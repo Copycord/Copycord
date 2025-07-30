@@ -1,0 +1,25 @@
+version: 2
+updates:
+  # ─── Python deps in server ───────────────────────────────────────
+  - package-ecosystem: "pip"
+    directory: "/code/server"
+    schedule:
+      interval: "weekly"
+
+  # ─── Dockerfile in server ──────────────────────────────────────
+  - package-ecosystem: "docker"
+    directory: "/code/server"
+    schedule:
+      interval: "weekly"
+
+  # ─── Python deps in client ─────────────────────────────────────
+  - package-ecosystem: "pip"
+    directory: "/code/client"
+    schedule:
+      interval: "weekly"
+
+  # ─── Dockerfile in client ──────────────────────────────────────
+  - package-ecosystem: "docker"
+    directory: "/code/client"
+    schedule:
+      interval: "weekly"
