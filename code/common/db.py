@@ -62,6 +62,8 @@ class DBManager:
         ).fetchall()]
         if "version" not in cols:
             c.execute("ALTER TABLE settings ADD COLUMN version TEXT NOT NULL DEFAULT ''")
+        if "notified_version" not in cols:
+            c.execute("ALTER TABLE settings ADD COLUMN notified_version TEXT NOT NULL DEFAULT ''")
         
         c.execute(
             "INSERT OR IGNORE INTO settings (id, blocked_keywords) VALUES (1, '')"
@@ -74,6 +76,14 @@ class DBManager:
 
     def set_version(self, version: str):
         self.conn.execute("UPDATE settings SET version = ? WHERE id = 1", (version,))
+        self.conn.commit()
+        
+    def get_notified_version(self) -> str:
+        row = self.conn.execute("SELECT notified_version FROM settings WHERE id = 1").fetchone()
+        return row[0] if row else ""
+
+    def set_notified_version(self, version: str):
+        self.conn.execute("UPDATE settings SET notified_version = ? WHERE id = 1", (version,))
         self.conn.commit()
 
     def get_all_category_mappings(self) -> List[sqlite3.Row]:

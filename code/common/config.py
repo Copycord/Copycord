@@ -112,22 +112,28 @@ class Config:
                     await asyncio.sleep(self._release_interval)
                     continue
 
-                last = db.get_version()
+                last = db.get_version() # Get the current version from db
+                notified = db.get_notified_version() # Check if the owner has been notified already
 
                 if tag != last:
                     logger.info("New Copycord release detected: %s (%s)", tag, url)
 
-                    guild = receiver.bot.get_guild(guild_id)
-                    if guild:
-                        try:
-                            owner = guild.owner or await guild.fetch_member(guild.owner_id)
-                            await owner.send(
-                                f"A new Copycord release is available: `{tag}`\n{url}"
-                            )
-                        except Exception as e:
-                            logger.warning("Failed to DM guild owner: %s", e)
+                    if tag != notified:
+                        guild = receiver.bot.get_guild(guild_id)
+                        if guild:
+                            try:
+                                owner = guild.owner or await guild.fetch_member(guild.owner_id)
+                                await owner.send(
+                                    f"A new Copycord release is available: **{tag}**\n{url}"
+                                )
+                                logger.debug("Sent release DM to guild owner %s", owner)
+                                db.set_notified_version(tag)
+                            except Exception as e:
+                                logger.warning("Failed to DM guild owner: %s", e)
+                    else:
+                        logger.debug("Already notified owner of %s; skipping DM", tag)
 
-                    if last and tag == self.CURRENT_VERSION:
+                    if tag == self.CURRENT_VERSION:
                         db.set_version(tag)
 
             except Exception:
