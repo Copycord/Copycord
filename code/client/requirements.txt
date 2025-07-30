@@ -1,2 +1,2 @@
 discord.py-self==2.0.1
-websockets==11.0
+websockets==15.0.1
