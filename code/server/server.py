@@ -17,6 +17,8 @@ from discord import (
 from discord.errors import HTTPException, Forbidden
 import os
 import sys
+import io
+from PIL import Image, ImageSequence
 from datetime import datetime, timezone
 from asyncio import Queue
 from common.config import Config
@@ -193,29 +195,29 @@ class ServerReceiver:
                 logger.info("Sync task #%d completed: %s", task_id, summary)
             finally:
                 self.sitemap_queue.task_done()
-                
-    async def _sync_emojis(self,
-                           guild: discord.Guild,
-                           emojis: list[dict]) -> tuple[int, int, int]:
+
+    async def _sync_emojis(
+        self, guild: discord.Guild, emojis: list[dict]
+    ) -> tuple[int, int, int]:
         """
         Mirror the host guild’s custom emojis into the clone guild,
         handling static vs animated limits, deletions, renames, and creations.
         """
-        # ─── Initialize counters ────────────────────────────────────
         deleted = renamed = created = 0
+        skipped_limit_static = skipped_limit_animated = size_failed = 0
 
-        # ─── Count existing static vs animated emojis ───────────────
-        static_count   = sum(1 for e in guild.emojis if not e.animated)
+        # Count existing static vs animated
+        static_count = sum(1 for e in guild.emojis if not e.animated)
         animated_count = sum(1 for e in guild.emojis if e.animated)
-        limit          = guild.emoji_limit
+        limit = guild.emoji_limit
 
-        # ─── Load persisted mappings and incoming data ─────────────
-        current  = { r["original_emoji_id"]: r for r in self.db.get_all_emoji_mappings() }
-        incoming = { e["id"]: e for e in emojis }
+        # Build lookup tables
+        current = {r["original_emoji_id"]: r for r in self.db.get_all_emoji_mappings()}
+        incoming = {e["id"]: e for e in emojis}
 
-        # ─── 1) Delete emojis removed upstream ──────────────────────
+        # 1) Delete emojis removed upstream
         for orig_id in set(current) - set(incoming):
-            row    = current[orig_id]
+            row = current[orig_id]
             cloned = discord.utils.get(guild.emojis, id=row["cloned_emoji_id"])
             if cloned:
                 try:
@@ -229,52 +231,82 @@ class ServerReceiver:
             self.db.delete_emoji_mapping(orig_id)
             await self._cooldown()
 
-        # ─── 2) Rename or create incoming emojis ────────────────────
+        # 2) Process all incoming (create / rename / repair)
         for orig_id, info in incoming.items():
-            name        = info["name"]
-            url         = info["url"]
+            name = info["name"]
+            url = info["url"]
             is_animated = info.get("animated", False)
-            mapping     = current.get(orig_id)
+            mapping = current.get(orig_id)
+            cloned = mapping and discord.utils.get(
+                guild.emojis, id=mapping["cloned_emoji_id"]
+            )
 
-            # — Rename if upstream name changed
-            if mapping and mapping["original_emoji_name"] != name:
-                cloned = discord.utils.get(guild.emojis, id=mapping["cloned_emoji_id"])
-                if cloned:
-                    try:
-                        await cloned.edit(name=name)
-                        renamed += 1
-                        logger.info(f"Renamed emoji {mapping['original_emoji_name']} → {name}")
-                        self.db.upsert_emoji_mapping(orig_id, name, cloned.id, cloned.name)
-                    except discord.HTTPException as e:
-                        logger.error(f"Failed renaming emoji {cloned.name}: {e}")
+            # 2a) Orphaned mapping? (deleted manually in clone)
+            if mapping and not cloned:
+                logger.warning(
+                    f"Stale mapping for emoji {mapping['original_emoji_name']}; will recreate"
+                )
+                self.db.delete_emoji_mapping(orig_id)
+                mapping = cloned = None
+
+            # 2b) Repair manual rename in clone
+            if mapping and cloned.name != name:
+                try:
+                    await cloned.edit(name=name)
+                    renamed += 1
+                    logger.info(f"Restored emoji {cloned.name} → {name}")
+                    self.db.upsert_emoji_mapping(orig_id, name, cloned.id, name)
+                except discord.HTTPException as e:
+                    logger.error(f"Failed restoring emoji {cloned.name}: {e}")
                 await self._cooldown()
                 continue
 
-            # — Skip if already cloned
+            # 2c) Upstream rename
+            if mapping and mapping["original_emoji_name"] != name:
+                try:
+                    await cloned.edit(name=name)
+                    renamed += 1
+                    logger.info(
+                        f"Renamed emoji {mapping['original_emoji_name']} → {name}"
+                    )
+                    self.db.upsert_emoji_mapping(orig_id, name, cloned.id, cloned.name)
+                except discord.HTTPException as e:
+                    logger.error(f"Failed renaming emoji {cloned.name}: {e}")
+                await self._cooldown()
+                continue
+
+            # skip up‐to‐date
             if mapping:
                 continue
 
-            # — Enforce static vs animated limits
-            if is_animated:
-                if animated_count >= limit:
-                    logger.warning(f"Animated-emoji limit reached ({limit}); skipping {name}")
-                    continue
-            else:
-                if static_count >= limit:
-                    logger.warning(f"Static-emoji limit reached ({limit}); skipping {name}")
-                    continue
-
-            # — Fetch emoji image
-            try:
-                async with self.session.get(url) as resp:
-                    img = await resp.read()
-            except Exception as e:
-                logger.error(f"Failed fetching emoji image {url}: {e}")
+            # enforce limits
+            if is_animated and animated_count >= limit:
+                skipped_limit_animated += 1
+                continue
+            if not is_animated and static_count >= limit:
+                skipped_limit_static += 1
                 continue
 
-            # — Create new emoji in clone guild
+            # fetch raw bytes
             try:
-                created_emo = await guild.create_custom_emoji(name=name, image=img)
+                async with self.session.get(url) as resp:
+                    raw = await resp.read()
+            except Exception as e:
+                logger.error(f"Failed fetching {url}: {e}")
+                continue
+
+            # attempt to shrink to ≤256 KiB
+            try:
+                if is_animated:
+                    raw = await self._shrink_animated(raw, max_bytes=262_144)
+                else:
+                    raw = await self._shrink_static(raw, max_bytes=262_144)
+            except Exception as e:
+                logger.error(f"Error shrinking emoji {name}: {e}")
+
+            # create emoji
+            try:
+                created_emo = await guild.create_custom_emoji(name=name, image=raw)
                 created += 1
                 logger.info(f"Created emoji {name}")
                 self.db.upsert_emoji_mapping(
@@ -285,13 +317,81 @@ class ServerReceiver:
                 else:
                     static_count += 1
             except discord.HTTPException as e:
-                logger.error(f"Failed creating emoji {name}: {e}")
+                if "50138" in str(e):
+                    size_failed += 1
+                else:
+                    logger.error(f"Failed creating {name}: {e}")
 
             await self._cooldown()
 
+        # summary
+        if skipped_limit_static or skipped_limit_animated:
+            logger.info(
+                f"Skipped {skipped_limit_static} static and "
+                f"{skipped_limit_animated} animated emojis due to guild limit ({limit}). Guild needs boosting to increase this limit."
+            )
+        if size_failed:
+            logger.info(
+                f"Skipped {size_failed} emojis because they still exceed 256 KiB after conversion attempt."
+            )
+
         return deleted, renamed, created
 
+    # ─── emoji shrinking helpers ────────────────────────────────────────
 
+    async def _shrink_static(self, data: bytes, max_bytes: int) -> bytes:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self._sync_shrink_static, data, max_bytes
+        )
+
+    def _sync_shrink_static(self, data: bytes, max_bytes: int) -> bytes:
+        buf = io.BytesIO(data)
+        img = Image.open(buf).convert("RGBA")
+        img.thumbnail((128, 128), Image.LANCZOS)
+
+        out = io.BytesIO()
+        img.save(out, format="PNG", optimize=True)
+        result = out.getvalue()
+        if len(result) <= max_bytes:
+            return result
+
+        out = io.BytesIO()
+        quant = img.convert("P", palette=Image.ADAPTIVE)
+        quant.save(out, format="PNG", optimize=True)
+        result = out.getvalue()
+        return result if len(result) <= max_bytes else data
+
+    async def _shrink_animated(self, data: bytes, max_bytes: int) -> bytes:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self._sync_shrink_animated, data, max_bytes
+        )
+
+    def _sync_shrink_animated(self, data: bytes, max_bytes: int) -> bytes:
+        buf = io.BytesIO(data)
+        img = Image.open(buf)
+        frames = []
+        durations = []
+
+        for frame in ImageSequence.Iterator(img):
+            f = frame.convert("RGBA")
+            f.thumbnail((128, 128), Image.LANCZOS)
+            frames.append(f)
+            durations.append(frame.info.get("duration", 100))
+
+        out = io.BytesIO()
+        frames[0].save(
+            out,
+            format="GIF",
+            save_all=True,
+            append_images=frames[1:],
+            duration=durations,
+            loop=0,
+            optimize=True,
+        )
+        result = out.getvalue()
+        return result if len(result) <= max_bytes else data
 
     async def _cooldown(self):
         """Sleep for the current backoff delay, then double it (max 10s)."""
@@ -312,7 +412,6 @@ class ServerReceiver:
             comm = sitemap.get("community", {})
             rules_id = comm.get("rules_channel_id")
             updates_id = comm.get("public_updates_channel_id")
-            
 
             # ─── COMMUNITY SUPPORT CHECK ────────────────────────────────
             # Does the sitemap ask for community mode?
@@ -481,9 +580,11 @@ class ServerReceiver:
             )
             removed_cat = await self._handle_removed_categories(guild, sitemap)
             renamed_cat = await self._handle_renamed_categories(guild, sitemap)
-            
+
             # ─── EMOJI SYNC ────────────────────────────────────────
-            emoji_deleted, emoji_renamed, emoji_created = await self._sync_emojis(guild, sitemap.get("emojis", []))
+            emoji_deleted, emoji_renamed, emoji_created = await self._sync_emojis(
+                guild, sitemap.get("emojis", [])
+            )
 
             old_map = {
                 r["original_channel_id"]: r["original_parent_category_id"]
@@ -991,10 +1092,7 @@ class ServerReceiver:
                 if clone_cat and clone_cat.name != new_name:
                     old = clone_cat.name
                     await clone_cat.edit(name=new_name)
-                    logger.info(
-                        "Renamed category %s → %s",
-                        old, new_name
-                    )
+                    logger.info("Renamed category %s → %s", old, new_name)
                     self.db.upsert_category_mapping(
                         orig_id, new_name, row["cloned_category_id"], new_name
                     )
@@ -1170,7 +1268,6 @@ class ServerReceiver:
             await self._cooldown()
 
         return moved
-
 
     async def _recreate_webhook(self, original_id: int) -> Optional[str]:
         """
