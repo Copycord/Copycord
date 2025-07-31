@@ -51,6 +51,17 @@ class DBManager:
             )
             """
         )
+        
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS emoji_mappings (
+              original_emoji_id   INTEGER PRIMARY KEY,
+              original_emoji_name TEXT    NOT NULL,
+              cloned_emoji_id     INTEGER UNIQUE,
+              cloned_emoji_name   TEXT    NOT NULL
+            );
+            """
+        )
         c.execute("""
             CREATE TABLE IF NOT EXISTS settings  (
                 id              INTEGER PRIMARY KEY CHECK (id = 1),
@@ -222,3 +233,27 @@ class DBManager:
         )
         self.conn.commit()
         return True
+
+    def get_all_emoji_mappings(self) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM emoji_mappings").fetchall()
+
+    def upsert_emoji_mapping(self,
+                             orig_id: int,
+                             orig_name: str,
+                             clone_id: int,
+                             clone_name: str):
+        self.conn.execute(
+            """INSERT OR REPLACE INTO emoji_mappings
+               (original_emoji_id, original_emoji_name,
+                cloned_emoji_id, cloned_emoji_name)
+               VALUES (?, ?, ?, ?)""",
+            (orig_id, orig_name, clone_id, clone_name),
+        )
+        self.conn.commit()
+
+    def delete_emoji_mapping(self, orig_id: int):
+        self.conn.execute(
+            "DELETE FROM emoji_mappings WHERE original_emoji_id = ?",
+            (orig_id,),
+        )
+        self.conn.commit()
