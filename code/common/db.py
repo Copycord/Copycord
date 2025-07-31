@@ -257,3 +257,13 @@ class DBManager:
             (orig_id,),
         )
         self.conn.commit()
+        
+    def get_emoji_mapping(self, original_id: int) -> sqlite3.Row | None:
+        """
+        Returns the row for this original emoji ID, or None if we never
+        cloned that emoji.
+        """
+        return self.conn.execute(
+            "SELECT * FROM emoji_mappings WHERE original_emoji_id = ?",
+            (original_id,)
+        ).fetchone()
