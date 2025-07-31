@@ -123,6 +123,15 @@ class ClientListener:
             "standalone_channels": [],
             "forums": [],
             "threads": [],
+            "emojis": [
+                {
+                    "id": e.id,
+                    "name": e.name,
+                    "url": str(e.url),
+                    "animated": e.animated
+                }
+                for e in guild.emojis
+            ],
             "community": {
                 "enabled": guild.features and "COMMUNITY" in guild.features,
                 "rules_channel_id": (
