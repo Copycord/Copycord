@@ -75,7 +75,7 @@ In the new folder, create `docker-compose.yml`:
 services:
   server:
     container_name: copycord-server
-    image: ghcr.io/copycord/copycord-server:v1.2.1
+    image: ghcr.io/copycord/copycord-server:v1.3.0
     environment:
       - SERVER_TOKEN=123456789123456789 # Discord bot token, must be invited into the cloned server
       - CLONE_GUILD_ID=123456789 # ID of the server you created to be cloned
@@ -88,7 +88,7 @@ services:
 
   client:
     container_name: copycord-client
-    image: ghcr.io/copycord/copycord-client:v1.2.1
+    image: ghcr.io/copycord/copycord-client:v1.3.0
     environment:
       - CLIENT_TOKEN=123456789123456789 # Discord user account token, see "Getting Started"
       - HOST_GUILD_ID=123456789 # ID of the server we wil be cloning
