@@ -244,7 +244,7 @@ class ServerReceiver:
             # 2a) Orphaned mapping? (deleted manually in clone)
             if mapping and not cloned:
                 logger.warning(
-                    f"Stale mapping for emoji {mapping['original_emoji_name']}; will recreate"
+                    f"Emoji {mapping['original_emoji_name']} stored in mapping, but missing; will recreate"
                 )
                 self.db.delete_emoji_mapping(orig_id)
                 mapping = cloned = None
