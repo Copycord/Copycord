@@ -4,6 +4,7 @@ import logging
 from typing import List, Optional, Tuple, Dict, Union
 import aiohttp
 import discord
+import re
 from discord import (
     ForumChannel,
     NotFound,
@@ -87,6 +88,7 @@ class ServerReceiver:
         self.MAX_GUILD_CHANNELS = 500
         self.MAX_CATEGORIES = 50
         self.MAX_CHANNELS_PER_CATEGORY = 50
+        self._EMOJI_RE = re.compile(r'<(a?):(?P<name>[^:]+):(?P<id>\d+)>')
 
         async def _command_sync():
             try:
@@ -1598,6 +1600,28 @@ class ServerReceiver:
             except Exception as e:
                 logger.warning("Failed to archive thread %s: %s", thread.id, e)
 
+    def _replace_emoji_ids(self, content: str) -> str:
+        """
+        Replace any <:Name:orig_id> or <a:Name:orig_id> with
+        the corresponding cloned emoji ID in this guild.
+        """
+        def _repl(match: re.Match) -> str:
+            animated_flag = match.group(1) or ""
+            name = match.group("name")
+            orig_id = int(match.group("id"))
+
+            row = self.db.get_emoji_mapping(orig_id)
+            if not row:
+                # we never cloned this one → leave it untouched
+                return match.group(0)
+
+            new_id = row["cloned_emoji_id"]
+            prefix = "a" if animated_flag == "a" else ""
+            return f"<{prefix}:{name}:{new_id}>"
+
+        return self._EMOJI_RE.sub(_repl, content)
+
+
     def _build_webhook_payload(self, msg: Dict) -> dict:
         """
         Turn a raw incoming msg dict into the final webhook payload.
@@ -1608,6 +1632,7 @@ class ServerReceiver:
         """
         # 1) Build up the text blob
         text = msg.get("content", "")
+        text = self._replace_emoji_ids(text) # Replace emoji IDs with cloned ones
         for att in msg.get("attachments", []):
             if att["url"] not in text:
                 text += f"\n{att['url']}"
