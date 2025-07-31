@@ -193,9 +193,108 @@ class ServerReceiver:
                 logger.info("Sync task #%d completed: %s", task_id, summary)
             finally:
                 self.sitemap_queue.task_done()
+                
+    async def _sync_emojis(self,
+                           guild: discord.Guild,
+                           emojis: list[dict]) -> tuple[int, int, int]:
+        """
+        Mirror the host guild’s custom emojis into the clone guild,
+        handling static vs animated limits, deletions, renames, and creations.
+        """
+        # ─── Initialize counters ────────────────────────────────────
+        deleted = renamed = created = 0
+
+        # ─── Count existing static vs animated emojis ───────────────
+        static_count   = sum(1 for e in guild.emojis if not e.animated)
+        animated_count = sum(1 for e in guild.emojis if e.animated)
+        limit          = guild.emoji_limit
+
+        # ─── Load persisted mappings and incoming data ─────────────
+        current  = { r["original_emoji_id"]: r for r in self.db.get_all_emoji_mappings() }
+        incoming = { e["id"]: e for e in emojis }
+
+        # ─── 1) Delete emojis removed upstream ──────────────────────
+        for orig_id in set(current) - set(incoming):
+            row    = current[orig_id]
+            cloned = discord.utils.get(guild.emojis, id=row["cloned_emoji_id"])
+            if cloned:
+                try:
+                    await cloned.delete()
+                    deleted += 1
+                    logger.info(f"Deleted emoji {row['cloned_emoji_name']}")
+                except discord.Forbidden:
+                    logger.warning(f"No permission to delete emoji {cloned.name}")
+                except discord.HTTPException as e:
+                    logger.error(f"Error deleting emoji {cloned.name}: {e}")
+            self.db.delete_emoji_mapping(orig_id)
+            await self._cooldown()
+
+        # ─── 2) Rename or create incoming emojis ────────────────────
+        for orig_id, info in incoming.items():
+            name        = info["name"]
+            url         = info["url"]
+            is_animated = info.get("animated", False)
+            mapping     = current.get(orig_id)
+
+            # — Rename if upstream name changed
+            if mapping and mapping["original_emoji_name"] != name:
+                cloned = discord.utils.get(guild.emojis, id=mapping["cloned_emoji_id"])
+                if cloned:
+                    try:
+                        await cloned.edit(name=name)
+                        renamed += 1
+                        logger.info(f"Renamed emoji {mapping['original_emoji_name']} → {name}")
+                        self.db.upsert_emoji_mapping(orig_id, name, cloned.id, cloned.name)
+                    except discord.HTTPException as e:
+                        logger.error(f"Failed renaming emoji {cloned.name}: {e}")
+                await self._cooldown()
+                continue
+
+            # — Skip if already cloned
+            if mapping:
+                continue
+
+            # — Enforce static vs animated limits
+            if is_animated:
+                if animated_count >= limit:
+                    logger.warning(f"Animated-emoji limit reached ({limit}); skipping {name}")
+                    continue
+            else:
+                if static_count >= limit:
+                    logger.warning(f"Static-emoji limit reached ({limit}); skipping {name}")
+                    continue
+
+            # — Fetch emoji image
+            try:
+                async with self.session.get(url) as resp:
+                    img = await resp.read()
+            except Exception as e:
+                logger.error(f"Failed fetching emoji image {url}: {e}")
+                continue
+
+            # — Create new emoji in clone guild
+            try:
+                created_emo = await guild.create_custom_emoji(name=name, image=img)
+                created += 1
+                logger.info(f"Created emoji {name}")
+                self.db.upsert_emoji_mapping(
+                    orig_id, name, created_emo.id, created_emo.name
+                )
+                if created_emo.animated:
+                    animated_count += 1
+                else:
+                    static_count += 1
+            except discord.HTTPException as e:
+                logger.error(f"Failed creating emoji {name}: {e}")
+
+            await self._cooldown()
+
+        return deleted, renamed, created
+
+
 
     async def _cooldown(self):
-        """Sleep for the current backoff delay, then double it (max 15s)."""
+        """Sleep for the current backoff delay, then double it (max 10s)."""
         delay = self._backoff_delay
         logger.debug(f"Backing off for {delay}s before next action")
         await asyncio.sleep(delay)
@@ -213,6 +312,7 @@ class ServerReceiver:
             comm = sitemap.get("community", {})
             rules_id = comm.get("rules_channel_id")
             updates_id = comm.get("public_updates_channel_id")
+            
 
             # ─── COMMUNITY SUPPORT CHECK ────────────────────────────────
             # Does the sitemap ask for community mode?
@@ -381,6 +481,9 @@ class ServerReceiver:
             )
             removed_cat = await self._handle_removed_categories(guild, sitemap)
             renamed_cat = await self._handle_renamed_categories(guild, sitemap)
+            
+            # ─── EMOJI SYNC ────────────────────────────────────────
+            emoji_deleted, emoji_renamed, emoji_created = await self._sync_emojis(guild, sitemap.get("emojis", []))
 
             old_map = {
                 r["original_channel_id"]: r["original_parent_category_id"]
@@ -640,6 +743,12 @@ class ServerReceiver:
                 parts.append(f"Deleted {deleted_threads} threads")
             if renamed_threads:
                 parts.append(f"Renamed {renamed_threads} threads")
+            if emoji_deleted:
+                parts.append(f"Deleted {emoji_deleted} emojis")
+            if emoji_renamed:
+                parts.append(f"Renamed {emoji_renamed} emojis")
+            if emoji_created:
+                parts.append(f"Created {emoji_created} emojis")
             if not parts:
                 parts.append("No changes needed")
 
