@@ -292,7 +292,27 @@ class ClientListener:
 
         embeds = [embed.to_dict() for embed in message.embeds]
 
-        components = [comp.to_dict() for comp in message.components]
+        components: list[dict] = []
+        for comp in message.components:
+            try:
+                components.append(comp.to_dict())
+            except NotImplementedError:
+                row: dict = {"type": getattr(comp, "type", None), "components": []}
+                for child in getattr(comp, "children", []):
+                    child_data: dict = {}
+                    for attr in ("custom_id", "label", "style", "url", "disabled"):
+                        if hasattr(child, attr):
+                            child_data[attr] = getattr(child, attr)
+                    if hasattr(child, "emoji") and child.emoji:
+                        emoji = child.emoji
+                        emoji_data: dict = {}
+                        if hasattr(emoji, "name"):
+                            emoji_data["name"] = emoji.name
+                        if getattr(emoji, "id", None):
+                            emoji_data["id"] = emoji.id
+                        child_data["emoji"] = emoji_data
+                    row["components"].append(child_data)
+                components.append(row)
 
         is_thread = isinstance(message.channel, discord.Thread)
         payload = {
