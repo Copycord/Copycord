@@ -1020,7 +1020,7 @@ class ServerReceiver:
 
             ch = await guild.create_text_channel(name=name, category=category)
 
-        logger.info("Created %s channel '%s' (ID %d)", kind, name, ch.id)
+        logger.info("Created %s channel '%s' #%s", kind, name, ch.id)
 
         if kind == "news":
             if "NEWS" in guild.features:
