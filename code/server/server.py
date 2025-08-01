@@ -799,6 +799,7 @@ class ServerReceiver:
                 clone_tid = mapping["cloned_thread_id"]
 
                 ch = guild.get_channel(clone_tid)
+                removed_thread_mappings = 0
                 if not ch:
                     try:
                         ch = await self.bot.fetch_channel(clone_tid)
@@ -808,6 +809,7 @@ class ServerReceiver:
                             orig_tid,
                         )
                         self.db.delete_forum_thread_mapping(orig_tid)
+                        removed_thread_mappings += 1
                         continue
 
                 if ch.name != new_name:
@@ -855,6 +857,8 @@ class ServerReceiver:
                 parts.append(f"Reparented {moved_master} channels")
             if deleted_threads:
                 parts.append(f"Deleted {deleted_threads} threads")
+            if removed_thread_mappings:
+                parts.append(f"Deleted {removed_thread_mappings} thread mappings")
             if renamed_threads:
                 parts.append(f"Renamed {renamed_threads} threads")
             if emoji_deleted:
