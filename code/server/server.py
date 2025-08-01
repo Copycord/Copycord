@@ -77,7 +77,7 @@ class ServerReceiver:
         self._processor_started = False
         self._sitemap_task_counter = 0
         self._sync_lock = asyncio.Lock()
-        self.max_threads = 1000
+        self.max_threads = 950
         self.bot.event(self.on_ready)
         self._ws_task: asyncio.Task | None = None
         self._sitemap_task: asyncio.Task | None = None
@@ -1483,7 +1483,7 @@ class ServerReceiver:
                 new_thread_id = int(data_json["channel_id"])
 
                 try:
-                    await self._enforce_thread_limit(cloned_parent)
+                    await self._enforce_thread_limit(guild)
                 except Exception as e:
                     logger.warning(
                         "Failed to enforce thread limit on forum %s: %s",
@@ -1506,6 +1506,15 @@ class ServerReceiver:
                         for e in send_kwargs["embeds"]
                     ]
                 await wh.send(**send_kwargs, thread=new_thread, wait=True)
+                
+                try:
+                    await self._enforce_thread_limit(guild)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to enforce thread limit on channel #%s: %s",
+                        cloned_parent.id,
+                        e,
+                    )
 
             else:
                 logger.error(
@@ -1639,29 +1648,50 @@ class ServerReceiver:
             row["cloned_thread_id"],
         )
 
-    async def _enforce_thread_limit(self, forum_channel: discord.ForumChannel):
-        """Archive the oldest active threads if we're at or above max_threads. Max active threads = 1000."""
-        active = [t for t in forum_channel.threads if not t.archived]
-        if len(active) < self.max_threads:
-            return
-
-        active.sort(
-            key=lambda t: t.created_at or datetime.min.replace(tzinfo=timezone.utc)
+    async def _enforce_thread_limit(self, guild: discord.Guild):
+        """
+        Global thread‐limit enforcement: archive oldest active threads
+        across the entire guild (both TextChannel threads and ForumChannel threads)
+        so you never have more than self.max_threads active.
+        """
+        # Gather all active (non‐archived) threads in the guild
+        # Guild.threads includes public threads from text channels and forum channels
+        active = [t for t in guild.threads if not getattr(t, "archived", False)]
+        logger.debug(
+            "Guild %d has %d active threads: %s",
+            guild.id,
+            len(active),
+            [t.id for t in active],
         )
 
-        to_archive = active[: len(active) - (self.max_threads - 1)]
+        # If we're at or under the limit, nothing to do
+        if len(active) <= self.max_threads:
+            return
 
+        # Sort oldest → newest
+        active.sort(
+            key=lambda t: t.created_at
+                        or datetime.datetime.min.replace(tzinfo=timezone.utc)
+        )
+
+        # Pick exactly how many to archive
+        num_to_archive = len(active) - self.max_threads
+        to_archive = active[:num_to_archive]
+
+        # Archive them
         for thread in to_archive:
             try:
                 await thread.edit(archived=True)
+                parent = thread.parent
+                parent_name = parent.name if parent else "Unknown"
                 logger.info(
-                    "Auto‑archived thread %s in forum %s to free up slot",
-                    thread.id,
-                    forum_channel.id,
+                    "Auto-archived thread '%s' in #%s to respect thread limits",
+                    thread.name,
+                    parent_name,
                 )
             except Exception as e:
-                logger.warning("Failed to archive thread %s: %s", thread.id, e)
-
+                logger.warning("Failed to auto-archive thread %d: %s", thread.id, e)
+                
     def _replace_emoji_ids(self, content: str) -> str:
         """
         Replace any <:Name:orig_id> or <a:Name:orig_id> with
