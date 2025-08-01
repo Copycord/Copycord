@@ -35,6 +35,11 @@ class Config:
             "true",
             "yes",
         )
+        self.CLONE_EMOJI = os.getenv("CLONE_EMOJI", "false").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
 
         raw = os.getenv("COMMAND_USERS", "")
         self.COMMAND_USERS = [int(u) for u in raw.split(",") if u.strip()]
