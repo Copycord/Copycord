@@ -804,25 +804,12 @@ class ServerReceiver:
                     try:
                         ch = await self.bot.fetch_channel(clone_tid)
                     except discord.NotFound:
-                        if orig_tid not in valid_threads:
-                            self.db.delete_forum_thread_mapping(orig_tid)
-                            continue
-
-                        forum_map = next(
-                            r
-                            for r in self.db.get_all_channel_mappings()
-                            if r["original_channel_id"] == mapping["forum_original_id"]
+                        logger.info(
+                            "Cloned thread %d no longer exists; removing its mapping",
+                            orig_tid,
                         )
-                        parent = guild.get_channel(forum_map["cloned_channel_id"])
-
-                        if isinstance(parent, discord.ForumChannel):
-                            # drop forum‐thread mappings instead of recreating
-                            logger.info(
-                                "Cloned Forum thread %d manually deleted; removing its mapping",
-                                orig_tid,
-                            )
-                            self.db.delete_forum_thread_mapping(orig_tid)
-                            continue
+                        self.db.delete_forum_thread_mapping(orig_tid)
+                        continue
 
                         elif isinstance(parent, discord.TextChannel):
                             new = await parent.create_thread(
