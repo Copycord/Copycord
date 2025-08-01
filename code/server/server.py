@@ -782,7 +782,6 @@ class ServerReceiver:
                     deleted_threads += 1
 
             renamed_threads = 0
-            recreated_threads = 0
             for src in sitemap.get("threads", []):
                 orig_tid = src["id"]
                 new_name = src["name"]
@@ -810,35 +809,6 @@ class ServerReceiver:
                         )
                         self.db.delete_forum_thread_mapping(orig_tid)
                         continue
-
-                        elif isinstance(parent, discord.TextChannel):
-                            new = await parent.create_thread(
-                                name=mapping["original_thread_name"],
-                                type=ChannelType.public_thread,
-                                auto_archive_duration=1440,
-                            )
-                            recreated_threads += 1
-                            logger.info(
-                                "Recreated missing channel‐thread '%s' in #%d",
-                                mapping["original_thread_name"],
-                                parent.id,
-                            )
-                            self.db.upsert_forum_thread_mapping(
-                                orig_tid,
-                                mapping["original_thread_name"],
-                                new.id,
-                                mapping["forum_original_id"],
-                                parent.id,
-                            )
-                            ch = new
-
-                        else:
-                            logger.error(
-                                "Cannot recreate missing thread under %s; deleting mapping",
-                                type(parent),
-                            )
-                            self.db.delete_forum_thread_mapping(orig_tid)
-                            continue
 
                 if ch.name != new_name:
                     old = ch.name
@@ -887,8 +857,6 @@ class ServerReceiver:
                 parts.append(f"Deleted {deleted_threads} threads")
             if renamed_threads:
                 parts.append(f"Renamed {renamed_threads} threads")
-            if recreated_threads:
-                parts.append(f"Recreated {recreated_threads} threads")
             if emoji_deleted:
                 parts.append(f"Deleted {emoji_deleted} emojis")
             if emoji_renamed:
