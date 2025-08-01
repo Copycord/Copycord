@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import logging
 from typing import Optional
 import discord
-from discord import MessageType
+from discord import ChannelType, MessageType
 import os
 import pprint
 import sys
@@ -124,12 +124,7 @@ class ClientListener:
             "forums": [],
             "threads": [],
             "emojis": [
-                {
-                    "id": e.id,
-                    "name": e.name,
-                    "url": str(e.url),
-                    "animated": e.animated
-                }
+                {"id": e.id, "name": e.name, "url": str(e.url), "animated": e.animated}
                 for e in guild.emojis
             ],
             "community": {
@@ -162,26 +157,39 @@ class ClientListener:
         ]
 
         for forum in guild.forums:
-            sitemap["forums"].append(
-                {
-                    "id": forum.id,
-                    "name": forum.name,
-                    "category_id": forum.category.id if forum.category else None,
-                }
-            )
+            sitemap["forums"].append({
+                "id":          forum.id,
+                "name":        forum.name,
+                "category_id": forum.category.id if forum.category else None,
+            })
 
-            for thread in forum.threads:
-                sitemap["threads"].append(
-                    {
-                        "id": thread.id,
-                        "forum_id": forum.id,
-                        "name": thread.name,
-                    }
-                )
+        seen = {t["id"] for t in sitemap["threads"]}
+        for row in self.db.get_all_threads():
+            orig_tid   = row["original_thread_id"]
+            forum_orig = row["forum_original_id"]
+
+            if orig_tid in seen:
+                continue
+
+            thr = guild.get_channel(orig_tid)
+            if not thr:
+                try:
+                    thr = await self.bot.fetch_channel(orig_tid)
+                except Exception:
+                    continue
+
+            if not isinstance(thr, discord.Thread):
+                continue
+
+            sitemap["threads"].append({
+                "id":       thr.id,
+                "forum_id": forum_orig,
+                "name":     thr.name,
+                "archived": thr.archived,
+            })
 
         await self.ws.send({"type": "sitemap", "data": sitemap})
-
-        logger.info("Sitemap sent to Server.")
+        logger.info("Sitemap sent to Server")
 
     async def periodic_sync_loop(self):
         await self.bot.wait_until_ready()
@@ -246,16 +254,25 @@ class ClientListener:
     def should_ignore(self, message: discord.Message) -> bool:
         """
         Skip:
-        - system messages (joins/leaves/pins/etc)
+        - thread_created events in a text channel
+        - channel_name_change system messages
         - DMs or messages not in our configured guild
         - messages containing a blocked keyword
         """
+        # Ignore thread_created events in text channels
+        if message.type == MessageType.thread_created:
+            return True
+
+        # Ignore channel name change system messages in threads
+        if message.type == MessageType.channel_name_change:
+            return True
+
         # Ignore DMs or wrong guild
         if message.guild is None or message.guild.id != self.host_guild_id:
             return True
 
         # Ignore blocked keywords
-        content = message.content.lower()
+        content = (message.content or "").lower()
         for kw in self.blocked_keywords:
             if kw in content:
                 logger.info(
@@ -294,7 +311,10 @@ class ClientListener:
 
         components = [comp.to_dict() for comp in message.components]
 
-        is_thread = isinstance(message.channel, discord.Thread)
+        is_thread = message.channel.type in (
+            ChannelType.public_thread,
+            ChannelType.private_thread,
+        )
         payload = {
             "type": "thread_message" if is_thread else "message",
             "data": {
