@@ -860,8 +860,8 @@ class ServerReceiver:
                     old = ch.name
                     await ch.edit(name=new_name)
                     logger.info(
-                        "Renamed cloned thread '%s' → '%s' (ID %d)",
-                        old, new_name, ch.id
+                        "Renamed cloned thread %s → %s",
+                        old, new_name
                     )
                     self.db.upsert_forum_thread_mapping(
                         orig_tid,
