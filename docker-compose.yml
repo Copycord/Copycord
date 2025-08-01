@@ -6,6 +6,7 @@ services:
       - SERVER_TOKEN=123456789123456789 # Discord bot token, must be invited into the cloned server
       - CLONE_GUILD_ID=123456789 # ID of the server you created to be cloned
       - COMMAND_USERS=12345678 # List of users allowed to use the bot commands, separated by commas
+      - CLONE_EMOJI=True # Should we clone emojis from the host server?
       - DELETE_CHANNELS=False # Should we delete channels after they are deleted from the host server? WARNING: This will delete the channel and all of its messages
       - DELETE_THREADS=False # Should we delete threads after they are deleted from the host server? WARNING: This will delete the thread and all of its messages
     volumes:
