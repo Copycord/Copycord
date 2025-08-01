@@ -1454,10 +1454,13 @@ class ServerReceiver:
         wh = Webhook.from_url(forum_map["channel_webhook_url"], session=session)
 
         if thread_map is None:
+            cloned_chan = guild.get_channel(forum_map["cloned_channel_id"])
+            chan_name = cloned_chan.name if cloned_chan else "<unknown>"
+
             logger.info(
-                "Creating thread '%s' in forum %s by %s",
+                "Creating thread '%s' in channel #%s by %s",
                 data["thread_name"],
-                data["forum_id"],
+                chan_name,           
                 data["author"],
             )
 
