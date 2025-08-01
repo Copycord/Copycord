@@ -77,6 +77,7 @@ class ServerReceiver:
         self._processor_started = False
         self._sitemap_task_counter = 0
         self._sync_lock = asyncio.Lock()
+        self._thread_locks: dict[int, asyncio.Lock] = {}
         self.max_threads = 950
         self.bot.event(self.on_ready)
         self._ws_task: asyncio.Task | None = None
