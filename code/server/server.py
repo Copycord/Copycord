@@ -583,10 +583,6 @@ class ServerReceiver:
             removed_cat = await self._handle_removed_categories(guild, sitemap)
             renamed_cat = await self._handle_renamed_categories(guild, sitemap)
 
-            # ─── EMOJI SYNC ────────────────────────────────────────
-            emoji_deleted, emoji_renamed, emoji_created = await self._sync_emojis(
-                guild, sitemap.get("emojis", [])
-            )
 
             old_map = {
                 r["original_channel_id"]: r["original_parent_category_id"]
@@ -825,6 +821,15 @@ class ServerReceiver:
                     except Exception as e:
                         logger.error("Failed renaming thread %d: %s", clone_tid, e)
 
+            # ─── EMOJI SYNC ────────────────────────────────────────
+            if self.config.CLONE_EMOJI:
+                emoji_deleted, emoji_renamed, emoji_created = await self._sync_emojis(
+                    guild, sitemap.get("emojis", [])
+                )
+            else:
+                logger.info("Emoji cloning is disabled, skipping sync.")
+                emoji_deleted, emoji_renamed, emoji_created = 0, 0, 0
+                
             parts = []
             if removed_cat:
                 parts.append(f"Deleted {removed_cat} stale categories")
