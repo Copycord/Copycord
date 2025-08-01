@@ -1444,7 +1444,13 @@ class ServerReceiver:
                 )
                 new_thread_id = new_thread.id
 
-                await wh.send(**payload, thread=new_thread, wait=True)
+                send_kwargs = payload.copy()
+                if "embeds" in send_kwargs:
+                    send_kwargs["embeds"] = [
+                        Embed.from_dict(e) if isinstance(e, dict) else e
+                        for e in send_kwargs["embeds"]
+                    ]
+                await wh.send(**send_kwargs, thread=new_thread, wait=True)
 
             else:
                 logger.error(
