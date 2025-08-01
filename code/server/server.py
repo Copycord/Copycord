@@ -785,6 +785,7 @@ class ServerReceiver:
                     deleted_threads += 1
 
             renamed_threads = 0
+            recreated_threads = 0
             for src in sitemap.get("threads", []):
                 orig_tid = src["id"]
                 new_name = src["name"]
@@ -800,30 +801,77 @@ class ServerReceiver:
                     continue
 
                 clone_tid = mapping["cloned_thread_id"]
-                ch = guild.get_channel(clone_tid) or await self.bot.fetch_channel(
-                    clone_tid
-                )
-                if ch and ch.name != new_name:
-                    old = ch.name
+
+                ch = guild.get_channel(clone_tid)
+                if not ch:
                     try:
-                        await ch.edit(name=new_name)
-                        logger.info(
-                            "Renamed cloned thread '%s' → '%s' (ID %d)",
-                            old,
-                            new_name,
-                            clone_tid,
+                        ch = await self.bot.fetch_channel(clone_tid)
+                    except discord.NotFound:
+                        if orig_tid not in valid_threads:
+                            self.db.delete_forum_thread_mapping(orig_tid)
+                            continue
+
+                        forum_map = next(
+                            r
+                            for r in self.db.get_all_channel_mappings()
+                            if r["original_channel_id"] == mapping["forum_original_id"]
                         )
-                        self.db.upsert_forum_thread_mapping(
-                            orig_tid,
-                            new_name,
-                            clone_tid,
-                            mapping["original_thread_id"],
-                            mapping["cloned_thread_id"],
-                        )
-                        renamed_threads += 1
-                        await self._cooldown()
-                    except Exception as e:
-                        logger.error("Failed renaming thread %d: %s", clone_tid, e)
+                        parent = guild.get_channel(forum_map["cloned_channel_id"])
+
+                        if isinstance(parent, discord.ForumChannel):
+                            # drop forum‐thread mappings instead of recreating
+                            logger.info(
+                                "Cloned Forum thread %d manually deleted; removing its mapping",
+                                orig_tid,
+                            )
+                            self.db.delete_forum_thread_mapping(orig_tid)
+                            continue
+
+                        elif isinstance(parent, discord.TextChannel):
+                            new = await parent.create_thread(
+                                name=mapping["original_thread_name"],
+                                type=ChannelType.public_thread,
+                                auto_archive_duration=1440,
+                            )
+                            recreated_threads += 1
+                            logger.info(
+                                "Recreated missing channel‐thread '%s' in #%d",
+                                mapping["original_thread_name"],
+                                parent.id,
+                            )
+                            self.db.upsert_forum_thread_mapping(
+                                orig_tid,
+                                mapping["original_thread_name"],
+                                new.id,
+                                mapping["forum_original_id"],
+                                parent.id,
+                            )
+                            ch = new
+
+                        else:
+                            logger.error(
+                                "Cannot recreate missing thread under %s; deleting mapping",
+                                type(parent),
+                            )
+                            self.db.delete_forum_thread_mapping(orig_tid)
+                            continue
+
+                if ch.name != new_name:
+                    old = ch.name
+                    await ch.edit(name=new_name)
+                    logger.info(
+                        "Renamed cloned thread '%s' → '%s' (ID %d)",
+                        old, new_name, ch.id
+                    )
+                    self.db.upsert_forum_thread_mapping(
+                        orig_tid,
+                        new_name,
+                        ch.id,
+                        mapping["forum_original_id"],
+                        mapping["cloned_thread_id"],
+                    )
+                    renamed_threads += 1
+                    await self._cooldown()
 
             parts = []
             if removed_cat:
@@ -846,6 +894,8 @@ class ServerReceiver:
                 parts.append(f"Deleted {deleted_threads} threads")
             if renamed_threads:
                 parts.append(f"Renamed {renamed_threads} threads")
+            if recreated_threads:
+                parts.append(f"Recreated {recreated_threads} threads")
             if emoji_deleted:
                 parts.append(f"Deleted {emoji_deleted} emojis")
             if emoji_renamed:
@@ -1388,8 +1438,8 @@ class ServerReceiver:
                     )
                 except NotFound:
                     logger.warning(
-                        "Cloned thread %s missing, recreating",
-                        thread_map["thread_name"],
+                        "Cloned thread for '%s' missing, will recreate it",
+                        data.get("thread_name"),
                     )
                     self.db.delete_forum_thread_mapping(data["thread_id"])
                     thread_map = None
@@ -1499,6 +1549,8 @@ class ServerReceiver:
             return
 
         cloned_id = row["cloned_thread_id"]
+        cloned_thread_name = row["original_thread_name"]
+        cloned_thread_chnl = row["forum_cloned_id"]
 
         if delete_remote:
             guild = self.bot.get_guild(self.clone_guild_id)
@@ -1516,9 +1568,9 @@ class ServerReceiver:
                     try:
                         await ch.delete()
                         logger.info(
-                            "Deleted cloned thread %s for original thread %s",
-                            cloned_id,
-                            orig_thread_id,
+                            "Deleted thread '%s' in #%s",
+                            cloned_thread_name,
+                            cloned_thread_chnl
                         )
                     except Exception as e:
                         logger.error(
@@ -1530,7 +1582,6 @@ class ServerReceiver:
                 )
 
         self.db.delete_forum_thread_mapping(orig_thread_id)
-        logger.info("Deleted thread %s", orig_thread_id)
 
     async def handle_thread_rename(self, data: dict):
         """Rename a cloned thread when the source thread was renamed."""
@@ -1620,7 +1671,6 @@ class ServerReceiver:
             return f"<{prefix}:{name}:{new_id}>"
 
         return self._EMOJI_RE.sub(_repl, content)
-
 
     def _build_webhook_payload(self, msg: Dict) -> dict:
         """
