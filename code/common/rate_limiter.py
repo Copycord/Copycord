@@ -6,7 +6,7 @@ from typing import Tuple, Dict
 
 class ActionType(Enum):
     WEBHOOK = "webhook"
-    NEW_WEBHOOK = "new_webhook"  # For creating new webhooks
+    NEW_WEBHOOK = "new_webhook"
     CREATE = "create_channel"
     EDIT = "edit_channel"
     DELETE = "delete_channel"
@@ -46,11 +46,11 @@ class RateLimiter:
 class RateLimitManager:
     def __init__(self, config: Dict[ActionType, Tuple[int, float]] = None):
         cfg = {
-            ActionType.WEBHOOK: (5, 2), # Webhook messages: 5 per 2 seconds
-            ActionType.CREATE: (2, 10), # Channel creation: 2 per 10 seconds
-            ActionType.NEW_WEBHOOK: (1, 15), # Webhook creation: 1 per 15 seconds
-            ActionType.EDIT: (3, 15), # Channel edits: 3 per 15 seconds
-            ActionType.DELETE: (3, 15), # Channel deletions: 3 per 15 seconds
+            ActionType.WEBHOOK: (5, 2.0), # Webhook messages: 5 per 2 seconds
+            ActionType.CREATE: (2, 10.0), # Channel creation: 2 per 10 seconds
+            ActionType.NEW_WEBHOOK: (1, 15.0), # Webhook creation: 1 per 15 seconds
+            ActionType.EDIT: (3, 15.0), # Channel edits: 3 per 15 seconds
+            ActionType.DELETE: (3, 15.0), # Channel deletions: 3 per 15 seconds
             ActionType.THREAD: (2, 5.0), # Thread operations: 2 per 5 seconds
             ActionType.EMOJI: (3, 60.0), # Emoji operations: 3 per 60 seconds
         }
