@@ -149,7 +149,7 @@ class ServerReceiver:
             asyncio.create_task(self.forward_message(data))
 
         elif typ == "thread_message":
-            asyncio.create_task(self.handle_forum_message(data))
+            asyncio.create_task(self.handle_thread_message(data))
 
         elif typ == "thread_delete":
             asyncio.create_task(self.handle_thread_delete(data))
@@ -561,7 +561,7 @@ class ServerReceiver:
                         await self.ratelimit.acquire(ActionType.EDIT)
                         await clone_chan.edit(name=item["name"])
                         logger.info(
-                            "Renamed community channel '%s' → '%s' (ID %d)",
+                            "Renamed channel '%s' → '%s' (ID %d)",
                             old,
                             item["name"],
                             clone_chan.id,
@@ -875,7 +875,7 @@ class ServerReceiver:
         # Flush thread-message buffer
         for data in list(self._pending_thread_msgs):
             await asyncio.sleep(0.5)
-            await self.handle_forum_message(data)
+            await self.handle_thread_message(data)
         self._pending_thread_msgs.clear()
 
         return "; ".join(parts)
@@ -1347,7 +1347,7 @@ class ServerReceiver:
             logger.exception("Failed to recreate webhook for #%s", original_id)
             return None
 
-    async def handle_forum_message(self, data: dict):
+    async def handle_thread_message(self, data: dict):
         """
         Handle an incoming forum-thread message: buffer if unmapped, create or forward to thread.
         """
@@ -1368,14 +1368,14 @@ class ServerReceiver:
             return
 
         # 3) Load forum-channel mapping
-        forum_map = next(
+        thread_map = next(
             (
                 r for r in self.db.get_all_channel_mappings()
                 if r["original_channel_id"] == data["forum_id"]
             ),
             None,
         )
-        if not forum_map:
+        if not thread_map:
             logger.info(
                 "No forum mapping for '%s'; buffering until synced",
                 data.get("thread_name"),
@@ -1384,11 +1384,11 @@ class ServerReceiver:
             return
 
         # 4) Check cloned forum channel
-        cloned_forum = guild.get_channel(forum_map["cloned_channel_id"])
+        cloned_forum = guild.get_channel(thread_map["cloned_channel_id"])
         if not cloned_forum:
             logger.info(
                 "Mapped forum channel %d not found; buffering until exists",
-                forum_map["cloned_channel_id"],
+                thread_map["cloned_channel_id"],
             )
             self._pending_thread_msgs.append(data)
             return
@@ -1396,10 +1396,11 @@ class ServerReceiver:
         # 5) Build payload and prepare webhook
         payload = self._build_webhook_payload(data)
         session = aiohttp.ClientSession()
+        webhook_url = thread_map.get("channel_webhook_url")
         try:
             # 6) Instantiate the forum webhook
-            forum_webhook = Webhook.from_url(
-                forum_map["channel_webhook_url"], session=session
+            thread_webhook = Webhook.from_url(
+                thread_map["channel_webhook_url"], session=session
             )
 
             # 7) Ensure only one creator per original thread
@@ -1418,7 +1419,7 @@ class ServerReceiver:
                 )
 
                 if thread_map is None:
-                    cloned_chan = guild.get_channel(forum_map["cloned_channel_id"])
+                    cloned_chan = guild.get_channel(thread_map["cloned_channel_id"])
                     chan_name = cloned_chan.name if cloned_chan else "<unknown>"
 
                     logger.info(
@@ -1430,7 +1431,7 @@ class ServerReceiver:
 
                     if isinstance(cloned_forum, discord.ForumChannel):
                         # Webhook-based creation (includes initial message)
-                        base = forum_map["channel_webhook_url"]
+                        base = thread_map["channel_webhook_url"]
                         sep  = "&" if "?" in base else "?"
                         url  = f"{base}{sep}wait=true"
                         await self.ratelimit.acquire(ActionType.THREAD)
@@ -1470,7 +1471,7 @@ class ServerReceiver:
                         data["thread_name"],
                         new_id,
                         data["forum_id"],
-                        forum_map["cloned_channel_id"],
+                        thread_map["cloned_channel_id"],
                     )
                 else:
                     # thread already created by another coroutine
