@@ -1696,6 +1696,20 @@ class ServerReceiver:
             elif isinstance(raw, Embed):
                 embeds.append(raw)
 
+        # Replace custom emoji IDs in embeds
+        for e in embeds:
+            if e.description:
+                e.description = self._replace_emoji_ids(e.description)
+            if getattr(e, "title", None):
+                e.title = self._replace_emoji_ids(e.title)
+            if e.footer and getattr(e.footer, "text", None):
+                e.footer.text = self._replace_emoji_ids(e.footer.text)
+            for f in getattr(e, "fields", []):
+                if f.name:
+                    f.name = self._replace_emoji_ids(f.name)
+                if f.value:
+                    f.value = self._replace_emoji_ids(f.value)
+
         base = {
             "username": msg["author"],
             "avatar_url": msg.get("avatar_url"),
