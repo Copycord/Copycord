@@ -1791,22 +1791,33 @@ class ServerReceiver:
             )
             return
 
-        # Attempt send (with recreate-on-404)
-        for attempt in (1, 2):
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
             try:
                 await self.ratelimit.acquire(ActionType.WEBHOOK, key=url)
                 async with self.session.post(url, json=payload) as resp:
+                    # Success
                     if resp.status in (200, 204):
                         logger.info(
                             "Forwarded message to #%s from %s",
-                            msg["channel_name"],
-                            msg["author"],
+                            msg["channel_name"], msg["author"],
                         )
                         return
 
-                    if resp.status == 404 and attempt == 1:
-                        logger.debug("Webhook %s 404; checking mapping...", url)
+                    # Rate limited: retry after delay
+                    if resp.status == 429 and attempt < max_attempts:
+                        retry_after = resp.headers.get("Retry-After")
+                        wait = float(retry_after) if retry_after else 1.0
+                        logger.warning(
+                            "Rate limited on attempt %d/%d for #%s; sleeping %.1fs then retrying",
+                            attempt, max_attempts, msg["channel_name"], wait,
+                        )
+                        await asyncio.sleep(wait)
+                        continue
 
+                    # Webhook gone: try recreate on first 404
+                    if resp.status == 404 and attempt == 1:
+                        logger.debug("Webhook %s 404; attempting to recreate...", url)
                         mapping = next(
                             (
                                 r
@@ -1815,12 +1826,10 @@ class ServerReceiver:
                             ),
                             None,
                         )
-
                         if not mapping or not mapping["channel_webhook_url"]:
                             logger.warning(
                                 "No mapping for channel %s; buffering msg from %s",
-                                msg["channel_name"],
-                                msg["author"],
+                                msg["channel_name"], msg["author"],
                             )
                             self._pending_msgs.setdefault(source_id, []).append(msg)
                             return
@@ -1830,13 +1839,19 @@ class ServerReceiver:
                             return
                         continue
 
+                    # Other failures
                     body = await resp.text()
-                    logger.error("Failed to send (%s): %s", resp.status, body)
+                    logger.error("Failed to send (status %s): %s", resp.status, body)
                     return
 
             except Exception:
                 logger.exception("Error forwarding message to #%s", msg["channel_name"])
                 return
+
+        logger.error(
+            "Exhausted %d attempts sending to #%s; dropping message from %s",
+            max_attempts, msg["channel_name"], msg["author"],
+        )
 
     async def _shutdown(self):
         logger.info("Shutting down server...")
