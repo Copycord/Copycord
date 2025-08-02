@@ -36,7 +36,7 @@ docker compose version
 
 ## Step 2: Configure the Environment
 
-- Update your `.env` file or `docker-compose.yml` with your tokens and guild IDs.
+- Update your `.env` file and `docker-compose.yml` with your tokens and guild IDs.
 - Refer to the `README.md` in the repository for full configuration details.
 
 ---
