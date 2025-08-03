@@ -34,7 +34,7 @@ log_file = os.path.join(LOG_DIR, "client.log")
 fh = RotatingFileHandler(
     log_file,
     maxBytes=10 * 1024 * 1024,
-    backupCount=0,
+    backupCount=1,
     encoding="utf-8",
 )
 fh.setFormatter(formatter)
