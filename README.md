@@ -97,17 +97,15 @@ services:
 
 `.env`
 ```yaml
-SERVER_TOKEN= # Discord bot token for the clone-server
-CLONE_GUILD_ID= # ID of the guild where messages will be forwarded, bot must be in this guild
-COMMAND_USERS= # Discord user IDs allowed to use commands seperated by commas
+SERVER_TOKEN= # Discord bot token
+CLONE_GUILD_ID= # ID of the clone guild, bot must be invited to this guild
+COMMAND_USERS= # Discord user IDs allowed to use commands separated by commas
 DELETE_CHANNELS=True # Delete channels after they are deleted from the host server
 DELETE_THREADS=True # Delete threads after they are deleted from the host server
-CLONE_EMOJIS=True # Clone emojis from the host server to the clone server
+CLONE_EMOJI=True # Clone emojis from the host server to the clone server
 
-# Discord self‑bot token for the monitored server
-CLIENT_TOKEN=
-# ID of the guild to monitor
-HOST_GUILD_ID=
+CLIENT_TOKEN= # Your discord account token
+HOST_GUILD_ID= # ID of the host guild to monitor
 ```
 
 ### 3. Launch Copycord
