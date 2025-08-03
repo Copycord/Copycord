@@ -2,6 +2,7 @@ import asyncio
 import signal
 from datetime import datetime, timezone
 import logging
+from logging.handlers import RotatingFileHandler
 from typing import Optional
 import discord
 from discord import ChannelType, MessageType
@@ -30,7 +31,7 @@ ch.setFormatter(formatter)
 root.addHandler(ch)
 
 log_file = os.path.join(LOG_DIR, "client.log")
-fh = logging.RotatingFileHandler(
+fh = RotatingFileHandler(
     log_file,
     maxBytes=10 * 1024 * 1024,
     backupCount=0,

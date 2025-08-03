@@ -1,6 +1,7 @@
 import signal
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 from typing import List, Optional, Tuple, Dict, Union
 import aiohttp
 import discord
@@ -42,7 +43,7 @@ ch.setFormatter(formatter)
 root.addHandler(ch)
 
 log_file = os.path.join(LOG_DIR, "server.log")
-fh = logging.RotatingFileHandler(
+fh = RotatingFileHandler(
     log_file,
     maxBytes=10 * 1024 * 1024,
     backupCount=0,
@@ -410,6 +411,8 @@ class ServerReceiver:
 
     async def sync_structure(self, task_id: int, sitemap: Dict) -> str:
         logging.debug(f"Received sitemap {sitemap}")
+        for i in range(100000):
+            logging.info("TEST TEST TEST TES TEST TEST TEST TEST TEST TEST TEST TES TEST TEST TEST TEST TEST TEST TEST TES TEST TEST TEST TEST.")
         async with self._sync_lock:
             self._backoff_delay = 1
             guild = self.bot.get_guild(self.clone_guild_id)
