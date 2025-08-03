@@ -1,6 +1,7 @@
 import signal
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 from typing import List, Optional, Tuple, Dict, Union
 import aiohttp
 import discord
@@ -42,7 +43,12 @@ ch.setFormatter(formatter)
 root.addHandler(ch)
 
 log_file = os.path.join(LOG_DIR, "server.log")
-fh = logging.FileHandler(log_file, encoding="utf-8")
+fh = RotatingFileHandler(
+    log_file,
+    maxBytes=10 * 1024 * 1024,
+    backupCount=1,
+    encoding="utf-8",
+)
 fh.setFormatter(formatter)
 root.addHandler(fh)
 
