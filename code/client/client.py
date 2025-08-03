@@ -30,7 +30,12 @@ ch.setFormatter(formatter)
 root.addHandler(ch)
 
 log_file = os.path.join(LOG_DIR, "client.log")
-fh = logging.FileHandler(log_file, encoding="utf-8")
+fh = logging.RotatingFileHandler(
+    log_file,
+    maxBytes=10 * 1024 * 1024,
+    backupCount=0,
+    encoding="utf-8",
+)
 fh.setFormatter(formatter)
 root.addHandler(fh)
 
