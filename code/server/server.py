@@ -707,7 +707,7 @@ class ServerReceiver:
             incoming = self._parse_sitemap(sitemap)
             created_chan = renamed_chan = 0
             for item in incoming:
-                if comm.get("enabled") and item["id"] in (rules_id, updates_id):
+                if want_comm and item["id"] in (rules_id, updates_id):
                     continue
                 mapping = next(
                     (
