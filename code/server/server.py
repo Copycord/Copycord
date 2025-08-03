@@ -411,8 +411,6 @@ class ServerReceiver:
 
     async def sync_structure(self, task_id: int, sitemap: Dict) -> str:
         logging.debug(f"Received sitemap {sitemap}")
-        for i in range(100000):
-            logging.info("TEST TEST TEST TES TEST TEST TEST TEST TEST TEST TEST TES TEST TEST TEST TEST TEST TEST TEST TES TEST TEST TEST TEST.")
         async with self._sync_lock:
             self._backoff_delay = 1
             guild = self.bot.get_guild(self.clone_guild_id)
