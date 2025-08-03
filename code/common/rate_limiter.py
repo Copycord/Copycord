@@ -46,8 +46,8 @@ class RateLimiter:
 class RateLimitManager:
     def __init__(self, config: Dict[ActionType, Tuple[int, float]] = None):
         cfg = {
-            ActionType.WEBHOOK: (5, 2.0), # Webhook messages: 5 per 2 seconds
-            ActionType.CREATE: (2, 10.0), # Channel creation: 2 per 10 seconds
+            ActionType.WEBHOOK: (5, 2.5), # Webhook messages: 5 per 2 seconds
+            ActionType.CREATE: (2, 15.0), # Channel creation: 2 per 10 seconds
             ActionType.NEW_WEBHOOK: (1, 15.0), # Webhook creation: 1 per 15 seconds
             ActionType.EDIT: (3, 15.0), # Channel edits: 3 per 15 seconds
             ActionType.DELETE: (3, 15.0), # Channel deletions: 3 per 15 seconds
