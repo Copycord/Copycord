@@ -1,3 +1,5 @@
+[![Release](https://img.shields.io/github/v/release/copycord/copycord?label=Release)](https://github.com/copycord/copycord/releases/latest)
+
 _Love this project? Give it a ⭐️ and let others know!_
 
 <p align="left">
