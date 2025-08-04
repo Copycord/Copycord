@@ -1355,28 +1355,17 @@ class ServerReceiver:
         """
         Handle an incoming forum-thread message: buffer if unmapped, create or forward to thread.
         """
-        # 1) Buffer all messages during sync
-        if self._sync_lock.locked():
-            logger.info(
-                "Sync in progress; buffering thread message for '%s' from %s",
-                data.get("thread_name"),
-                data.get("author"),
-            )
-            self._pending_thread_msgs.append(data)
-            return
 
-        # 2) Ensure guild exists
+        # Ensure guild exists
         guild = self.bot.get_guild(self.clone_guild_id)
         if not guild:
             logger.error("Clone guild %s not available", self.clone_guild_id)
             return
 
-        # 3) Load forum-channel mapping
+        # Load forum-channel mapping
         thread_map = next(
-            (
-                r for r in self.db.get_all_channel_mappings()
-                if r["original_channel_id"] == data["forum_id"]
-            ),
+            (r for r in self.db.get_all_channel_mappings()
+            if r["original_channel_id"] == data["forum_id"]),
             None,
         )
         if not thread_map:
@@ -1387,7 +1376,7 @@ class ServerReceiver:
             self._pending_thread_msgs.append(data)
             return
 
-        # 4) Check cloned forum channel
+        # Check cloned forum channel
         cloned_forum = guild.get_channel(thread_map["cloned_channel_id"])
         if not cloned_forum:
             logger.info(
@@ -1397,47 +1386,62 @@ class ServerReceiver:
             self._pending_thread_msgs.append(data)
             return
 
-        # 5) Build payload and prepare webhook
+        # Build payload
         payload = self._build_webhook_payload(data)
-        session = aiohttp.ClientSession()
-        webhook_url = thread_map.get("channel_webhook_url")
-        try:
-            # 6) Instantiate the forum webhook
-            thread_webhook = Webhook.from_url(
-                thread_map["channel_webhook_url"], session=session
+        if payload is None:
+            logger.info(
+                "No webhook payload built for '%s'; skipping",
+                data.get("thread_name"),
             )
+            return
 
-            # 7) Ensure only one creator per original thread
+        if not payload.get("content") and not payload.get("embeds"):
+            logger.info("Skipping empty message for '%s'", data.get("thread_name"))
+            return
+
+        # Prepare HTTP session & webhook
+        session = aiohttp.ClientSession()
+        try:
+            webhook_url = thread_map["channel_webhook_url"]
+            if not webhook_url:
+                logger.warning(
+                    "Mapped forum channel %s has no webhook; attempting to recreate",
+                    thread_map["cloned_channel_id"]
+                )
+                webhook_url = await self._recreate_webhook(data["thread_id"])
+                if not webhook_url:
+                    logger.info(
+                        "Could not recreate webhook for '%s'; buffering",
+                        data.get("thread_name")
+                    )
+                    self._pending_thread_msgs.append(data)
+                    return
+            thread_webhook = Webhook.from_url(webhook_url, session=session)
+
+            # Ensure only one creator per original thread
             orig_tid = data["thread_id"]
             lock = self._thread_locks.setdefault(orig_tid, asyncio.Lock())
             created = False
 
             async with lock:
-                # re-fetch the thread mapping inside the lock
-                thread_map = next(
-                    (
-                        r for r in self.db.get_all_threads()
-                        if r["original_thread_id"] == orig_tid
-                    ),
+                thread_map_db = next(
+                    (r for r in self.db.get_all_threads()
+                    if r["original_thread_id"] == orig_tid),
                     None,
                 )
 
-                if thread_map is None:
-                    cloned_chan = guild.get_channel(thread_map["cloned_channel_id"])
-                    chan_name = cloned_chan.name if cloned_chan else "<unknown>"
-
+                if thread_map_db is None:
+                    chan_name = cloned_forum.name
                     logger.info(
                         "Creating thread '%s' in channel #%s by %s",
-                        data["thread_name"],
-                        chan_name,
-                        data["author"],
+                        data["thread_name"], chan_name, data["author"]
                     )
 
                     if isinstance(cloned_forum, discord.ForumChannel):
-                        # Webhook-based creation (includes initial message)
-                        base = thread_map["channel_webhook_url"]
-                        sep  = "&" if "?" in base else "?"
-                        url  = f"{base}{sep}wait=true"
+                        base = webhook_url
+                        sep = "&" if "?" in base else "?"
+                        url = f"{base}{sep}wait=true"
+
                         await self.ratelimit.acquire(ActionType.THREAD)
                         async with session.post(
                             url, json={**payload, "thread_name": data["thread_name"]}
@@ -1445,8 +1449,8 @@ class ServerReceiver:
                             resp.raise_for_status()
                             new_id = int((await resp.json())["channel_id"])
                             created = True
+
                     else:
-                        # Direct thread creation on a TextChannel
                         await self.ratelimit.acquire(ActionType.THREAD)
                         new_thread = await cloned_forum.create_thread(
                             name=data["thread_name"],
@@ -1454,13 +1458,19 @@ class ServerReceiver:
                             auto_archive_duration=1440,
                         )
                         new_id = new_thread.id
-                        # send the initial post
-                        await self.ratelimit.acquire(ActionType.WEBHOOK, key=webhook_url)
-                        await thread_webhook.send(**payload, thread=new_thread, wait=True)
-                        created = True
-                        
 
-                    # enforce forum thread limit
+                        await self.ratelimit.acquire(ActionType.WEBHOOK, key=webhook_url)
+                        await thread_webhook.send(
+                            content=payload.get("content"),
+                            embeds=payload.get("embeds"),
+                            username=payload.get("username"),
+                            avatar_url=payload.get("avatar_url"),
+                            thread=new_thread,
+                            wait=True,
+                        )
+                        created = True
+
+                    # Enforce thread limit
                     try:
                         await self._enforce_thread_limit(guild)
                     except Exception as e:
@@ -1469,7 +1479,6 @@ class ServerReceiver:
                             cloned_forum.id, e
                         )
 
-                    # persist the new mapping
                     self.db.upsert_forum_thread_mapping(
                         orig_tid,
                         data["thread_name"],
@@ -1478,23 +1487,25 @@ class ServerReceiver:
                         thread_map["cloned_channel_id"],
                     )
                 else:
-                    # thread already created by another coroutine
-                    new_id = thread_map["cloned_thread_id"]
+                    new_id = thread_map_db["cloned_thread_id"]
 
-                # fetch the actual Thread object
-                clone_thread = (
-                    guild.get_channel(new_id)
-                    or await self.bot.fetch_channel(new_id)
-                )
+                clone_thread = guild.get_channel(new_id) or await self.bot.fetch_channel(new_id)
 
-            # Outside the lock, forward message only if not initial create
             if not created:
                 logger.info(
                     "Forwarding message to existing thread '%s' from %s",
                     data["thread_name"], data["author"]
                 )
                 await self.ratelimit.acquire(ActionType.WEBHOOK, key=webhook_url)
-                await thread_webhook.send(**payload, thread=clone_thread, wait=True)
+                await thread_webhook.send(
+                    content=payload.get("content"),
+                    embeds=payload.get("embeds"),
+                    username=payload.get("username"),
+                    avatar_url=payload.get("avatar_url"),
+                    thread=clone_thread,
+                    wait=True,
+                )
+
         finally:
             await session.close()
 
