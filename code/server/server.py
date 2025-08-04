@@ -311,7 +311,7 @@ class ServerReceiver:
 
             # create emoji
             try:
-                await self.ratelimit.acquire(ActionType.EDIT)
+                await self.ratelimit.acquire(ActionType.EMOJI)
                 created_emo = await guild.create_custom_emoji(name=name, image=raw)
                 created += 1
                 logger.info(f"Created emoji {name}")
