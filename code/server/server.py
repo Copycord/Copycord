@@ -1481,7 +1481,7 @@ class ServerReceiver:
                     or await self.bot.fetch_channel(new_id)
                 )
 
-            # 8) Outside the lock, forward message only if not initial create
+            # Outside the lock, forward message only if not initial create
             if not created:
                 logger.info(
                     "Forwarding message to existing thread '%s' from %s",
