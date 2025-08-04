@@ -1760,11 +1760,12 @@ class ServerReceiver:
 
         # Buffer if sync in progress or no mapping yet
         if mapping is None:
-            logger.info(
-                "No mapping yet for channel #%s; buffering message from %s until synced",
-                msg["channel_name"], msg["author"],
-            )
-            self._pending_msgs.setdefault(source_id, []).append(msg)
+            if self._sync_lock.locked():
+                logger.info(
+                    "No mapping yet for channel #%s; buffering message from %s until synced",
+                    msg["channel_name"], msg["author"],
+                )
+                self._pending_msgs.setdefault(source_id, []).append(msg)
             return
 
         # Recreate missing webhook if needed
