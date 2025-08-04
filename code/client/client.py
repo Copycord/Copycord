@@ -347,6 +347,7 @@ class ClientListener:
                 "channel_id": message.channel.id,
                 "channel_name": message.channel.name,
                 "author": author,
+                "author_id": message.author.id,
                 "avatar_url": (
                     str(message.author.display_avatar.url)
                     if message.author.display_avatar

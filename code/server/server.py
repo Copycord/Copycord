@@ -1305,7 +1305,7 @@ class ServerReceiver:
 
         cloned_id = row["cloned_channel_id"]
         if not cloned_id:
-            logger.error(
+            logger.debug(
                 "No mapping found for #%s; cannot recreate webhook",
                 original_id,
             )
@@ -1322,7 +1322,7 @@ class ServerReceiver:
 
         ch = guild.get_channel(cloned_id)
         if not ch:
-            logger.error(
+            logger.debug(
                 "Clone channel %s not found in guild %s; cannot recreate webhook for #%s",
                 cloned_id,
                 self.clone_guild_id,
@@ -1370,7 +1370,7 @@ class ServerReceiver:
         )
         if not thread_map:
             logger.info(
-                "No forum mapping for '%s'; buffering until synced",
+                "No forum mapping for '%s';  until synced",
                 data.get("thread_name"),
             )
             self._pending_thread_msgs.append(data)
@@ -1380,7 +1380,7 @@ class ServerReceiver:
         cloned_forum = guild.get_channel(thread_map["cloned_channel_id"])
         if not cloned_forum:
             logger.info(
-                "Mapped forum channel %d not found; buffering until exists",
+                "Mapped forum channel %d not found; added to queue for later",
                 thread_map["cloned_channel_id"],
             )
             self._pending_thread_msgs.append(data)
@@ -1411,7 +1411,7 @@ class ServerReceiver:
                 webhook_url = await self._recreate_webhook(data["thread_id"])
                 if not webhook_url:
                     logger.info(
-                        "Could not recreate webhook for '%s'; buffering",
+                        "Could not recreate webhook for '%s'; added to queue for later",
                         data.get("thread_name")
                     )
                     self._pending_thread_msgs.append(data)
@@ -1762,7 +1762,7 @@ class ServerReceiver:
         if mapping is None:
             if self._sync_lock.locked():
                 logger.info(
-                    "No mapping yet for channel #%s; buffering message from %s until synced",
+                    "No mapping yet for channel #%s; msg from %s is queued and will be sent after sync",
                     msg["channel_name"], msg["author"],
                 )
                 self._pending_msgs.setdefault(source_id, []).append(msg)
@@ -1772,7 +1772,7 @@ class ServerReceiver:
         if not url:
             if self._sync_lock.locked():
                 logger.info(
-                    "Sync in progress; message in #%s from %s will be forwarded after sync",
+                    "Sync in progress; message in #%s from %s is queued and will be sent after sync",
                     msg["channel_name"], msg["author"],
                 )
                 self._pending_msgs.setdefault(source_id, []).append(msg)
@@ -1785,7 +1785,7 @@ class ServerReceiver:
             url = await self._recreate_webhook(source_id)
             if not url:
                 logger.info(
-                    "Could not recreate webhook for #%s; buffering message from %s",
+                    "Could not recreate webhook for #%s; queued message from %s",
                     msg["channel_name"], msg["author"],
                 )
                 self._pending_msgs.setdefault(source_id, []).append(msg)
@@ -1827,8 +1827,8 @@ class ServerReceiver:
                 wait=True,
             )
             logger.info(
-                "Forwarded message to #%s from %s",
-                msg["channel_name"], msg["author"],
+                "Forwarded message to #%s from %s (User ID: %s)",
+                msg["channel_name"], msg["author"], msg["author_id"]
             )
 
         except HTTPException as e:
@@ -1838,7 +1838,7 @@ class ServerReceiver:
                 url = await self._recreate_webhook(source_id)
                 if not url:
                     logger.warning(
-                        "No mapping for channel %s; buffering msg from %s",
+                        "No mapping for channel %s; msg from %s is queued and will be sent after sync",
                         msg["channel_name"], msg["author"],
                     )
                     self._pending_msgs.setdefault(source_id, []).append(msg)
