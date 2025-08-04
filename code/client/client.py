@@ -37,6 +37,7 @@ fh = RotatingFileHandler(
     backupCount=1,
     encoding="utf-8",
 )
+fh.setLevel(logging.INFO)
 fh.setFormatter(formatter)
 root.addHandler(fh)
 

@@ -51,6 +51,7 @@ fh = RotatingFileHandler(
     backupCount=1,
     encoding="utf-8",
 )
+fh.setLevel(logging.INFO)
 fh.setFormatter(formatter)
 root.addHandler(fh)
 
@@ -1374,8 +1375,21 @@ class ServerReceiver:
             return
 
         cloned_parent = guild.get_channel(chan_map["cloned_channel_id"])
+        cloned_id = chan_map["cloned_channel_id"]
+        if cloned_id is None:
+            logger.warning(
+                "Channel %s not cloned yet; queueing message until it’s created",
+                data["channel_name"],
+            )
+            self._pending_thread_msgs.append(data)
+            return
+
+        cloned_parent = guild.get_channel(cloned_id)
         if not cloned_parent:
-            logger.info("Cloned channel %d missing; adding to queue, waiting for next sync", chan_map["cloned_channel_id"])
+            logger.info(
+                "Channel %s not cloned yet; queueing message until it’s created",
+                cloned_id,
+            )
             self._pending_thread_msgs.append(data)
             return
 
