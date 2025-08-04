@@ -67,22 +67,18 @@ _Love this project? Give it a ⭐️ and let others know!_
 
 ## Configuration
 
-### 1. Create a new folder and add `docker-compose.yml`
+### 1. Create a new folder and add `docker-compose.yml` and `.env` 
 
-In the new folder, create `docker-compose.yml`:
+In the new folder, create `docker-compose.yml` and `.env`: 
 
+`docker-compose.yml`
 ```yaml
 services:
   server:
     container_name: copycord-server
     image: ghcr.io/copycord/copycord-server:v1.3.3
-    environment:
-      - SERVER_TOKEN=123456789123456789 # Discord bot token, must be invited into the cloned server
-      - CLONE_GUILD_ID=123456789 # ID of the server you created to be cloned
-      - COMMAND_USERS=12345678 # List of users allowed to use the bot commands, separated by commas
-      - CLONE_EMOJI=True # Should we clone emojis from the host server?
-      - DELETE_CHANNELS=False # Should we delete channels after they are deleted from the host server? WARNING: This will delete the channel and all of its messages
-      - DELETE_THREADS=False # Should we delete threads after they are deleted from the host server? WARNING: This will delete the thread and all of its messages
+    env_file:
+      - .env
     volumes:
       - ./data:/data
     restart: unless-stopped
@@ -90,14 +86,26 @@ services:
   client:
     container_name: copycord-client
     image: ghcr.io/copycord/copycord-client:v1.3.3
-    environment:
-      - CLIENT_TOKEN=123456789123456789 # Discord user account token, see "Getting Started"
-      - HOST_GUILD_ID=123456789 # ID of the server we wil be cloning
+    env_file:
+      - .env
     volumes:
       - ./data:/data
     depends_on:
       - server
     restart: unless-stopped
+```
+
+`.env`
+```yaml
+SERVER_TOKEN= # Discord bot token
+CLONE_GUILD_ID= # ID of the clone guild, bot must be invited to this guild
+COMMAND_USERS= # Discord user IDs allowed to use commands separated by commas
+DELETE_CHANNELS=True # Delete channels after they are deleted from the host server
+DELETE_THREADS=True # Delete threads after they are deleted from the host server
+CLONE_EMOJI=True # Clone emojis from the host server to the clone server
+
+CLIENT_TOKEN= # Your discord account token
+HOST_GUILD_ID= # ID of the host guild to monitor
 ```
 
 ### 3. Launch Copycord

@@ -1,6 +1,7 @@
 import signal
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 from typing import List, Optional, Tuple, Dict, Union
 import aiohttp
 import discord
@@ -43,7 +44,12 @@ ch.setFormatter(formatter)
 root.addHandler(ch)
 
 log_file = os.path.join(LOG_DIR, "server.log")
-fh = logging.FileHandler(log_file, encoding="utf-8")
+fh = RotatingFileHandler(
+    log_file,
+    maxBytes=10 * 1024 * 1024,
+    backupCount=1,
+    encoding="utf-8",
+)
 fh.setFormatter(formatter)
 root.addHandler(fh)
 
@@ -1695,6 +1701,20 @@ class ServerReceiver:
 
             elif isinstance(raw, Embed):
                 embeds.append(raw)
+
+        # Replace custom emoji IDs in embeds
+        for e in embeds:
+            if e.description:
+                e.description = self._replace_emoji_ids(e.description)
+            if getattr(e, "title", None):
+                e.title = self._replace_emoji_ids(e.title)
+            if e.footer and getattr(e.footer, "text", None):
+                e.footer.text = self._replace_emoji_ids(e.footer.text)
+            for f in getattr(e, "fields", []):
+                if f.name:
+                    f.name = self._replace_emoji_ids(f.name)
+                if f.value:
+                    f.value = self._replace_emoji_ids(f.value)
 
         base = {
             "username": msg["author"],
