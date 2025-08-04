@@ -1719,53 +1719,47 @@ class ServerReceiver:
     async def forward_message(self, msg: Dict):
         source_id = msg["channel_id"]
 
-        # Lookup mapping
+        # 1) Lookup mapping
         mapping = next(
-            (
-                r
-                for r in self.db.get_all_channel_mappings()
-                if r["original_channel_id"] == source_id
-            ),
+            (r for r in self.db.get_all_channel_mappings()
+            if r["original_channel_id"] == source_id),
             None,
         )
         url = mapping["channel_webhook_url"] if mapping else None
 
-        # Buffer if sync in progress or no mapping yet
+        # 2) Buffer if sync in progress or no mapping yet
         if mapping is None:
             logger.info(
                 "No mapping yet for channel #%s; buffering message from %s until synced",
-                msg["channel_name"],
-                msg["author"],
+                msg["channel_name"], msg["author"],
             )
             self._pending_msgs.setdefault(source_id, []).append(msg)
             return
 
-        # 2) We have a mapping but no webhook URL → either buffer (mid-sync) or recreate
+        # 3) Recreate missing webhook if needed
         if not url:
             if self._sync_lock.locked():
                 logger.info(
                     "Sync in progress; message in #%s from %s will be forwarded after sync",
-                    msg["channel_name"],
-                    msg["author"],
+                    msg["channel_name"], msg["author"],
                 )
                 self._pending_msgs.setdefault(source_id, []).append(msg)
                 return
 
             logger.warning(
-                "Mapped channel %s has no webhook; attempting to recreate", msg["channel_name"]
+                "Mapped channel %s has no webhook; attempting to recreate",
+                msg["channel_name"],
             )
             url = await self._recreate_webhook(source_id)
             if not url:
-                # recreate failed (e.g. channel not yet created) → buffer and retry post-sync
                 logger.info(
                     "Could not recreate webhook for #%s; buffering message from %s",
-                    msg["channel_name"],
-                    msg["author"],
+                    msg["channel_name"], msg["author"],
                 )
                 self._pending_msgs.setdefault(source_id, []).append(msg)
                 return
 
-        # Build payload
+        # 4) Build and validate payload
         payload = self._build_webhook_payload(msg)
         if payload is None:
             logger.info(
@@ -1777,81 +1771,70 @@ class ServerReceiver:
             logger.info("Skipping empty message for #%s", msg["channel_name"])
             return
 
-        # Ensure serializable
-        try:
-            import json
-
-            json.dumps(payload)
-        except (TypeError, ValueError) as e:
-            logger.error(
-                "Skipping message from #%s: payload not JSON serializable: %s; payload=%r",
-                msg["channel_name"],
-                e,
-                payload,
-            )
-            return
-
-        max_attempts = 3
-        for attempt in range(1, max_attempts + 1):
+        if payload.get("content"):
             try:
-                await self.ratelimit.acquire(ActionType.WEBHOOK, key=url)
-                async with self.session.post(url, json=payload) as resp:
-                    # Success
-                    if resp.status in (200, 204):
-                        logger.info(
-                            "Forwarded message to #%s from %s",
-                            msg["channel_name"], msg["author"],
-                        )
-                        return
-
-                    # Rate limited: retry after delay
-                    if resp.status == 429 and attempt < max_attempts:
-                        retry_after = resp.headers.get("Retry-After")
-                        wait = float(retry_after) if retry_after else 1.0
-                        logger.warning(
-                            "Rate limited on attempt %d/%d for #%s; sleeping %.1fs then retrying",
-                            attempt, max_attempts, msg["channel_name"], wait,
-                        )
-                        await asyncio.sleep(wait)
-                        continue
-
-                    # Webhook gone: try recreate on first 404
-                    if resp.status == 404 and attempt == 1:
-                        logger.debug("Webhook %s 404; attempting to recreate...", url)
-                        mapping = next(
-                            (
-                                r
-                                for r in self.db.get_all_channel_mappings()
-                                if r["original_channel_id"] == source_id
-                            ),
-                            None,
-                        )
-                        if not mapping or not mapping["channel_webhook_url"]:
-                            logger.warning(
-                                "No mapping for channel %s; buffering msg from %s",
-                                msg["channel_name"], msg["author"],
-                            )
-                            self._pending_msgs.setdefault(source_id, []).append(msg)
-                            return
-
-                        url = await self._recreate_webhook(source_id)
-                        if not url:
-                            return
-                        continue
-
-                    # Other failures
-                    body = await resp.text()
-                    logger.error("Failed to send (status %s): %s", resp.status, body)
-                    return
-
-            except Exception:
-                logger.exception("Error forwarding message to #%s", msg["channel_name"])
+                import json
+                json.dumps({"content": payload["content"]})
+            except (TypeError, ValueError) as e:
+                logger.error(
+                    "Skipping message from #%s: content not JSON serializable: %s; content=%r",
+                    msg["channel_name"], e, payload["content"],
+                )
                 return
 
-        logger.error(
-            "Exhausted %d attempts sending to #%s; dropping message from %s",
-            max_attempts, msg["channel_name"], msg["author"],
-        )
+        # 5) Pre-throttle via our bucket
+        await self.ratelimit.acquire(ActionType.WEBHOOK, key=url)
+
+        # 6) Use discord.Webhook for auto-retry on 429s
+        webhook = Webhook.from_url(url, session=self.session)
+
+        try:
+            await webhook.send(
+                content=payload.get("content"),
+                embeds=payload.get("embeds"),
+                username=payload.get("username"),
+                avatar_url=payload.get("avatar_url"),
+                wait=True,
+            )
+            logger.info(
+                "Forwarded message to #%s from %s",
+                msg["channel_name"], msg["author"],
+            )
+
+        except HTTPException as e:
+            # Handle 404 by recreating once
+            if e.status == 404:
+                logger.debug("Webhook %s returned 404; attempting recreate...", url)
+                url = await self._recreate_webhook(source_id)
+                if not url:
+                    logger.warning(
+                        "No mapping for channel %s; buffering msg from %s",
+                        msg["channel_name"], msg["author"],
+                    )
+                    self._pending_msgs.setdefault(source_id, []).append(msg)
+                    return
+
+                # Retry with new webhook
+                await self.ratelimit.acquire(ActionType.WEBHOOK, key=url)
+                webhook = Webhook.from_url(url, session=self.session)
+                await webhook.send(
+                    content=payload.get("content"),
+                    embeds=payload.get("embeds"),
+                    username=payload.get("username"),
+                    avatar_url=payload.get("avatar_url"),
+                    wait=True,
+                )
+                logger.info(
+                    "Forwarded message to #%s after recreate from %s",
+                    msg["channel_name"], msg["author"],
+                )
+
+            else:
+                # Other HTTPExceptions bubble up after discord.py retries
+                logger.error(
+                    "Failed to send to #%s (status %s): %s",
+                    msg["channel_name"], e.status, e.text
+                )
 
     async def _shutdown(self):
         logger.info("Shutting down server...")
