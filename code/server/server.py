@@ -868,13 +868,11 @@ class ServerReceiver:
         # Flush regular-message buffer
         for source_id, msgs in list(self._pending_msgs.items()):
             for msg in msgs:
-                await asyncio.sleep(0.5)
                 await self.forward_message(msg)
             self._pending_msgs.pop(source_id, None)
 
         # Flush thread-message buffer
         for data in list(self._pending_thread_msgs):
-            await asyncio.sleep(0.5)
             await self.handle_thread_message(data)
         self._pending_thread_msgs.clear()
 
