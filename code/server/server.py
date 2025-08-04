@@ -1702,16 +1702,18 @@ class ServerReceiver:
         }
 
         if len(text) > 2000:
-            logger.debug("Payload too long (%d chars), wrapping in embed", len(text))
             long_embed = Embed(description=text[:4096])
-            # turn *all* embeds into dicts
-            all_embeds = [long_embed] + embeds
-            return {**base, "embeds": [e.to_dict() for e in all_embeds]}
+            return {
+                **base,
+                "content": None,
+                "embeds": [long_embed] + embeds
+            }
 
-        payload = {**base, "content": text or None}
-        if embeds:
-            # convert all Embed instances to dicts
-            payload["embeds"] = [e.to_dict() for e in embeds]
+        payload = {
+            **base,
+            "content": text or None,
+            "embeds": embeds
+        }
         return payload
 
     async def forward_message(self, msg: Dict):
