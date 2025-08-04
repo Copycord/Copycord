@@ -8,6 +8,7 @@ import time
 import logging
 from common.config import Config
 from common.db import DBManager
+from common.rate_limiter import RateLimitManager, ActionType
 
 logger = logging.getLogger("commands")
 
@@ -21,6 +22,7 @@ class CloneCommands(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.db = DBManager(config.DB_PATH)
+        self.ratelimit = RateLimitManager()
         self.start_time = time.time()
         self.allowed_users = getattr(config, 'COMMAND_USERS', []) or []
 
@@ -215,6 +217,7 @@ class CloneCommands(commands.Cog):
 
             for cat in orphan_categories:
                 try:
+                    await self.ratelimit.acquire(ActionType.EMOJI)
                     await cat.delete()
                     deleted_cats += 1
                     logger.info("Deleted orphan category %s (ID %d)", cat.name, cat.id)
@@ -223,6 +226,7 @@ class CloneCommands(commands.Cog):
 
             for ch in orphan_channels:
                 try:
+                    await self.ratelimit.acquire(ActionType.EMOJI)
                     await ch.delete()
                     deleted_chs += 1
                     logger.info("Deleted orphan channel %s (ID %d)", ch.name, ch.id)
