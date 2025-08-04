@@ -1719,7 +1719,7 @@ class ServerReceiver:
     async def forward_message(self, msg: Dict):
         source_id = msg["channel_id"]
 
-        # 1) Lookup mapping
+        # Lookup mapping
         mapping = next(
             (r for r in self.db.get_all_channel_mappings()
             if r["original_channel_id"] == source_id),
@@ -1727,7 +1727,7 @@ class ServerReceiver:
         )
         url = mapping["channel_webhook_url"] if mapping else None
 
-        # 2) Buffer if sync in progress or no mapping yet
+        # Buffer if sync in progress or no mapping yet
         if mapping is None:
             logger.info(
                 "No mapping yet for channel #%s; buffering message from %s until synced",
@@ -1736,7 +1736,7 @@ class ServerReceiver:
             self._pending_msgs.setdefault(source_id, []).append(msg)
             return
 
-        # 3) Recreate missing webhook if needed
+        # Recreate missing webhook if needed
         if not url:
             if self._sync_lock.locked():
                 logger.info(
@@ -1759,7 +1759,7 @@ class ServerReceiver:
                 self._pending_msgs.setdefault(source_id, []).append(msg)
                 return
 
-        # 4) Build and validate payload
+        # Build and validate payload
         payload = self._build_webhook_payload(msg)
         if payload is None:
             logger.info(
@@ -1782,10 +1782,8 @@ class ServerReceiver:
                 )
                 return
 
-        # 5) Pre-throttle via our bucket
         await self.ratelimit.acquire(ActionType.WEBHOOK, key=url)
 
-        # 6) Use discord.Webhook for auto-retry on 429s
         webhook = Webhook.from_url(url, session=self.session)
 
         try:
@@ -1830,7 +1828,6 @@ class ServerReceiver:
                 )
 
             else:
-                # Other HTTPExceptions bubble up after discord.py retries
                 logger.error(
                     "Failed to send to #%s (status %s): %s",
                     msg["channel_name"], e.status, e.text
