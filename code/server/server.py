@@ -1369,13 +1369,13 @@ class ServerReceiver:
             None
         )
         if not chan_map:
-            logger.info("No mapping for #%s; buffering", data["channel_name"])
+            logger.info("No mapping for #%s; adding to queue, waiting for next sync", data["channel_name"])
             self._pending_thread_msgs.append(data)
             return
 
         cloned_parent = guild.get_channel(chan_map["cloned_channel_id"])
         if not cloned_parent:
-            logger.info("Cloned channel %d missing; buffering", chan_map["cloned_channel_id"])
+            logger.info("Cloned channel %d missing; adding to queue, waiting for next sync", chan_map["cloned_channel_id"])
             self._pending_thread_msgs.append(data)
             return
 
@@ -1423,7 +1423,7 @@ class ServerReceiver:
                             thr_map = None
                             clone_thread = None
                         else:
-                            logger.warning("Error fetching thread %s; buffering",
+                            logger.warning("Error fetching thread %s; adding to queue, waiting for next sync",
                                         thr_map["cloned_thread_id"])
                             self._pending_thread_msgs.append(data)
                             return
