@@ -14,6 +14,7 @@ _Love this project? Give it a ⭐️ and let others know!_
 > - Detects channel renames, position changes, and recreates missing channels on the fly
 > - Creates webhooks in all channels used to forward identical messages as they are sent
 > - The user account in the host server handles listening; a separate bot handles relaying, minimizing exposure
+> - Send DM announcements in realtime to specific users when a message contains a designated keyword
 > - Slash commands and community server features
 > - Updated regularly with new feature requests
 
@@ -119,6 +120,10 @@ docker-compose up -d
 ```
 
 This will pull the latest images, start both the **server** (bot) and **client** (listener), and mount `./data` for database and logs.
+##
+### Slash commands
+- [Slash Commands Wiki](docs/slash_commands.md)
+##
 
 > [!IMPORTANT]
 > Copycord uses self‑bot methods (listening via a user token), which violates Discord’s Terms of Service and may result in account termination. Although our two‑step design reduces exposure, **use at your own risk**. We strongly recommend using an alternate account for the listening component.
