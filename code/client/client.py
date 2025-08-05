@@ -1,4 +1,5 @@
 import asyncio
+import re
 import signal
 from datetime import datetime, timezone
 import logging
@@ -291,9 +292,65 @@ class ClientListener:
 
         return False
 
+    async def maybe_send_announcement(self, message: discord.Message) -> bool:
+        """
+        Fires when content contains any trigger:
+        – for normal words: whole-word match (\b…\b)
+        – for emoji-based keywords: substring or custom-emoji markup
+        """
+        content = message.content
+        lower   = content.lower()
+        author  = message.author
+        chan_id = message.channel.id
+
+        triggers = self.db.get_announcement_triggers()
+
+        for kw, entries in triggers.items():
+            key = kw.lower()
+
+            matched = False
+            # try word-boundary match for simple alphanumerics
+            if re.match(r'^\w+$', key):
+                if re.search(rf'\b{re.escape(key)}\b', lower):
+                    matched = True
+            # try custom-emoji markup: <:name:digits> or <a:name:digits>
+            if not matched and re.match(r'^[A-Za-z0-9_]+$', key):
+                if re.search(rf'<a?:{re.escape(key)}:\d+>', content):
+                    matched = True
+            # fallback: substring (for Unicode emoji, punctuation, spaces, etc)
+            if not matched and key in lower:
+                matched = True
+
+            if not matched:
+                continue
+
+            # check filters
+            for filter_id, allowed_chan in entries:
+                if (filter_id == 0 or author.id == filter_id) and \
+                (allowed_chan == 0 or chan_id == allowed_chan):
+
+                    payload = {
+                        "type": "announce",
+                        "data": {
+                            "keyword":      kw,
+                            "content":      content,
+                            "author":       author.name,
+                            "channel_id":   chan_id,
+                            "channel_name": message.channel.name,
+                            "timestamp":    str(message.created_at),
+                        }
+                    }
+                    await self.ws.send(payload)
+                    logger.info(f"Announcement `{kw}` by {author} (filtered).")
+                    return True
+
+        return False
+
     async def on_message(self, message: discord.Message):
         if self.should_ignore(message):
             return
+        
+        await self.maybe_send_announcement(message)
 
         # Normalize content and detect system messages
         raw = message.content or ""
