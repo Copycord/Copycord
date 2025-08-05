@@ -164,6 +164,9 @@ class ServerReceiver:
 
         elif typ == "thread_rename":
             asyncio.create_task(self.handle_thread_rename(data))
+            
+        elif typ == "announce":
+            asyncio.create_task(self.handle_announce(data))
 
         else:
             logger.warning("Unknown WS type '%s'", typ)
@@ -208,6 +211,68 @@ class ServerReceiver:
                 logger.info("Sync task #%d completed: %s", task_id, summary)
             finally:
                 self.sitemap_queue.task_done()
+                
+    async def handle_announce(self, data: dict):
+        guild = self.bot.get_guild(self.clone_guild_id)
+        if not guild:
+            logger.error("Clone guild not available for announcements")
+            return
+        try:
+            raw_kw       = data["keyword"]
+            content      = data["content"]
+            author       = data["author"]
+            orig_chan_id = data.get("channel_id")
+            timestamp    = data["timestamp"]
+
+            all_sub_keys  = self.db.get_announcement_keywords()
+            matching_keys = [
+                sub_kw for sub_kw in all_sub_keys
+                if sub_kw == "*" or re.search(rf'\b{re.escape(sub_kw)}\b', content, re.IGNORECASE)
+            ]
+
+            user_ids = set()
+            for mk in matching_keys:
+                user_ids.update(self.db.get_announcement_users(mk))
+
+            if not user_ids:
+                logger.info(f"No subscribers for announcement keys {matching_keys}")
+                return
+
+            clone_chan_id = orig_chan_id
+            for row in self.db.get_all_channel_mappings():
+                if row["original_channel_id"] == orig_chan_id:
+                    clone_chan_id = row["cloned_channel_id"]
+                    break
+            channel_mention = f"<#{clone_chan_id}>"
+
+            def _truncate(text: str, limit: int) -> str:
+                return text if len(text) <= limit else text[: limit - 3] + "..."
+
+            MAX_DESC = 4096
+            MAX_FIELD = 1024
+
+            desc = _truncate(content, MAX_DESC)
+            kw_value = _truncate(", ".join(matching_keys) or raw_kw, MAX_FIELD)
+
+            embed = discord.Embed(
+                title="📢 Announcement",
+                description=desc,
+                timestamp=datetime.fromisoformat(timestamp),
+            )
+            embed.set_author(name=author)
+            embed.add_field(name="Channel", value=channel_mention, inline=True)
+            embed.add_field(name="Keyword", value=kw_value, inline=True)
+
+            # 6) send DMs
+            for uid in user_ids:
+                try:
+                    user = self.bot.get_user(uid) or await self.bot.fetch_user(uid)
+                    await user.send(embed=embed)
+                    logger.info(f"Sent announcement {matching_keys} to {user}")
+                except Exception as e:
+                    logger.warning(f"Failed to DM {uid} for {matching_keys}: {e}")
+        except Exception as e:
+            logger.exception("Unexpected error in handle_announce: %s", e)
 
     async def _sync_emojis(
         self, guild: discord.Guild, emojis: list[dict]
