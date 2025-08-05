@@ -51,7 +51,7 @@ class DBManager:
             )
             """
         )
-        
+
         c.execute(
             """
             CREATE TABLE IF NOT EXISTS emoji_mappings (
@@ -62,25 +62,50 @@ class DBManager:
             );
             """
         )
-        c.execute("""
+        c.execute(
+            """
             CREATE TABLE IF NOT EXISTS settings  (
                 id              INTEGER PRIMARY KEY CHECK (id = 1),
                 blocked_keywords TEXT    NOT NULL DEFAULT ''
             );
-        """)
-        cols = [r[1] for r in c.execute(
-            "PRAGMA table_info(settings)"
-        ).fetchall()]
+        """
+        )
+        # Create the announcement subscriptions table
+        c.execute(
+            """
+        CREATE TABLE IF NOT EXISTS announcement_subscriptions (
+        keyword   TEXT    NOT NULL,
+        user_id   INTEGER NOT NULL,
+        PRIMARY KEY(keyword, user_id)
+        );
+        """
+        )
+        c.execute(
+            """
+        CREATE TABLE IF NOT EXISTS announcement_triggers  (
+        keyword   TEXT    NOT NULL,
+        filter_user_id    INTEGER NOT NULL,
+        channel_id     INTEGER NOT NULL DEFAULT 0, 
+        PRIMARY KEY(keyword, filter_user_id, channel_id)
+        );
+        """
+        )
+
+        cols = [r[1] for r in c.execute("PRAGMA table_info(settings)").fetchall()]
         if "version" not in cols:
-            c.execute("ALTER TABLE settings ADD COLUMN version TEXT NOT NULL DEFAULT ''")
+            c.execute(
+                "ALTER TABLE settings ADD COLUMN version TEXT NOT NULL DEFAULT ''"
+            )
         if "notified_version" not in cols:
-            c.execute("ALTER TABLE settings ADD COLUMN notified_version TEXT NOT NULL DEFAULT ''")
-        
+            c.execute(
+                "ALTER TABLE settings ADD COLUMN notified_version TEXT NOT NULL DEFAULT ''"
+            )
+
         c.execute(
             "INSERT OR IGNORE INTO settings (id, blocked_keywords) VALUES (1, '')"
         )
         self.conn.commit()
-        
+
     def get_version(self) -> str:
         row = self.conn.execute("SELECT version FROM settings WHERE id = 1").fetchone()
         return row[0] if row else ""
@@ -88,13 +113,17 @@ class DBManager:
     def set_version(self, version: str):
         self.conn.execute("UPDATE settings SET version = ? WHERE id = 1", (version,))
         self.conn.commit()
-        
+
     def get_notified_version(self) -> str:
-        row = self.conn.execute("SELECT notified_version FROM settings WHERE id = 1").fetchone()
+        row = self.conn.execute(
+            "SELECT notified_version FROM settings WHERE id = 1"
+        ).fetchone()
         return row[0] if row else ""
 
     def set_notified_version(self, version: str):
-        self.conn.execute("UPDATE settings SET notified_version = ? WHERE id = 1", (version,))
+        self.conn.execute(
+            "UPDATE settings SET notified_version = ? WHERE id = 1", (version,)
+        )
         self.conn.commit()
 
     def get_all_category_mappings(self) -> List[sqlite3.Row]:
@@ -188,12 +217,10 @@ class DBManager:
 
     def count_channels(self) -> int:
         return self.conn.execute("SELECT COUNT(*) FROM channel_mappings").fetchone()[0]
-    
+
     def get_blocked_keywords(self) -> list[str]:
         """Fetches the list of blocked keywords from settings."""
-        cur = self.conn.execute(
-            "SELECT blocked_keywords FROM settings WHERE id = 1"
-        )
+        cur = self.conn.execute("SELECT blocked_keywords FROM settings WHERE id = 1")
         row = cur.fetchone()
         if not row or not row[0].strip():
             return []
@@ -201,24 +228,22 @@ class DBManager:
 
     def add_blocked_keyword(self, keyword: str) -> bool:
         kws = self.get_blocked_keywords()
-        k   = keyword.lower().strip()
+        k = keyword.lower().strip()
         if k in kws:
             return False
         kws.append(k)
         csv = ",".join(kws)
 
         cur = self.conn.execute(
-            "UPDATE settings SET blocked_keywords = ? WHERE id = 1",
-            (csv,)
+            "UPDATE settings SET blocked_keywords = ? WHERE id = 1", (csv,)
         )
         if cur.rowcount == 0:
             self.conn.execute(
-                "INSERT INTO settings (id, blocked_keywords) VALUES (1, ?)",
-                (csv,)
+                "INSERT INTO settings (id, blocked_keywords) VALUES (1, ?)", (csv,)
             )
         self.conn.commit()
         return True
-    
+
     def remove_blocked_keyword(self, keyword: str) -> bool:
         """Removes a keyword if present; returns True if removed, False otherwise."""
         kws = self.get_blocked_keywords()
@@ -237,11 +262,9 @@ class DBManager:
     def get_all_emoji_mappings(self) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM emoji_mappings").fetchall()
 
-    def upsert_emoji_mapping(self,
-                             orig_id: int,
-                             orig_name: str,
-                             clone_id: int,
-                             clone_name: str):
+    def upsert_emoji_mapping(
+        self, orig_id: int, orig_name: str, clone_id: int, clone_name: str
+    ):
         self.conn.execute(
             """INSERT OR REPLACE INTO emoji_mappings
                (original_emoji_id, original_emoji_name,
@@ -257,13 +280,90 @@ class DBManager:
             (orig_id,),
         )
         self.conn.commit()
-        
+
     def get_emoji_mapping(self, original_id: int) -> sqlite3.Row | None:
         """
         Returns the row for this original emoji ID, or None if we never
         cloned that emoji.
         """
         return self.conn.execute(
-            "SELECT * FROM emoji_mappings WHERE original_emoji_id = ?",
-            (original_id,)
+            "SELECT * FROM emoji_mappings WHERE original_emoji_id = ?", (original_id,)
         ).fetchone()
+
+    def add_announcement_user(self, keyword: str, user_id: int) -> bool:
+        """Returns True if newly added, False if already present."""
+        cur = self.conn.execute(
+            "INSERT OR IGNORE INTO announcement_subscriptions(keyword, user_id) VALUES (?, ?)",
+            (keyword, user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def remove_announcement_user(self, keyword: str, user_id: int) -> bool:
+        """Returns True if removed, False if none existed."""
+        cur = self.conn.execute(
+            "DELETE FROM announcement_subscriptions WHERE keyword = ? AND user_id = ?",
+            (keyword, user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def get_announcement_users(self, keyword: str) -> list[int]:
+        """
+        Returns all user IDs who subscribed to this keyword
+        OR who subscribed globally (keyword='*').
+        """
+        rows = self.conn.execute(
+            "SELECT user_id FROM announcement_subscriptions "
+            "WHERE keyword = ? OR keyword = '*'",
+            (keyword,),
+        ).fetchall()
+        return [r["user_id"] for r in rows]
+
+    def get_announcement_keywords(self) -> list[str]:
+        """Distinct list of all keywords with at least one subscriber."""
+        rows = self.conn.execute(
+            "SELECT DISTINCT keyword FROM announcement_subscriptions"
+        ).fetchall()
+        return [r["keyword"] for r in rows]
+
+    def add_announcement_trigger(
+        self,
+        keyword: str,
+        filter_user_id: int = 0,
+        channel_id: int = 0,
+    ) -> bool:
+        cur = self.conn.execute(
+            "INSERT OR IGNORE INTO announcement_triggers(keyword, filter_user_id, channel_id) "
+            "VALUES (?, ?, ?)",
+            (keyword, filter_user_id, channel_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def remove_announcement_trigger(
+        self,
+        keyword: str,
+        filter_user_id: int = 0,
+        channel_id: int = 0,
+    ) -> bool:
+        cur = self.conn.execute(
+            "DELETE FROM announcement_triggers "
+            "WHERE keyword = ? AND filter_user_id = ? AND channel_id = ?",
+            (keyword, filter_user_id, channel_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def get_announcement_triggers(self) -> dict[str, list[tuple[int,int]]]:
+        """
+        Returns a mapping:
+          keyword → list of (filter_user_id, channel_id) tuples.
+        """
+        rows = self.conn.execute(
+            "SELECT keyword, filter_user_id, channel_id FROM announcement_triggers"
+        ).fetchall()
+        d: dict[str, list[tuple[int,int]]] = {}
+        for r in rows:
+            d.setdefault(r["keyword"], []).append((r["filter_user_id"], r["channel_id"]))
+        return d
