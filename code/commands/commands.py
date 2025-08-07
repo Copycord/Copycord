@@ -217,7 +217,7 @@ class CloneCommands(commands.Cog):
 
             for cat in orphan_categories:
                 try:
-                    await self.ratelimit.acquire(ActionType.EMOJI)
+                    await self.ratelimit.acquire(ActionType.DELETE_CHANNEL)
                     await cat.delete()
                     deleted_cats += 1
                     logger.info("Deleted orphan category %s (ID %d)", cat.name, cat.id)
@@ -226,7 +226,7 @@ class CloneCommands(commands.Cog):
 
             for ch in orphan_channels:
                 try:
-                    await self.ratelimit.acquire(ActionType.EMOJI)
+                    await self.ratelimit.acquire(ActionType.DELETE_CHANNEL)
                     await ch.delete()
                     deleted_chs += 1
                     logger.info("Deleted orphan channel %s (ID %d)", ch.name, ch.id)
