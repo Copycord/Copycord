@@ -1,10 +1,9 @@
-import logging, re, time
+import logging, re
 from typing import Optional, Tuple
 from common.rate_limiter import ActionType
 
 log = logging.getLogger("discord_hooks")
 
-# (pattern, action) pairs; extend as needed
 _ROUTE_MAP: Tuple[Tuple[re.Pattern, ActionType], ...] = (
     (re.compile(r"/channels/\{channel_id\}/webhooks"), ActionType.WEBHOOK_CREATE),
     (re.compile(r"/guilds/\{guild_id\}/emojis"),        ActionType.EMOJI_CREATE),
@@ -79,6 +78,6 @@ def install_discord_rl_probe(ratelimit_mgr):
     http_log = logging.getLogger("discord.http")
     if not any(isinstance(h, DiscordHTTPRLHandler) for h in http_log.handlers):
         http_log.addHandler(DiscordHTTPRLHandler(ratelimit_mgr))
-        log.info("Installed DiscordHTTPRLHandler on 'discord.http' logger")
+        log.debug("Installed DiscordHTTPRLHandler on 'discord.http' logger")
     else:
         log.debug("DiscordHTTPRLHandler already installed on 'discord.http'")
