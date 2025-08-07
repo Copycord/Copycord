@@ -82,7 +82,7 @@ class Config:
 
     def setup_release_watcher(self, receiver):
         """Start the release watcher background task"""
-        logger.info("Scheduling release watcher task")
+        logger.debug("Scheduling release watcher task")
         asyncio.get_event_loop().create_task(self._release_watcher_loop(receiver))
 
     async def _release_watcher_loop(self, receiver):
