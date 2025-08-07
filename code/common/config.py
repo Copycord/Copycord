@@ -16,6 +16,7 @@ class Config:
         )
         self._release_interval = 3600
         # ─── Server-side settings ─────────────────────────────────
+        self.DEFAULT_WEBHOOK_AVATAR_URL = "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/logo/logo.png"
         self.SERVER_TOKEN = os.getenv("SERVER_TOKEN")
         self.CLONE_GUILD_ID = os.getenv("CLONE_GUILD_ID", "0")
         self.DB_PATH = os.getenv("DB_PATH", "/data/data.db")
