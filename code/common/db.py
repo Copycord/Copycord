@@ -9,6 +9,10 @@ class DBManager:
         self._init_schema()
 
     def _init_schema(self):
+        """
+        Initializes the database schema by creating necessary tables, adding columns if they
+        do not exist, and setting up triggers for automatic timestamp updates.
+        """
         c = self.conn.cursor()
 
         c.execute(
@@ -110,7 +114,6 @@ class DBManager:
             "INSERT OR IGNORE INTO settings (id, blocked_keywords) VALUES (1, '')"
         )
 
-        # Now for each table we want to track:
         tables = [
             ("category_mappings", "original_category_id"),
             ("channel_mappings", "original_channel_id"),
@@ -167,26 +170,41 @@ class DBManager:
         self.conn.commit()
 
     def get_version(self) -> str:
+        """
+        Retrieves the version information from the settings table in the database.
+        """
         row = self.conn.execute("SELECT version FROM settings WHERE id = 1").fetchone()
         return row[0] if row else ""
 
     def set_version(self, version: str):
+        """
+        Updates the version in the settings table of the database.
+        """
         self.conn.execute("UPDATE settings SET version = ? WHERE id = 1", (version,))
         self.conn.commit()
 
     def get_notified_version(self) -> str:
+        """
+        Retrieves the notified version from the settings table in the database.
+        """
         row = self.conn.execute(
             "SELECT notified_version FROM settings WHERE id = 1"
         ).fetchone()
         return row[0] if row else ""
 
     def set_notified_version(self, version: str):
+        """
+        Updates the notified_version field in the settings table to the specified version.
+        """
         self.conn.execute(
             "UPDATE settings SET notified_version = ? WHERE id = 1", (version,)
         )
         self.conn.commit()
 
     def get_all_category_mappings(self) -> List[sqlite3.Row]:
+        """
+        Retrieves all category mappings from the database.
+        """
         return self.conn.execute("SELECT * FROM category_mappings").fetchall()
 
     def upsert_category_mapping(
@@ -196,6 +214,9 @@ class DBManager:
         clone_id: Optional[int],
         clone_name: Optional[str],
     ):
+        """
+        Inserts or updates a category mapping in the database.
+        """
         self.conn.execute(
             """INSERT OR REPLACE INTO category_mappings
                (original_category_id, original_category_name, cloned_category_id, cloned_category_name)
@@ -205,18 +226,30 @@ class DBManager:
         self.conn.commit()
 
     def delete_category_mapping(self, orig_id: int):
+        """
+        Deletes a category mapping from the database based on the original category ID.
+        """
         self.conn.execute(
             "DELETE FROM category_mappings WHERE original_category_id = ?", (orig_id,)
         )
         self.conn.commit()
 
     def count_categories(self) -> int:
+        """
+        Counts the total number of categories in the 'category_mappings' table.
+        """
         return self.conn.execute("SELECT COUNT(*) FROM category_mappings").fetchone()[0]
 
     def get_all_channel_mappings(self) -> List[sqlite3.Row]:
+        """
+        Retrieves all channel mappings from the database.
+        """
         return self.conn.execute("SELECT * FROM channel_mappings").fetchall()
 
     def get_all_threads(self) -> List[sqlite3.Row]:
+        """
+        Retrieves all rows from the 'threads' table in the database.
+        """
         return self.conn.execute("SELECT * FROM threads").fetchall()
 
     def upsert_forum_thread_mapping(
@@ -227,6 +260,9 @@ class DBManager:
         forum_orig_id: int,
         forum_clone_id: Optional[int],
     ):
+        """
+        Inserts or updates a mapping of forum thread information in the database.
+        """
         self.conn.execute(
             """INSERT OR REPLACE INTO threads
                (original_thread_id, original_thread_name,
@@ -244,6 +280,9 @@ class DBManager:
         self.conn.commit()
 
     def delete_forum_thread_mapping(self, orig_thread_id: int):
+        """
+        Deletes a forum thread mapping from the database.
+        """
         self.conn.execute(
             "DELETE FROM threads WHERE original_thread_id = ?",
             (orig_thread_id,),
@@ -259,6 +298,9 @@ class DBManager:
         orig_cat_id: Optional[int],
         clone_cat_id: Optional[int],
     ):
+        """
+        Inserts or updates a channel mapping in the database.
+        """
         self.conn.execute(
             """INSERT OR REPLACE INTO channel_mappings
                (original_channel_id, original_channel_name,
@@ -270,12 +312,18 @@ class DBManager:
         self.conn.commit()
 
     def delete_channel_mapping(self, orig_id: int):
+        """
+        Deletes a channel mapping from the database based on the original channel ID.
+        """
         self.conn.execute(
             "DELETE FROM channel_mappings WHERE original_channel_id = ?", (orig_id,)
         )
         self.conn.commit()
 
     def count_channels(self) -> int:
+        """
+        Counts the total number of channels in the 'channel_mappings' table.
+        """
         return self.conn.execute("SELECT COUNT(*) FROM channel_mappings").fetchone()[0]
 
     def get_blocked_keywords(self) -> list[str]:
@@ -287,6 +335,12 @@ class DBManager:
         return [kw.strip() for kw in row[0].split(",") if kw.strip()]
 
     def add_blocked_keyword(self, keyword: str) -> bool:
+        """
+        Adds a keyword to the list of blocked keywords in the database.
+        This method retrieves the current list of blocked keywords, checks if the
+        provided keyword (case-insensitive) is already in the list, and if not,
+        adds it to the list and updates the database.
+        """
         kws = self.get_blocked_keywords()
         k = keyword.lower().strip()
         if k in kws:
@@ -320,11 +374,18 @@ class DBManager:
         return True
 
     def get_all_emoji_mappings(self) -> list[sqlite3.Row]:
+        """
+        Retrieves all emoji mappings from the database.
+        """
         return self.conn.execute("SELECT * FROM emoji_mappings").fetchall()
 
     def upsert_emoji_mapping(
         self, orig_id: int, orig_name: str, clone_id: int, clone_name: str
     ):
+        """
+        Inserts or updates a mapping between original and cloned emoji details
+        in the emoji_mappings database table.
+        """
         self.conn.execute(
             """INSERT OR REPLACE INTO emoji_mappings
                (original_emoji_id, original_emoji_name,
@@ -335,6 +396,9 @@ class DBManager:
         self.conn.commit()
 
     def delete_emoji_mapping(self, orig_id: int):
+        """
+        Deletes a mapping from the emoji_mappings table in the database based on the given original emoji ID.
+        """
         self.conn.execute(
             "DELETE FROM emoji_mappings WHERE original_emoji_id = ?",
             (orig_id,),
@@ -393,6 +457,9 @@ class DBManager:
         filter_user_id: int = 0,
         channel_id: int = 0,
     ) -> bool:
+        """
+        Adds a new announcement trigger to the database.
+        """
         cur = self.conn.execute(
             "INSERT OR IGNORE INTO announcement_triggers(keyword, filter_user_id, channel_id) "
             "VALUES (?, ?, ?)",
@@ -407,6 +474,9 @@ class DBManager:
         filter_user_id: int = 0,
         channel_id: int = 0,
     ) -> bool:
+        """
+        Removes an announcement trigger from the database.
+        """
         cur = self.conn.execute(
             "DELETE FROM announcement_triggers "
             "WHERE keyword = ? AND filter_user_id = ? AND channel_id = ?",
@@ -417,8 +487,7 @@ class DBManager:
 
     def get_announcement_triggers(self) -> dict[str, list[tuple[int, int]]]:
         """
-        Returns a mapping:
-          keyword → list of (filter_user_id, channel_id) tuples.
+        Retrieves announcement triggers from the database.
         """
         rows = self.conn.execute(
             "SELECT keyword, filter_user_id, channel_id FROM announcement_triggers"
