@@ -418,7 +418,8 @@ class ClientListener:
                 "embeds": embeds,
                 **(
                     {
-                        "forum_id": message.channel.parent.id,
+                        "thread_parent_id": message.channel.parent.id,
+                        "thread_parent_name": message.channel.parent.name,
                         "thread_id": message.channel.id,
                         "thread_name": message.channel.name,
                     }
@@ -456,6 +457,9 @@ class ClientListener:
                     "data": {
                         "thread_id": before.id,
                         "new_name": after.name,
+                        "old_name": before.name,
+                        "parent_name": after.parent.name,
+                        "parent_id": after.parent.id,
                     },
                 }
                 logger.info(
