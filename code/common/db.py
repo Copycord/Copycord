@@ -10,83 +10,88 @@ class DBManager:
 
     def _init_schema(self):
         c = self.conn.cursor()
+
         c.execute(
             """
-            CREATE TABLE IF NOT EXISTS category_mappings (
-              original_category_id   INTEGER PRIMARY KEY,
-              original_category_name TEXT    NOT NULL,
-              cloned_category_id     INTEGER,
-              cloned_category_name   TEXT
-            )
+        CREATE TABLE IF NOT EXISTS category_mappings (
+          original_category_id   INTEGER PRIMARY KEY,
+          original_category_name TEXT    NOT NULL,
+          cloned_category_id     INTEGER,
+          cloned_category_name   TEXT
+        );
         """
-        )
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS channel_mappings (
-              original_channel_id           INTEGER PRIMARY KEY,
-              original_channel_name         TEXT    NOT NULL,
-              cloned_channel_id             INTEGER UNIQUE,
-              channel_webhook_url           TEXT,
-              original_parent_category_id   INTEGER,
-              cloned_parent_category_id     INTEGER,
-              FOREIGN KEY(original_parent_category_id)
-                REFERENCES category_mappings(original_category_id),
-              FOREIGN KEY(cloned_parent_category_id)
-                REFERENCES category_mappings(cloned_category_id)
-            );
-            """
-        )
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS threads (
-              original_thread_id     INTEGER PRIMARY KEY,
-              original_thread_name   TEXT    NOT NULL,
-              cloned_thread_id       INTEGER,
-              forum_original_id      INTEGER NOT NULL,
-              forum_cloned_id        INTEGER,
-              FOREIGN KEY(forum_original_id)
-                REFERENCES channel_mappings(original_channel_id),
-              FOREIGN KEY(forum_cloned_id)
-                REFERENCES channel_mappings(cloned_channel_id)
-            )
-            """
         )
 
         c.execute(
             """
-            CREATE TABLE IF NOT EXISTS emoji_mappings (
-              original_emoji_id   INTEGER PRIMARY KEY,
-              original_emoji_name TEXT    NOT NULL,
-              cloned_emoji_id     INTEGER UNIQUE,
-              cloned_emoji_name   TEXT    NOT NULL
-            );
-            """
-        )
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS settings  (
-                id              INTEGER PRIMARY KEY CHECK (id = 1),
-                blocked_keywords TEXT    NOT NULL DEFAULT ''
-            );
-        """
-        )
-        # Create the announcement subscriptions table
-        c.execute(
-            """
-        CREATE TABLE IF NOT EXISTS announcement_subscriptions (
-        keyword   TEXT    NOT NULL,
-        user_id   INTEGER NOT NULL,
-        PRIMARY KEY(keyword, user_id)
+        CREATE TABLE IF NOT EXISTS channel_mappings (
+          original_channel_id           INTEGER PRIMARY KEY,
+          original_channel_name         TEXT    NOT NULL,
+          cloned_channel_id             INTEGER UNIQUE,
+          channel_webhook_url           TEXT,
+          original_parent_category_id   INTEGER,
+          cloned_parent_category_id     INTEGER,
+          FOREIGN KEY(original_parent_category_id)
+            REFERENCES category_mappings(original_category_id),
+          FOREIGN KEY(cloned_parent_category_id)
+            REFERENCES category_mappings(cloned_category_id)
         );
         """
         )
+
         c.execute(
             """
-        CREATE TABLE IF NOT EXISTS announcement_triggers  (
-        keyword   TEXT    NOT NULL,
-        filter_user_id    INTEGER NOT NULL,
-        channel_id     INTEGER NOT NULL DEFAULT 0, 
-        PRIMARY KEY(keyword, filter_user_id, channel_id)
+        CREATE TABLE IF NOT EXISTS threads (
+          original_thread_id     INTEGER PRIMARY KEY,
+          original_thread_name   TEXT    NOT NULL,
+          cloned_thread_id       INTEGER,
+          forum_original_id      INTEGER NOT NULL,
+          forum_cloned_id        INTEGER,
+          FOREIGN KEY(forum_original_id)
+            REFERENCES channel_mappings(original_channel_id),
+          FOREIGN KEY(forum_cloned_id)
+            REFERENCES channel_mappings(cloned_channel_id)
+        );
+        """
+        )
+
+        c.execute(
+            """
+        CREATE TABLE IF NOT EXISTS emoji_mappings (
+          original_emoji_id   INTEGER PRIMARY KEY,
+          original_emoji_name TEXT    NOT NULL,
+          cloned_emoji_id     INTEGER UNIQUE,
+          cloned_emoji_name   TEXT    NOT NULL
+        );
+        """
+        )
+
+        c.execute(
+            """
+        CREATE TABLE IF NOT EXISTS settings (
+          id                INTEGER PRIMARY KEY CHECK (id = 1),
+          blocked_keywords  TEXT    NOT NULL DEFAULT ''
+        );
+        """
+        )
+
+        c.execute(
+            """
+        CREATE TABLE IF NOT EXISTS announcement_subscriptions (
+          keyword   TEXT    NOT NULL,
+          user_id   INTEGER NOT NULL,
+          PRIMARY KEY(keyword, user_id)
+        );
+        """
+        )
+
+        c.execute(
+            """
+        CREATE TABLE IF NOT EXISTS announcement_triggers (
+          keyword        TEXT    NOT NULL,
+          filter_user_id INTEGER NOT NULL,
+          channel_id     INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY(keyword, filter_user_id, channel_id)
         );
         """
         )
@@ -104,6 +109,61 @@ class DBManager:
         c.execute(
             "INSERT OR IGNORE INTO settings (id, blocked_keywords) VALUES (1, '')"
         )
+
+        # Now for each table we want to track:
+        tables = [
+            ("category_mappings", "original_category_id"),
+            ("channel_mappings", "original_channel_id"),
+            ("threads", "original_thread_id"),
+            ("emoji_mappings", "original_emoji_id"),
+            ("settings", "id"),
+            ("announcement_subscriptions", "keyword"),
+            ("announcement_triggers", "keyword"),
+        ]
+
+        for table, pk in tables:
+            cols = [row[1] for row in c.execute(f"PRAGMA table_info({table})")]
+            if "last_updated" not in cols:
+                c.execute(f"ALTER TABLE {table} ADD COLUMN last_updated DATETIME")
+
+                c.execute(f"UPDATE {table} SET last_updated = CURRENT_TIMESTAMP")
+
+            insert_trig = f"trg_{table}_stamp_insert"
+            if not c.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger' AND name=?",
+                (insert_trig,),
+            ).fetchone():
+                c.execute(
+                    f"""
+                CREATE TRIGGER {insert_trig}
+                  AFTER INSERT ON {table}
+                  FOR EACH ROW
+                BEGIN
+                  UPDATE {table}
+                    SET last_updated = CURRENT_TIMESTAMP
+                  WHERE {pk} = NEW.{pk};
+                END;
+                """
+                )
+
+            update_trig = f"trg_{table}_stamp_update"
+            if not c.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger' AND name=?",
+                (update_trig,),
+            ).fetchone():
+                c.execute(
+                    f"""
+                CREATE TRIGGER {update_trig}
+                  AFTER UPDATE ON {table}
+                  FOR EACH ROW
+                BEGIN
+                  UPDATE {table}
+                    SET last_updated = CURRENT_TIMESTAMP
+                  WHERE {pk} = OLD.{pk};
+                END;
+                """
+                )
+
         self.conn.commit()
 
     def get_version(self) -> str:
@@ -355,7 +415,7 @@ class DBManager:
         self.conn.commit()
         return cur.rowcount > 0
 
-    def get_announcement_triggers(self) -> dict[str, list[tuple[int,int]]]:
+    def get_announcement_triggers(self) -> dict[str, list[tuple[int, int]]]:
         """
         Returns a mapping:
           keyword → list of (filter_user_id, channel_id) tuples.
@@ -363,7 +423,9 @@ class DBManager:
         rows = self.conn.execute(
             "SELECT keyword, filter_user_id, channel_id FROM announcement_triggers"
         ).fetchall()
-        d: dict[str, list[tuple[int,int]]] = {}
+        d: dict[str, list[tuple[int, int]]] = {}
         for r in rows:
-            d.setdefault(r["keyword"], []).append((r["filter_user_id"], r["channel_id"]))
+            d.setdefault(r["keyword"], []).append(
+                (r["filter_user_id"], r["channel_id"])
+            )
         return d
