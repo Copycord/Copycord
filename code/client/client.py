@@ -88,7 +88,7 @@ class ClientListener:
 
     async def _on_ws(self, msg: dict) -> dict | None:
         """
-        msg is the JSON‐decoded dict sent by the server.
+        Handles WebSocket (WS) messages received by the client.
         """
         typ = msg.get("type")
         data = msg.get("data", {})
@@ -121,6 +121,12 @@ class ClientListener:
         return None
 
     async def build_and_send_sitemap(self):
+        """
+        Asynchronously builds and sends a sitemap of the Discord guild to the server.
+        The sitemap includes information about categories, standalone text channels, forums, threads, emojis,
+        and community settings of the guild. It fetches additional thread data from the database and ensures
+        all relevant information is sent to the server via a WebSocket connection.
+        """
         guild = self.bot.get_guild(self.host_guild_id)
         if not guild:
             logger.error("Guild %s not found", self.host_guild_id)
@@ -165,15 +171,17 @@ class ClientListener:
         ]
 
         for forum in guild.forums:
-            sitemap["forums"].append({
-                "id":          forum.id,
-                "name":        forum.name,
-                "category_id": forum.category.id if forum.category else None,
-            })
+            sitemap["forums"].append(
+                {
+                    "id": forum.id,
+                    "name": forum.name,
+                    "category_id": forum.category.id if forum.category else None,
+                }
+            )
 
         seen = {t["id"] for t in sitemap["threads"]}
         for row in self.db.get_all_threads():
-            orig_tid   = row["original_thread_id"]
+            orig_tid = row["original_thread_id"]
             forum_orig = row["forum_original_id"]
 
             if orig_tid in seen:
@@ -189,17 +197,22 @@ class ClientListener:
             if not isinstance(thr, discord.Thread):
                 continue
 
-            sitemap["threads"].append({
-                "id":       thr.id,
-                "forum_id": forum_orig,
-                "name":     thr.name,
-                "archived": thr.archived,
-            })
+            sitemap["threads"].append(
+                {
+                    "id": thr.id,
+                    "forum_id": forum_orig,
+                    "name": thr.name,
+                    "archived": thr.archived,
+                }
+            )
 
         await self.ws.send({"type": "sitemap", "data": sitemap})
         logger.info("Sitemap sent to Server")
 
     async def periodic_sync_loop(self):
+        """
+        Periodically synchronizes data by building and sending a sitemap.
+        """
         await self.bot.wait_until_ready()
         await asyncio.sleep(5)
         while True:
@@ -210,6 +223,10 @@ class ClientListener:
             await asyncio.sleep(self.config.SYNC_INTERVAL_SECONDS)
 
     async def _debounced_sitemap(self):
+        """
+        An asynchronous helper method that ensures the sitemap is built and sent
+        after a short delay, while preventing multiple concurrent executions.
+        """
         try:
             await asyncio.sleep(1)
             await self.build_and_send_sitemap()
@@ -217,11 +234,19 @@ class ClientListener:
             self.debounce_task = None
 
     def schedule_sync(self):
+        """
+        Schedules a debounced synchronization task.
+
+        This method checks if a debounce task is already scheduled. If not, it creates
+        and schedules a new asynchronous task to perform a debounced sitemap synchronization.
+        """
         if self.debounce_task is None:
             self.debounce_task = asyncio.create_task(self._debounced_sitemap())
 
     async def on_ready(self):
-        # Ensure we're in the clone guild
+        """
+        Event handler that is triggered when the bot is ready.
+        """
         host_guild = self.bot.get_guild(self.host_guild_id)
         if host_guild is None:
             logger.error(
@@ -240,8 +265,7 @@ class ClientListener:
 
     def extract_public_message_attrs(self, message: discord.Message) -> dict:
         """
-        Return a dict of all public, non‑callable attributes on a discord.Message.
-        Skips private attrs (starting with '_') and anything that raises on getattr.
+        Extracts public (non-private and non-callable) attributes from a discord.Message object.
         """
         attrs = {}
         for name in dir(message):
@@ -261,11 +285,7 @@ class ClientListener:
 
     def should_ignore(self, message: discord.Message) -> bool:
         """
-        Skip:
-        - thread_created events in a text channel
-        - channel_name_change system messages
-        - DMs or messages not in our configured guild
-        - messages containing a blocked keyword
+        Determines whether a given Discord message should be ignored based on various conditions.
         """
         # Ignore thread_created events in text channels
         if message.type == MessageType.thread_created:
@@ -294,13 +314,12 @@ class ClientListener:
 
     async def maybe_send_announcement(self, message: discord.Message) -> bool:
         """
-        Fires when content contains any trigger:
-        – for normal words: whole-word match (\b…\b)
-        – for emoji-based keywords: substring or custom-emoji markup
+        Checks if a message contains any announcement triggers and sends an announcement
+        if the conditions are met.
         """
         content = message.content
-        lower   = content.lower()
-        author  = message.author
+        lower = content.lower()
+        author = message.author
         chan_id = message.channel.id
 
         triggers = self.db.get_announcement_triggers()
@@ -310,12 +329,12 @@ class ClientListener:
 
             matched = False
             # try word-boundary match for simple alphanumerics
-            if re.match(r'^\w+$', key):
-                if re.search(rf'\b{re.escape(key)}\b', lower):
+            if re.match(r"^\w+$", key):
+                if re.search(rf"\b{re.escape(key)}\b", lower):
                     matched = True
             # try custom-emoji markup: <:name:digits> or <a:name:digits>
-            if not matched and re.match(r'^[A-Za-z0-9_]+$', key):
-                if re.search(rf'<a?:{re.escape(key)}:\d+>', content):
+            if not matched and re.match(r"^[A-Za-z0-9_]+$", key):
+                if re.search(rf"<a?:{re.escape(key)}:\d+>", content):
                     matched = True
             # fallback: substring (for Unicode emoji, punctuation, spaces, etc)
             if not matched and key in lower:
@@ -326,19 +345,20 @@ class ClientListener:
 
             # check filters
             for filter_id, allowed_chan in entries:
-                if (filter_id == 0 or author.id == filter_id) and \
-                (allowed_chan == 0 or chan_id == allowed_chan):
+                if (filter_id == 0 or author.id == filter_id) and (
+                    allowed_chan == 0 or chan_id == allowed_chan
+                ):
 
                     payload = {
                         "type": "announce",
                         "data": {
-                            "keyword":      kw,
-                            "content":      content,
-                            "author":       author.name,
-                            "channel_id":   chan_id,
+                            "keyword": kw,
+                            "content": content,
+                            "author": author.name,
+                            "channel_id": chan_id,
                             "channel_name": message.channel.name,
-                            "timestamp":    str(message.created_at),
-                        }
+                            "timestamp": str(message.created_at),
+                        },
                     }
                     await self.ws.send(payload)
                     logger.info(f"Announcement `{kw}` by {author} (filtered).")
@@ -347,9 +367,13 @@ class ClientListener:
         return False
 
     async def on_message(self, message: discord.Message):
+        """
+        Handles incoming Discord messages and processes them for forwarding.
+        This method is triggered whenever a message is sent in a channel the bot has access to.
+        """
         if self.should_ignore(message):
             return
-        
+
         await self.maybe_send_announcement(message)
 
         # Normalize content and detect system messages
@@ -443,6 +467,12 @@ class ClientListener:
         )
 
     async def on_thread_delete(self, thread: discord.Thread):
+        """
+        Event handler that is triggered when a thread is deleted in a Discord server.
+
+        This method checks if the deleted thread belongs to the host guild. If it does,
+        it sends a notification payload to the WebSocket server with the thread's ID.
+        """
         if thread.guild.id != self.host_guild_id:
             return
         payload = {"type": "thread_delete", "data": {"thread_id": thread.id}}
@@ -450,6 +480,14 @@ class ClientListener:
         logger.info("Notified server of deleted thread %s", thread.id)
 
     async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
+        """
+        Handles updates to a Discord thread, such as renaming.
+
+        This method is triggered when a thread is updated in a guild. It checks if the
+        thread belongs to the specified host guild and if the thread's name has changed.
+        If a rename is detected, it constructs a payload with details about the change
+        and sends it through the WebSocket connection.
+        """
         if before.guild and before.guild.id == self.host_guild_id:
             if before.name != after.name:
                 payload = {
@@ -468,16 +506,29 @@ class ClientListener:
                 await self.ws.send(payload)
 
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
+        """
+        Event handler that is triggered when a new channel is created in a guild.
+        """
         if channel.guild.id != self.host_guild_id:
             return
         self.schedule_sync()
 
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+        """
+        Event handler that is triggered when a guild channel is deleted.
+        """
         if channel.guild.id != self.host_guild_id:
             return
         self.schedule_sync()
 
     async def on_guild_channel_update(self, before, after):
+        """
+        Handles updates to guild channels within the host guild.
+        This method is triggered when a guild channel is updated. It checks if the
+        update occurred in the host guild and determines whether the update involves
+        structural changes (such as a name change or a change in the parent category).
+        If a structural change is detected, it schedules a synchronization process.
+        """
         if before.guild.id != self.host_guild_id:
             return
 
@@ -495,6 +546,9 @@ class ClientListener:
             )
 
     async def _shutdown(self):
+        """
+        Asynchronously shuts down the client.
+        """
         logger.info("Shutting down client…")
         if self._sync_task:
             self._sync_task.cancel()
@@ -507,6 +561,13 @@ class ClientListener:
         logger.info("Client shutdown complete.")
 
     def run(self):
+        """
+        Runs the Copycord client.
+
+        This method initializes the asyncio event loop and starts the bot using the
+        provided client token from the configuration. It ensures proper shutdown
+        of the bot and cleanup of pending tasks when the event loop is closed.
+        """
         logger.info("Starting Copycord %s", self.config.CURRENT_VERSION)
         loop = asyncio.get_event_loop()
         try:
