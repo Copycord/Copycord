@@ -10,13 +10,16 @@ logger = logging.getLogger("websockets")
 
 MessageHandler = Callable[[dict], Awaitable[None]]
 
+
 class WebsocketManager:
     def __init__(self, send_url: str, listen_host: str, listen_port: int):
         self.send_url = send_url
         self.listen_host = listen_host
         self.listen_port = listen_port
 
-    async def start_server(self, handler: Callable[[dict], Awaitable[dict|None]]) -> None:
+    async def start_server(
+        self, handler: Callable[[dict], Awaitable[dict | None]]
+    ) -> None:
         """
         Spins up a websockets.server using `handler` for each incoming JSON
         message.  Runs until cancelled.
@@ -34,12 +37,19 @@ class WebsocketManager:
             server.close()
             await server.wait_closed()
 
-    async def _serve_loop(self, ws: WebSocketServerProtocol, path: str,
-                          handler: Callable[[dict], Awaitable[dict|None]]):
+    async def _serve_loop(
+        self,
+        ws: WebSocketServerProtocol,
+        path: str,
+        handler: Callable[[dict], Awaitable[dict | None]],
+    ):
+        """
+        Handles the WebSocket server loop, processing incoming messages and sending responses.
+        """
         async for raw in ws:
             try:
-                msg      = json.loads(raw)
-                response = await handler(msg)    
+                msg = json.loads(raw)
+                response = await handler(msg)
                 if isinstance(response, dict):
                     await ws.send(json.dumps(response))
             except Exception:
