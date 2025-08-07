@@ -1,18 +1,15 @@
-import asyncio
-import time
+import asyncio, time
 from enum import Enum
-from typing import Tuple, Dict
-
+from typing import Tuple, Dict, Optional
 
 class ActionType(Enum):
-    WEBHOOK = "webhook"
-    NEW_WEBHOOK = "new_webhook"
-    CREATE = "create_channel"
-    EDIT = "edit_channel"
-    DELETE = "delete_channel"
+    WEBHOOK_MESSAGE = "webhook_message"
+    WEBHOOK_CREATE = "webhook_create"
+    CREATE_CHANNEL = "create_channel"
+    EDIT_CHANNEL = "edit_channel"
+    DELETE_CHANNEL = "delete_channel"
     THREAD = "thread"
-    EMOJI = "emoji"
-
+    EMOJI_CREATE = "emoji_create"
 
 class RateLimiter:
     def __init__(self, max_rate: int, time_window: float):
@@ -21,71 +18,115 @@ class RateLimiter:
         self._allowance = max_rate
         self._last_check = time.monotonic()
         self._lock = asyncio.Lock()
+        self._cooldown_until = 0.0  # NEW
 
     async def acquire(self):
         async with self._lock:
             now = time.monotonic()
+
+            # Respect adaptive cooldowns
+            if now < self._cooldown_until:
+                await asyncio.sleep(self._cooldown_until - now)
+                now = time.monotonic()
+
             elapsed = now - self._last_check
             self._last_check = now
 
-            # refill tokens
+            # Refill tokens
             self._allowance = min(
                 self._max_rate,
                 self._allowance + elapsed * (self._max_rate / self._time_window),
             )
 
             if self._allowance < 1.0:
+                # Sleep until we have 1 token
                 wait = (1.0 - self._allowance) * (self._time_window / self._max_rate)
-                await asyncio.sleep(wait)
+                if wait > 0:
+                    await asyncio.sleep(wait)
                 self._last_check = time.monotonic()
-                self._allowance = 0.0
+                self._allowance = 0.0  # we’ll consume the token below by setting to 0
             else:
+                # Consume one token
                 self._allowance -= 1.0
+
+
+    def backoff(self, seconds: float):
+        now = time.monotonic()
+        candidate_end = now + max(0.0, seconds)
+        if candidate_end > self._cooldown_until:
+            self._cooldown_until = candidate_end
+
+    def reset(self):
+        self._cooldown_until = 0.0
+
+    def relax(self, factor: float = 0.5):
+        """
+        Reduce the remaining cooldown by 'factor' (50% by default).
+        factor=0 clears it immediately, factor=1 leaves it unchanged.
+        """
+        if factor <= 0:
+            self._cooldown_until = 0.0
+            return
+        now = time.monotonic()
+        if self._cooldown_until > now:
+            remaining = self._cooldown_until - now
+            self._cooldown_until = now + remaining * max(0.0, min(1.0, factor))
+
+    def remaining_cooldown(self) -> float:
+        return max(0.0, self._cooldown_until - time.monotonic())
 
 
 class RateLimitManager:
     def __init__(self, config: Dict[ActionType, Tuple[int, float]] = None):
         cfg = config or {
-            ActionType.WEBHOOK: (5, 2.5), # Webhook messages: 5 per 2.5 seconds
-            ActionType.CREATE: (2, 15.0), # Channel creation: 2 per 15 seconds
-            ActionType.NEW_WEBHOOK: (1, 15.0), # Webhook creation: 1 per 15 seconds
-            ActionType.EDIT: (3, 15.0), # Channel edits: 3 per 15 seconds
-            ActionType.DELETE: (3, 15.0), # Channel deletions: 3 per 15 seconds
-            ActionType.THREAD: (2, 5.0), # Thread operations: 2 per 5 seconds
-            ActionType.EMOJI: (3, 60.0), # Emoji operations: 3 per 60 seconds
+            ActionType.WEBHOOK_MESSAGE: (5, 2.5),
+            ActionType.CREATE_CHANNEL: (2, 15.0),
+            ActionType.WEBHOOK_CREATE: (1, 30.0),
+            ActionType.EDIT_CHANNEL: (3, 15.0),
+            ActionType.DELETE_CHANNEL: (3, 15.0),
+            ActionType.THREAD: (2, 5.0),
+            ActionType.EMOJI_CREATE: (3, 60.0),
         }
-        # For non-webhook actions, one bucket each:
         self._limiters: Dict[ActionType, RateLimiter] = {
-            action: RateLimiter(rate, window)
-            for action, (rate, window) in cfg.items()
-            if action is not ActionType.WEBHOOK
+            a: RateLimiter(*cfg[a]) for a in cfg if a is not ActionType.WEBHOOK_MESSAGE
         }
-
-        # For webhooks: a dict of buckets keyed by webhook URL
-        self._webhook_config = cfg[ActionType.WEBHOOK]
+        self._webhook_config = cfg[ActionType.WEBHOOK_MESSAGE]
         self._webhook_limiters: Dict[str, RateLimiter] = {}
 
-    async def acquire(self, action: ActionType, key: str = None):
-        """
-        Wait for a token:
-          - for WEBHOOK: key must be the webhook URL (or unique ID).
-          - for others: key is ignored.
-        """
-        if action is ActionType.WEBHOOK:
-            # Must pass the webhook URL so each webhook gets its own bucket:
+    def _get(self, action: ActionType, key: str | None = None) -> Optional[RateLimiter]:
+        if action is ActionType.WEBHOOK_MESSAGE:
+            # keyed per-webhook/channel
             if key is None:
-                raise ValueError("Must provide `key` (webhook URL) for WEBHOOK rate limiting")
-
-            limiter = self._webhook_limiters.get(key)
-            if limiter is None:
+                return None
+            lim = self._webhook_limiters.get(key)
+            if not lim:
                 rate, window = self._webhook_config
-                limiter = RateLimiter(rate, window)
-                self._webhook_limiters[key] = limiter
+                lim = RateLimiter(rate, window)
+                self._webhook_limiters[key] = lim
+            return lim
 
-        else:
-            limiter = self._limiters.get(action)
-            if limiter is None:
-                # unknown action: no rate limiting
-                return
+        return self._limiters.get(action)
 
-        await limiter.acquire()
+    async def acquire(self, action: ActionType, key: str = None):
+        lim = self._get(action, key)
+        if lim:
+            await lim.acquire()
+
+    def penalize(self, action: ActionType, seconds: float, key: str | None = None):
+        lim = self._get(action, key)
+        if lim:
+            lim.backoff(seconds)
+
+    def relax(self, action: ActionType, factor: float = 0.5, key: str | None = None):
+        lim = self._get(action, key)
+        if lim:
+            lim.relax(factor)
+
+    def reset(self, action: ActionType, key: str | None = None):
+        lim = self._get(action, key)
+        if lim:
+            lim.reset()
+
+    def remaining(self, action: ActionType, key: str | None = None) -> float:
+        lim = self._get(action, key)
+        return lim.remaining_cooldown() if lim else 0.0
