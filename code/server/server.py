@@ -5,7 +5,6 @@ from logging.handlers import RotatingFileHandler
 from typing import List, Optional, Tuple, Dict, Union
 import aiohttp
 import discord
-from urllib.parse import quote_plus
 import re
 from discord import (
     ForumChannel,
