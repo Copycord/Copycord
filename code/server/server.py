@@ -88,10 +88,14 @@ class ServerReceiver:
         self._thread_locks: dict[int, asyncio.Lock] = {}
         self.max_threads = 950
         self.bot.event(self.on_ready)
+        self._default_avatar_bytes: Optional[bytes] = None
         self._ws_task: asyncio.Task | None = None
         self._sitemap_task: asyncio.Task | None = None
         self._pending_msgs: dict[int, list[dict]] = {}
         self._pending_thread_msgs: List[Dict] = []
+        self._webhook_locks: Dict[int, asyncio.Lock] = {}
+        self.cat_map: dict[int, dict] = {}
+        self.chan_map: dict[int, dict] = {}
         orig_on_connect = self.bot.on_connect
         self.ratelimit = RateLimitManager()
         # Discord guild/channel limits
