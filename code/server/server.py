@@ -2041,7 +2041,7 @@ class ServerReceiver:
         the provided server token from the configuration. It ensures proper 
         cleanup of resources and pending tasks during shutdown.
         """
-        logger.info("[✨] Starting Copycord %s", self.config.CURRENT_VERSION)
+        logger.info("[✨] Starting Copycord Server %s", self.config.CURRENT_VERSION)
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, lambda: asyncio.create_task(self.bot.close()))
