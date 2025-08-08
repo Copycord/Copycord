@@ -85,7 +85,7 @@ class RateLimitManager:
             ActionType.EDIT_CHANNEL: (3, 15.0),
             ActionType.DELETE_CHANNEL: (3, 15.0),
             ActionType.THREAD: (2, 5.0),
-            ActionType.EMOJI_CREATE: (3, 60.0),
+            ActionType.EMOJI_CREATE: (2, 60.0),
         }
         self._limiters: Dict[ActionType, RateLimiter] = {
             a: RateLimiter(*cfg[a]) for a in cfg if a is not ActionType.WEBHOOK_MESSAGE
