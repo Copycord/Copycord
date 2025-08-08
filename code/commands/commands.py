@@ -10,7 +10,7 @@ from common.config import Config
 from common.db import DBManager
 from common.rate_limiter import RateLimitManager, ActionType
 
-logger = logging.getLogger("commands")
+logger = logging.getLogger("server")
 
 config = Config()
 GUILD_ID = config.CLONE_GUILD_ID
@@ -64,9 +64,9 @@ class CloneCommands(commands.Cog):
         Fired when the bot is ready. Logs allowed users status.
         """
         if not self.allowed_users:
-            logger.warning("No allowed users configured: commands will not work for anyone.")
+            logger.warning("[⚠️] No allowed users configured: commands will not work for anyone.")
         else:
-            logger.info(f"Commands permissions set for users: {self.allowed_users}")
+            logger.info(f"[⚙️] Commands permissions set for users: {self.allowed_users}")
 
     @commands.slash_command(
         name="ping_server",
