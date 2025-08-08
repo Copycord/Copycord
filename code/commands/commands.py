@@ -2,6 +2,7 @@
 import discord
 from discord.ext import commands
 from discord import CategoryChannel, Option, Embed, Color
+from discord.errors import NotFound, Forbidden
 from discord import errors as discord_errors
 from datetime import datetime, timezone
 import time
@@ -67,6 +68,39 @@ class CloneCommands(commands.Cog):
             logger.warning("[⚠️] No allowed users configured: commands will not work for anyone.")
         else:
             logger.info(f"[⚙️] Commands permissions set for users: {self.allowed_users}")
+            
+    async def _reply_or_dm(self, ctx: discord.ApplicationContext, content: str) -> None:
+        """Try ephemeral followup; if the channel is gone, DM the user instead."""
+        try:
+            await ctx.followup.send(content, ephemeral=True)
+            return
+        except NotFound:
+            # The original interaction message or channel is gone (e.g., got deleted)
+            pass
+        except Forbidden:
+            # Webhook send forbidden; fall back to DM
+            pass
+
+        # Fallback to DM
+        try:
+            # Split into chunks if over 2000 chars
+            MAX = 2000
+            if len(content) <= MAX:
+                await ctx.user.send(content)
+            else:
+                # chunk on line boundaries if possible
+                start = 0
+                while start < len(content):
+                    end = min(start + MAX, len(content))
+                    # try not to break a line
+                    nl = content.rfind("\n", start, end)
+                    if nl == -1 or nl <= start + 100:  # give up if no good break
+                        nl = end
+                    await ctx.user.send(content[start:nl])
+                    start = nl
+        except Forbidden:
+            # DMs closed; nothing else we can do
+            logger.warning("[verify_structure] Could not DM user; DMs are closed.")
 
     @commands.slash_command(
         name="ping_server",
@@ -241,16 +275,16 @@ class CloneCommands(commands.Cog):
                     parts.append(f"{deleted_cats} categor{'y' if deleted_cats==1 else 'ies'}")
                 if deleted_chs:
                     parts.append(f"{deleted_chs} channel{'s' if deleted_chs!=1 else ''}")
-                msg = "Deleted " + " and ".join(parts) + "."
+                msg = "[⚙️] verify_structure: Deleted " + " and ".join(parts) + "."
                 logger.info("[⚙️] verify_structure: Deletion summary: %s", msg)
 
-            return await ctx.followup.send(msg, ephemeral=True)
+            return await self._reply_or_dm(ctx, msg)
 
         # Otherwise, normal report flow
         if not orphan_categories and not orphan_channels:
             msg = "[⚙️] verify_structure: All channels and categories match the last sitemap."
             logger.info(msg)
-            return await ctx.followup.send(msg, ephemeral=True)
+            return await self._reply_or_dm(ctx, msg)
 
         report_lines = []
         if orphan_categories:
@@ -265,7 +299,7 @@ class CloneCommands(commands.Cog):
         if len(report) > 1900:
             report = report[:1900] + "\n…(truncated)"
 
-        await ctx.followup.send(report, ephemeral=True)
+        await self._reply_or_dm(ctx, report)
 
 
     @commands.slash_command(
