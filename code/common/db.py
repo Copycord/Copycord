@@ -42,6 +42,9 @@ class DBManager:
         );
         """
         )
+        cols = [r[1] for r in c.execute("PRAGMA table_info(channel_mappings)").fetchall()]
+        if "channel_type" not in cols:
+            c.execute("ALTER TABLE channel_mappings ADD COLUMN channel_type INTEGER NOT NULL DEFAULT 0")
 
         c.execute(
             """
@@ -297,6 +300,7 @@ class DBManager:
         webhook_url: Optional[str],
         orig_cat_id: Optional[int],
         clone_cat_id: Optional[int],
+        channel_type: int,
     ):
         """
         Inserts or updates a channel mapping in the database.
@@ -305,9 +309,9 @@ class DBManager:
             """INSERT OR REPLACE INTO channel_mappings
                (original_channel_id, original_channel_name,
                 cloned_channel_id, channel_webhook_url,
-                original_parent_category_id, cloned_parent_category_id)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (orig_id, orig_name, clone_id, webhook_url, orig_cat_id, clone_cat_id),
+                original_parent_category_id, cloned_parent_category_id, channel_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (orig_id, orig_name, clone_id, webhook_url, orig_cat_id, clone_cat_id, channel_type),
         )
         self.conn.commit()
 
