@@ -6,7 +6,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 import discord
-from discord import ChannelType, MessageType
+from discord import ChannelType, MessageType, Member
 import os
 import pprint
 import sys
@@ -52,7 +52,9 @@ for lib in (
     "discord.http",
 ):
     logging.getLogger(lib).setLevel(logging.WARNING)
-    
+
+logging.getLogger("discord.state").setLevel(logging.ERROR)
+
 logging.getLogger("discord.client").setLevel(logging.ERROR)
 logger = logging.getLogger("client")
 
@@ -68,6 +70,7 @@ class ClientListener:
         self._sync_task: Optional[asyncio.Task] = None
         self.debounce_task: Optional[asyncio.Task] = None
         self._ws_task: Optional[asyncio.Task] = None
+        self._m_user = re.compile(r"<@!?(\d+)>")
         self.bot.event(self.on_ready)
         self.bot.event(self.on_message)
         self.bot.event(self.on_guild_channel_create)
@@ -120,6 +123,39 @@ class ClientListener:
             }
 
         return None
+    
+    def _humanize_user_mentions(self, content: str, message: discord.Message) -> str:
+        """Replace <@1234> (and <@!1234>) with @DisplayName based on the host guild."""
+
+        if not content:
+            return content
+
+        # Fast path: build a dict from the known mentions in the message
+        id_to_name = {}
+        for m in message.mentions:  # type: ignore[attr-defined]
+            if isinstance(m, Member):
+                id_to_name[str(m.id)] = f"@{m.display_name or m.name}"
+            else:
+                # Fallback for discord.User
+                id_to_name[str(m.id)] = f"@{m.name}"
+
+        def repl(match: re.Match) -> str:
+            uid = match.group(1)
+            name = id_to_name.get(uid)
+            if name:
+                return name
+            # Try to resolve if it wasn't in message.mentions (rare)
+            g = message.guild
+            if g:
+                mem = g.get_member(int(uid))
+                if mem:
+                    nm = f"@{mem.display_name or mem.name}"
+                    id_to_name[uid] = nm
+                    return nm
+            # As a last resort, leave it alone
+            return match.group(0)
+
+        return self._m_user.sub(repl, content)
 
     async def build_and_send_sitemap(self):
         """
@@ -256,9 +292,8 @@ class ClientListener:
                 self.host_guild_id,
             )
             sys.exit(1)
-
+        self.config.setup_release_watcher(self, should_dm=False)
         logger.info("[🤖] Logged in as %s in guild %s", self.bot.user, host_guild.name)
-
         if self._sync_task is None:
             self._sync_task = asyncio.create_task(self.periodic_sync_loop())
         if self._ws_task is None:
@@ -298,6 +333,10 @@ class ClientListener:
 
         # Ignore DMs or wrong guild
         if message.guild is None or message.guild.id != self.host_guild_id:
+            return True
+        
+        if message.channel.type in (ChannelType.voice, ChannelType.stage_voice):
+            # This is a voice channel text chat; unsupported → skip.
             return True
 
         # Ignore blocked keywords
@@ -424,11 +463,13 @@ class ClientListener:
             ChannelType.public_thread,
             ChannelType.private_thread,
         )
+        content = self._humanize_user_mentions(content, message) # Replace user mentions with display names
         payload = {
             "type": "thread_message" if is_thread else "message",
             "data": {
                 "channel_id": message.channel.id,
                 "channel_name": message.channel.name,
+                "channel_type": message.channel.type.value,
                 "author": author,
                 "author_id": message.author.id,
                 "avatar_url": (
@@ -455,7 +496,8 @@ class ClientListener:
         }
         await self.ws.send(payload)
         logger.info(
-            "[💬] Forwarded msg from %s",
+            "[📩] New msg detected in #%s from %s; forwarding to server",
+            message.channel.name,
             message.author.name,
         )
 
