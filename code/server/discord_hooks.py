@@ -59,7 +59,7 @@ class DiscordHTTPRLHandler(logging.Handler):
             bucket = m.group(2)
             action, key, route = self._map_bucket(bucket)
             if not action:
-                log.warning("No ActionType mapping for route=%s (bucket=%s); no penalty applied", route, bucket)
+                log.debug("No ActionType mapping for route=%s (bucket=%s); no penalty applied", route, bucket)
                 return
 
             if action == ActionType.WEBHOOK_MESSAGE:
@@ -69,10 +69,10 @@ class DiscordHTTPRLHandler(logging.Handler):
                 key = None
 
             self.rlm.penalize(action, FIXED_COOLDOWN_SECONDS, key=key)
-            log.warning("Rate limit detected; applying %ss safety net cooldown before next %s action",
+            log.warning("[❗] Discord rate limit detected; applying %ss safety net cooldown before next %s action",
                         FIXED_COOLDOWN_SECONDS, action.name)
         except Exception as e:
-            log.exception("Error in DiscordHTTPRLHandler.emit: %s", e)
+            log.exception("[⛔] Error in DiscordHTTPRLHandler.emit: %s", e)
 
 def install_discord_rl_probe(ratelimit_mgr):
     http_log = logging.getLogger("discord.http")
