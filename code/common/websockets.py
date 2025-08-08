@@ -30,7 +30,7 @@ class WebsocketManager:
             self.listen_port,
             logger=None,
         )
-        logger.info("WS server listening on %s:%s", self.listen_host, self.listen_port)
+        logger.debug("WS server listening on %s:%s", self.listen_host, self.listen_port)
         try:
             await asyncio.Future()
         finally:
