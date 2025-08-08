@@ -20,7 +20,7 @@ LOG_DIR = "/data"
 os.makedirs(LOG_DIR, exist_ok=True)
 
 formatter = logging.Formatter(
-    "%(asctime)s | %(levelname)-5s | %(name)s | %(message)s",
+    "%(asctime)s | %(levelname)-5s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
@@ -52,7 +52,8 @@ for lib in (
     "discord.http",
 ):
     logging.getLogger(lib).setLevel(logging.WARNING)
-
+    
+logging.getLogger("discord.client").setLevel(logging.ERROR)
 logger = logging.getLogger("client")
 
 
@@ -96,7 +97,7 @@ class ClientListener:
         if typ == "settings_update":
             self.blocked_keywords = data.get("blocked_keywords", [])
             logger.info(
-                "Blocked keywords refreshed: %s",
+                "[⚙️] Blocked keywords refreshed: %s",
                 ", ".join(self.blocked_keywords) or "<none>",
             )
             return None
@@ -129,7 +130,7 @@ class ClientListener:
         """
         guild = self.bot.get_guild(self.host_guild_id)
         if not guild:
-            logger.error("Guild %s not found", self.host_guild_id)
+            logger.error("[⛔] Guild %s not found", self.host_guild_id)
             return
 
         sitemap = {
@@ -207,7 +208,7 @@ class ClientListener:
             )
 
         await self.ws.send({"type": "sitemap", "data": sitemap})
-        logger.info("Sitemap sent to Server")
+        logger.info("[📩] Sitemap sent to Server")
 
     async def periodic_sync_loop(self):
         """
@@ -250,13 +251,13 @@ class ClientListener:
         host_guild = self.bot.get_guild(self.host_guild_id)
         if host_guild is None:
             logger.error(
-                "%s is not a member of the guild %s; shutting down.",
+                "[⛔] %s is not a member of the guild %s; shutting down.",
                 self.bot.user,
                 self.host_guild_id,
             )
             sys.exit(1)
 
-        logger.info("Logged in as %s in guild %s", self.bot.user, host_guild.name)
+        logger.info("[🤖] Logged in as %s in guild %s", self.bot.user, host_guild.name)
 
         if self._sync_task is None:
             self._sync_task = asyncio.create_task(self.periodic_sync_loop())
@@ -304,7 +305,7 @@ class ClientListener:
         for kw in self.blocked_keywords:
             if kw in content:
                 logger.info(
-                    "[BLOCKED] Dropping message %s: contains blocked keyword %r",
+                    "[❌] Dropping message %s: contains blocked keyword %r",
                     message.id,
                     kw,
                 )
@@ -361,7 +362,7 @@ class ClientListener:
                         },
                     }
                     await self.ws.send(payload)
-                    logger.info(f"Announcement `{kw}` by {author} (filtered).")
+                    logger.info(f"[📢] Announcement `{kw}` by {author} (filtered).")
                     return True
 
         return False
@@ -454,7 +455,7 @@ class ClientListener:
         }
         await self.ws.send(payload)
         logger.info(
-            "Forwarded msg from %s",
+            "[💬] Forwarded msg from %s",
             message.author.name,
         )
 
@@ -477,7 +478,7 @@ class ClientListener:
             return
         payload = {"type": "thread_delete", "data": {"thread_id": thread.id}}
         await self.ws.send(payload)
-        logger.info("Notified server of deleted thread %s", thread.id)
+        logger.info("[📩] Notified server of deleted thread %s", thread.id)
 
     async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
         """
@@ -501,7 +502,7 @@ class ClientListener:
                     },
                 }
                 logger.info(
-                    f"Thread rename detected: {before.id} {before.name!r} → {after.name!r}"
+                    f"[✏️] Thread rename detected: {before.id} {before.name!r} → {after.name!r}"
                 )
                 await self.ws.send(payload)
 
@@ -568,7 +569,7 @@ class ClientListener:
         provided client token from the configuration. It ensures proper shutdown
         of the bot and cleanup of pending tasks when the event loop is closed.
         """
-        logger.info("Starting Copycord %s", self.config.CURRENT_VERSION)
+        logger.info("[✨] Starting Copycord Client %s", self.config.CURRENT_VERSION)
         loop = asyncio.get_event_loop()
         try:
             loop.run_until_complete(self.bot.start(self.config.CLIENT_TOKEN))
