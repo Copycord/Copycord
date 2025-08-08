@@ -10,7 +10,7 @@ logger = logging.getLogger("config")
 
 class Config:
     def __init__(self):
-        self.CURRENT_VERSION = "v1.5.0"
+        self.CURRENT_VERSION = "v1.5.1"
         self.GITHUB_API_LATEST = (
             "https://api.github.com/repos/Copycord/Copycord/releases/latest"
         )
@@ -122,7 +122,7 @@ class Config:
                 notified = db.get_notified_version() # Check if the owner has been notified already
 
                 if tag != last:
-                    logger.info("New Copycord release detected: %s (%s)", tag, url)
+                    logger.info("[📢] New Copycord release detected: %s (%s)", tag, url)
 
                     if tag != notified:
                         guild = receiver.bot.get_guild(guild_id)
