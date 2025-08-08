@@ -67,9 +67,9 @@ class WebsocketManager:
                     await ws.send(json.dumps(payload))
                 return
             except OSError as e:
-                logger.warning("WS send error on attempt %d: %s", attempt, e)
+                logger.warning("[⚠️] WS send error on attempt %d: %s", attempt, e)
                 await asyncio.sleep(2)
-        logger.error("WS send giving up on payload type=%s", payload.get("type"))
+        logger.error("[⛔] WS send giving up on payload type=%s", payload.get("type"))
 
     async def request(self, payload: dict, timeout: float = 10.0) -> dict | None:
         """
@@ -91,8 +91,8 @@ class WebsocketManager:
                 return data
 
         except asyncio.TimeoutError:
-            logger.error("WS request timed out after %s seconds", timeout)
+            logger.error("[⛔] WS request timed out after %s seconds", timeout)
             return None
         except Exception as e:
-            logger.error("WS request failed: %s", e, exc_info=True)
+            logger.error("[⛔] WS request failed: %s", e, exc_info=True)
             return None
