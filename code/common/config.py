@@ -80,32 +80,33 @@ class Config:
                 sys.exit(1)
             setattr(self, name, val)
 
-    def setup_release_watcher(self, receiver):
+    def setup_release_watcher(self, receiver, should_dm: bool = True):
         """Start the release watcher background task"""
         logger.debug("Scheduling release watcher task")
-        asyncio.get_event_loop().create_task(self._release_watcher_loop(receiver))
+        asyncio.get_event_loop().create_task(
+            self._release_watcher_loop(receiver, should_dm)
+        )
 
-    async def _release_watcher_loop(self, receiver):
+    async def _release_watcher_loop(self, receiver, should_dm: bool = True):
         """Poll GitHub every hour and log when a new tag appears."""
         await receiver.bot.wait_until_ready()
         db = receiver.db
-        guild_id = receiver.clone_guild_id
-        
+
         stored = db.get_version()
         if stored != self.CURRENT_VERSION:
             db.set_version(self.CURRENT_VERSION)
 
         while not receiver.bot.is_closed():
             try:
+                guild_id = getattr(receiver, "clone_guild_id", None)
+                if guild_id is None:
+                    guild_id = getattr(receiver, "host_guild_id", None)
+
                 async with aiohttp.ClientSession() as session:
                     async with session.get(self.GITHUB_API_LATEST) as resp:
                         if resp.status != 200:
                             text = await resp.text()
-                            logger.debug(
-                                "GitHub API returned %d, skipping: %s",
-                                resp.status,
-                                text,
-                            )
+                            logger.debug("GitHub API returned %d, skipping: %s", resp.status, text)
                             await asyncio.sleep(self._release_interval)
                             continue
                         release = await resp.json()
@@ -118,31 +119,34 @@ class Config:
                     await asyncio.sleep(self._release_interval)
                     continue
 
-                last = db.get_version() # Get the current version from db
-                notified = db.get_notified_version() # Check if the owner has been notified already
+                last = db.get_version()
+                notified = db.get_notified_version()
 
                 if tag != last:
                     logger.info("[📢] New Copycord release detected: %s (%s)", tag, url)
 
-                    if tag != notified:
-                        guild = receiver.bot.get_guild(guild_id)
-                        if guild:
-                            try:
-                                owner = guild.owner or await guild.fetch_member(guild.owner_id)
-                                await owner.send(
-                                    f"A new Copycord release is available: **{tag}**\n{url}"
-                                )
-                                logger.debug("Sent release DM to guild owner %s", owner)
-                                db.set_notified_version(tag)
-                            except Exception as e:
-                                logger.warning("[⚠️] Failed to send new version release announcement DM to guild owner: %s", e)
+                    if should_dm and guild_id:
+                        if tag != notified:
+                            guild = receiver.bot.get_guild(guild_id)
+                            if guild:
+                                try:
+                                    owner = guild.owner or await guild.fetch_member(guild.owner_id)
+                                    await owner.send(f"A new Copycord release is available: **{tag}**\n{url}")
+                                    logger.debug("Sent release DM to guild owner %s", owner)
+                                    db.set_notified_version(tag)
+                                except Exception as e:
+                                    logger.warning("[⚠️] Failed to send new version release announcement DM to guild owner: %s", e)
+                        else:
+                            logger.debug("Already notified owner of %s; skipping DM", tag)
+                    elif should_dm and not guild_id:
+                        logger.debug("Skipping DM: no guild_id found on receiver (%s)", type(receiver).__name__)
                     else:
-                        logger.debug("Already notified owner of %s; skipping DM", tag)
+                        logger.debug("Skipping DM (should_dm=False)")
 
                     if tag == self.CURRENT_VERSION:
                         db.set_version(tag)
 
             except Exception:
                 logger.exception("[⛔] Error in version release watcher loop")
-                
+
             await asyncio.sleep(self._release_interval)
