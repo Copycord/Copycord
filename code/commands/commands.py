@@ -32,11 +32,11 @@ class CloneCommands(commands.Cog):
         """
         cmd_name = ctx.command.name if ctx.command else 'unknown'
         if ctx.user.id in self.allowed_users:
-            logger.info(f"User {ctx.user.id} executed the '{cmd_name}' command.")
+            logger.info(f"[⚡] User {ctx.user.id} executed the '{cmd_name}' command.")
             return True
         # deny access otherwise
         await ctx.respond("You are not authorized to use this command.", ephemeral=True)
-        logger.warning(f"Unauthorized access: user {ctx.user.id} attempted to run command '{cmd_name}'")
+        logger.warning(f"[⚠️] Unauthorized access: user {ctx.user.id} attempted to run command '{cmd_name}'")
         return False
 
     @commands.Cog.listener()
@@ -208,7 +208,7 @@ class CloneCommands(commands.Cog):
             if not isinstance(ch, CategoryChannel) and ch.id not in mapped_chs
         ]
         logger.info(
-            "Found %d orphan categories and %d orphan channels",
+            "[⚙️] Found %d orphan categories and %d orphan channels",
             len(orphan_categories), len(orphan_channels)
         )
 
@@ -220,18 +220,18 @@ class CloneCommands(commands.Cog):
                     await self.ratelimit.acquire(ActionType.DELETE_CHANNEL)
                     await cat.delete()
                     deleted_cats += 1
-                    logger.info("Deleted orphan category %s (ID %d)", cat.name, cat.id)
+                    logger.info("[🗑️] Deleted orphan category %s (ID %d)", cat.name, cat.id)
                 except Exception as e:
-                    logger.warning("Failed to delete category %s: %s", cat.id, e)
+                    logger.warning("[⚠️] Failed to delete category %s: %s", cat.id, e)
 
             for ch in orphan_channels:
                 try:
                     await self.ratelimit.acquire(ActionType.DELETE_CHANNEL)
                     await ch.delete()
                     deleted_chs += 1
-                    logger.info("Deleted orphan channel %s (ID %d)", ch.name, ch.id)
+                    logger.info("[🗑️] Deleted orphan channel %s (ID %d)", ch.name, ch.id)
                 except Exception as e:
-                    logger.warning("Failed to delete channel %s: %s", ch.id, e)
+                    logger.warning("[⚠️] Failed to delete channel %s: %s", ch.id, e)
 
             if deleted_cats == 0 and deleted_chs == 0:
                 msg = "No orphaned channels or categories found to delete."
@@ -242,13 +242,13 @@ class CloneCommands(commands.Cog):
                 if deleted_chs:
                     parts.append(f"{deleted_chs} channel{'s' if deleted_chs!=1 else ''}")
                 msg = "Deleted " + " and ".join(parts) + "."
-                logger.info("Deletion summary: %s", msg)
+                logger.info("[⚙️] verify_structure: Deletion summary: %s", msg)
 
             return await ctx.followup.send(msg, ephemeral=True)
 
         # Otherwise, normal report flow
         if not orphan_categories and not orphan_channels:
-            msg = "All channels and categories match the last sitemap."
+            msg = "[⚙️] verify_structure: All channels and categories match the last sitemap."
             logger.info(msg)
             return await ctx.followup.send(msg, ephemeral=True)
 
