@@ -135,7 +135,7 @@ class Config:
                                 logger.debug("Sent release DM to guild owner %s", owner)
                                 db.set_notified_version(tag)
                             except Exception as e:
-                                logger.warning("Failed to DM guild owner: %s", e)
+                                logger.warning("[⚠️] Failed to send new version release announcement DM to guild owner: %s", e)
                     else:
                         logger.debug("Already notified owner of %s; skipping DM", tag)
 
@@ -143,6 +143,6 @@ class Config:
                         db.set_version(tag)
 
             except Exception:
-                logger.exception("Error in release watcher loop")
+                logger.exception("[⛔] Error in version release watcher loop")
                 
             await asyncio.sleep(self._release_interval)
