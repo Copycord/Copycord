@@ -89,6 +89,7 @@ class ServerReceiver:
         self._sync_lock = asyncio.Lock()
         self._thread_locks: dict[int, asyncio.Lock] = {}
         self.max_threads = 950
+        self._m_ch = re.compile(r"<#(\d+)>")
         self.bot.event(self.on_ready)
         self._default_avatar_bytes: Optional[bytes] = None
         self._ws_task: asyncio.Task | None = None
@@ -139,6 +140,7 @@ class ServerReceiver:
             await self.bot.close()
             sys.exit(1)
         self._load_mappings() # Load initial channel mappings from the database
+        await self._backfill_channel_types() # Fill channel types for old rows
 
         logger.info(
             "[🤖] Logged in as %s and monitoring guild %s ", self.bot.user, clone_guild.name
@@ -167,6 +169,10 @@ class ServerReceiver:
             )
 
         elif typ == "message":
+            ct = data.get("channel_type")
+            if ct in (ChannelType.voice.value, ChannelType.stage_voice.value):
+                logger.debug("[🎙️] Dropping voice text-chat message for %s", data.get("channel_name"))
+                return
             asyncio.create_task(self.forward_message(data))
 
         elif typ == "thread_message":
@@ -223,7 +229,60 @@ class ServerReceiver:
             else:
                 logger.info("[💾] Sync task #%d completed: %s", task_id, summary)
             finally:
+                try:
+                    await self._flush_buffers()
+                except Exception:
+                    logger.exception("Error flushing pending messages after task %d", task_id)
                 self.sitemap_queue.task_done()
+                
+    async def _backfill_channel_types(self) -> None:
+        """Populate channel_mappings.channel_type for old rows."""
+        try:
+            guild = self.bot.get_guild(self.clone_guild_id)
+            if not guild:
+                return
+
+            rows = [dict(r) for r in self.db.get_all_channel_mappings()]
+
+            # Early exit if every row already has a type
+            if not any(r.get("channel_type") in (None, 0) for r in rows):
+                return 
+
+            changed = 0
+            for row in rows:
+                if row.get("channel_type") not in (None, 0):
+                    continue
+
+                clone_id = row.get("cloned_channel_id")
+                if not clone_id:
+                    continue
+
+                ch = guild.get_channel(int(clone_id))
+                if not ch:
+                    continue
+
+                ctype = int(ch.type.value)
+
+                self.db.upsert_channel_mapping(
+                    int(row["original_channel_id"]),
+                    row["original_channel_name"],
+                    int(row["cloned_channel_id"]) if row["cloned_channel_id"] else None,
+                    row["channel_webhook_url"],
+                    int(row["original_parent_category_id"]) if row["original_parent_category_id"] else None,
+                    int(row["cloned_parent_category_id"]) if row["cloned_parent_category_id"] else None,
+                    ctype,
+                )
+                changed += 1
+
+            if changed:
+                self._load_mappings()
+                logger.debug("[🧭] Backfilled channel_type for %d channels", changed)
+
+        except Exception:
+            logger.exception("Backfill of channel_type failed")
+
+
+
 
     async def handle_announce(self, data: dict):
         """
@@ -282,7 +341,7 @@ class ServerReceiver:
                 try:
                     user = self.bot.get_user(uid) or await self.bot.fetch_user(uid)
                     await user.send(embed=embed)
-                    logger.info(f"[📢] Sent announcement {matching_keys} to {user}")
+                    logger.info(f"[🔔] Sent announcement {matching_keys} to {user}")
                 except Exception as e:
                     logger.warning(f"[⚠️] Failed to DM {uid} for {matching_keys}: {e}")
         except Exception as e:
@@ -527,14 +586,14 @@ class ServerReceiver:
         # Categories
         for orig, row in list(self.cat_map.items()):
             if not guild.get_channel(row["cloned_category_id"]):
-                logger.info("[🗑️] Purging stale category mapping %d", orig)
+                logger.info("[🗑️] Purging category mapping %d", orig)
                 self.db.delete_category_mapping(orig)
                 self.cat_map.pop(orig)
 
         # Channels
         for orig, row in list(self.chan_map.items()):
             if not guild.get_channel(row["cloned_channel_id"]):
-                logger.info("[🗑️] Purging stale channel mapping %d", orig)
+                logger.info("[🗑️] Purging channel mapping %d", orig)
                 self.db.delete_channel_mapping(orig)
                 self.chan_map.pop(orig)
 
@@ -551,6 +610,16 @@ class ServerReceiver:
                 return "Error: clone guild missing"
 
             self._load_mappings()
+            
+            # --- Emoji sync in background ---
+            if self.config.CLONE_EMOJI:
+                if self._emoji_task and not self._emoji_task.done():
+                    logger.debug("Emoji sync already running, skipping new task.")
+                else:
+                    logger.debug("Starting background emoji sync task.")
+                    self._emoji_task = asyncio.create_task(
+                        self._run_emoji_sync(guild, sitemap.get("emojis", []))
+                    )
 
             cat_created, ch_reparented = await self._repair_deleted_categories(guild, sitemap)
             self._purge_stale_mappings(guild)
@@ -574,16 +643,6 @@ class ServerReceiver:
                 parts.append(f"Reparented {moved} channels")
 
             parts += await self._sync_threads(guild, sitemap)
-
-            # --- Emoji sync in background ---
-            if self.config.CLONE_EMOJI:
-                if self._emoji_task and not self._emoji_task.done():
-                    logger.debug("Emoji sync already running, skipping new task.")
-                else:
-                    logger.debug("Starting background emoji sync task.")
-                    self._emoji_task = asyncio.create_task(
-                        self._run_emoji_sync(guild, sitemap.get("emojis", []))
-                    )
 
         await self._flush_buffers()
         return "; ".join(parts) if parts else "No changes needed"
@@ -715,6 +774,9 @@ class ServerReceiver:
                 for ch_orig_id, ch_row in self.chan_map.items():
                     if ch_row["original_parent_category_id"] != orig_cat_id:
                         continue
+                    
+                    ch = guild.get_channel(ch_row["cloned_channel_id"])
+                    ctype = ch.type.value if ch else None
 
                     self.db.upsert_channel_mapping(
                         ch_orig_id,
@@ -723,6 +785,7 @@ class ServerReceiver:
                         ch_row["channel_webhook_url"],
                         ch_row["original_parent_category_id"],
                         new_cat.id,
+                        ctype,
                     )
 
                     self.chan_map[ch_orig_id]["cloned_parent_category_id"] = new_cat.id
@@ -747,7 +810,7 @@ class ServerReceiver:
 
         rem = await self._handle_removed_categories(guild, sitemap)
         if rem:
-            parts.append(f"Deleted {rem} stale categories")
+            parts.append(f"Deleted {rem} categories")
         ren = await self._handle_renamed_categories(guild, sitemap)
         if ren:
             parts.append(f"Renamed {ren} categories")
@@ -801,7 +864,8 @@ class ServerReceiver:
                 ch.id,
                 url,
                 forum.get("category_id"),
-                parent.id if parent else None
+                parent.id if parent else None,
+                ChannelType.forum.value, 
             )
             self.chan_map[orig] = {
                 "original_channel_id":        orig,
@@ -810,6 +874,7 @@ class ServerReceiver:
                 "channel_webhook_url":        url,
                 "original_parent_category_id": forum.get("category_id"),
                 "cloned_parent_category_id":   parent.id if parent else None,
+                "channel_type": ChannelType.forum.value,
             }
 
         if created:
@@ -831,7 +896,7 @@ class ServerReceiver:
         # 1) deleted, renamed, created logic…
         rem = await self._handle_removed_channels(guild, incoming)
         if rem:
-            parts.append(f"Deleted {rem} stale channels")
+            parts.append(f"Deleted {rem} channels")
 
         created = renamed = converted = 0
 
@@ -859,6 +924,19 @@ class ServerReceiver:
                     await ch.edit(type=ChannelType.news)
                     converted += 1
                     logger.info("[✏️] Converted channel '%s' #%d → Announcement", ch.name, ch.id)
+                    # persist channel_type change
+                    row = self.chan_map.get(orig, {})
+                    self.db.upsert_channel_mapping(
+                        orig,
+                        row.get("original_channel_name", name),
+                        ch.id,
+                        row.get("channel_webhook_url"),
+                        row.get("original_parent_category_id"),
+                        row.get("cloned_parent_category_id"),
+                        ChannelType.news.value,
+                    )
+                    if orig in self.chan_map:
+                        self.chan_map[orig]["channel_type"] = ChannelType.news.value
 
             # 3) Rename if needed
             if ch.name != name:
@@ -907,7 +985,7 @@ class ServerReceiver:
                 if clone_ch and self.config.DELETE_THREADS:
                     await self.ratelimit.acquire(ActionType.DELETE_CHANNEL)
                     await clone_ch.delete()
-                    logger.info("[🗑️] Deleted stale cloned thread %s", clone_id)
+                    logger.info("[🗑️] Deleted cloned thread %s", clone_id)
                 self.db.delete_forum_thread_mapping(orig_id)
                 deleted += 1
                 continue
@@ -1258,6 +1336,7 @@ class ServerReceiver:
                         url,
                         parent_id,
                         category.id if category else None,
+                        channel_type, 
                     )
                     # update in-memory as well
                     self.chan_map[original_id] = {
@@ -1267,6 +1346,7 @@ class ServerReceiver:
                         "channel_webhook_url":         url,
                         "original_parent_category_id": parent_id,
                         "cloned_parent_category_id":   category.id if category else None,
+                        "channel_type": channel_type,
                     }
                     return original_id, clone_id, url
 
@@ -1287,6 +1367,7 @@ class ServerReceiver:
             url,
             parent_id,
             category.id if category else None,
+            channel_type,
         )
         self.chan_map[original_id] = {
             "original_channel_id":         original_id,
@@ -1295,6 +1376,7 @@ class ServerReceiver:
             "channel_webhook_url":         url,
             "original_parent_category_id": parent_id,
             "cloned_parent_category_id":   category.id if category else None,
+             "channel_type": channel_type,
         }
         return original_id, ch.id, url
 
@@ -1357,15 +1439,18 @@ class ServerReceiver:
                     ch.name, clone_id, e
                 )
                 continue
-
+            ctype = ch.type.value if ch else None
             # 5) Persist the new parent in both DB and in-memory map
             self.db.upsert_channel_mapping(
                 orig_id,
                 row["original_channel_name"],
                 clone_id,
                 row["channel_webhook_url"],
-                upstream_parent,           # new original_parent_category_id
-                desired_parent_clone_id,   # new cloned_parent_category_id
+                upstream_parent,         
+                desired_parent_clone_id,
+                ctype,
+                
+                
             )
             self.chan_map[orig_id]["cloned_parent_category_id"] = desired_parent_clone_id
 
@@ -1436,7 +1521,11 @@ class ServerReceiver:
                     cloned_id, original_id
                 )
                 return None
-
+            cloned_id = fresh["cloned_channel_id"]
+            # derive type
+            guild = self.bot.get_guild(self.clone_guild_id)
+            ch = guild.get_channel(cloned_id) if guild else None
+            ctype = ch.type.value if ch else None
             try:
                 wh = await self._create_webhook_safely(ch, "Clonecord", await self._get_default_avatar_bytes())
                 new_url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
@@ -1449,6 +1538,7 @@ class ServerReceiver:
                     new_url,
                     fresh["original_parent_category_id"],
                     fresh["cloned_parent_category_id"],
+                    ctype,
                 )
 
                 logger.info(
@@ -1818,6 +1908,21 @@ class ServerReceiver:
             return f"<{prefix}:{name}:{new_id}>"
 
         return self._EMOJI_RE.sub(_repl, content)
+    
+    def _remap_channel_mentions(self, content: str) -> str:
+        """Map host channel mentions to cloned channel mentions using chan_map."""
+        if not content:
+            return content
+
+        def repl(match: re.Match) -> str:
+            orig = int(match.group(1))
+            row = self.chan_map.get(orig)
+            # row keys come from DB: cloned_channel_id
+            if row and row.get("cloned_channel_id"):
+                return f"<#{row['cloned_channel_id']}>"
+            return match.group(0)
+
+        return self._m_ch.sub(repl, content)
 
     def _build_webhook_payload(self, msg: Dict) -> dict:
         """
@@ -1829,6 +1934,7 @@ class ServerReceiver:
         # 1) Build up the text blob
         text = msg.get("content", "")
         text = self._replace_emoji_ids(text) # Replace emoji IDs with cloned ones
+        text = self._remap_channel_mentions(text) # Remap channel mentions
         for att in msg.get("attachments", []):
             if att["url"] not in text:
                 text += f"\n{att['url']}"
@@ -1908,8 +2014,8 @@ class ServerReceiver:
         # Buffer if sync in progress or no mapping yet
         if mapping is None:
             logger.info(
-                "[⌛] No mapping yet for channel #%s; msg from %s is queued and will be sent after sync",
-                msg["channel_name"], msg["author"],
+                "[⌛] No mapping yet for channel %s (%s); msg from %s is queued and will be sent after sync",
+                msg["channel_name"], msg["channel_id"], msg["author"],
             )
             self._pending_msgs.setdefault(source_id, []).append(msg)
             return
