@@ -105,7 +105,8 @@ CLONE_GUILD_ID= # ID of the clone guild, bot must be invited to this guild
 COMMAND_USERS= # Discord user IDs allowed to use commands separated by commas
 DELETE_CHANNELS=True # Delete channels after they are deleted from the host server
 DELETE_THREADS=True # Delete threads after they are deleted from the host server
-CLONE_EMOJI=True # Clone emojis from the host server to the clone server
+CLONE_EMOJI=True # Clone emojis
+CLONE_STICKER=True # Clone stickers
 
 CLIENT_TOKEN= # Your discord account token
 HOST_GUILD_ID= # ID of the host guild to monitor
