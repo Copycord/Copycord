@@ -72,6 +72,17 @@ class DBManager:
         );
         """
         )
+        
+        c.execute(
+            """
+        CREATE TABLE IF NOT EXISTS sticker_mappings (
+        original_sticker_id   INTEGER PRIMARY KEY,
+        original_sticker_name TEXT    NOT NULL,
+        cloned_sticker_id     INTEGER UNIQUE,
+        cloned_sticker_name   TEXT    NOT NULL
+        );
+        """
+        )
 
         c.execute(
             """
@@ -125,6 +136,7 @@ class DBManager:
             ("settings", "id"),
             ("announcement_subscriptions", "keyword"),
             ("announcement_triggers", "keyword"),
+            ("sticker_mappings", "original_sticker_id"),
         ]
 
         for table, pk in tables:
@@ -502,3 +514,29 @@ class DBManager:
                 (r["filter_user_id"], r["channel_id"])
             )
         return d
+
+    def get_all_sticker_mappings(self) -> list[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM sticker_mappings").fetchall()
+
+    def get_sticker_mapping(self, original_id: int) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM sticker_mappings WHERE original_sticker_id = ?", (original_id,)
+        ).fetchone()
+
+    def upsert_sticker_mapping(
+        self, orig_id: int, orig_name: str, clone_id: int, clone_name: str
+    ):
+        self.conn.execute(
+            """INSERT OR REPLACE INTO sticker_mappings
+            (original_sticker_id, original_sticker_name,
+                cloned_sticker_id, cloned_sticker_name)
+            VALUES (?, ?, ?, ?)""",
+            (orig_id, orig_name, clone_id, clone_name),
+        )
+        self.conn.commit()
+
+    def delete_sticker_mapping(self, orig_id: int):
+        self.conn.execute(
+            "DELETE FROM sticker_mappings WHERE original_sticker_id = ?", (orig_id,)
+        )
+        self.conn.commit()
