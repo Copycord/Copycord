@@ -123,7 +123,7 @@ class ClientListener:
             }
 
         return None
-    
+
     def _humanize_user_mentions(self, content: str, message: discord.Message) -> str:
         """Replace <@1234> (and <@!1234>) with @DisplayName based on the host guild."""
 
@@ -161,13 +161,35 @@ class ClientListener:
         """
         Asynchronously builds and sends a sitemap of the Discord guild to the server.
         The sitemap includes information about categories, standalone text channels, forums, threads, emojis,
-        and community settings of the guild. It fetches additional thread data from the database and ensures
+        stickers, and community settings of the guild. It fetches additional thread data from the database and ensures
         all relevant information is sent to the server via a WebSocket connection.
         """
         guild = self.bot.get_guild(self.host_guild_id)
         if not guild:
             logger.error("[⛔] Guild %s not found", self.host_guild_id)
             return
+
+        def _enum_int(val, default=0):
+            if val is None:
+                return default
+            v = getattr(val, "value", val)
+            try:
+                return int(v)
+            except Exception:
+                return default
+
+        def _sticker_url(s):
+            u = getattr(s, "url", None)
+            if not u:
+                asset = getattr(s, "asset", None)
+                u = getattr(asset, "url", None) if asset else None
+            return str(u) if u else ""
+
+        try:
+            fetched_stickers = await guild.fetch_stickers()
+        except Exception as e:
+            logger.warning("[🎟️] Could not fetch stickers: %s", e)
+            fetched_stickers = list(getattr(guild, "stickers", []))
 
         sitemap = {
             "categories": [],
@@ -178,8 +200,9 @@ class ClientListener:
                 {"id": e.id, "name": e.name, "url": str(e.url), "animated": e.animated}
                 for e in guild.emojis
             ],
+            "stickers": [],
             "community": {
-                "enabled": guild.features and "COMMUNITY" in guild.features,
+                "enabled": "COMMUNITY" in guild.features,
                 "rules_channel_id": (
                     guild.rules_channel.id if guild.rules_channel else None
                 ),
@@ -190,6 +213,32 @@ class ClientListener:
                 ),
             },
         }
+
+        try:
+            guild_sticker_type_val = getattr(discord.StickerType, "guild").value
+        except Exception:
+            guild_sticker_type_val = 1
+
+        stickers_payload = []
+        for s in fetched_stickers:
+            stype = _enum_int(getattr(s, "type", None), default=guild_sticker_type_val)
+            if stype != guild_sticker_type_val:
+                continue
+
+            stickers_payload.append(
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "format_type": _enum_int(
+                        getattr(s, "format", None) or getattr(s, "format_type", None), 0
+                    ),
+                    "url": _sticker_url(s),
+                    "tags": getattr(s, "tags", "") or "",
+                    "description": getattr(s, "description", "") or "",
+                    "available": bool(getattr(s, "available", True)),
+                }
+            )
+        sitemap["stickers"] = stickers_payload
 
         for cat in guild.categories:
             channels = [
@@ -207,7 +256,7 @@ class ClientListener:
             if ch.category is None
         ]
 
-        for forum in guild.forums:
+        for forum in getattr(guild, "forums", []):
             sitemap["forums"].append(
                 {
                     "id": forum.id,
@@ -334,7 +383,7 @@ class ClientListener:
         # Ignore DMs or wrong guild
         if message.guild is None or message.guild.id != self.host_guild_id:
             return True
-        
+
         if message.channel.type in (ChannelType.voice, ChannelType.stage_voice):
             # This is a voice channel text chat; unsupported → skip.
             return True
@@ -463,7 +512,9 @@ class ClientListener:
             ChannelType.public_thread,
             ChannelType.private_thread,
         )
-        content = self._humanize_user_mentions(content, message) # Replace user mentions with display names
+        content = self._humanize_user_mentions(
+            content, message
+        )  # Replace user mentions with display names
         payload = {
             "type": "thread_message" if is_thread else "message",
             "data": {
