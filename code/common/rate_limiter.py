@@ -10,6 +10,7 @@ class ActionType(Enum):
     DELETE_CHANNEL = "delete_channel"
     THREAD = "thread"
     EMOJI_CREATE = "emoji_create"
+    STICKER_CREATE = "sticker_create"  # Duplicate, but kept for compatibility
 
 class RateLimiter:
     def __init__(self, max_rate: int, time_window: float):
@@ -86,6 +87,7 @@ class RateLimitManager:
             ActionType.DELETE_CHANNEL: (3, 15.0),
             ActionType.THREAD: (2, 5.0),
             ActionType.EMOJI_CREATE: (2, 60.0),
+            ActionType.STICKER_CREATE: (2, 60.0),
         }
         self._limiters: Dict[ActionType, RateLimiter] = {
             a: RateLimiter(*cfg[a]) for a in cfg if a is not ActionType.WEBHOOK_MESSAGE
