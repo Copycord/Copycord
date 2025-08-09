@@ -100,6 +100,8 @@ class ServerReceiver:
         self._new_webhook_gate = asyncio.Lock()
         self._emoji_task: Optional[asyncio.Task] = None
         self._emoji_task_lock = asyncio.Lock()
+        self._sticker_task: asyncio.Task | None = None
+        self._sticker_lock = asyncio.Lock()
         self.cat_map: dict[int, dict] = {}
         self.chan_map: dict[int, dict] = {}
         orig_on_connect = self.bot.on_connect
@@ -282,8 +284,6 @@ class ServerReceiver:
             logger.exception("Backfill of channel_type failed")
 
 
-
-
     async def handle_announce(self, data: dict):
         """
         Handles the announcement process by sending direct messages (DMs) to users
@@ -346,6 +346,7 @@ class ServerReceiver:
                     logger.warning(f"[⚠️] Failed to DM {uid} for {matching_keys}: {e}")
         except Exception as e:
             logger.exception("Unexpected error in handle_announce: %s", e)
+
 
     async def _sync_emojis(
         self, guild: discord.Guild, emojis: list[dict]
@@ -489,6 +490,185 @@ class ServerReceiver:
 
         return deleted, renamed, created
 
+    async def _run_emoji_sync(self, guild, emoji_data):
+        """Runs the emoji sync in the background with a lock."""
+        async with self._emoji_task_lock:
+            try:
+                d, r, c = await self._sync_emojis(guild, emoji_data)
+                changes = []
+                if d: changes.append(f"Deleted {d} emojis")
+                if r: changes.append(f"Renamed {r} emojis")
+                if c: changes.append(f"Created {c} emojis")
+                if changes:
+                    logger.info("[😊] Emoji sync changes: " + "; ".join(changes))
+            except asyncio.CancelledError:
+                logger.debug("[😊] Emoji sync task was canceled before completion.")
+            except Exception as e:
+                logger.exception("[😊] Emoji sync failed: %s", e)
+
+    async def _sync_stickers(
+        self, guild: discord.Guild, stickers: list[dict]
+    ) -> tuple[int, int, int]:
+        """
+        Mirror the host guild’s custom stickers into the clone guild.
+        Handles deletions, renames, and creations with limit-aware behavior.
+        """
+        deleted = renamed = created = 0
+        skipped_limit = size_failed = 0
+
+        # Determine sticker limit (discord.py provides sticker_limit on Guild; fallback to 5)
+        limit = getattr(guild, "sticker_limit", None)
+        if not isinstance(limit, int):
+            # very conservative fallback; most unboosted servers cap at 5
+            limit = 5
+
+        # Use a fresh fetch for accuracy (guild.stickers may be stale/empty)
+        try:
+            clone_stickers = await guild.fetch_stickers()
+        except Exception:
+            clone_stickers = []
+        current_count = len(clone_stickers)
+        clone_by_id = {s.id: s for s in clone_stickers}
+
+        current = {r["original_sticker_id"]: r for r in self.db.get_all_sticker_mappings()}
+        incoming = {int(s["id"]): s for s in stickers if s.get("id")}
+
+        # 1) Delete stickers removed upstream
+        for orig_id in set(current) - set(incoming):
+            row = current[orig_id]
+            cloned = clone_by_id.get(row["cloned_sticker_id"])
+            if cloned:
+                try:
+                    await self.ratelimit.acquire(ActionType.STICKER_CREATE)
+                    await cloned.delete()
+                    deleted += 1
+                    current_count = max(0, current_count - 1)
+                    logger.info(f"[🎟️] Deleted sticker {row['cloned_sticker_name']}")
+                except discord.Forbidden:
+                    logger.warning(f"[⚠️] No permission to delete sticker {row['cloned_sticker_name']}")
+                except discord.HTTPException as e:
+                    logger.error(f"[⛔] Error deleting sticker {row['cloned_sticker_name']}: {e}")
+            self.db.delete_sticker_mapping(orig_id)
+
+        # 2) Process incoming (create / rename / repair)
+        for orig_id, info in incoming.items():
+            name = info.get("name") or f"sticker_{orig_id}"
+            url  = info.get("url") or ""
+            mapping = current.get(orig_id)
+            cloned = None
+            if mapping:
+                cloned = clone_by_id.get(mapping["cloned_sticker_id"])
+                if mapping and not cloned:
+                    logger.warning(
+                        f"[⚠️] Sticker {mapping['original_sticker_name']} missing in clone; will recreate"
+                    )
+                    self.db.delete_sticker_mapping(orig_id)
+                    mapping = None
+
+            # 2b) Upstream rename
+            if mapping and cloned and mapping["original_sticker_name"] != name:
+                try:
+                    await self.ratelimit.acquire(ActionType.STICKER_CREATE)
+                    await cloned.edit(name=name)  # discord.py ≥2.4
+                    renamed += 1
+                    logger.info(f"[🎟️] Renamed sticker {mapping['original_sticker_name']} → {name}")
+                    self.db.upsert_sticker_mapping(orig_id, name, cloned.id, cloned.name)
+                except discord.HTTPException as e:
+                    logger.error(f"[⛔] Failed renaming sticker {cloned.name}: {e}")
+                continue
+
+            # Up-to-date
+            if mapping:
+                continue
+
+            # 2c) Create new
+            if not url:
+                logger.warning(f"[⚠️] Sticker {name} has no URL; skipping")
+                continue
+
+            # LIMIT CHECK — skip if we're at/over the cap
+            if current_count >= limit:
+                skipped_limit += 1
+                continue
+
+            # fetch bytes
+            raw = None
+            try:
+                if self.session is None or self.session.closed:
+                    self.session = aiohttp.ClientSession()
+                async with self.session.get(url) as resp:
+                    raw = await resp.read()
+            except Exception as e:
+                logger.error(f"[⛔] Failed fetching sticker {name} at {url}: {e}")
+                continue
+
+            # enforce size (Discord cap ~512 KiB for stickers)
+            if raw and len(raw) > 512 * 1024:
+                logger.info(f"[🎟️] Skipping {name}: exceeds size limit")
+                size_failed += 1
+                continue
+
+            # choose filename by format; default to png
+            fmt = int((info.get("format_type") or 0))
+            if fmt == 3:
+                fname = f"{name}.json"   # LOTTIE
+            else:
+                fname = f"{name}.png"    # PNG/APNG use .png container
+
+            file = discord.File(io.BytesIO(raw), filename=fname)
+
+            tag = (info.get("tags") or "🙂")[:50]
+            desc = (info.get("description") or "")[:100]
+
+            try:
+                await self.ratelimit.acquire(ActionType.STICKER_CREATE)
+                created_stk = await guild.create_sticker(
+                    name=name,
+                    description=desc,
+                    emoji=tag,
+                    file=file,
+                    reason="Clonecord sync",
+                )
+                created += 1
+                current_count += 1
+                logger.info(f"[🎟️] Created sticker {name}")
+                self.db.upsert_sticker_mapping(orig_id, name, created_stk.id, created_stk.name)
+            except discord.HTTPException as e:
+                # Gracefully handle "Maximum number of stickers reached (30039)"
+                if getattr(e, "code", None) == 30039 or "30039" in str(e):
+                    skipped_limit += 1
+                    logger.info("[🎟️] Skipped creating sticker due to guild sticker limit.")
+                else:
+                    logger.error(f"[⛔] Failed creating sticker {name}: {e}")
+
+        # summary (match emoji style)
+        if skipped_limit:
+            logger.info(
+                f"[🎟️] Skipped {skipped_limit} stickers due to guild limit ({limit}). "
+                "Guild needs boosting to increase this limit."
+            )
+        if size_failed:
+            logger.info(f"[🎟️] Skipped {size_failed} stickers because they exceed 512 KiB.")
+
+        return deleted, renamed, created
+
+    async def _run_sticker_sync(self, guild: discord.Guild, stickers: list[dict]) -> None:
+        async with self._sticker_lock:  # prevent overlap, match emoji style if you use a lock there too
+            try:
+                deleted, renamed, created = await self._sync_stickers(guild, stickers or [])
+                if any((deleted, renamed, created)):
+                    parts = []
+                    if deleted: parts.append(f"Deleted {deleted}")
+                    if renamed: parts.append(f"Renamed {renamed}")
+                    if created: parts.append(f"Created {created}")
+                    logger.info("[🎟️] Sticker sync: " + ", ".join(parts))
+            except Exception:
+                logger.exception("[🎟️] Sticker sync failed")
+            finally:
+                # keep the handle clean so a new task can be scheduled next time
+                self._sticker_task = None
+
+
     async def _shrink_static(self, data: bytes, max_bytes: int) -> bytes:
         """
         Asynchronously shrinks the given static data to fit within the specified maximum size.
@@ -620,6 +800,16 @@ class ServerReceiver:
                     self._emoji_task = asyncio.create_task(
                         self._run_emoji_sync(guild, sitemap.get("emojis", []))
                     )
+            
+            # --- Sticker sync in background ---
+            if self.config.CLONE_STICKER:
+                if self._sticker_task and not self._sticker_task.done():
+                    logger.debug("Sticker sync already running, skipping new task.")
+                else:
+                    logger.debug("Starting background sticker sync task.")
+                    self._sticker_task = asyncio.create_task(
+                        self._run_sticker_sync(guild, sitemap.get("stickers", []))
+                    )
 
             cat_created, ch_reparented = await self._repair_deleted_categories(guild, sitemap)
             self._purge_stale_mappings(guild)
@@ -646,22 +836,8 @@ class ServerReceiver:
 
         await self._flush_buffers()
         return "; ".join(parts) if parts else "No changes needed"
+    
 
-    async def _run_emoji_sync(self, guild, emoji_data):
-        """Runs the emoji sync in the background with a lock."""
-        async with self._emoji_task_lock:
-            try:
-                d, r, c = await self._sync_emojis(guild, emoji_data)
-                changes = []
-                if d: changes.append(f"Deleted {d} emojis")
-                if r: changes.append(f"Renamed {r} emojis")
-                if c: changes.append(f"Created {c} emojis")
-                if changes:
-                    logger.info("[😊] Emoji sync changes: " + "; ".join(changes))
-            except asyncio.CancelledError:
-                logger.debug("[😊] Emoji sync task was canceled before completion.")
-            except Exception as e:
-                logger.exception("[😊] Emoji sync failed: %s", e)
 
     async def _sync_community(self, guild: Guild, sitemap: Dict) -> List[str]:
         """
