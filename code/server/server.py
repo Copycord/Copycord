@@ -19,8 +19,6 @@ from discord import (
 from discord.errors import HTTPException, Forbidden
 import os
 import sys
-import io
-from PIL import Image, ImageSequence
 from datetime import datetime, timezone
 from asyncio import Queue
 from common.config import Config
@@ -28,6 +26,8 @@ from common.websockets import WebsocketManager
 from common.db import DBManager
 from common.rate_limiter import RateLimitManager, ActionType
 from server.discord_hooks import install_discord_rl_probe
+from server.emojis import EmojiManager
+from server.stickers import StickerManager
 
 LOG_DIR = "/data"
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -98,14 +98,28 @@ class ServerReceiver:
         self._pending_thread_msgs: List[Dict] = []
         self._webhook_locks: Dict[int, asyncio.Lock] = {}
         self._new_webhook_gate = asyncio.Lock()
-        self._emoji_task: Optional[asyncio.Task] = None
-        self._emoji_task_lock = asyncio.Lock()
-        self._sticker_task: asyncio.Task | None = None
-        self._sticker_lock = asyncio.Lock()
+        self.sticker_map: dict[int, dict] = {}
         self.cat_map: dict[int, dict] = {}
         self.chan_map: dict[int, dict] = {}
+        self._unmapped_warned: set[int] = set()
+        self._warn_lock = asyncio.Lock()
+        self._shutting_down = False
         orig_on_connect = self.bot.on_connect
         self.ratelimit = RateLimitManager()
+        self.emojis = EmojiManager(
+            bot=self.bot,
+            db=self.db,
+            ratelimit=self.ratelimit,
+            clone_guild_id=int(self.config.CLONE_GUILD_ID),
+            session=self.session,
+        )
+        self.stickers = StickerManager(
+            bot=self.bot,
+            db=self.db,
+            ratelimit=self.ratelimit,
+            clone_guild_id=int(self.config.CLONE_GUILD_ID),
+            session=self.session,
+        )
         install_discord_rl_probe(self.ratelimit)
         # Discord guild/channel limits
         self.MAX_GUILD_CHANNELS = 500
@@ -141,7 +155,10 @@ class ServerReceiver:
             )
             await self.bot.close()
             sys.exit(1)
-        self._load_mappings() # Load initial channel mappings from the database
+        self._load_mappings()
+        self.emojis.set_session(self.session)
+        self.stickers.set_session(self.session)
+        await self.stickers.refresh_cache()
         await self._backfill_channel_types() # Fill channel types for old rows
 
         logger.info(
@@ -157,6 +174,8 @@ class ServerReceiver:
         """
         Handles incoming WebSocket messages and dispatches them based on their type.
         """
+        if self._shutting_down:
+            return
         typ = msg.get("type")
         data = msg.get("data", {})
         if typ == "sitemap":
@@ -194,22 +213,30 @@ class ServerReceiver:
 
     async def process_sitemap_queue(self):
         """Continuously process only the newest sitemap, discarding any others."""
+        if self._shutting_down:
+            return
+
         first = True
-        while True:
+        while not self._shutting_down:
             if not first:
                 logger.debug("Waiting 5s before processing next sitemap…")
                 await asyncio.sleep(5)
+                if self._shutting_down:
+                    break
             first = False
 
+            # Wait for at least one sitemap
             task_id, sitemap = await self.sitemap_queue.get()
 
+            # Drop all but the newest
             qsize = self.sitemap_queue.qsize()
             if qsize:
                 logger.debug(
                     "Dropping %d outdated sitemap(s), will process only the newest (task #%d).",
-                    qsize,
-                    task_id,
+                    qsize, task_id
                 )
+
+            # Drain queue properly (latest item wins)
             while True:
                 try:
                     old_id, old_map = self.sitemap_queue.get_nowait()
@@ -220,8 +247,7 @@ class ServerReceiver:
 
             logger.debug(
                 "Starting sync task #%d (queue size then: %d)",
-                task_id,
-                self.sitemap_queue.qsize(),
+                task_id, self.sitemap_queue.qsize()
             )
 
             try:
@@ -236,6 +262,15 @@ class ServerReceiver:
                 except Exception:
                     logger.exception("Error flushing pending messages after task %d", task_id)
                 self.sitemap_queue.task_done()
+
+        # Optional: drain remaining items on shutdown without processing
+        try:
+            while True:
+                self.sitemap_queue.get_nowait()
+                self.sitemap_queue.task_done()
+        except asyncio.QueueEmpty:
+            pass
+
                 
     async def _backfill_channel_types(self) -> None:
         """Populate channel_mappings.channel_type for old rows."""
@@ -289,6 +324,8 @@ class ServerReceiver:
         Handles the announcement process by sending direct messages (DMs) to users
         subscribed to specific keywords in the announcement content.
         """
+        if self._shutting_down:
+            return
         guild = self.bot.get_guild(self.clone_guild_id)
         if not guild:
             logger.error("[⛔] Clone guild not available for announcements")
@@ -347,401 +384,6 @@ class ServerReceiver:
         except Exception as e:
             logger.exception("Unexpected error in handle_announce: %s", e)
 
-
-    async def _sync_emojis(
-        self, guild: discord.Guild, emojis: list[dict]
-    ) -> tuple[int, int, int]:
-        """
-        Mirror the host guild’s custom emojis into the clone guild,
-        handling static vs animated limits, deletions, renames, and creations.
-        """
-        deleted = renamed = created = 0
-        skipped_limit_static = skipped_limit_animated = size_failed = 0
-
-        # Count existing static vs animated
-        static_count = sum(1 for e in guild.emojis if not e.animated)
-        animated_count = sum(1 for e in guild.emojis if e.animated)
-        limit = guild.emoji_limit
-
-        # Build lookup tables
-        current = {r["original_emoji_id"]: r for r in self.db.get_all_emoji_mappings()}
-        incoming = {e["id"]: e for e in emojis}
-
-        # 1) Delete emojis removed upstream
-        for orig_id in set(current) - set(incoming):
-            row = current[orig_id]
-            cloned = discord.utils.get(guild.emojis, id=row["cloned_emoji_id"])
-            if cloned:
-                try:
-                    await self.ratelimit.acquire(ActionType.EMOJI_CREATE)
-                    await cloned.delete()
-                    deleted += 1
-                    logger.info(f"[😊] Deleted emoji {row['cloned_emoji_name']}")
-                except discord.Forbidden:
-                    logger.warning(f"[⚠️] No permission to delete emoji {cloned.name}")
-                except discord.HTTPException as e:
-                    logger.error(f"[⛔] Error deleting emoji {cloned.name}: {e}")
-            self.db.delete_emoji_mapping(orig_id)
-
-        # 2) Process all incoming (create / rename / repair)
-        for orig_id, info in incoming.items():
-            name = info["name"]
-            url = info["url"]
-            is_animated = info.get("animated", False)
-            mapping = current.get(orig_id)
-            cloned = mapping and discord.utils.get(
-                guild.emojis, id=mapping["cloned_emoji_id"]
-            )
-
-            # 2a) Orphaned mapping? (deleted manually in clone)
-            if mapping and not cloned:
-                logger.warning(
-                    f"[⚠️] Emoji {mapping['original_emoji_name']} stored in mapping, but missing in clone server; will recreate"
-                )
-                self.db.delete_emoji_mapping(orig_id)
-                mapping = cloned = None
-
-            # 2b) Repair manual rename in clone
-            if mapping and cloned.name != name:
-                try:
-                    await self.ratelimit.acquire(ActionType.EMOJI_CREATE)
-                    await cloned.edit(name=name)
-                    renamed += 1
-                    logger.info(f"[😊] Restored emoji {cloned.name} → {name}")
-                    self.db.upsert_emoji_mapping(orig_id, name, cloned.id, name)
-                except discord.HTTPException as e:
-                    logger.error(f"[⛔] Failed restoring emoji {cloned.name}: {e}")
-                continue
-
-            # 2c) Upstream rename
-            if mapping and mapping["original_emoji_name"] != name:
-                try:
-                    await self.ratelimit.acquire(ActionType.EMOJI_CREATE)
-                    await cloned.edit(name=name)
-                    renamed += 1
-                    logger.info(
-                        f"[😊] Renamed emoji {mapping['original_emoji_name']} → {name}"
-                    )
-                    self.db.upsert_emoji_mapping(orig_id, name, cloned.id, cloned.name)
-                except discord.HTTPException as e:
-                    logger.error(f"[⛔] Failed renaming emoji {cloned.name}: {e}")
-                continue
-
-            # skip up‐to‐date
-            if mapping:
-                continue
-
-            # enforce limits
-            if is_animated and animated_count >= limit:
-                skipped_limit_animated += 1
-                continue
-            if not is_animated and static_count >= limit:
-                skipped_limit_static += 1
-                continue
-
-            # fetch raw bytes
-            try:
-                if self.session is None or self.session.closed:
-                    self.session = aiohttp.ClientSession()
-                async with self.session.get(url) as resp:
-                    raw = await resp.read()
-            except Exception as e:
-                logger.error(f"[⛔] Failed fetching {url}: {e}")
-                continue
-
-            # attempt to shrink to ≤256 KiB
-            try:
-                if is_animated:
-                    raw = await self._shrink_animated(raw, max_bytes=262_144)
-                else:
-                    raw = await self._shrink_static(raw, max_bytes=262_144)
-            except Exception as e:
-                logger.error(f"[⛔] Error shrinking emoji {name}: {e}")
-
-            # create emoji
-            try:
-                await self.ratelimit.acquire(ActionType.EMOJI_CREATE)
-                created_emo = await guild.create_custom_emoji(name=name, image=raw)
-                created += 1
-                logger.info(f"[😊] Created emoji {name}")
-                self.db.upsert_emoji_mapping(
-                    orig_id, name, created_emo.id, created_emo.name
-                )
-                if created_emo.animated:
-                    animated_count += 1
-                else:
-                    static_count += 1
-            except discord.HTTPException as e:
-                if "50138" in str(e):
-                    size_failed += 1
-                else:
-                    logger.error(f"[⛔] Failed creating {name}: {e}")
-
-        # summary
-        if skipped_limit_static or skipped_limit_animated:
-            logger.info(
-                f"[😊] Skipped {skipped_limit_static} static and "
-                f"{skipped_limit_animated} animated emojis due to guild limit ({limit}). Guild needs boosting to increase this limit."
-            )
-        if size_failed:
-            logger.info(
-                f"[😊] Skipped {size_failed} emojis because they still exceed 256 KiB after conversion attempt."
-            )
-
-        return deleted, renamed, created
-
-    async def _run_emoji_sync(self, guild, emoji_data):
-        """Runs the emoji sync in the background with a lock."""
-        async with self._emoji_task_lock:
-            try:
-                d, r, c = await self._sync_emojis(guild, emoji_data)
-                changes = []
-                if d: changes.append(f"Deleted {d} emojis")
-                if r: changes.append(f"Renamed {r} emojis")
-                if c: changes.append(f"Created {c} emojis")
-                if changes:
-                    logger.info("[😊] Emoji sync changes: " + "; ".join(changes))
-            except asyncio.CancelledError:
-                logger.debug("[😊] Emoji sync task was canceled before completion.")
-            except Exception as e:
-                logger.exception("[😊] Emoji sync failed: %s", e)
-
-    async def _sync_stickers(
-        self, guild: discord.Guild, stickers: list[dict]
-    ) -> tuple[int, int, int]:
-        """
-        Mirror the host guild’s custom stickers into the clone guild.
-        Handles deletions, renames, and creations with limit-aware behavior.
-        """
-        deleted = renamed = created = 0
-        skipped_limit = size_failed = 0
-
-        # Determine sticker limit (discord.py provides sticker_limit on Guild; fallback to 5)
-        limit = getattr(guild, "sticker_limit", None)
-        if not isinstance(limit, int):
-            # very conservative fallback; most unboosted servers cap at 5
-            limit = 5
-
-        # Use a fresh fetch for accuracy (guild.stickers may be stale/empty)
-        try:
-            clone_stickers = await guild.fetch_stickers()
-        except Exception:
-            clone_stickers = []
-        current_count = len(clone_stickers)
-        clone_by_id = {s.id: s for s in clone_stickers}
-
-        current = {r["original_sticker_id"]: r for r in self.db.get_all_sticker_mappings()}
-        incoming = {int(s["id"]): s for s in stickers if s.get("id")}
-
-        # 1) Delete stickers removed upstream
-        for orig_id in set(current) - set(incoming):
-            row = current[orig_id]
-            cloned = clone_by_id.get(row["cloned_sticker_id"])
-            if cloned:
-                try:
-                    await self.ratelimit.acquire(ActionType.STICKER_CREATE)
-                    await cloned.delete()
-                    deleted += 1
-                    current_count = max(0, current_count - 1)
-                    logger.info(f"[🎟️] Deleted sticker {row['cloned_sticker_name']}")
-                except discord.Forbidden:
-                    logger.warning(f"[⚠️] No permission to delete sticker {row['cloned_sticker_name']}")
-                except discord.HTTPException as e:
-                    logger.error(f"[⛔] Error deleting sticker {row['cloned_sticker_name']}: {e}")
-            self.db.delete_sticker_mapping(orig_id)
-
-        # 2) Process incoming (create / rename / repair)
-        for orig_id, info in incoming.items():
-            name = info.get("name") or f"sticker_{orig_id}"
-            url  = info.get("url") or ""
-            mapping = current.get(orig_id)
-            cloned = None
-            if mapping:
-                cloned = clone_by_id.get(mapping["cloned_sticker_id"])
-                if mapping and not cloned:
-                    logger.warning(
-                        f"[⚠️] Sticker {mapping['original_sticker_name']} missing in clone; will recreate"
-                    )
-                    self.db.delete_sticker_mapping(orig_id)
-                    mapping = None
-
-            # 2b) Upstream rename
-            if mapping and cloned and mapping["original_sticker_name"] != name:
-                try:
-                    await self.ratelimit.acquire(ActionType.STICKER_CREATE)
-                    await cloned.edit(name=name)  # discord.py ≥2.4
-                    renamed += 1
-                    logger.info(f"[🎟️] Renamed sticker {mapping['original_sticker_name']} → {name}")
-                    self.db.upsert_sticker_mapping(orig_id, name, cloned.id, cloned.name)
-                except discord.HTTPException as e:
-                    logger.error(f"[⛔] Failed renaming sticker {cloned.name}: {e}")
-                continue
-
-            # Up-to-date
-            if mapping:
-                continue
-
-            # 2c) Create new
-            if not url:
-                logger.warning(f"[⚠️] Sticker {name} has no URL; skipping")
-                continue
-
-            # LIMIT CHECK — skip if we're at/over the cap
-            if current_count >= limit:
-                skipped_limit += 1
-                continue
-
-            # fetch bytes
-            raw = None
-            try:
-                if self.session is None or self.session.closed:
-                    self.session = aiohttp.ClientSession()
-                async with self.session.get(url) as resp:
-                    raw = await resp.read()
-            except Exception as e:
-                logger.error(f"[⛔] Failed fetching sticker {name} at {url}: {e}")
-                continue
-
-            # enforce size (Discord cap ~512 KiB for stickers)
-            if raw and len(raw) > 512 * 1024:
-                logger.info(f"[🎟️] Skipping {name}: exceeds size limit")
-                size_failed += 1
-                continue
-
-            # choose filename by format; default to png
-            fmt = int((info.get("format_type") or 0))
-            if fmt == 3:
-                fname = f"{name}.json"   # LOTTIE
-            else:
-                fname = f"{name}.png"    # PNG/APNG use .png container
-
-            file = discord.File(io.BytesIO(raw), filename=fname)
-
-            tag = (info.get("tags") or "🙂")[:50]
-            desc = (info.get("description") or "")[:100]
-
-            try:
-                await self.ratelimit.acquire(ActionType.STICKER_CREATE)
-                created_stk = await guild.create_sticker(
-                    name=name,
-                    description=desc,
-                    emoji=tag,
-                    file=file,
-                    reason="Clonecord sync",
-                )
-                created += 1
-                current_count += 1
-                logger.info(f"[🎟️] Created sticker {name}")
-                self.db.upsert_sticker_mapping(orig_id, name, created_stk.id, created_stk.name)
-            except discord.HTTPException as e:
-                # Gracefully handle "Maximum number of stickers reached (30039)"
-                if getattr(e, "code", None) == 30039 or "30039" in str(e):
-                    skipped_limit += 1
-                    logger.info("[🎟️] Skipped creating sticker due to guild sticker limit.")
-                else:
-                    logger.error(f"[⛔] Failed creating sticker {name}: {e}")
-
-        # summary (match emoji style)
-        if skipped_limit:
-            logger.info(
-                f"[🎟️] Skipped {skipped_limit} stickers due to guild limit ({limit}). "
-                "Guild needs boosting to increase this limit."
-            )
-        if size_failed:
-            logger.info(f"[🎟️] Skipped {size_failed} stickers because they exceed 512 KiB.")
-
-        return deleted, renamed, created
-
-    async def _run_sticker_sync(self, guild: discord.Guild, stickers: list[dict]) -> None:
-        async with self._sticker_lock:  # prevent overlap, match emoji style if you use a lock there too
-            try:
-                deleted, renamed, created = await self._sync_stickers(guild, stickers or [])
-                if any((deleted, renamed, created)):
-                    parts = []
-                    if deleted: parts.append(f"Deleted {deleted}")
-                    if renamed: parts.append(f"Renamed {renamed}")
-                    if created: parts.append(f"Created {created}")
-                    logger.info("[🎟️] Sticker sync: " + ", ".join(parts))
-            except Exception:
-                logger.exception("[🎟️] Sticker sync failed")
-            finally:
-                # keep the handle clean so a new task can be scheduled next time
-                self._sticker_task = None
-
-
-    async def _shrink_static(self, data: bytes, max_bytes: int) -> bytes:
-        """
-        Asynchronously shrinks the given static data to fit within the specified maximum size.
-        """
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self._sync_shrink_static, data, max_bytes
-        )
-
-    def _sync_shrink_static(self, data: bytes, max_bytes: int) -> bytes:
-        """
-        Shrinks an image to a maximum size and ensures it fits within a specified byte limit.
-        This method takes image data as input, resizes the image to a maximum dimension of 128x128 pixels,
-        and attempts to compress it to fit within the specified maximum byte size. If the compressed image
-        exceeds the byte limit, the original image data is returned.
-        """
-        buf = io.BytesIO(data)
-        img = Image.open(buf).convert("RGBA")
-        img.thumbnail((128, 128), Image.LANCZOS)
-
-        out = io.BytesIO()
-        img.save(out, format="PNG", optimize=True)
-        result = out.getvalue()
-        if len(result) <= max_bytes:
-            return result
-
-        out = io.BytesIO()
-        quant = img.convert("P", palette=Image.ADAPTIVE)
-        quant.save(out, format="PNG", optimize=True)
-        result = out.getvalue()
-        return result if len(result) <= max_bytes else data
-
-    async def _shrink_animated(self, data: bytes, max_bytes: int) -> bytes:
-        """
-        Asynchronously shrinks an animated data object (e.g., GIF) to fit within a specified maximum size.
-        """
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self._sync_shrink_animated, data, max_bytes
-        )
-
-    def _sync_shrink_animated(self, data: bytes, max_bytes: int) -> bytes:
-        """
-        Shrinks an animated GIF to a maximum size while maintaining its animation.
-        This method takes a byte stream of an animated GIF, resizes each frame to a 
-        maximum dimension of 128x128 pixels, and reassembles the animation. If the 
-        resulting GIF exceeds the specified maximum byte size, the original data 
-        is returned.
-        """
-        buf = io.BytesIO(data)
-        img = Image.open(buf)
-        frames = []
-        durations = []
-
-        for frame in ImageSequence.Iterator(img):
-            f = frame.convert("RGBA")
-            f.thumbnail((128, 128), Image.LANCZOS)
-            frames.append(f)
-            durations.append(frame.info.get("duration", 100))
-
-        out = io.BytesIO()
-        frames[0].save(
-            out,
-            format="GIF",
-            save_all=True,
-            append_images=frames[1:],
-            duration=durations,
-            loop=0,
-            optimize=True,
-        )
-        result = out.getvalue()
-        return result if len(result) <= max_bytes else data
-
     def _load_mappings(self):
         """
         Loads category and channel mappings from the database into in-memory dictionaries.
@@ -754,6 +396,10 @@ class ServerReceiver:
             r["original_channel_id"]: dict(r)
             for r in self.db.get_all_channel_mappings()
         }
+        try:
+            self.sticker_map = {r["original_sticker_id"]: dict(r) for r in self.db.get_all_sticker_mappings()}
+        except Exception:
+            self.sticker_map = {}
 
     def _purge_stale_mappings(self, guild: discord.Guild):
         """
@@ -780,7 +426,6 @@ class ServerReceiver:
     async def sync_structure(self, task_id: int, sitemap: Dict) -> str:
         """
         Synchronizes the structure of a Discord guild based on the provided sitemap.
-        Runs _sync_emojis in the background, skipping if one is already running.
         """
         logger.debug(f"Sync Task #{task_id}: Processing sitemap {sitemap}")
         async with self._sync_lock:
@@ -790,26 +435,15 @@ class ServerReceiver:
                 return "Error: clone guild missing"
 
             self._load_mappings()
+            self.stickers.set_last_sitemap(sitemap.get("stickers"))
             
             # --- Emoji sync in background ---
             if self.config.CLONE_EMOJI:
-                if self._emoji_task and not self._emoji_task.done():
-                    logger.debug("Emoji sync already running, skipping new task.")
-                else:
-                    logger.debug("Starting background emoji sync task.")
-                    self._emoji_task = asyncio.create_task(
-                        self._run_emoji_sync(guild, sitemap.get("emojis", []))
-                    )
+                self.emojis.kickoff_sync(sitemap.get("emojis", []))
             
             # --- Sticker sync in background ---
             if self.config.CLONE_STICKER:
-                if self._sticker_task and not self._sticker_task.done():
-                    logger.debug("Sticker sync already running, skipping new task.")
-                else:
-                    logger.debug("Starting background sticker sync task.")
-                    self._sticker_task = asyncio.create_task(
-                        self._run_sticker_sync(guild, sitemap.get("stickers", []))
-                    )
+                self.stickers.kickoff_sync()
 
             cat_created, ch_reparented = await self._repair_deleted_categories(guild, sitemap)
             self._purge_stale_mappings(guild)
@@ -1213,13 +847,99 @@ class ServerReceiver:
 
     async def _flush_buffers(self) -> None:
         """Forward any buffered messages and thread-msgs."""
-        for msgs in list(self._pending_msgs.values()):
-            for msg in msgs:
-                await self.forward_message(msg)
-        self._pending_msgs.clear()
+        if self._shutting_down:
+            return
+
+        snapshot_by_chan = self._pending_msgs
+        self._pending_msgs = {}
+
+        for chan_id, msgs in list(snapshot_by_chan.items()):
+            for i, msg in enumerate(list(msgs)):
+                if self._shutting_down:
+                    # put back the rest of this channel's snapshot
+                    remaining = msgs[i:]
+                    if remaining:
+                        self._pending_msgs.setdefault(chan_id, []).extend(remaining)
+                    # also put back all unprocessed channels
+                    for rest_id, rest_msgs in snapshot_by_chan.items():
+                        if rest_id == chan_id:
+                            continue
+                        if rest_msgs:
+                            self._pending_msgs.setdefault(rest_id, []).extend(rest_msgs)
+                    return
+                try:
+                    await self.forward_message(msg)
+                except Exception:
+                    # On unexpected errors, requeue this msg
+                    self._pending_msgs.setdefault(chan_id, []).append(msg)
+                    logger.exception("[⚠️] Error forwarding buffered msg; requeued")
+
+        # ---- Thread messages ----
+        if self._shutting_down:
+            return
+
+        thread_snapshot = list(self._pending_thread_msgs)
+        self._pending_thread_msgs = []
+
+        for i, data in enumerate(thread_snapshot):
+            if self._shutting_down:
+                # put back the rest
+                remaining = thread_snapshot[i:]
+                if remaining:
+                    self._pending_thread_msgs.extend(remaining)
+                return
+            try:
+                await self.handle_thread_message(data)
+            except Exception:
+                self._pending_thread_msgs.append(data)
+                logger.exception("[⚠️] Error forwarding buffered thread msg; requeued")
+        
+    async def _flush_channel_buffer(self, original_id: int) -> None:
+        """Flush just the buffered messages for a single source channel."""
+        if self._shutting_down:
+            return
+
+        msgs = self._pending_msgs.pop(original_id, [])
+        for i, m in enumerate(list(msgs)):
+            if self._shutting_down:
+                remaining = msgs[i:]
+                if remaining:
+                    self._pending_msgs.setdefault(original_id, []).extend(remaining)
+                return
+            try:
+                await self.forward_message(m)
+            except Exception:
+                # Requeue on error
+                self._pending_msgs.setdefault(original_id, []).append(m)
+                logger.exception("[⚠️] Error forwarding buffered msg for #%s; requeued", original_id)
+
+    async def _flush_thread_parent_buffer(self, parent_original_id: int) -> None:
+        """Flush queued thread messages whose parent is now available."""
+        if self._shutting_down or not self._pending_thread_msgs:
+            return
+
+        # Split first, then mutate the queue once
+        to_send: list[dict] = []
+        remaining: list[dict] = []
         for data in list(self._pending_thread_msgs):
-            await self.handle_thread_message(data)
-        self._pending_thread_msgs.clear()
+            if data.get("thread_parent_id") == parent_original_id:
+                to_send.append(data)
+            else:
+                remaining.append(data)
+
+        # Commit the new queue before doing any awaits
+        self._pending_thread_msgs = remaining
+
+        # Now deliver the matched items
+        for data in to_send:
+            if self._shutting_down:
+                return
+            try:
+                await self.handle_thread_message(data)
+            except Exception:
+                logger.exception("[⚠️] Failed forwarding queued thread msg; requeuing")
+                # Optional: requeue so it isn't lost
+                self._pending_thread_msgs.append(data)
 
     def _parse_sitemap(self, sitemap: Dict) -> List[Dict]:
         """
@@ -1291,6 +1011,8 @@ class ServerReceiver:
         `category`.  If the category or guild is at capacity, it falls back to
         standalone (category=None).  Returns the created channel object.
         """
+        if self._shutting_down:
+            return
         if not self._can_create_in_category(guild, category):
             cat_label = category.name if category else "<root>"
             logger.warning(
@@ -1463,6 +1185,8 @@ class ServerReceiver:
         return cat, True
     
     async def _create_webhook_safely(self, ch, name, avatar_bytes):
+        if self._shutting_down:
+            return
         async with self._new_webhook_gate:
             rem = self.ratelimit.remaining(ActionType.WEBHOOK_CREATE)
             logger.debug("NEW_WEBHOOK pre-acquire cooldown remaining: %.2fs", rem)
@@ -1485,6 +1209,8 @@ class ServerReceiver:
         If a mapping already exists and is valid, it returns the existing channel and webhook.
         Otherwise, it creates a new channel and webhook, updates the database, and returns the new mapping.
         """
+        if self._shutting_down:
+            return
         category = None
         if parent_id is not None:
             category, _ = await self._ensure_category(guild, parent_id, parent_name)
@@ -1524,6 +1250,9 @@ class ServerReceiver:
                         "cloned_parent_category_id":   category.id if category else None,
                         "channel_type": channel_type,
                     }
+                    await self._flush_channel_buffer(original_id)
+                    await self._flush_thread_parent_buffer(original_id)
+                    self._unmapped_warned.discard(original_id)
                     return original_id, clone_id, url
 
                 # stale mapping—purge and fall through
@@ -1554,6 +1283,8 @@ class ServerReceiver:
             "cloned_parent_category_id":   category.id if category else None,
              "channel_type": channel_type,
         }
+        await self._flush_channel_buffer(original_id)
+        await self._flush_thread_parent_buffer(original_id)
         return original_id, ch.id, url
 
     async def _handle_master_channel_moves(
@@ -1634,6 +1365,8 @@ class ServerReceiver:
 
     async def _get_default_avatar_bytes(self) -> Optional[bytes]:
         """Fetch (and cache) the default webhook avatar."""
+        if self._shutting_down:
+            return
         if self._default_avatar_bytes is None:
             url = self.config.DEFAULT_WEBHOOK_AVATAR_URL
             if not url:
@@ -1658,6 +1391,8 @@ class ServerReceiver:
         channel mapping. If the webhook is missing or invalid, it creates a new webhook
         for the corresponding cloned channel and updates the database and internal mapping.
         """
+        if self._shutting_down:
+            return
         # 1) lookup the DB row
         row = self.chan_map.get(original_id)
         if not row:
@@ -1692,7 +1427,7 @@ class ServerReceiver:
             guild     = self.bot.get_guild(self.clone_guild_id)
             ch        = guild.get_channel(cloned_id) if guild else None
             if not ch:
-                logger.error(
+                logger.debug(
                     "[⛔] Cloned channel %s not found for #%s; cannot recreate webhook.",
                     cloned_id, original_id
                 )
@@ -1722,6 +1457,8 @@ class ServerReceiver:
                     fresh["original_channel_name"], original_id
                 )
                 self.chan_map[original_id]["channel_webhook_url"] = new_url
+                await self._flush_channel_buffer(original_id)
+                await self._flush_thread_parent_buffer(original_id)
                 return new_url
 
             except Exception:
@@ -1735,6 +1472,8 @@ class ServerReceiver:
         cloned thread in the cloned guild. If the cloned thread or its parent channel does not
         exist yet, the message is queued for later processing.
         """
+        if self._shutting_down:
+            return
         # ensure clone guild
         guild = self.bot.get_guild(self.clone_guild_id)
         if not guild:
@@ -1897,6 +1636,8 @@ class ServerReceiver:
         Handles the deletion of a thread in the host server and optionally deletes
         the corresponding cloned thread in the cloned server.
         """
+        if self._shutting_down:
+            return
         orig_thread_id = data["thread_id"]
         delete_remote = getattr(self.config, "DELETE_CLONED_THREADS", True)
 
@@ -1960,6 +1701,8 @@ class ServerReceiver:
         This method is triggered when a thread is renamed in the host guild. It ensures
         that the corresponding thread in the cloned guild is renamed to match the new name.
         """
+        if self._shutting_down:
+            return
         orig_thread_id = data["thread_id"]
         new_name = data["new_name"]
         old_name = data["old_name"]
@@ -2100,24 +1843,31 @@ class ServerReceiver:
 
         return self._m_ch.sub(repl, content)
 
+    def _sanitize_inline(self, s: str | None) -> str | None:
+        if not s:
+            return s
+        s = self._replace_emoji_ids(s)
+        s = self._remap_channel_mentions(s)
+        return s
+
     def _build_webhook_payload(self, msg: Dict) -> dict:
         """
         Constructs a webhook payload from a given message dictionary.
-        This method processes the message content, attachments, and embeds to 
-        generate a payload suitable for sending to a webhook. It also replaces 
-        custom emoji IDs in the text and embed fields.
+        Processes text, attachments, embeds, channel mentions, and stickers (as image embeds).
+        Also replaces custom emoji IDs in text and embed fields.
         """
         # 1) Build up the text blob
-        text = msg.get("content", "")
-        text = self._replace_emoji_ids(text) # Replace emoji IDs with cloned ones
-        text = self._remap_channel_mentions(text) # Remap channel mentions
-        for att in msg.get("attachments", []):
-            if att["url"] not in text:
-                text += f"\n{att['url']}"
+        text = self._sanitize_inline(msg.get("content", "") or "")
 
-        raw_embeds = msg.get("embeds", [])
+        for att in msg.get("attachments", []) or []:
+            url = att.get("url")
+            if url and url not in text:
+                text += f"\n{url}"
+
+        raw_embeds = msg.get("embeds", []) or []
         embeds: list[Embed] = []
 
+        # Convert raw embeds; push heavy media URLs into text if needed
         for raw in raw_embeds:
             if isinstance(raw, dict):
                 e_type = raw.get("type")
@@ -2126,48 +1876,50 @@ class ServerReceiver:
                     if page_url not in text:
                         text += f"\n{page_url}"
                     continue
-
                 try:
                     embeds.append(Embed.from_dict(raw))
                 except Exception as e:
                     logger.warning("[⚠️] Could not convert embed dict to Embed: %s", e)
-
             elif isinstance(raw, Embed):
                 embeds.append(raw)
 
-        # Replace custom emoji IDs in embeds
+        # sanitize embeds with clone guild replacements
         for e in embeds:
-            if e.description:
-                e.description = self._replace_emoji_ids(e.description)
+            # top-level text
+            if getattr(e, "description", None):
+                e.description = self._sanitize_inline(e.description)
             if getattr(e, "title", None):
-                e.title = self._replace_emoji_ids(e.title)
-            if e.footer and getattr(e.footer, "text", None):
-                e.footer.text = self._replace_emoji_ids(e.footer.text)
-            for f in getattr(e, "fields", []):
-                if f.name:
-                    f.name = self._replace_emoji_ids(f.name)
-                if f.value:
-                    f.value = self._replace_emoji_ids(f.value)
+                e.title = self._sanitize_inline(e.title)
+
+            # footer
+            if getattr(e, "footer", None) and getattr(e.footer, "text", None):
+                e.footer.text = self._sanitize_inline(e.footer.text)
+
+            # author
+            if getattr(e, "author", None) and getattr(e.author, "name", None):
+                e.author.name = self._sanitize_inline(e.author.name)
+
+            # fields
+            for f in getattr(e, "fields", []) or []:
+                if getattr(f, "name", None):
+                    f.name = self._sanitize_inline(f.name)
+                if getattr(f, "value", None):
+                    f.value = self._sanitize_inline(f.value)
 
         base = {
-            "username": msg["author"],
+            "username": msg.get("author") or "Unknown",
             "avatar_url": msg.get("avatar_url"),
         }
 
+        # If content too long, move it into an embed
         if len(text) > 2000:
             long_embed = Embed(description=text[:4096])
-            return {
-                **base,
-                "content": None,
-                "embeds": [long_embed] + embeds
-            }
+            return {**base, "content": None, "embeds": [long_embed] + embeds}
 
-        payload = {
-            **base,
-            "content": text or None,
-            "embeds": embeds
-        }
+        # Normal payload
+        payload = {**base, "content": (text or None), "embeds": embeds}
         return payload
+    
 
     async def forward_message(self, msg: Dict):
         """
@@ -2178,6 +1930,9 @@ class ServerReceiver:
         - Validates the payload before sending to ensure it is properly formatted.
         - Handles rate limiting and retries in case of certain HTTP errors (e.g., 404).
         """
+        if self._shutting_down:
+            return
+        
         source_id = msg["channel_id"]
 
         # Lookup mapping
@@ -2189,12 +1944,32 @@ class ServerReceiver:
 
         # Buffer if sync in progress or no mapping yet
         if mapping is None:
-            logger.info(
-                "[⌛] No mapping yet for channel %s (%s); msg from %s is queued and will be sent after sync",
-                msg["channel_name"], msg["channel_id"], msg["author"],
+            # serialize the "log once" check to avoid duplicate logs under concurrency
+            async with self._warn_lock:
+                if source_id not in self._unmapped_warned:
+                    logger.info(
+                        "[⌛] No mapping yet for channel %s (%s); msg from %s is queued and will be sent after sync",
+                        msg["channel_name"], msg["channel_id"], msg["author"],
+                    )
+                    self._unmapped_warned.add(source_id)
+                    
+        # Stickers logic: try cloned -> standard -> webhook image-embed fallback
+        stickers = msg.get("stickers") or []
+        if stickers:
+            guild = self.bot.get_guild(self.clone_guild_id)
+            ch = guild.get_channel(mapping["cloned_channel_id"]) if (guild and mapping) else None
+
+            handled = await self.stickers.send_with_fallback(
+                receiver=self,
+                ch=ch,
+                stickers=stickers,
+                mapping=mapping,
+                msg=msg,
+                source_id=source_id
             )
-            self._pending_msgs.setdefault(source_id, []).append(msg)
-            return
+
+            if handled:
+                return
 
         # Recreate missing webhook if needed
         if not url:
@@ -2292,11 +2067,12 @@ class ServerReceiver:
                     "[⛔] Failed to send to #%s (status %s): %s",
                     msg["channel_name"], e.status, e.text
                 )
-
+                
     async def _shutdown(self):
         """
         Asynchronously shuts down the server and performs cleanup tasks.
         """
+        self._shutting_down = True
         logger.info("Shutting down server...")
         if self._ws_task is not None:
             self._ws_task.cancel()
