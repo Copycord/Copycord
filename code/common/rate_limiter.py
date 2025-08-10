@@ -9,7 +9,7 @@ class ActionType(Enum):
     EDIT_CHANNEL = "edit_channel"
     DELETE_CHANNEL = "delete_channel"
     THREAD = "thread"
-    EMOJI_CREATE = "emoji_create"
+    EMOJI = "emoji"
     STICKER_CREATE = "sticker_create"
 
 class RateLimiter:
@@ -86,7 +86,7 @@ class RateLimitManager:
             ActionType.EDIT_CHANNEL: (3, 15.0),
             ActionType.DELETE_CHANNEL: (3, 15.0),
             ActionType.THREAD: (2, 5.0),
-            ActionType.EMOJI_CREATE: (2, 60.0),
+            ActionType.EMOJI: (2, 60.0),
             ActionType.STICKER_CREATE: (2, 60.0),
         }
         self._limiters: Dict[ActionType, RateLimiter] = {

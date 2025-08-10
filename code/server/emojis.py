@@ -85,7 +85,7 @@ class EmojiManager:
             cloned = discord.utils.get(guild.emojis, id=row["cloned_emoji_id"])
             if cloned:
                 try:
-                    await self.ratelimit.acquire(ActionType.EMOJI_CREATE)
+                    await self.ratelimit.acquire(ActionType.EMOJI)
                     await cloned.delete()
                     deleted += 1
                     logger.info(f"[😊] Deleted emoji {row['cloned_emoji_name']}")
@@ -112,7 +112,7 @@ class EmojiManager:
             # Repair manual rename in clone
             if mapping and cloned and cloned.name != name:
                 try:
-                    await self.ratelimit.acquire(ActionType.EMOJI_CREATE)
+                    await self.ratelimit.acquire(ActionType.EMOJI)
                     await cloned.edit(name=name)
                     renamed += 1
                     logger.info(f"[😊] Restored emoji {cloned.name} → {name}")
@@ -124,7 +124,7 @@ class EmojiManager:
             # Upstream rename
             if mapping and cloned and mapping["original_emoji_name"] != name:
                 try:
-                    await self.ratelimit.acquire(ActionType.EMOJI_CREATE)
+                    await self.ratelimit.acquire(ActionType.EMOJI)
                     await cloned.edit(name=name)
                     renamed += 1
                     logger.info(f"[😊] Renamed emoji {mapping['original_emoji_name']} → {name}")
@@ -166,7 +166,7 @@ class EmojiManager:
 
             # Create
             try:
-                await self.ratelimit.acquire(ActionType.EMOJI_CREATE)
+                await self.ratelimit.acquire(ActionType.EMOJI)
                 created_emo = await guild.create_custom_emoji(name=name, image=raw)
                 created += 1
                 logger.info(f"[😊] Created emoji {name}")

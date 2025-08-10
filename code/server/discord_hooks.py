@@ -6,7 +6,7 @@ log = logging.getLogger("discord_hooks")
 
 _ROUTE_MAP: Tuple[Tuple[re.Pattern, ActionType], ...] = (
     (re.compile(r"/channels/\{channel_id\}/webhooks"), ActionType.WEBHOOK_CREATE),
-    (re.compile(r"/guilds/\{guild_id\}/emojis"),        ActionType.EMOJI_CREATE),
+    (re.compile(r"/guilds/\{guild_id\}/emojis"),        ActionType.EMOJI),
     (re.compile(r"/guilds/\{guild_id\}/stickers"),        ActionType.STICKER_CREATE),
     (re.compile(r"/guilds/\{guild_id\}/channels"),      ActionType.CREATE_CHANNEL),
     (re.compile(r"/channels/\{channel_id\}"),           ActionType.EDIT_CHANNEL), 
