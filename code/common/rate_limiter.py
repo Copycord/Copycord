@@ -10,7 +10,7 @@ class ActionType(Enum):
     DELETE_CHANNEL = "delete_channel"
     THREAD = "thread"
     EMOJI_CREATE = "emoji_create"
-    STICKER_CREATE = "sticker_create"  # Duplicate, but kept for compatibility
+    STICKER_CREATE = "sticker_create"
 
 class RateLimiter:
     def __init__(self, max_rate: int, time_window: float):
