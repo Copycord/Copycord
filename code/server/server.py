@@ -102,6 +102,7 @@ class ServerReceiver:
         self.cat_map: dict[int, dict] = {}
         self.chan_map: dict[int, dict] = {}
         self._unmapped_warned: set[int] = set()
+        self._unmapped_threads_warned: set[int] = set()
         self._warn_lock = asyncio.Lock()
         self._shutting_down = False
         orig_on_connect = self.bot.on_connect
@@ -1482,11 +1483,24 @@ class ServerReceiver:
 
         # parent channel mapping
         self._load_mappings()
-        chan_map = self.chan_map.get(data["thread_parent_id"])
+        orig_tid  = int(data["thread_id"])
+        parent_id = int(data["thread_parent_id"])
+
+        chan_map = self.chan_map.get(parent_id)
         if not chan_map:
-            logger.info("[⌛] No mapping for #%s; adding to queue, waiting for next sync", data["channel_name"])
+            async with self._warn_lock:
+                if orig_tid not in self._unmapped_threads_warned:
+                    logger.info(
+                        "[⌛] No mapping yet for thread '%s' (thread_id=%s, parent=%s); msg from %s queued until after sync",
+                        data.get("thread_name", "<unnamed>"),
+                        orig_tid,
+                        data.get("thread_parent_name") or data.get("channel_name") or parent_id,
+                        data.get("author", "<unknown>"),
+                    )
+                    self._unmapped_threads_warned.add(orig_tid)
             self._pending_thread_msgs.append(data)
             return
+
 
         cloned_parent = guild.get_channel(chan_map["cloned_channel_id"])
         cloned_id = chan_map["cloned_channel_id"]
@@ -1940,11 +1954,11 @@ class ServerReceiver:
         if mapping is None:
             self._load_mappings()
             mapping = self.chan_map.get(source_id)
+            
         url = mapping["channel_webhook_url"] if mapping else None
 
         # Buffer if sync in progress or no mapping yet
         if mapping is None:
-            # serialize the "log once" check to avoid duplicate logs under concurrency
             async with self._warn_lock:
                 if source_id not in self._unmapped_warned:
                     logger.info(
@@ -1952,6 +1966,8 @@ class ServerReceiver:
                         msg["channel_name"], msg["channel_id"], msg["author"],
                     )
                     self._unmapped_warned.add(source_id)
+            self._pending_msgs.setdefault(source_id, []).append(msg)
+            return
                     
         # Stickers logic: try cloned -> standard -> webhook image-embed fallback
         stickers = msg.get("stickers") or []
@@ -1972,7 +1988,7 @@ class ServerReceiver:
                 return
 
         # Recreate missing webhook if needed
-        if not url:
+        if mapping and not url:
             if self._sync_lock.locked():
                 logger.info(
                     "[⌛] Sync in progress; message in #%s from %s is queued and will be sent after sync",
