@@ -124,7 +124,6 @@ class ClientListener:
 
         return None
 
-
     async def build_and_send_sitemap(self):
         """
         Asynchronously builds and sends a sitemap of the Discord guild to the server.
@@ -186,7 +185,7 @@ class ClientListener:
             guild_sticker_type_val = getattr(discord.StickerType, "guild").value
         except Exception:
             guild_sticker_type_val = 1
- 
+
         stickers_payload = []
         for s in fetched_stickers:
             stype = _enum_int(getattr(s, "type", None), default=guild_sticker_type_val)
@@ -453,7 +452,7 @@ class ClientListener:
             return match.group(0)
 
         return self._m_user.sub(repl, content)
-    
+
     def _sanitize_inline(
         self,
         s: str | None,
@@ -465,7 +464,7 @@ class ClientListener:
         if message:
             s = self._humanize_user_mentions(s, message, id_to_name_override=id_map)
         return s
-    
+
     def _sanitize_embed_dict(
         self,
         d: dict,
@@ -478,39 +477,51 @@ class ClientListener:
         if "title" in e:
             e["title"] = self._sanitize_inline(e.get("title"), message, id_map)
         if "description" in e:
-            e["description"] = self._sanitize_inline(e.get("description"), message, id_map)
+            e["description"] = self._sanitize_inline(
+                e.get("description"), message, id_map
+            )
 
         # author
         if isinstance(e.get("author"), dict) and "name" in e["author"]:
             e["author"] = dict(e["author"])
-            e["author"]["name"] = self._sanitize_inline(e["author"].get("name"), message, id_map)
+            e["author"]["name"] = self._sanitize_inline(
+                e["author"].get("name"), message, id_map
+            )
 
         # footer
         if isinstance(e.get("footer"), dict) and "text" in e["footer"]:
             e["footer"] = dict(e["footer"])
-            e["footer"]["text"] = self._sanitize_inline(e["footer"].get("text"), message, id_map)
+            e["footer"]["text"] = self._sanitize_inline(
+                e["footer"].get("text"), message, id_map
+            )
 
         # fields
         if isinstance(e.get("fields"), list):
             new_fields = []
             for f in e["fields"]:
                 if not isinstance(f, dict):
-                    new_fields.append(f); continue
+                    new_fields.append(f)
+                    continue
                 f2 = dict(f)
                 if "name" in f2:
-                    f2["name"]  = self._sanitize_inline(f2.get("name"), message, id_map)
+                    f2["name"] = self._sanitize_inline(f2.get("name"), message, id_map)
                 if "value" in f2:
-                    f2["value"] = self._sanitize_inline(f2.get("value"), message, id_map)
+                    f2["value"] = self._sanitize_inline(
+                        f2.get("value"), message, id_map
+                    )
                 new_fields.append(f2)
             e["fields"] = new_fields
 
-        return e 
-    
-    async def _build_mention_map(self, message: discord.Message, embed_dicts: list[dict]) -> dict[str, str]:
+        return e
+
+    async def _build_mention_map(
+        self, message: discord.Message, embed_dicts: list[dict]
+    ) -> dict[str, str]:
         ids: set[str] = set()
 
         def _collect(s: str | None):
-            if not s: return
+            if not s:
+                return
             ids.update(self._m_user.findall(s))
 
         # collect from content
@@ -524,7 +535,7 @@ class ClientListener:
             _collect(a.get("name"))
             f = e.get("footer") or {}
             _collect(f.get("text"))
-            for fld in (e.get("fields") or []):
+            for fld in e.get("fields") or []:
                 _collect(fld.get("name"))
                 _collect(fld.get("value"))
 
@@ -590,7 +601,9 @@ class ClientListener:
 
         raw_embeds = [e.to_dict() for e in message.embeds]
         mention_map = await self._build_mention_map(message, raw_embeds)
-        embeds  = [self._sanitize_embed_dict(e, message, mention_map) for e in raw_embeds]
+        embeds = [
+            self._sanitize_embed_dict(e, message, mention_map) for e in raw_embeds
+        ]
         content = self._sanitize_inline(content, message, mention_map)
 
         components: list[dict] = []
@@ -619,7 +632,7 @@ class ClientListener:
             ChannelType.public_thread,
             ChannelType.private_thread,
         )
-            
+
         def _enum_int(val, default=0):
             v = getattr(val, "value", val)
             try:
@@ -636,13 +649,15 @@ class ClientListener:
 
         stickers_payload = []
         for s in getattr(message, "stickers", []) or []:
-            stickers_payload.append({
-                "id": s.id,
-                "name": s.name,
-                "format_type": _enum_int(getattr(s, "format", None), 0),
-                "url": _sticker_url(s),   # <-- add this
-            })
-            
+            stickers_payload.append(
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "format_type": _enum_int(getattr(s, "format", None), 0),
+                    "url": _sticker_url(s),  # <-- add this
+                }
+            )
+
         payload = {
             "type": "thread_message" if is_thread else "message",
             "data": {
