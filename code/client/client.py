@@ -124,38 +124,6 @@ class ClientListener:
 
         return None
 
-    def _humanize_user_mentions(self, content: str, message: discord.Message) -> str:
-        """Replace <@1234> (and <@!1234>) with @DisplayName based on the host guild."""
-
-        if not content:
-            return content
-
-        # Fast path: build a dict from the known mentions in the message
-        id_to_name = {}
-        for m in message.mentions:  # type: ignore[attr-defined]
-            if isinstance(m, Member):
-                id_to_name[str(m.id)] = f"@{m.display_name or m.name}"
-            else:
-                # Fallback for discord.User
-                id_to_name[str(m.id)] = f"@{m.name}"
-
-        def repl(match: re.Match) -> str:
-            uid = match.group(1)
-            name = id_to_name.get(uid)
-            if name:
-                return name
-            # Try to resolve if it wasn't in message.mentions (rare)
-            g = message.guild
-            if g:
-                mem = g.get_member(int(uid))
-                if mem:
-                    nm = f"@{mem.display_name or mem.name}"
-                    id_to_name[uid] = nm
-                    return nm
-            # As a last resort, leave it alone
-            return match.group(0)
-
-        return self._m_user.sub(repl, content)
 
     async def build_and_send_sitemap(self):
         """
@@ -218,7 +186,7 @@ class ClientListener:
             guild_sticker_type_val = getattr(discord.StickerType, "guild").value
         except Exception:
             guild_sticker_type_val = 1
-
+ 
         stickers_payload = []
         for s in fetched_stickers:
             stype = _enum_int(getattr(s, "type", None), default=guild_sticker_type_val)
@@ -455,6 +423,142 @@ class ClientListener:
 
         return False
 
+    def _humanize_user_mentions(
+        self,
+        content: str,
+        message: discord.Message,
+        id_to_name_override: dict[str, str] | None = None,
+    ) -> str:
+        if not content:
+            return content
+
+        id_to_name = dict(id_to_name_override or {})
+
+        # seed with message.mentions (helps for content)
+        for m in getattr(message, "mentions", []):
+            name = f"@{(m.display_name if isinstance(m, Member) else m.name) or m.name}"
+            id_to_name[str(m.id)] = name
+
+        def repl(match: re.Match) -> str:
+            uid = match.group(1)
+            name = id_to_name.get(uid)
+            if name:
+                return name
+            g = message.guild
+            mem = g.get_member(int(uid)) if g else None
+            if mem:
+                nm = f"@{mem.display_name or mem.name}"
+                id_to_name[uid] = nm
+                return nm
+            return match.group(0)
+
+        return self._m_user.sub(repl, content)
+    
+    def _sanitize_inline(
+        self,
+        s: str | None,
+        message: discord.Message | None = None,
+        id_map: dict[str, str] | None = None,
+    ) -> str | None:
+        if not s:
+            return s
+        if message:
+            s = self._humanize_user_mentions(s, message, id_to_name_override=id_map)
+        return s
+    
+    def _sanitize_embed_dict(
+        self,
+        d: dict,
+        message: discord.Message,
+        id_map: dict[str, str] | None = None,
+    ) -> dict:
+        e = dict(d)
+
+        # top-level
+        if "title" in e:
+            e["title"] = self._sanitize_inline(e.get("title"), message, id_map)
+        if "description" in e:
+            e["description"] = self._sanitize_inline(e.get("description"), message, id_map)
+
+        # author
+        if isinstance(e.get("author"), dict) and "name" in e["author"]:
+            e["author"] = dict(e["author"])
+            e["author"]["name"] = self._sanitize_inline(e["author"].get("name"), message, id_map)
+
+        # footer
+        if isinstance(e.get("footer"), dict) and "text" in e["footer"]:
+            e["footer"] = dict(e["footer"])
+            e["footer"]["text"] = self._sanitize_inline(e["footer"].get("text"), message, id_map)
+
+        # fields
+        if isinstance(e.get("fields"), list):
+            new_fields = []
+            for f in e["fields"]:
+                if not isinstance(f, dict):
+                    new_fields.append(f); continue
+                f2 = dict(f)
+                if "name" in f2:
+                    f2["name"]  = self._sanitize_inline(f2.get("name"), message, id_map)
+                if "value" in f2:
+                    f2["value"] = self._sanitize_inline(f2.get("value"), message, id_map)
+                new_fields.append(f2)
+            e["fields"] = new_fields
+
+        return e 
+    
+    async def _build_mention_map(self, message: discord.Message, embed_dicts: list[dict]) -> dict[str, str]:
+        ids: set[str] = set()
+
+        def _collect(s: str | None):
+            if not s: return
+            ids.update(self._m_user.findall(s))
+
+        # collect from content
+        _collect(message.content)
+
+        # collect from embeds
+        for e in embed_dicts:
+            _collect(e.get("title"))
+            _collect(e.get("description"))
+            a = e.get("author") or {}
+            _collect(a.get("name"))
+            f = e.get("footer") or {}
+            _collect(f.get("text"))
+            for fld in (e.get("fields") or []):
+                _collect(fld.get("name"))
+                _collect(fld.get("value"))
+
+        if not ids:
+            return {}
+
+        g = message.guild
+        id_to_name: dict[str, str] = {}
+
+        for sid in ids:
+            uid = int(sid)
+            # 1) cache
+            mem = g.get_member(uid) if g else None
+            if mem:
+                id_to_name[sid] = f"@{mem.display_name or mem.name}"
+                continue
+            # 2) fetch member for display name
+            try:
+                if g:
+                    mem = await g.fetch_member(uid)
+                    id_to_name[sid] = f"@{mem.display_name or mem.name}"
+                    continue
+            except Exception:
+                pass
+            # fallback: global user (no guild display name)
+            try:
+                u = await self.bot.fetch_user(uid)
+                id_to_name[sid] = f"@{u.name}"
+            except Exception:
+                # leave unresolved; replacer will keep original token
+                pass
+
+        return id_to_name
+
     async def on_message(self, message: discord.Message):
         """
         Handles incoming Discord messages and processes them for forwarding.
@@ -484,7 +588,10 @@ class ClientListener:
             for att in message.attachments
         ]
 
-        embeds = [embed.to_dict() for embed in message.embeds]
+        raw_embeds = [e.to_dict() for e in message.embeds]
+        mention_map = await self._build_mention_map(message, raw_embeds)
+        embeds  = [self._sanitize_embed_dict(e, message, mention_map) for e in raw_embeds]
+        content = self._sanitize_inline(content, message, mention_map)
 
         components: list[dict] = []
         for comp in message.components:
@@ -512,9 +619,30 @@ class ClientListener:
             ChannelType.public_thread,
             ChannelType.private_thread,
         )
-        content = self._humanize_user_mentions(
-            content, message
-        )  # Replace user mentions with display names
+            
+        def _enum_int(val, default=0):
+            v = getattr(val, "value", val)
+            try:
+                return int(v)
+            except Exception:
+                return default
+
+        def _sticker_url(s):
+            u = getattr(s, "url", None)
+            if not u:
+                asset = getattr(s, "asset", None)
+                u = getattr(asset, "url", None) if asset else None
+            return str(u) if u else ""
+
+        stickers_payload = []
+        for s in getattr(message, "stickers", []) or []:
+            stickers_payload.append({
+                "id": s.id,
+                "name": s.name,
+                "format_type": _enum_int(getattr(s, "format", None), 0),
+                "url": _sticker_url(s),   # <-- add this
+            })
+            
         payload = {
             "type": "thread_message" if is_thread else "message",
             "data": {
@@ -532,6 +660,7 @@ class ClientListener:
                 "timestamp": str(message.created_at),
                 "attachments": attachments,
                 "components": components,
+                "stickers": stickers_payload,
                 "embeds": embeds,
                 **(
                     {
