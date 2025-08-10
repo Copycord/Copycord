@@ -293,6 +293,49 @@ class StickerManager:
             return False
         u = u.lower()
         return u.endswith((".png", ".webp", ".gif", ".apng", ".jpg", ".jpeg"))
+    
+    def lookup_original_urls(self, stickers: list[dict]) -> list[tuple[str, str]]:
+        """
+        For each incoming sticker (up to 3), try to find an original CDN URL
+        from the most recent sitemap the server received from the client.
+        Returns a list of (name, url) pairs, filtered to image URLs only.
+        """
+        if not self._last_sitemap:
+            return []
+
+        by_id: dict[int, dict] = {}
+        for row in self._last_sitemap:
+            rid = row.get("id")
+            url = row.get("url")
+            if rid is None or not url:
+                continue
+            try:
+                rid_int = int(rid)
+            except Exception:
+                continue
+            by_id[rid_int] = row
+
+        out: list[tuple[str, str]] = []
+        for s in (stickers or [])[:3]:
+            sid = s.get("id")
+            try:
+                sid_int = int(sid)
+            except Exception:
+                continue
+
+            row = by_id.get(sid_int)
+            if not row:
+                continue
+
+            url = row.get("url")
+            if not url or not self._is_image_url(url):
+                # Skip non-image formats (e.g., lottie .json) for pure image-embed fallback
+                continue
+
+            name = row.get("name") or s.get("name") or "sticker"
+            out.append((name, url))
+
+        return out
 
     async def send_with_fallback(
         self,
