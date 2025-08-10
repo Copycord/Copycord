@@ -520,7 +520,8 @@ class DBManager:
 
     def get_sticker_mapping(self, original_id: int) -> sqlite3.Row | None:
         return self.conn.execute(
-            "SELECT * FROM sticker_mappings WHERE original_sticker_id = ?", (original_id,)
+            "SELECT * FROM sticker_mappings WHERE original_sticker_id = ?",
+            (original_id,),
         ).fetchone()
 
     def upsert_sticker_mapping(
@@ -540,9 +541,3 @@ class DBManager:
             "DELETE FROM sticker_mappings WHERE original_sticker_id = ?", (orig_id,)
         )
         self.conn.commit()
-        
-    def get_sticker_mapping(self, original_id: int) -> sqlite3.Row | None:
-        return self.conn.execute(
-            "SELECT * FROM sticker_mappings WHERE original_sticker_id = ?",
-            (original_id,),
-        ).fetchone()
