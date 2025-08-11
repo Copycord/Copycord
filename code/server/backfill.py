@@ -2,7 +2,8 @@ import asyncio
 import logging
 from collections import defaultdict
 from datetime import datetime, timezone
-
+from aiohttp import ClientConnectionError, ServerDisconnectedError
+import ssl
 import discord
 
 
@@ -17,7 +18,19 @@ class BackfillManager:
         self._inflight = defaultdict(int)         
         self._by_clone: dict[int, int] = {}         
         self._rotate_pool: dict[int, list[str]] = {} 
-        self._rotate_idx: dict[int, int] = {}       
+        self._rotate_idx: dict[int, int] = {}     
+        self.semaphores: dict[int, asyncio.Semaphore] = {}
+        self._global_lock: asyncio.Lock = asyncio.Lock()
+        self._global_sync: dict | None = None
+        
+    async def on_started(self, channel_id: int):
+        cid = int(channel_id)
+        loop = asyncio.get_event_loop()
+        st = self._progress.get(cid) or {}
+        st.setdefault("started_at", loop.time())
+        st.setdefault("last_count", 0)
+        st.setdefault("delivered", 0)
+        self._progress[cid] = st
 
     def mark_backfill(self, original_id: int) -> None:
         """
@@ -95,64 +108,167 @@ class BackfillManager:
                 elapsed = int(now - st["started_at"])
                 await st["msg"].edit(content=f"📦 Backfilling… **{count}** messages (elapsed: {elapsed}s)")
                 st["last_edit_ts"] = now
-                st["last_count"] = count
+                st["last_count"] = max(int(st.get("last_count", 0)), int(count))
             except Exception:
                 pass
+            
+    def note_sent(self, channel_id: int) -> None:
+        """Increment server-side delivered count for a backfill message."""
+        cid = int(channel_id)
+        st = self._progress.get(cid)
+        if not st:
+            return
+        st["delivered"] = int(st.get("delivered", 0)) + 1
+            
+    async def shutdown(self):
+        self._flags.clear()
+        await asyncio.sleep(0.1)
+        for cid in list(self._progress.keys()):
+            try:
+                await self._clear_sink(cid, send_dm=False, delete_temp=True, quiet=True)
+            except Exception:
+                pass
+        self._progress.clear()
+        
+    async def try_begin_global_sync(self, original_id: int, user_id: int) -> tuple[bool, dict | None]:
+        """
+        Attempt to claim the global sync slot.
+        Returns (ok, conflict_info). If ok=False, conflict_info has keys: original_id, user_id, started_at
+        """
+        async with self._global_lock:
+            if self._global_sync is not None:
+                # someone else is already running a sync
+                return False, dict(self._global_sync)
+            # claim it
+            self._global_sync = {
+                "original_id": int(original_id),
+                "user_id": int(user_id),
+                "started_at": asyncio.get_event_loop().time(),
+            }
+            return True, None
+
+    async def end_global_sync(self, original_id: int) -> None:
+        """Release the global sync slot if held for this channel."""
+        async with self._global_lock:
+            if self._global_sync and self._global_sync.get("original_id") == int(original_id):
+                self._global_sync = None
+
+    def current_global_sync(self) -> dict | None:
+        """Readonly peek at the current global sync info, or None."""
+        return dict(self._global_sync) if self._global_sync else None
 
     async def on_done(self, original_id: int) -> None:
         """
         Handles the completion of a backfill operation for a specific channel.
+        Shutdown-safe and uses server-side delivered count to avoid 0 in summary.
         """
         cid = int(original_id)
-        await self._wait_drain(cid, timeout=None) 
+
+        # 1) wait until server finished forwarding all backfill messages
+        await self._wait_drain(cid, timeout=None)
+
+        # 2) clear flag; flush any buffered live messages
         self._flags.discard(cid)
         await self.r._flush_channel_buffer(cid)
 
-        st = self._progress.get(cid) or {}
-        clone_id = st.get("clone_channel_id")
-        temp_id = st.get("temp_webhook_id")
-        total = st["last_count"] if st else 0
-        elapsed_s = int(asyncio.get_event_loop().time() - st["started_at"]) if st else 0
+        st          = self._progress.get(cid) or {}
+        clone_id    = st.get("clone_channel_id")
+        temp_id     = st.get("temp_webhook_id")
+        delivered   = int(st.get("delivered", 0))
+        last_count  = int(st.get("last_count", 0))
+        total       = delivered
+        started_at  = st.get("started_at")
+        elapsed_s   = int(asyncio.get_event_loop().time() - started_at) if started_at else 0
         finished_dt = datetime.now(timezone.utc)
 
-        # DM summary if we know who invoked
-        uid = st.get("user_id") if st else None
-        if uid:
-            clone_id = st.get("clone_channel_id")
-            ch_value = f"<#{clone_id}>" if clone_id else f"Original #{cid}"
+        shutting_down = getattr(self.r, "_shutting_down", False)
+        suppress_dm   = getattr(self.r, "_suppress_backfill_dm", False)
 
+        # 3) DM summary (skip during shutdown)
+        uid = st.get("user_id")
+        if uid and not (shutting_down or suppress_dm):
+            ch_value = f"<#{clone_id}>" if clone_id else f"Original #{cid}"
             embed = discord.Embed(
                 title="💬 Backfill Complete",
-                description="Your channel messages have been cloned.",
+                description="Channel messages have been fully synced.",
                 timestamp=finished_dt,
                 color=discord.Color.green(),
             )
             embed.add_field(name="Channel", value=ch_value, inline=True)
             embed.add_field(name="Messages Cloned", value=str(total), inline=True)
             embed.add_field(name="Duration", value=self._fmt_duration(elapsed_s), inline=True)
-            
             try:
                 user = self.bot.get_user(uid) or await self.bot.fetch_user(uid)
                 await user.send(embed=embed)
                 self.log.info("[📨] DM’d backfill summary to user %s for channel %s", uid, cid)
             except Exception as e:
-                self.log.warning("[⚠️] Could not DM user %s: %s", uid, e)
-                
-        if temp_id:
+                (self.log.warning if not shutting_down else self.log.debug)(
+                    "[⚠️] Could not DM user %s: %s", uid, e
+                )
+
+        # 4) temp webhook cleanup (skip during shutdown)
+        if temp_id and not shutting_down:
             try:
-                wh = await self.bot.fetch_webhook(temp_id)
-                await wh.delete(reason="Backfill rotation cleanup")
+                if self.r.session and not self.r.session.closed:
+                    wh = await self.bot.fetch_webhook(temp_id)
+                    await wh.delete(reason="Backfill rotation cleanup")
+                else:
+                    self.log.debug("[shutdown] Skipping temp webhook delete for %s (session closed)", temp_id)
             except Exception as e:
                 self.log.warning("[⚠️] Could not delete temp webhook %s: %s", temp_id, e)
 
+        # 5) clear rotation pools
         if clone_id:
             self._rotate_pool.pop(int(clone_id), None)
             self._rotate_idx.pop(int(clone_id), None)
             self._by_clone.pop(int(clone_id), None)
 
-
+        # 6) clear sink
         await self.clear_sink(cid)
-        self.log.info("[📦] Backfill finished for #%s; buffered messages flushed", cid)
+        await self.end_global_sync(cid)
+
+        # 7) final log
+        if not shutting_down:
+            self.log.info("[📦] Backfill finished for #%s; buffered messages flushed", cid)
+        else:
+            self.log.debug("[📦] Backfill finished for #%s during shutdown; skipped DM/cleanup", cid)
+        
+    async def _clear_sink(self, channel_id: int, *, send_dm: bool, delete_temp: bool, quiet: bool):
+        st = self._progress.get(channel_id)
+        if not st:
+            return
+
+        # 1) DM summary (only if not shutting down)
+        if send_dm and not getattr(self.r, "_shutting_down", False):
+            try:
+                user = self.r.bot.get_user(st["user_id"]) or await self.r.bot.fetch_user(st["user_id"])
+                if st.get("final_embed"):
+                    await user.send(embed=st["final_embed"])
+                    self.r.logger.info("[📨] DM’d backfill summary to user %s for channel %s",
+                                       st["user_id"], channel_id)
+            except Exception as e:
+                self.r.logger.warning("[⚠️] Could not DM user %s: %s", st.get("user_id"), e)
+
+        # 2) Delete temp webhook (skip if session is closing)
+        if delete_temp:
+            url = st.get("temp_webhook_url")
+            if url:
+                try:
+                    if self.r.session and not self.r.session.closed:
+                        wh = discord.Webhook.from_url(url, session=self.r.session)
+                        await wh.delete()
+                    else:
+                        # if our session is gone, do not attempt network I/O during shutdown
+                        return
+                except (ClientConnectionError, ServerDisconnectedError, ssl.SSLError) as e:
+                    # demote to DEBUG while shutting down
+                    lvl = self.r.logger.debug if getattr(self.r, "_shutting_down", False) or quiet else self.r.logger.warning
+                    lvl("[⚠️] Could not delete temp webhook %s: %s", url, e)
+                except Exception as e:
+                    lvl = self.r.logger.debug if quiet else self.r.logger.warning
+                    lvl("[⚠️] Could not delete temp webhook %s: %s", url, e)
+
+        self._progress.pop(channel_id, None)
 
     def _on_task_done(self, cid: int, task: asyncio.Task) -> None:
         """
