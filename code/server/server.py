@@ -664,7 +664,7 @@ class ServerReceiver:
             created += 1
 
             # 2) Immediately create its webhook
-            wh = await self._create_webhook_safely(ch, "Clonecord", await self._get_default_avatar_bytes())
+            wh = await self._create_webhook_safely(ch, "Copycord", await self._get_default_avatar_bytes())
             url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
 
             # 3) Persist the mapping
@@ -1275,7 +1275,7 @@ class ServerReceiver:
                         return original_id, clone_id, wh_url
 
                     # re-create the webhook
-                    wh = await self._create_webhook_safely(ch, "Clonecord", await self._get_default_avatar_bytes())
+                    wh = await self._create_webhook_safely(ch, "Copycord", await self._get_default_avatar_bytes())
                     url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
                     self.db.upsert_channel_mapping(
                         original_id,
@@ -1310,7 +1310,7 @@ class ServerReceiver:
         # 2) brand-new channel + webhook
         kind = "news" if channel_type == ChannelType.news.value else "text"
         ch = await self._create_channel(guild, kind, original_name, category)
-        wh = await self._create_webhook_safely(ch, "Clonecord", await self._get_default_avatar_bytes())
+        wh = await self._create_webhook_safely(ch, "Copycord", await self._get_default_avatar_bytes())
         url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
 
         self.db.upsert_channel_mapping(
@@ -1484,7 +1484,7 @@ class ServerReceiver:
                 return None
             ctype = ch.type.value
             try:
-                wh = await self._create_webhook_safely(ch, "Clonecord", await self._get_default_avatar_bytes())
+                wh = await self._create_webhook_safely(ch, "Copycord", await self._get_default_avatar_bytes())
                 new_url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
 
                 # persist via direct indexing too
