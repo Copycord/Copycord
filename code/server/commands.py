@@ -544,18 +544,18 @@ class CloneCommands(commands.Cog):
     async def clone_messages(
         self,
         ctx: discord.ApplicationContext,
-        clone_channel: discord.TextChannel = Option(discord.TextChannel, "Pick the CLONED channel", required=True)
+        clone_channel: discord.TextChannel = Option(discord.TextChannel, "Pick the channel to sync", required=True)
     ):
         """
         Workflow:
         1) Resolve original (host) channel from the provided CLONED channel.
-        2) Mark the channel as 'backfilling' on the server to buffer live messages.
-        3) Register a progress sink (with user_id + clone_channel_id) so the server can DM a summary when finished.
+        2) Enforce a global single-sync gate (only one channel sync across the whole server).
+        3) Mark the channel as 'backfilling' and register a progress sink (DM summary on finish).
         4) Ask the client (via WS) to stream the full history oldest→newest.
-            """
+        """
         await ctx.defer(ephemeral=True)
 
-        # Resolve original channel id from DB mapping
+        # 1) Resolve original channel id from DB mapping
         try:
             row = self.db.conn.execute(
                 "SELECT original_channel_id FROM channel_mappings WHERE cloned_channel_id = ?",
@@ -591,36 +591,76 @@ class CloneCommands(commands.Cog):
                 ephemeral=True,
             )
 
+        # 2) GLOBAL single-sync gate (only one sync at a time across the server)
+        try:
+            ok, conflict = await receiver.backfill.try_begin_global_sync(original_id, ctx.user.id)
+        except Exception:
+            ok, conflict = False, None
+
+        if not ok:
+            # Show which channel/user currently holds the gate, if known
+            conflict_orig = int(conflict.get("original_id", 0)) if conflict else None
+            conflict_user = int(conflict.get("user_id", 0)) if conflict else None
+
+            conflict_clone_id = None
+            if conflict_orig:
+                try:
+                    row2 = self.db.conn.execute(
+                        "SELECT cloned_channel_id FROM channel_mappings WHERE original_channel_id = ?",
+                        (conflict_orig,),
+                    ).fetchone()
+                    if row2:
+                        conflict_clone_id = int(row2["cloned_channel_id"] if hasattr(row2, "__getitem__") else row2[0])
+                except Exception:
+                    pass
+
+            where = f"<#{conflict_clone_id}>" if conflict_clone_id else (f"channel `{conflict_orig}`" if conflict_orig else "another channel")
+            who = f" by <@{conflict_user}>" if conflict_user else ""
+            embed = discord.Embed(
+                title="⏳ A channel sync is already running",
+                description=f"Only one channel message sync can run at a time for this server.\nCurrent sync: {where}{who}",
+                color=discord.Color.orange(),
+            )
+            return await ctx.followup.send(embed=embed, ephemeral=True)
+
+        # 3) Mark backfill + register sink; release the global gate on failure
         try:
             receiver.backfill.mark_backfill(original_id)
             receiver.backfill.register_sink(
                 original_id,
-                msg=None,
+                msg=None,               # DM summary only
                 user_id=ctx.user.id,
                 clone_channel_id=clone_channel.id,
             )
         except Exception as e:
             logger.exception("[⛔] Failed registering backfill sink for %s: %s", original_id, e)
+            # Release global gate because we didn’t actually start
+            try:
+                await receiver.backfill.end_global_sync(original_id)
+            except Exception:
+                pass
             return await ctx.followup.send(
                 embed=self._err_embed("Internal Error", "Failed setting up progress tracking."),
                 ephemeral=True,
             )
 
+        # Notify the invoker
         await ctx.followup.send(
             embed=self._ok_embed(
                 "Starting message sync",
-                f"Cloning all messages in {clone_channel.mention}, this may take a while...\n"
-                f"Any new messages in this channel will be forwarded after the sync is finished.\n",
+                f"Cloning all messages in {clone_channel.mention} (oldest → newest)…\n"
+                f"New messages in this channel will be queued and forwarded after the sync is finished."
             ),
             ephemeral=True,
         )
 
+        # 4) Ask the client to start the backfill (oldest → newest); cleanup on error
         try:
-            await self.bot.ws_manager.send(
-                {"type": "clone_messages", "data": {"channel_id": original_id}}
-            )
+            await self.bot.ws_manager.send({"type": "clone_messages", "data": {"channel_id": original_id}})
+            logger.info("[⚡] User %s executed the 'clone_messages' command.", ctx.user.id)
         except Exception as e:
             logger.exception("[⛔] Failed to send WS backfill request for %s: %s", original_id, e)
+            # Best effort cleanup because the client did not start
             try:
                 receiver.backfill.unmark_backfill(original_id)
             except AttributeError:
@@ -629,12 +669,13 @@ class CloneCommands(commands.Cog):
                 await receiver.backfill.clear_sink(original_id)
             except Exception:
                 pass
+            try:
+                await receiver.backfill.end_global_sync(original_id)  # release global gate
+            except Exception:
+                pass
 
             return await ctx.followup.send(
-                embed=self._err_embed(
-                    "Client Unreachable",
-                    "I couldn’t contact the client to start the backfill."
-                ),
+                embed=self._err_embed("Client Unreachable", "I couldn’t contact the client to start the backfill."),
                 ephemeral=True,
             )
 
