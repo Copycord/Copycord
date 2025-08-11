@@ -2082,6 +2082,10 @@ class ServerReceiver:
             if handled:
                 if is_backfill:
                     self.backfill.note_sent(source_id)
+                    d, t = self.backfill.get_progress(source_id)
+                    suffix = f" [{d}/{t}]" if t else f" [{d}]"
+                    logger.info("[💬]%s Forwarded (stickers) to #%s from %s (%s)%s",
+                                tag, msg["channel_name"], msg["author"], msg["author_id"], suffix)
                 return
 
         # Recreate missing webhook if needed
@@ -2161,12 +2165,21 @@ class ServerReceiver:
                     avatar_url=payload.get("avatar_url"),
                     wait=True,
                 )
-                logger.info(
-                    "[💬]%s Forwarded message to #%s from %s (%s)",
-                    tag, msg["channel_name"], msg["author"], msg["author_id"]
-                )
+
                 if is_backfill:
+                    # Count a successful backfill message and log "sent / left"
                     self.backfill.note_sent(source_id)
+                    sent, total = self.backfill.get_progress(source_id)
+                    left = max(total - sent, 0)
+                    logger.info(
+                        "[💬] [msg-sync] Forwarded message to #%s from %s (%s) [%d/%d left]",
+                        msg["channel_name"], msg["author"], msg["author_id"], sent, left
+                    )
+                else:
+                    logger.info(
+                        "[💬] Forwarded message to #%s from %s (%s)",
+                        msg["channel_name"], msg["author"], msg["author_id"]
+                    )
 
             except HTTPException as e:
                 # ---- Handle 429: sleep then retry once ----
@@ -2180,6 +2193,7 @@ class ServerReceiver:
                     delay = max(0.0, float(retry_after))
                     logger.warning("[⏱️]%s 429 for #%s — sleeping %.2fs then retrying", tag, msg["channel_name"], delay)
                     await asyncio.sleep(delay)
+
                     await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=rl_key)
                     # Reuse cached webhook
                     webhook2 = self._webhooks.get(url_to_use) or Webhook.from_url(url_to_use, session=self.session)
@@ -2190,16 +2204,23 @@ class ServerReceiver:
                         avatar_url=payload.get("avatar_url"),
                         wait=True,
                     )
-                    logger.info(
-                        "[💬]%s Forwarded message to #%s from %s (%s) (after 429 retry)",
-                        tag, msg["channel_name"], msg["author"], msg["author_id"]
-                    )
+
                     if is_backfill:
                         self.backfill.note_sent(source_id)
-                    return
+                        sent, total = self.backfill.get_progress(source_id)
+                        left = max(total - sent, 0)
+                        logger.info(
+                            "[💬] [msg-sync] Forwarded message to #%s from %s (%s) (after 429 retry) [%d/%d left]",
+                            msg["channel_name"], msg["author"], msg["author_id"], sent, left
+                        )
+                    else:
+                        logger.info(
+                            "[💬]%s Forwarded message to #%s from %s (%s) (after 429 retry)",
+                            tag, msg["channel_name"], msg["author"], msg["author_id"]
+                        )
 
                 # ---- 404 recreate ----
-                if e.status == 404:
+                elif e.status == 404:
                     logger.debug("Webhook %s returned 404; attempting recreate...", url_to_use)
                     new_url = await self._recreate_webhook(source_id)
                     if not new_url:
@@ -2220,17 +2241,25 @@ class ServerReceiver:
                         avatar_url=payload.get("avatar_url"),
                         wait=True,
                     )
-                    logger.info(
-                        "[💬]%s Forwarded message to #%s from %s (%s)",
-                        tag, msg["channel_name"], msg["author"], msg["author_id"]
-                    )
+
                     if is_backfill:
                         self.backfill.note_sent(source_id)
-                    return
+                        sent, total = self.backfill.get_progress(source_id)
+                        left = max(total - sent, 0)
+                        logger.info(
+                            "[💬] [msg-sync] Forwarded message to #%s from %s (%s) [%d/%d left]",
+                            msg["channel_name"], msg["author"], msg["author_id"], sent, left
+                        )
+                    else:
+                        logger.info(
+                            "[💬]%s Forwarded message to #%s from %s (%s)",
+                            tag, msg["channel_name"], msg["author"], msg["author_id"]
+                        )
 
-                # Other HTTP errors
-                logger.error("[⛔] Failed to send to #%s (status %s): %s",
-                            msg["channel_name"], e.status, e.text)
+                # ---- Other HTTP errors ----
+                else:
+                    logger.error("[⛔] Failed to send to #%s (status %s): %s",
+                                msg["channel_name"], e.status, e.text)
 
             except (ClientError, asyncio.TimeoutError) as e:
                 # network issue → queue for later rather than drop
@@ -2239,8 +2268,6 @@ class ServerReceiver:
                 msg["__buffered__"] = True
                 self._pending_msgs.setdefault(source_id, []).append(msg)
                 return
-
-        # Gate per cloned channel during backfill; otherwise just send
         if is_backfill and clone_id:
             sem = self.backfill.semaphores.setdefault(int(clone_id), asyncio.Semaphore(1))
             async with sem:
