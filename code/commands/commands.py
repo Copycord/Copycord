@@ -535,6 +535,108 @@ class CloneCommands(commands.Cog):
             )
 
         await ctx.respond(embed=embed, ephemeral=True)
+        
+    @commands.slash_command(
+        name="clone_messages",
+        description="Clone all messages for a *cloned* channel (oldest → newest), queueing live traffic meanwhile.",
+        guild_ids=[GUILD_ID],
+    )
+    async def clone_messages(
+        self,
+        ctx: discord.ApplicationContext,
+        clone_channel: discord.TextChannel = Option(discord.TextChannel, "Pick the CLONED channel", required=True)
+    ):
+        """
+        Workflow:
+        1) Resolve original (host) channel from the provided CLONED channel.
+        2) Mark the channel as 'backfilling' on the server to buffer live messages.
+        3) Register a progress sink (with user_id + clone_channel_id) so the server can DM a summary when finished.
+        4) Ask the client (via WS) to stream the full history oldest→newest.
+            """
+        await ctx.defer(ephemeral=True)
+
+        # Resolve original channel id from DB mapping
+        try:
+            row = self.db.conn.execute(
+                "SELECT original_channel_id FROM channel_mappings WHERE cloned_channel_id = ?",
+                (clone_channel.id,),
+            ).fetchone()
+        except Exception as e:
+            logger.exception("[⛔] DB error resolving original for cloned %s: %s", clone_channel.id, e)
+            return await ctx.followup.send(
+                embed=self._err_embed("Database Error", "I couldn’t resolve the channel mapping. Please try again."),
+                ephemeral=True,
+            )
+
+        if not row:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Mapping Found",
+                    f"I don’t have a mapping for {clone_channel.mention}. Run a structure sync first."
+                ),
+                ephemeral=True,
+            )
+
+        try:
+            original_id = int(row["original_channel_id"])
+        except Exception:
+            original_id = int(row[0])
+
+        # Reach the server receiver
+        receiver = getattr(self.bot, "server", None)
+        if receiver is None:
+            logger.error("[⛔] Server receiver not available on bot")
+            return await ctx.followup.send(
+                embed=self._err_embed("Internal Error", "Server receiver is unavailable."),
+                ephemeral=True,
+            )
+
+        try:
+            receiver.backfill.mark_backfill(original_id)
+            receiver.backfill.register_sink(
+                original_id,
+                msg=None,
+                user_id=ctx.user.id,
+                clone_channel_id=clone_channel.id,
+            )
+        except Exception as e:
+            logger.exception("[⛔] Failed registering backfill sink for %s: %s", original_id, e)
+            return await ctx.followup.send(
+                embed=self._err_embed("Internal Error", "Failed setting up progress tracking."),
+                ephemeral=True,
+            )
+
+        await ctx.followup.send(
+            embed=self._ok_embed(
+                "Starting message sync",
+                f"Cloning all messages in {clone_channel.mention}, this may take a while...\n"
+                f"Any new messages in this channel will be forwarded after the sync is finished.\n",
+            ),
+            ephemeral=True,
+        )
+
+        try:
+            await self.bot.ws_manager.send(
+                {"type": "clone_messages", "data": {"channel_id": original_id}}
+            )
+        except Exception as e:
+            logger.exception("[⛔] Failed to send WS backfill request for %s: %s", original_id, e)
+            try:
+                receiver.backfill.unmark_backfill(original_id)
+            except AttributeError:
+                receiver.backfill._flags.discard(original_id)
+            try:
+                await receiver.backfill.clear_sink(original_id)
+            except Exception:
+                pass
+
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Client Unreachable",
+                    "I couldn’t contact the client to start the backfill."
+                ),
+                ephemeral=True,
+            )
 
 def setup(bot: commands.Bot):
     bot.add_cog(CloneCommands(bot))
