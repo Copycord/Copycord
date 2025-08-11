@@ -818,6 +818,17 @@ class ClientListener:
             
         sent = 0
         last_ping = 0.0
+        
+        # One-time pre-count so the server knows the total up front
+        if getattr(self, "do_precount", False):
+            total = 0
+            async for _ in ch.history(limit=None, oldest_first=True):
+                total += 1
+            # Tell the server the total message count once
+            await self.ws.send({
+                "type": "backfill_progress",
+                "data": {"channel_id": original_channel_id, "count": total}
+            })
 
         try:
             async for m in ch.history(limit=None, oldest_first=True):
