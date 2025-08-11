@@ -8,7 +8,7 @@ import time
 import logging
 from common.config import Config
 from common.db import DBManager
-from common.rate_limiter import RateLimitManager, ActionType
+from server.rate_limiter import RateLimitManager, ActionType
 
 logger = logging.getLogger("server")
 

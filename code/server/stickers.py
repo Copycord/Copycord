@@ -5,7 +5,7 @@ import asyncio
 import discord
 import aiohttp
 import logging
-from common.rate_limiter import RateLimitManager, ActionType
+from server.rate_limiter import RateLimitManager, ActionType
 
 logger = logging.getLogger("server.stickers")
 

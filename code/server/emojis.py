@@ -3,7 +3,7 @@ from typing import Tuple, List, Optional
 import asyncio, io
 import aiohttp, discord, logging
 from PIL import Image, ImageSequence
-from common.rate_limiter import RateLimitManager, ActionType
+from server.rate_limiter import RateLimitManager, ActionType
 
 logger = logging.getLogger("server.emojis")
 

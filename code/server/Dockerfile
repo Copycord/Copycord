@@ -7,7 +7,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # copy shared code + server package
 COPY common    ./common
-COPY commands    ./commands
 COPY server    ./server
 
 # make /app importable

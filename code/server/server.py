@@ -24,7 +24,7 @@ from asyncio import Queue
 from common.config import Config
 from common.websockets import WebsocketManager
 from common.db import DBManager
-from common.rate_limiter import RateLimitManager, ActionType
+from server.rate_limiter import RateLimitManager, ActionType
 from server.discord_hooks import install_discord_rl_probe
 from server.emojis import EmojiManager
 from server.stickers import StickerManager
@@ -145,7 +145,7 @@ class ServerReceiver:
                 )
 
         self.bot.on_connect = _command_sync
-        self.bot.load_extension("commands.commands")
+        self.bot.load_extension("server.commands")
 
     async def on_ready(self):
         """

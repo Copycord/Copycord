@@ -1,6 +1,6 @@
 import logging, re
 from typing import Optional, Tuple
-from common.rate_limiter import ActionType
+from server.rate_limiter import ActionType
 
 log = logging.getLogger("discord_hooks")
 
