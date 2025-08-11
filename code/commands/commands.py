@@ -101,6 +101,16 @@ class CloneCommands(commands.Cog):
             # DMs closed; nothing else we can do
             logger.warning("[verify_structure] Could not DM user; DMs are closed.")
 
+    def _ok_embed(self, title: str, description: str, *, fields=None, color=discord.Color.blurple()):
+        e = discord.Embed(title=title, description=description, color=color, timestamp=datetime.now(timezone.utc))
+        if fields:
+            for name, value, inline in fields:
+                e.add_field(name=name, value=value, inline=inline)
+        return e
+
+    def _err_embed(self, title: str, description: str):
+        return discord.Embed(title=title, description=description, color=discord.Color.red(), timestamp=datetime.now(timezone.utc))
+
     @commands.slash_command(
         name="ping_server",
         description="Show server latency and server information.",
