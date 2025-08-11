@@ -25,14 +25,44 @@ class BackfillManager:
         self._global_lock: asyncio.Lock = asyncio.Lock()
         self._global_sync: dict | None = None
         
-    async def on_started(self, channel_id: int):
-        cid = int(channel_id)
+    async def on_started(self, original_id: int) -> None:
+        """
+        Initialize server-side state for a channel backfill:
+        - mark channel as backfilling (buffers live traffic)
+        - ensure a progress sink exists
+        - initialize progress counters
+        - create a temp webhook for rotation (if we know the clone channel)
+        """
+        cid = int(original_id)
+        self._flags.add(cid)
+
+        # Ensure we have a sink; if not, create a minimal one
+        st = self._progress.get(cid)
+        if not st:
+            self.register_sink(
+                cid,
+                user_id=None,
+                clone_channel_id=None,
+                msg=None,
+            )
+            st = self._progress[cid]
+
+        # Initialize/ensure progress fields
         loop = asyncio.get_event_loop()
-        st = self._progress.get(cid) or {}
         st.setdefault("started_at", loop.time())
-        st.setdefault("last_count", 0)
-        st.setdefault("delivered", 0)
-        self._progress[cid] = st
+        st.setdefault("started_dt", datetime.now(timezone.utc))
+        st.setdefault("last_count", 0)     # client-reported count
+        st.setdefault("delivered", 0)      # server-side successful sends
+        st.setdefault("last_edit_ts", 0.0)
+        st.setdefault("temp_webhook_id", None)
+        st.setdefault("temp_webhook_url", None)
+
+        # Create a temp webhook for rotation if we know the cloned channel
+        clone_id = st.get("clone_channel_id")
+        if clone_id:
+            temp_id, temp_url = await self._ensure_temp_webhook(int(clone_id))
+            st["temp_webhook_id"] = temp_id
+            st["temp_webhook_url"] = temp_url
 
     def mark_backfill(self, original_id: int) -> None:
         """
@@ -79,23 +109,6 @@ class BackfillManager:
         cid = int(original_id)
         self._inflight[cid] += 1
         task.add_done_callback(lambda t, c=cid: self._on_task_done(c, t))
-
-    async def on_started(self, original_id: int) -> None:
-        """
-        Handles the initialization process when an operation starts.
-        """
-        cid = int(original_id)
-        self._flags.add(cid)
-        if cid not in self._progress:
-            self.register_sink(cid, user_id=None, clone_channel_id=None, msg=None)
-
-        st = self._progress.get(cid) or {}
-        clone_id = st.get("clone_channel_id")
-        if clone_id:
-            temp_id, temp_url = await self._ensure_temp_webhook(clone_id)
-            st["temp_webhook_id"] = temp_id
-            st["temp_webhook_url"] = temp_url
-
 
     async def on_progress(self, original_id: int, count: int) -> None:
         """
