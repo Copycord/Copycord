@@ -111,21 +111,25 @@ class BackfillManager:
         task.add_done_callback(lambda t, c=cid: self._on_task_done(c, t))
 
     async def on_progress(self, original_id: int, count: int) -> None:
-        """
-        Handles progress updates for a backfilling operation.
-        """
         st = self._progress.get(int(original_id))
-        if not st or not st.get("msg"):
+        if not st:
             return
-        now = asyncio.get_event_loop().time()
-        if (now - st["last_edit_ts"] >= 2.0) or (count - st["last_count"] >= 100):
-            try:
-                elapsed = int(now - st["started_at"])
-                await st["msg"].edit(content=f"📦 Backfilling… **{count}** messages (elapsed: {elapsed}s)")
-                st["last_edit_ts"] = now
-                st["last_count"] = max(int(st.get("last_count", 0)), int(count))
-            except Exception:
-                pass
+
+        # Always record the latest seen counts
+        prev = int(st.get("last_count", 0))
+        st["last_count"] = max(prev, int(count))
+        st["expected_total"] = max(int(st.get("expected_total", 0)), int(count))
+
+        # Only try to edit if we actually have a sink message
+        if st.get("msg"):
+            now = asyncio.get_event_loop().time()
+            if (now - st.get("last_edit_ts", 0.0) >= 2.0) or (count - prev >= 100):
+                try:
+                    elapsed = int(now - st["started_at"])
+                    await st["msg"].edit(content=f"📦 Backfilling… **{count}** messages (elapsed: {elapsed}s)")
+                    st["last_edit_ts"] = now
+                except Exception:
+                    pass
             
     def note_sent(self, channel_id: int) -> None:
         """Increment server-side delivered count for a backfill message."""
@@ -134,6 +138,28 @@ class BackfillManager:
         if not st:
             return
         st["delivered"] = int(st.get("delivered", 0)) + 1
+        
+
+    def update_expected_total(self, channel_id: int, total: int) -> None:
+        """Optionally set/raise an expected total (from a meta/progress message)."""
+        cid = int(channel_id)
+        st = self._progress.get(cid)
+        if not st:
+            return
+        st["expected_total"] = max(int(st.get("expected_total", 0)), int(total))
+        
+    def get_progress(self, channel_id: int) -> tuple[int, int]:
+        """
+        Return (delivered, total). If total is unknown, it may be 0.
+        We prefer 'expected_total' (from meta), otherwise fall back to last_count.
+        """
+        cid = int(channel_id)
+        st = self._progress.get(cid) or {}
+        delivered = int(st.get("delivered", 0))
+        total = int(st.get("expected_total") or st.get("last_count") or 0)
+        if total < delivered:
+            total = delivered
+        return delivered, total
             
     async def shutdown(self):
         self._flags.clear()
@@ -262,7 +288,7 @@ class BackfillManager:
                     self.r.logger.info("[📨] DM’d backfill summary to user %s for channel %s",
                                        st["user_id"], channel_id)
             except Exception as e:
-                self.r.logger.warning("[⚠️] Could not DM user %s: %s", st.get("user_id"), e)
+                self.log.warning("[⚠️] Could not DM user %s: %s", st.get("user_id"), e)
 
         # 2) Delete temp webhook (skip if session is closing)
         if delete_temp:
@@ -277,11 +303,10 @@ class BackfillManager:
                         return
                 except (ClientConnectionError, ServerDisconnectedError, ssl.SSLError) as e:
                     # demote to DEBUG while shutting down
-                    lvl = self.r.logger.debug if getattr(self.r, "_shutting_down", False) or quiet else self.r.logger.warning
+                    lvl = self.log.debug if getattr(self.r, "_shutting_down", False) or quiet else self.log.warning
                     lvl("[⚠️] Could not delete temp webhook %s: %s", url, e)
                 except Exception as e:
-                    lvl = self.r.logger.debug if quiet else self.r.logger.warning
-                    lvl("[⚠️] Could not delete temp webhook %s: %s", url, e)
+                    lvl = self.log.debug if quiet else self.log.warning
 
         self._progress.pop(channel_id, None)
 
