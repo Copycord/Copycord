@@ -16,6 +16,7 @@ _Love this project? Give it a ⭐️ and let others know!_
 > - The user account in the host server handles listening; a separate bot handles relaying, minimizing exposure
 > - Send DM announcements in realtime to specific users when a message contains a designated keyword
 > - Slash commands and community server features
+> - Clone entire channel message history 🆕
 > - Updated regularly with new feature requests
 
 
@@ -79,7 +80,7 @@ In the new folder, create `docker-compose.yml` and `.env`:
 services:
   server:
     container_name: copycord-server
-    image: ghcr.io/copycord/copycord-server:v1.6.1
+    image: ghcr.io/copycord/copycord-server:v1.7.0
     env_file:
       - .env
     volumes:
@@ -88,7 +89,7 @@ services:
 
   client:
     container_name: copycord-client
-    image: ghcr.io/copycord/copycord-client:v1.6.1
+    image: ghcr.io/copycord/copycord-client:v1.7.0
     env_file:
       - .env
     volumes:
