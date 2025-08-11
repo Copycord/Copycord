@@ -657,7 +657,6 @@ class CloneCommands(commands.Cog):
         # 4) Ask the client to start the backfill (oldest → newest); cleanup on error
         try:
             await self.bot.ws_manager.send({"type": "clone_messages", "data": {"channel_id": original_id}})
-            logger.info("[⚡] User %s executed the 'clone_messages' command.", ctx.user.id)
         except Exception as e:
             logger.exception("[⛔] Failed to send WS backfill request for %s: %s", original_id, e)
             # Best effort cleanup because the client did not start
