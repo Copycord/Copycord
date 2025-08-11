@@ -135,4 +135,19 @@ Use these commands to configure keyword-based DMs for important updates.
 
 ---
 
+### 9. `/clone_messages <#cloned_channel>`
+
+**Description:** Clones the full message history from the mapped **host** channel into the specified **cloned** channel, streaming **oldest → newest**. While the backfill runs, new (live) messages for that channel are **buffered** and sent immediately after the backfill completes. You’ll receive a **DM summary** when it’s done.
+
+**Parameters:**
+
+* `#cloned_channel` (required): The cloned channel to populate with history.
+
+**Usage Examples:**
+
+```
+/clone_messages <#general>
+```
+
+---
 > *Ensure the bot has the correct permissions and that `COMMAND_USERS` in `config` includes your user ID.*
