@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from aiohttp import ClientConnectionError, ServerDisconnectedError
 import ssl
 import discord
+from server.rate_limiter import RateLimitManager, ActionType
 
 
 class BackfillManager:
@@ -12,6 +13,7 @@ class BackfillManager:
         self.r = receiver
         self.bot = receiver.bot
         self.log = logging.getLogger("server")
+        self.ratelimit = RateLimitManager()
 
         self._flags: set[int] = set()              
         self._progress: dict[int, dict] = {}       
@@ -339,6 +341,82 @@ class BackfillManager:
         idx ^= 1
         self._rotate_idx[clone_channel_id] = idx
         return pool[idx]
+    
+    async def cleanup_orphan_temp_webhooks(self) -> None:
+        """
+        On startup, remove any temporary webhooks we created previously but didn't delete.
+        Looks for webhooks named 'Copycord Temp' in all cloned channels.
+        Safe to run even if there are none; logs what it finds.
+        """
+        try:
+            if getattr(self.r, "_shutting_down", False):
+                return
+
+            # Make sure mappings are loaded
+            self.r._load_mappings()
+
+            guild = self.bot.get_guild(self.r.clone_guild_id)
+            if not guild:
+                self.log.warning("[cleanup] Clone guild %s not available; skipping temp webhook cleanup",
+                                 self.r.clone_guild_id)
+                return
+
+            # unique set of cloned channel IDs from the current mapping
+            clone_ids = {row["cloned_channel_id"] for row in self.r.chan_map.values() if row.get("cloned_channel_id")}
+            if not clone_ids:
+                self.log.debug("[cleanup] No cloned channels in mapping; nothing to clean")
+                return
+
+            deleted = 0
+            checked = 0
+
+            for cid in clone_ids:
+                if getattr(self.r, "_shutting_down", False):
+                    break
+
+                ch = guild.get_channel(int(cid))
+                if not ch:
+                    try:
+                        ch = await self.bot.fetch_channel(int(cid))
+                    except Exception:
+                        ch = None
+                if not ch:
+                    continue
+
+                try:
+                    hooks = await ch.webhooks()
+                except Exception as e:
+                    self.log.debug("[cleanup] Could not list webhooks for #%s: %s", cid, e)
+                    continue
+
+                for wh in hooks:
+                    # Heuristic: name match, and (if available) created by this bot
+                    is_temp_name = (wh.name or "").strip().lower() == "copycord temp"
+                    made_by_us = False
+                    try:
+                        # wh.user may be None if not expanded; guard it
+                        if getattr(wh, "user", None) and getattr(wh.user, "id", None):
+                            made_by_us = (wh.user.id == self.bot.user.id)
+                    except Exception:
+                        pass
+
+                    if is_temp_name and (made_by_us or True):
+                        try:
+                            await self.ratelimit.acquire(ActionType.WEBHOOK_CREATE)
+                            await wh.delete(reason="Startup cleanup of orphan temp webhook")
+                            deleted += 1
+                            self.log.info("[🧹] Deleted orphan temp webhook %s in #%s", wh.id, ch.name)
+                        except Exception as e:
+                            self.log.warning("[⚠️] Failed to delete temp webhook %s in #%s: %s", wh.id, ch.name, e)
+
+                checked += 1
+                await asyncio.sleep(0)  # yield to loop
+
+            self.log.debug("[🧹] Temp webhook cleanup complete: checked %d channels, deleted %d webhooks",
+                          checked, deleted)
+
+        except Exception:
+            self.log.exception("[cleanup] Unexpected error while cleaning temp webhooks")
 
 
     @staticmethod
