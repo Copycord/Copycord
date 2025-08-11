@@ -28,6 +28,7 @@ from common.rate_limiter import RateLimitManager, ActionType
 from server.discord_hooks import install_discord_rl_probe
 from server.emojis import EmojiManager
 from server.stickers import StickerManager
+from server.backfill import BackfillManager
 
 LOG_DIR = "/data"
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -74,6 +75,7 @@ class ServerReceiver:
     def __init__(self):
         self.config = Config()
         self.bot = discord.Bot(intents=discord.Intents.all())
+        self.bot.server = self 
         self.ws = WebsocketManager(
             send_url=self.config.CLIENT_WS_URL,
             listen_host=self.config.SERVER_WS_HOST,
@@ -82,6 +84,7 @@ class ServerReceiver:
         self.clone_guild_id = int(self.config.CLONE_GUILD_ID)
         self.bot.ws_manager = self.ws
         self.db = DBManager(self.config.DB_PATH)
+        self.backfill = BackfillManager(self)
         self.session: aiohttp.ClientSession = None
         self.sitemap_queue: Queue = Queue()
         self._processor_started = False
@@ -197,9 +200,16 @@ class ServerReceiver:
         elif typ == "message":
             ct = data.get("channel_type")
             if ct in (ChannelType.voice.value, ChannelType.stage_voice.value):
-                logger.debug("[🎙️] Dropping voice text-chat message for %s", data.get("channel_name"))
                 return
-            asyncio.create_task(self.forward_message(data))
+
+            if data.get("__backfill__"):
+                cid = int(data["channel_id"])
+                await self.forward_message(data)
+                st = self.backfill._progress.get(cid)
+                if st:
+                    st["last_count"] = (st.get("last_count") or 0) + 1
+            else:
+                asyncio.create_task(self.forward_message(data))
 
         elif typ == "thread_message":
             asyncio.create_task(self.handle_thread_message(data))
@@ -212,6 +222,15 @@ class ServerReceiver:
 
         elif typ == "announce":
             asyncio.create_task(self.handle_announce(data))
+
+        elif typ == "backfill_started":
+            await self.backfill.on_started(int(data.get("channel_id")))
+
+        elif typ == "backfill_progress":
+            await self.backfill.on_progress(int(data.get("channel_id")), int(data.get("count") or 0))
+
+        elif typ == "backfill_done":
+            await self.backfill.on_done(int(data.get("channel_id")))
 
         else:
             logger.warning("[⚠️] Unknown WS type '%s'", typ)
@@ -1997,6 +2016,13 @@ class ServerReceiver:
             return
         
         source_id = msg["channel_id"]
+        is_backfill = bool(msg.get("__backfill__"))
+
+        if self.backfill.is_backfilling(source_id) and not is_backfill:
+            self._pending_msgs.setdefault(source_id, []).append(msg)
+            logger.debug("[⏳] Buffered live message during backfill for #%s", source_id)
+            return
+    
         buffered = bool(msg.get("__buffered__"))
         tag = " [buffered]" if buffered else ""
 
@@ -2006,7 +2032,15 @@ class ServerReceiver:
             self._load_mappings()
             mapping = self.chan_map.get(source_id)
             
-        url = mapping["channel_webhook_url"] if mapping else None
+        url = None
+        if mapping:
+            url = mapping.get("channel_webhook_url")
+
+        # rotate during backfill if we have a temp webhook for this cloned channel
+        if url and msg.get("__backfill__"):
+            clone_id = mapping.get("cloned_channel_id") or mapping.get("clone_channel_id")
+            if clone_id:
+                url = self.backfill.choose_url(int(clone_id), url)
 
         # Buffer if sync in progress or no mapping yet
         if mapping is None:
