@@ -110,6 +110,7 @@ class ServerReceiver:
         self.chan_map: dict[int, dict] = {}
         self._unmapped_warned: set[int] = set()
         self._unmapped_threads_warned: set[int] = set()
+        self._webhooks: dict[str, Webhook] = {}
         self._warn_lock = asyncio.Lock()
         self._shutting_down = False
         orig_on_connect = self.bot.on_connect
@@ -201,13 +202,8 @@ class ServerReceiver:
             ct = data.get("channel_type")
             if ct in (ChannelType.voice.value, ChannelType.stage_voice.value):
                 return
-
             if data.get("__backfill__"):
-                cid = int(data["channel_id"])
                 await self.forward_message(data)
-                st = self.backfill._progress.get(cid)
-                if st:
-                    st["last_count"] = (st.get("last_count") or 0) + 1
             else:
                 asyncio.create_task(self.forward_message(data))
 
@@ -1551,8 +1547,7 @@ class ServerReceiver:
         self._load_mappings()
         orig_tid  = int(data["thread_id"])
         parent_id = int(data["thread_parent_id"])
-        buffered = bool(data.get("__buffered__"))
-        tag = " [buffered]" if buffered else ""
+        tag = self._log_tag(data)
 
         chan_map = self.chan_map.get(parent_id)
         if not chan_map:
@@ -2002,59 +1997,68 @@ class ServerReceiver:
         payload = {**base, "content": (text or None), "embeds": embeds}
         return payload
     
+    def _log_tag(self, data: dict) -> str:
+        """Return a short tag like ' [sync & buffered]' for backfill/buffered messages."""
+        parts = []
+        if data.get("__backfill__"):
+            parts.append("msg-sync")
+        if data.get("__buffered__"):
+            parts.append("buffered")
+        return f" [{' & '.join(parts)}]" if parts else ""
+    
 
     async def forward_message(self, msg: Dict):
         """
         Forwards a message to the appropriate channel webhook based on the channel mapping.
-        This method handles the following scenarios:
-        - Queues the message if no mapping exists for the source channel or if a sync is in progress.
-        - Attempts to recreate a missing webhook if necessary.
-        - Validates the payload before sending to ensure it is properly formatted.
-        - Handles rate limiting and retries in case of certain HTTP errors (e.g., 404).
+        Queues when mapping/sync unavailable, validates payload, and handles RL/retries.
         """
         if self._shutting_down:
             return
-        
+
+        tag = self._log_tag(msg)
+
         source_id = msg["channel_id"]
         is_backfill = bool(msg.get("__backfill__"))
 
+        # Buffer live messages while backfill is running for this source channel
         if self.backfill.is_backfilling(source_id) and not is_backfill:
+            msg["__buffered__"] = True
             self._pending_msgs.setdefault(source_id, []).append(msg)
             logger.debug("[⏳] Buffered live message during backfill for #%s", source_id)
             return
-    
-        buffered = bool(msg.get("__buffered__"))
-        tag = " [buffered]" if buffered else ""
 
         # Lookup mapping
         mapping = self.chan_map.get(source_id)
         if mapping is None:
             self._load_mappings()
             mapping = self.chan_map.get(source_id)
-            
+
         url = None
         if mapping:
             url = mapping.get("channel_webhook_url")
 
-        # rotate during backfill if we have a temp webhook for this cloned channel
-        if url and msg.get("__backfill__"):
+        # Determine cloned channel id (used for rotation & per-channel gating)
+        clone_id = None
+        if mapping:
             clone_id = mapping.get("cloned_channel_id") or mapping.get("clone_channel_id")
-            if clone_id:
-                url = self.backfill.choose_url(int(clone_id), url)
 
-        # Buffer if sync in progress or no mapping yet
+        # Rotate during backfill if we have a temp webhook for this cloned channel
+        if url and is_backfill and clone_id:
+            url = self.backfill.choose_url(int(clone_id), url)
+
+        # Buffer if no mapping yet
         if mapping is None:
             async with self._warn_lock:
                 if source_id not in self._unmapped_warned:
-                    # Buffer message and warn only once per channel to avoid spam logs
                     logger.info(
                         "[⌛] No mapping yet for channel %s (%s); msg from %s is queued and will be sent after sync",
                         msg["channel_name"], msg["channel_id"], msg["author"],
                     )
                     self._unmapped_warned.add(source_id)
+            msg["__buffered__"] = True
             self._pending_msgs.setdefault(source_id, []).append(msg)
             return
-                    
+
         # Stickers logic: try cloned -> standard -> webhook image-embed fallback
         stickers = msg.get("stickers") or []
         if stickers:
@@ -2069,8 +2073,9 @@ class ServerReceiver:
                 msg=msg,
                 source_id=source_id
             )
-
             if handled:
+                if is_backfill:
+                    self.backfill.note_sent(source_id)
                 return
 
         # Recreate missing webhook if needed
@@ -2080,32 +2085,34 @@ class ServerReceiver:
                     "[⌛] Sync in progress; message in #%s from %s is queued and will be sent after sync",
                     msg["channel_name"], msg["author"],
                 )
+                msg["__buffered__"] = True
                 self._pending_msgs.setdefault(source_id, []).append(msg)
                 return
 
-            logger.warning(
-                "[⚠️] Mapped channel %s has no webhook; attempting to recreate",
-                msg["channel_name"],
-            )
+            logger.warning("[⚠️] Mapped channel %s has no webhook; attempting to recreate", msg["channel_name"])
             url = await self._recreate_webhook(source_id)
             if not url:
                 logger.info(
                     "[⌛] Could not recreate webhook for #%s; queued message from %s",
                     msg["channel_name"], msg["author"],
                 )
+                msg["__buffered__"] = True
                 self._pending_msgs.setdefault(source_id, []).append(msg)
                 return
 
         # Build and validate payload
         payload = self._build_webhook_payload(msg)
         if payload is None:
-            logger.debug(
-                "No webhook payload built for #%s; skipping", msg["channel_name"]
-            )
+            logger.debug("No webhook payload built for #%s; skipping", msg["channel_name"])
             return
 
         if not payload.get("content") and not payload.get("embeds"):
-            logger.info("[⚠️]%s Skipping empty message in #%s", tag, msg["channel_name"])
+            logger.info(
+                "[⚠️]%s Skipping empty message in #%s (attachments=%d stickers=%d)",
+                tag, msg["channel_name"],
+                len(msg.get("attachments") or []),
+                len(msg.get("stickers") or []),
+            )
             return
 
         if payload.get("content"):
@@ -2118,41 +2125,29 @@ class ServerReceiver:
                     msg["channel_name"], e, payload["content"],
                 )
                 return
-            
-        if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession()
-        await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=url)
-        webhook = Webhook.from_url(url, session=self.session)
 
-        try:
-            await webhook.send(
-                content=payload.get("content"),
-                embeds=payload.get("embeds"),
-                username=payload.get("username"),
-                avatar_url=payload.get("avatar_url"),
-                wait=True,
-            )
-            logger.info(
-                "[💬]%s Forwarded message to #%s from %s (%s)",
-                tag, msg["channel_name"], msg["author"], msg["author_id"]
-            )
+        # --- Per-channel RL key during backfill; else per-URL ---
+        rl_key = f"channel:{clone_id}" if (is_backfill and clone_id) else url
 
-        except HTTPException as e:
-            # Handle 404 by recreating once
-            if e.status == 404:
-                logger.debug("Webhook %s returned 404; attempting recreate...", url)
-                url = await self._recreate_webhook(source_id)
-                if not url:
-                    logger.warning(
-                        "[⌛] No mapping for channel %s; msg from %s is queued and will be sent after sync",
-                        msg["channel_name"], msg["author"],
-                    )
-                    self._pending_msgs.setdefault(source_id, []).append(msg)
-                    return
+        # Prepare helpers (webhook cache + sender)
+        if not hasattr(self, "_webhooks"):
+            self._webhooks = {}  # url -> Webhook
 
-                # Retry with new webhook
-                await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=url)
-                webhook = Webhook.from_url(url, session=self.session)
+        async def _do_send(url_to_use: str):
+            from aiohttp import ClientError
+            import asyncio
+
+            if self.session is None or self.session.closed:
+                self.session = aiohttp.ClientSession()
+
+            await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=rl_key)
+
+            webhook = self._webhooks.get(url_to_use)
+            if webhook is None or webhook.session is None or webhook.session.closed:
+                webhook = Webhook.from_url(url_to_use, session=self.session)
+                self._webhooks[url_to_use] = webhook
+
+            try:
                 await webhook.send(
                     content=payload.get("content"),
                     embeds=payload.get("embeds"),
@@ -2161,45 +2156,157 @@ class ServerReceiver:
                     wait=True,
                 )
                 logger.info(
-                    "[💬] Forwarded message to #%s from %s",
-                    msg["channel_name"], msg["author"],
+                    "[💬]%s Forwarded message to #%s from %s (%s)",
+                    tag, msg["channel_name"], msg["author"], msg["author_id"]
                 )
+                if is_backfill:
+                    self.backfill.note_sent(source_id)
 
-            else:
-                logger.error(
-                    "[⛔] Failed to send to #%s (status %s): %s",
-                    msg["channel_name"], e.status, e.text
-                )
+            except HTTPException as e:
+                # ---- Handle 429: sleep then retry once ----
+                if e.status == 429:
+                    retry_after = getattr(e, "retry_after", None)
+                    if retry_after is None:
+                        try:
+                            retry_after = float(getattr(e, "response", None).headers.get("X-RateLimit-Reset-After", 0))
+                        except Exception:
+                            retry_after = 2.0
+                    delay = max(0.0, float(retry_after))
+                    logger.warning("[⏱️]%s 429 for #%s — sleeping %.2fs then retrying", tag, msg["channel_name"], delay)
+                    await asyncio.sleep(delay)
+                    await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=rl_key)
+                    # Reuse cached webhook
+                    webhook2 = self._webhooks.get(url_to_use) or Webhook.from_url(url_to_use, session=self.session)
+                    await webhook2.send(
+                        content=payload.get("content"),
+                        embeds=payload.get("embeds"),
+                        username=payload.get("username"),
+                        avatar_url=payload.get("avatar_url"),
+                        wait=True,
+                    )
+                    logger.info(
+                        "[💬]%s Forwarded message to #%s from %s (%s) (after 429 retry)",
+                        tag, msg["channel_name"], msg["author"], msg["author_id"]
+                    )
+                    if is_backfill:
+                        self.backfill.note_sent(source_id)
+                    return
+
+                # ---- 404 recreate ----
+                if e.status == 404:
+                    logger.debug("Webhook %s returned 404; attempting recreate...", url_to_use)
+                    new_url = await self._recreate_webhook(source_id)
+                    if not new_url:
+                        logger.warning(
+                            "[⌛] No mapping for channel %s; msg from %s is queued and will be sent after sync",
+                            msg["channel_name"], msg["author"],
+                        )
+                        msg["__buffered__"] = True
+                        self._pending_msgs.setdefault(source_id, []).append(msg)
+                        return
+
+                    await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=(f"channel:{clone_id}" if (is_backfill and clone_id) else new_url))
+                    webhook3 = self._webhooks.get(new_url) or Webhook.from_url(new_url, session=self.session)
+                    await webhook3.send(
+                        content=payload.get("content"),
+                        embeds=payload.get("embeds"),
+                        username=payload.get("username"),
+                        avatar_url=payload.get("avatar_url"),
+                        wait=True,
+                    )
+                    logger.info(
+                        "[💬]%s Forwarded message to #%s from %s (%s)",
+                        tag, msg["channel_name"], msg["author"], msg["author_id"]
+                    )
+                    if is_backfill:
+                        self.backfill.note_sent(source_id)
+                    return
+
+                # Other HTTP errors
+                logger.error("[⛔] Failed to send to #%s (status %s): %s",
+                            msg["channel_name"], e.status, e.text)
+
+            except (ClientError, asyncio.TimeoutError) as e:
+                # network issue → queue for later rather than drop
+                logger.warning("[🌐]%s Network error sending to #%s: %s — queued for retry",
+                            tag, msg["channel_name"], e)
+                msg["__buffered__"] = True
+                self._pending_msgs.setdefault(source_id, []).append(msg)
+                return
+
+        # Gate per cloned channel during backfill; otherwise just send
+        if is_backfill and clone_id:
+            sem = self.backfill.semaphores.setdefault(int(clone_id), asyncio.Semaphore(1))
+            async with sem:
+                await _do_send(url)
+        else:
+            await _do_send(url)
+
                 
     async def _shutdown(self):
         """
-        Asynchronously shuts down the server and performs cleanup tasks.
+        Gracefully shut down the server:
+        1) stop accepting new work (WS, flags)
+        2) cancel/wait background tasks
+        3) let backfill clean up (DM summary, temp webhooks)
+        4) close HTTP session(s) and bot last
         """
+        if getattr(self, "_shutting_down", False):
+            return
         self._shutting_down = True
-        logger.info("Shutting down server...")
-        if getattr(self, "_flush_bg_task", None):
-            self._flush_bg_task.cancel()
-            try:
-                await self._flush_bg_task
-            except asyncio.CancelledError:
-                pass
-        if self._ws_task is not None:
-            self._ws_task.cancel()
-            try:
-                await self._ws_task
-            except asyncio.CancelledError:
-                pass
-        if self._sitemap_task is not None:
-            self._sitemap_task.cancel()
-            try:
-                await self._sitemap_task
-            except asyncio.CancelledError:
-                pass
-        if self.session:
-            await self.session.close()
-        await self.bot.close()
-        logger.info("Shutdown complete.")
 
+        logger.info("Shutting down server...")
+
+        # 1) Stop inbound WS/IO if available (so no new events arrive)
+        try:
+            ws = getattr(self, "ws_manager", None) or getattr(self, "ws", None)
+            if ws and hasattr(ws, "stop"):
+                await ws.stop()
+        except Exception:
+            logger.debug("[shutdown] ws stop failed", exc_info=True)
+
+        # 2) Cancel background tasks (and wait for them to finish)
+        async def _cancel_and_wait(task, name: str):
+            if not task:
+                return
+            try:
+                task.cancel()
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                logger.debug("[shutdown] %s task error during cancel/wait", name, exc_info=True)
+
+        await _cancel_and_wait(getattr(self, "_flush_bg_task", None), "flush")
+        await _cancel_and_wait(getattr(self, "_sitemap_task", None), "sitemap")
+        await _cancel_and_wait(getattr(self, "_ws_task", None), "ws")
+
+        # Tell backfill not to DM on finish if your on_done checks this flag
+        setattr(self, "_suppress_backfill_dm", True)
+
+        # 3) Backfill cleanup BEFORE closing sessions (DM + temp webhook delete)
+        try:
+            bf = getattr(self, "backfill", None)
+            if bf and hasattr(bf, "shutdown") and callable(bf.shutdown):
+                await bf.shutdown()  # should delete temp webhooks and skip DMs if self._shutting_down == True
+        except Exception:
+            logger.debug("[shutdown] backfill cleanup failed", exc_info=True)
+
+        # 4) Close HTTP session and the bot transport LAST
+        try:
+            if getattr(self, "session", None) and not self.session.closed:
+                await self.session.close()
+        except Exception:
+            logger.debug("[shutdown] aiohttp session close failed", exc_info=True)
+
+        try:
+            if hasattr(self, "bot",) and self.bot and not self.bot.is_closed():
+                await self.bot.close()
+        except Exception:
+            logger.debug("[shutdown] bot close failed", exc_info=True)
+
+        logger.info("Shutdown complete.")
+    
     def run(self):
         """
         Starts the Copycord server and manages the event loop.
@@ -2211,7 +2318,7 @@ class ServerReceiver:
         logger.info("[✨] Starting Copycord Server %s", self.config.CURRENT_VERSION)
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(self.bot.close()))
+            loop.add_signal_handler(sig, lambda: asyncio.create_task(self._shutdown()))
 
         try:
             loop.run_until_complete(self.bot.start(self.config.SERVER_TOKEN))
