@@ -96,6 +96,10 @@ class ServerReceiver:
         self._sitemap_task: asyncio.Task | None = None
         self._pending_msgs: dict[int, list[dict]] = {}
         self._pending_thread_msgs: List[Dict] = []
+        self._flush_bg_task: asyncio.Task | None = None
+        self._flush_full_flag: bool = False
+        self._flush_targets: set[int] = set()          # original channel IDs
+        self._flush_thread_targets: set[int] = set()   # thread parent IDs
         self._webhook_locks: Dict[int, asyncio.Lock] = {}
         self._new_webhook_gate = asyncio.Lock()
         self.sticker_map: dict[int, dict] = {}
@@ -258,10 +262,6 @@ class ServerReceiver:
             else:
                 logger.info("[💾] Sync task #%d completed: %s", task_id, summary)
             finally:
-                try:
-                    await self._flush_buffers()
-                except Exception:
-                    logger.exception("Error flushing pending messages after task %d", task_id)
                 self.sitemap_queue.task_done()
 
         # Optional: drain remaining items on shutdown without processing
@@ -434,7 +434,6 @@ class ServerReceiver:
             if not guild:
                 logger.error("[⛔] Clone guild %s not found", self.clone_guild_id)
                 return "Error: clone guild missing"
-
             self._load_mappings()
             self.stickers.set_last_sitemap(sitemap.get("stickers"))
             
@@ -469,7 +468,7 @@ class ServerReceiver:
 
             parts += await self._sync_threads(guild, sitemap)
 
-        await self._flush_buffers()
+        self._schedule_flush()
         return "; ".join(parts) if parts else "No changes needed"
     
 
@@ -846,54 +845,31 @@ class ServerReceiver:
 
         return parts
 
-    async def _flush_buffers(self) -> None:
-        """Forward any buffered messages and thread-msgs."""
-        if self._shutting_down:
-            return
+    async def _flush_buffers(
+        self,
+        target_chans: set[int] | None = None,
+        target_thread_parents: set[int] | None = None,
+    ) -> None:
+        """
+        If targets provided: drain only those; otherwise drain all buffers.
+        """
+        # channels
+        if target_chans:
+            for cid in list(target_chans):
+                await self._flush_channel_buffer(cid)
+        else:
+            for cid in list(self._pending_msgs.keys()):
+                await self._flush_channel_buffer(cid)
 
-        snapshot_by_chan = self._pending_msgs
-        self._pending_msgs = {}
-
-        for chan_id, msgs in list(snapshot_by_chan.items()):
-            for i, msg in enumerate(list(msgs)):
-                if self._shutting_down:
-                    # put back the rest of this channel's snapshot
-                    remaining = msgs[i:]
-                    if remaining:
-                        self._pending_msgs.setdefault(chan_id, []).extend(remaining)
-                    # also put back all unprocessed channels
-                    for rest_id, rest_msgs in snapshot_by_chan.items():
-                        if rest_id == chan_id:
-                            continue
-                        if rest_msgs:
-                            self._pending_msgs.setdefault(rest_id, []).extend(rest_msgs)
-                    return
-                try:
-                    await self.forward_message(msg)
-                except Exception:
-                    # On unexpected errors, requeue this msg
-                    self._pending_msgs.setdefault(chan_id, []).append(msg)
-                    logger.exception("[⚠️] Error forwarding buffered msg; requeued")
-
-        # ---- Thread messages ----
-        if self._shutting_down:
-            return
-
-        thread_snapshot = list(self._pending_thread_msgs)
-        self._pending_thread_msgs = []
-
-        for i, data in enumerate(thread_snapshot):
-            if self._shutting_down:
-                # put back the rest
-                remaining = thread_snapshot[i:]
-                if remaining:
-                    self._pending_thread_msgs.extend(remaining)
-                return
-            try:
-                await self.handle_thread_message(data)
-            except Exception:
-                self._pending_thread_msgs.append(data)
-                logger.exception("[⚠️] Error forwarding buffered thread msg; requeued")
+        # thread parents
+        if target_thread_parents:
+            for pid in list(target_thread_parents):
+                await self._flush_thread_parent_buffer(pid)
+        else:
+            # drain all thread buffers (whatever your current 'all' logic is)
+            parents = {d.get("thread_parent_id") for d in self._pending_thread_msgs if d.get("thread_parent_id") is not None}
+            for pid in list(parents):
+                await self._flush_thread_parent_buffer(pid)
         
     async def _flush_channel_buffer(self, original_id: int) -> None:
         """Flush just the buffered messages for a single source channel."""
@@ -908,6 +884,7 @@ class ServerReceiver:
                     self._pending_msgs.setdefault(original_id, []).extend(remaining)
                 return
             try:
+                m["__buffered__"] = True
                 await self.forward_message(m)
             except Exception:
                 # Requeue on error
@@ -936,12 +913,80 @@ class ServerReceiver:
             if self._shutting_down:
                 return
             try:
+                data["__buffered__"] = True
                 await self.handle_thread_message(data)
             except Exception:
                 logger.exception("[⚠️] Failed forwarding queued thread msg; requeuing")
                 # Optional: requeue so it isn't lost
                 self._pending_thread_msgs.append(data)
+                
+    def _flush_done_cb(self, task: asyncio.Task) -> None:
+        """Log any exception raised by the background flush."""
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("[flush] Background flush task failed")
 
+    def _schedule_flush(
+        self,
+        chan_ids: set[int] | None = None,
+        thread_parent_ids: set[int] | None = None,
+    ) -> None:
+        """
+        - No args  -> request a full flush.
+        - With args -> request a targeted flush (coalesces with other requests).
+        If a task is already running, we just enqueue flags/targets and let it pick them up.
+        """
+        if getattr(self, "_shutting_down", False):
+            return
+
+        # record the request
+        if not chan_ids and not thread_parent_ids:
+            self._flush_full_flag = True  # upgrade everything
+        else:
+            if chan_ids:
+                self._flush_targets |= set(chan_ids)
+            if thread_parent_ids:
+                self._flush_thread_targets |= set(thread_parent_ids)
+
+        # if a worker is already running, it will notice these flags/sets
+        if self._flush_bg_task and not self._flush_bg_task.done():
+            return
+
+        async def _runner():
+            try:
+                # Keep draining until no more work was queued during the run
+                while True:
+                    full = self._flush_full_flag
+                    chans = self._flush_targets.copy()
+                    threads = self._flush_thread_targets.copy()
+
+                    # reset for new arrivals during this iteration
+                    self._flush_full_flag = False
+                    self._flush_targets.clear()
+                    self._flush_thread_targets.clear()
+
+                    if full:
+                        await self._flush_buffers()  # global drain
+                    else:
+                        await self._flush_buffers(
+                            target_chans=(chans or None),
+                            target_thread_parents=(threads or None),
+                        )
+
+                    # nothing new queued while we were flushing -> we’re done
+                    if not self._flush_full_flag and not self._flush_targets and not self._flush_thread_targets:
+                        break
+
+                    await asyncio.sleep(0)  # yield to event loop
+            except asyncio.CancelledError:
+                pass
+
+        self._flush_bg_task = asyncio.create_task(_runner())
+        self._flush_bg_task.add_done_callback(self._flush_done_cb)
+    
     def _parse_sitemap(self, sitemap: Dict) -> List[Dict]:
         """
         Parses a sitemap dictionary and extracts channel and thread information into a list of dictionaries.
@@ -1251,8 +1296,10 @@ class ServerReceiver:
                         "cloned_parent_category_id":   category.id if category else None,
                         "channel_type": channel_type,
                     }
-                    await self._flush_channel_buffer(original_id)
-                    await self._flush_thread_parent_buffer(original_id)
+                    self._schedule_flush(
+                        chan_ids={original_id},
+                        thread_parent_ids={original_id},
+                    )
                     self._unmapped_warned.discard(original_id)
                     return original_id, clone_id, url
 
@@ -1284,8 +1331,10 @@ class ServerReceiver:
             "cloned_parent_category_id":   category.id if category else None,
              "channel_type": channel_type,
         }
-        await self._flush_channel_buffer(original_id)
-        await self._flush_thread_parent_buffer(original_id)
+        self._schedule_flush(
+            chan_ids={original_id},
+            thread_parent_ids={original_id},
+        )
         return original_id, ch.id, url
 
     async def _handle_master_channel_moves(
@@ -1425,19 +1474,15 @@ class ServerReceiver:
 
             # fall through to actual creation…
             cloned_id = fresh["cloned_channel_id"]
-            guild     = self.bot.get_guild(self.clone_guild_id)
-            ch        = guild.get_channel(cloned_id) if guild else None
+            guild = self.bot.get_guild(self.clone_guild_id)
+            ch = guild.get_channel(cloned_id) if guild else None
             if not ch:
                 logger.debug(
                     "[⛔] Cloned channel %s not found for #%s; cannot recreate webhook.",
                     cloned_id, original_id
                 )
                 return None
-            cloned_id = fresh["cloned_channel_id"]
-            # derive type
-            guild = self.bot.get_guild(self.clone_guild_id)
-            ch = guild.get_channel(cloned_id) if guild else None
-            ctype = ch.type.value if ch else None
+            ctype = ch.type.value
             try:
                 wh = await self._create_webhook_safely(ch, "Clonecord", await self._get_default_avatar_bytes())
                 new_url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
@@ -1458,8 +1503,10 @@ class ServerReceiver:
                     fresh["original_channel_name"], original_id
                 )
                 self.chan_map[original_id]["channel_webhook_url"] = new_url
-                await self._flush_channel_buffer(original_id)
-                await self._flush_thread_parent_buffer(original_id)
+                self._schedule_flush(
+                    chan_ids={original_id},
+                    thread_parent_ids={original_id},
+                )
                 return new_url
 
             except Exception:
@@ -1485,6 +1532,8 @@ class ServerReceiver:
         self._load_mappings()
         orig_tid  = int(data["thread_id"])
         parent_id = int(data["thread_parent_id"])
+        buffered = bool(data.get("__buffered__"))
+        tag = " [buffered]" if buffered else ""
 
         chan_map = self.chan_map.get(parent_id)
         if not chan_map:
@@ -1572,8 +1621,8 @@ class ServerReceiver:
 
                 # If no mapping (first use or after deletion), create new
                 if thr_map is None:
-                    logger.info("[🧵] Creating thread '%s' in #%s by %s (%s)",
-                                data["thread_name"], cloned_parent.name, data["author"], data["author_id"])
+                    logger.info("[🧵]%s Creating thread '%s' in #%s by %s (%s)",
+                                tag, data["thread_name"], cloned_parent.name, data["author"], data["author_id"])
                     await self.ratelimit.acquire(ActionType.THREAD)
 
                     if isinstance(cloned_parent, ForumChannel):
@@ -1627,8 +1676,8 @@ class ServerReceiver:
 
             # subsequent messages only
             if not created:
-                logger.info("[💬] Forwarding message to thread '%s' in #%s from %s (%s)",
-                            data["thread_name"], data["thread_parent_name"], data["author"], data["author_id"])
+                logger.info("[💬]%s Forwarding message to thread '%s' in #%s from %s (%s)",
+                            tag, data["thread_name"], data["thread_parent_name"], data["author"], data["author_id"])
                 await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=webhook_url)
                 await thread_webhook.send(
                     content    = payload.get("content"),
@@ -1948,6 +1997,8 @@ class ServerReceiver:
             return
         
         source_id = msg["channel_id"]
+        buffered = bool(msg.get("__buffered__"))
+        tag = " [buffered]" if buffered else ""
 
         # Lookup mapping
         mapping = self.chan_map.get(source_id)
@@ -1961,6 +2012,7 @@ class ServerReceiver:
         if mapping is None:
             async with self._warn_lock:
                 if source_id not in self._unmapped_warned:
+                    # Buffer message and warn only once per channel to avoid spam logs
                     logger.info(
                         "[⌛] No mapping yet for channel %s (%s); msg from %s is queued and will be sent after sync",
                         msg["channel_name"], msg["channel_id"], msg["author"],
@@ -2019,7 +2071,7 @@ class ServerReceiver:
             return
 
         if not payload.get("content") and not payload.get("embeds"):
-            logger.info("[⚠️] Skipping empty message in #%s", msg["channel_name"])
+            logger.info("[⚠️]%s Skipping empty message in #%s", tag, msg["channel_name"])
             return
 
         if payload.get("content"):
@@ -2032,9 +2084,10 @@ class ServerReceiver:
                     msg["channel_name"], e, payload["content"],
                 )
                 return
-
+            
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
         await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=url)
-
         webhook = Webhook.from_url(url, session=self.session)
 
         try:
@@ -2046,8 +2099,8 @@ class ServerReceiver:
                 wait=True,
             )
             logger.info(
-                "[💬] Forwarded message to #%s from %s (%s)",
-                msg["channel_name"], msg["author"], msg["author_id"]
+                "[💬]%s Forwarded message to #%s from %s (%s)",
+                tag, msg["channel_name"], msg["author"], msg["author_id"]
             )
 
         except HTTPException as e:
@@ -2090,6 +2143,12 @@ class ServerReceiver:
         """
         self._shutting_down = True
         logger.info("Shutting down server...")
+        if getattr(self, "_flush_bg_task", None):
+            self._flush_bg_task.cancel()
+            try:
+                await self._flush_bg_task
+            except asyncio.CancelledError:
+                pass
         if self._ws_task is not None:
             self._ws_task.cancel()
             try:
