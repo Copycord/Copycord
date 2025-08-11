@@ -168,7 +168,8 @@ class ServerReceiver:
         self.emojis.set_session(self.session)
         self.stickers.set_session(self.session)
         await self.stickers.refresh_cache()
-        await self._backfill_channel_types() # Fill channel types for old rows
+        await self._backfill_channel_types()
+        asyncio.create_task(self.backfill.cleanup_orphan_temp_webhooks())
 
         logger.info(
             "[🤖] Logged in as %s and monitoring guild %s ", self.bot.user, clone_guild.name
