@@ -10,7 +10,7 @@ logger = logging.getLogger("config")
 
 class Config:
     def __init__(self):
-        self.CURRENT_VERSION = "v1.6.0"
+        self.CURRENT_VERSION = "v1.6.1"
         self.GITHUB_API_LATEST = (
             "https://api.github.com/repos/Copycord/Copycord/releases/latest"
         )
