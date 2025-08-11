@@ -351,16 +351,13 @@ class StickerManager:
         Returns True if the message was sent or queued (no further action needed by caller).
         Returns False if we prepared embeds in `msg` and the caller should continue with webhook send.
         """
-
-        # Buffer if mapping/channel isn't ready OR a sync is in progress
-        sync_locked = getattr(receiver, "_sync_lock", None)
-        if (not mapping) or (not ch) or (sync_locked and sync_locked.locked()):
+        if (not mapping) or (not ch):
+            msg["__buffered__"] = True
             receiver._pending_msgs.setdefault(source_id, []).append(msg)
             logger.info(
-                "[⏳] Queued sticker message for later: %s%s%s",
+                "[⏳] Queued sticker message for later: %s%s",
                 "mapping missing" if not mapping else "",
                 " and cloned channel not found" if mapping and not ch else "",
-                " (sync in progress)" if (sync_locked and sync_locked.locked()) else "",
             )
             return True
 
