@@ -1,6 +1,7 @@
 import asyncio
 import re
 import signal
+import unicodedata
 from datetime import datetime, timezone
 import logging
 from logging.handlers import RotatingFileHandler
@@ -65,12 +66,14 @@ class ClientListener:
         self.db = DBManager(self.config.DB_PATH)
         self.host_guild_id = int(self.config.HOST_GUILD_ID)
         self.blocked_keywords = self.db.get_blocked_keywords()
+        self._rebuild_blocklist(self.blocked_keywords)
         self.start_time = datetime.now(timezone.utc)
         self.bot = commands.Bot(command_prefix="!", self_bot=True)
         self._sync_task: Optional[asyncio.Task] = None
         self.debounce_task: Optional[asyncio.Task] = None
         self._ws_task: Optional[asyncio.Task] = None
         self._m_user = re.compile(r"<@!?(\d+)>")
+        self.do_precount = True
         self.bot.event(self.on_ready)
         self.bot.event(self.on_message)
         self.bot.event(self.on_guild_channel_create)
@@ -98,12 +101,10 @@ class ClientListener:
         data = msg.get("data", {})
 
         if typ == "settings_update":
-            self.blocked_keywords = data.get("blocked_keywords", [])
-            logger.info(
-                "[⚙️] Blocked keywords refreshed: %s",
-                ", ".join(self.blocked_keywords) or "<none>",
-            )
-            return None
+            kws = data.get("blocked_keywords") or []
+            self._rebuild_blocklist(kws)
+            logger.info("[⚙️] Updated block list: %d keywords", len(self.blocked_keywords))
+            return  # optional ack if your WS expects it
 
         elif typ == "ping":
             now = datetime.now(timezone.utc)
@@ -340,6 +341,19 @@ class ClientListener:
             attrs[name] = value
         return attrs
 
+
+    def _rebuild_blocklist(self, keywords: list[str] | None = None) -> None:
+        if keywords is None:
+            keywords = self.db.get_blocked_keywords()
+        # normalize and store canonical list
+        self.blocked_keywords = [k.lower().strip() for k in (keywords or []) if k and k.strip()]
+        # word-boundary patterns; matches "yo" but not "you"
+        self._blocked_patterns = [
+            re.compile(rf'(?<!\w){re.escape(k)}(?!\w)', re.IGNORECASE)
+            for k in self.blocked_keywords
+        ]
+        logger.debug("[⚙️] Block list now: %s", self.blocked_keywords)
+
     def should_ignore(self, message: discord.Message) -> bool:
         """
         Determines whether a given Discord message should be ignored based on various conditions.
@@ -361,14 +375,11 @@ class ClientListener:
             return True
 
         # Ignore blocked keywords
-        content = (message.content or "").lower()
-        for kw in self.blocked_keywords:
-            if kw in content:
-                logger.info(
-                    "[❌] Dropping message %s: contains blocked keyword %r",
-                    message.id,
-                    kw,
-                )
+        content = unicodedata.normalize("NFKC", message.content or "")
+        for pat in getattr(self, "_blocked_patterns", []):
+            if pat.search(content):
+                logger.info("[❌] Dropping message %s: blocked keyword matched (%s)",
+                            message.id, pat.pattern)
                 return True
 
         return False
@@ -810,9 +821,6 @@ class ClientListener:
 
         try:
             async for m in ch.history(limit=None, oldest_first=True):
-                if self.should_ignore(m):
-                    continue
-
                 raw = m.content or ""
                 system = getattr(m, "system_content", "") or ""
                 content = system if (not raw and system) else raw
@@ -870,7 +878,7 @@ class ClientListener:
                     await self.ws.send({"type": "backfill_progress", "data": {"channel_id": original_channel_id, "count": sent}})
                     last_ping = now
                     
-                await asyncio.sleep(1.5)  # Avoid hitting Discord's API too hard
+                await asyncio.sleep(2)  # Avoid hitting Discord's API too hard
         finally:
             await self.ws.send({"type": "backfill_done", "data": {"channel_id": original_channel_id}})
 
