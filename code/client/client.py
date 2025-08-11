@@ -121,6 +121,11 @@ class ClientListener:
                     "client_start_time": self.start_time.isoformat(),
                 },
             }
+            
+        elif typ == "clone_messages":
+            chan_id = int(data.get("channel_id"))
+            asyncio.create_task(self._backfill_channel(chan_id))
+            return {"ok": True}
 
         return None
 
@@ -780,6 +785,95 @@ class ClientListener:
             logger.debug(
                 "Ignored channel update for %s: non-structural change", before.id
             )
+
+
+    async def _backfill_channel(self, original_channel_id: int):
+        await self.ws.send({"type": "backfill_started", "data": {"channel_id": original_channel_id}})
+
+        guild = self.bot.get_guild(self.host_guild_id)
+        if not guild:
+            logger.error("[⛔] Host guild %s not available", self.host_guild_id)
+            await self.ws.send({"type": "backfill_done", "data": {"channel_id": original_channel_id}})
+            return
+
+        ch = guild.get_channel(original_channel_id)
+        if not ch:
+            try:
+                ch = await self.bot.fetch_channel(original_channel_id)
+            except Exception as e:
+                logger.error("[⛔] Cannot fetch channel %s: %s", original_channel_id, e)
+                await self.ws.send({"type": "backfill_done", "data": {"channel_id": original_channel_id}})
+                return
+            
+        sent = 0
+        last_ping = 0.0
+
+        try:
+            async for m in ch.history(limit=None, oldest_first=True):
+                if self.should_ignore(m):
+                    continue
+
+                raw = m.content or ""
+                system = getattr(m, "system_content", "") or ""
+                content = system if (not raw and system) else raw
+                author = "System" if (not raw and system) else m.author.name
+
+                raw_embeds = [e.to_dict() for e in m.embeds]
+                mention_map = await self._build_mention_map(m, raw_embeds)
+                embeds = [self._sanitize_embed_dict(e, m, mention_map) for e in raw_embeds]
+                content = self._sanitize_inline(content, m, mention_map)
+
+                # Stickers payload
+                def _enum_int(val, default=0):
+                    v = getattr(val, "value", val)
+                    try: return int(v)
+                    except Exception: return default
+
+                def _sticker_url(s):
+                    u = getattr(s, "url", None)
+                    if not u:
+                        asset = getattr(s, "asset", None)
+                        u = getattr(asset, "url", None) if asset else None
+                    return str(u) if u else ""
+
+                stickers_payload = []
+                for s in getattr(m, "stickers", []) or []:
+                    stickers_payload.append({
+                        "id": s.id,
+                        "name": s.name,
+                        "format_type": _enum_int(getattr(s, "format", None), 0),
+                        "url": _sticker_url(s),
+                    })
+
+                payload = {
+                    "type": "message",
+                    "data": {
+                        "channel_id": m.channel.id,
+                        "channel_name": m.channel.name,
+                        "channel_type": m.channel.type.value,
+                        "author": author,
+                        "author_id": m.author.id,
+                        "avatar_url": (str(m.author.display_avatar.url) if getattr(m.author, "display_avatar", None) else None),
+                        "content": content,
+                        "embeds": embeds,
+                        "attachments": [{"url": a.url, "filename": a.filename, "size": a.size} for a in m.attachments],
+                        "stickers": stickers_payload,
+                        "__backfill__": True,   # <—— KEY
+                    },
+                }
+
+                await self.ws.send(payload)
+                
+                sent += 1
+                now = asyncio.get_event_loop().time()
+                if sent % 50 == 0 or (now - last_ping) >= 2.0:
+                    await self.ws.send({"type": "backfill_progress", "data": {"channel_id": original_channel_id, "count": sent}})
+                    last_ping = now
+                    
+                await asyncio.sleep(1.5)  # Avoid hitting Discord's API too hard
+        finally:
+            await self.ws.send({"type": "backfill_done", "data": {"channel_id": original_channel_id}})
+
 
     async def _shutdown(self):
         """
