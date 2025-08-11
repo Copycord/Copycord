@@ -202,6 +202,11 @@ class ServerReceiver:
         elif typ == "message":
             ct = data.get("channel_type")
             if ct in (ChannelType.voice.value, ChannelType.stage_voice.value):
+                logger.debug(
+                    "[🔇] Dropping message for voice/stage_voice channel (type: %s, data: %s)",
+                    ct,
+                    data,
+                )
                 return
             if data.get("__backfill__"):
                 await self.forward_message(data)
@@ -2301,7 +2306,7 @@ class ServerReceiver:
             logger.debug("[shutdown] aiohttp session close failed", exc_info=True)
 
         try:
-            if hasattr(self, "bot",) and self.bot and not self.bot.is_closed():
+            if hasattr(self, "bot") and self.bot and not self.bot.is_closed():
                 await self.bot.close()
         except Exception:
             logger.debug("[shutdown] bot close failed", exc_info=True)
