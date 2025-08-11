@@ -453,16 +453,14 @@ class ClientListener:
 
         return self._m_user.sub(repl, content)
 
-    def _sanitize_inline(
-        self,
-        s: str | None,
-        message: discord.Message | None = None,
-        id_map: dict[str, str] | None = None,
-    ) -> str | None:
+    def _sanitize_inline(self, s, message=None, id_map=None):
         if not s:
             return s
+        # Replace {mention} with actual mention text
+        if "{mention}" in s:
+            s = s.replace("{mention}", f"@{message.author.display_name}")
         if message:
-            s = self._humanize_user_mentions(s, message, id_to_name_override=id_map)
+            s = self._humanize_user_mentions(s, message, id_map)
         return s
 
     def _sanitize_embed_dict(
