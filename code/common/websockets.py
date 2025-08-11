@@ -1,4 +1,3 @@
-# common/websockets.py
 import asyncio
 import json
 import logging

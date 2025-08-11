@@ -1,4 +1,3 @@
-# server/emojis.py
 from __future__ import annotations
 from typing import Tuple, List, Optional
 import asyncio, io

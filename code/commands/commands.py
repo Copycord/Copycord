@@ -1,4 +1,3 @@
-# commands/commands.py
 import discord
 from discord.ext import commands
 from discord import CategoryChannel, Option, Embed, Color

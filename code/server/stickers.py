@@ -222,7 +222,7 @@ class StickerManager:
         cloned stickers using a preloaded database mapping. It returns a tuple
         containing a list of `discord.StickerItem` objects and a list of sticker names.
         """
-        # Use preloaded DB mapping (caller should keep an in-memory map if desired)
+        # Use preloaded DB mapping
         rows = {r["original_sticker_id"]: r for r in self.db.get_all_sticker_mappings()}
         guild = self.bot.get_guild(self.clone_guild_id)
 
