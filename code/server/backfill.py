@@ -247,7 +247,7 @@ class BackfillManager:
 
         # final log
         if not shutting_down:
-            logger.info("[📦] Backfill finished for #%s; buffered messages flushed", cid)
+            logger.debug("[📦] Backfill finished for #%s; buffered messages flushed", cid)
         else:
             logger.debug("[📦] Backfill finished for #%s during shutdown; skipped DM/cleanup", cid)
         
