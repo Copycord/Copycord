@@ -485,7 +485,7 @@ class BackfillManager:
             # Return every candidate; picker will filter out the primary and cap to N
             return [u for (_id, u, _name) in temps]
         except Exception as e:
-            self.log.debug("[temps] list failed for #%s: %s", clone_channel_id, e)
+            logger.debug("[temps] list failed for #%s: %s", clone_channel_id, e)
             return []
         
     async def pick_url_for_send(self, clone_channel_id: int, primary_url: str, create_missing: bool):
