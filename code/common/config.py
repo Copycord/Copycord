@@ -41,7 +41,7 @@ class Config:
             "true",
             "yes",
         )
-        
+
         self.CLONE_STICKER = os.getenv("CLONE_STICKER", "false").lower() in (
             "1",
             "true",
@@ -86,71 +86,157 @@ class Config:
                 sys.exit(1)
             setattr(self, name, val)
 
-    def setup_release_watcher(self, receiver, should_dm: bool = True):
-        """Start the release watcher background task"""
-        logger.debug("Scheduling release watcher task")
-        asyncio.get_event_loop().create_task(
-            self._release_watcher_loop(receiver, should_dm)
-        )
-
-    async def _release_watcher_loop(self, receiver, should_dm: bool = True):
-        """Poll GitHub every hour and log when a new tag appears."""
+    async def setup_release_watcher(self, receiver, should_dm: bool = True):
+        """Poll GitHub and (optionally) update presence/DM if remote > local.
+        Safe to run from both server and client; client has no update_status.
+        """
         await receiver.bot.wait_until_ready()
         db = receiver.db
 
-        stored = db.get_version()
-        if stored != self.CURRENT_VERSION:
+        # Keep DB's "running version" in sync with the binary
+        if db.get_version() != self.CURRENT_VERSION:
             db.set_version(self.CURRENT_VERSION)
+
+        import re
+
+        def _norm_version(tag: str) -> str:
+            if not tag:
+                return "0.0.0"
+            tag = tag.strip()
+            if tag.lower().startswith("v"):
+                tag = tag[1:]
+            tag = re.sub(r"[^0-9.]", "", tag)
+            parts = [p for p in tag.split(".") if p.isdigit()]
+            while len(parts) < 3:
+                parts.append("0")
+            return ".".join(parts[:3])
+
+        def _ver_tuple(tag: str) -> tuple[int, int, int]:
+            a, b, c = _norm_version(tag).split(".")
+            return int(a), int(b), int(c)
+
+        def _cmp_versions(a: str, b: str) -> int:
+            ta, tb = _ver_tuple(a), _ver_tuple(b)
+            return (ta > tb) - (ta < tb)
+
+        async def _maybe_update_status(text: str):
+            """Only server has update_status; client does not."""
+            fn = getattr(receiver, "update_status", None)
+            if callable(fn):
+                try:
+                    await fn(text)
+                except Exception:
+                    logger.debug("update_status failed", exc_info=True)
+            else:
+                logger.debug("Skipping status update (receiver has no update_status)")
 
         while not receiver.bot.is_closed():
             try:
-                guild_id = getattr(receiver, "clone_guild_id", None)
-                if guild_id is None:
-                    guild_id = getattr(receiver, "host_guild_id", None)
+                guild_id = getattr(receiver, "clone_guild_id", None) or getattr(
+                    receiver, "host_guild_id", None
+                )
 
                 async with aiohttp.ClientSession() as session:
-                    async with session.get(self.GITHUB_API_LATEST) as resp:
-                        if resp.status != 200:
-                            text = await resp.text()
-                            logger.debug("GitHub API returned %d, skipping: %s", resp.status, text)
-                            await asyncio.sleep(self._release_interval)
-                            continue
-                        release = await resp.json()
+                    # Fetch recent releases (incl. prereleases)
+                    releases = []
+                    try:
+                        async with session.get(
+                            "https://api.github.com/repos/Copycord/Copycord/releases?per_page=20"
+                        ) as resp:
+                            if resp.status == 200:
+                                releases = await resp.json()
+                            else:
+                                logger.debug(
+                                    "Releases API %d: %s",
+                                    resp.status,
+                                    await resp.text(),
+                                )
+                    except Exception:
+                        logger.exception("Failed to fetch releases")
 
-                tag = release.get("tag_name")
-                url = release.get("html_url", "<no-url>")
+                    # Fetch recent tags (extra/fallback)
+                    tags = []
+                    try:
+                        async with session.get(
+                            "https://api.github.com/repos/Copycord/Copycord/tags?per_page=20"
+                        ) as resp:
+                            if resp.status == 200:
+                                tags = await resp.json()
+                            else:
+                                logger.debug(
+                                    "Tags API %d: %s", resp.status, await resp.text()
+                                )
+                    except Exception:
+                        logger.exception("Failed to fetch tags")
 
-                if not tag:
-                    logger.debug("GitHub response missing tag_name field: %r", release)
+                # Build candidate (tag, url)
+                candidates: list[tuple[str, str]] = []
+                for r in releases:
+                    t = (r.get("tag_name") or "").strip()
+                    if t:
+                        candidates.append((t, r.get("html_url") or ""))
+                for t in tags:
+                    name = (t.get("name") or "").strip()
+                    if name:
+                        candidates.append((name, t.get("zipball_url") or ""))
+
+                if not candidates:
+                    logger.debug("No version candidates; skipping this cycle")
                     await asyncio.sleep(self._release_interval)
                     continue
 
-                last = db.get_version()
-                notified = db.get_notified_version()
+                # Highest semver from candidates
+                tag, url = max(candidates, key=lambda x: _ver_tuple(x[0]))
 
-                if tag != last:
-                    logger.info("[📢] New Copycord release detected: %s (%s)", tag, url)
+                # Compare GitHub latest vs our running version
+                cmp_remote_local = _cmp_versions(tag, self.CURRENT_VERSION)
 
-                    if should_dm and guild_id:
-                        if tag != notified:
-                            guild = receiver.bot.get_guild(guild_id)
-                            if guild:
-                                try:
-                                    owner = guild.owner or await guild.fetch_member(guild.owner_id)
-                                    await owner.send(f"A new Copycord release is available: **{tag}**\n{url}")
-                                    logger.debug("Sent release DM to guild owner %s", owner)
-                                    db.set_notified_version(tag)
-                                except Exception as e:
-                                    logger.warning("[⚠️] Failed to send new version release announcement DM to guild owner: %s", e)
-                        else:
-                            logger.debug("Already notified owner of %s; skipping DM", tag)
-                    elif should_dm and not guild_id:
-                        logger.debug("Skipping DM: no guild_id found on receiver (%s)", type(receiver).__name__)
-                    else:
-                        logger.debug("Skipping DM (should_dm=False)")
+                # Visibility log if observed tag changed (independent of notifications)
+                last_seen = db.get_notified_version() or ""
+                if _norm_version(tag) != _norm_version(last_seen):
+                    logger.debug("[📢] GitHub latest observed: %s (%s)", tag, url)
 
-                    if tag == self.CURRENT_VERSION:
-                        db.set_version(tag)
+                if cmp_remote_local > 0:
+                    # Remote > local → update available (ALWAYS log this)
+                    logger.info("[⬆️] Update available: %s %s", tag, url)
+
+                    # Server-only presence
+                    await _maybe_update_status("New update available!")
+
+                    # DM only if enabled and not yet notified for this specific tag
+                    if (
+                        should_dm
+                        and guild_id
+                        and _norm_version(tag) != _norm_version(last_seen)
+                    ):
+                        guild = receiver.bot.get_guild(guild_id)
+                        if guild:
+                            try:
+                                owner = guild.owner or await guild.fetch_member(
+                                    guild.owner_id
+                                )
+                                await owner.send(
+                                    f"A new Copycord release is available: **{tag}**\n{url}"
+                                )
+                                logger.debug("Sent release DM to guild owner %s", owner)
+                                db.set_notified_version(tag)
+                            except Exception as e:
+                                logger.warning(
+                                    "[⚠️] Failed to send new version DM: %s", e
+                                )
+                else:
+                    # Equal or ahead → show local version (server only)
+                    await _maybe_update_status(f"{self.CURRENT_VERSION}")
+
+                    # If we just matched GitHub, align notified_version
+                    if cmp_remote_local == 0 and _norm_version(tag) != _norm_version(
+                        last_seen
+                    ):
+                        db.set_notified_version(tag)
+
+                # Keep DB "running version" aligned
+                if db.get_version() != self.CURRENT_VERSION:
+                    db.set_version(self.CURRENT_VERSION)
 
             except Exception:
                 logger.exception("[⛔] Error in version release watcher loop")

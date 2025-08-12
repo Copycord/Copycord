@@ -149,12 +149,21 @@ class ServerReceiver:
 
         self.bot.on_connect = _command_sync
         self.bot.load_extension("server.commands")
+        
+    async def update_status(self, message: str):
+        """Update the bot's Discord status."""
+        try:
+            await self.bot.change_presence(activity=discord.Game(name=message))
+            logger.debug("[🟢] Bot status updated to: %s", message)
+        except Exception as e:
+            logger.debug("[⚠️] Failed to update bot status: %s", e)
 
     async def on_ready(self):
         """
         Event handler that is called when the bot is ready.
         """
-        self.config.setup_release_watcher(self)
+        await self.update_status(f"{self.config.CURRENT_VERSION}")
+        asyncio.create_task(self.config.setup_release_watcher(self))
         self.session = aiohttp.ClientSession()
         # Ensure we're in the clone guild
         clone_guild = self.bot.get_guild(self.clone_guild_id)
