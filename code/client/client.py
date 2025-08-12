@@ -103,7 +103,9 @@ class ClientListener:
         if typ == "settings_update":
             kws = data.get("blocked_keywords") or []
             self._rebuild_blocklist(kws)
-            logger.info("[⚙️] Updated block list: %d keywords", len(self.blocked_keywords))
+            logger.info(
+                "[⚙️] Updated block list: %d keywords", len(self.blocked_keywords)
+            )
             return  # optional ack if your WS expects it
 
         elif typ == "ping":
@@ -122,7 +124,7 @@ class ClientListener:
                     "client_start_time": self.start_time.isoformat(),
                 },
             }
-            
+
         elif typ == "clone_messages":
             chan_id = int(data.get("channel_id"))
             asyncio.create_task(self._backfill_channel(chan_id))
@@ -319,7 +321,7 @@ class ClientListener:
                 self.host_guild_id,
             )
             sys.exit(1)
-        self.config.setup_release_watcher(self, should_dm=False)
+        asyncio.create_task(self.config.setup_release_watcher(self, should_dm=False))
         logger.info("[🤖] Logged in as %s in guild %s", self.bot.user, host_guild.name)
         if self._sync_task is None:
             self._sync_task = asyncio.create_task(self.periodic_sync_loop())
@@ -346,15 +348,16 @@ class ClientListener:
             attrs[name] = value
         return attrs
 
-
     def _rebuild_blocklist(self, keywords: list[str] | None = None) -> None:
         if keywords is None:
             keywords = self.db.get_blocked_keywords()
         # normalize and store canonical list
-        self.blocked_keywords = [k.lower().strip() for k in (keywords or []) if k and k.strip()]
+        self.blocked_keywords = [
+            k.lower().strip() for k in (keywords or []) if k and k.strip()
+        ]
         # word-boundary patterns; matches "yo" but not "you"
         self._blocked_patterns = [
-            re.compile(rf'(?<!\w){re.escape(k)}(?!\w)', re.IGNORECASE)
+            re.compile(rf"(?<!\w){re.escape(k)}(?!\w)", re.IGNORECASE)
             for k in self.blocked_keywords
         ]
         logger.debug("[⚙️] Block list now: %s", self.blocked_keywords)
@@ -383,8 +386,11 @@ class ClientListener:
         content = unicodedata.normalize("NFKC", message.content or "")
         for pat in getattr(self, "_blocked_patterns", []):
             if pat.search(content):
-                logger.info("[❌] Dropping message %s: blocked keyword matched (%s)",
-                            message.id, pat.pattern)
+                logger.info(
+                    "[❌] Dropping message %s: blocked keyword matched (%s)",
+                    message.id,
+                    pat.pattern,
+                )
                 return True
 
         return False
@@ -802,14 +808,18 @@ class ClientListener:
                 "Ignored channel update for %s: non-structural change", before.id
             )
 
-
     async def _backfill_channel(self, original_channel_id: int):
-        await self.ws.send({"type": "backfill_started", "data": {"channel_id": original_channel_id}})
+        """Grab all human/bot messages from a channel and send to server"""
+        await self.ws.send(
+            {"type": "backfill_started", "data": {"channel_id": original_channel_id}}
+        )
 
         guild = self.bot.get_guild(self.host_guild_id)
         if not guild:
             logger.error("[⛔] Host guild %s not available", self.host_guild_id)
-            await self.ws.send({"type": "backfill_done", "data": {"channel_id": original_channel_id}})
+            await self.ws.send(
+                {"type": "backfill_done", "data": {"channel_id": original_channel_id}}
+            )
             return
 
         ch = guild.get_channel(original_channel_id)
@@ -818,40 +828,83 @@ class ClientListener:
                 ch = await self.bot.fetch_channel(original_channel_id)
             except Exception as e:
                 logger.error("[⛔] Cannot fetch channel %s: %s", original_channel_id, e)
-                await self.ws.send({"type": "backfill_done", "data": {"channel_id": original_channel_id}})
+                await self.ws.send(
+                    {
+                        "type": "backfill_done",
+                        "data": {"channel_id": original_channel_id},
+                    }
+                )
                 return
-            
+
+        # ----- filter: only human/bot messages, exclude all system messages -----
+        ALLOWED_TYPES = {MessageType.default}
+        for _name in ("reply", "application_command", "context_menu_command"):
+            _t = getattr(MessageType, _name, None)
+            if _t is not None:
+                ALLOWED_TYPES.add(_t)
+
+        def _is_normal(msg) -> bool:
+            # skip if Discord flags it as system
+            try:
+                if callable(getattr(msg, "is_system", None)) and msg.is_system():
+                    return False
+            except Exception:
+                pass
+            # skip if author is a system user
+            if getattr(getattr(msg, "author", None), "system", False):
+                return False
+            # allow only specific message types
+            if getattr(msg, "type", None) not in ALLOWED_TYPES:
+                return False
+            return True
+
+        # -----------------------------------------------------------------------
+
         sent = 0
         last_ping = 0.0
-        
-        # One-time pre-count so the server knows the total up front
+
+        # One-time pre-count so the server knows the total up front (only normal messages)
         if getattr(self, "do_precount", False):
-            total = 0
-            async for _ in ch.history(limit=None, oldest_first=True):
-                total += 1
-            # Tell the server the total message count once
-            await self.ws.send({
-                "type": "backfill_progress",
-                "data": {"channel_id": original_channel_id, "count": total}
-            })
+            try:
+                total = 0
+                async for m in ch.history(limit=None, oldest_first=True):
+                    if not _is_normal(m):
+                        continue
+                    total += 1
+                await self.ws.send(
+                    {
+                        "type": "backfill_progress",
+                        "data": {"channel_id": original_channel_id, "count": total},
+                    }
+                )
+            except Exception as e:
+                logger.warning("[ℹ️] Precount failed for %s: %s", original_channel_id, e)
 
         try:
             async for m in ch.history(limit=None, oldest_first=True):
+                if not _is_normal(m):
+                    continue
+
                 raw = m.content or ""
                 system = getattr(m, "system_content", "") or ""
                 content = system if (not raw and system) else raw
                 author = "System" if (not raw and system) else m.author.name
 
+                # Embeds & mentions
                 raw_embeds = [e.to_dict() for e in m.embeds]
                 mention_map = await self._build_mention_map(m, raw_embeds)
-                embeds = [self._sanitize_embed_dict(e, m, mention_map) for e in raw_embeds]
+                embeds = [
+                    self._sanitize_embed_dict(e, m, mention_map) for e in raw_embeds
+                ]
                 content = self._sanitize_inline(content, m, mention_map)
 
                 # Stickers payload
                 def _enum_int(val, default=0):
                     v = getattr(val, "value", val)
-                    try: return int(v)
-                    except Exception: return default
+                    try:
+                        return int(v)
+                    except Exception:
+                        return default
 
                 def _sticker_url(s):
                     u = getattr(s, "url", None)
@@ -862,12 +915,14 @@ class ClientListener:
 
                 stickers_payload = []
                 for s in getattr(m, "stickers", []) or []:
-                    stickers_payload.append({
-                        "id": s.id,
-                        "name": s.name,
-                        "format_type": _enum_int(getattr(s, "format", None), 0),
-                        "url": _sticker_url(s),
-                    })
+                    stickers_payload.append(
+                        {
+                            "id": s.id,
+                            "name": s.name,
+                            "format_type": _enum_int(getattr(s, "format", None), 0),
+                            "url": _sticker_url(s),
+                        }
+                    )
 
                 payload = {
                     "type": "message",
@@ -877,27 +932,39 @@ class ClientListener:
                         "channel_type": m.channel.type.value,
                         "author": author,
                         "author_id": m.author.id,
-                        "avatar_url": (str(m.author.display_avatar.url) if getattr(m.author, "display_avatar", None) else None),
+                        "avatar_url": (
+                            str(m.author.display_avatar.url)
+                            if getattr(m.author, "display_avatar", None)
+                            else None
+                        ),
                         "content": content,
                         "embeds": embeds,
-                        "attachments": [{"url": a.url, "filename": a.filename, "size": a.size} for a in m.attachments],
+                        "attachments": [
+                            {"url": a.url, "filename": a.filename, "size": a.size}
+                            for a in m.attachments
+                        ],
                         "stickers": stickers_payload,
-                        "__backfill__": True,   # <—— KEY
+                        "__backfill__": True,
                     },
                 }
 
                 await self.ws.send(payload)
-                
+
                 sent += 1
                 now = asyncio.get_event_loop().time()
                 if sent % 50 == 0 or (now - last_ping) >= 2.0:
-                    await self.ws.send({"type": "backfill_progress", "data": {"channel_id": original_channel_id, "count": sent}})
+                    await self.ws.send(
+                        {
+                            "type": "backfill_progress",
+                            "data": {"channel_id": original_channel_id, "count": sent},
+                        }
+                    )
                     last_ping = now
-                    
-                await asyncio.sleep(2)  # Avoid hitting Discord's API too hard
-        finally:
-            await self.ws.send({"type": "backfill_done", "data": {"channel_id": original_channel_id}})
 
+        finally:
+            await self.ws.send(
+                {"type": "backfill_done", "data": {"channel_id": original_channel_id}}
+            )
 
     async def _shutdown(self):
         """
