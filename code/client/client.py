@@ -127,6 +127,11 @@ class ClientListener:
             chan_id = int(data.get("channel_id"))
             asyncio.create_task(self._backfill_channel(chan_id))
             return {"ok": True}
+        
+        elif typ =="sitemap_request":
+            self.schedule_sync()
+            logger.info("[🌐] Received sitemap request")
+            return {"ok": True}
 
         return None
 
