@@ -137,6 +137,35 @@ class ClientListener:
                 return {"ok": True}
             else:
                 return {"ok": False, "error": "Cloning is disabled"}
+            
+        elif typ == "list_users":
+            include_names = bool(data.get("include_names", False))
+            guild = self.bot.get_guild(self.host_guild_id)
+            if not guild:
+                return {"ok": False, "error": f"Guild {self.host_guild_id} not found on client."}
+
+            members = []
+            try:
+                # Fetch all members
+                async for m in guild.fetch_members(limit=None):
+                    members.append(m)
+            except Exception:
+                # Fallback to cache
+                members = list(getattr(guild, "members", []))
+
+            if include_names:
+                payload = [
+                    {
+                        "id": m.id,
+                        "username": getattr(m, "name", None),
+                        "bot": bool(getattr(m, "bot", False)),
+                    }
+                    for m in members
+                ]
+            else:
+                payload = [m.id for m in members]
+
+            return {"ok": True, "data": {"users": payload}}
 
         return None
 
@@ -821,163 +850,163 @@ class ClientListener:
                     "Ignored channel update for %s: non-structural change", before.id
                 )
 
-        async def _backfill_channel(self, original_channel_id: int):
-            """Grab all human/bot messages from a channel and send to server"""
-            await self.ws.send(
-                {"type": "backfill_started", "data": {"channel_id": original_channel_id}}
-            )
+    async def _backfill_channel(self, original_channel_id: int):
+        """Grab all human/bot messages from a channel and send to server"""
+        await self.ws.send(
+            {"type": "backfill_started", "data": {"channel_id": original_channel_id}}
+        )
 
-            guild = self.bot.get_guild(self.host_guild_id)
-            if not guild:
-                logger.error("[⛔] Host guild %s not available", self.host_guild_id)
+        guild = self.bot.get_guild(self.host_guild_id)
+        if not guild:
+            logger.error("[⛔] Host guild %s not available", self.host_guild_id)
+            await self.ws.send(
+                {"type": "backfill_done", "data": {"channel_id": original_channel_id}}
+            )
+            return
+
+        ch = guild.get_channel(original_channel_id)
+        if not ch:
+            try:
+                ch = await self.bot.fetch_channel(original_channel_id)
+            except Exception as e:
+                logger.error("[⛔] Cannot fetch channel %s: %s", original_channel_id, e)
                 await self.ws.send(
-                    {"type": "backfill_done", "data": {"channel_id": original_channel_id}}
+                    {
+                        "type": "backfill_done",
+                        "data": {"channel_id": original_channel_id},
+                    }
                 )
                 return
 
-            ch = guild.get_channel(original_channel_id)
-            if not ch:
-                try:
-                    ch = await self.bot.fetch_channel(original_channel_id)
-                except Exception as e:
-                    logger.error("[⛔] Cannot fetch channel %s: %s", original_channel_id, e)
-                    await self.ws.send(
-                        {
-                            "type": "backfill_done",
-                            "data": {"channel_id": original_channel_id},
-                        }
-                    )
-                    return
+        # ----- filter: only human/bot messages, exclude all system messages -----
+        ALLOWED_TYPES = {MessageType.default}
+        for _name in ("reply", "application_command", "context_menu_command"):
+            _t = getattr(MessageType, _name, None)
+            if _t is not None:
+                ALLOWED_TYPES.add(_t)
 
-            # ----- filter: only human/bot messages, exclude all system messages -----
-            ALLOWED_TYPES = {MessageType.default}
-            for _name in ("reply", "application_command", "context_menu_command"):
-                _t = getattr(MessageType, _name, None)
-                if _t is not None:
-                    ALLOWED_TYPES.add(_t)
-
-            def _is_normal(msg) -> bool:
-                # skip if Discord flags it as system
-                try:
-                    if callable(getattr(msg, "is_system", None)) and msg.is_system():
-                        return False
-                except Exception:
-                    pass
-                # skip if author is a system user
-                if getattr(getattr(msg, "author", None), "system", False):
-                    return False
-                # allow only specific message types
-                if getattr(msg, "type", None) not in ALLOWED_TYPES:
-                    return False
-                return True
-
-            # -----------------------------------------------------------------------
-
-            sent = 0
-            last_ping = 0.0
-
-            # One-time pre-count so the server knows the total up front (only normal messages)
-            if getattr(self, "do_precount", False):
-                try:
-                    total = 0
-                    async for m in ch.history(limit=None, oldest_first=True):
-                        if not _is_normal(m):
-                            continue
-                        total += 1
-                    await self.ws.send(
-                        {
-                            "type": "backfill_progress",
-                            "data": {"channel_id": original_channel_id, "count": total},
-                        }
-                    )
-                except Exception as e:
-                    logger.warning("[ℹ️] Precount failed for %s: %s", original_channel_id, e)
-
+        def _is_normal(msg) -> bool:
+            # skip if Discord flags it as system
             try:
+                if callable(getattr(msg, "is_system", None)) and msg.is_system():
+                    return False
+            except Exception:
+                pass
+            # skip if author is a system user
+            if getattr(getattr(msg, "author", None), "system", False):
+                return False
+            # allow only specific message types
+            if getattr(msg, "type", None) not in ALLOWED_TYPES:
+                return False
+            return True
+
+        # -----------------------------------------------------------------------
+
+        sent = 0
+        last_ping = 0.0
+
+        # One-time pre-count so the server knows the total up front (only normal messages)
+        if getattr(self, "do_precount", False):
+            try:
+                total = 0
                 async for m in ch.history(limit=None, oldest_first=True):
                     if not _is_normal(m):
                         continue
-
-                    raw = m.content or ""
-                    system = getattr(m, "system_content", "") or ""
-                    content = system if (not raw and system) else raw
-                    author = "System" if (not raw and system) else m.author.name
-
-                    # Embeds & mentions
-                    raw_embeds = [e.to_dict() for e in m.embeds]
-                    mention_map = await self._build_mention_map(m, raw_embeds)
-                    embeds = [
-                        self._sanitize_embed_dict(e, m, mention_map) for e in raw_embeds
-                    ]
-                    content = self._sanitize_inline(content, m, mention_map)
-
-                    # Stickers payload
-                    def _enum_int(val, default=0):
-                        v = getattr(val, "value", val)
-                        try:
-                            return int(v)
-                        except Exception:
-                            return default
-
-                    def _sticker_url(s):
-                        u = getattr(s, "url", None)
-                        if not u:
-                            asset = getattr(s, "asset", None)
-                            u = getattr(asset, "url", None) if asset else None
-                        return str(u) if u else ""
-
-                    stickers_payload = []
-                    for s in getattr(m, "stickers", []) or []:
-                        stickers_payload.append(
-                            {
-                                "id": s.id,
-                                "name": s.name,
-                                "format_type": _enum_int(getattr(s, "format", None), 0),
-                                "url": _sticker_url(s),
-                            }
-                        )
-
-                    payload = {
-                        "type": "message",
-                        "data": {
-                            "channel_id": m.channel.id,
-                            "channel_name": m.channel.name,
-                            "channel_type": m.channel.type.value,
-                            "author": author,
-                            "author_id": m.author.id,
-                            "avatar_url": (
-                                str(m.author.display_avatar.url)
-                                if getattr(m.author, "display_avatar", None)
-                                else None
-                            ),
-                            "content": content,
-                            "embeds": embeds,
-                            "attachments": [
-                                {"url": a.url, "filename": a.filename, "size": a.size}
-                                for a in m.attachments
-                            ],
-                            "stickers": stickers_payload,
-                            "__backfill__": True,
-                        },
-                    }
-
-                    await self.ws.send(payload)
-
-                    sent += 1
-                    now = asyncio.get_event_loop().time()
-                    if sent % 50 == 0 or (now - last_ping) >= 2.0:
-                        await self.ws.send(
-                            {
-                                "type": "backfill_progress",
-                                "data": {"channel_id": original_channel_id, "count": sent},
-                            }
-                        )
-                        last_ping = now
-
-            finally:
+                    total += 1
                 await self.ws.send(
-                    {"type": "backfill_done", "data": {"channel_id": original_channel_id}}
+                    {
+                        "type": "backfill_progress",
+                        "data": {"channel_id": original_channel_id, "count": total},
+                    }
                 )
+            except Exception as e:
+                logger.warning("[ℹ️] Precount failed for %s: %s", original_channel_id, e)
+
+        try:
+            async for m in ch.history(limit=None, oldest_first=True):
+                if not _is_normal(m):
+                    continue
+
+                raw = m.content or ""
+                system = getattr(m, "system_content", "") or ""
+                content = system if (not raw and system) else raw
+                author = "System" if (not raw and system) else m.author.name
+
+                # Embeds & mentions
+                raw_embeds = [e.to_dict() for e in m.embeds]
+                mention_map = await self._build_mention_map(m, raw_embeds)
+                embeds = [
+                    self._sanitize_embed_dict(e, m, mention_map) for e in raw_embeds
+                ]
+                content = self._sanitize_inline(content, m, mention_map)
+
+                # Stickers payload
+                def _enum_int(val, default=0):
+                    v = getattr(val, "value", val)
+                    try:
+                        return int(v)
+                    except Exception:
+                        return default
+
+                def _sticker_url(s):
+                    u = getattr(s, "url", None)
+                    if not u:
+                        asset = getattr(s, "asset", None)
+                        u = getattr(asset, "url", None) if asset else None
+                    return str(u) if u else ""
+
+                stickers_payload = []
+                for s in getattr(m, "stickers", []) or []:
+                    stickers_payload.append(
+                        {
+                            "id": s.id,
+                            "name": s.name,
+                            "format_type": _enum_int(getattr(s, "format", None), 0),
+                            "url": _sticker_url(s),
+                        }
+                    )
+
+                payload = {
+                    "type": "message",
+                    "data": {
+                        "channel_id": m.channel.id,
+                        "channel_name": m.channel.name,
+                        "channel_type": m.channel.type.value,
+                        "author": author,
+                        "author_id": m.author.id,
+                        "avatar_url": (
+                            str(m.author.display_avatar.url)
+                            if getattr(m.author, "display_avatar", None)
+                            else None
+                        ),
+                        "content": content,
+                        "embeds": embeds,
+                        "attachments": [
+                            {"url": a.url, "filename": a.filename, "size": a.size}
+                            for a in m.attachments
+                        ],
+                        "stickers": stickers_payload,
+                        "__backfill__": True,
+                    },
+                }
+
+                await self.ws.send(payload)
+
+                sent += 1
+                now = asyncio.get_event_loop().time()
+                if sent % 50 == 0 or (now - last_ping) >= 2.0:
+                    await self.ws.send(
+                        {
+                            "type": "backfill_progress",
+                            "data": {"channel_id": original_channel_id, "count": sent},
+                        }
+                    )
+                    last_ping = now
+
+        finally:
+            await self.ws.send(
+                {"type": "backfill_done", "data": {"channel_id": original_channel_id}}
+            )
 
     async def _shutdown(self):
         """
