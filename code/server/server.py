@@ -149,7 +149,7 @@ class ServerReceiver:
 
         self.bot.on_connect = _command_sync
         self.bot.load_extension("server.commands")
-        
+
     async def update_status(self, message: str):
         """Update the bot's Discord status."""
         try:
@@ -186,7 +186,8 @@ class ServerReceiver:
             self.bot.user,
             clone_guild.name,
         )
-
+        if not self.config.ENABLE_CLONING:
+            logger.info("[🔕] Server cloning is disabled...")
 
         if not self._processor_started:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
@@ -197,83 +198,85 @@ class ServerReceiver:
         """
         Handles the event triggered when webhooks are updated in a guild channel.
         """
-        if self._shutting_down:
-            return
-        try:
-            if channel.guild.id != self.clone_guild_id:
+        if self.config.ENABLE_CLONING:
+            if self._shutting_down:
                 return
-        except AttributeError:
-            return
-        # Zap the cached pool so the next send rebuilds and includes any new “Copycord” hooks
-        self.backfill.invalidate_rotation(int(channel.id))
-        logger.debug(
-            "[rotate] Webhooks changed in #%s — webhook rotation pool invalidated",
-            channel.id,
-        )
+            try:
+                if channel.guild.id != self.clone_guild_id:
+                    return
+            except AttributeError:
+                return
+            # Zap the cached pool so the next send rebuilds and includes any new “Copycord” hooks
+            self.backfill.invalidate_rotation(int(channel.id))
+            logger.debug(
+                "[rotate] Webhooks changed in #%s — webhook rotation pool invalidated",
+                channel.id,
+            )
 
     async def on_guild_channel_delete(self, channel):
         """When a cloned channel/category is deleted, request a sitemap"""
-        try:
-            if channel.guild.id != self.clone_guild_id:
+        if self.config.ENABLE_CLONING:
+            try:
+                if channel.guild.id != self.clone_guild_id:
+                    return
+            except AttributeError:
                 return
-        except AttributeError:
-            return
 
-        # Is this a category?
-        is_category = (
-            isinstance(channel, discord.CategoryChannel) or
-            getattr(channel, "type", None) == discord.ChannelType.category
-        )
+            # Is this a category?
+            is_category = (
+                isinstance(channel, discord.CategoryChannel) or
+                getattr(channel, "type", None) == discord.ChannelType.category
+            )
 
-        if is_category:
-            # Look up the original category whose clone was deleted
-            hit_src_cat_id = None
-            for orig_cat_id, row in list(self.cat_map.items()):
-                if int(row.get("cloned_category_id") or 0) == int(channel.id):
-                    hit_src_cat_id = int(orig_cat_id)
+            if is_category:
+                # Look up the original category whose clone was deleted
+                hit_src_cat_id = None
+                for orig_cat_id, row in list(self.cat_map.items()):
+                    if int(row.get("cloned_category_id") or 0) == int(channel.id):
+                        hit_src_cat_id = int(orig_cat_id)
+                        break
+
+                if hit_src_cat_id is None:
+                    return  # not one of ours
+
+                # Mark the category mapping stale in memory
+                self.cat_map.pop(hit_src_cat_id, None)
+
+                logger.warning(
+                    "[🧹] Cloned category deleted: id=%s name=%s (src_cat=%s). Requesting sitemap.",
+                    channel.id, getattr(channel, "name", "?"), hit_src_cat_id
+                )
+
+                # Ask the client to send over the sitemap
+                await self.bot.ws_manager.send({"type": "sitemap_request"})
+                return
+
+            # ----- Not a category: handle channel deletion -----
+            hit_src_id = None
+            for src_id, row in list(self.chan_map.items()):
+                if int(row.get("cloned_channel_id") or 0) == int(channel.id):
+                    hit_src_id = int(src_id)
                     break
 
-            if hit_src_cat_id is None:
+            if hit_src_id is None:
                 return  # not one of ours
 
-            # Mark the category mapping stale in memory
-            self.cat_map.pop(hit_src_cat_id, None)
+            # Invalidate rotation/webhook caches for this clone channel
+            try:
+                self.backfill.invalidate_rotation(int(channel.id))
+            except Exception:
+                pass
+
+            # Mark the channel mapping stale in memory
+            self.chan_map.pop(hit_src_id, None)
 
             logger.warning(
-                "[🧹] Cloned category deleted: id=%s name=%s (src_cat=%s). Requesting sitemap.",
-                channel.id, getattr(channel, "name", "?"), hit_src_cat_id
+                "[🧹] Cloned channel deleted: id=%s name=%s (src=%s). Requesting sitemap.",
+                channel.id, getattr(channel, "name", "?"), hit_src_id
             )
 
             # Ask the client to send over the sitemap
             await self.bot.ws_manager.send({"type": "sitemap_request"})
-            return
-
-        # ----- Not a category: handle channel deletion -----
-        hit_src_id = None
-        for src_id, row in list(self.chan_map.items()):
-            if int(row.get("cloned_channel_id") or 0) == int(channel.id):
-                hit_src_id = int(src_id)
-                break
-
-        if hit_src_id is None:
-            return  # not one of ours
-
-        # Invalidate rotation/webhook caches for this clone channel
-        try:
-            self.backfill.invalidate_rotation(int(channel.id))
-        except Exception:
-            pass
-
-        # Mark the channel mapping stale in memory
-        self.chan_map.pop(hit_src_id, None)
-
-        logger.warning(
-            "[🧹] Cloned channel deleted: id=%s name=%s (src=%s). Requesting sitemap.",
-            channel.id, getattr(channel, "name", "?"), hit_src_id
-        )
-
-        # Ask the client to send over the sitemap
-        await self.bot.ws_manager.send({"type": "sitemap_request"})
 
     async def _on_ws(self, msg: dict):
         """
@@ -2384,10 +2387,10 @@ class ServerReceiver:
                 self._webhooks[url_to_use] = webhook
 
             await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=rl_key)
-            
+
             if self._shutting_down:
                 return
-            
+
             try:
                 await webhook.send(
                     content=payload.get("content"),
@@ -2487,7 +2490,7 @@ class ServerReceiver:
                         msg["__buffered__"] = True
                         self._pending_msgs.setdefault(source_id, []).append(msg)
                         return
-                    
+
                     await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=rl_key)
                     webhook3 = self._webhooks.get(new_url) or Webhook.from_url(
                         new_url, session=self.session

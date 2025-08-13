@@ -26,6 +26,13 @@ class Config:
         self.SERVER_WS_URL = os.getenv(
             "WS_SERVER_URL", f"ws://{self.SERVER_WS_HOST}:{self.SERVER_WS_PORT}"
         )
+        
+        self.ENABLE_CLONING = os.getenv("ENABLE_CLONING", "false").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        
         self.DELETE_CHANNELS = os.getenv("DELETE_CHANNELS", "false").lower() in (
             "1",
             "true",

@@ -131,9 +131,12 @@ class ClientListener:
             return {"ok": True}
         
         elif typ =="sitemap_request":
-            self.schedule_sync()
-            logger.info("[🌐] Received sitemap request")
-            return {"ok": True}
+            if self.config.ENABLE_CLONING:
+                self.schedule_sync()
+                logger.info("[🌐] Received sitemap request")
+                return {"ok": True}
+            else:
+                return {"ok": False, "error": "Cloning is disabled"}
 
         return None
 
@@ -323,8 +326,11 @@ class ClientListener:
             sys.exit(1)
         asyncio.create_task(self.config.setup_release_watcher(self, should_dm=False))
         logger.info("[🤖] Logged in as %s in guild %s", self.bot.user, host_guild.name)
-        if self._sync_task is None:
-            self._sync_task = asyncio.create_task(self.periodic_sync_loop())
+        if self.config.ENABLE_CLONING:
+            if self._sync_task is None:
+                self._sync_task = asyncio.create_task(self.periodic_sync_loop())
+        else:
+            logger.info("[🔕] Server cloning is disabled...")
         if self._ws_task is None:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
 
@@ -600,134 +606,136 @@ class ClientListener:
         Handles incoming Discord messages and processes them for forwarding.
         This method is triggered whenever a message is sent in a channel the bot has access to.
         """
-        if self.should_ignore(message):
-            return
+        if self.config.ENABLE_CLONING:
+            
+            if self.should_ignore(message):
+                return
 
-        await self.maybe_send_announcement(message)
+            await self.maybe_send_announcement(message)
 
-        # Normalize content and detect system messages
-        raw = message.content or ""
-        system = getattr(message, "system_content", "") or ""
-        if not raw and system:
-            content = system
-            author = "System"
-        else:
-            content = raw
-            author = message.author.name
+            # Normalize content and detect system messages
+            raw = message.content or ""
+            system = getattr(message, "system_content", "") or ""
+            if not raw and system:
+                content = system
+                author = "System"
+            else:
+                content = raw
+                author = message.author.name
 
-        attachments = [
-            {
-                "url": att.url,
-                "filename": att.filename,
-                "size": att.size,
-            }
-            for att in message.attachments
-        ]
-
-        raw_embeds = [e.to_dict() for e in message.embeds]
-        mention_map = await self._build_mention_map(message, raw_embeds)
-        embeds = [
-            self._sanitize_embed_dict(e, message, mention_map) for e in raw_embeds
-        ]
-        content = self._sanitize_inline(content, message, mention_map)
-
-        components: list[dict] = []
-        for comp in message.components:
-            try:
-                components.append(comp.to_dict())
-            except NotImplementedError:
-                row: dict = {"type": getattr(comp, "type", None), "components": []}
-                for child in getattr(comp, "children", []):
-                    child_data: dict = {}
-                    for attr in ("custom_id", "label", "style", "url", "disabled"):
-                        if hasattr(child, attr):
-                            child_data[attr] = getattr(child, attr)
-                    if hasattr(child, "emoji") and child.emoji:
-                        emoji = child.emoji
-                        emoji_data: dict = {}
-                        if hasattr(emoji, "name"):
-                            emoji_data["name"] = emoji.name
-                        if getattr(emoji, "id", None):
-                            emoji_data["id"] = emoji.id
-                        child_data["emoji"] = emoji_data
-                    row["components"].append(child_data)
-                components.append(row)
-
-        is_thread = message.channel.type in (
-            ChannelType.public_thread,
-            ChannelType.private_thread,
-        )
-
-        def _enum_int(val, default=0):
-            v = getattr(val, "value", val)
-            try:
-                return int(v)
-            except Exception:
-                return default
-
-        def _sticker_url(s):
-            u = getattr(s, "url", None)
-            if not u:
-                asset = getattr(s, "asset", None)
-                u = getattr(asset, "url", None) if asset else None
-            return str(u) if u else ""
-
-        stickers_payload = []
-        for s in getattr(message, "stickers", []) or []:
-            stickers_payload.append(
+            attachments = [
                 {
-                    "id": s.id,
-                    "name": s.name,
-                    "format_type": _enum_int(getattr(s, "format", None), 0),
-                    "url": _sticker_url(s),  # <-- add this
+                    "url": att.url,
+                    "filename": att.filename,
+                    "size": att.size,
                 }
+                for att in message.attachments
+            ]
+
+            raw_embeds = [e.to_dict() for e in message.embeds]
+            mention_map = await self._build_mention_map(message, raw_embeds)
+            embeds = [
+                self._sanitize_embed_dict(e, message, mention_map) for e in raw_embeds
+            ]
+            content = self._sanitize_inline(content, message, mention_map)
+
+            components: list[dict] = []
+            for comp in message.components:
+                try:
+                    components.append(comp.to_dict())
+                except NotImplementedError:
+                    row: dict = {"type": getattr(comp, "type", None), "components": []}
+                    for child in getattr(comp, "children", []):
+                        child_data: dict = {}
+                        for attr in ("custom_id", "label", "style", "url", "disabled"):
+                            if hasattr(child, attr):
+                                child_data[attr] = getattr(child, attr)
+                        if hasattr(child, "emoji") and child.emoji:
+                            emoji = child.emoji
+                            emoji_data: dict = {}
+                            if hasattr(emoji, "name"):
+                                emoji_data["name"] = emoji.name
+                            if getattr(emoji, "id", None):
+                                emoji_data["id"] = emoji.id
+                            child_data["emoji"] = emoji_data
+                        row["components"].append(child_data)
+                    components.append(row)
+
+            is_thread = message.channel.type in (
+                ChannelType.public_thread,
+                ChannelType.private_thread,
             )
 
-        payload = {
-            "type": "thread_message" if is_thread else "message",
-            "data": {
-                "channel_id": message.channel.id,
-                "channel_name": message.channel.name,
-                "channel_type": message.channel.type.value,
-                "author": author,
-                "author_id": message.author.id,
-                "avatar_url": (
-                    str(message.author.display_avatar.url)
-                    if message.author.display_avatar
-                    else None
-                ),
-                "content": content,
-                "timestamp": str(message.created_at),
-                "attachments": attachments,
-                "components": components,
-                "stickers": stickers_payload,
-                "embeds": embeds,
-                **(
+            def _enum_int(val, default=0):
+                v = getattr(val, "value", val)
+                try:
+                    return int(v)
+                except Exception:
+                    return default
+
+            def _sticker_url(s):
+                u = getattr(s, "url", None)
+                if not u:
+                    asset = getattr(s, "asset", None)
+                    u = getattr(asset, "url", None) if asset else None
+                return str(u) if u else ""
+
+            stickers_payload = []
+            for s in getattr(message, "stickers", []) or []:
+                stickers_payload.append(
                     {
-                        "thread_parent_id": message.channel.parent.id,
-                        "thread_parent_name": message.channel.parent.name,
-                        "thread_id": message.channel.id,
-                        "thread_name": message.channel.name,
+                        "id": s.id,
+                        "name": s.name,
+                        "format_type": _enum_int(getattr(s, "format", None), 0),
+                        "url": _sticker_url(s),  # <-- add this
                     }
-                    if is_thread
-                    else {}
-                ),
-            },
-        }
-        await self.ws.send(payload)
-        logger.info(
-            "[📩] New msg detected in #%s from %s; forwarding to server",
-            message.channel.name,
-            message.author.name,
-        )
+                )
 
-        # Pull message attributes for debugging
-        msg_attrs = self.extract_public_message_attrs(message)
+            payload = {
+                "type": "thread_message" if is_thread else "message",
+                "data": {
+                    "channel_id": message.channel.id,
+                    "channel_name": message.channel.name,
+                    "channel_type": message.channel.type.value,
+                    "author": author,
+                    "author_id": message.author.id,
+                    "avatar_url": (
+                        str(message.author.display_avatar.url)
+                        if message.author.display_avatar
+                        else None
+                    ),
+                    "content": content,
+                    "timestamp": str(message.created_at),
+                    "attachments": attachments,
+                    "components": components,
+                    "stickers": stickers_payload,
+                    "embeds": embeds,
+                    **(
+                        {
+                            "thread_parent_id": message.channel.parent.id,
+                            "thread_parent_name": message.channel.parent.name,
+                            "thread_id": message.channel.id,
+                            "thread_name": message.channel.name,
+                        }
+                        if is_thread
+                        else {}
+                    ),
+                },
+            }
+            await self.ws.send(payload)
+            logger.info(
+                "[📩] New msg detected in #%s from %s; forwarding to server",
+                message.channel.name,
+                message.author.name,
+            )
 
-        logger.debug(
-            "Full Message attributes:\n%s",
-            pprint.pformat(msg_attrs, indent=2, width=120),
-        )
+            # Pull message attributes for debugging
+            msg_attrs = self.extract_public_message_attrs(message)
+
+            logger.debug(
+                "Full Message attributes:\n%s",
+                pprint.pformat(msg_attrs, indent=2, width=120),
+            )
 
     async def on_thread_delete(self, thread: discord.Thread):
         """
@@ -736,11 +744,12 @@ class ClientListener:
         This method checks if the deleted thread belongs to the host guild. If it does,
         it sends a notification payload to the WebSocket server with the thread's ID.
         """
-        if thread.guild.id != self.host_guild_id:
-            return
-        payload = {"type": "thread_delete", "data": {"thread_id": thread.id}}
-        await self.ws.send(payload)
-        logger.info("[📩] Notified server of deleted thread %s", thread.id)
+        if self.config.ENABLE_CLONING:
+            if thread.guild.id != self.host_guild_id:
+                return
+            payload = {"type": "thread_delete", "data": {"thread_id": thread.id}}
+            await self.ws.send(payload)
+            logger.info("[📩] Notified server of deleted thread %s", thread.id)
 
     async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
         """
@@ -751,38 +760,41 @@ class ClientListener:
         If a rename is detected, it constructs a payload with details about the change
         and sends it through the WebSocket connection.
         """
-        if before.guild and before.guild.id == self.host_guild_id:
-            if before.name != after.name:
-                payload = {
-                    "type": "thread_rename",
-                    "data": {
-                        "thread_id": before.id,
-                        "new_name": after.name,
-                        "old_name": before.name,
-                        "parent_name": after.parent.name,
-                        "parent_id": after.parent.id,
-                    },
-                }
-                logger.info(
-                    f"[✏️] Thread rename detected: {before.id} {before.name!r} → {after.name!r}"
-                )
-                await self.ws.send(payload)
+        if self.config.ENABLE_CLONING:
+            if before.guild and before.guild.id == self.host_guild_id:
+                if before.name != after.name:
+                    payload = {
+                        "type": "thread_rename",
+                        "data": {
+                            "thread_id": before.id,
+                            "new_name": after.name,
+                            "old_name": before.name,
+                            "parent_name": after.parent.name,
+                            "parent_id": after.parent.id,
+                        },
+                    }
+                    logger.info(
+                        f"[✏️] Thread rename detected: {before.id} {before.name!r} → {after.name!r}"
+                    )
+                    await self.ws.send(payload)
 
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
         """
         Event handler that is triggered when a new channel is created in a guild.
         """
-        if channel.guild.id != self.host_guild_id:
-            return
-        self.schedule_sync()
+        if self.config.ENABLE_CLONING:
+            if channel.guild.id != self.host_guild_id:
+                return
+            self.schedule_sync()
 
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
         """
         Event handler that is triggered when a guild channel is deleted.
         """
-        if channel.guild.id != self.host_guild_id:
-            return
-        self.schedule_sync()
+        if self.config.ENABLE_CLONING:
+            if channel.guild.id != self.host_guild_id:
+                return
+            self.schedule_sync()
 
     async def on_guild_channel_update(self, before, after):
         """
@@ -792,179 +804,180 @@ class ClientListener:
         structural changes (such as a name change or a change in the parent category).
         If a structural change is detected, it schedules a synchronization process.
         """
-        if before.guild.id != self.host_guild_id:
-            return
+        if self.config.ENABLE_CLONING:
+            if before.guild.id != self.host_guild_id:
+                return
 
-        # Only resync if name or parent category changed
-        name_changed = before.name != after.name
-        parent_before = getattr(before, "category_id", None)
-        parent_after = getattr(after, "category_id", None)
-        parent_changed = parent_before != parent_after
+            # Only resync if name or parent category changed
+            name_changed = before.name != after.name
+            parent_before = getattr(before, "category_id", None)
+            parent_after = getattr(after, "category_id", None)
+            parent_changed = parent_before != parent_after
 
-        if name_changed or parent_changed:
-            self.schedule_sync()
-        else:
-            logger.debug(
-                "Ignored channel update for %s: non-structural change", before.id
-            )
+            if name_changed or parent_changed:
+                self.schedule_sync()
+            else:
+                logger.debug(
+                    "Ignored channel update for %s: non-structural change", before.id
+                )
 
-    async def _backfill_channel(self, original_channel_id: int):
-        """Grab all human/bot messages from a channel and send to server"""
-        await self.ws.send(
-            {"type": "backfill_started", "data": {"channel_id": original_channel_id}}
-        )
-
-        guild = self.bot.get_guild(self.host_guild_id)
-        if not guild:
-            logger.error("[⛔] Host guild %s not available", self.host_guild_id)
+        async def _backfill_channel(self, original_channel_id: int):
+            """Grab all human/bot messages from a channel and send to server"""
             await self.ws.send(
-                {"type": "backfill_done", "data": {"channel_id": original_channel_id}}
+                {"type": "backfill_started", "data": {"channel_id": original_channel_id}}
             )
-            return
 
-        ch = guild.get_channel(original_channel_id)
-        if not ch:
-            try:
-                ch = await self.bot.fetch_channel(original_channel_id)
-            except Exception as e:
-                logger.error("[⛔] Cannot fetch channel %s: %s", original_channel_id, e)
+            guild = self.bot.get_guild(self.host_guild_id)
+            if not guild:
+                logger.error("[⛔] Host guild %s not available", self.host_guild_id)
                 await self.ws.send(
-                    {
-                        "type": "backfill_done",
-                        "data": {"channel_id": original_channel_id},
-                    }
+                    {"type": "backfill_done", "data": {"channel_id": original_channel_id}}
                 )
                 return
 
-        # ----- filter: only human/bot messages, exclude all system messages -----
-        ALLOWED_TYPES = {MessageType.default}
-        for _name in ("reply", "application_command", "context_menu_command"):
-            _t = getattr(MessageType, _name, None)
-            if _t is not None:
-                ALLOWED_TYPES.add(_t)
-
-        def _is_normal(msg) -> bool:
-            # skip if Discord flags it as system
-            try:
-                if callable(getattr(msg, "is_system", None)) and msg.is_system():
-                    return False
-            except Exception:
-                pass
-            # skip if author is a system user
-            if getattr(getattr(msg, "author", None), "system", False):
-                return False
-            # allow only specific message types
-            if getattr(msg, "type", None) not in ALLOWED_TYPES:
-                return False
-            return True
-
-        # -----------------------------------------------------------------------
-
-        sent = 0
-        last_ping = 0.0
-
-        # One-time pre-count so the server knows the total up front (only normal messages)
-        if getattr(self, "do_precount", False):
-            try:
-                total = 0
-                async for m in ch.history(limit=None, oldest_first=True):
-                    if not _is_normal(m):
-                        continue
-                    total += 1
-                await self.ws.send(
-                    {
-                        "type": "backfill_progress",
-                        "data": {"channel_id": original_channel_id, "count": total},
-                    }
-                )
-            except Exception as e:
-                logger.warning("[ℹ️] Precount failed for %s: %s", original_channel_id, e)
-
-        try:
-            async for m in ch.history(limit=None, oldest_first=True):
-                if not _is_normal(m):
-                    continue
-
-                raw = m.content or ""
-                system = getattr(m, "system_content", "") or ""
-                content = system if (not raw and system) else raw
-                author = "System" if (not raw and system) else m.author.name
-
-                # Embeds & mentions
-                raw_embeds = [e.to_dict() for e in m.embeds]
-                mention_map = await self._build_mention_map(m, raw_embeds)
-                embeds = [
-                    self._sanitize_embed_dict(e, m, mention_map) for e in raw_embeds
-                ]
-                content = self._sanitize_inline(content, m, mention_map)
-
-                # Stickers payload
-                def _enum_int(val, default=0):
-                    v = getattr(val, "value", val)
-                    try:
-                        return int(v)
-                    except Exception:
-                        return default
-
-                def _sticker_url(s):
-                    u = getattr(s, "url", None)
-                    if not u:
-                        asset = getattr(s, "asset", None)
-                        u = getattr(asset, "url", None) if asset else None
-                    return str(u) if u else ""
-
-                stickers_payload = []
-                for s in getattr(m, "stickers", []) or []:
-                    stickers_payload.append(
+            ch = guild.get_channel(original_channel_id)
+            if not ch:
+                try:
+                    ch = await self.bot.fetch_channel(original_channel_id)
+                except Exception as e:
+                    logger.error("[⛔] Cannot fetch channel %s: %s", original_channel_id, e)
+                    await self.ws.send(
                         {
-                            "id": s.id,
-                            "name": s.name,
-                            "format_type": _enum_int(getattr(s, "format", None), 0),
-                            "url": _sticker_url(s),
+                            "type": "backfill_done",
+                            "data": {"channel_id": original_channel_id},
                         }
                     )
+                    return
 
-                payload = {
-                    "type": "message",
-                    "data": {
-                        "channel_id": m.channel.id,
-                        "channel_name": m.channel.name,
-                        "channel_type": m.channel.type.value,
-                        "author": author,
-                        "author_id": m.author.id,
-                        "avatar_url": (
-                            str(m.author.display_avatar.url)
-                            if getattr(m.author, "display_avatar", None)
-                            else None
-                        ),
-                        "content": content,
-                        "embeds": embeds,
-                        "attachments": [
-                            {"url": a.url, "filename": a.filename, "size": a.size}
-                            for a in m.attachments
-                        ],
-                        "stickers": stickers_payload,
-                        "__backfill__": True,
-                    },
-                }
+            # ----- filter: only human/bot messages, exclude all system messages -----
+            ALLOWED_TYPES = {MessageType.default}
+            for _name in ("reply", "application_command", "context_menu_command"):
+                _t = getattr(MessageType, _name, None)
+                if _t is not None:
+                    ALLOWED_TYPES.add(_t)
 
-                await self.ws.send(payload)
+            def _is_normal(msg) -> bool:
+                # skip if Discord flags it as system
+                try:
+                    if callable(getattr(msg, "is_system", None)) and msg.is_system():
+                        return False
+                except Exception:
+                    pass
+                # skip if author is a system user
+                if getattr(getattr(msg, "author", None), "system", False):
+                    return False
+                # allow only specific message types
+                if getattr(msg, "type", None) not in ALLOWED_TYPES:
+                    return False
+                return True
 
-                sent += 1
-                now = asyncio.get_event_loop().time()
-                if sent % 50 == 0 or (now - last_ping) >= 2.0:
+            # -----------------------------------------------------------------------
+
+            sent = 0
+            last_ping = 0.0
+
+            # One-time pre-count so the server knows the total up front (only normal messages)
+            if getattr(self, "do_precount", False):
+                try:
+                    total = 0
+                    async for m in ch.history(limit=None, oldest_first=True):
+                        if not _is_normal(m):
+                            continue
+                        total += 1
                     await self.ws.send(
                         {
                             "type": "backfill_progress",
-                            "data": {"channel_id": original_channel_id, "count": sent},
+                            "data": {"channel_id": original_channel_id, "count": total},
                         }
                     )
-                    last_ping = now
+                except Exception as e:
+                    logger.warning("[ℹ️] Precount failed for %s: %s", original_channel_id, e)
 
-        finally:
-            await self.ws.send(
-                {"type": "backfill_done", "data": {"channel_id": original_channel_id}}
-            )
+            try:
+                async for m in ch.history(limit=None, oldest_first=True):
+                    if not _is_normal(m):
+                        continue
+
+                    raw = m.content or ""
+                    system = getattr(m, "system_content", "") or ""
+                    content = system if (not raw and system) else raw
+                    author = "System" if (not raw and system) else m.author.name
+
+                    # Embeds & mentions
+                    raw_embeds = [e.to_dict() for e in m.embeds]
+                    mention_map = await self._build_mention_map(m, raw_embeds)
+                    embeds = [
+                        self._sanitize_embed_dict(e, m, mention_map) for e in raw_embeds
+                    ]
+                    content = self._sanitize_inline(content, m, mention_map)
+
+                    # Stickers payload
+                    def _enum_int(val, default=0):
+                        v = getattr(val, "value", val)
+                        try:
+                            return int(v)
+                        except Exception:
+                            return default
+
+                    def _sticker_url(s):
+                        u = getattr(s, "url", None)
+                        if not u:
+                            asset = getattr(s, "asset", None)
+                            u = getattr(asset, "url", None) if asset else None
+                        return str(u) if u else ""
+
+                    stickers_payload = []
+                    for s in getattr(m, "stickers", []) or []:
+                        stickers_payload.append(
+                            {
+                                "id": s.id,
+                                "name": s.name,
+                                "format_type": _enum_int(getattr(s, "format", None), 0),
+                                "url": _sticker_url(s),
+                            }
+                        )
+
+                    payload = {
+                        "type": "message",
+                        "data": {
+                            "channel_id": m.channel.id,
+                            "channel_name": m.channel.name,
+                            "channel_type": m.channel.type.value,
+                            "author": author,
+                            "author_id": m.author.id,
+                            "avatar_url": (
+                                str(m.author.display_avatar.url)
+                                if getattr(m.author, "display_avatar", None)
+                                else None
+                            ),
+                            "content": content,
+                            "embeds": embeds,
+                            "attachments": [
+                                {"url": a.url, "filename": a.filename, "size": a.size}
+                                for a in m.attachments
+                            ],
+                            "stickers": stickers_payload,
+                            "__backfill__": True,
+                        },
+                    }
+
+                    await self.ws.send(payload)
+
+                    sent += 1
+                    now = asyncio.get_event_loop().time()
+                    if sent % 50 == 0 or (now - last_ping) >= 2.0:
+                        await self.ws.send(
+                            {
+                                "type": "backfill_progress",
+                                "data": {"channel_id": original_channel_id, "count": sent},
+                            }
+                        )
+                        last_ping = now
+
+            finally:
+                await self.ws.send(
+                    {"type": "backfill_done", "data": {"channel_id": original_channel_id}}
+                )
 
     async def _shutdown(self):
         """
