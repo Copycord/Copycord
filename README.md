@@ -104,6 +104,7 @@ services:
 SERVER_TOKEN= # Discord bot token
 CLONE_GUILD_ID= # ID of the clone guild, bot must be invited to this guild
 COMMAND_USERS= # Discord user IDs allowed to use commands separated by commas
+ENABLE_CLONING=True # Enable/Disable cloning
 DELETE_CHANNELS=True # Delete channels after they are deleted from the host server
 DELETE_THREADS=True # Delete threads after they are deleted from the host server
 CLONE_EMOJI=True # Clone emojis
