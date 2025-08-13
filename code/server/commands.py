@@ -6,6 +6,11 @@ from discord import errors as discord_errors
 from datetime import datetime, timezone
 import time
 import logging
+import asyncio
+import io
+import json
+import gzip
+import math
 from common.config import Config
 from common.db import DBManager
 from server.rate_limiter import RateLimitManager, ActionType
@@ -677,6 +682,148 @@ class CloneCommands(commands.Cog):
                 embed=self._err_embed("Client Unreachable", "I couldn’t contact the client to start the backfill."),
                 ephemeral=True,
             )
+            
+    @commands.slash_command(
+        name="export_users",
+        description="Export host server users as JSON (IDs only by default; optionally include usernames).",
+        guild_ids=[GUILD_ID],
+    )          
+    async def export_users(
+        self,
+        ctx: discord.ApplicationContext,
+        include_names: bool = Option(bool, "Include usernames/display names", default=False),
+    ):
+        """
+        Requests the client for the HOST server's members and returns JSON.
+        Success -> plain messages with file(s). Errors -> embed.
+        """
+        await ctx.defer(ephemeral=True)
+
+        # --- Ask client for the list ---
+        try:
+            resp = await self.bot.ws_manager.request({
+                "type": "list_users",
+                "data": {"include_names": include_names}
+            })
+        except Exception as e:
+            embed = self._err_embed("Export Failed", f"Could not reach the client: {e!r}")
+            return await ctx.followup.send(embed=embed, ephemeral=True)
+
+        if not resp or not resp.get("ok"):
+            err = (resp or {}).get("error", "Unknown error")
+            embed = self._err_embed("Export Failed", f"Client refused or failed: {err}")
+            return await ctx.followup.send(embed=embed, ephemeral=True)
+
+        users = (resp.get("data") or {}).get("users", [])
+        if not isinstance(users, list):
+            embed = self._err_embed("Export Failed", "Client returned unexpected payload.")
+            return await ctx.followup.send(embed=embed, ephemeral=True)
+
+        # --- Build JSON bytes ---
+        data_bytes = json.dumps(users, indent=2, ensure_ascii=False).encode("utf-8")
+        count = len(users)
+        fmt_label = "IDs + names" if include_names else "IDs only"
+
+        # --- Determine max upload size for this guild (fallback to 8 MiB) ---
+        guild_limit = getattr(ctx.guild, "filesize_limit", 8 * 1024 * 1024) or (8 * 1024 * 1024)
+        # Keep a safety margin so we don't hit boundary errors due to payload headers
+        SAFETY = 64 * 1024
+        max_bytes = max(1, guild_limit - SAFETY)
+
+        async def send_one_file(raw_bytes: bytes, fname: str, note: str = ""):
+            bio = io.BytesIO(raw_bytes)
+            bio.seek(0)
+            await ctx.followup.send(
+                content=(note or ""),
+                file=discord.File(bio, filename=fname),
+                ephemeral=False,
+            )
+
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        base = f"export_users_{timestamp}"
+
+        if len(data_bytes) <= max_bytes:
+            await send_one_file(
+                data_bytes,
+                f"{base}.json",
+                note=f"> Total users sniped: `{count}`",
+            )
+            return
+
+        gz_bytes = gzip.compress(data_bytes)  # default compression level
+        if len(gz_bytes) <= max_bytes:
+            await send_one_file(
+                gz_bytes,
+                f"{base}.json.gz",
+                note=(
+                    f"User export complete (compressed). Total users: **{count}**\n"
+                    f"Format: {fmt_label}\nFile is gzipped to fit upload limits."
+                ),
+            )
+            return
+
+        parts_needed = math.ceil(len(data_bytes) / max_bytes)
+        # Avoid edge cases:
+        parts_needed = max(2, parts_needed)
+
+        total = len(users)
+        per_part = math.ceil(total / parts_needed)
+
+        idx = 0
+        part_num = 1
+        sent_any = False
+        while idx < total:
+            backoff = per_part
+            while True:
+                slice_users = users[idx: idx + backoff]
+                part_bytes = json.dumps(slice_users, indent=2, ensure_ascii=False).encode("utf-8")
+
+                if len(part_bytes) <= max_bytes:
+                    await send_one_file(
+                        part_bytes,
+                        f"{base}.part{part_num:02d}-of-??.json",  # fix names after loop if desired
+                        note=(f"User export (part {part_num}): **{len(slice_users)}** users\nFormat: {fmt_label}")
+                            if not sent_any else ""
+                    )
+                    sent_any = True
+                    idx += backoff
+                    part_num += 1
+                    break
+
+                if backoff <= 1:
+                    gz_part = gzip.compress(part_bytes)
+                    if len(gz_part) <= max_bytes:
+                        await send_one_file(
+                            gz_part,
+                            f"{base}.part{part_num:02d}-of-??.json.gz",
+                            note=(f"User export (part {part_num}, compressed): **{len(slice_users)}** users\nFormat: {fmt_label}")
+                                if not sent_any else ""
+                        )
+                        sent_any = True
+                        idx += backoff
+                        part_num += 1
+                        break
+                    # If we still can't fit, abort
+                    embed = self._err_embed(
+                        "Export Failed",
+                        "A user record is too large to upload, even when compressed. "
+                        "Try exporting IDs only or filter the scope."
+                    )
+                    return await ctx.followup.send(embed=embed, ephemeral=True)
+
+                # Reduce slice size and try again
+                backoff = max(1, backoff // 2)
+
+            # Small pause for rate limits when many parts
+            if idx < total:
+                await asyncio.sleep(0.6)
+
+        # Small summary message
+        await ctx.followup.send(
+            content=f"> Sent **{part_num - 1}** parts. Total users sniper: `{count}`",
+            ephemeral=False,
+        )
+
 
 def setup(bot: commands.Bot):
     bot.add_cog(CloneCommands(bot))
