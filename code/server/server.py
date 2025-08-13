@@ -221,6 +221,12 @@ class ServerReceiver:
                     return
             except AttributeError:
                 return
+            
+            # Skip if sync is in progress
+            if getattr(self, "_sync_lock", None) and self._sync_lock.locked():
+                logger.debug("[🛑] Sync in progress — ignoring sitemap request for deleted channel %s", channel.id)
+                return
+
 
             # Is this a category?
             is_category = (
