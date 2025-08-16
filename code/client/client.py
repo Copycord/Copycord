@@ -1,6 +1,17 @@
+# =============================================================================
+#  Copycord
+#  Copyright (C) 2021 github.com/Copycord
+#
+#  This source code is released under the GNU Affero General Public License
+#  version 3.0. A copy of the license is available at:
+#  https://www.gnu.org/licenses/agpl-3.0.en.html
+# =============================================================================
+
 import asyncio
+import contextlib
 import re
 import signal
+import traceback
 import unicodedata
 from datetime import datetime, timezone
 import logging
@@ -8,6 +19,7 @@ from logging.handlers import RotatingFileHandler
 from typing import Optional
 import discord
 from discord import ChannelType, MessageType, Member
+from discord.errors import Forbidden, HTTPException
 import os
 import pprint
 import sys
@@ -15,10 +27,15 @@ from discord.ext import commands
 from common.config import Config
 from common.db import DBManager
 from common.websockets import WebsocketManager
+from client.scraper import MemberScraper
+from client.scraper import StreamManager
 
 
 LOG_DIR = "/data"
 os.makedirs(LOG_DIR, exist_ok=True)
+
+LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
+LEVEL = getattr(logging, LEVEL_NAME, logging.INFO)
 
 formatter = logging.Formatter(
     "%(asctime)s | %(levelname)-5s | %(message)s",
@@ -26,10 +43,11 @@ formatter = logging.Formatter(
 )
 
 root = logging.getLogger()
-root.setLevel(logging.INFO)
+root.setLevel(LEVEL)
 
 ch = logging.StreamHandler()
 ch.setFormatter(formatter)
+ch.setLevel(LEVEL)
 root.addHandler(ch)
 
 log_file = os.path.join(LOG_DIR, "client.log")
@@ -39,30 +57,25 @@ fh = RotatingFileHandler(
     backupCount=1,
     encoding="utf-8",
 )
-fh.setLevel(logging.INFO)
 fh.setFormatter(formatter)
+fh.setLevel(LEVEL)
 root.addHandler(fh)
 
+# keep library noise down
 for name in ("websockets.server", "websockets.protocol"):
     logging.getLogger(name).setLevel(logging.WARNING)
-for lib in (
-    "discord",
-    "discord.client",
-    "discord.gateway",
-    "discord.state",
-    "discord.http",
-):
+for lib in ("discord","discord.client","discord.gateway","discord.state","discord.http"):
     logging.getLogger(lib).setLevel(logging.WARNING)
+for lib in ("discord.state", "discord.client"):
+    logging.getLogger(lib).setLevel(logging.ERROR)
 
-logging.getLogger("discord.state").setLevel(logging.ERROR)
-
-logging.getLogger("discord.client").setLevel(logging.ERROR)
 logger = logging.getLogger("client")
+logger.setLevel(LEVEL)
 
 
 class ClientListener:
     def __init__(self):
-        self.config = Config()
+        self.config = Config(logger=logger)
         self.db = DBManager(self.config.DB_PATH)
         self.host_guild_id = int(self.config.HOST_GUILD_ID)
         self.blocked_keywords = self.db.get_blocked_keywords()
@@ -73,6 +86,12 @@ class ClientListener:
         self.debounce_task: Optional[asyncio.Task] = None
         self._ws_task: Optional[asyncio.Task] = None
         self._m_user = re.compile(r"<@!?(\d+)>")
+        self.scraper = getattr(self, "scraper", None)
+        self._scrape_lock = getattr(self, "_scrape_lock", asyncio.Lock())
+        self.streams = getattr(self, "streams", StreamManager(logger))
+        self._scrape_task: asyncio.Task | None = None
+        self._last_cancel_at: float | None = None
+        self._cancelling: bool = False 
         self.do_precount = True
         self.bot.event(self.on_ready)
         self.bot.event(self.on_message)
@@ -85,6 +104,7 @@ class ClientListener:
             send_url=self.config.SERVER_WS_URL,
             listen_host=self.config.CLIENT_WS_HOST,
             listen_port=self.config.CLIENT_WS_PORT,
+            logger=logger,
         )
 
         loop = asyncio.get_event_loop()
@@ -137,37 +157,161 @@ class ClientListener:
                 return {"ok": True}
             else:
                 return {"ok": False, "error": "Cloning is disabled"}
-            
-        elif typ == "list_users":
-            include_names = bool(data.get("include_names", False))
-            guild = self.bot.get_guild(self.host_guild_id)
-            if not guild:
-                return {"ok": False, "error": f"Guild {self.host_guild_id} not found on client."}
 
-            members = []
+        elif typ == "scrape_members":
+            include_names = bool(data.get("include_names", True))
+
+            def clamp(v, lo, hi): return max(lo, min(hi, v))
             try:
-                # Fetch all members
-                async for m in guild.fetch_members(limit=None):
-                    members.append(m)
+                ns = int(data.get("num_sessions", 2))
             except Exception:
-                # Fallback to cache
-                members = list(getattr(guild, "members", []))
+                ns = 2
+            ns = clamp(ns, 1, 5)
 
-            if include_names:
-                payload = [
-                    {
-                        "id": m.id,
-                        "username": getattr(m, "name", None),
-                        "bot": bool(getattr(m, "bot", False)),
-                    }
-                    for m in members
-                ]
+            mpps = data.get("max_parallel_per_session")
+            if mpps is None:
+                mpps = clamp(8 // ns, 1, 5)
             else:
-                payload = [m.id for m in members]
+                mpps = clamp(int(mpps), 1, 5)
 
-            return {"ok": True, "data": {"users": payload}}
+            try:
+                if self.scraper is None:
+                    self.scraper = MemberScraper(self.bot, self.config, logger=logger)
+
+                async with self._scrape_lock:
+                    if self._scrape_task and not self._scrape_task.done():
+                        logger.debug("[scrape] REJECT: already-running task")
+                        return {"ok": False, "error": "scrape-already-running"}
+
+                    self._scrape_task = asyncio.create_task(
+                        self.scraper.scrape(
+                            include_names=include_names,
+                            num_sessions=ns,
+                            max_parallel_per_session=mpps,
+                        ),
+                        name="scrape",
+                    )
+                    try:
+                        result = await self._scrape_task
+                        logger.debug("[scrape] TASK_AWAITED_OK count=%d", len((result or {}).get("members", [])))
+                        return {"ok": True, "data": result}
+                    except asyncio.CancelledError:
+                        logger.debug("[scrape] TASK_AWAITED_CANCELLED")
+                        return {"ok": False, "error": "cancelled"}
+                    except BaseException as e:
+                        logger.exception("[❌] OP8 scrape failed: %r", e)
+                        return {"ok": False, "error": str(e)}
+                    finally:
+                        self._scrape_task = None
+            except BaseException as e:
+                logger.exception("[❌] OP8 scrape failed (outer): %r", e)
+                return {"ok": False, "error": str(e)}
+
+        elif typ == "stream_next":
+            sid = data.get("id")
+            offset = int(data.get("offset", 0))
+            length = int(data.get("length", 0) or 0)
+            return self.streams.next(sid, offset, length or None)
+
+        elif typ == "stream_abort":
+            return self.streams.abort(data.get("id"))
+
+        elif typ == "scrape_cancel":
+            try:
+                self._cancelling = True
+                t = getattr(self, "_scrape_task", None)
+                if getattr(self, "scraper", None):
+                    self.scraper.request_cancel()
+                    logger.debug("[scrape] CANCEL → cooperative flag set")
+                if t and not t.done():
+                    t.cancel()
+                    logger.debug("[scrape] CANCEL → hard cancel issued to task")
+                return {"ok": True}
+            except Exception as e:
+                logger.exception("[scrape] CANCEL failed")
+                return {"ok": False, "error": str(e)}
+
+        elif typ == "scrape_snapshot":
+            try:
+                include_names = bool((data or {}).get("include_names", True))
+                if getattr(self, "scraper", None):
+                    members = await self.scraper.snapshot_members()
+                    return self.streams.pack_json(
+                        {"members": members, "count": len(members)},
+                        max_inline_bytes=800_000,
+                    )
+                return self.streams.pack_json({"members": [], "count": 0}, max_inline_bytes=800_000)
+            except Exception as e:
+                logger.exception("[❌] scrape_snapshot failed")
+                return {"ok": False, "error": str(e)}
+            
 
         return None
+    
+    async def _resolve_accessible_host_channel(self, orig_channel_id: int):
+        """
+        Maps a cloned channel id to its host channel id (if applicable), and returns a
+        channel object you can actually access along with the resolved channel_id and guild.
+
+        Returns: (channel: discord.TextChannel, channel_id: int, guild: discord.Guild)
+        Raises: discord.Forbidden if no accessible channel can be found.
+        """
+        logger = logging.getLogger("client")
+
+        # 1) Map cloned -> host channel id BEFORE any fetches
+        channel_id = int(orig_channel_id)
+        if hasattr(self, "chan_map"):
+            for src_id, row in self.chan_map.items():
+                if int(row.get("cloned_channel_id") or 0) == channel_id:
+                    logger.debug(f"[map] Mapped cloned channel {channel_id} -> host channel {src_id}")
+                    channel_id = int(src_id)
+                    break
+
+        # 2) Try cache, then fetch
+        channel = self.bot.get_channel(channel_id)
+        if not channel:
+            try:
+                channel = await self.bot.fetch_channel(channel_id)
+            except discord.Forbidden:
+                channel = None
+
+        # 3) Resolve guild
+        guild = getattr(channel, "guild", None)
+        if guild is None:
+            # Prefer an explicit host guild id if your client has it
+            host_guild = None
+            if hasattr(self, "host_guild_id") and self.host_guild_id:
+                host_guild = self.bot.get_guild(int(self.host_guild_id))
+            # Fallback: try to guess (last resort)
+            if host_guild is None and self.bot.guilds:
+                host_guild = self.bot.guilds[0]
+            guild = host_guild
+
+        if guild is None:
+            raise discord.Forbidden(None, {"message": "No guild available for fallback"})
+
+        # 4) If we couldn’t fetch the requested channel (or it’s None), pick the first readable text channel
+        if channel is None:
+            me = guild.me or guild.get_member(getattr(getattr(self.bot, "user", None), "id", 0))
+
+            def can_read(ch) -> bool:
+                try:
+                    if me is None:
+                        return False
+                    perms = ch.permissions_for(me)
+                    return bool(perms.view_channel and perms.read_message_history)
+                except Exception:
+                    return False
+
+            readable = next((ch for ch in guild.text_channels if can_read(ch)), None)
+            if not readable:
+                raise discord.Forbidden(None, {"message": "No accessible text channel found in the host guild."})
+
+            channel = readable
+            channel_id = readable.id
+
+        return channel, channel_id, guild
+
 
     async def build_and_send_sitemap(self):
         """
@@ -759,12 +903,12 @@ class ClientListener:
             )
 
             # Pull message attributes for debugging
-            msg_attrs = self.extract_public_message_attrs(message)
+            # msg_attrs = self.extract_public_message_attrs(message)
 
-            logger.debug(
-                "Full Message attributes:\n%s",
-                pprint.pformat(msg_attrs, indent=2, width=120),
-            )
+            # logger.debug(
+            #     "Full Message attributes:\n%s",
+            #     pprint.pformat(msg_attrs, indent=2, width=120),
+            # )
 
     async def on_thread_delete(self, thread: discord.Thread):
         """
@@ -899,15 +1043,12 @@ class ClientListener:
             if getattr(msg, "type", None) not in ALLOWED_TYPES:
                 return False
             return True
-
-        # -----------------------------------------------------------------------
-
+        
         sent = 0
         last_ping = 0.0
-
-        # One-time pre-count so the server knows the total up front (only normal messages)
-        if getattr(self, "do_precount", False):
-            try:
+        
+        try:
+            if getattr(self, "do_precount", False):
                 total = 0
                 async for m in ch.history(limit=None, oldest_first=True):
                     if not _is_normal(m):
@@ -919,10 +1060,6 @@ class ClientListener:
                         "data": {"channel_id": original_channel_id, "count": total},
                     }
                 )
-            except Exception as e:
-                logger.warning("[ℹ️] Precount failed for %s: %s", original_channel_id, e)
-
-        try:
             async for m in ch.history(limit=None, oldest_first=True):
                 if not _is_normal(m):
                     continue
@@ -1003,24 +1140,33 @@ class ClientListener:
                     )
                     last_ping = now
 
+        except Forbidden as e:
+            # Prevent the unhandled task exception and report cleanly
+            logger.info("[backfill] history forbidden channel=%s: %s", original_channel_id, e)
+        except HTTPException as e:
+            logger.warning("[backfill] HTTP error channel=%s: %s", original_channel_id, e)
         finally:
-            await self.ws.send(
-                {"type": "backfill_done", "data": {"channel_id": original_channel_id}}
-            )
+            await self.ws.send({"type": "backfill_done", "data": {"channel_id": original_channel_id}})
 
     async def _shutdown(self):
         """
         Asynchronously shuts down the client.
         """
         logger.info("Shutting down client…")
-        if self._sync_task:
-            self._sync_task.cancel()
-            try:
-                await self._sync_task
-            except asyncio.CancelledError:
-                pass
-
-        await self.bot.close()
+        self.ws.begin_shutdown()
+        try:
+            t = getattr(self, "_scrape_task", None)
+            if getattr(self, "scraper", None):
+                self.scraper.request_cancel()
+            if t and not t.done():
+                t.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await asyncio.wait_for(t, timeout=5.0)
+        except Exception as e:
+            logger.debug("Shutdown error: %r", e)
+        # close the discord client last
+        with contextlib.suppress(Exception):
+            await self.bot.close()
         logger.info("Client shutdown complete.")
 
     def run(self):
