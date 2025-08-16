@@ -1,3 +1,12 @@
+# =============================================================================
+#  Copycord
+#  Copyright (C) 2021 github.com/Copycord
+#
+#  This source code is released under the GNU Affero General Public License
+#  version 3.0. A copy of the license is available at:
+#  https://www.gnu.org/licenses/agpl-3.0.en.html
+# =============================================================================
+
 import logging, re
 from typing import Optional, Tuple
 from server.rate_limiter import ActionType
