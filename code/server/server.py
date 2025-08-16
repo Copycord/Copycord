@@ -1,3 +1,12 @@
+# =============================================================================
+#  Copycord
+#  Copyright (C) 2021 github.com/Copycord
+#
+#  This source code is released under the GNU Affero General Public License
+#  version 3.0. A copy of the license is available at:
+#  https://www.gnu.org/licenses/agpl-3.0.en.html
+# =============================================================================
+
 import signal
 import asyncio
 import logging
@@ -33,16 +42,20 @@ from server.backfill import BackfillManager
 LOG_DIR = "/data"
 os.makedirs(LOG_DIR, exist_ok=True)
 
+LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
+LEVEL = getattr(logging, LEVEL_NAME, logging.INFO)
+
 formatter = logging.Formatter(
     "%(asctime)s | %(levelname)-5s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
 root = logging.getLogger()
-root.setLevel(logging.INFO)
+root.setLevel(LEVEL)
 
 ch = logging.StreamHandler()
 ch.setFormatter(formatter)
+ch.setLevel(LEVEL)
 root.addHandler(ch)
 
 log_file = os.path.join(LOG_DIR, "server.log")
@@ -52,34 +65,30 @@ fh = RotatingFileHandler(
     backupCount=1,
     encoding="utf-8",
 )
-fh.setLevel(logging.INFO)
 fh.setFormatter(formatter)
+fh.setLevel(LEVEL)
 root.addHandler(fh)
 
+# keep library noise down
 for name in ("websockets.server", "websockets.protocol"):
     logging.getLogger(name).setLevel(logging.WARNING)
-for lib in (
-    "discord",
-    "discord.client",
-    "discord.gateway",
-    "discord.state",
-    "discord.http",
-):
+for lib in ("discord","discord.client","discord.gateway","discord.state","discord.http"):
     logging.getLogger(lib).setLevel(logging.WARNING)
-
 logging.getLogger("discord.client").setLevel(logging.ERROR)
-logger = logging.getLogger("server")
 
+logger = logging.getLogger("server")
+logger.setLevel(LEVEL)
 
 class ServerReceiver:
     def __init__(self):
-        self.config = Config()
+        self.config = Config(logger=logger)
         self.bot = discord.Bot(intents=discord.Intents.all())
         self.bot.server = self
         self.ws = WebsocketManager(
             send_url=self.config.CLIENT_WS_URL,
             listen_host=self.config.SERVER_WS_HOST,
             listen_port=self.config.SERVER_WS_PORT,
+            logger=logger,
         )
         self.clone_guild_id = int(self.config.CLONE_GUILD_ID)
         self.bot.ws_manager = self.ws
@@ -154,6 +163,10 @@ class ServerReceiver:
         """Update the bot's Discord status."""
         try:
             await self.bot.change_presence(activity=discord.Game(name=message))
+            self._last_status = getattr(self, "_last_status", None)
+            if self._last_status == message:
+                return
+            self._last_status = message
             logger.debug("[🟢] Bot status updated to: %s", message)
         except Exception as e:
             logger.debug("[⚠️] Failed to update bot status: %s", e)
@@ -221,17 +234,19 @@ class ServerReceiver:
                     return
             except AttributeError:
                 return
-            
+
             # Skip if sync is in progress
             if getattr(self, "_sync_lock", None) and self._sync_lock.locked():
-                logger.debug("[🛑] Sync in progress — ignoring sitemap request for deleted channel %s", channel.id)
+                logger.debug(
+                    "[🛑] Sync in progress — ignoring sitemap request for deleted channel %s",
+                    channel.id,
+                )
                 return
-
 
             # Is this a category?
             is_category = (
-                isinstance(channel, discord.CategoryChannel) or
-                getattr(channel, "type", None) == discord.ChannelType.category
+                isinstance(channel, discord.CategoryChannel)
+                or getattr(channel, "type", None) == discord.ChannelType.category
             )
 
             if is_category:
@@ -250,7 +265,9 @@ class ServerReceiver:
 
                 logger.warning(
                     "[🧹] Cloned category deleted: id=%s name=%s (src_cat=%s). Requesting sitemap.",
-                    channel.id, getattr(channel, "name", "?"), hit_src_cat_id
+                    channel.id,
+                    getattr(channel, "name", "?"),
+                    hit_src_cat_id,
                 )
 
                 # Ask the client to send over the sitemap
@@ -278,7 +295,9 @@ class ServerReceiver:
 
             logger.warning(
                 "[🧹] Cloned channel deleted: id=%s name=%s (src=%s). Requesting sitemap.",
-                channel.id, getattr(channel, "name", "?"), hit_src_id
+                channel.id,
+                getattr(channel, "name", "?"),
+                hit_src_id,
             )
 
             # Ask the client to send over the sitemap
@@ -2600,7 +2619,6 @@ class ServerReceiver:
 
         logger.info("Shutting down server...")
 
-        # 1) Stop inbound WS/IO if available (so no new events arrive)
         try:
             ws = getattr(self, "ws_manager", None) or getattr(self, "ws", None)
             if ws and hasattr(ws, "stop"):
@@ -2608,7 +2626,6 @@ class ServerReceiver:
         except Exception:
             logger.debug("[shutdown] ws stop failed", exc_info=True)
 
-        # 2) Cancel background tasks (and wait for them to finish)
         async def _cancel_and_wait(task, name: str):
             if not task:
                 return
@@ -2626,18 +2643,14 @@ class ServerReceiver:
         await _cancel_and_wait(getattr(self, "_sitemap_task", None), "sitemap")
         await _cancel_and_wait(getattr(self, "_ws_task", None), "ws")
 
-        # Tell backfill not to DM on finish if your on_done checks this flag
         setattr(self, "_suppress_backfill_dm", True)
-
-        # 3) Backfill cleanup BEFORE closing sessions (DM + temp webhook delete)
         try:
             bf = getattr(self, "backfill", None)
             if bf and hasattr(bf, "shutdown") and callable(bf.shutdown):
-                await bf.shutdown()  # should delete temp webhooks and skip DMs if self._shutting_down == True
+                await bf.shutdown()
         except Exception:
             logger.debug("[shutdown] backfill cleanup failed", exc_info=True)
 
-        # 4) Close HTTP session and the bot transport LAST
         try:
             if getattr(self, "session", None) and not self.session.closed:
                 await self.session.close()
