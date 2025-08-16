@@ -112,6 +112,8 @@ CLONE_STICKER=True # Clone stickers
 
 CLIENT_TOKEN= # Your discord account token
 HOST_GUILD_ID= # ID of the host guild to monitor
+
+LOG_LEVEL=INFO # INFO or DEBUG
 ```
 
 ### 3. Launch Copycord
