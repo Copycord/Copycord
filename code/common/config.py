@@ -1,15 +1,29 @@
+# =============================================================================
+#  Copycord
+#  Copyright (C) 2021 github.com/Copycord
+#
+#  This source code is released under the GNU Affero General Public License
+#  version 3.0. A copy of the license is available at:
+#  https://www.gnu.org/licenses/agpl-3.0.en.html
+# =============================================================================
+
 import asyncio
 import os
 import sys
 import logging
+from typing import Optional
 import aiohttp
 from common.db import DBManager
 
-logger = logging.getLogger("config")
+logger = logging.getLogger(__name__)
 
 
 class Config:
-    def __init__(self):
+    def __init__(
+        self,
+        logger: Optional[logging.Logger] = None,
+    ):
+        self.logger = logger.getChild(self.__class__.__name__)
         self.CURRENT_VERSION = "v1.7.0"
         self.GITHUB_API_LATEST = (
             "https://api.github.com/repos/Copycord/Copycord/releases/latest"
@@ -26,13 +40,13 @@ class Config:
         self.SERVER_WS_URL = os.getenv(
             "WS_SERVER_URL", f"ws://{self.SERVER_WS_HOST}:{self.SERVER_WS_PORT}"
         )
-        
-        self.ENABLE_CLONING = os.getenv("ENABLE_CLONING", "false").lower() in (
+
+        self.ENABLE_CLONING = os.getenv("ENABLE_CLONING", "true").lower() in (
             "1",
             "true",
             "yes",
         )
-        
+
         self.DELETE_CHANNELS = os.getenv("DELETE_CHANNELS", "false").lower() in (
             "1",
             "true",
@@ -43,13 +57,13 @@ class Config:
             "true",
             "yes",
         )
-        self.CLONE_EMOJI = os.getenv("CLONE_EMOJI", "false").lower() in (
+        self.CLONE_EMOJI = os.getenv("CLONE_EMOJI", "true").lower() in (
             "1",
             "true",
             "yes",
         )
 
-        self.CLONE_STICKER = os.getenv("CLONE_STICKER", "false").lower() in (
+        self.CLONE_STICKER = os.getenv("CLONE_STICKER", "true").lower() in (
             "1",
             "true",
             "yes",
@@ -71,23 +85,23 @@ class Config:
         # ─── VALIDATION ─────────────────────────────────────────────────
         for name in ("SERVER_TOKEN", "CLIENT_TOKEN"):
             if not getattr(self, name):
-                logger.error(f"Missing required environment variable {name}")
+                self.logger.error(f"Missing required environment variable {name}")
                 sys.exit(1)
 
         for name in ("HOST_GUILD_ID", "CLONE_GUILD_ID"):
             raw = getattr(self, name)
             if raw is None:
-                logger.error(f"Missing required Discord guild ID env var: {name}")
+                self.logger.error(f"Missing required Discord guild ID env var: {name}")
                 sys.exit(1)
             try:
                 val = int(raw)
             except (TypeError, ValueError):
-                logger.error(
+                self.logger.error(
                     f"Discord guild ID {name} must be an integer (got {raw!r}); aborting."
                 )
                 sys.exit(1)
             if val <= 0:
-                logger.error(
+                self.logger.error(
                     f"Discord guild ID {name} must be a positive integer (got {val}); shutting down."
                 )
                 sys.exit(1)
@@ -133,9 +147,11 @@ class Config:
                 try:
                     await fn(text)
                 except Exception:
-                    logger.debug("update_status failed", exc_info=True)
+                    self.logger.debug("update_status failed", exc_info=True)
             else:
-                logger.debug("Skipping status update (receiver has no update_status)")
+                self.logger.debug(
+                    "Skipping status update (receiver has no update_status)"
+                )
 
         while not receiver.bot.is_closed():
             try:
@@ -153,13 +169,13 @@ class Config:
                             if resp.status == 200:
                                 releases = await resp.json()
                             else:
-                                logger.debug(
+                                self.logger.debug(
                                     "Releases API %d: %s",
                                     resp.status,
                                     await resp.text(),
                                 )
                     except Exception:
-                        logger.exception("Failed to fetch releases")
+                        self.logger.exception("Failed to fetch releases")
 
                     # Fetch recent tags (extra/fallback)
                     tags = []
@@ -170,11 +186,11 @@ class Config:
                             if resp.status == 200:
                                 tags = await resp.json()
                             else:
-                                logger.debug(
+                                self.logger.debug(
                                     "Tags API %d: %s", resp.status, await resp.text()
                                 )
                     except Exception:
-                        logger.exception("Failed to fetch tags")
+                        self.logger.exception("Failed to fetch tags")
 
                 # Build candidate (tag, url)
                 candidates: list[tuple[str, str]] = []
@@ -188,7 +204,7 @@ class Config:
                         candidates.append((name, t.get("zipball_url") or ""))
 
                 if not candidates:
-                    logger.debug("No version candidates; skipping this cycle")
+                    self.logger.debug("No version candidates; skipping this cycle")
                     await asyncio.sleep(self._release_interval)
                     continue
 
@@ -201,11 +217,11 @@ class Config:
                 # Visibility log if observed tag changed (independent of notifications)
                 last_seen = db.get_notified_version() or ""
                 if _norm_version(tag) != _norm_version(last_seen):
-                    logger.debug("[📢] GitHub latest observed: %s (%s)", tag, url)
+                    self.logger.debug("[📢] GitHub latest observed: %s (%s)", tag, url)
 
                 if cmp_remote_local > 0:
                     # Remote > local → update available (ALWAYS log this)
-                    logger.info("[⬆️] Update available: %s %s", tag, url)
+                    self.logger.info("[⬆️] Update available: %s %s", tag, url)
 
                     # Server-only presence
                     await _maybe_update_status("New update available!")
@@ -225,10 +241,12 @@ class Config:
                                 await owner.send(
                                     f"A new Copycord release is available: **{tag}**\n{url}"
                                 )
-                                logger.debug("Sent release DM to guild owner %s", owner)
+                                self.logger.debug(
+                                    "Sent release DM to guild owner %s", owner
+                                )
                                 db.set_notified_version(tag)
                             except Exception as e:
-                                logger.warning(
+                                self.logger.warning(
                                     "[⚠️] Failed to send new version DM: %s", e
                                 )
                 else:
@@ -246,6 +264,6 @@ class Config:
                     db.set_version(self.CURRENT_VERSION)
 
             except Exception:
-                logger.exception("[⛔] Error in version release watcher loop")
+                self.logger.exception("[⛔] Error in version release watcher loop")
 
             await asyncio.sleep(self._release_interval)
