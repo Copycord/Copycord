@@ -1,47 +1,67 @@
+# =============================================================================
+#  Copycord
+#  Copyright (C) 2021 github.com/Copycord
+#
+#  This source code is released under the GNU Affero General Public License
+#  version 3.0. A copy of the license is available at:
+#  https://www.gnu.org/licenses/agpl-3.0.en.html
+# =============================================================================
+
 import discord
 from discord.ext import commands
-from discord import CategoryChannel, Option, Embed, Color
+from discord import (
+    CategoryChannel,
+    Option,
+    Embed,
+    Color,
+    ChannelType,
+    SlashCommandOptionType,
+)
 from discord.errors import NotFound, Forbidden
 from discord import errors as discord_errors
 from datetime import datetime, timezone
 import time
 import logging
 import asyncio
-import io
-import json
-import gzip
-import math
+import time
 from common.config import Config
 from common.db import DBManager
 from server.rate_limiter import RateLimitManager, ActionType
+from server.helpers import MemberExportService, ExportJob
 
 logger = logging.getLogger("server")
 
-config = Config()
+config = Config(logger=logger)
 GUILD_ID = config.CLONE_GUILD_ID
+
 
 class CloneCommands(commands.Cog):
     """
     Collection of slash commands for the Clone bot, restricted to allowed users.
     """
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.db = DBManager(config.DB_PATH)
         self.ratelimit = RateLimitManager()
         self.start_time = time.time()
-        self.allowed_users = getattr(config, 'COMMAND_USERS', []) or []
+        self.allowed_users = getattr(config, "COMMAND_USERS", []) or []
+        self.export = MemberExportService(self.bot, self.bot.ws_manager, logger=logger)
+        self._export_jobs: dict[int, ExportJob] = {}
 
     async def cog_check(self, ctx: commands.Context):
         """
         Global check for all commands in this cog. Only users whose ID is in set in config may execute commands.
         """
-        cmd_name = ctx.command.name if ctx.command else 'unknown'
+        cmd_name = ctx.command.name if ctx.command else "unknown"
         if ctx.user.id in self.allowed_users:
             logger.info(f"[⚡] User {ctx.user.id} executed the '{cmd_name}' command.")
             return True
         # deny access otherwise
         await ctx.respond("You are not authorized to use this command.", ephemeral=True)
-        logger.warning(f"[⚠️] Unauthorized access: user {ctx.user.id} attempted to run command '{cmd_name}'")
+        logger.warning(
+            f"[⚠️] Unauthorized access: user {ctx.user.id} attempted to run command '{cmd_name}'"
+        )
         return False
 
     @commands.Cog.listener()
@@ -55,7 +75,7 @@ class CloneCommands(commands.Cog):
         with full tracebacks for debugging.
         """
         orig = getattr(error, "original", None)
-        err  = orig or error
+        err = orig or error
 
         if isinstance(err, (commands.CheckFailure, discord_errors.CheckFailure)):
             return
@@ -69,52 +89,84 @@ class CloneCommands(commands.Cog):
         Fired when the bot is ready. Logs allowed users status.
         """
         if not self.allowed_users:
-            logger.warning("[⚠️] No allowed users configured: commands will not work for anyone.")
+            logger.warning(
+                "[⚠️] No allowed users configured: commands will not work for anyone."
+            )
         else:
             logger.info(f"[⚙️] Commands permissions set for users: {self.allowed_users}")
-            
+
     async def _reply_or_dm(self, ctx: discord.ApplicationContext, content: str) -> None:
         """Try ephemeral followup; if the channel is gone, DM the user instead."""
         try:
             await ctx.followup.send(content, ephemeral=True)
             return
         except NotFound:
-            # The original interaction message or channel is gone (e.g., got deleted)
             pass
         except Forbidden:
-            # Webhook send forbidden; fall back to DM
             pass
 
-        # Fallback to DM
         try:
-            # Split into chunks if over 2000 chars
             MAX = 2000
             if len(content) <= MAX:
                 await ctx.user.send(content)
             else:
-                # chunk on line boundaries if possible
                 start = 0
                 while start < len(content):
                     end = min(start + MAX, len(content))
-                    # try not to break a line
                     nl = content.rfind("\n", start, end)
-                    if nl == -1 or nl <= start + 100:  # give up if no good break
+                    if nl == -1 or nl <= start + 100:
                         nl = end
                     await ctx.user.send(content[start:nl])
                     start = nl
         except Forbidden:
-            # DMs closed; nothing else we can do
             logger.warning("[verify_structure] Could not DM user; DMs are closed.")
 
-    def _ok_embed(self, title: str, description: str, *, fields=None, color=discord.Color.blurple()):
-        e = discord.Embed(title=title, description=description, color=color, timestamp=datetime.now(timezone.utc))
+    def _ok_embed(
+        self,
+        title_or_desc: str | None = None,
+        description: str | None = None,
+        *,
+        fields=None,
+        color=discord.Color.blurple(),
+        footer: str | None = None,
+        show_timestamp: bool = True,
+    ) -> discord.Embed:
+        """
+        Build a standard success/info embed.
+        """
+        if description is None:
+            # Only one positional arg was given → it's the description; no title.
+            if title_or_desc is None:
+                raise ValueError("description is required")
+            title = None
+            description = title_or_desc
+        else:
+            # Two-arg form → treat first as title.
+            title = title_or_desc
+
+        e = discord.Embed(title=title, description=description, color=color)
+
+        if show_timestamp:
+            from datetime import datetime, timezone
+
+            e.timestamp = datetime.now(timezone.utc)
+
         if fields:
             for name, value, inline in fields:
                 e.add_field(name=name, value=value, inline=inline)
+
+        if footer:
+            e.set_footer(text=footer)
+
         return e
 
     def _err_embed(self, title: str, description: str):
-        return discord.Embed(title=title, description=description, color=discord.Color.red(), timestamp=datetime.now(timezone.utc))
+        return discord.Embed(
+            title=title,
+            description=description,
+            color=discord.Color.red(),
+            timestamp=datetime.now(timezone.utc),
+        )
 
     @commands.slash_command(
         name="ping_server",
@@ -148,32 +200,29 @@ class CloneCommands(commands.Cog):
         await ctx.defer(ephemeral=True)
 
         server_ts = datetime.now(timezone.utc).timestamp()
-        resp = await self.bot.ws_manager.request({
-            "type": "ping",
-            "data": {"timestamp": server_ts}
-        })
+        resp = await self.bot.ws_manager.request(
+            {"type": "ping", "data": {"timestamp": server_ts}}
+        )
 
         if not resp or "data" not in resp:
             return await ctx.followup.send(
-                "No response from client (timed out or error)",
-                ephemeral=True
+                "No response from client (timed out or error)", ephemeral=True
             )
 
         d = resp["data"]
-        ws_latency_ms   = (d.get("discord_ws_latency_s") or 0) * 1000
-        round_trip_ms   = (d.get("round_trip_seconds") or 0) * 1000
-        client_start    = datetime.fromisoformat(d.get("client_start_time"))
-        uptime_delta    = datetime.now(timezone.utc) - client_start
-        hours, rem      = divmod(int(uptime_delta.total_seconds()), 3600)
-        minutes, sec    = divmod(rem, 60)
-        uptime_str      = f"{hours}h {minutes}m {sec}s"
+        ws_latency_ms = (d.get("discord_ws_latency_s") or 0) * 1000
+        round_trip_ms = (d.get("round_trip_seconds") or 0) * 1000
+        client_start = datetime.fromisoformat(d.get("client_start_time"))
+        uptime_delta = datetime.now(timezone.utc) - client_start
+        hours, rem = divmod(int(uptime_delta.total_seconds()), 3600)
+        minutes, sec = divmod(rem, 60)
+        uptime_str = f"{hours}h {minutes}m {sec}s"
 
-        embed = discord.Embed(
-            title="📡 Pong! (Client)",
-            timestamp=datetime.utcnow()
-        )
+        embed = discord.Embed(title="📡 Pong! (Client)", timestamp=datetime.utcnow())
         embed.add_field(name="Latency", value=f"{ws_latency_ms:.2f} ms", inline=True)
-        embed.add_field(name="Round‑Trip Time", value=f"{round_trip_ms:.2f} ms", inline=True)
+        embed.add_field(
+            name="Round‑Trip Time", value=f"{round_trip_ms:.2f} ms", inline=True
+        )
         embed.add_field(name="Client Uptime", value=uptime_str, inline=True)
 
         await ctx.followup.send(embed=embed, ephemeral=True)
@@ -186,7 +235,9 @@ class CloneCommands(commands.Cog):
     async def block_add(
         self,
         ctx: discord.ApplicationContext,
-        keyword: str = Option(description="Keyword to block (will toggle)", required=True),
+        keyword: str = Option(
+            description="Keyword to block (will toggle)", required=True
+        ),
     ):
         """Toggle a blocked keyword in blocked_keywords."""
         if self.db.add_blocked_keyword(keyword):
@@ -199,12 +250,13 @@ class CloneCommands(commands.Cog):
 
         # push update to client
         new_list = self.db.get_blocked_keywords()
-        await self.bot.ws_manager.send({
-            "type": "settings_update",
-            "data": {"blocked_keywords": new_list}
-        })
+        await self.bot.ws_manager.send(
+            {"type": "settings_update", "data": {"blocked_keywords": new_list}}
+        )
 
-        await ctx.respond(f"{emoji} `{keyword}` {action} in block list.", ephemeral=True)
+        await ctx.respond(
+            f"{emoji} `{keyword}` {action} in block list.", ephemeral=True
+        )
 
     @commands.slash_command(
         name="block_list",
@@ -231,7 +283,7 @@ class CloneCommands(commands.Cog):
         delete: bool = Option(
             bool,
             "If true, delete orphaned channels/categories after reporting",
-            default=False
+            default=False,
         ),
     ):
         """Lists—and optionally deletes—categories and channels that aren’t in the last synced sitemap."""
@@ -252,12 +304,14 @@ class CloneCommands(commands.Cog):
 
         orphan_categories = [c for c in guild.categories if c.id not in mapped_cats]
         orphan_channels = [
-            ch for ch in guild.channels
+            ch
+            for ch in guild.channels
             if not isinstance(ch, CategoryChannel) and ch.id not in mapped_chs
         ]
         logger.info(
             "[⚙️] Found %d orphan categories and %d orphan channels",
-            len(orphan_categories), len(orphan_channels)
+            len(orphan_categories),
+            len(orphan_channels),
         )
 
         if delete:
@@ -268,7 +322,9 @@ class CloneCommands(commands.Cog):
                     await self.ratelimit.acquire(ActionType.DELETE_CHANNEL)
                     await cat.delete()
                     deleted_cats += 1
-                    logger.info("[🗑️] Deleted orphan category %s (ID %d)", cat.name, cat.id)
+                    logger.info(
+                        "[🗑️] Deleted orphan category %s (ID %d)", cat.name, cat.id
+                    )
                 except Exception as e:
                     logger.warning("[⚠️] Failed to delete category %s: %s", cat.id, e)
 
@@ -286,9 +342,13 @@ class CloneCommands(commands.Cog):
             else:
                 parts = []
                 if deleted_cats:
-                    parts.append(f"{deleted_cats} categor{'y' if deleted_cats==1 else 'ies'}")
+                    parts.append(
+                        f"{deleted_cats} categor{'y' if deleted_cats==1 else 'ies'}"
+                    )
                 if deleted_chs:
-                    parts.append(f"{deleted_chs} channel{'s' if deleted_chs!=1 else ''}")
+                    parts.append(
+                        f"{deleted_chs} channel{'s' if deleted_chs!=1 else ''}"
+                    )
                 msg = "[⚙️] verify_structure: Deleted " + " and ".join(parts) + "."
                 logger.info("[⚙️] verify_structure: Deletion summary: %s", msg)
 
@@ -314,7 +374,6 @@ class CloneCommands(commands.Cog):
             report = report[:1900] + "\n…(truncated)"
 
         await self._reply_or_dm(ctx, report)
-
 
     @commands.slash_command(
         name="announcement_trigger",
@@ -347,9 +406,9 @@ class CloneCommands(commands.Cog):
                 embed=Embed(
                     title="⚠️ Invalid User ID",
                     description=f"`{user_id}` is not a valid user ID.",
-                    color=Color.red()
+                    color=Color.red(),
                 ),
-                ephemeral=True
+                ephemeral=True,
             )
 
         if channel_id:
@@ -360,9 +419,9 @@ class CloneCommands(commands.Cog):
                     embed=Embed(
                         title="⚠️ Invalid Channel ID",
                         description=f"`{channel_id}` is not a valid channel ID.",
-                        color=Color.red()
+                        color=Color.red(),
                     ),
-                    ephemeral=True
+                    ephemeral=True,
                 )
         else:
             chan_id = 0
@@ -385,29 +444,27 @@ class CloneCommands(commands.Cog):
                         f"A global trigger for **{keyword}** by user ID `{filter_id}` "
                         "already exists. Please remove it first if you want to add a specific channel trigger."
                     ),
-                    color=Color.blue()
+                    color=Color.blue(),
                 ),
-                ephemeral=True
+                ephemeral=True,
             )
 
         added = self.db.add_announcement_trigger(keyword, filter_id, chan_id)
-        who   = f"user ID `{filter_id}`"
+        who = f"user ID `{filter_id}`"
         where = f"in channel `#{chan_id}`" if chan_id else "in any channel"
 
         if not added:
             embed = Embed(
                 title="Trigger Already Exists",
                 description=f"Trigger for **{keyword}** by {who} {where} already exists.",
-                color=Color.orange()
+                color=Color.orange(),
             )
         else:
-            title = "Global Trigger Registered" if chan_id == 0 else "Trigger Registered"
-            desc  = f"Will announce **{keyword}** by {who} {where}."
-            embed = Embed(
-                title=title,
-                description=desc,
-                color=Color.green()
+            title = (
+                "Global Trigger Registered" if chan_id == 0 else "Trigger Registered"
             )
+            desc = f"Will announce **{keyword}** by {who} {where}."
+            embed = Embed(title=title, description=desc, color=Color.green())
 
         await ctx.respond(embed=embed, ephemeral=True)
 
@@ -420,14 +477,10 @@ class CloneCommands(commands.Cog):
         self,
         ctx: discord.ApplicationContext,
         user: discord.User = Option(
-            discord.User,
-            "User to (un)subscribe (defaults to you)",
-            required=False
+            discord.User, "User to (un)subscribe (defaults to you)", required=False
         ),
         keyword: str = Option(
-            str,
-            "Keyword to subscribe to (omit for ALL announcements)",
-            required=False
+            str, "Keyword to subscribe to (omit for ALL announcements)", required=False
         ),
     ):
         """
@@ -444,36 +497,33 @@ class CloneCommands(commands.Cog):
             embed = Embed(
                 title="Already Subscribed Globally",
                 description=f"{target.mention} is already subscribed to **all** announcements. Unsubscribe them first to subscribe to specific keywords.",
-                color=Color.blue()
+                color=Color.blue(),
             )
             return await ctx.respond(embed=embed, ephemeral=True)
 
         if sub_key == "*":
             self.db.conn.execute(
                 "DELETE FROM announcement_subscriptions WHERE user_id = ? AND keyword != '*'",
-                (target.id,)
+                (target.id,),
             )
             self.db.conn.commit()
 
         if self.db.add_announcement_user(sub_key, target.id):
             action = "Subscribed"
-            color  = Color.green()
+            color = Color.green()
         else:
             self.db.remove_announcement_user(sub_key, target.id)
             action = "Unsubscribed"
-            color  = Color.orange()
+            color = Color.orange()
 
-        embed = Embed(
-            title="🔔 Announcement Subscription Updated",
-            color=color
-        )
+        embed = Embed(title="🔔 Announcement Subscription Updated", color=color)
         embed.add_field(name="User", value=target.mention, inline=True)
         scope = keyword if keyword else "All announcements"
         embed.add_field(name="Scope", value=scope, inline=True)
         embed.add_field(name="Action", value=action, inline=True)
 
         await ctx.respond(embed=embed, ephemeral=True)
-    
+
     @commands.slash_command(
         name="announcement_list",
         description="List all announcement triggers, or delete by index",
@@ -483,11 +533,8 @@ class CloneCommands(commands.Cog):
         self,
         ctx: discord.ApplicationContext,
         delete: int = Option(
-            int,
-            "Index of the trigger to delete",
-            required=False,
-            min_value=1
-        )
+            int, "Index of the trigger to delete", required=False, min_value=1
+        ),
     ):
         """
         /announcement_list [delete]
@@ -505,25 +552,22 @@ class CloneCommands(commands.Cog):
             idx = delete - 1
             if idx < 0 or idx >= len(keys):
                 return await ctx.respond(
-                    f"⚠️ Invalid index `{delete}`; pick 1–{len(keys)}.",
-                    ephemeral=True
+                    f"⚠️ Invalid index `{delete}`; pick 1–{len(keys)}.", ephemeral=True
                 )
             kw = keys[idx]
             for filter_id, chan_id in triggers[kw]:
                 self.db.remove_announcement_trigger(kw, filter_id, chan_id)
             self.db.conn.execute(
-                "DELETE FROM announcement_subscriptions WHERE keyword = ?",
-                (kw,)
+                "DELETE FROM announcement_subscriptions WHERE keyword = ?", (kw,)
             )
             self.db.conn.commit()
             return await ctx.respond(
                 f"Deleted announcement trigger **{kw}** and cleared its subscribers.",
-                ephemeral=True
+                ephemeral=True,
             )
 
         embed = discord.Embed(
-            title="📋 Announcement Triggers",
-            color=discord.Color.blurple()
+            title="📋 Announcement Triggers", color=discord.Color.blurple()
         )
 
         for i, kw in enumerate(keys, start=1):
@@ -533,14 +577,10 @@ class CloneCommands(commands.Cog):
                 user_desc = "any user" if filter_id == 0 else f"user `{filter_id}`"
                 chan_desc = "any channel" if chan_id == 0 else f"channel `#{chan_id}`"
                 lines.append(f"> From {user_desc} in {chan_desc}")
-            embed.add_field(
-                name=f"{i}. {kw}",
-                value="\n".join(lines),
-                inline=False
-            )
+            embed.add_field(name=f"{i}. {kw}", value="\n".join(lines), inline=False)
 
         await ctx.respond(embed=embed, ephemeral=True)
-        
+
     @commands.slash_command(
         name="clone_messages",
         description="Clone all messages for a *cloned* channel (oldest → newest), queueing live traffic meanwhile.",
@@ -549,27 +589,31 @@ class CloneCommands(commands.Cog):
     async def clone_messages(
         self,
         ctx: discord.ApplicationContext,
-        clone_channel: discord.TextChannel = Option(discord.TextChannel, "Pick the channel to sync", required=True)
+        clone_channel: discord.abc.GuildChannel = Option(
+            SlashCommandOptionType.channel,
+            "Pick the channel to sync",
+            required=True,
+            channel_types=[ChannelType.text, ChannelType.news],
+        ),
     ):
-        """
-        Workflow:
-        1) Resolve original (host) channel from the provided CLONED channel.
-        2) Enforce a global single-sync gate (only one channel sync across the whole server).
-        3) Mark the channel as 'backfilling' and register a progress sink (DM summary on finish).
-        4) Ask the client (via WS) to stream the full history oldest→newest.
-        """
         await ctx.defer(ephemeral=True)
 
-        # 1) Resolve original channel id from DB mapping
         try:
             row = self.db.conn.execute(
                 "SELECT original_channel_id FROM channel_mappings WHERE cloned_channel_id = ?",
                 (clone_channel.id,),
             ).fetchone()
         except Exception as e:
-            logger.exception("[⛔] DB error resolving original for cloned %s: %s", clone_channel.id, e)
+            logger.exception(
+                "[⛔] DB error resolving original for cloned %s: %s",
+                clone_channel.id,
+                e,
+            )
             return await ctx.followup.send(
-                embed=self._err_embed("Database Error", "I couldn’t resolve the channel mapping. Please try again."),
+                embed=self._err_embed(
+                    "Database Error",
+                    "I couldn’t resolve the channel mapping. Please try again.",
+                ),
                 ephemeral=True,
             )
 
@@ -577,7 +621,7 @@ class CloneCommands(commands.Cog):
             return await ctx.followup.send(
                 embed=self._err_embed(
                     "No Mapping Found",
-                    f"I don’t have a mapping for {clone_channel.mention}. Run a structure sync first."
+                    f"I don’t have a mapping for {clone_channel.mention}. Run a structure sync first.",
                 ),
                 ephemeral=True,
             )
@@ -587,23 +631,24 @@ class CloneCommands(commands.Cog):
         except Exception:
             original_id = int(row[0])
 
-        # Reach the server receiver
         receiver = getattr(self.bot, "server", None)
         if receiver is None:
             logger.error("[⛔] Server receiver not available on bot")
             return await ctx.followup.send(
-                embed=self._err_embed("Internal Error", "Server receiver is unavailable."),
+                embed=self._err_embed(
+                    "Internal Error", "Server receiver is unavailable."
+                ),
                 ephemeral=True,
             )
 
-        # 2) GLOBAL single-sync gate (only one sync at a time across the server)
         try:
-            ok, conflict = await receiver.backfill.try_begin_global_sync(original_id, ctx.user.id)
+            ok, conflict = await receiver.backfill.try_begin_global_sync(
+                original_id, ctx.user.id
+            )
         except Exception:
             ok, conflict = False, None
 
         if not ok:
-            # Show which channel/user currently holds the gate, if known
             conflict_orig = int(conflict.get("original_id", 0)) if conflict else None
             conflict_user = int(conflict.get("user_id", 0)) if conflict else None
 
@@ -615,56 +660,68 @@ class CloneCommands(commands.Cog):
                         (conflict_orig,),
                     ).fetchone()
                     if row2:
-                        conflict_clone_id = int(row2["cloned_channel_id"] if hasattr(row2, "__getitem__") else row2[0])
+                        conflict_clone_id = int(
+                            row2["cloned_channel_id"]
+                            if hasattr(row2, "__getitem__")
+                            else row2[0]
+                        )
                 except Exception:
                     pass
 
-            where = f"<#{conflict_clone_id}>" if conflict_clone_id else (f"channel `{conflict_orig}`" if conflict_orig else "another channel")
-            who = f" by <@{conflict_user}>" if conflict_user else ""
-            embed = discord.Embed(
-                title="⏳ A channel sync is already running",
-                description=f"Only one channel message sync can run at a time for this server.\nCurrent sync: {where}{who}",
-                color=discord.Color.orange(),
+            where = (
+                f"<#{conflict_clone_id}>"
+                if conflict_clone_id
+                else (
+                    f"channel `{conflict_orig}`" if conflict_orig else "another channel"
+                )
             )
-            return await ctx.followup.send(embed=embed, ephemeral=True)
+            who = f" by <@{conflict_user}>" if conflict_user else ""
+            desc = f"Only one channel message sync can run at a time for this server.\nCurrent sync: {where}{who}"
+            return await ctx.followup.send(
+                embed=self._ok_embed("⏳ A channel sync is already running", desc),
+                ephemeral=True,
+            )
 
-        # 3) Mark backfill + register sink; release the global gate on failure
         try:
             receiver.backfill.mark_backfill(original_id)
             receiver.backfill.register_sink(
                 original_id,
-                msg=None,               # DM summary only
+                msg=None,
                 user_id=ctx.user.id,
                 clone_channel_id=clone_channel.id,
             )
         except Exception as e:
-            logger.exception("[⛔] Failed registering backfill sink for %s: %s", original_id, e)
-            # Release global gate because we didn’t actually start
+            logger.exception(
+                "[⛔] Failed registering backfill sink for %s: %s", original_id, e
+            )
             try:
                 await receiver.backfill.end_global_sync(original_id)
             except Exception:
                 pass
             return await ctx.followup.send(
-                embed=self._err_embed("Internal Error", "Failed setting up progress tracking."),
+                embed=self._err_embed(
+                    "Internal Error", "Failed setting up progress tracking."
+                ),
                 ephemeral=True,
             )
 
-        # Notify the invoker
         await ctx.followup.send(
             embed=self._ok_embed(
                 "Starting message sync",
                 f"Cloning all messages in {clone_channel.mention} (oldest → newest)…\n"
-                f"New messages in this channel will be queued and forwarded after the sync is finished."
+                f"New messages in this channel will be queued and forwarded after the sync is finished.",
             ),
             ephemeral=True,
         )
 
-        # 4) Ask the client to start the backfill (oldest → newest); cleanup on error
         try:
-            await self.bot.ws_manager.send({"type": "clone_messages", "data": {"channel_id": original_id}})
+            await self.bot.ws_manager.send(
+                {"type": "clone_messages", "data": {"channel_id": original_id}}
+            )
         except Exception as e:
-            logger.exception("[⛔] Failed to send WS backfill request for %s: %s", original_id, e)
-            # Best effort cleanup because the client did not start
+            logger.exception(
+                "[⛔] Failed to send WS backfill request for %s: %s", original_id, e
+            )
             try:
                 receiver.backfill.unmark_backfill(original_id)
             except AttributeError:
@@ -674,154 +731,182 @@ class CloneCommands(commands.Cog):
             except Exception:
                 pass
             try:
-                await receiver.backfill.end_global_sync(original_id)  # release global gate
+                await receiver.backfill.end_global_sync(original_id)
             except Exception:
                 pass
 
             return await ctx.followup.send(
-                embed=self._err_embed("Client Unreachable", "I couldn’t contact the client to start the backfill."),
+                embed=self._err_embed(
+                    "Client Unreachable",
+                    "I couldn’t contact the client to start the backfill.",
+                ),
                 ephemeral=True,
             )
-            
+
     @commands.slash_command(
-        name="export_users",
-        description="Export host server users as JSON (IDs only by default; optionally include usernames).",
+        name="start_member_export",
+        description="Fully scrape the host server and export server members",
         guild_ids=[GUILD_ID],
-    )          
-    async def export_users(
+    )
+    async def start_member_export(
         self,
         ctx: discord.ApplicationContext,
-        include_names: bool = Option(bool, "Include usernames/display names", default=False),
+        include_names: bool = Option(
+            bool, "Include metadata (id, username, bot)", default=False
+        ),
+        num_sessions: int = Option(
+            int,
+            "**CAUTION**: more sessions = possibly higher ban risk",
+            required=False,
+            default=1,
+            min_value=1,
+            max_value=5,
+        ),
     ):
-        """
-        Requests the client for the HOST server's members and returns JSON.
-        Success -> plain messages with file(s). Errors -> embed.
-        """
         await ctx.defer(ephemeral=True)
 
-        # --- Ask client for the list ---
-        try:
-            resp = await self.bot.ws_manager.request({
-                "type": "list_users",
-                "data": {"include_names": include_names}
-            })
-        except Exception as e:
-            embed = self._err_embed("Export Failed", f"Could not reach the client: {e!r}")
-            return await ctx.followup.send(embed=embed, ephemeral=True)
-
-        if not resp or not resp.get("ok"):
-            err = (resp or {}).get("error", "Unknown error")
-            embed = self._err_embed("Export Failed", f"Client refused or failed: {err}")
-            return await ctx.followup.send(embed=embed, ephemeral=True)
-
-        users = (resp.get("data") or {}).get("users", [])
-        if not isinstance(users, list):
-            embed = self._err_embed("Export Failed", "Client returned unexpected payload.")
-            return await ctx.followup.send(embed=embed, ephemeral=True)
-
-        # --- Build JSON bytes ---
-        data_bytes = json.dumps(users, indent=2, ensure_ascii=False).encode("utf-8")
-        count = len(users)
-        fmt_label = "IDs + names" if include_names else "IDs only"
-
-        # --- Determine max upload size for this guild (fallback to 8 MiB) ---
-        guild_limit = getattr(ctx.guild, "filesize_limit", 8 * 1024 * 1024) or (8 * 1024 * 1024)
-        # Keep a safety margin so we don't hit boundary errors due to payload headers
-        SAFETY = 64 * 1024
-        max_bytes = max(1, guild_limit - SAFETY)
-
-        async def send_one_file(raw_bytes: bytes, fname: str, note: str = ""):
-            bio = io.BytesIO(raw_bytes)
-            bio.seek(0)
-            await ctx.followup.send(
-                content=(note or ""),
-                file=discord.File(bio, filename=fname),
-                ephemeral=False,
-            )
-
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        base = f"export_users_{timestamp}"
-
-        if len(data_bytes) <= max_bytes:
-            await send_one_file(
-                data_bytes,
-                f"{base}.json",
-                note=f"> Total users sniped: `{count}`",
-            )
-            return
-
-        gz_bytes = gzip.compress(data_bytes)  # default compression level
-        if len(gz_bytes) <= max_bytes:
-            await send_one_file(
-                gz_bytes,
-                f"{base}.json.gz",
-                note=(
-                    f"User export complete (compressed). Total users: **{count}**\n"
-                    f"Format: {fmt_label}\nFile is gzipped to fit upload limits."
+        gid = ctx.guild_id
+        if gid in self._export_jobs:
+            desc = "Use `/cancel_member_export` to stop it."
+            return await ctx.followup.send(
+                embed=self._ok_embed(
+                    "Export already running", desc, show_timestamp=False
                 ),
+                ephemeral=True,
             )
-            return
 
-        parts_needed = math.ceil(len(data_bytes) / max_bytes)
-        # Avoid edge cases:
-        parts_needed = max(2, parts_needed)
+        async def runner():
+            try:
+                await self.export.background_finish_and_dm(
+                    user_id=ctx.user.id,
+                    include_names=bool(include_names),
+                    num_sessions=int(num_sessions),
+                )
+            except asyncio.CancelledError:
+                pass
+            finally:
+                self._export_jobs.pop(gid, None)
 
-        total = len(users)
-        per_part = math.ceil(total / parts_needed)
+        task = asyncio.create_task(runner(), name=f"member-export:{gid}")
+        self._export_jobs[gid] = ExportJob(
+            task=task,
+            user_id=ctx.user.id,
+            include_names=bool(include_names),
+            started_at=time.monotonic(),
+        )
 
-        idx = 0
-        part_num = 1
-        sent_any = False
-        while idx < total:
-            backoff = per_part
-            while True:
-                slice_users = users[idx: idx + backoff]
-                part_bytes = json.dumps(slice_users, indent=2, ensure_ascii=False).encode("utf-8")
-
-                if len(part_bytes) <= max_bytes:
-                    await send_one_file(
-                        part_bytes,
-                        f"{base}.part{part_num:02d}-of-??.json",  # fix names after loop if desired
-                        note=(f"User export (part {part_num}): **{len(slice_users)}** users\nFormat: {fmt_label}")
-                            if not sent_any else ""
-                    )
-                    sent_any = True
-                    idx += backoff
-                    part_num += 1
-                    break
-
-                if backoff <= 1:
-                    gz_part = gzip.compress(part_bytes)
-                    if len(gz_part) <= max_bytes:
-                        await send_one_file(
-                            gz_part,
-                            f"{base}.part{part_num:02d}-of-??.json.gz",
-                            note=(f"User export (part {part_num}, compressed): **{len(slice_users)}** users\nFormat: {fmt_label}")
-                                if not sent_any else ""
-                        )
-                        sent_any = True
-                        idx += backoff
-                        part_num += 1
-                        break
-                    # If we still can't fit, abort
-                    embed = self._err_embed(
-                        "Export Failed",
-                        "A user record is too large to upload, even when compressed. "
-                        "Try exporting IDs only or filter the scope."
-                    )
-                    return await ctx.followup.send(embed=embed, ephemeral=True)
-
-                # Reduce slice size and try again
-                backoff = max(1, backoff // 2)
-
-            # Small pause for rate limits when many parts
-            if idx < total:
-                await asyncio.sleep(0.6)
-
-        # Small summary message
+        d = "Make sure your DMs are open—I’ll send the results there when they’re ready."
+        f = "This may take a while on large servers. You can stop early with /cancel_member_export."
         await ctx.followup.send(
-            content=f"> Sent **{part_num - 1}** parts. Total users sniper: `{count}`",
-            ephemeral=False,
+            embed=self._ok_embed(
+                "Member scrape started", d, footer=f, show_timestamp=False
+            ),
+            ephemeral=True,
+        )
+
+    @commands.slash_command(
+        name="cancel_member_export",
+        description="Cancel the running member export and DM whatever has been gathered so far",
+        guild_ids=[GUILD_ID],
+    )
+    async def cancel_member_export(self, ctx: discord.ApplicationContext):
+        await ctx.defer(ephemeral=True)
+
+        gid = ctx.guild_id
+        job = self._export_jobs.get(gid)  # don't pop yet
+        logger.info(
+            f"[export] cancel_member_export guild={gid} job_present={bool(job)}"
+        )
+
+        include_names = bool(getattr(job, "include_names", False))
+
+        snapshot = []
+        try:
+            resp = await self.bot.ws_manager.request(
+                {"type": "scrape_snapshot", "data": {"include_names": include_names}},
+                timeout=12.0,
+            )
+            if resp:
+                if "data" in resp and resp.get("data"):
+                    snapshot = resp["data"].get("members") or []
+                    logger.info(f"[export] snapshot_inline count={len(snapshot)}")
+                elif "stream" in resp and resp["stream"]:
+                    s = resp["stream"]
+                    logger.info(
+                        f"[export] snapshot_stream sid={s.get('id')} size={s.get('size')} chunk={s.get('chunk_size')}"
+                    )
+                    data = await self.export.consume_stream(
+                        s["id"],
+                        0,
+                        int(s.get("chunk_size", self.export.default_chunk_size)),
+                        timeout=15.0,
+                    )
+                    snapshot = data.get("members") or []
+                    logger.info(f"[export] snapshot_stream_done count={len(snapshot)}")
+            else:
+                logger.info("[export] snapshot_empty_response")
+        except Exception as e:
+            logger.info(f"[export] snapshot_failed: {e!r}")
+
+        try:
+            ack = await self.bot.ws_manager.request({"type": "scrape_cancel"})
+            logger.debug(f"[export] cancel_ack={ack}")
+        except Exception as e:
+            logger.debug(f"[export] cancel_send_failed: {e!r}")
+
+        if job:
+            try:
+                job.task.cancel()
+                logger.debug("[export] server_task_cancelled")
+            except Exception as e:
+                logger.debug(f"[export] server_task_cancel_error: {e!r}")
+            try:
+                await asyncio.wait_for(job.task, timeout=5.0)
+                logger.debug("[export] server_task_await_done")
+            except Exception as e:
+                logger.debug(f"[export] server_task_await_timeout_or_error: {e!r}")
+            self._export_jobs.pop(gid, None)
+
+        if snapshot:
+            try:
+                filename, payload, summary = self.export.build_member_export_payload(
+                    snapshot, include_names
+                )
+                elapsed = None
+                try:
+                    elapsed = (
+                        time.monotonic()
+                        - float(getattr(job, "started_at", time.monotonic()))
+                        if job
+                        else None
+                    )
+                except Exception:
+                    pass
+                await self.export.dm_export_file(
+                    (job.user_id if job else ctx.user.id),
+                    filename=filename,
+                    payload=payload,
+                    summary=summary,
+                    duration_secs=elapsed,
+                    total=len(snapshot),
+                    include_names=include_names,
+                )
+                logger.info(f"[export] dm_sent count={len(snapshot)} file={filename}")
+            except Exception as e:
+                logger.info(f"[export] dm_failed: {e!r}")
+            msg = f"Stopped early. I sent **{len(snapshot)}** members to your DMs."
+        else:
+            msg = "Stopped. If any data was gathered, you’ll receive a DM."
+
+        try:
+            ack = await self.bot.ws_manager.request({"type": "scrape_unblock"})
+            logger.debug(f"[export] unblock_ack={ack}")
+        except Exception as e:
+            logger.debug(f"[export] unblock_failed: {e!r}")
+
+        return await ctx.followup.send(
+            embed=self._ok_embed("Member export canceled", msg, show_timestamp=False),
+            ephemeral=True,
         )
 
 
