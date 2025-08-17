@@ -123,6 +123,14 @@ class DBManager:
         );
         """
         )
+        
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS join_dm_subscriptions (
+            guild_id INTEGER NOT NULL,
+            user_id  INTEGER NOT NULL,
+            PRIMARY KEY (guild_id, user_id)
+        );
+        """)
 
         cols = [r[1] for r in c.execute("PRAGMA table_info(settings)").fetchall()]
         if "version" not in cols:
@@ -147,6 +155,7 @@ class DBManager:
             ("announcement_subscriptions", "keyword"),
             ("announcement_triggers", "keyword"),
             ("sticker_mappings", "original_sticker_id"),
+            ("join_dm_subscriptions", "guild_id"),
         ]
 
         for table, pk in tables:
@@ -525,6 +534,43 @@ class DBManager:
             )
         return d
 
+    def add_onjoin_subscription(self, guild_id: int, user_id: int) -> bool:
+        cur = self.conn.execute(
+            "INSERT OR IGNORE INTO join_dm_subscriptions(guild_id, user_id) VALUES (?, ?)",
+            (guild_id, user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def remove_onjoin_subscription(self, guild_id: int, user_id: int) -> bool:
+        cur = self.conn.execute(
+            "DELETE FROM join_dm_subscriptions WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def has_onjoin_subscription(self, guild_id: int, user_id: int) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM join_dm_subscriptions WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id),
+        ).fetchone()
+        return bool(row)
+
+    def get_onjoin_users(self, guild_id: int) -> list[int]:
+        rows = self.conn.execute(
+            "SELECT user_id FROM join_dm_subscriptions WHERE guild_id = ?",
+            (guild_id,),
+        ).fetchall()
+        return [r["user_id"] for r in rows]
+
+    def get_onjoin_guilds_for_user(self, user_id: int) -> list[int]:
+        rows = self.conn.execute(
+            "SELECT guild_id FROM join_dm_subscriptions WHERE user_id = ?",
+            (user_id,),
+        ).fetchall()
+        return [r["guild_id"] for r in rows]
+
     def get_all_sticker_mappings(self) -> list[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM sticker_mappings").fetchall()
 
@@ -551,3 +597,4 @@ class DBManager:
             "DELETE FROM sticker_mappings WHERE original_sticker_id = ?", (orig_id,)
         )
         self.conn.commit()
+        

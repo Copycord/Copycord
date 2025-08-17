@@ -908,6 +908,47 @@ class CloneCommands(commands.Cog):
             embed=self._ok_embed("Member export canceled", msg, show_timestamp=False),
             ephemeral=True,
         )
+        
+    @commands.slash_command(
+        name="onjoin_dm",
+        description="Toggle DM notifications to you when someone joins the given server ID",
+        guild_ids=[GUILD_ID],
+    )
+    async def onjoin_dm(
+        self,
+        ctx: discord.ApplicationContext,
+        server_id: str = Option(str, "Guild/server ID to watch", required=True),
+    ):
+        await ctx.defer(ephemeral=True)
+
+        try:
+            gid = int(server_id)
+        except ValueError:
+            return await ctx.followup.send(
+                embed=Embed(
+                    title="Invalid server ID",
+                    description="Please pass a numeric guild ID.",
+                    color=Color.red(),
+                ),
+                ephemeral=True,
+            )
+
+        # Toggle behavior
+        if self.db.has_onjoin_subscription(gid, ctx.user.id):
+            self.db.remove_onjoin_subscription(gid, ctx.user.id)
+            title = "On-Join DM Disabled"
+            desc = f"You will **no longer** receive a DM when someone joins **{gid}**."
+            color = Color.orange()
+        else:
+            self.db.add_onjoin_subscription(gid, ctx.user.id)
+            title = "On-Join DM Enabled"
+            desc = f"You will receive a DM when someone joins **{gid}**."
+            color = Color.green()
+
+        await ctx.followup.send(
+            embed=Embed(title=title, description=desc, color=color),
+            ephemeral=True,
+        )
 
 
 def setup(bot: commands.Bot):

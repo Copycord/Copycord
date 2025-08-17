@@ -100,6 +100,7 @@ class ClientListener:
         self.bot.event(self.on_guild_channel_update)
         self.bot.event(self.on_thread_delete)
         self.bot.event(self.on_thread_update)
+        self.bot.event(self.on_member_join)
         self.ws = WebsocketManager(
             send_url=self.config.SERVER_WS_URL,
             listen_host=self.config.CLIENT_WS_HOST,
@@ -993,6 +994,35 @@ class ClientListener:
                 logger.debug(
                     "Ignored channel update for %s: non-structural change", before.id
                 )
+
+    async def on_member_join(self, member: discord.Member):
+        try:
+            guild = member.guild
+
+            if not self.db.get_onjoin_users(guild.id):
+                return
+
+            payload = {
+                "type": "member_joined",
+                "data": {
+                    "guild_id": guild.id,
+                    "guild_name": guild.name,
+                    "user_id": member.id,
+                    "username": str(member),
+                    "display_name": getattr(member, "display_name", member.name),
+                    "avatar_url": str(member.display_avatar.url) if member.display_avatar else None,
+                    "joined_at": datetime.now(timezone.utc).isoformat(),
+                },
+            }
+            await self.ws.send(payload)
+            logger.info("[📩] Member join observed in %s: %s (%s) → notified server",
+                        guild.id, member.display_name, member.id)
+
+        except Exception:
+            logger.exception("Failed to forward member_joined")
+
+
+
 
     async def _backfill_channel(self, original_channel_id: int):
         """Grab all human/bot messages from a channel and send to server"""

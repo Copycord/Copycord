@@ -38,6 +38,7 @@ from server.discord_hooks import install_discord_rl_probe
 from server.emojis import EmojiManager
 from server.stickers import StickerManager
 from server.backfill import BackfillManager
+from server.helpers import OnJoinService
 
 LOG_DIR = "/data"
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -140,6 +141,7 @@ class ServerReceiver:
             clone_guild_id=int(self.config.CLONE_GUILD_ID),
             session=self.session,
         )
+        self.onjoin = OnJoinService(self.bot, self.db, logger.getChild("OnJoin"))
         install_discord_rl_probe(self.ratelimit)
         # Discord guild/channel limits
         self.MAX_GUILD_CHANNELS = 500
@@ -359,6 +361,9 @@ class ServerReceiver:
 
         elif typ == "backfill_done":
             await self.backfill.on_done(int(data.get("channel_id")))
+            
+        elif typ == "member_joined":
+            asyncio.create_task(self.onjoin.handle_member_joined(data))
 
         else:
             logger.warning("[⚠️] Unknown WS type '%s'", typ)

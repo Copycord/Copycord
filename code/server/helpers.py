@@ -15,9 +15,10 @@ import io
 import json
 import logging
 import time
+import random
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 import discord
 
 
@@ -377,3 +378,125 @@ class MemberExportService:
             )
         except Exception as e:
             self.logger.exception("resume_stream_and_dm: unexpected error: %r", e)
+
+
+class OnJoinService:
+    DEFAULT_COLORS = [
+        discord.Color.blurple(),
+        discord.Color.blue(),
+        discord.Color.teal(),
+        discord.Color.green(),
+        discord.Color.gold(),
+        discord.Color.orange(),
+        discord.Color.purple(),
+        discord.Color.red(),
+        discord.Color.fuchsia(),
+    ]
+
+    def __init__(
+        self,
+        bot: discord.Client,
+        db,
+        logger: Optional[logging.Logger] = None,
+        *,
+        colors: Optional[Iterable[discord.Color]] = None,
+        color_strategy: str = "random",  # "random" | "seed_guild" | "seed_user"
+    ) -> None:
+        self.bot = bot
+        self.db = db
+        self.log = (logger or logging.getLogger(__name__)).getChild(self.__class__.__name__)
+        self._palette = list(colors) if colors else list(self.DEFAULT_COLORS)
+        self._color_strategy = color_strategy
+
+    # ----------------------------- public entrypoint -----------------------------
+
+    async def handle_member_joined(self, data: dict) -> None:
+        try:
+            guild_id = int(data.get("guild_id") or 0)
+            guild_name = data.get("guild_name") or str(guild_id)
+            user_id = int(data.get("user_id") or 0)
+            display = data.get("display_name") or data.get("username") or str(user_id)
+            avatar = data.get("avatar_url")
+            joined_iso = data.get("joined_at")
+
+            ts = int(
+                (
+                    datetime.fromisoformat(joined_iso).timestamp()
+                    if joined_iso
+                    else datetime.now(timezone.utc).timestamp()
+                )
+            )
+
+            targets = self.db.get_onjoin_users(guild_id)
+            if not targets:
+                return
+
+            embed = self.build_embed(
+                display_name=display,
+                user_id=user_id,
+                guild_name=guild_name,
+                when_unix=ts,
+                avatar_url=avatar,
+            )
+
+            await self._fanout_dm(targets, embed, guild_id)
+        except Exception:
+            self.log.exception("handle_member_joined failed")
+
+    # --------------------------------- helpers ----------------------------------
+
+    async def _fanout_dm(self, user_ids: Iterable[int], embed: discord.Embed, guild_id: int) -> None:
+        for uid in user_ids:
+            try:
+                u = self.bot.get_user(uid) or await self.bot.fetch_user(uid)
+                await u.send(embed=embed)
+                self.log.info("[🔔] On-join DM sent to %s for guild %s", uid, guild_id)
+            except Exception as ex:
+                self.log.warning("[⚠️] Failed DM to %s for guild %s: %s", uid, guild_id, ex)
+
+    # ------------------------------ embed building ------------------------------
+
+    def build_embed(
+        self,
+        *,
+        display_name: str,
+        user_id: int,
+        guild_name: str,
+        when_unix: int,
+        avatar_url: Optional[str] = None,
+        color: Optional[discord.Color] = None,
+    ) -> discord.Embed:
+        color = color or self._pick_color(guild_id=None, user_id=user_id)
+
+        desc = f"**{display_name}** just joined **{guild_name}**\n\n"
+        desc += f"> **User**: <@{user_id}> (`{user_id}`)\n"
+        desc += f"> **When**: <t:{when_unix}:R>"
+
+        e = discord.Embed(
+            description=desc,
+            timestamp=datetime.fromtimestamp(when_unix, tz=timezone.utc),
+            color=color,
+        )
+
+        if avatar_url:
+            e.set_thumbnail(url=avatar_url)
+
+        return e
+
+    def _pick_color(self, *, guild_id: Optional[int], user_id: Optional[int]) -> discord.Color:
+        if not self._palette:
+            return discord.Color(random.randint(0, 0xFFFFFF))
+
+        strat = (self._color_strategy or "random").lower()
+        if strat == "random":
+            return random.choice(self._palette)
+
+        if strat == "seed_guild" and guild_id:
+            idx = hash(guild_id) % len(self._palette)
+            return self._palette[idx]
+
+        if strat == "seed_user" and user_id:
+            idx = hash(user_id) % len(self._palette)
+            return self._palette[idx]
+
+        return random.choice(self._palette)
