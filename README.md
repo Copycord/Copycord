@@ -13,13 +13,14 @@ _Love this project? Give it a ⭐️ and let others know!_
 > **Features:**
 > - Clones host server categories and channels on first run
 > - Detects channel renames, position changes, and recreates missing channels on the fly
+> - Category and channel filtering
 > - Creates webhooks in all channels used to forward identical messages as they are sent
 > - The user account in the host server handles listening; a separate bot handles relaying, minimizing exposure
 > - Send DM announcements in realtime to specific users when a message contains a designated keyword
 > - Slash commands and community server features
 > - Clone entire channel message history ✨🆕
 > - Scrape the host server member list and output a file containing all member IDs ✨🆕
-> - Get notified when someone joins any server your account is in✨🆕
+>
 
 
 ## How It Works
@@ -167,6 +168,9 @@ Create the /data folder in the main Copycord folder and the config file into /da
 # • IDs:
 #     - Use IDs from the HOST guild (the source you’re mirroring), not the clone guild.
 #     - Right-click → “Copy ID” in Discord (Developer Mode) to get these.
+#
+# • Note:
+#     - If a category ID is provided, all channels in that category are also included
 #
 
 whitelist:
