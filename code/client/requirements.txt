@@ -1,2 +1,3 @@
 discord.py-self==2.0.1
 websockets==11.0
+PyYAML==6.0.2
