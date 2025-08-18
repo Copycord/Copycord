@@ -74,11 +74,14 @@ _Love this project? Give it a ⭐️ and let others know!_
 
 ## Configuration
 
-### 1. Create a new folder and add `docker-compose.yml` and `.env` 
+### 1. Create a new /Copycord folder and add `docker-compose.yml` and `.env` 
 
 In the new folder, create `docker-compose.yml` and `.env`: 
 
-`docker-compose.yml`
+`Copycord/docker-compose.yml`
+<details>
+  <summary>Click to expand docker-compose.yml example</summary>
+
 ```yaml
 services:
   server:
@@ -101,8 +104,12 @@ services:
       - server
     restart: unless-stopped
 ```
+</details>
 
-`.env`
+`Copycord/.env`
+<details>
+  <summary>Click to expand .env example</summary>
+  
 ```yaml
 SERVER_TOKEN= # Discord bot token
 CLONE_GUILD_ID= # ID of the clone guild, bot must be invited to this guild
@@ -118,6 +125,47 @@ HOST_GUILD_ID= # ID of the host guild to monitor
 ENABLE_CLONING=True # Enable/Disable realtime cloning
 LOG_LEVEL=INFO # INFO or DEBUG
 ```
+</details>
+
+### 2. Create the /data folder and add config.yml inside
+
+Create the /data folder in the main Copycord folder and the config file into /data: 
+
+`Copycord/data/config.yml`
+
+<details>
+  <summary>Click to expand config.yml example</summary>
+
+```yaml
+# Copycord config.yml
+#
+# How it works
+# ------------
+# • WHITELIST (allow-list):
+#     - If ANY IDs are listed below, ONLY those categories/channels are cloned
+#       and messages from them are forwarded. Everything else is ignored.
+#     - Leave BOTH lists empty to disable whitelist mode.
+#
+# • EXCLUDED (deny-list):
+#     - Categories/channels listed here are always ignored.
+#
+# • Precedence:
+#     - Whitelist > Excluded. If an ID appears in both, it will be INCLUDED.
+#
+# • IDs:
+#     - Use IDs from the HOST guild (the source you’re mirroring), not the clone guild.
+#     - Right-click → “Copy ID” in Discord (Developer Mode) to get these.
+#
+
+whitelist:
+  categories: []   # e.g. [123456789012345678, 234567890123456789]
+  channels: []     # e.g. [345678901234567890]
+
+excluded:
+  categories: []   # e.g. [456789012345678901]
+  channels: []     # e.g. [567890123456789012]
+```
+</details>
 
 ### 3. Launch Copycord
 
