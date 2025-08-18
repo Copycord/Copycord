@@ -68,6 +68,10 @@ class Config:
         )
         
         self.CLONE_ROLES = os.getenv("CLONE_ROLES", "true").lower() in ("1","true","yes")
+        
+        self.MIRROR_ROLE_PERMISSIONS = os.getenv("MIRROR_ROLE_PERMISSIONS", "true").lower() in ("1","true","yes","y","on")
+        
+        self.DELETE_ROLES = os.getenv("DELETE_ROLES", "true").lower() in ("1", "true", "yes")
 
         self.logger = logger.getChild(self.__class__.__name__)
         self.excluded_category_ids: set[int] = set()
