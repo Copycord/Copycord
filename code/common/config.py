@@ -23,7 +23,6 @@ class Config:
         self,
         logger: Optional[logging.Logger] = None,
     ):
-        self.logger = logger.getChild(self.__class__.__name__)
         self.CURRENT_VERSION = "v1.8.0"
         self.GITHUB_API_LATEST = (
             "https://api.github.com/repos/Copycord/Copycord/releases/latest"
@@ -34,7 +33,6 @@ class Config:
         self.SERVER_TOKEN = os.getenv("SERVER_TOKEN")
         self.CLONE_GUILD_ID = os.getenv("CLONE_GUILD_ID", "0")
         self.DB_PATH = os.getenv("DB_PATH", "/data/data.db")
-        self.db = DBManager(self.DB_PATH)
         self.SERVER_WS_HOST = os.getenv("SERVER_WS_HOST", "server")
         self.SERVER_WS_PORT = int(os.getenv("SERVER_WS_PORT", "8765"))
         self.SERVER_WS_URL = os.getenv(
@@ -69,6 +67,11 @@ class Config:
             "yes",
         )
 
+        self.logger = logger.getChild(self.__class__.__name__)
+        self.excluded_category_ids: set[int] = set()
+        self.excluded_channel_ids: set[int] = set()
+        self._load_exclusions_from_yaml()
+        self.db = DBManager(self.DB_PATH)
         raw = os.getenv("COMMAND_USERS", "")
         self.COMMAND_USERS = [int(u) for u in raw.split(",") if u.strip()]
 
@@ -267,3 +270,49 @@ class Config:
                 self.logger.exception("[⛔] Error in version release watcher loop")
 
             await asyncio.sleep(self._release_interval)
+                
+    def _load_exclusions_from_yaml(self):
+        import os, yaml
+
+        cfg_path = os.getenv("CONFIG_YAML", "/data/config.yml")
+        os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
+
+        if not os.path.exists(cfg_path):
+            default_cfg = {
+                "whitelist": {"categories": [], "channels": []},
+                "excluded":  {"categories": [], "channels": []},
+            }
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(default_cfg, f, default_flow_style=False, sort_keys=False)
+            self.include_category_ids  = set()
+            self.include_channel_ids   = set()
+            self.excluded_category_ids = set()
+            self.excluded_channel_ids  = set()
+            self.whitelist_enabled = False
+            return
+
+        # Load existing (treat empty file as blanks)
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+
+        # Support alias 'included' for 'whitelist'
+        wl = (data.get("whitelist") or data.get("included") or {}) or {}
+        ex = (data.get("excluded") or {}) or {}
+
+        def to_ids(items):
+            out = set()
+            for x in (items or []):
+                try:
+                    out.add(int(str(x).strip()))
+                except Exception:
+                    if getattr(self, "logger", None):
+                        self.logger.warning("[⚠️] Ignoring non-integer ID in config.yml: %r", x)
+            return out
+
+        self.include_category_ids  = to_ids(wl.get("categories"))
+        self.include_channel_ids   = to_ids(wl.get("channels"))
+        self.excluded_category_ids = to_ids(ex.get("categories"))
+        self.excluded_channel_ids  = to_ids(ex.get("channels"))
+
+        # Whitelist is ON only if the include lists are non-empty
+        self.whitelist_enabled = bool(self.include_category_ids or self.include_channel_ids)
