@@ -358,6 +358,7 @@ class ClientListener:
                 for e in guild.emojis
             ],
             "stickers": [],
+            "roles": [],
             "community": {
                 "enabled": "COMMUNITY" in guild.features,
                 "rules_channel_id": (
@@ -396,6 +397,21 @@ class ClientListener:
                 }
             )
         sitemap["stickers"] = stickers_payload
+        
+        sitemap["roles"] = [
+            {
+                "id": r.id,
+                "name": r.name,
+                "permissions": r.permissions.value,
+                "color": r.color.value if hasattr(r.color, "value") else int(r.color),
+                "hoist": r.hoist,
+                "mentionable": r.mentionable,
+                "managed": r.managed,
+                "everyone": (r == r.guild.default_role),
+                "position": r.position, 
+            }
+            for r in guild.roles
+        ]
 
         for cat in guild.categories:
             channels = [
