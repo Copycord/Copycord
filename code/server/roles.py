@@ -13,11 +13,15 @@ class RoleManager:
         db,
         ratelimit: RateLimitManager,
         clone_guild_id: int,
+        delete_roles: bool = True,
+        mirror_permissions: bool = True,
     ):
         self.bot = bot
         self.db = db
         self.ratelimit = ratelimit
         self.clone_guild_id = clone_guild_id
+        self.delete_roles = delete_roles
+        self.mirror_permissions = mirror_permissions 
         self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
         self._last_roles: List[Dict] = []
@@ -41,16 +45,14 @@ class RoleManager:
     async def _run_sync(self, guild: discord.Guild, incoming: List[Dict]) -> None:
         async with self._lock:
             try:
-                d, u, c, reord = await self._sync(guild, incoming)
+                deleted, updated, created = await self._sync(guild, incoming)
                 parts = []
-                if d:
-                    parts.append(f"Deleted {d} roles")
-                if u:
-                    parts.append(f"Updated {u} roles")
-                if c:
-                    parts.append(f"Created {c} roles")
-                if reord:
-                    parts.append("Reordered roles")
+                if deleted:
+                    parts.append(f"Deleted {deleted} roles")
+                if updated:
+                    parts.append(f"Updated {updated} roles")
+                if created:
+                    parts.append(f"Created {created} roles")
                 if parts:
                     logger.info("[🧩] Role sync changes: " + "; ".join(parts))
                 else:
@@ -62,11 +64,12 @@ class RoleManager:
             finally:
                 self._task = None
 
+
     async def _sync(
         self, guild: discord.Guild, incoming: List[Dict]
-    ) -> Tuple[int, int, int, bool]:
+    ) -> Tuple[int, int, int]:
         """
-        Mirror roles (name/perms/color/hoist/mentionable + order).
+        Mirror roles (name/color/hoist/mentionable + permissions if enabled).
         Skip managed roles and @everyone.
         """
         me = guild.me
@@ -84,19 +87,45 @@ class RoleManager:
 
         deleted = updated = created = 0
 
+        # ---------------------
+        # Deletions
+        # ---------------------
         for orig_id in list(current.keys()):
             if orig_id not in incoming_filtered:
                 row = current[orig_id]
-                cloned_id = row.get("cloned_role_id")
+                cloned_id = row["cloned_role_id"] if "cloned_role_id" in row.keys() else None
                 cloned = clone_by_id.get(int(cloned_id), None) if cloned_id else None
+
+                if not self.delete_roles:
+                    self.db.delete_role_mapping(orig_id)
+                    if cloned:
+                        logger.info(
+                            "[🧩] Host role deleted; kept cloned role %s (%d), removed mapping.",
+                            cloned.name, cloned.id
+                        )
+                    else:
+                        logger.info(
+                            "[🧩] Host role deleted; cloned missing, removed mapping only."
+                        )
+                    continue
+
                 if (
                     not cloned
                     or cloned.is_default()
                     or cloned.managed
                     or cloned.position >= bot_top
                 ):
+                    # Can't/shouldn't delete → still remove mapping
                     self.db.delete_role_mapping(orig_id)
+                    if cloned:
+                        logger.info(
+                            "[🧩] Skipped deleting role %s (%d); removed mapping.",
+                            cloned.name, cloned.id
+                        )
+                    else:
+                        logger.info("[🧩] Cloned role missing; removed mapping.")
                     continue
+
                 try:
                     await self.ratelimit.acquire(ActionType.EDIT_CHANNEL)
                     await cloned.delete()
@@ -104,16 +133,19 @@ class RoleManager:
                     logger.info("[🧩] Deleted role %s (%d)", cloned.name, cloned.id)
                 except Exception as e:
                     logger.warning(
-                        "[⚠️] Failed deleting role %s: %s",
-                        getattr(cloned, "name", cloned_id),
-                        e,
+                        "[⚠️] Failed deleting role %s (%s); removing mapping anyway: %s",
+                        getattr(cloned, "name", "?"), cloned_id, e
                     )
                 finally:
                     self.db.delete_role_mapping(orig_id)
 
+        # Refresh live lookups after deletions
         current = {r["original_role_id"]: r for r in self.db.get_all_role_mappings()}
         clone_by_id = {r.id: r for r in guild.roles}
 
+        # ---------------------
+        # Creates / Updates
+        # ---------------------
         for orig_id, info in incoming_filtered.items():
             want_name = info["name"]
             want_perms = discord.Permissions(info.get("permissions", 0))
@@ -124,90 +156,134 @@ class RoleManager:
             mapping = current.get(orig_id)
             cloned = None
             if mapping:
-                cloned = clone_by_id.get(int(mapping["cloned_role_id"]))
+                cloned_id = int(mapping["cloned_role_id"])
+                cloned = clone_by_id.get(cloned_id)
 
+            # Orphan mapping
             if mapping and not cloned:
                 self.db.delete_role_mapping(orig_id)
                 mapping = None
 
+            # ---- Create
             if not mapping:
                 try:
                     await self.ratelimit.acquire(ActionType.EDIT_CHANNEL)
-                    cloned = await guild.create_role(
+                    kwargs = dict(
                         name=want_name,
-                        permissions=want_perms,
                         colour=want_color,
                         hoist=want_hoist,
                         mentionable=want_mention,
                         reason="Copycord role sync",
                     )
+                    if self.mirror_permissions:
+                        kwargs["permissions"] = want_perms
+
+                    cloned = await guild.create_role(**kwargs)
                     created += 1
                     self.db.upsert_role_mapping(
                         orig_id, want_name, cloned.id, cloned.name
                     )
                     clone_by_id[cloned.id] = cloned
                     logger.info("[🧩] Created role %s", cloned.name)
+                    if self.mirror_permissions:
+                        logger.debug(
+                            "[🧩] create details: name=%r perms=%d color=#%06X hoist=%s mentionable=%s",
+                            want_name, want_perms.value, self._color_int(want_color),
+                            want_hoist, want_mention,
+                        )
+                    else:
+                        logger.debug(
+                            "[🧩] create details: name=%r perms=(skipped) color=#%06X hoist=%s mentionable=%s",
+                            want_name, self._color_int(want_color), want_hoist, want_mention,
+                        )
                 except Exception as e:
                     logger.warning("[⚠️] Failed creating role %s: %s", want_name, e)
                 continue
 
+            # ---- Update
             if (
                 cloned
                 and (not cloned.is_default())
                 and (not cloned.managed)
                 and cloned.position < bot_top
             ):
-                need_edit = (
-                    cloned.name != want_name
-                    or cloned.permissions.value != want_perms.value
-                    or cloned.color.value != want_color.value
-                    or cloned.hoist != want_hoist
-                    or cloned.mentionable != want_mention
-                )
-                if need_edit:
+                # Detect exact changes we plan to apply
+                changes: list[str] = []
+
+                if cloned.name != want_name:
+                    changes.append(f"name: {cloned.name!r} -> {want_name!r}")
+
+                if self.mirror_permissions and (cloned.permissions.value != want_perms.value):
+                    added, removed = self._perm_diff(cloned.permissions, want_perms)
+                    parts = []
+                    if added:
+                        parts.append("+" + ",".join(added))
+                    if removed:
+                        parts.append("-" + ",".join(removed))
+                    changes.append(
+                        f"perms: {' '.join(parts) if parts else '(bitfield change)'} "
+                        f"({cloned.permissions.value} -> {want_perms.value})"
+                    )
+                elif (not self.mirror_permissions) and (cloned.permissions.value != want_perms.value):
+                    # permissions differ but we're not mirroring them
+                    logger.debug(
+                        "[🧩] permissions differ for %s (%d) but MIRROR_ROLE_PERMISSIONS=False; skipping perms update.",
+                        cloned.name, cloned.id
+                    )
+
+                old_color = self._color_int(cloned.color)
+                new_color = self._color_int(want_color)
+                if old_color != new_color:
+                    changes.append(f"color: #{old_color:06X} -> #{new_color:06X}")
+
+                if cloned.hoist != want_hoist:
+                    changes.append(f"hoist: {cloned.hoist} -> {want_hoist}")
+
+                if cloned.mentionable != want_mention:
+                    changes.append(f"mentionable: {cloned.mentionable} -> {want_mention}")
+
+                if changes:
+                    logger.debug(
+                        "[🧩] update details for %s (%d): %s",
+                        cloned.name, cloned.id, "; ".join(changes),
+                    )
                     try:
                         await self.ratelimit.acquire(ActionType.EDIT_CHANNEL)
-                        await cloned.edit(
+                        kwargs = dict(
                             name=want_name,
-                            permissions=want_perms,
                             colour=want_color,
                             hoist=want_hoist,
                             mentionable=want_mention,
                             reason="Copycord role sync",
                         )
+                        if self.mirror_permissions:
+                            kwargs["permissions"] = want_perms
+
+                        await cloned.edit(**kwargs)
                         updated += 1
                         self.db.upsert_role_mapping(
                             orig_id, want_name, cloned.id, cloned.name
                         )
                         logger.info("[🧩] Updated role %s", cloned.name)
                     except Exception as e:
-                        logger.warning(
-                            "[⚠️] Failed updating role %s: %s", cloned.name, e
-                        )
+                        logger.warning("[⚠️] Failed updating role %s: %s", cloned.name, e)
 
+        return deleted, updated, created
+    
+    def _color_int(self, c) -> int:
         try:
-            mapping = {
-                r["original_role_id"]: r["cloned_role_id"]
-                for r in self.db.get_all_role_mappings()
-            }
-            desired = [
-                mapping[r["id"]]
-                for r in sorted(incoming_filtered.values(), key=lambda x: x["position"])
-                if r["id"] in mapping
-            ]
-            positions = {}
-            movable = [guild.get_role(cid) for cid in desired]
-            movable = [
-                r for r in movable if r and not r.is_default() and r.position < bot_top
-            ]
-            base = 1
-            for i, role in enumerate(movable, start=base):
-                positions[role] = i
-            if positions:
-                await self.ratelimit.acquire(ActionType.EDIT_CHANNEL)
-                await guild.edit_role_positions(positions=positions)
-                return deleted, updated, created, True
-        except Exception as e:
-            logger.debug("[ℹ️] Role reordering skipped/failed: %s", e)
+            return int(c.value)
+        except Exception:
+            return int(c)
 
-        return deleted, updated, created, False
+    def _perm_diff(self, before_perm: discord.Permissions, after_perm: discord.Permissions) -> tuple[list[str], list[str]]:
+        """Return (added_flags, removed_flags) between two Permissions."""
+        added, removed = [], []
+        # Permissions is iterable: yields (name, bool)
+        for name, new in after_perm:
+            old = getattr(before_perm, name)
+            if new and not old:
+                added.append(name)
+            elif old and not new:
+                removed.append(name)
+        return added, removed
