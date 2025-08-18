@@ -600,8 +600,6 @@ class ClientListener:
                 if not self._is_filtered_out(int(ch["id"]), cat_id)
             ]
 
-            # ✅ Keep empty categories when WL is OFF.
-            # ✅ When WL is ON, keep empty category only if it is whitelisted.
             keep_empty = (not wl_on) or (cat_id in inc_cats)
             if kept_children or keep_empty:
                 new_categories.append({**cat, "channels": kept_children})
