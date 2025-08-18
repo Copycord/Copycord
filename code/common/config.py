@@ -66,12 +66,22 @@ class Config:
             "true",
             "yes",
         )
-        
-        self.CLONE_ROLES = os.getenv("CLONE_ROLES", "true").lower() in ("1","true","yes")
-        
-        self.MIRROR_ROLE_PERMISSIONS = os.getenv("MIRROR_ROLE_PERMISSIONS", "true").lower() in ("1","true","yes","y","on")
-        
-        self.DELETE_ROLES = os.getenv("DELETE_ROLES", "true").lower() in ("1", "true", "yes")
+
+        self.CLONE_ROLES = os.getenv("CLONE_ROLES", "true").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+
+        self.MIRROR_ROLE_PERMISSIONS = os.getenv(
+            "MIRROR_ROLE_PERMISSIONS", "true"
+        ).lower() in ("1", "true", "yes", "y", "on")
+
+        self.DELETE_ROLES = os.getenv("DELETE_ROLES", "true").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
 
         self.logger = logger.getChild(self.__class__.__name__)
         self.excluded_category_ids: set[int] = set()
@@ -276,30 +286,60 @@ class Config:
                 self.logger.exception("[⛔] Error in version release watcher loop")
 
             await asyncio.sleep(self._release_interval)
-                
+
     def _load_exclusions_from_yaml(self):
         import os, yaml
 
         cfg_path = os.getenv("CONFIG_YAML", "/data/config.yml")
         os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
 
+        DEFAULT_YAML = """# Copycord filtering config
+    # - whitelist: if any IDs listed, ONLY those categories/channels are allowed.
+    # - excluded:  drop these unless they are explicitly whitelisted. (When both match, WHITELIST TAKES PRECEDENCE.)
+    # Tip: leave lists as [] to disable that filter.
+    # IDs must be integers. Examples shown below.
+    # If a category ID is added, all channels from that category are included.
+
+    whitelist:
+    categories: []   # e.g. [123456789012345678, 234567890123456789]
+    channels: []     # e.g. [345678901234567890]
+
+    excluded:
+    categories: []   # e.g. [456789012345678901]
+    channels: []     # e.g. [567890123456789012]
+    """
+
+        # Create default if missing (write with comments)
         if not os.path.exists(cfg_path):
-            default_cfg = {
-                "whitelist": {"categories": [], "channels": []},
-                "excluded":  {"categories": [], "channels": []},
-            }
-            with open(cfg_path, "w", encoding="utf-8") as f:
-                yaml.safe_dump(default_cfg, f, default_flow_style=False, sort_keys=False)
-            self.include_category_ids  = set()
-            self.include_channel_ids   = set()
+            try:
+                with open(cfg_path, "w", encoding="utf-8") as f:
+                    f.write(DEFAULT_YAML)
+                if getattr(self, "logger", None):
+                    self.logger.info(
+                        "[📝] Created default config.yml with examples at %s", cfg_path
+                    )
+            except Exception as e:
+                if getattr(self, "logger", None):
+                    self.logger.warning("[⚠️] Could not write default config.yml: %s", e)
+
+            # Defaults in-memory
+            self.include_category_ids = set()
+            self.include_channel_ids = set()
             self.excluded_category_ids = set()
-            self.excluded_channel_ids  = set()
+            self.excluded_channel_ids = set()
             self.whitelist_enabled = False
             return
 
-        # Load existing (treat empty file as blanks)
-        with open(cfg_path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
+        # Load existing (treat empty or invalid file as blanks)
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+        except Exception as e:
+            if getattr(self, "logger", None):
+                self.logger.warning(
+                    "[⚠️] Failed to parse %s, using empty filters: %s", cfg_path, e
+                )
+            data = {}
 
         # Support alias 'included' for 'whitelist'
         wl = (data.get("whitelist") or data.get("included") or {}) or {}
@@ -307,18 +347,22 @@ class Config:
 
         def to_ids(items):
             out = set()
-            for x in (items or []):
+            for x in items or []:
                 try:
                     out.add(int(str(x).strip()))
                 except Exception:
                     if getattr(self, "logger", None):
-                        self.logger.warning("[⚠️] Ignoring non-integer ID in config.yml: %r", x)
+                        self.logger.warning(
+                            "[⚠️] Ignoring non-integer ID in config.yml: %r", x
+                        )
             return out
 
-        self.include_category_ids  = to_ids(wl.get("categories"))
-        self.include_channel_ids   = to_ids(wl.get("channels"))
+        self.include_category_ids = to_ids(wl.get("categories"))
+        self.include_channel_ids = to_ids(wl.get("channels"))
         self.excluded_category_ids = to_ids(ex.get("categories"))
-        self.excluded_channel_ids  = to_ids(ex.get("channels"))
+        self.excluded_channel_ids = to_ids(ex.get("channels"))
 
-        # Whitelist is ON only if the include lists are non-empty
-        self.whitelist_enabled = bool(self.include_category_ids or self.include_channel_ids)
+        # Whitelist is ON only if either include list is non-empty
+        self.whitelist_enabled = bool(
+            self.include_category_ids or self.include_channel_ids
+        )
