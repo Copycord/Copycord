@@ -93,6 +93,18 @@ class DBManager:
         );
         """
         )
+        
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS role_mappings (
+            original_role_id   INTEGER PRIMARY KEY,
+            original_role_name TEXT    NOT NULL,
+            cloned_role_id     INTEGER UNIQUE,
+            cloned_role_name   TEXT    NOT NULL,
+            last_updated       DATETIME
+            );
+            """
+        )
 
         c.execute(
             """
@@ -156,6 +168,7 @@ class DBManager:
             ("announcement_triggers", "keyword"),
             ("sticker_mappings", "original_sticker_id"),
             ("join_dm_subscriptions", "guild_id"),
+            ("role_mappings", "original_role_id"),
         ]
 
         for table, pk in tables:
@@ -598,3 +611,31 @@ class DBManager:
         )
         self.conn.commit()
         
+
+    def get_all_role_mappings(self) -> List[sqlite3.Row]:
+        return self.conn.execute("SELECT * FROM role_mappings").fetchall()
+
+    def upsert_role_mapping(
+        self,
+        orig_id: int,
+        orig_name: str,
+        clone_id: Optional[int],
+        clone_name: Optional[str],
+    ):
+        self.conn.execute(
+            """INSERT OR REPLACE INTO role_mappings
+            (original_role_id, original_role_name, cloned_role_id, cloned_role_name)
+            VALUES (?, ?, ?, ?)""",
+            (orig_id, orig_name, clone_id, clone_name),
+        )
+        self.conn.commit()
+
+    def delete_role_mapping(self, orig_id: int):
+        self.conn.execute("DELETE FROM role_mappings WHERE original_role_id = ?", (orig_id,))
+        self.conn.commit()
+        
+    def get_role_mapping(self, orig_id: int):
+        return self.conn.execute(
+            "SELECT * FROM role_mappings WHERE original_role_id = ?",
+            (orig_id,)
+        ).fetchone()
