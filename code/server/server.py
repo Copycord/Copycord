@@ -37,6 +37,7 @@ from server.rate_limiter import RateLimitManager, ActionType
 from server.discord_hooks import install_discord_rl_probe
 from server.emojis import EmojiManager
 from server.stickers import StickerManager
+from server.roles import RoleManager
 from server.backfill import BackfillManager
 from server.helpers import OnJoinService
 
@@ -141,6 +142,12 @@ class ServerReceiver:
             clone_guild_id=int(self.config.CLONE_GUILD_ID),
             session=self.session,
         )
+        self.roles = RoleManager(
+            bot=self.bot,
+            db=self.db,
+            ratelimit=self.ratelimit,
+            clone_guild_id=int(self.config.CLONE_GUILD_ID),
+        )
         self.onjoin = OnJoinService(self.bot, self.db, logger.getChild("OnJoin"))
         install_discord_rl_probe(self.ratelimit)
         # Discord guild/channel limits
@@ -148,6 +155,7 @@ class ServerReceiver:
         self.MAX_CATEGORIES = 50
         self.MAX_CHANNELS_PER_CATEGORY = 50
         self._EMOJI_RE = re.compile(r"<(a?):(?P<name>[^:]+):(?P<id>\d+)>")
+        self._m_role = re.compile(r"<@&(?P<id>\d+)>")
 
         async def _command_sync():
             try:
@@ -609,6 +617,9 @@ class ServerReceiver:
             # --- Sticker sync in background ---
             if self.config.CLONE_STICKER:
                 self.stickers.kickoff_sync()
+                
+            if getattr(self.config, "CLONE_ROLES", False):
+                self.roles.kickoff_sync(sitemap.get("roles", []))
 
             cat_created, ch_reparented = await self._repair_deleted_categories(
                 guild, sitemap
@@ -2161,6 +2172,14 @@ class ServerReceiver:
                     logger.warning(
                         "[⚠️] Failed to auto-archive thread %s: %s", thread.id, e
                     )
+                    
+    def _sanitize_inline(self, s: str | None) -> str | None:
+        if not s:
+            return s
+        s = self._replace_emoji_ids(s)
+        s = self._remap_channel_mentions(s)
+        s = self._remap_role_mentions(s)
+        return s
 
     def _replace_emoji_ids(self, content: str) -> str:
         """
@@ -2198,13 +2217,26 @@ class ServerReceiver:
             return match.group(0)
 
         return self._m_ch.sub(repl, content)
+    
 
-    def _sanitize_inline(self, s: str | None) -> str | None:
-        if not s:
-            return s
-        s = self._replace_emoji_ids(s)
-        s = self._remap_channel_mentions(s)
-        return s
+    def _remap_role_mentions(self, content: str) -> str:
+        """Map host role mentions to cloned role mentions using role_mappings."""
+        if not content:
+            return content
+
+        def repl(match: re.Match) -> str:
+            orig_role_id = int(match.group("id"))
+            row = self.db.get_role_mapping(orig_role_id) 
+
+            if row and "cloned_role_id" in row.keys():
+                cloned_id = row["cloned_role_id"]
+                if cloned_id:
+                    return f"<@&{cloned_id}>"
+
+            return match.group(0)
+
+        return self._m_role.sub(repl, content)
+
 
     def _build_webhook_payload(self, msg: Dict) -> dict:
         """
