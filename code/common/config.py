@@ -66,6 +66,8 @@ class Config:
             "true",
             "yes",
         )
+        
+        self.CLONE_ROLES = os.getenv("CLONE_ROLES", "true").lower() in ("1","true","yes")
 
         self.logger = logger.getChild(self.__class__.__name__)
         self.excluded_category_ids: set[int] = set()
