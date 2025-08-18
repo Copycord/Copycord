@@ -111,20 +111,31 @@ services:
   <summary>Click to expand .env example</summary>
   
 ```yaml
-SERVER_TOKEN= # Discord bot token
-CLONE_GUILD_ID= # ID of the clone guild, bot must be invited to this guild
-COMMAND_USERS= # Discord user IDs allowed to use commands separated by commas
-DELETE_CHANNELS=True # Delete channels after they are deleted from the host server
-DELETE_THREADS=True # Delete threads after they are deleted from the host server
-CLONE_EMOJI=True # Clone emojis
-CLONE_STICKER=True # Clone stickers
-CLONE_ROLES=True # Clone roles
+# --- SERVER (BOT in the CLONE guild) ---
+SERVER_TOKEN=            # your bot token
+CLONE_GUILD_ID=          # destination guild ID (where cloning goes)
+COMMAND_USERS=           # comma-separated user IDs allowed to run server commands
 
-CLIENT_TOKEN= # Your discord account token
-HOST_GUILD_ID= # ID of the host guild to monitor
+# --- WHAT TO DELETE WHEN REMOVED ON HOST (defaults: True) ---
+DELETE_CHANNELS=True     # True: delete cloned channels; False: keep & drop mapping
+DELETE_THREADS=True      # True: delete cloned threads;  False: keep & drop mapping
+DELETE_ROLES=True        # True: delete cloned roles;    False: keep & drop mapping
 
-ENABLE_CLONING=True # Enable/Disable realtime cloning
-LOG_LEVEL=INFO # INFO or DEBUG
+# --- WHAT TO CLONE (toggle features) ---
+CLONE_EMOJI=True         # clone emojis
+CLONE_STICKER=True       # clone stickers
+CLONE_ROLES=True         # clone roles
+
+# --- ROLE PERMISSIONS ---
+MIRROR_ROLE_PERMISSIONS=True   # True: also mirror role perms; False: only name/color/etc
+
+# --- CLIENT (YOUR ACCOUNT watching the HOST guild) ---
+CLIENT_TOKEN=            # your user token
+HOST_GUILD_ID=           # source guild ID (what you’re mirroring)
+
+# --- RUNTIME ---
+ENABLE_CLONING=True      # master on/off for realtime cloning
+LOG_LEVEL=INFO           # INFO or DEBUG
 ```
 </details>
 
