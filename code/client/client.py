@@ -448,7 +448,8 @@ class ClientListener:
                     "archived": thr.archived,
                 }
             )
-
+            
+        sitemap = self._filter_sitemap(sitemap)
         await self.ws.send({"type": "sitemap", "data": sitemap})
         logger.info("[📩] Sitemap sent to Server")
 
@@ -542,10 +543,115 @@ class ClientListener:
         ]
         logger.debug("[⚙️] Block list now: %s", self.blocked_keywords)
 
+    def _filter_sitemap(self, sitemap: dict) -> dict:
+        wl_on = bool(self.config.whitelist_enabled)
+        inc_cats = getattr(self.config, "include_category_ids", set())
+
+        new_categories = []
+        for cat in sitemap.get("categories", []):
+            cat_id = int(cat["id"])
+
+            # Skip whole category if excluded (or not whitelisted when WL is ON)
+            if self._is_filtered_out(None, cat_id):
+                continue
+
+            kept_children = [
+                ch for ch in cat.get("channels", [])
+                if not self._is_filtered_out(int(ch["id"]), cat_id)
+            ]
+
+            # ✅ Keep empty categories when WL is OFF.
+            # ✅ When WL is ON, keep empty category only if it is whitelisted.
+            keep_empty = (not wl_on) or (cat_id in inc_cats)
+            if kept_children or keep_empty:
+                new_categories.append({**cat, "channels": kept_children})
+
+        standalones = [
+            ch for ch in sitemap.get("standalone_channels", [])
+            if not self._is_filtered_out(int(ch["id"]), None)
+        ]
+
+        forums = [
+            f for f in sitemap.get("forums", [])
+            if not self._is_filtered_out(int(f["id"]), int(f.get("category_id") or 0))
+        ]
+
+        keep_forum_ids = {int(f["id"]) for f in forums}
+        threads = [t for t in sitemap.get("threads", []) if int(t.get("forum_id", 0)) in keep_forum_ids]
+
+        out = dict(sitemap)
+        out["categories"] = new_categories
+        out["standalone_channels"] = standalones
+        out["forums"] = forums
+        out["threads"] = threads
+        return out
+        
+    def _is_filtered_out(self, channel_id: int | None, category_id: int | None) -> bool:
+        """
+        Return True if this (channel, category) should be dropped (ignored).
+        Behavior:
+        - If whitelist is enabled, only IDs present in the whitelist are allowed.
+        - Excludes still apply, but whitelist wins on conflicts.
+        """
+        cfg = self.config
+
+        # 1) Whitelist gate (if enabled)
+        if cfg.whitelist_enabled:
+            allowed = False
+            if channel_id and channel_id in cfg.include_channel_ids:
+                allowed = True
+            elif category_id and category_id in cfg.include_category_ids:
+                allowed = True
+            if not allowed:
+                return True  # filtered out
+
+        # 2) Exclude lists (whitelist wins)
+        if channel_id and channel_id in cfg.excluded_channel_ids:
+            # Explicit channel whitelist overrides channel exclude
+            if channel_id in cfg.include_channel_ids:
+                return False
+            # Category whitelist also overrides
+            if category_id and category_id in cfg.include_category_ids:
+                return False
+            return True
+
+        if category_id and category_id in cfg.excluded_category_ids:
+            # Category/channel explicit whitelists override
+            if category_id in cfg.include_category_ids:
+                return False
+            if channel_id and channel_id in cfg.include_channel_ids:
+                return False
+            return True
+
+        return False
+
+    # Backward-compat wrapper (optional):
+    def _is_excluded_ids(self, channel_id: int | None, category_id: int | None) -> bool:
+        return self._is_filtered_out(channel_id, category_id)
+
     def should_ignore(self, message: discord.Message) -> bool:
         """
         Determines whether a given Discord message should be ignored based on various conditions.
         """
+        ch = message.channel
+        try:
+            # For text channels
+            ch_id = getattr(ch, "id", None)
+            cat_id = getattr(ch, "category_id", None)
+
+            # For threads: category_id lives on the parent forum
+            if isinstance(getattr(ch, "__class__", None), type) and getattr(ch.__class__, "__name__", "") == "Thread":
+                parent = getattr(ch, "parent", None)
+                if parent is not None:
+                    # parent is a ForumChannel (has its own category_id)
+                    cat_id = getattr(parent, "category_id", cat_id)
+
+            if self._is_filtered_out(ch_id, cat_id):
+                return True
+        except Exception:
+            # Fail-safe: don't break message flow
+            pass
+        
         # Ignore thread_created events in text channels
         if message.type == MessageType.thread_created:
             return True
@@ -574,6 +680,7 @@ class ClientListener:
                 return True
 
         return False
+    
 
     async def maybe_send_announcement(self, message: discord.Message) -> bool:
         """
@@ -910,6 +1017,46 @@ class ClientListener:
             #     "Full Message attributes:\n%s",
             #     pprint.pformat(msg_attrs, indent=2, width=120),
             # )
+            
+    def _in_scope_channel(self, ch) -> bool:
+        """
+        Returns True if changes to `ch` should affect the filtered sitemap.
+        - CategoryChannel: test by category-id only
+        - Thread: test via parent channel + its category
+        - Text/Forum channel: test via channel-id + its category
+        """
+        try:
+            import discord
+            if isinstance(ch, discord.CategoryChannel):
+                return not self._is_filtered_out(None, ch.id)
+
+            # For threads, check the parent channel instead
+            if isinstance(ch, discord.Thread):
+                parent = getattr(ch, "parent", None)
+                if parent is None:
+                    return False
+                cat_id = getattr(parent, "category_id", None)
+                return not self._is_filtered_out(parent.id, cat_id)
+
+            # Text / Forum channels
+            cat_id = getattr(ch, "category_id", None)
+            return not self._is_filtered_out(getattr(ch, "id", None), cat_id)
+        except Exception:
+            return True
+
+    def _in_scope_thread(self, thr: discord.Thread) -> bool:
+        """
+        Returns True if this thread should affect the filtered sitemap / message flow.
+        We gate by the PARENT channel + its category (we don't whitelist/exclude by thread ID).
+        """
+        try:
+            parent = getattr(thr, "parent", None)
+            if parent is None:
+                return False
+            cat_id = getattr(parent, "category_id", None)
+            return not self._is_filtered_out(getattr(parent, "id", None), cat_id)
+        except Exception:
+            return True
 
     async def on_thread_delete(self, thread: discord.Thread):
         """
@@ -921,6 +1068,11 @@ class ClientListener:
         if self.config.ENABLE_CLONING:
             if thread.guild.id != self.host_guild_id:
                 return
+            if not self._in_scope_thread(thread):
+                logger.debug("[thread] Ignoring delete for filtered-out thread %s (parent=%s)",
+                            getattr(thread, "id", None),
+                            getattr(getattr(thread, "parent", None), "id", None))
+                return
             payload = {"type": "thread_delete", "data": {"thread_id": thread.id}}
             await self.ws.send(payload)
             logger.info("[📩] Notified server of deleted thread %s", thread.id)
@@ -928,29 +1080,33 @@ class ClientListener:
     async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
         """
         Handles updates to a Discord thread, such as renaming.
-
-        This method is triggered when a thread is updated in a guild. It checks if the
-        thread belongs to the specified host guild and if the thread's name has changed.
-        If a rename is detected, it constructs a payload with details about the change
-        and sends it through the WebSocket connection.
         """
-        if self.config.ENABLE_CLONING:
-            if before.guild and before.guild.id == self.host_guild_id:
-                if before.name != after.name:
-                    payload = {
-                        "type": "thread_rename",
-                        "data": {
-                            "thread_id": before.id,
-                            "new_name": after.name,
-                            "old_name": before.name,
-                            "parent_name": after.parent.name,
-                            "parent_id": after.parent.id,
-                        },
-                    }
-                    logger.info(
-                        f"[✏️] Thread rename detected: {before.id} {before.name!r} → {after.name!r}"
-                    )
-                    await self.ws.send(payload)
+        if not self.config.ENABLE_CLONING:
+            return
+        if not (before.guild and before.guild.id == self.host_guild_id):
+            return
+
+        if not (self._in_scope_thread(before) or self._in_scope_thread(after)):
+            logger.debug("[thread] Ignoring update for filtered-out thread %s (parent=%s)",
+                        getattr(before, "id", None),
+                        getattr(getattr(before, "parent", None), "id", None))
+            return
+
+        if before.name != after.name:
+            payload = {
+                "type": "thread_rename",
+                "data": {
+                    "thread_id": before.id,
+                    "new_name": after.name,
+                    "old_name": before.name,
+                    "parent_name": getattr(after.parent, "name", None),
+                    "parent_id": getattr(after.parent, "id", None),
+                },
+            }
+            logger.info(
+                f"[✏️] Thread rename detected: {before.id} {before.name!r} → {after.name!r}"
+            )
+            await self.ws.send(payload)
 
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
         """
@@ -958,6 +1114,10 @@ class ClientListener:
         """
         if self.config.ENABLE_CLONING:
             if channel.guild.id != self.host_guild_id:
+                return
+            
+            if not self._in_scope_channel(channel):
+                logger.debug("Ignored create for filtered-out channel/category %s", getattr(channel, "id", None))
                 return
             self.schedule_sync()
 
@@ -967,6 +1127,9 @@ class ClientListener:
         """
         if self.config.ENABLE_CLONING:
             if channel.guild.id != self.host_guild_id:
+                return
+            if not self._in_scope_channel(channel):
+                logger.debug("Ignored delete for filtered-out channel/category %s", getattr(channel, "id", None))
                 return
             self.schedule_sync()
 
@@ -980,6 +1143,10 @@ class ClientListener:
         """
         if self.config.ENABLE_CLONING:
             if before.guild.id != self.host_guild_id:
+                return
+            
+            if not (self._in_scope_channel(before) or self._in_scope_channel(after)):
+                logger.debug("Ignored update for filtered-out channel/category %s", getattr(before, "id", None))
                 return
 
             # Only resync if name or parent category changed
