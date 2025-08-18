@@ -64,7 +64,13 @@ root.addHandler(fh)
 # keep library noise down
 for name in ("websockets.server", "websockets.protocol"):
     logging.getLogger(name).setLevel(logging.WARNING)
-for lib in ("discord","discord.client","discord.gateway","discord.state","discord.http"):
+for lib in (
+    "discord",
+    "discord.client",
+    "discord.gateway",
+    "discord.state",
+    "discord.http",
+):
     logging.getLogger(lib).setLevel(logging.WARNING)
 for lib in ("discord.state", "discord.client"):
     logging.getLogger(lib).setLevel(logging.ERROR)
@@ -91,7 +97,7 @@ class ClientListener:
         self.streams = getattr(self, "streams", StreamManager(logger))
         self._scrape_task: asyncio.Task | None = None
         self._last_cancel_at: float | None = None
-        self._cancelling: bool = False 
+        self._cancelling: bool = False
         self.do_precount = True
         self.bot.event(self.on_ready)
         self.bot.event(self.on_message)
@@ -101,6 +107,9 @@ class ClientListener:
         self.bot.event(self.on_thread_delete)
         self.bot.event(self.on_thread_update)
         self.bot.event(self.on_member_join)
+        self.bot.event(self.on_guild_role_create)
+        self.bot.event(self.on_guild_role_delete)
+        self.bot.event(self.on_guild_role_update)
         self.ws = WebsocketManager(
             send_url=self.config.SERVER_WS_URL,
             listen_host=self.config.CLIENT_WS_HOST,
@@ -150,8 +159,8 @@ class ClientListener:
             chan_id = int(data.get("channel_id"))
             asyncio.create_task(self._backfill_channel(chan_id))
             return {"ok": True}
-        
-        elif typ =="sitemap_request":
+
+        elif typ == "sitemap_request":
             if self.config.ENABLE_CLONING:
                 self.schedule_sync()
                 logger.info("[🌐] Received sitemap request")
@@ -162,7 +171,9 @@ class ClientListener:
         elif typ == "scrape_members":
             include_names = bool(data.get("include_names", True))
 
-            def clamp(v, lo, hi): return max(lo, min(hi, v))
+            def clamp(v, lo, hi):
+                return max(lo, min(hi, v))
+
             try:
                 ns = int(data.get("num_sessions", 2))
             except Exception:
@@ -194,7 +205,10 @@ class ClientListener:
                     )
                     try:
                         result = await self._scrape_task
-                        logger.debug("[scrape] TASK_AWAITED_OK count=%d", len((result or {}).get("members", [])))
+                        logger.debug(
+                            "[scrape] TASK_AWAITED_OK count=%d",
+                            len((result or {}).get("members", [])),
+                        )
                         return {"ok": True, "data": result}
                     except asyncio.CancelledError:
                         logger.debug("[scrape] TASK_AWAITED_CANCELLED")
@@ -241,14 +255,15 @@ class ClientListener:
                         {"members": members, "count": len(members)},
                         max_inline_bytes=800_000,
                     )
-                return self.streams.pack_json({"members": [], "count": 0}, max_inline_bytes=800_000)
+                return self.streams.pack_json(
+                    {"members": [], "count": 0}, max_inline_bytes=800_000
+                )
             except Exception as e:
                 logger.exception("[❌] scrape_snapshot failed")
                 return {"ok": False, "error": str(e)}
-            
 
         return None
-    
+
     async def _resolve_accessible_host_channel(self, orig_channel_id: int):
         """
         Maps a cloned channel id to its host channel id (if applicable), and returns a
@@ -264,7 +279,9 @@ class ClientListener:
         if hasattr(self, "chan_map"):
             for src_id, row in self.chan_map.items():
                 if int(row.get("cloned_channel_id") or 0) == channel_id:
-                    logger.debug(f"[map] Mapped cloned channel {channel_id} -> host channel {src_id}")
+                    logger.debug(
+                        f"[map] Mapped cloned channel {channel_id} -> host channel {src_id}"
+                    )
                     channel_id = int(src_id)
                     break
 
@@ -289,11 +306,15 @@ class ClientListener:
             guild = host_guild
 
         if guild is None:
-            raise discord.Forbidden(None, {"message": "No guild available for fallback"})
+            raise discord.Forbidden(
+                None, {"message": "No guild available for fallback"}
+            )
 
         # 4) If we couldn’t fetch the requested channel (or it’s None), pick the first readable text channel
         if channel is None:
-            me = guild.me or guild.get_member(getattr(getattr(self.bot, "user", None), "id", 0))
+            me = guild.me or guild.get_member(
+                getattr(getattr(self.bot, "user", None), "id", 0)
+            )
 
             def can_read(ch) -> bool:
                 try:
@@ -306,13 +327,15 @@ class ClientListener:
 
             readable = next((ch for ch in guild.text_channels if can_read(ch)), None)
             if not readable:
-                raise discord.Forbidden(None, {"message": "No accessible text channel found in the host guild."})
+                raise discord.Forbidden(
+                    None,
+                    {"message": "No accessible text channel found in the host guild."},
+                )
 
             channel = readable
             channel_id = readable.id
 
         return channel, channel_id, guild
-
 
     async def build_and_send_sitemap(self):
         """
@@ -397,7 +420,7 @@ class ClientListener:
                 }
             )
         sitemap["stickers"] = stickers_payload
-        
+
         sitemap["roles"] = [
             {
                 "id": r.id,
@@ -408,7 +431,7 @@ class ClientListener:
                 "mentionable": r.mentionable,
                 "managed": r.managed,
                 "everyone": (r == r.guild.default_role),
-                "position": r.position, 
+                "position": r.position,
             }
             for r in guild.roles
         ]
@@ -464,7 +487,7 @@ class ClientListener:
                     "archived": thr.archived,
                 }
             )
-            
+
         sitemap = self._filter_sitemap(sitemap)
         await self.ws.send({"type": "sitemap", "data": sitemap})
         logger.info("[📩] Sitemap sent to Server")
@@ -572,7 +595,8 @@ class ClientListener:
                 continue
 
             kept_children = [
-                ch for ch in cat.get("channels", [])
+                ch
+                for ch in cat.get("channels", [])
                 if not self._is_filtered_out(int(ch["id"]), cat_id)
             ]
 
@@ -583,17 +607,23 @@ class ClientListener:
                 new_categories.append({**cat, "channels": kept_children})
 
         standalones = [
-            ch for ch in sitemap.get("standalone_channels", [])
+            ch
+            for ch in sitemap.get("standalone_channels", [])
             if not self._is_filtered_out(int(ch["id"]), None)
         ]
 
         forums = [
-            f for f in sitemap.get("forums", [])
+            f
+            for f in sitemap.get("forums", [])
             if not self._is_filtered_out(int(f["id"]), int(f.get("category_id") or 0))
         ]
 
         keep_forum_ids = {int(f["id"]) for f in forums}
-        threads = [t for t in sitemap.get("threads", []) if int(t.get("forum_id", 0)) in keep_forum_ids]
+        threads = [
+            t
+            for t in sitemap.get("threads", [])
+            if int(t.get("forum_id", 0)) in keep_forum_ids
+        ]
 
         out = dict(sitemap)
         out["categories"] = new_categories
@@ -601,7 +631,7 @@ class ClientListener:
         out["forums"] = forums
         out["threads"] = threads
         return out
-        
+
     def _is_filtered_out(self, channel_id: int | None, category_id: int | None) -> bool:
         """
         Return True if this (channel, category) should be dropped (ignored).
@@ -656,7 +686,10 @@ class ClientListener:
             cat_id = getattr(ch, "category_id", None)
 
             # For threads: category_id lives on the parent forum
-            if isinstance(getattr(ch, "__class__", None), type) and getattr(ch.__class__, "__name__", "") == "Thread":
+            if (
+                isinstance(getattr(ch, "__class__", None), type)
+                and getattr(ch.__class__, "__name__", "") == "Thread"
+            ):
                 parent = getattr(ch, "parent", None)
                 if parent is not None:
                     # parent is a ForumChannel (has its own category_id)
@@ -667,7 +700,7 @@ class ClientListener:
         except Exception:
             # Fail-safe: don't break message flow
             pass
-        
+
         # Ignore thread_created events in text channels
         if message.type == MessageType.thread_created:
             return True
@@ -696,7 +729,6 @@ class ClientListener:
                 return True
 
         return False
-    
 
     async def maybe_send_announcement(self, message: discord.Message) -> bool:
         """
@@ -904,7 +936,7 @@ class ClientListener:
         This method is triggered whenever a message is sent in a channel the bot has access to.
         """
         if self.config.ENABLE_CLONING:
-            
+
             if self.should_ignore(message):
                 return
 
@@ -1033,7 +1065,48 @@ class ClientListener:
             #     "Full Message attributes:\n%s",
             #     pprint.pformat(msg_attrs, indent=2, width=120),
             # )
-            
+
+    def _role_change_is_relevant(
+        self, before: discord.Role, after: discord.Role
+    ) -> bool:
+        """
+        Only schedule a sitemap when something Copycord can mirror actually changed.
+        Skip @everyone and managed roles. (Role position changes are ignored.)
+        """
+        try:
+            # Skip noise
+            if after.is_default() or after.managed:
+                return False
+
+            # Name / perms / color / hoist / mentionable  (INTENTIONALLY ignore position)
+            if before.name != after.name:
+                return True
+
+            if getattr(before.permissions, "value", 0) != getattr(
+                after.permissions, "value", 0
+            ):
+                return True
+
+            def _colval(c):
+                try:
+                    return c.value
+                except Exception:
+                    return int(c)
+
+            if _colval(before.color) != _colval(after.color):
+                return True
+
+            if before.hoist != after.hoist:
+                return True
+
+            if before.mentionable != after.mentionable:
+                return True
+
+        except Exception:
+            return True
+
+        return False
+
     def _in_scope_channel(self, ch) -> bool:
         """
         Returns True if changes to `ch` should affect the filtered sitemap.
@@ -1042,7 +1115,6 @@ class ClientListener:
         - Text/Forum channel: test via channel-id + its category
         """
         try:
-            import discord
             if isinstance(ch, discord.CategoryChannel):
                 return not self._is_filtered_out(None, ch.id)
 
@@ -1085,9 +1157,11 @@ class ClientListener:
             if thread.guild.id != self.host_guild_id:
                 return
             if not self._in_scope_thread(thread):
-                logger.debug("[thread] Ignoring delete for filtered-out thread %s (parent=%s)",
-                            getattr(thread, "id", None),
-                            getattr(getattr(thread, "parent", None), "id", None))
+                logger.debug(
+                    "[thread] Ignoring delete for filtered-out thread %s (parent=%s)",
+                    getattr(thread, "id", None),
+                    getattr(getattr(thread, "parent", None), "id", None),
+                )
                 return
             payload = {"type": "thread_delete", "data": {"thread_id": thread.id}}
             await self.ws.send(payload)
@@ -1103,9 +1177,11 @@ class ClientListener:
             return
 
         if not (self._in_scope_thread(before) or self._in_scope_thread(after)):
-            logger.debug("[thread] Ignoring update for filtered-out thread %s (parent=%s)",
-                        getattr(before, "id", None),
-                        getattr(getattr(before, "parent", None), "id", None))
+            logger.debug(
+                "[thread] Ignoring update for filtered-out thread %s (parent=%s)",
+                getattr(before, "id", None),
+                getattr(getattr(before, "parent", None), "id", None),
+            )
             return
 
         if before.name != after.name:
@@ -1131,9 +1207,12 @@ class ClientListener:
         if self.config.ENABLE_CLONING:
             if channel.guild.id != self.host_guild_id:
                 return
-            
+
             if not self._in_scope_channel(channel):
-                logger.debug("Ignored create for filtered-out channel/category %s", getattr(channel, "id", None))
+                logger.debug(
+                    "Ignored create for filtered-out channel/category %s",
+                    getattr(channel, "id", None),
+                )
                 return
             self.schedule_sync()
 
@@ -1145,7 +1224,10 @@ class ClientListener:
             if channel.guild.id != self.host_guild_id:
                 return
             if not self._in_scope_channel(channel):
-                logger.debug("Ignored delete for filtered-out channel/category %s", getattr(channel, "id", None))
+                logger.debug(
+                    "Ignored delete for filtered-out channel/category %s",
+                    getattr(channel, "id", None),
+                )
                 return
             self.schedule_sync()
 
@@ -1160,9 +1242,12 @@ class ClientListener:
         if self.config.ENABLE_CLONING:
             if before.guild.id != self.host_guild_id:
                 return
-            
+
             if not (self._in_scope_channel(before) or self._in_scope_channel(after)):
-                logger.debug("Ignored update for filtered-out channel/category %s", getattr(before, "id", None))
+                logger.debug(
+                    "Ignored update for filtered-out channel/category %s",
+                    getattr(before, "id", None),
+                )
                 return
 
             # Only resync if name or parent category changed
@@ -1177,6 +1262,43 @@ class ClientListener:
                 logger.debug(
                     "Ignored channel update for %s: non-structural change", before.id
                 )
+
+    async def on_guild_role_create(self, role: discord.Role):
+        if not self.config.ENABLE_CLONING or not getattr(
+            self.config, "CLONE_ROLES", True
+        ):
+            return
+        if role.guild.id != self.host_guild_id:
+            return
+        logger.debug("[roles] create: %s (%d) → scheduling sitemap", role.name, role.id)
+        self.schedule_sync()
+
+    async def on_guild_role_delete(self, role: discord.Role):
+        if not self.config.ENABLE_CLONING or not getattr(
+            self.config, "CLONE_ROLES", True
+        ):
+            return
+        if role.guild.id != self.host_guild_id:
+            return
+        logger.debug("[roles] delete: %s (%d) → scheduling sitemap", role.name, role.id)
+        self.schedule_sync()
+
+    async def on_guild_role_update(self, before: discord.Role, after: discord.Role):
+        if not self.config.ENABLE_CLONING or not getattr(
+            self.config, "CLONE_ROLES", True
+        ):
+            return
+        if after.guild.id != self.host_guild_id:
+            return
+        if not self._role_change_is_relevant(before, after):
+            logger.debug(
+                "[roles] update ignored (irrelevant): %s (%d)", after.name, after.id
+            )
+            return
+        logger.debug(
+            "[roles] update: %s (%d) → scheduling sitemap", after.name, after.id
+        )
+        self.schedule_sync()
 
     async def on_member_join(self, member: discord.Member):
         try:
@@ -1193,19 +1315,24 @@ class ClientListener:
                     "user_id": member.id,
                     "username": str(member),
                     "display_name": getattr(member, "display_name", member.name),
-                    "avatar_url": str(member.display_avatar.url) if member.display_avatar else None,
+                    "avatar_url": (
+                        str(member.display_avatar.url)
+                        if member.display_avatar
+                        else None
+                    ),
                     "joined_at": datetime.now(timezone.utc).isoformat(),
                 },
             }
             await self.ws.send(payload)
-            logger.info("[📩] Member join observed in %s: %s (%s) → notified server",
-                        guild.id, member.display_name, member.id)
+            logger.info(
+                "[📩] Member join observed in %s: %s (%s) → notified server",
+                guild.id,
+                member.display_name,
+                member.id,
+            )
 
         except Exception:
             logger.exception("Failed to forward member_joined")
-
-
-
 
     async def _backfill_channel(self, original_channel_id: int):
         """Grab all human/bot messages from a channel and send to server"""
@@ -1256,10 +1383,10 @@ class ClientListener:
             if getattr(msg, "type", None) not in ALLOWED_TYPES:
                 return False
             return True
-        
+
         sent = 0
         last_ping = 0.0
-        
+
         try:
             if getattr(self, "do_precount", False):
                 total = 0
@@ -1355,11 +1482,17 @@ class ClientListener:
 
         except Forbidden as e:
             # Prevent the unhandled task exception and report cleanly
-            logger.info("[backfill] history forbidden channel=%s: %s", original_channel_id, e)
+            logger.info(
+                "[backfill] history forbidden channel=%s: %s", original_channel_id, e
+            )
         except HTTPException as e:
-            logger.warning("[backfill] HTTP error channel=%s: %s", original_channel_id, e)
+            logger.warning(
+                "[backfill] HTTP error channel=%s: %s", original_channel_id, e
+            )
         finally:
-            await self.ws.send({"type": "backfill_done", "data": {"channel_id": original_channel_id}})
+            await self.ws.send(
+                {"type": "backfill_done", "data": {"channel_id": original_channel_id}}
+            )
 
     async def _shutdown(self):
         """
