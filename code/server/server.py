@@ -147,6 +147,8 @@ class ServerReceiver:
             db=self.db,
             ratelimit=self.ratelimit,
             clone_guild_id=int(self.config.CLONE_GUILD_ID),
+            delete_roles=bool(self.config.DELETE_ROLES),
+            mirror_permissions=bool(self.config.MIRROR_ROLE_PERMISSIONS),
         )
         self.onjoin = OnJoinService(self.bot, self.db, logger.getChild("OnJoin"))
         install_discord_rl_probe(self.ratelimit)
