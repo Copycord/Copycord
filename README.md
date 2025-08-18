@@ -118,6 +118,7 @@ DELETE_CHANNELS=True # Delete channels after they are deleted from the host serv
 DELETE_THREADS=True # Delete threads after they are deleted from the host server
 CLONE_EMOJI=True # Clone emojis
 CLONE_STICKER=True # Clone stickers
+CLONE_ROLES=True # Clone roles
 
 CLIENT_TOKEN= # Your discord account token
 HOST_GUILD_ID= # ID of the host guild to monitor
