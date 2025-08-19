@@ -136,7 +136,7 @@ class RoleManager:
                     continue
 
                 try:
-                    await self.ratelimit.acquire(ActionType.EDIT_CHANNEL)
+                    await self.ratelimit.acquire(ActionType.ROLE)
                     await cloned.delete()
                     deleted += 1
                     logger.info("[🧩] Deleted role %s (%d)", cloned.name, cloned.id)
@@ -176,7 +176,7 @@ class RoleManager:
             # ---- Create
             if not mapping:
                 try:
-                    await self.ratelimit.acquire(ActionType.EDIT_CHANNEL)
+                    await self.ratelimit.acquire(ActionType.ROLE)
                     kwargs = dict(
                         name=want_name,
                         colour=want_color,
@@ -257,7 +257,7 @@ class RoleManager:
                         cloned.name, cloned.id, "; ".join(changes),
                     )
                     try:
-                        await self.ratelimit.acquire(ActionType.EDIT_CHANNEL)
+                        await self.ratelimit.acquire(ActionType.ROLE)
                         kwargs = dict(
                             name=want_name,
                             colour=want_color,

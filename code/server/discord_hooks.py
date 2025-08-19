@@ -15,20 +15,29 @@ log = logging.getLogger("discord_hooks")
 
 _ROUTE_MAP: Tuple[Tuple[re.Pattern, ActionType], ...] = (
     (re.compile(r"/channels/\{channel_id\}/webhooks"), ActionType.WEBHOOK_CREATE),
-    (re.compile(r"/guilds/\{guild_id\}/emojis"),        ActionType.EMOJI),
-    (re.compile(r"/guilds/\{guild_id\}/stickers"),        ActionType.STICKER_CREATE),
-    (re.compile(r"/guilds/\{guild_id\}/channels"),      ActionType.CREATE_CHANNEL),
-    (re.compile(r"/channels/\{channel_id\}"),           ActionType.EDIT_CHANNEL), 
-    (re.compile(r"/channels/\{channel_id\}/messages"),  ActionType.WEBHOOK_MESSAGE),
-    (re.compile(r"/channels/\{channel_id\}/threads"),   ActionType.THREAD),
-    (re.compile(r"/channels/\{channel_id\}/messages/\{message_id\}"), ActionType.DELETE_CHANNEL),
+    (re.compile(r"/guilds/\{guild_id\}/emojis"), ActionType.EMOJI),
+    (re.compile(r"/guilds/\{guild_id\}/stickers"), ActionType.STICKER_CREATE),
+    (re.compile(r"/guilds/\{guild_id\}/channels"), ActionType.CREATE_CHANNEL),
+    (
+        re.compile(r"^/(?:api/v\d+/)?guilds/\d+/roles(?:/\d+)?(?:\?.*)?$"),
+        ActionType.ROLE,
+    ),
+    (re.compile(r"/channels/\{channel_id\}"), ActionType.EDIT_CHANNEL),
+    (re.compile(r"/channels/\{channel_id\}/messages"), ActionType.WEBHOOK_MESSAGE),
+    (re.compile(r"/channels/\{channel_id\}/threads"), ActionType.THREAD),
+    (
+        re.compile(r"/channels/\{channel_id\}/messages/\{message_id\}"),
+        ActionType.DELETE_CHANNEL,
+    ),
 )
+
 
 def _pick_major(parts: list[str]) -> str | None:
     for p in parts:
         if p and p.isdigit():
             return p
     return None
+
 
 class DiscordHTTPRLHandler(logging.Handler):
     _rx = re.compile(r"Retrying in ([\d.]+) seconds.*bucket \"([^\"]+)\"")
@@ -37,9 +46,11 @@ class DiscordHTTPRLHandler(logging.Handler):
         super().__init__(level=logging.WARNING)
         self.rlm = ratelimit_mgr
 
-    def _map_bucket(self, bucket: str) -> tuple[Optional[ActionType], Optional[str], str]:
+    def _map_bucket(
+        self, bucket: str
+    ) -> tuple[Optional[ActionType], Optional[str], str]:
         parts = bucket.split(":")
-        major = _pick_major(parts) 
+        major = _pick_major(parts)
         route = parts[-1]
 
         action = None
@@ -53,9 +64,14 @@ class DiscordHTTPRLHandler(logging.Handler):
             key = None
         elif action == ActionType.WEBHOOK_MESSAGE and major:
             key = major
-            
-        log.debug("Bucket map: route=%s parts=%s -> action=%s key=%s",
-                  route, parts, getattr(action, "name", None), key)
+
+        log.debug(
+            "Bucket map: route=%s parts=%s -> action=%s key=%s",
+            route,
+            parts,
+            getattr(action, "name", None),
+            key,
+        )
         return action, key, route
 
     def emit(self, record: logging.LogRecord):
@@ -69,7 +85,11 @@ class DiscordHTTPRLHandler(logging.Handler):
             bucket = m.group(2)
             action, key, route = self._map_bucket(bucket)
             if not action:
-                log.debug("No ActionType mapping for route=%s (bucket=%s); no penalty applied", route, bucket)
+                log.debug(
+                    "No ActionType mapping for route=%s (bucket=%s); no penalty applied",
+                    route,
+                    bucket,
+                )
                 return
 
             if action == ActionType.WEBHOOK_MESSAGE:
@@ -79,10 +99,14 @@ class DiscordHTTPRLHandler(logging.Handler):
                 key = None
 
             self.rlm.penalize(action, FIXED_COOLDOWN_SECONDS, key=key)
-            log.warning("[❗] Discord rate limit detected; applying %ss safety net cooldown before next %s action",
-                        FIXED_COOLDOWN_SECONDS, action.name)
+            log.warning(
+                "[❗] Discord rate limit detected; applying %ss safety net cooldown before next %s action",
+                FIXED_COOLDOWN_SECONDS,
+                action.name,
+            )
         except Exception as e:
             log.exception("[⛔] Error in DiscordHTTPRLHandler.emit: %s", e)
+
 
 def install_discord_rl_probe(ratelimit_mgr):
     http_log = logging.getLogger("discord.http")

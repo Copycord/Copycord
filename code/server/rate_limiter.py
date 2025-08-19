@@ -19,6 +19,7 @@ class ActionType(Enum):
     DELETE_CHANNEL = "delete_channel"
     THREAD = "thread"
     EMOJI = "emoji"
+    ROLE = "role"
     STICKER_CREATE = "sticker_create"
 
 class RateLimiter:
@@ -94,6 +95,7 @@ class RateLimitManager:
             ActionType.WEBHOOK_CREATE: (1, 30.0),
             ActionType.EDIT_CHANNEL: (3, 15.0),
             ActionType.DELETE_CHANNEL: (3, 15.0),
+            ActionType.ROLE: (1, 10.0),
             ActionType.THREAD: (2, 5.0),
             ActionType.EMOJI: (1, 60.0),
             ActionType.STICKER_CREATE: (1, 60.0),
