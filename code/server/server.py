@@ -1486,7 +1486,6 @@ class ServerReceiver:
             return
         async with self._new_webhook_gate:
             rem = self.ratelimit.remaining(ActionType.WEBHOOK_CREATE)
-            logger.debug("NEW_WEBHOOK pre-acquire cooldown remaining: %.2fs", rem)
             await self.ratelimit.acquire(ActionType.WEBHOOK_CREATE)
             webhook = await ch.create_webhook(name=name, avatar=avatar_bytes)
             logger.info("[➕] Created a webhook in channel %s", ch.name)
