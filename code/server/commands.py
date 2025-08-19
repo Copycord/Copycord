@@ -314,82 +314,100 @@ class CloneCommands(commands.Cog):
             len(orphan_channels),
         )
 
-        if delete:
-            deleted_cats = deleted_chs = 0
-            skipped_protected_cats = skipped_protected_chs = 0
+        if not delete:
+            if not orphan_categories and not orphan_channels:
+                msg = "[⚙️] verify_structure: All channels and categories match the last sitemap."
+                logger.info(msg)
+                return await self._reply_or_dm(ctx, msg)
 
-            # Get protected channel IDs
-            receiver = getattr(self.bot, "server", None)
-            protected = receiver._protected_channel_ids(guild)
+            lines = []
+            if orphan_categories:
+                lines.append(f"**Orphan Categories ({len(orphan_categories)})**:")
+                lines += [f"- {cat.name} (ID {cat.id})" for cat in orphan_categories]
+            if orphan_channels:
+                lines.append(f"**Orphan Channels ({len(orphan_channels)})**:")
+                lines += [f"- <#{ch.id}> ({ch.name})" for ch in orphan_channels]
 
-            # --- categories ---
-            for cat in orphan_categories:
-                try:
-                    # Skip deleting a category that contains any protected channels
-                    if any(c.id in protected for c in cat.channels):
-                        skipped_protected_cats += 1
-                        logger.info("[🛡️] Skipping category %s (%d): contains protected channel(s).",
-                                    cat.name, cat.id)
-                        continue
+            report = "\n".join(lines)
+            if len(report) > 1900:
+                report = report[:1900] + "\n…(truncated)"
+            return await self._reply_or_dm(ctx, report)
 
-                    await self.ratelimit.acquire(ActionType.DELETE_CHANNEL)
-                    await cat.delete()
-                    deleted_cats += 1
-                    logger.info("[🗑️] Deleted orphan category %s (ID %d)", cat.name, cat.id)
+        # ---------- DELETE PATH ----------
+        deleted_cats = deleted_chs = 0
+        skipped_protected_cats = skipped_protected_chs = 0
 
-                except Exception as e:
-                    logger.warning("[⚠️] Failed to delete category %s (%d): %s", cat.name, cat.id, e)
+        # Protected channel IDs (safe lookup)
+        protected = set()
+        receiver = getattr(self.bot, "server", None)
+        if receiver and hasattr(receiver, "_protected_channel_ids"):
+            try:
+                protected = set(receiver._protected_channel_ids(guild))
+            except Exception as e:
+                logger.debug("[verify_structure] protected lookup failed: %s", e)
 
-            # --- channels (non-category) ---
-            for ch in orphan_channels:
-                try:
-                    # Skip if the channel itself is protected
-                    if ch.id in protected:
-                        skipped_protected_chs += 1
-                        logger.info("[🛡️] Skipping protected channel %s (ID %d)", ch.name, ch.id)
-                        continue
+        # Categories
+        for cat in orphan_categories:
+            try:
+                await self.ratelimit.acquire(ActionType.DELETE_CHANNEL)
+                await cat.delete()
+                deleted_cats += 1
+                logger.info("[🗑️] Deleted orphan category %s (ID %d)", cat.name, cat.id)
 
-                    await self.ratelimit.acquire(ActionType.DELETE_CHANNEL)
-                    await ch.delete()
-                    deleted_chs += 1
-                    logger.info("[🗑️] Deleted orphan channel %s (ID %d)", ch.name, ch.id)
+            except Exception as e:
+                logger.warning("[⚠️] Failed to delete category %s (%d): %s", cat.name, cat.id, e)
 
-                except Exception as e:
-                    logger.warning("[⚠️] Failed to delete channel %s (%d): %s",
-                                getattr(ch, "name", "?"), getattr(ch, "id", 0), e)
+        # Channels
+        for ch in orphan_channels:
+            try:
+                if ch.id in protected:
+                    skipped_protected_chs += 1
+                    logger.info("[🛡️] Skipping protected channel %s (ID %d)", ch.name, ch.id)
+                    continue
 
-            if deleted_cats == 0 and deleted_chs == 0 and skipped_protected_cats == 0 and skipped_protected_chs == 0:
-                msg = "[⚙️] verify_structure: No orphaned channels or categories found to delete."
-            else:
-                def _fmt(n: int, singular: str, plural: str | None = None) -> str:
-                    if plural is None:
-                        plural = singular + "s"
-                    return f"{n} {singular if n == 1 else plural}"
+                await self.ratelimit.acquire(ActionType.DELETE_CHANNEL)
+                await ch.delete()
+                deleted_chs += 1
+                logger.info("[🗑️] Deleted orphan channel %s (ID %d)", ch.name, ch.id)
 
-                deleted_parts = []
-                if deleted_cats:
-                    deleted_parts.append(_fmt(deleted_cats, "category", "categories"))
-                if deleted_chs:
-                    deleted_parts.append(_fmt(deleted_chs, "channel"))
+            except Exception as e:
+                logger.warning(
+                    "[⚠️] Failed to delete channel %s (%d): %s",
+                    getattr(ch, "name", "?"), getattr(ch, "id", 0), e
+                )
 
-                skipped_parts = []
-                if skipped_protected_cats:
-                    skipped_parts.append(_fmt(skipped_protected_cats, "protected category", "protected categories"))
-                if skipped_protected_chs:
-                    skipped_parts.append(_fmt(skipped_protected_chs, "protected channel"))
+        # result message
+        if deleted_cats == 0 and deleted_chs == 0 and skipped_protected_cats == 0 and skipped_protected_chs == 0:
+            msg = "[⚙️] verify_structure: No orphaned channels or categories found to delete."
+        else:
+            def _fmt(n: int, singular: str, plural: str | None = None) -> str:
+                if plural is None:
+                    plural = singular + "s"
+                return f"{n} {singular if n == 1 else plural}"
 
-                pieces = []
-                if deleted_parts:
-                    pieces.append("Deleted " + " and ".join(deleted_parts) + ".")
-                else:
-                    pieces.append("No deletions.")
-                if skipped_parts:
-                    pieces.append("Skipped " + " and ".join(skipped_parts) + ".")
+            parts = []
+            dels = []
+            if deleted_cats:
+                dels.append(_fmt(deleted_cats, "category", "categories"))
+            if deleted_chs:
+                dels.append(_fmt(deleted_chs, "channel"))
+            if dels:
+                parts.append("Deleted " + " and ".join(dels) + ".")
 
-                msg = "[⚙️] verify_structure: " + " ".join(pieces)
+            skips = []
+            if skipped_protected_cats:
+                skips.append(_fmt(skipped_protected_cats, "protected category", "protected categories"))
+            if skipped_protected_chs:
+                skips.append(_fmt(skipped_protected_chs, "protected channel"))
+            if skips:
+                parts.append("Skipped " + " and ".join(skips) + ".")
 
-            logger.info(msg)
-            return await self._reply_or_dm(ctx, msg)
+            if not parts:
+                parts.append("No deletions.")
+            msg = "[⚙️] verify_structure: " + " ".join(parts)
+
+        logger.info(msg)
+        return await self._reply_or_dm(ctx, msg)
 
     @commands.slash_command(
         name="announcement_trigger",
