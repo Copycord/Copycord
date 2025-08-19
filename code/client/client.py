@@ -11,7 +11,6 @@ import asyncio
 import contextlib
 import re
 import signal
-import traceback
 import unicodedata
 from datetime import datetime, timezone
 import logging
@@ -26,6 +25,7 @@ import sys
 from discord.ext import commands
 from common.config import Config
 from common.db import DBManager
+from client.sitemap import SitemapService
 from common.websockets import WebsocketManager
 from client.scraper import MemberScraper
 from client.scraper import StreamManager
@@ -89,7 +89,6 @@ class ClientListener:
         self.start_time = datetime.now(timezone.utc)
         self.bot = commands.Bot(command_prefix="!", self_bot=True)
         self._sync_task: Optional[asyncio.Task] = None
-        self.debounce_task: Optional[asyncio.Task] = None
         self._ws_task: Optional[asyncio.Task] = None
         self._m_user = re.compile(r"<@!?(\d+)>")
         self.scraper = getattr(self, "scraper", None)
@@ -114,6 +113,14 @@ class ClientListener:
             send_url=self.config.SERVER_WS_URL,
             listen_host=self.config.CLIENT_WS_HOST,
             listen_port=self.config.CLIENT_WS_PORT,
+            logger=logger,
+        )
+        self.sitemap = SitemapService(
+            bot=self.bot,
+            config=self.config,
+            db=self.db,
+            ws=self.ws,
+            host_guild_id=self.host_guild_id,
             logger=logger,
         )
 
@@ -337,194 +344,18 @@ class ClientListener:
 
         return channel, channel_id, guild
 
-    async def build_and_send_sitemap(self):
-        """
-        Asynchronously builds and sends a sitemap of the Discord guild to the server.
-        The sitemap includes information about categories, standalone text channels, forums, threads, emojis,
-        stickers, and community settings of the guild. It fetches additional thread data from the database and ensures
-        all relevant information is sent to the server via a WebSocket connection.
-        """
-        guild = self.bot.get_guild(self.host_guild_id)
-        if not guild:
-            logger.error("[⛔] Guild %s not found", self.host_guild_id)
-            return
-
-        def _enum_int(val, default=0):
-            if val is None:
-                return default
-            v = getattr(val, "value", val)
-            try:
-                return int(v)
-            except Exception:
-                return default
-
-        def _sticker_url(s):
-            u = getattr(s, "url", None)
-            if not u:
-                asset = getattr(s, "asset", None)
-                u = getattr(asset, "url", None) if asset else None
-            return str(u) if u else ""
-
-        try:
-            fetched_stickers = await guild.fetch_stickers()
-        except Exception as e:
-            logger.warning("[🎟️] Could not fetch stickers: %s", e)
-            fetched_stickers = list(getattr(guild, "stickers", []))
-
-        sitemap = {
-            "categories": [],
-            "standalone_channels": [],
-            "forums": [],
-            "threads": [],
-            "emojis": [
-                {"id": e.id, "name": e.name, "url": str(e.url), "animated": e.animated}
-                for e in guild.emojis
-            ],
-            "stickers": [],
-            "roles": [],
-            "community": {
-                "enabled": "COMMUNITY" in guild.features,
-                "rules_channel_id": (
-                    guild.rules_channel.id if guild.rules_channel else None
-                ),
-                "public_updates_channel_id": (
-                    guild.public_updates_channel.id
-                    if guild.public_updates_channel
-                    else None
-                ),
-            },
-        }
-
-        try:
-            guild_sticker_type_val = getattr(discord.StickerType, "guild").value
-        except Exception:
-            guild_sticker_type_val = 1
-
-        stickers_payload = []
-        for s in fetched_stickers:
-            stype = _enum_int(getattr(s, "type", None), default=guild_sticker_type_val)
-            if stype != guild_sticker_type_val:
-                continue
-
-            stickers_payload.append(
-                {
-                    "id": s.id,
-                    "name": s.name,
-                    "format_type": _enum_int(
-                        getattr(s, "format", None) or getattr(s, "format_type", None), 0
-                    ),
-                    "url": _sticker_url(s),
-                    "tags": getattr(s, "tags", "") or "",
-                    "description": getattr(s, "description", "") or "",
-                    "available": bool(getattr(s, "available", True)),
-                }
-            )
-        sitemap["stickers"] = stickers_payload
-
-        sitemap["roles"] = [
-            {
-                "id": r.id,
-                "name": r.name,
-                "permissions": r.permissions.value,
-                "color": r.color.value if hasattr(r.color, "value") else int(r.color),
-                "hoist": r.hoist,
-                "mentionable": r.mentionable,
-                "managed": r.managed,
-                "everyone": (r == r.guild.default_role),
-                "position": r.position,
-            }
-            for r in guild.roles
-        ]
-
-        for cat in guild.categories:
-            channels = [
-                {"id": ch.id, "name": ch.name, "type": ch.type.value}
-                for ch in cat.channels
-                if isinstance(ch, discord.TextChannel)
-            ]
-            sitemap["categories"].append(
-                {"id": cat.id, "name": cat.name, "channels": channels}
-            )
-
-        sitemap["standalone_channels"] = [
-            {"id": ch.id, "name": ch.name, "type": ch.type.value}
-            for ch in guild.text_channels
-            if ch.category is None
-        ]
-
-        for forum in getattr(guild, "forums", []):
-            sitemap["forums"].append(
-                {
-                    "id": forum.id,
-                    "name": forum.name,
-                    "category_id": forum.category.id if forum.category else None,
-                }
-            )
-
-        seen = {t["id"] for t in sitemap["threads"]}
-        for row in self.db.get_all_threads():
-            orig_tid = row["original_thread_id"]
-            forum_orig = row["forum_original_id"]
-
-            if orig_tid in seen:
-                continue
-
-            thr = guild.get_channel(orig_tid)
-            if not thr:
-                try:
-                    thr = await self.bot.fetch_channel(orig_tid)
-                except Exception:
-                    continue
-
-            if not isinstance(thr, discord.Thread):
-                continue
-
-            sitemap["threads"].append(
-                {
-                    "id": thr.id,
-                    "forum_id": forum_orig,
-                    "name": thr.name,
-                    "archived": thr.archived,
-                }
-            )
-
-        sitemap = self._filter_sitemap(sitemap)
-        await self.ws.send({"type": "sitemap", "data": sitemap})
-        logger.info("[📩] Sitemap sent to Server")
-
     async def periodic_sync_loop(self):
-        """
-        Periodically synchronizes data by building and sending a sitemap.
-        """
         await self.bot.wait_until_ready()
         await asyncio.sleep(5)
         while True:
             try:
-                await self.build_and_send_sitemap()
+                await self.sitemap.build_and_send()
             except Exception:
                 logger.exception("Error in periodic sync loop")
             await asyncio.sleep(self.config.SYNC_INTERVAL_SECONDS)
 
-    async def _debounced_sitemap(self):
-        """
-        An asynchronous helper method that ensures the sitemap is built and sent
-        after a short delay, while preventing multiple concurrent executions.
-        """
-        try:
-            await asyncio.sleep(1)
-            await self.build_and_send_sitemap()
-        finally:
-            self.debounce_task = None
-
     def schedule_sync(self):
-        """
-        Schedules a debounced synchronization task.
-
-        This method checks if a debounce task is already scheduled. If not, it creates
-        and schedules a new asynchronous task to perform a debounced sitemap synchronization.
-        """
-        if self.debounce_task is None:
-            self.debounce_task = asyncio.create_task(self._debounced_sitemap())
+        self.sitemap.schedule_sync()
 
     async def on_ready(self):
         """
@@ -582,97 +413,6 @@ class ClientListener:
         ]
         logger.debug("[⚙️] Block list now: %s", self.blocked_keywords)
 
-    def _filter_sitemap(self, sitemap: dict) -> dict:
-        wl_on = bool(self.config.whitelist_enabled)
-        inc_cats = getattr(self.config, "include_category_ids", set())
-
-        new_categories = []
-        for cat in sitemap.get("categories", []):
-            cat_id = int(cat["id"])
-
-            # Skip whole category if excluded (or not whitelisted when WL is ON)
-            if self._is_filtered_out(None, cat_id):
-                continue
-
-            kept_children = [
-                ch
-                for ch in cat.get("channels", [])
-                if not self._is_filtered_out(int(ch["id"]), cat_id)
-            ]
-
-            keep_empty = (not wl_on) or (cat_id in inc_cats)
-            if kept_children or keep_empty:
-                new_categories.append({**cat, "channels": kept_children})
-
-        standalones = [
-            ch
-            for ch in sitemap.get("standalone_channels", [])
-            if not self._is_filtered_out(int(ch["id"]), None)
-        ]
-
-        forums = [
-            f
-            for f in sitemap.get("forums", [])
-            if not self._is_filtered_out(int(f["id"]), int(f.get("category_id") or 0))
-        ]
-
-        keep_forum_ids = {int(f["id"]) for f in forums}
-        threads = [
-            t
-            for t in sitemap.get("threads", [])
-            if int(t.get("forum_id", 0)) in keep_forum_ids
-        ]
-
-        out = dict(sitemap)
-        out["categories"] = new_categories
-        out["standalone_channels"] = standalones
-        out["forums"] = forums
-        out["threads"] = threads
-        return out
-
-    def _is_filtered_out(self, channel_id: int | None, category_id: int | None) -> bool:
-        """
-        Return True if this (channel, category) should be dropped (ignored).
-        Behavior:
-        - If whitelist is enabled, only IDs present in the whitelist are allowed.
-        - Excludes still apply, but whitelist wins on conflicts.
-        """
-        cfg = self.config
-
-        # 1) Whitelist gate (if enabled)
-        if cfg.whitelist_enabled:
-            allowed = False
-            if channel_id and channel_id in cfg.include_channel_ids:
-                allowed = True
-            elif category_id and category_id in cfg.include_category_ids:
-                allowed = True
-            if not allowed:
-                return True  # filtered out
-
-        # 2) Exclude lists (whitelist wins)
-        if channel_id and channel_id in cfg.excluded_channel_ids:
-            # Explicit channel whitelist overrides channel exclude
-            if channel_id in cfg.include_channel_ids:
-                return False
-            # Category whitelist also overrides
-            if category_id and category_id in cfg.include_category_ids:
-                return False
-            return True
-
-        if category_id and category_id in cfg.excluded_category_ids:
-            # Category/channel explicit whitelists override
-            if category_id in cfg.include_category_ids:
-                return False
-            if channel_id and channel_id in cfg.include_channel_ids:
-                return False
-            return True
-
-        return False
-
-    # Backward-compat wrapper (optional):
-    def _is_excluded_ids(self, channel_id: int | None, category_id: int | None) -> bool:
-        return self._is_filtered_out(channel_id, category_id)
-
     def should_ignore(self, message: discord.Message) -> bool:
         """
         Determines whether a given Discord message should be ignored based on various conditions.
@@ -693,7 +433,7 @@ class ClientListener:
                     # parent is a ForumChannel (has its own category_id)
                     cat_id = getattr(parent, "category_id", cat_id)
 
-            if self._is_filtered_out(ch_id, cat_id):
+            if self.sitemap.is_excluded_ids(ch_id, cat_id):
                 return True
         except Exception:
             # Fail-safe: don't break message flow
@@ -1064,86 +804,6 @@ class ClientListener:
             #     pprint.pformat(msg_attrs, indent=2, width=120),
             # )
 
-    def _role_change_is_relevant(
-        self, before: discord.Role, after: discord.Role
-    ) -> bool:
-        """
-        Only schedule a sitemap when something Copycord can mirror actually changed.
-        Skip @everyone and managed roles. (Role position changes are ignored.)
-        """
-        try:
-            # Skip noise
-            if after.is_default() or after.managed:
-                return False
-
-            # Name / perms / color / hoist / mentionable  (INTENTIONALLY ignore position)
-            if before.name != after.name:
-                return True
-
-            if getattr(before.permissions, "value", 0) != getattr(
-                after.permissions, "value", 0
-            ):
-                return True
-
-            def _colval(c):
-                try:
-                    return c.value
-                except Exception:
-                    return int(c)
-
-            if _colval(before.color) != _colval(after.color):
-                return True
-
-            if before.hoist != after.hoist:
-                return True
-
-            if before.mentionable != after.mentionable:
-                return True
-
-        except Exception:
-            return True
-
-        return False
-
-    def _in_scope_channel(self, ch) -> bool:
-        """
-        Returns True if changes to `ch` should affect the filtered sitemap.
-        - CategoryChannel: test by category-id only
-        - Thread: test via parent channel + its category
-        - Text/Forum channel: test via channel-id + its category
-        """
-        try:
-            if isinstance(ch, discord.CategoryChannel):
-                return not self._is_filtered_out(None, ch.id)
-
-            # For threads, check the parent channel instead
-            if isinstance(ch, discord.Thread):
-                parent = getattr(ch, "parent", None)
-                if parent is None:
-                    return False
-                cat_id = getattr(parent, "category_id", None)
-                return not self._is_filtered_out(parent.id, cat_id)
-
-            # Text / Forum channels
-            cat_id = getattr(ch, "category_id", None)
-            return not self._is_filtered_out(getattr(ch, "id", None), cat_id)
-        except Exception:
-            return True
-
-    def _in_scope_thread(self, thr: discord.Thread) -> bool:
-        """
-        Returns True if this thread should affect the filtered sitemap / message flow.
-        We gate by the PARENT channel + its category (we don't whitelist/exclude by thread ID).
-        """
-        try:
-            parent = getattr(thr, "parent", None)
-            if parent is None:
-                return False
-            cat_id = getattr(parent, "category_id", None)
-            return not self._is_filtered_out(getattr(parent, "id", None), cat_id)
-        except Exception:
-            return True
-
     async def on_thread_delete(self, thread: discord.Thread):
         """
         Event handler that is triggered when a thread is deleted in a Discord server.
@@ -1154,7 +814,7 @@ class ClientListener:
         if self.config.ENABLE_CLONING:
             if thread.guild.id != self.host_guild_id:
                 return
-            if not self._in_scope_thread(thread):
+            if not self.sitemap.in_scope_thread(thread):
                 logger.debug(
                     "[thread] Ignoring delete for filtered-out thread %s (parent=%s)",
                     getattr(thread, "id", None),
@@ -1174,7 +834,9 @@ class ClientListener:
         if not (before.guild and before.guild.id == self.host_guild_id):
             return
 
-        if not (self._in_scope_thread(before) or self._in_scope_thread(after)):
+        if not (
+            self.sitemap.in_scope_thread(before) or self.sitemap.in_scope_thread(after)
+        ):
             logger.debug(
                 "[thread] Ignoring update for filtered-out thread %s (parent=%s)",
                 getattr(before, "id", None),
@@ -1206,7 +868,7 @@ class ClientListener:
             if channel.guild.id != self.host_guild_id:
                 return
 
-            if not self._in_scope_channel(channel):
+            if not self.sitemap.in_scope_channel(channel):
                 logger.debug(
                     "Ignored create for filtered-out channel/category %s",
                     getattr(channel, "id", None),
@@ -1221,7 +883,7 @@ class ClientListener:
         if self.config.ENABLE_CLONING:
             if channel.guild.id != self.host_guild_id:
                 return
-            if not self._in_scope_channel(channel):
+            if not self.sitemap.in_scope_channel(channel):
                 logger.debug(
                     "Ignored delete for filtered-out channel/category %s",
                     getattr(channel, "id", None),
@@ -1241,7 +903,10 @@ class ClientListener:
             if before.guild.id != self.host_guild_id:
                 return
 
-            if not (self._in_scope_channel(before) or self._in_scope_channel(after)):
+            if not (
+                self.sitemap.in_scope_channel(before)
+                or self.sitemap.in_scope_channel(after)
+            ):
                 logger.debug(
                     "Ignored update for filtered-out channel/category %s",
                     getattr(before, "id", None),
@@ -1288,7 +953,7 @@ class ClientListener:
             return
         if after.guild.id != self.host_guild_id:
             return
-        if not self._role_change_is_relevant(before, after):
+        if not self.sitemap.role_change_is_relevant(before, after):
             logger.debug(
                 "[roles] update ignored (irrelevant): %s (%d)", after.name, after.id
             )
