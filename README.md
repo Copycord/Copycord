@@ -155,23 +155,20 @@ Create the /data folder in the main Copycord folder and the config file into /da
 # How it works
 # ------------
 # • WHITELIST (allow-list):
-#     - If ANY IDs are listed below, ONLY those categories/channels are cloned
-#       and messages from them are forwarded. Everything else is ignored.
-#     - Leave BOTH lists empty to disable whitelist mode.
+#     - If ANY IDs are listed, ONLY those categories/channels are cloned.
+#     - Leave BOTH WHITELIST lists empty to disable whitelist mode.
 #
 # • EXCLUDED (deny-list):
-#     - Categories/channels listed here are always ignored.
+#     - Drops whatever is listed.
 #
-# • Precedence:
-#     - Whitelist > Excluded. If an ID appears in both, it will be INCLUDED.
+# • Precedence (practical rules):
+#     1) Channel whitelist > channel exclude
+#     2) Channel exclude > category whitelist   <-- (lets you whitelist a category but drop a few channels)
+#     3) Category whitelist > category exclude
 #
 # • IDs:
-#     - Use IDs from the HOST guild (the source you’re mirroring), not the clone guild.
-#     - Right-click → “Copy ID” in Discord (Developer Mode) to get these.
-#
-# • Note:
-#     - If a category ID is provided, all channels in that category are also included
-#
+#     - Use IDs from the HOST guild (the source), not the clone guild.
+#     - Right-click → “Copy ID” in Discord (Developer Mode).
 
 whitelist:
   categories: []   # e.g. [123456789012345678, 234567890123456789]
