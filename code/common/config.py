@@ -23,7 +23,7 @@ class Config:
         self,
         logger: Optional[logging.Logger] = None,
     ):
-        self.CURRENT_VERSION = "v1.8.0"
+        self.CURRENT_VERSION = "v1.9.0"
         self.GITHUB_API_LATEST = (
             "https://api.github.com/repos/Copycord/Copycord/releases/latest"
         )
