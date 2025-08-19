@@ -17,15 +17,15 @@ import logging
 from logging.handlers import RotatingFileHandler
 from typing import Optional
 import discord
-from discord import ChannelType, MessageType, Member
+from discord import ChannelType, MessageType
 from discord.errors import Forbidden, HTTPException
 import os
-import pprint
 import sys
 from discord.ext import commands
 from common.config import Config
 from common.db import DBManager
 from client.sitemap import SitemapService
+from client.message_utils import MessageUtils
 from common.websockets import WebsocketManager
 from client.scraper import MemberScraper
 from client.scraper import StreamManager
@@ -88,6 +88,7 @@ class ClientListener:
         self._rebuild_blocklist(self.blocked_keywords)
         self.start_time = datetime.now(timezone.utc)
         self.bot = commands.Bot(command_prefix="!", self_bot=True)
+        self.msg = MessageUtils(self.bot)
         self._sync_task: Optional[asyncio.Task] = None
         self._ws_task: Optional[asyncio.Task] = None
         self._m_user = re.compile(r"<@!?(\d+)>")
@@ -379,26 +380,6 @@ class ClientListener:
         if self._ws_task is None:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
 
-    def extract_public_message_attrs(self, message: discord.Message) -> dict:
-        """
-        Extracts public (non-private and non-callable) attributes from a discord.Message object.
-        """
-        attrs = {}
-        for name in dir(message):
-            if name.startswith("_"):
-                continue
-
-            try:
-                value = getattr(message, name)
-            except Exception:
-                continue
-
-            if callable(value):
-                continue
-
-            attrs[name] = value
-        return attrs
-
     def _rebuild_blocklist(self, keywords: list[str] | None = None) -> None:
         if keywords is None:
             keywords = self.db.get_blocked_keywords()
@@ -522,152 +503,6 @@ class ClientListener:
 
         return False
 
-    def _humanize_user_mentions(
-        self,
-        content: str,
-        message: discord.Message,
-        id_to_name_override: dict[str, str] | None = None,
-    ) -> str:
-        if not content:
-            return content
-
-        id_to_name = dict(id_to_name_override or {})
-
-        # seed with message.mentions (helps for content)
-        for m in getattr(message, "mentions", []):
-            name = f"@{(m.display_name if isinstance(m, Member) else m.name) or m.name}"
-            id_to_name[str(m.id)] = name
-
-        def repl(match: re.Match) -> str:
-            uid = match.group(1)
-            name = id_to_name.get(uid)
-            if name:
-                return name
-            g = message.guild
-            mem = g.get_member(int(uid)) if g else None
-            if mem:
-                nm = f"@{mem.display_name or mem.name}"
-                id_to_name[uid] = nm
-                return nm
-            return match.group(0)
-
-        return self._m_user.sub(repl, content)
-
-    def _sanitize_inline(self, s, message=None, id_map=None):
-        if not s:
-            return s
-        # Replace {mention} with actual mention text
-        if "{mention}" in s:
-            s = s.replace("{mention}", f"@{message.author.display_name}")
-        if message:
-            s = self._humanize_user_mentions(s, message, id_map)
-        return s
-
-    def _sanitize_embed_dict(
-        self,
-        d: dict,
-        message: discord.Message,
-        id_map: dict[str, str] | None = None,
-    ) -> dict:
-        e = dict(d)
-
-        # top-level
-        if "title" in e:
-            e["title"] = self._sanitize_inline(e.get("title"), message, id_map)
-        if "description" in e:
-            e["description"] = self._sanitize_inline(
-                e.get("description"), message, id_map
-            )
-
-        # author
-        if isinstance(e.get("author"), dict) and "name" in e["author"]:
-            e["author"] = dict(e["author"])
-            e["author"]["name"] = self._sanitize_inline(
-                e["author"].get("name"), message, id_map
-            )
-
-        # footer
-        if isinstance(e.get("footer"), dict) and "text" in e["footer"]:
-            e["footer"] = dict(e["footer"])
-            e["footer"]["text"] = self._sanitize_inline(
-                e["footer"].get("text"), message, id_map
-            )
-
-        # fields
-        if isinstance(e.get("fields"), list):
-            new_fields = []
-            for f in e["fields"]:
-                if not isinstance(f, dict):
-                    new_fields.append(f)
-                    continue
-                f2 = dict(f)
-                if "name" in f2:
-                    f2["name"] = self._sanitize_inline(f2.get("name"), message, id_map)
-                if "value" in f2:
-                    f2["value"] = self._sanitize_inline(
-                        f2.get("value"), message, id_map
-                    )
-                new_fields.append(f2)
-            e["fields"] = new_fields
-
-        return e
-
-    async def _build_mention_map(
-        self, message: discord.Message, embed_dicts: list[dict]
-    ) -> dict[str, str]:
-        ids: set[str] = set()
-
-        def _collect(s: str | None):
-            if not s:
-                return
-            ids.update(self._m_user.findall(s))
-
-        # collect from content
-        _collect(message.content)
-
-        # collect from embeds
-        for e in embed_dicts:
-            _collect(e.get("title"))
-            _collect(e.get("description"))
-            a = e.get("author") or {}
-            _collect(a.get("name"))
-            f = e.get("footer") or {}
-            _collect(f.get("text"))
-            for fld in e.get("fields") or []:
-                _collect(fld.get("name"))
-                _collect(fld.get("value"))
-
-        if not ids:
-            return {}
-
-        g = message.guild
-        id_to_name: dict[str, str] = {}
-
-        for sid in ids:
-            uid = int(sid)
-            # 1) cache
-            mem = g.get_member(uid) if g else None
-            if mem:
-                id_to_name[sid] = f"@{mem.display_name or mem.name}"
-                continue
-            # 2) fetch member for display name
-            try:
-                if g:
-                    mem = await g.fetch_member(uid)
-                    id_to_name[sid] = f"@{mem.display_name or mem.name}"
-                    continue
-            except Exception:
-                pass
-            # fallback: global user (no guild display name)
-            try:
-                u = await self.bot.fetch_user(uid)
-                id_to_name[sid] = f"@{u.name}"
-            except Exception:
-                # leave unresolved; replacer will keep original token
-                pass
-
-        return id_to_name
-
     async def on_message(self, message: discord.Message):
         """
         Handles incoming Discord messages and processes them for forwarding.
@@ -700,11 +535,12 @@ class ClientListener:
             ]
 
             raw_embeds = [e.to_dict() for e in message.embeds]
-            mention_map = await self._build_mention_map(message, raw_embeds)
+            mention_map = await self.msg.build_mention_map(message, raw_embeds)
             embeds = [
-                self._sanitize_embed_dict(e, message, mention_map) for e in raw_embeds
+                self.msg.sanitize_embed_dict(e, message, mention_map)
+                for e in raw_embeds
             ]
-            content = self._sanitize_inline(content, message, mention_map)
+            content = self.msg.sanitize_inline(content, message, mention_map)
 
             components: list[dict] = []
             for comp in message.components:
@@ -733,30 +569,9 @@ class ClientListener:
                 ChannelType.private_thread,
             )
 
-            def _enum_int(val, default=0):
-                v = getattr(val, "value", val)
-                try:
-                    return int(v)
-                except Exception:
-                    return default
-
-            def _sticker_url(s):
-                u = getattr(s, "url", None)
-                if not u:
-                    asset = getattr(s, "asset", None)
-                    u = getattr(asset, "url", None) if asset else None
-                return str(u) if u else ""
-
-            stickers_payload = []
-            for s in getattr(message, "stickers", []) or []:
-                stickers_payload.append(
-                    {
-                        "id": s.id,
-                        "name": s.name,
-                        "format_type": _enum_int(getattr(s, "format", None), 0),
-                        "url": _sticker_url(s),  # <-- add this
-                    }
-                )
+            stickers_payload = self.msg.stickers_payload(
+                getattr(message, "stickers", [])
+            )
 
             payload = {
                 "type": "thread_message" if is_thread else "message",
@@ -795,14 +610,6 @@ class ClientListener:
                 message.channel.name,
                 message.author.name,
             )
-
-            # Pull message attributes for debugging
-            # msg_attrs = self.extract_public_message_attrs(message)
-
-            # logger.debug(
-            #     "Full Message attributes:\n%s",
-            #     pprint.pformat(msg_attrs, indent=2, width=120),
-            # )
 
     async def on_thread_delete(self, thread: discord.Thread):
         """
@@ -1074,37 +881,13 @@ class ClientListener:
 
                 # Embeds & mentions
                 raw_embeds = [e.to_dict() for e in m.embeds]
-                mention_map = await self._build_mention_map(m, raw_embeds)
+                mention_map = await self.msg.build_mention_map(m, raw_embeds)
                 embeds = [
-                    self._sanitize_embed_dict(e, m, mention_map) for e in raw_embeds
+                    self.msg.sanitize_embed_dict(e, m, mention_map) for e in raw_embeds
                 ]
-                content = self._sanitize_inline(content, m, mention_map)
+                content = self.msg.sanitize_inline(content, m, mention_map)
 
-                # Stickers payload
-                def _enum_int(val, default=0):
-                    v = getattr(val, "value", val)
-                    try:
-                        return int(v)
-                    except Exception:
-                        return default
-
-                def _sticker_url(s):
-                    u = getattr(s, "url", None)
-                    if not u:
-                        asset = getattr(s, "asset", None)
-                        u = getattr(asset, "url", None) if asset else None
-                    return str(u) if u else ""
-
-                stickers_payload = []
-                for s in getattr(m, "stickers", []) or []:
-                    stickers_payload.append(
-                        {
-                            "id": s.id,
-                            "name": s.name,
-                            "format_type": _enum_int(getattr(s, "format", None), 0),
-                            "url": _sticker_url(s),
-                        }
-                    )
+                stickers_payload = self.msg.stickers_payload(getattr(m, "stickers", []))
 
                 payload = {
                     "type": "message",
