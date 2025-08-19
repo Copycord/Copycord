@@ -301,12 +301,12 @@ class Config:
     # If a category ID is added, all channels from that category are included.
 
     whitelist:
-    categories: []   # e.g. [123456789012345678, 234567890123456789]
-    channels: []     # e.g. [345678901234567890]
+        categories: []   # e.g. [123456789012345678, 234567890123456789]
+        channels: []     # e.g. [345678901234567890]
 
     excluded:
-    categories: []   # e.g. [456789012345678901]
-    channels: []     # e.g. [567890123456789012]
+        categories: []   # e.g. [456789012345678901]
+        channels: []     # e.g. [567890123456789012]
     """
 
         # Create default if missing (write with comments)
@@ -316,7 +316,7 @@ class Config:
                     f.write(DEFAULT_YAML)
                 if getattr(self, "logger", None):
                     self.logger.info(
-                        "[📝] Created default config.yml with examples at %s", cfg_path
+                        "[📝] Created default config.yml at %s", cfg_path
                     )
             except Exception as e:
                 if getattr(self, "logger", None):
