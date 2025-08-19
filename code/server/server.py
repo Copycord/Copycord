@@ -620,7 +620,8 @@ class ServerReceiver:
             if self.config.CLONE_STICKER:
                 self.stickers.kickoff_sync()
                 
-            if getattr(self.config, "CLONE_ROLES", False):
+            # --- Role sync in background ---   
+            if self.config.CLONE_ROLES:
                 self.roles.kickoff_sync(sitemap.get("roles", []))
 
             cat_created, ch_reparented = await self._repair_deleted_categories(
