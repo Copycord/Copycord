@@ -1,6 +1,7 @@
 services:
   admin:
     image: ghcr.io/copycord/copycord:v2.0.0
+    container_name: copycord-admin
     environment:
       - ROLE=admin
     ports:
@@ -10,6 +11,7 @@ services:
 
   server:
     image: ghcr.io/copycord/copycord:v2.0.0
+    container_name: copycord-server
     environment:
       - ROLE=server
     volumes:
@@ -19,6 +21,7 @@ services:
 
   client:
     image: ghcr.io/copycord/copycord:v2.0.0
+    container_name: copycord-client
     environment:
       - ROLE=client
     volumes:
