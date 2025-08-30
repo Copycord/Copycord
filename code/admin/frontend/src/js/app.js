@@ -37,6 +37,68 @@
     }
   }
 
+  async function refreshFooterVersion() {
+    const wrap = document.getElementById("footer-version");
+    if (!wrap) return;
+  
+    
+    const link = document.getElementById("footer-version-link");
+    const plain = document.getElementById("footer-version-text");
+  
+    try {
+      const res = await fetch("/version", { credentials: "same-origin" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const v = await res.json();
+  
+      const textWhenUpdate = `${v.latest}`;
+      const textWhenNormal = `Version ${v.current}`;
+  
+      if (v.update_available) {
+        
+        if (link) {
+          link.textContent = textWhenUpdate;
+          link.href = v.url;
+          link.classList.add("update-flash");
+          link.setAttribute("aria-label", "New update available");
+        } else if (plain) {
+          plain.textContent = textWhenUpdate;
+          plain.classList.add("update-flash");
+          plain.style.cursor = "pointer";
+          plain.onclick = () => window.open(v.url, "_blank", "noopener");
+        } else {
+          
+          const a = document.createElement("a");
+          a.id = "footer-version-link";
+          a.target = "_blank";
+          a.rel = "noopener";
+          a.className = "footer-link update-flash";
+          a.textContent = textWhenUpdate;
+          a.href = v.url;
+          wrap.innerHTML = "";
+          wrap.appendChild(a);
+        }
+      } else {
+        
+        if (link) {
+          link.textContent = v.current || "dev";
+          link.classList.remove("update-flash");
+          
+          const def = link.getAttribute("data-default-href");
+          link.href = def || `https://github.com/Copycord/Copycord/releases/tag/${v.current}`;
+          link.setAttribute("aria-label", `Copycord ${v.current}`);
+        } else if (plain) {
+          plain.textContent = v.current ? `Version ${v.current}` : "dev";
+          plain.classList.remove("update-flash");
+          plain.onclick = null;
+          plain.style.cursor = "";
+        }
+      }
+    } catch (err) {
+      
+      console.debug("Footer version check failed:", err);
+    }
+  }
+
   (function initToasts() {
     // Create the #toast-root if it doesn't exist
     function ensureToastRoot() {
@@ -1063,6 +1125,9 @@
     const cBtnX = document.getElementById("confirm-close");
     const cBtnCa = document.getElementById("confirm-cancel");
     const cBack = cModal ? cModal.querySelector(".modal-backdrop") : null;
+
+    refreshFooterVersion();
+    setInterval(refreshFooterVersion, 600_000);
 
     validateConfigAndToggle({ decorate: false });
 

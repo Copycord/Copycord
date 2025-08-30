@@ -3542,3 +3542,15 @@ body {
 .label.has-tip {
   position: relative;
 }
+
+#footer-version .update-flash,
+#footer-version.update-flash,
+#footer-version-link.update-flash {
+  color: #e53935;
+  font-weight: 700;
+  animation: cpc-flash 1s infinite alternate;
+}
+@keyframes cpc-flash {
+  from { opacity: 1; }
+  to   { opacity: 0.35; }
+}

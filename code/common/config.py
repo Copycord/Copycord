@@ -209,6 +209,12 @@ class Config:
 
                 # Highest semver from candidates
                 tag, url = max(candidates, key=lambda x: _ver_tuple(x[0]))
+                
+                try:
+                    db.set_config("latest_tag", tag or "")
+                    db.set_config("latest_url", url or "")
+                except Exception:
+                    self.logger.debug("Failed to persist latest_tag/latest_url", exc_info=True)
 
                 # Compare GitHub latest vs our running version
                 cmp_remote_local = _cmp_versions(tag, CURRENT_VERSION)

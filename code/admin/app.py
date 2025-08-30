@@ -14,7 +14,12 @@ import time
 import logging
 from typing import Dict, List, Set, Literal
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Body, status
-from fastapi.responses import RedirectResponse, PlainTextResponse, StreamingResponse, JSONResponse
+from fastapi.responses import (
+    RedirectResponse,
+    PlainTextResponse,
+    StreamingResponse,
+    JSONResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.types import Scope, Receive, Send
@@ -27,13 +32,14 @@ from time import perf_counter
 import sys as _sys, json as _json, contextvars
 from datetime import datetime
 
-# One source of truth for redaction keys
+
 REDACT_KEYS = {"SERVER_TOKEN", "CLIENT_TOKEN"}
 
-# Context vars for per-request / per-connection context
-req_id_var   = contextvars.ContextVar("req_id", default="-")
-route_var    = contextvars.ContextVar("route",   default="-")
-client_var   = contextvars.ContextVar("client",  default="-")
+
+req_id_var = contextvars.ContextVar("req_id", default="-")
+route_var = contextvars.ContextVar("route", default="-")
+client_var = contextvars.ContextVar("client", default="-")
+
 
 def _redact_value(val):
     try:
@@ -46,16 +52,18 @@ def _redact_value(val):
     except Exception:
         return "<unprintable>"
 
+
 def _set_ws_context(route: str, ws: WebSocket):
     route_var.set(route)
-    # Starlette exposes client (host, port) on WebSocket
+
     c = getattr(ws, "client", None)
     if c:
         client_var.set(f"{getattr(c, 'host', '?')}:{getattr(c, 'port', '?')}")
     else:
         client_var.set("-")
-    # Generate a per-connection id to reuse in logs
+
     req_id_var.set(uuid.uuid4().hex[:8])
+
 
 def _redact_obj(obj):
     try:
@@ -71,11 +79,12 @@ def _redact_obj(obj):
     except Exception:
         return {"_redact_error": True}
 
+
 class RedactFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        # attach context
+
         record.req_id = req_id_var.get()
-        record.scope  = route_var.get()
+        record.scope = route_var.get()
         record.client = client_var.get()
 
         try:
@@ -103,7 +112,9 @@ class RedactFilter(logging.Filter):
                         new_list.append(_redact_value(a))
                     else:
                         new_list.append(a)
-                record.args = tuple(new_list) if isinstance(record.args, tuple) else new_list
+                record.args = (
+                    tuple(new_list) if isinstance(record.args, tuple) else new_list
+                )
 
             if isinstance(record.msg, str):
                 record.msg = _redact_value(record.msg)
@@ -113,32 +124,45 @@ class RedactFilter(logging.Filter):
 
         return True
 
+
 LEVEL_MARK = {
     logging.DEBUG: "🧩",
-    logging.INFO:  "✅",
-    logging.WARNING:"⚠️",
+    logging.INFO: "✅",
+    logging.WARNING: "⚠️",
     logging.ERROR: "❌",
-    logging.CRITICAL:"💥",
+    logging.CRITICAL: "💥",
 }
+
 
 def _now_iso():
     return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
+
 class HumanFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         mark = LEVEL_MARK.get(record.levelno, "•")
-        ts   = _now_iso()
+        ts = _now_iso()
         scope = record.__dict__.get("scope") or "-"
-        rid   = record.__dict__.get("req_id") or "-"
-        cli   = record.__dict__.get("client") or "-"
+        rid = record.__dict__.get("req_id") or "-"
+        cli = record.__dict__.get("client") or "-"
         msg = super().format(record)
         extras = []
-        for k in ("conn_id","socket_id","channel_id","guild_id","events_sent","forwarded","heartbeats","took_ms"):
+        for k in (
+            "conn_id",
+            "socket_id",
+            "channel_id",
+            "guild_id",
+            "events_sent",
+            "forwarded",
+            "heartbeats",
+            "took_ms",
+        ):
             v = getattr(record, k, None)
             if v not in (None, "", []):
                 extras.append(f"{k}={v}")
         extras_s = f" | {' '.join(extras)}" if extras else ""
         return f"{ts} {mark} {record.levelname:<8} [{scope}] (rid={rid} cli={cli}) {msg}{extras_s}"
+
 
 class JSONFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
@@ -151,11 +175,21 @@ class JSONFormatter(logging.Formatter):
             "client": getattr(record, "client", "-"),
             "logger": record.name,
         }
-        for k in ("conn_id","socket_id","channel_id","guild_id","events_sent","forwarded","heartbeats","took_ms"):
+        for k in (
+            "conn_id",
+            "socket_id",
+            "channel_id",
+            "guild_id",
+            "events_sent",
+            "forwarded",
+            "heartbeats",
+            "took_ms",
+        ):
             v = getattr(record, k, None)
             if v not in (None, "", []):
                 base[k] = v
         return _json.dumps(base, separators=(",", ":"))
+
 
 class ContextAdapter(logging.LoggerAdapter):
     def process(self, msg, kwargs):
@@ -164,9 +198,11 @@ class ContextAdapter(logging.LoggerAdapter):
             extra.setdefault(k, v)
         return msg, kwargs
 
+
 def get_logger(name="copycord", **ctx):
     logger = logging.getLogger(name)
     return ContextAdapter(logger, dict(ctx))
+
 
 def configure_app_logging():
     """
@@ -190,7 +226,7 @@ def configure_app_logging():
         handler.addFilter(RedactFilter())
 
     if uvicorn_err.handlers:
-        root.handlers = uvicorn_err.handlers[:]  # reuse sinks
+        root.handlers = uvicorn_err.handlers[:]
         for h in root.handlers:
             _apply_formatter(h)
     else:
@@ -202,12 +238,14 @@ def configure_app_logging():
     root.propagate = False
     root.setLevel(getattr(logging, lvl, logging.INFO))
 
-    # noise control
     logging.getLogger("uvicorn").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-    logging.getLogger("websockets").setLevel(logging.WARNING if root.level > logging.DEBUG else logging.DEBUG)
+    logging.getLogger("websockets").setLevel(
+        logging.WARNING if root.level > logging.DEBUG else logging.DEBUG
+    )
     return get_logger("copycord")
+
 
 LOGGER = configure_app_logging()
 
@@ -222,16 +260,20 @@ def _redact_dict(d: dict) -> dict:
     except Exception:
         return {"_redact_error": True}
 
+
 class _Timer:
     def __init__(self, label: str):
         self.label = label
         self._t0 = None
         self.ms = 0.0
+
     def __enter__(self):
         self._t0 = perf_counter()
         return self
+
     def __exit__(self, *exc):
         self.ms = (perf_counter() - self._t0) * 1000.0
+
 
 def _safe(x):
     try:
@@ -240,21 +282,23 @@ def _safe(x):
     except Exception:
         return "<unprintable>"
 
+
 APP_TITLE = "Copycord"
 
-# Shared volumes / paths
-DATA_DIR = Path(os.getenv("DATA_DIR", "/data")); DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = os.getenv("DB_PATH", "/data/data.db")
 db = DBManager(DB_PATH)
 
-# WebSocket control
+
 SERVER_CTRL_URL = os.getenv("WS_SERVER_CTRL_URL", "ws://server:9101")
 CLIENT_CTRL_URL = os.getenv("WS_CLIENT_CTRL_URL", "ws://client:9102")
 
 CLIENT_AGENT_URL = os.getenv("WS_CLIENT_URL", "ws://client:8766")
 SERVER_AGENT_URL = os.getenv("WS_SERVER_URL", "ws://server:8765")
 
-# Config keys
+
 ALLOWED_ENV = [
     "SERVER_TOKEN",
     "CLONE_GUILD_ID",
@@ -286,10 +330,10 @@ BOOL_KEYS = [
 DEFAULTS: Dict[str, str] = {
     "DELETE_CHANNELS": "True",
     "DELETE_THREADS": "True",
-    "DELETE_ROLES":   "True",
-    "CLONE_EMOJI":    "True",
-    "CLONE_STICKER":  "True",
-    "CLONE_ROLES":    "True",
+    "DELETE_ROLES": "True",
+    "CLONE_EMOJI": "True",
+    "CLONE_STICKER": "True",
+    "CLONE_ROLES": "True",
     "MIRROR_ROLE_PERMISSIONS": "False",
     "ENABLE_CLONING": "True",
     "LOG_LEVEL": "INFO",
@@ -297,20 +341,22 @@ DEFAULTS: Dict[str, str] = {
     "COMMAND_USERS": "",
 }
 
-# ----- FastAPI + templating -----
+
 app = FastAPI(title=APP_TITLE)
 BASE_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 shutdown_event = asyncio.Event()
 
-# ----- Request context middleware -----
+
 class RequestContextMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         rid = request.headers.get("X-Request-ID") or uuid.uuid4().hex[:8]
         token_r = req_id_var.set(rid)
         token_s = route_var.set(request.url.path or "-")
-        token_c = client_var.set(f"{getattr(request.client, 'host', '?')}:{getattr(request.client, 'port', '?')}")
+        token_c = client_var.set(
+            f"{getattr(request.client, 'host', '?')}:{getattr(request.client, 'port', '?')}"
+        )
         response = None
         try:
             response = await call_next(request)
@@ -322,7 +368,9 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             client_var.reset(token_c)
         return response
 
+
 app.add_middleware(RequestContextMiddleware)
+
 
 class ConnCloseOnShutdownASGI:
     def __init__(self, app):
@@ -336,14 +384,20 @@ class ConnCloseOnShutdownASGI:
             if message["type"] == "http.response.start" and shutdown_event.is_set():
                 headers = MutableHeaders(raw=message.setdefault("headers", []))
                 headers["Connection"] = "close"
-                LOGGER.debug("ConnCloseOnShutdownASGI | injected Connection: close for path=%s", scope.get("path"))
+                LOGGER.debug(
+                    "ConnCloseOnShutdownASGI | injected Connection: close for path=%s",
+                    scope.get("path"),
+                )
             await send(message)
 
         try:
             await self.app(scope, receive, send_wrapper)
         except asyncio.CancelledError:
-            LOGGER.debug("ConnCloseOnShutdownASGI | request cancelled path=%s", scope.get("path"))
+            LOGGER.debug(
+                "ConnCloseOnShutdownASGI | request cancelled path=%s", scope.get("path")
+            )
             return
+
 
 class BusHub:
     def __init__(self):
@@ -402,7 +456,11 @@ class BusHub:
 
         LOGGER.debug(
             "BusHub.publish | kind=%s role=%s sse=%d ui=%d recent=%d",
-            kind, role, len(self.subscribers), len(self.ui_sockets), len(self.recent)
+            kind,
+            role,
+            len(self.subscribers),
+            len(self.ui_sockets),
+            len(self.recent),
         )
 
     async def add_ui(self, ws: WebSocket):
@@ -434,8 +492,12 @@ class BusHub:
             self.subscribers.discard(q)
 
         await self._broadcast_text(text)
-        LOGGER.debug("BusHub.broadcast | kind=%s role=%s ui_sockets=%d",
-                     rec.get("kind"), rec.get("role"), len(self.ui_sockets))
+        LOGGER.debug(
+            "BusHub.broadcast | kind=%s role=%s ui_sockets=%d",
+            rec.get("kind"),
+            rec.get("role"),
+            len(self.ui_sockets),
+        )
 
     async def _broadcast_text(self, text: str):
         dead = []
@@ -450,24 +512,31 @@ class BusHub:
                     await ws.close()
                 self.ui_sockets.discard(ws)
         if dead:
-            LOGGER.debug("BusHub._broadcast_text | cleaned_dead=%d remaining=%d", len(dead), len(self.ui_sockets))
+            LOGGER.debug(
+                "BusHub._broadcast_text | cleaned_dead=%d remaining=%d",
+                len(dead),
+                len(self.ui_sockets),
+            )
 
 
 hub = BusHub()
 agent_sockets: Set[WebSocket] = set()
-bus_sockets:   Set[WebSocket] = set()
+bus_sockets: Set[WebSocket] = set()
+
 
 class BackfillLocks:
     def __init__(self, ttl_launching_sec: float = 20.0):
         self._launching_ttl = ttl_launching_sec
-        self._launching: Dict[int, float] = {}  # channel_id -> expires_at
+        self._launching: Dict[int, float] = {}
         self._running: set[int] = set()
         self._lock = asyncio.Lock()
 
     async def try_acquire_launching(self, channel_id: int) -> bool:
         now = time.time()
         async with self._lock:
-            self._launching = {cid: exp for cid, exp in self._launching.items() if exp > now}
+            self._launching = {
+                cid: exp for cid, exp in self._launching.items() if exp > now
+            }
             if channel_id in self._running or channel_id in self._launching:
                 return False
             self._launching[channel_id] = now + self._launching_ttl
@@ -483,7 +552,7 @@ class BackfillLocks:
             self._launching.pop(channel_id, None)
             self._running.discard(channel_id)
 
-    async def status(self, channel_id: int) -> Literal["idle","launching","running"]:
+    async def status(self, channel_id: int) -> Literal["idle", "launching", "running"]:
         now = time.time()
         async with self._lock:
             if channel_id in self._running:
@@ -492,7 +561,9 @@ class BackfillLocks:
                 return "launching"
             return "idle"
 
+
 locks = BackfillLocks()
+
 
 async def _lock_listener():
     q = hub.subscribe()
@@ -512,21 +583,24 @@ async def _lock_listener():
             cid = int(cid)
         except Exception:
             continue
-        if t in ("backfill_ack",):        # accepted → running
+        if t in ("backfill_ack",):
             await locks.promote_to_running(cid)
-        elif t in ("backfill_done",):     # finished → release
+        elif t in ("backfill_done",):
             await locks.release(cid)
-        elif t in ("backfill_busy",):     # server said already running → keep as running
+        elif t in ("backfill_busy",):
             await locks.promote_to_running(cid)
         elif t in ("backfill_stream_end",):
-            # client finished sending; server will send backfill_done later,
+
             pass
 
-async def _close_ws_quietly(ws: WebSocket, code: int = 1001, reason: str = "server shutdown"):
+
+async def _close_ws_quietly(
+    ws: WebSocket, code: int = 1001, reason: str = "server shutdown"
+):
     with contextlib.suppress(RuntimeError, WebSocketDisconnect, Exception):
         await ws.close(code=code, reason=reason)
 
-# ---------------------- WebSocket: /bus ----------------------
+
 @app.websocket("/bus")
 async def admin_bus(ws: WebSocket):
     await ws.accept()
@@ -542,11 +616,16 @@ async def admin_bus(ws: WebSocket):
     try:
         while True:
             raw = await ws.receive_text()
-            local_log.debug("Recv | raw=%s", raw[:300])   # truncate long
+            local_log.debug("Recv | raw=%s", raw[:300])
             count += 1
             try:
                 ev = json.loads(raw)
-                local_log.debug("Parsed | kind=%s role=%s keys=%s", ev.get("kind"), ev.get("role"), list(ev.keys()))
+                local_log.debug(
+                    "Parsed | kind=%s role=%s keys=%s",
+                    ev.get("kind"),
+                    ev.get("role"),
+                    list(ev.keys()),
+                )
             except Exception:
                 ev = {"kind": "log", "role": "unknown", "payload": {"raw": raw}}
                 local_log.warning("JSON parse failed | raw=%s", raw[:200])
@@ -563,15 +642,14 @@ async def admin_bus(ws: WebSocket):
     finally:
         bus_sockets.discard(ws)
 
-# ---------------------- SSE: /bus/stream ----------------------
+
 @app.get("/bus/stream")
 async def bus_stream(request: Request):
-    # connection context
+
     client = request.client
     client_addr = f"{getattr(client, 'host', '?')}:{getattr(client, 'port', '?')}"
     conn_id = uuid.uuid4().hex[:8]
 
-    # contextual logger
     local_log = get_logger("copycord.sse", conn_id=conn_id)
     route_var.set("/bus/stream")
     client_var.set(client_addr)
@@ -593,37 +671,55 @@ async def bus_stream(request: Request):
                 return f"kind=? (non-json) len={len(msg)}"
 
         try:
-            # initial status flush
+
             initial = 0
             for role, payload in hub.status.items():
                 if payload:
-                    data = json.dumps({"kind": "status", "role": role, "payload": payload})
+                    data = json.dumps(
+                        {"kind": "status", "role": role, "payload": payload}
+                    )
                     yield f"data: {data}\n\n"
                     initial += 1
                     events_sent += 1
             local_log.debug("Initial status flush | entries=%d", initial)
 
-            # main loop
             while not shutdown_event.is_set():
                 if await request.is_disconnected():
-                    local_log.info("Client disconnected", extra={"events_sent": events_sent, "heartbeats": heartbeats_sent})
+                    local_log.info(
+                        "Client disconnected",
+                        extra={
+                            "events_sent": events_sent,
+                            "heartbeats": heartbeats_sent,
+                        },
+                    )
                     return
                 try:
                     msg = await asyncio.wait_for(q.get(), timeout=1.0)
-                    local_log.debug("Yield event | %s | qsize=%d", _summarize(msg), q.qsize())
+                    local_log.debug(
+                        "Yield event | %s | qsize=%d", _summarize(msg), q.qsize()
+                    )
                     yield f"data: {msg}\n\n"
                     events_sent += 1
                 except asyncio.TimeoutError:
                     yield ":ka\n\n"
                     heartbeats_sent += 1
                     if heartbeats_sent % 60 == 0:
-                        local_log.debug("Heartbeat checkpoint", extra={"heartbeats": heartbeats_sent})
+                        local_log.debug(
+                            "Heartbeat checkpoint",
+                            extra={"heartbeats": heartbeats_sent},
+                        )
         except asyncio.CancelledError:
-            local_log.debug("Closed by client", extra={"events_sent": events_sent, "heartbeats": heartbeats_sent})
+            local_log.debug(
+                "Closed by client",
+                extra={"events_sent": events_sent, "heartbeats": heartbeats_sent},
+            )
             return
         finally:
             hub.unsubscribe(q)
-            local_log.info("Closed", extra={"events_sent": events_sent, "heartbeats": heartbeats_sent})
+            local_log.info(
+                "Closed",
+                extra={"events_sent": events_sent, "heartbeats": heartbeats_sent},
+            )
 
     return StreamingResponse(
         gen(),
@@ -635,7 +731,7 @@ async def bus_stream(request: Request):
         },
     )
 
-# ---------------------- WebSocket: /ws/ui ----------------------
+
 @app.websocket("/ws/ui")
 async def ws_ui(ws: WebSocket):
     await ws.accept()
@@ -643,15 +739,16 @@ async def ws_ui(ws: WebSocket):
     hub.ui_sockets.add(ws)
     socket_id = id(ws)
     local_log = get_logger("copycord.ws.ui", socket_id=socket_id)
-    route_var.set("/ws/ui"); client_var.set("-")
+    route_var.set("/ws/ui")
+    client_var.set("-")
 
     local_log.info("Connected | ui_sockets=%d", len(hub.ui_sockets))
-    
+
     backlog = list(hub.recent)[-20:]
     for m in backlog:
         await ws.send_text(json.dumps(m))
     local_log.debug("Sent backlog | count=%d", len(backlog))
-    
+
     try:
         while not shutdown_event.is_set():
             try:
@@ -667,7 +764,7 @@ async def ws_ui(ws: WebSocket):
         hub.ui_sockets.discard(ws)
         local_log.debug("Removed | ui_sockets=%d", len(hub.ui_sockets))
 
-# ---------------------- WebSocket: /ws/out ----------------------
+
 @app.websocket("/ws/out")
 async def ws_out(websocket: WebSocket):
     await websocket.accept()
@@ -676,7 +773,8 @@ async def ws_out(websocket: WebSocket):
 
     socket_id = id(websocket)
     local_log = get_logger("copycord.ws.out", socket_id=socket_id)
-    route_var.set("/ws/out"); client_var.set("-")
+    route_var.set("/ws/out")
+    client_var.set("-")
 
     local_log.info("Client connected", extra={"events_sent": 0})
     local_log.debug("WebSocket attached to hub")
@@ -693,7 +791,7 @@ async def ws_out(websocket: WebSocket):
         await hub.remove_ui(websocket)
         local_log.debug("Cleanup complete | active_ui_sockets=%d", len(hub.ui_sockets))
 
-# ---------------------- WebSocket: /ws/in ----------------------
+
 @app.websocket("/ws/in")
 async def ws_in(websocket: WebSocket):
     await websocket.accept()
@@ -702,7 +800,8 @@ async def ws_in(websocket: WebSocket):
 
     socket_id = id(websocket)
     local_log = get_logger("copycord.ws.in", socket_id=socket_id)
-    route_var.set("/ws/in"); client_var.set("-")
+    route_var.set("/ws/in")
+    client_var.set("-")
 
     local_log.info("Agent connected", extra={"forwarded": 0})
 
@@ -711,7 +810,9 @@ async def ws_in(websocket: WebSocket):
         while not shutdown_event.is_set():
             try:
                 ev = await asyncio.wait_for(websocket.receive(), timeout=1.0)
-                local_log.debug("Event received | type=%s keys=%s", ev.get('type'), list(ev.keys()))
+                local_log.debug(
+                    "Event received | type=%s keys=%s", ev.get("type"), list(ev.keys())
+                )
             except asyncio.TimeoutError:
                 continue
 
@@ -725,7 +826,9 @@ async def ws_in(websocket: WebSocket):
 
             raw = ev.get("text")
             if raw:
-                local_log.debug("Raw text received | length=%d | preview=%s", len(raw), raw[:200])
+                local_log.debug(
+                    "Raw text received | length=%d | preview=%s", len(raw), raw[:200]
+                )
             else:
                 raw_bytes = ev.get("bytes") or []
                 local_log.debug("Raw bytes received | length=%d", len(raw_bytes))
@@ -743,15 +846,16 @@ async def ws_in(websocket: WebSocket):
                 msg = {"type": "raw", "data": raw}
                 local_log.warning("JSON parse failed | raw_preview=%s", raw[:200])
 
-            # Hub publish vs broadcast logic
             if isinstance(msg, dict) and ("kind" in msg or "payload" in msg):
                 await hub.publish(
                     kind=msg.get("kind") or msg.get("type") or "event",
                     role=msg.get("role") or "ui",
-                    payload=msg.get("payload") or {}
+                    payload=msg.get("payload") or {},
                 )
                 forwarded += 1
-                local_log.debug("Published message to hub", extra={"forwarded": forwarded})
+                local_log.debug(
+                    "Published message to hub", extra={"forwarded": forwarded}
+                )
                 with contextlib.suppress(Exception):
                     await websocket.send_text('{"ok":true}')
                 continue
@@ -768,7 +872,9 @@ async def ws_in(websocket: WebSocket):
             forwarded += 1
             local_log.debug("Broadcast message", extra={"forwarded": forwarded})
             if forwarded % 100 == 0:
-                local_log.info("Forwarding checkpoint reached", extra={"forwarded": forwarded})
+                local_log.info(
+                    "Forwarding checkpoint reached", extra={"forwarded": forwarded}
+                )
 
             with contextlib.suppress(Exception):
                 await websocket.send_text('{"ok":true}')
@@ -776,7 +882,9 @@ async def ws_in(websocket: WebSocket):
     except WebSocketDisconnect:
         local_log.info("Agent disconnected", extra={"forwarded": forwarded})
     except asyncio.CancelledError:
-        local_log.debug("Connection cancelled (client closed)", extra={"forwarded": forwarded})
+        local_log.debug(
+            "Connection cancelled (client closed)", extra={"forwarded": forwarded}
+        )
         return
     finally:
         agent_sockets.discard(websocket)
@@ -784,7 +892,7 @@ async def ws_in(websocket: WebSocket):
             await websocket.close()
         local_log.debug("Cleanup complete | active_agents=%d", len(agent_sockets))
 
-# ----- WebSocket helpers -----
+
 async def _ws_cmd(url: str, payload: dict, timeout: float = 0.7) -> dict:
     with _Timer(f"_ws_cmd {url}") as t:
         try:
@@ -799,33 +907,56 @@ async def _ws_cmd(url: str, payload: dict, timeout: float = 0.7) -> dict:
                     msg = await ws.recv()
                     if isinstance(msg, (bytes, str)):
                         res = json.loads(msg)
-                        LOGGER.debug("_ws_cmd ok | url=%s took_ms=%.1f payload=%s -> %s",
-                                     url, t.ms, _safe(payload), _safe(res), extra={"took_ms": round(t.ms, 1)})
+                        LOGGER.debug(
+                            "_ws_cmd ok | url=%s took_ms=%.1f payload=%s -> %s",
+                            url,
+                            t.ms,
+                            _safe(payload),
+                            _safe(res),
+                            extra={"took_ms": round(t.ms, 1)},
+                        )
                         return res
-                    LOGGER.debug("_ws_cmd bad-response | url=%s took_ms=%.1f", url, t.ms, extra={"took_ms": round(t.ms, 1)})
+                    LOGGER.debug(
+                        "_ws_cmd bad-response | url=%s took_ms=%.1f",
+                        url,
+                        t.ms,
+                        extra={"took_ms": round(t.ms, 1)},
+                    )
                     return {"ok": False, "running": False, "error": "bad-response"}
         except Exception as e:
-            LOGGER.debug("_ws_cmd error | url=%s took_ms=%.1f err=%s", url, t.ms, repr(e), extra={"took_ms": round(t.ms, 1)})
+            LOGGER.debug(
+                "_ws_cmd error | url=%s took_ms=%.1f err=%s",
+                url,
+                t.ms,
+                repr(e),
+                extra={"took_ms": round(t.ms, 1)},
+            )
             return {"ok": False, "running": False, "error": str(e)}
 
-# ----- Routes -----
 
 @app.get("/", response_class=None)
 async def index(request: Request):
     env = _read_env()
-    s_server = await _ws_cmd(SERVER_CTRL_URL, {"cmd":"status"})
-    s_client = await _ws_cmd(CLIENT_CTRL_URL, {"cmd":"status"})
+    s_server = await _ws_cmd(SERVER_CTRL_URL, {"cmd": "status"})
+    s_client = await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "status"})
 
     both_running = bool(s_server.get("running")) and bool(s_client.get("running"))
 
     text_keys = [
-        "SERVER_TOKEN", "CLIENT_TOKEN",
-        "HOST_GUILD_ID", "CLONE_GUILD_ID", "COMMAND_USERS",
+        "SERVER_TOKEN",
+        "CLIENT_TOKEN",
+        "HOST_GUILD_ID",
+        "CLONE_GUILD_ID",
+        "COMMAND_USERS",
     ]
     bool_keys = BOOL_KEYS
-    log_level = env.get("LOG_LEVEL","INFO")
-    LOGGER.debug("GET / | both_running=%s server=%s client=%s",
-                both_running, s_server.get("status"), s_client.get("status"))
+    log_level = env.get("LOG_LEVEL", "INFO")
+    LOGGER.debug(
+        "GET / | both_running=%s server=%s client=%s",
+        both_running,
+        s_server.get("status"),
+        s_client.get("status"),
+    )
 
     return templates.TemplateResponse(
         "index.html",
@@ -843,13 +974,20 @@ async def index(request: Request):
         },
     )
 
+
 @app.get("/health", response_class=PlainTextResponse)
 async def health():
-    s1 = await _ws_cmd(SERVER_CTRL_URL, {"cmd":"status"})
-    s2 = await _ws_cmd(CLIENT_CTRL_URL, {"cmd":"status"})
-    ok = (s1.get("ok", True) and s2.get("ok", True))
-    LOGGER.info("Health check | server=%s client=%s ok=%s", s1.get("status"), s2.get("status"), ok)
+    s1 = await _ws_cmd(SERVER_CTRL_URL, {"cmd": "status"})
+    s2 = await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "status"})
+    ok = s1.get("ok", True) and s2.get("ok", True)
+    LOGGER.info(
+        "Health check | server=%s client=%s ok=%s",
+        s1.get("status"),
+        s2.get("status"),
+        ok,
+    )
     return "ok" if ok else PlainTextResponse("control not reachable", status_code=500)
+
 
 @app.post("/save")
 async def save(request: Request):
@@ -863,14 +1001,15 @@ async def save(request: Request):
     _write_env(values)
     return RedirectResponse("/", status_code=303)
 
+
 @app.post("/start")
 async def start_all():
     errs = _validate(_read_env())
     if errs:
         LOGGER.warning("POST /start blocked | errs=%s", errs)
         return PlainTextResponse("Cannot start: " + "; ".join(errs), status_code=400)
-    srv = await _ws_cmd(SERVER_CTRL_URL, {"cmd":"start"})
-    cli = await _ws_cmd(CLIENT_CTRL_URL, {"cmd":"start"})
+    srv = await _ws_cmd(SERVER_CTRL_URL, {"cmd": "start"})
+    cli = await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "start"})
     if not srv.get("ok") or srv.get("error") or not cli.get("ok") or cli.get("error"):
         detail = f"server={srv.get('error') or srv.get('status')}, client={cli.get('error') or cli.get('status')}"
         LOGGER.error("POST /start failed | %s", detail)
@@ -878,17 +1017,20 @@ async def start_all():
     LOGGER.info("POST /start ok")
     return RedirectResponse("/", status_code=303)
 
+
 @app.post("/stop")
 async def stop_all():
     LOGGER.info("POST /stop requested")
-    await _ws_cmd(CLIENT_CTRL_URL, {"cmd":"stop"})
-    await _ws_cmd(SERVER_CTRL_URL, {"cmd":"stop"})
+    await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "stop"})
+    await _ws_cmd(SERVER_CTRL_URL, {"cmd": "stop"})
     return RedirectResponse("/", status_code=303)
+
 
 @app.on_event("shutdown")
 async def on_shutdown():
     LOGGER.info("Shutdown initiated")
     shutdown_event.set()
+
     async def _close_group(peers: Set[WebSocket], timeout: float = 0.2):
         sockets = list(peers)
         peers.clear()
@@ -898,13 +1040,17 @@ async def on_shutdown():
         done, pending = await asyncio.wait(tasks, timeout=timeout)
         for t in pending:
             t.cancel()
-        LOGGER.debug("Closed WS group | closed=%d cancelled=%d", len(done), len(pending))
+        LOGGER.debug(
+            "Closed WS group | closed=%d cancelled=%d", len(done), len(pending)
+        )
+
     await asyncio.gather(
         _close_group(hub.ui_sockets),
         _close_group(bus_sockets),
         _close_group(agent_sockets),
     )
     LOGGER.info("Shutdown complete")
+
 
 @app.post("/logs/clear")
 async def clear_logs():
@@ -920,6 +1066,7 @@ async def clear_logs():
             pass
     LOGGER.info("POST /logs/clear done | cleared=%s", cleared)
     return RedirectResponse("/", status_code=303)
+
 
 @app.get("/logs/{which}", response_class=PlainTextResponse)
 async def logs(which: str, tail: int = 20000):
@@ -943,6 +1090,7 @@ async def logs(which: str, tail: int = 20000):
 
     return PlainTextResponse("No logs yet.", status_code=404)
 
+
 @app.on_event("startup")
 async def _apply_db_log_level_and_banner():
     try:
@@ -954,13 +1102,20 @@ async def _apply_db_log_level_and_banner():
             configure_app_logging()
     except Exception:
         pass
-    LOGGER.debug("Starting %s | LOG_LEVEL=%s | LOG_FORMAT=%s | WS_SERVER_CTRL=%s | WS_CLIENT_CTRL=%s",
-                APP_TITLE, logging.getLevelName(LOGGER.logger.level),
-                os.getenv("LOG_FORMAT","HUMAN"), SERVER_CTRL_URL, CLIENT_CTRL_URL)
+    LOGGER.debug(
+        "Starting %s | LOG_LEVEL=%s | LOG_FORMAT=%s | WS_SERVER_CTRL=%s | WS_CLIENT_CTRL=%s",
+        APP_TITLE,
+        logging.getLevelName(LOGGER.logger.level),
+        os.getenv("LOG_FORMAT", "HUMAN"),
+        SERVER_CTRL_URL,
+        CLIENT_CTRL_URL,
+    )
+
 
 @app.on_event("startup")
 async def _start_bg_tasks():
     asyncio.create_task(_lock_listener())
+
 
 @app.get("/logs/stream/{which}")
 async def logs_stream(which: str, request: Request, tail_bytes: int = 50000):
@@ -1033,7 +1188,9 @@ async def logs_stream(which: str, request: Request, tail_bytes: int = 50000):
                                 st = os.stat(path)
                             except FileNotFoundError:
                                 break
-                            if (st.st_ino != last_stat.st_ino) or (st.st_dev != last_stat.st_dev):
+                            if (st.st_ino != last_stat.st_ino) or (
+                                st.st_dev != last_stat.st_dev
+                            ):
                                 break
                             if pos > st.st_size:
                                 f.seek(st.st_size)
@@ -1058,6 +1215,7 @@ async def logs_stream(which: str, request: Request, tail_bytes: int = 50000):
         },
     )
 
+
 def _derive_state(obj: dict) -> str:
     """
     Normalize a status payload into 'running' or 'stopped' (or passthrough).
@@ -1071,10 +1229,20 @@ def _derive_state(obj: dict) -> str:
         return "running"
 
     good = {
-        "running","started","active","online","ok","ready","up",
-        "connected","logged_in","logged-in","authenticated","awake"
+        "running",
+        "started",
+        "active",
+        "online",
+        "ok",
+        "ready",
+        "up",
+        "connected",
+        "logged_in",
+        "logged-in",
+        "authenticated",
+        "awake",
     }
-    bad = {"stopped","offline","down","error","dead","failed"}
+    bad = {"stopped", "offline", "down", "error", "dead", "failed"}
 
     if s in good:
         return "running"
@@ -1083,6 +1251,7 @@ def _derive_state(obj: dict) -> str:
     if obj.get("pid"):
         return "running"
     return "stopped" if s == "" else s
+
 
 def _enrich_from_bus(ctrl: dict, bus: dict) -> dict:
     out = dict(ctrl or {})
@@ -1094,6 +1263,7 @@ def _enrich_from_bus(ctrl: dict, bus: dict) -> dict:
         out["running"] = bus["running"]
     out.setdefault("status", "")
     return out
+
 
 def _is_discord_ready(obj: dict) -> bool:
     """
@@ -1117,6 +1287,7 @@ def _is_discord_ready(obj: dict) -> bool:
 
     st2 = str(obj.get("gateway") or obj.get("discord_status") or "").lower()
     return st2 in {"ready", "connected", "online"}
+
 
 async def _collect_status() -> dict:
     with _Timer("/status") as t:
@@ -1147,44 +1318,60 @@ async def _collect_status() -> dict:
         "status": "running" if both_running else "stopped",
     }
 
-    LOGGER.debug("GET /status | took_ms=%.1f running=%s ready=%s",
-                 t.ms, both_running, both_ready, extra={"took_ms": round(t.ms, 1)})
+    LOGGER.debug(
+        "GET /status | took_ms=%.1f running=%s ready=%s",
+        t.ms,
+        both_running,
+        both_ready,
+        extra={"took_ms": round(t.ms, 1)},
+    )
     return res
+
 
 @app.get("/status", response_class=JSONResponse)
 async def status_json():
     return await _collect_status()
 
+
 @app.get("/api/status", response_class=JSONResponse)
 async def api_status_alias():
     return await _collect_status()
+
 
 @app.get("/api/runtime", response_class=JSONResponse)
 async def api_runtime_alias():
     return await _collect_status()
 
+
 @app.get("/api/bots/status", response_class=JSONResponse)
 async def api_bots_status_alias():
     return await _collect_status()
+
 
 @app.get("/runtime", response_class=JSONResponse)
 async def runtime_alias():
     return await _collect_status()
 
-# ----- Filters API -----
 
 @app.get("/filters")
 def get_filters():
     f = db.get_filters()
-    out = {"whitelist": {"category": [], "channel": []},
-           "exclude":   {"category": [], "channel": []}}
-    for scope in ("category","channel"):
+    out = {
+        "whitelist": {"category": [], "channel": []},
+        "exclude": {"category": [], "channel": []},
+    }
+    for scope in ("category", "channel"):
         out["whitelist"][scope] = [str(i) for i in sorted(f["whitelist"][scope])]
-        out["exclude"][scope]   = [str(i) for i in sorted(f["exclude"][scope])]
-    LOGGER.debug("GET /filters | wl_cat=%d wl_ch=%d ex_cat=%d ex_ch=%d",
-                 len(out['whitelist']['category']), len(out['whitelist']['channel']),
-                 len(out['exclude']['category']),   len(out['exclude']['channel']))
+        out["exclude"][scope] = [str(i) for i in sorted(f["exclude"][scope])]
+    LOGGER.debug(
+        "GET /filters | wl_cat=%d wl_ch=%d ex_cat=%d ex_ch=%d",
+        len(out["whitelist"]["category"]),
+        len(out["whitelist"]["channel"]),
+        len(out["exclude"]["category"]),
+        len(out["exclude"]["channel"]),
+    )
     return out
+
 
 @app.post("/filters/save")
 async def save_filters(request: Request):
@@ -1195,26 +1382,36 @@ async def save_filters(request: Request):
         items = [s for s in (x.strip() for x in raw.split(",")) if s]
         out = []
         for s in items:
-            try: out.append(int(s))
-            except Exception: pass
+            try:
+                out.append(int(s))
+            except Exception:
+                pass
         return list(dict.fromkeys(out))
 
     wl_cats = parse_ids("wl_categories")
-    wl_chs  = parse_ids("wl_channels")
+    wl_chs = parse_ids("wl_channels")
     ex_cats = parse_ids("ex_categories")
-    ex_chs  = parse_ids("ex_channels")
+    ex_chs = parse_ids("ex_channels")
 
     db.replace_filters(wl_cats, wl_chs, ex_cats, ex_chs)
 
     payload = {
         "whitelist": {"category": wl_cats, "channel": wl_chs},
-        "exclude":   {"category": ex_cats, "channel": ex_chs},
+        "exclude": {"category": ex_cats, "channel": ex_chs},
     }
-    LOGGER.info("POST /filters/save | wl_cat=%d wl_ch=%d ex_cat=%d ex_ch=%d",
-                len(wl_cats), len(wl_chs), len(ex_cats), len(ex_chs))
+    LOGGER.info(
+        "POST /filters/save | wl_cat=%d wl_ch=%d ex_cat=%d ex_ch=%d",
+        len(wl_cats),
+        len(wl_chs),
+        len(ex_cats),
+        len(ex_chs),
+    )
     await hub.publish("filters", "both", payload)
-    asyncio.create_task(_ws_cmd(CLIENT_AGENT_URL, {"type": "filters_reload"}, timeout=1.0))
+    asyncio.create_task(
+        _ws_cmd(CLIENT_AGENT_URL, {"type": "filters_reload"}, timeout=1.0)
+    )
     return RedirectResponse("/", status_code=303)
+
 
 def _read_env() -> Dict[str, str]:
     vals = DEFAULTS.copy()
@@ -1230,6 +1427,7 @@ def _read_env() -> Dict[str, str]:
     LOGGER.debug("Config read | %s", _redact_dict(vals))
     return vals
 
+
 def _write_env(values: Dict[str, str]) -> None:
     for k in ALLOWED_ENV:
         v = values.get(k, "") or ""
@@ -1241,6 +1439,7 @@ def _write_env(values: Dict[str, str]) -> None:
             v = "JSON" if str(v).upper() == "JSON" else "HUMAN"
         db.set_config(k, v)
     LOGGER.info("Config saved | %s", _redact_dict(values))
+
 
 def _validate(values: Dict[str, str]) -> List[str]:
     errs: List[str] = []
@@ -1260,10 +1459,11 @@ def _validate(values: Dict[str, str]) -> List[str]:
         LOGGER.debug("Config validation ok")
     return errs
 
-def _norm_bool_str(v: str) -> str:
-    return "True" if str(v).strip().lower() in ("true","1","yes","on") else "False"
 
-# --- Channels page (HTML) ---
+def _norm_bool_str(v: str) -> str:
+    return "True" if str(v).strip().lower() in ("true", "1", "yes", "on") else "False"
+
+
 @app.get("/channels")
 async def channels_page(request: Request):
     env = _read_env()
@@ -1277,7 +1477,7 @@ async def channels_page(request: Request):
         },
     )
 
-# --- Channels API (JSON) ---
+
 @app.get("/api/channels", response_class=JSONResponse)
 async def channels_api():
     chans = [dict(r) for r in db.get_all_channel_mappings()]
@@ -1291,12 +1491,24 @@ async def channels_api():
 
     out = [
         {
-            "original_channel_id": str(ch["original_channel_id"]) if ch.get("original_channel_id") is not None else "",
+            "original_channel_id": (
+                str(ch["original_channel_id"])
+                if ch.get("original_channel_id") is not None
+                else ""
+            ),
             "original_channel_name": ch.get("original_channel_name") or "",
-            "cloned_channel_id": str(ch["cloned_channel_id"]) if ch.get("cloned_channel_id") is not None else None,
+            "cloned_channel_id": (
+                str(ch["cloned_channel_id"])
+                if ch.get("cloned_channel_id") is not None
+                else None
+            ),
             "channel_type": int(ch.get("channel_type", 0)),
             "category_name": ch.get("category_name"),
-            "original_parent_category_id": str(ch["original_parent_category_id"]) if ch.get("original_parent_category_id") not in (None, "", 0) else None,
+            "original_parent_category_id": (
+                str(ch["original_parent_category_id"])
+                if ch.get("original_parent_category_id") not in (None, "", 0)
+                else None
+            ),
             "channel_webhook_url": ch.get("channel_webhook_url"),
             "clone_channel_name": ch.get("clone_channel_name") or None,
         }
@@ -1310,45 +1522,71 @@ async def api_backfill_start(payload: dict = Body(...)):
     try:
         channel_id = int(payload.get("channel_id") or payload.get("clone_channel_id"))
     except Exception:
-        return JSONResponse({"ok": False, "error": "invalid-channel_id"}, status_code=400)
+        return JSONResponse(
+            {"ok": False, "error": "invalid-channel_id"}, status_code=400
+        )
 
     st = await locks.status(channel_id)
-    if st in ("launching","running"):
-        return JSONResponse({"ok": False, "error": "backfill-already-running"}, status_code=409)
+    if st in ("launching", "running"):
+        return JSONResponse(
+            {"ok": False, "error": "backfill-already-running"}, status_code=409
+        )
 
     ok = await locks.try_acquire_launching(channel_id)
     if not ok:
-        return JSONResponse({"ok": False, "error": "backfill-already-running"}, status_code=409)
-    mode = (payload.get("mode") or (payload.get("range") or {}).get("mode") or "all")
-    after_iso  = payload.get("since") or payload.get("after_iso")
-    before_iso = payload.get("before_iso") or (payload.get("range") or {}).get("before") or payload.get("until") or payload.get("to_iso")
+        return JSONResponse(
+            {"ok": False, "error": "backfill-already-running"}, status_code=409
+        )
+    mode = payload.get("mode") or (payload.get("range") or {}).get("mode") or "all"
+    after_iso = payload.get("since") or payload.get("after_iso")
+    before_iso = (
+        payload.get("before_iso")
+        or (payload.get("range") or {}).get("before")
+        or payload.get("until")
+        or payload.get("to_iso")
+    )
     last_n = payload.get("last_n")
 
     data = {"channel_id": channel_id}
-    if after_iso:  data["after_iso"]  = str(after_iso)
-    if before_iso: data["before_iso"] = str(before_iso)
+    if after_iso:
+        data["after_iso"] = str(after_iso)
+    if before_iso:
+        data["before_iso"] = str(before_iso)
     if last_n is not None:
-        try: data["last_n"] = int(last_n)
+        try:
+            data["last_n"] = int(last_n)
         except Exception:
             await locks.release(channel_id)
-            return JSONResponse({"ok": False, "error": "invalid-last_n"}, status_code=400)
+            return JSONResponse(
+                {"ok": False, "error": "invalid-last_n"}, status_code=400
+            )
 
-    # keep range for UI/debug; if “between”, include both bounds
     if mode == "between":
-        data["range"] = {"mode": mode, "value": {"after": after_iso, "before": before_iso}}
+        data["range"] = {
+            "mode": mode,
+            "value": {"after": after_iso, "before": before_iso},
+        }
     else:
-        rng_val = after_iso if after_iso else (data.get("last_n") if "last_n" in data else None)
+        rng_val = (
+            after_iso
+            if after_iso
+            else (data.get("last_n") if "last_n" in data else None)
+        )
         data["range"] = {"mode": mode, "value": rng_val} if mode else None
     res = await _ws_cmd(CLIENT_AGENT_URL, {"type": "clone_messages", "data": data})
     if not res.get("ok", True):
-        await locks.release(channel_id)  # rollback on immediate failure
-        return JSONResponse({"ok": False, "error": res.get("error") or "client-agent-failed"}, status_code=502)
+        await locks.release(channel_id)
+        return JSONResponse(
+            {"ok": False, "error": res.get("error") or "client-agent-failed"},
+            status_code=502,
+        )
 
     return JSONResponse({"ok": True})
 
+
 @app.get("/guilds")
 async def guilds_page(request: Request):
-    env = _read_env() 
+    env = _read_env()
     return templates.TemplateResponse(
         "guilds.html",
         {
@@ -1359,7 +1597,7 @@ async def guilds_page(request: Request):
         },
     )
 
-# --- Guilds API (JSON) ---
+
 @app.get("/api/guilds", response_class=JSONResponse)
 async def guilds_api():
     """
@@ -1370,15 +1608,19 @@ async def guilds_api():
     rows = db.get_all_guilds()
     items = []
     for r in rows:
-        items.append({
-            "id": str(r.get("guild_id", "")),
-            "name": r.get("name") or "Unknown guild",
-            "icon_url": r.get("icon_url"),
-            "member_count": r.get("member_count"),
-        })
+        items.append(
+            {
+                "id": str(r.get("guild_id", "")),
+                "name": r.get("name") or "Unknown guild",
+                "icon_url": r.get("icon_url"),
+                "member_count": r.get("member_count"),
+            }
+        )
     return {"items": items}
 
-CLIENT_AGENT_TIMEOUT = int(os.getenv("CLIENT_AGENT_TIMEOUT", "10"))  # seconds
+
+CLIENT_AGENT_TIMEOUT = int(os.getenv("CLIENT_AGENT_TIMEOUT", "10"))
+
 
 @app.post("/api/scrape", response_class=JSONResponse)
 async def api_scrape(request: Request):
@@ -1389,11 +1631,15 @@ async def api_scrape(request: Request):
         LOGGER.exception("Failed to parse JSON body: %s", e)
         return JSONResponse({"ok": False, "error": "invalid-json"}, status_code=400)
 
-    include_username   = bool(payload.get("include_username", False))
+    include_username = bool(payload.get("include_username", False))
     include_avatar_url = bool(payload.get("include_avatar_url", False))
-    include_bio        = bool(payload.get("include_bio", False))
+    include_bio = bool(payload.get("include_bio", False))
 
-    if payload.get("include_names") and not (payload.get("include_username") or payload.get("include_avatar_url") or payload.get("include_bio")):
+    if payload.get("include_names") and not (
+        payload.get("include_username")
+        or payload.get("include_avatar_url")
+        or payload.get("include_bio")
+    ):
         include_username = True
         include_avatar_url = True
 
@@ -1414,7 +1660,12 @@ async def api_scrape(request: Request):
 
     LOGGER.debug(
         "Dispatching scrape to agent: gid=%s ns=%s mpps=%s username=%s avatar=%s bio=%s",
-        gid, ns, mpps, include_username, include_avatar_url, include_bio
+        gid,
+        ns,
+        mpps,
+        include_username,
+        include_avatar_url,
+        include_bio,
     )
 
     try:
@@ -1436,25 +1687,44 @@ async def api_scrape(request: Request):
         LOGGER.debug("Agent response: %s", res)
     except asyncio.TimeoutError:
         LOGGER.error("Timeout waiting for client agent (>%ss)", CLIENT_AGENT_TIMEOUT)
-        return JSONResponse({"ok": False, "error": "client-agent-timeout"}, status_code=status.HTTP_504_GATEWAY_TIMEOUT)
+        return JSONResponse(
+            {"ok": False, "error": "client-agent-timeout"},
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+        )
     except ConnectionRefusedError as e:
         LOGGER.error("Connection to client agent refused: %s", e)
-        return JSONResponse({"ok": False, "error": "client-agent-unreachable"}, status_code=status.HTTP_502_BAD_GATEWAY)
+        return JSONResponse(
+            {"ok": False, "error": "client-agent-unreachable"},
+            status_code=status.HTTP_502_BAD_GATEWAY,
+        )
     except Exception as e:
         LOGGER.exception("Unexpected client agent error: %s", e)
-        return JSONResponse({"ok": False, "error": f"client-agent-error: {type(e).__name__}: {e}"}, status_code=status.HTTP_502_BAD_GATEWAY)
+        return JSONResponse(
+            {"ok": False, "error": f"client-agent-error: {type(e).__name__}: {e}"},
+            status_code=status.HTTP_502_BAD_GATEWAY,
+        )
 
     if not res.get("ok", True):
         err = (res.get("error") or "").strip()
 
         if not err:
-            LOGGER.warning("Agent returned not-ok with empty error; returning 202 Accepted: %s", res)
-            return JSONResponse({"ok": True, "accepted": True}, status_code=status.HTTP_202_ACCEPTED)
+            LOGGER.warning(
+                "Agent returned not-ok with empty error; returning 202 Accepted: %s",
+                res,
+            )
+            return JSONResponse(
+                {"ok": True, "accepted": True}, status_code=status.HTTP_202_ACCEPTED
+            )
 
         if "already" in err and "running" in err:
-            return JSONResponse({"ok": False, "error": "scrape-already-running"}, status_code=409)
+            return JSONResponse(
+                {"ok": False, "error": "scrape-already-running"}, status_code=409
+            )
 
-        return JSONResponse({"ok": False, "error": err or "client-agent-failed"}, status_code=502)
+        return JSONResponse(
+            {"ok": False, "error": err or "client-agent-failed"}, status_code=502
+        )
+
 
 @app.get("/api/scrape/state", response_class=JSONResponse)
 async def api_scrape_state():
@@ -1465,6 +1735,7 @@ async def api_scrape_state():
         return {"running": bool(res.get("running")), "guild_id": res.get("guild_id")}
     except Exception:
         return {"running": False, "guild_id": None}
+
 
 @app.post("/api/scrape/cancel", response_class=JSONResponse)
 async def api_scrape_cancel(request: Request):
@@ -1481,14 +1752,23 @@ async def api_scrape_cancel(request: Request):
             timeout=2.0,
         )
     except ConnectionRefusedError:
-        return JSONResponse({"ok": False, "error": "client-agent-unreachable"}, status_code=502)
+        return JSONResponse(
+            {"ok": False, "error": "client-agent-unreachable"}, status_code=502
+        )
     except Exception as e:
-        return JSONResponse({"ok": False, "error": f"client-agent-error: {type(e).__name__}: {e}"}, status_code=502)
+        return JSONResponse(
+            {"ok": False, "error": f"client-agent-error: {type(e).__name__}: {e}"},
+            status_code=502,
+        )
 
     if not res.get("ok", True):
-        return JSONResponse({"ok": False, "error": res.get("error") or "client-agent-failed"}, status_code=502)
+        return JSONResponse(
+            {"ok": False, "error": res.get("error") or "client-agent-failed"},
+            status_code=502,
+        )
 
     return JSONResponse({"ok": True})
+
 
 @app.get("/api/guilds/{guild_id}", response_class=JSONResponse)
 async def guild_details(guild_id: str):
@@ -1498,7 +1778,7 @@ async def guild_details(guild_id: str):
       { id, name, icon_url, member_count, ... }
     """
     try:
-        rows = db.get_all_guilds() 
+        rows = db.get_all_guilds()
         row = next((r for r in rows if str(r.get("guild_id")) == str(guild_id)), None)
         if not row:
             return JSONResponse({"ok": False, "error": "not-found"}, status_code=404)
@@ -1516,14 +1796,17 @@ async def guild_details(guild_id: str):
     except Exception as e:
         LOGGER.exception("guild_details failed for id=%s: %s", guild_id, e)
         return JSONResponse({"ok": False, "error": "server-error"}, status_code=500)
-    
+
 
 def _canon(s: str | None) -> str:
     if s is None:
         return ""
     return unicodedata.normalize("NFKC", str(s)).strip()
 
+
 _DASHES_RE = re.compile(r"-{2,}")
+
+
 def _discordify(s: str | None) -> str | None:
     """
     Convert free text to a Discord-safe channel name:
@@ -1537,25 +1820,22 @@ def _discordify(s: str | None) -> str | None:
     """
     if s is None:
         return None
-    # Normalize + trim
+
     t = unicodedata.normalize("NFKC", str(s)).strip()
     if not t:
         return None
 
-    # Lowercase only letters (emojis/symbols are unaffected by lower())
     t = t.lower()
 
-    # Replace any whitespace with '-'
     t = re.sub(r"\s+", "-", t)
 
-    # Collapse consecutive dashes
     t = _DASHES_RE.sub("-", t).strip("-")
 
-    # Truncate to 100 chars
     if len(t) > 100:
         t = t[:100].rstrip("-") or None
 
     return t or None
+
 
 @app.post("/api/channels/customize", response_class=JSONResponse)
 async def api_channels_customize(payload: dict = Body(...)):
@@ -1570,12 +1850,12 @@ async def api_channels_customize(payload: dict = Body(...)):
     try:
         ocid = int(payload.get("original_channel_id"))
     except Exception:
-        return JSONResponse({"ok": False, "error": "invalid-original_channel_id"}, status_code=400)
+        return JSONResponse(
+            {"ok": False, "error": "invalid-original_channel_id"}, status_code=400
+        )
 
-    # 1) Normalize input to Discord-safe form (or None)
     desired = _discordify(payload.get("clone_channel_name", None))
 
-    # 2) Equal to original? (original names from Discord are already safe)
     try:
         orig = db.get_original_channel_name(ocid)
     except Exception:
@@ -1586,44 +1866,83 @@ async def api_channels_customize(payload: dict = Body(...)):
         desired = None
         same_as_original = True
 
-    # 3) Read current stored value (raw; may be None or a string)
     try:
         current_raw = db.get_clone_channel_name(ocid)
     except Exception:
         current_raw = None
 
-    # 4) Determine if we need to update ("" should not exist anymore; treat only None vs str)
-    needs_update = (desired is None and current_raw is not None) or \
-                   (desired is not None and current_raw != desired)
+    needs_update = (desired is None and current_raw is not None) or (
+        desired is not None and current_raw != desired
+    )
 
     if not needs_update:
-        LOGGER.info("Customize channel | original_id=%s no change (kept=%r)", ocid, current_raw)
-        return JSONResponse({"ok": True, "changed": False, "normalized": desired is not None})
+        LOGGER.info(
+            "Customize channel | original_id=%s no change (kept=%r)", ocid, current_raw
+        )
+        return JSONResponse(
+            {"ok": True, "changed": False, "normalized": desired is not None}
+        )
 
-    # 5) Update DB (write NULL when desired is None)
     try:
         db.set_channel_clone_name(ocid, desired)
         LOGGER.info(
             "Customize channel | original_id=%s updated to %r (orig=%r, was=%r)",
-            ocid, desired, orig, current_raw
+            ocid,
+            desired,
+            orig,
+            current_raw,
         )
     except Exception as e:
         LOGGER.exception("Failed to set clone_channel_name: %s", e)
         return JSONResponse({"ok": False, "error": "db-failure"}, status_code=500)
 
-    # 6) WS nudge policy
     should_nudge = not (desired is None and same_as_original)
     if should_nudge:
         try:
-            asyncio.create_task(_ws_cmd(CLIENT_AGENT_URL, {"type": "sitemap_request"}, timeout=1.0))
+            asyncio.create_task(
+                _ws_cmd(CLIENT_AGENT_URL, {"type": "sitemap_request"}, timeout=1.0)
+            )
         except Exception:
             LOGGER.debug("WS sitemap_request dispatch failed", exc_info=True)
 
-    return JSONResponse({
-        "ok": True,
-        "changed": True,
-        "nudged": should_nudge,
-        "normalized_name": desired,  # let UI reflect how it serialized
-    })
-# wrap app for connection-close behavior on shutdown
+    return JSONResponse(
+        {
+            "ok": True,
+            "changed": True,
+            "nudged": should_nudge,
+            "normalized_name": desired,
+        }
+    )
+
+
+@app.get("/version")
+def get_version():
+    current = db.get_version() or CURRENT_VERSION
+    latest = db.get_config("latest_tag", "")
+    url = db.get_config("latest_url", "")
+
+    def norm(v: str):
+        import re
+
+        v = (v or "").strip()
+        if v.lower().startswith("v"):
+            v = v[1:]
+        v = re.sub(r"[^0-9.]", "", v)
+        parts = [p for p in v.split(".") if p.isdigit()]
+        while len(parts) < 3:
+            parts.append("0")
+        return ".".join(parts[:3])
+
+    ca = tuple(int(x) for x in norm(current).split("."))
+    lb = tuple(int(x) for x in norm(latest).split(".")) if latest else (0, 0, 0)
+
+    return {
+        "current": current,
+        "latest": latest or current,
+        "url": url
+        or f"https://github.com/Copycord/Copycord/releases/tag/{latest or current}",
+        "update_available": bool(latest) and (lb > ca),
+    }
+
+
 app = ConnCloseOnShutdownASGI(app)
