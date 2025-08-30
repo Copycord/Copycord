@@ -7,36 +7,6 @@ _Love this project? Give it a ⭐️ and let others know!_
   <img src="logo/logo.png" alt="Copycord Logo" width="100"/>
 </p>
 
-<<<<<<< HEAD
-**Web UI & New Features Coming soon!**
-
-**Copycord** is a Discord server cloner, designed to help you clone and synchronize an entire server in real time. By leveraging your user account’s WebSocket connection together with a dedicated bot, Copycord keeps your clone server fully up to date.
-
-> [!IMPORTANT]
-> **Features:**
-> - Clone host server categories, channels, roles, emojis, stickers, and messages
-> - Detects channel renames, position changes, and recreates missing channels on the fly
-> - Category and channel filtering
-> - Creates webhooks in all channels used to forward identical messages as they are sent
-> - The user account in the host server handles listening; a separate bot handles relaying, minimizing exposure
-> - Send DM announcements in realtime to specific users when a message contains a designated keyword
-> - Slash commands and community server features
-> - **Channel History Cloner**: Clone the target servers full message history for any viewable channel ✨🆕
-> - **Member Scraper**: Scrape the entire target servers member list and output a file containing all member IDs ✨🆕
-
-
-## How It Works
-
-1. **Listen**  
-   Establishes a WebSocket connection using your user token to capture host-server events.
-
-2. **Sync**  
-   Compares the live server structure against a local database, then creates, renames, moves, or deletes channels and categories as needed.
-
-3. **Relay**  
-   For each new message, sends it via webhook—preserving content, author name, and avatar—in the clone server.
-
-=======
 
 **Copycord** lets you clone and monitor Discord servers in real-time, with a feature-rich slash command system and a sleek, easy-to-use web dashboard.
 Easily clone servers, scrape member lists, customize channels, and much more just a few clicks.
@@ -55,19 +25,13 @@ Easily clone servers, scrape member lists, customize channels, and much more jus
 > - **Real-Time DM Alerts** – Get instant, customizable DM notifications for important messages and events that matter most to you.  
 > - **Your Own Bot, Your Rules** – Run a fully independent Discord bot that you control—no restrictions.  
 > - **Sleek Web Dashboard** – Manage everything through a modern, easy-to-use web interface. 
->>>>>>> web-ui
 
 ## Getting Started
 
 ### Prerequisites
 
-<<<<<<< HEAD
-- Docker & Docker Compose  
-- Two Discord applications/accounts: one for listening, one for relaying
-=======
 - [Docker](https://github.com/Copycord/Copycord/blob/main/docs/Instructions.md)
 - Discord Account Token + Discord Bot Token
->>>>>>> web-ui
 
 ### Setup
 
@@ -102,114 +66,6 @@ Easily clone servers, scrape member lists, customize channels, and much more jus
 
 ## Configuration
 
-<<<<<<< HEAD
-### 1. Create a new /Copycord folder and add `docker-compose.yml` and `.env` 
-
-In the new folder, create `docker-compose.yml` and `.env`: 
-
-`Copycord/docker-compose.yml`
-<details>
-  <summary>Click to expand docker-compose.yml example</summary>
-
-```yaml
-services:
-  server:
-    container_name: copycord-server
-    image: ghcr.io/copycord/copycord-server:v1.9.0
-    env_file:
-      - .env
-    volumes:
-      - ./data:/data
-    restart: unless-stopped
-
-  client:
-    container_name: copycord-client
-    image: ghcr.io/copycord/copycord-client:v1.9.0
-    env_file:
-      - .env
-    volumes:
-      - ./data:/data
-    depends_on:
-      - server
-    restart: unless-stopped
-```
-</details>
-
-`Copycord/.env`
-<details>
-  <summary>Click to expand .env example</summary>
-  
-```yaml
-# --- SERVER (BOT in the CLONE guild) ---
-SERVER_TOKEN=            # your bot token
-CLONE_GUILD_ID=          # destination guild ID (where cloning goes)
-COMMAND_USERS=           # comma-separated user IDs allowed to run server commands
-
-# --- WHAT TO DELETE WHEN REMOVED ON HOST (defaults: True) ---
-DELETE_CHANNELS=True     # True: delete cloned channels; False: keep & drop mapping
-DELETE_THREADS=True      # True: delete cloned threads;  False: keep & drop mapping
-DELETE_ROLES=True        # True: delete cloned roles;    False: keep & drop mapping
-
-# --- WHAT TO CLONE (toggle features) ---
-CLONE_EMOJI=True         # clone emojis
-CLONE_STICKER=True       # clone stickers
-CLONE_ROLES=True         # clone roles
-
-# --- ROLE PERMISSIONS ---
-MIRROR_ROLE_PERMISSIONS=False   # True: also mirror role perms; False: only name/color/etc
-
-# --- CLIENT (YOUR ACCOUNT watching the HOST guild) ---
-CLIENT_TOKEN=            # your user token
-HOST_GUILD_ID=           # source guild ID (what you’re mirroring)
-
-# --- RUNTIME ---
-ENABLE_CLONING=True      # master on/off for realtime cloning
-LOG_LEVEL=INFO           # INFO or DEBUG
-```
-</details>
-
-### 2. Create the /data folder and add config.yml inside (optional)
-
-Create the /data folder in the main Copycord folder and the config file into /data: 
-
-`Copycord/data/config.yml`
-
-<details>
-  <summary>Click to expand config.yml example</summary>
-
-```yaml
-# Copycord config.yml
-#
-# How it works
-# ------------
-# • WHITELIST (allow-list):
-#     - If ANY IDs are listed, ONLY those categories/channels are cloned.
-#     - Leave BOTH WHITELIST lists empty to disable whitelist mode.
-#
-# • EXCLUDED (deny-list):
-#     - Drops whatever is listed.
-#
-# • Precedence (practical rules):
-#     1) Channel whitelist > channel exclude
-#     2) Channel exclude > category whitelist   <-- (lets you whitelist a category but drop a few channels)
-#     3) Category whitelist > category exclude
-#
-# • IDs:
-#     - Use IDs from the HOST guild (the source), not the clone guild.
-#     - Right-click → “Copy ID” in Discord (Developer Mode).
-
-whitelist:
-  categories: []   # e.g. [123456789012345678, 234567890123456789]
-  channels: []     # e.g. [345678901234567890]
-
-excluded:
-  categories: []   # e.g. [456789012345678901]
-  channels: []     # e.g. [567890123456789012]
-```
-</details>
-
-### 3. Launch Copycord
-=======
 ### 1. Create a copycord folder and add docker-compose.yml
 ```
 copycord/
@@ -250,7 +106,6 @@ services:
 ```
 
 ### 2. Launch Copycord
->>>>>>> web-ui
 
 Make sure you have Docker & Docker Compose installed, then open a command prompt in the same directory and run:
 
@@ -258,9 +113,6 @@ Make sure you have Docker & Docker Compose installed, then open a command pro
 docker-compose up -d
 ```
 
-<<<<<<< HEAD
-This will pull the latest images, start both the **server** (bot) and **client** (listener), and mount `./data` for database and logs.
-=======
 This will pull the latest images and start the web ui: http://localhost:8080
 
 ### 2. Configure Copycord via the web ui
@@ -289,7 +141,6 @@ This will pull the latest images and start the web ui: http://localhost:8080
 | `LOG_LEVEL`              | INFO    | Level of logs to show (`INFO` / `DEBUG`)                                    |
 
 
->>>>>>> web-ui
 ##
 ### Slash commands
 - [Slash Commands Wiki](docs/slash_commands.md)

@@ -9,10 +9,7 @@
 
 from __future__ import annotations
 import base64
-<<<<<<< HEAD
-=======
 import contextlib
->>>>>>> web-ui
 import gzip
 import asyncio
 import io
@@ -20,16 +17,10 @@ import json
 import logging
 import time
 import random
-<<<<<<< HEAD
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Optional, Tuple
-=======
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 import uuid
->>>>>>> web-ui
 import discord
 
 
@@ -510,9 +501,6 @@ class OnJoinService:
             idx = hash(user_id) % len(self._palette)
             return self._palette[idx]
 
-<<<<<<< HEAD
-        return random.choice(self._palette)
-=======
         return random.choice(self._palette)
     
         
@@ -894,4 +882,3 @@ def _safe_preview(obj) -> str:
     if len(s) > 500:
         return s[:500] + "…"
     return s
->>>>>>> web-ui

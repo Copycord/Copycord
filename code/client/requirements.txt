@@ -1,9 +1,4 @@
 discord.py-self==2.0.1
-<<<<<<< HEAD
-websockets==11.0
-PyYAML==6.0.2
-=======
 websockets==11.0.3
 PyYAML==6.0.2
 aiohttp>=3.9,<4
->>>>>>> web-ui

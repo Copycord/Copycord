@@ -79,6 +79,7 @@ logging.getLogger("discord.client").setLevel(logging.ERROR)
 logger = logging.getLogger("server")
 logger.setLevel(LEVEL)
 
+
 class ServerReceiver:
     def __init__(self):
         self.config = Config(logger=logger)
@@ -1638,6 +1639,7 @@ class ServerReceiver:
                 removed += 1
 
         return removed
+
     def _protected_channel_ids(self, guild: discord.Guild) -> set[int]:
         ids = set()
         for attr in ("rules_channel", "public_updates_channel", "system_channel"):
@@ -2536,6 +2538,7 @@ class ServerReceiver:
                     logger.warning(
                         "[⚠️] Failed to auto-archive thread %s: %s", thread.id, e
                     )
+
     def _sanitize_inline(self, s: str | None) -> str | None:
         if not s:
             return s

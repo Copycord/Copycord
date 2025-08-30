@@ -1,43 +1,39 @@
-# Bytecode & cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-
-# OS metadata
+*.whl
+*.egg-info/
+build/
+dist/
 .DS_Store
 Thumbs.db
-
-# Git & VCS
-.git
-.gitignore
-
-# Environment
-.env
-*.env
-
-# Docker metadata
-Dockerfile*
-.dockerignore
-
-# Editors & IDEs
-.vscode/
-.idea/
 *.swp
 *.swo
-
-# Tests / logs / temp
+.vscode/
+.idea/
+.git
+.gitignore
+.gitattributes
+.env
+*.env
+.venv/
+venv/
 *.log
 *.tmp
 *.bak
 *.old
-
-# Backup / archive files
 *.zip
 *.tar
 *.gz
 *.rar
 *.7z
-
-# Data or local volume folders
 data/
+config/
+tmp/
+code/admin/frontend/node_modules
+code/admin/frontend/.vite
+code/admin/frontend/.cache
+code/admin/static/assets
+Dockerfile*
+.dockerignore

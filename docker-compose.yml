@@ -1,23 +1,4 @@
 services:
-<<<<<<< HEAD
-  server:
-    image: ghcr.io/copycord/copycord-server:v1.8.0
-    container_name: copycord-server
-    env_file:
-      - .env
-    volumes:
-      - ./data:/data
-
-  client:
-    image: ghcr.io/copycord/copycord-client:v1.8.0
-    container_name: copycord-client
-    env_file:
-      - .env
-    volumes:
-      - ./data:/data
-    depends_on:
-      - server
-=======
   admin:
     image: ghcr.io/copycord/copycord:v2.0.0
     environment:
@@ -44,4 +25,3 @@ services:
       - ./data:/data
     depends_on:
       - admin
->>>>>>> web-ui

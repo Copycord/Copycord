@@ -70,16 +70,11 @@ class MemberScraper:
     async def scrape(
         self,
         channel_id: int | str | None = None,  # kept for compatibility
-<<<<<<< HEAD
-        include_names: bool = True,
-        *,
-=======
         *,
         guild_id: int | str | None = None,
         include_username: bool = False,
         include_avatar_url: bool = False,
         include_bio: bool = False,
->>>>>>> web-ui
         alphabet: str = "abcdefghijklmnopqrstuvwxyz0123456789_- .!@#$%^&*()+={}[]|:;\"'<>,.?/~`",
         max_parallel_per_session: int = 1,
         hello_ready_delay: float = 2.5,
@@ -88,22 +83,12 @@ class MemberScraper:
         recycle_after_dispatch: int = 2000,
         stall_timeout: float = 120.0,
         num_sessions: int = 1,
-<<<<<<< HEAD
-        strict_complete: bool = False,  # Keep going after initial guild member_count is found
-=======
         strict_complete: bool = False,
->>>>>>> web-ui
     ) -> Dict[str, Any]:
         # reset cancel flag for this run
         self._cancel_event = asyncio.Event()
 
         # ---------------------------- resolve guild ----------------------------
-<<<<<<< HEAD
-        guild_id = getattr(self.config, "HOST_GUILD_ID", None)
-        guild = self.bot.get_guild(int(guild_id)) if guild_id else None
-        if not guild:
-            raise RuntimeError("No guild available for scrape")
-=======
         gid_in = guild_id if guild_id is not None else getattr(self.config, "HOST_GUILD_ID", None)
         try:
             gid_int = int(gid_in) if gid_in is not None else None
@@ -119,7 +104,6 @@ class MemberScraper:
 
         gname = getattr(guild, "name", "UNKNOWN")
         self.log.debug(f"[guild] Target guild: {gname} ({guild.id}) (source={'caller' if guild_id is not None else 'config'})")
->>>>>>> web-ui
 
         gname = getattr(guild, "name", "UNKNOWN")
         self.log.debug(f"[guild] Target guild: {gname} ({guild.id})")
@@ -166,15 +150,12 @@ class MemberScraper:
         if is_bot:
             # GUILDS (1<<0) + GUILD_MEMBERS (1<<1) to make member chunks flow
             identify_d["intents"] = (1 << 0) | (1 << 1)
-<<<<<<< HEAD
-=======
             
         def build_avatar_url(uid: str, avatar_hash: str | None) -> str | None:
             if not uid or not avatar_hash:
                 return None
             ext = "gif" if str(avatar_hash).startswith("a_") else "png"
             return f"https://cdn.discordapp.com/avatars/{uid}/{avatar_hash}.{ext}?size=1024"
->>>>>>> web-ui
 
         # ---------------------------- shared stores ----------------------------
         members: Dict[str, Dict[str, Any]] = {}
@@ -185,26 +166,18 @@ class MemberScraper:
         # Global warm-up guards (only once per whole run)
         warmup_lock = asyncio.Lock()
         warmup_done = asyncio.Event()
-<<<<<<< HEAD
-=======
                 
         bios_needed: set[str] = set() if include_bio else set()
->>>>>>> web-ui
 
         # ---------------------------- helpers ----------------------------
         def shard_alphabet(alpha: str, k: int, n: int) -> str:
             return "".join(list(alpha)[k::n]) if n > 1 else alpha
 
-<<<<<<< HEAD
-        def should_stop() -> bool:
-            return stop_event.is_set() or self._cancel_event.is_set()
-=======
         def user_cancelled() -> bool:
             return self._cancel_event.is_set()
 
         def target_reached() -> bool:
             return stop_event.is_set()
->>>>>>> web-ui
 
         def next_sibling_prefix(q: str, alpha: str) -> Optional[str]:
             """Find the lexicographic next prefix at the same depth as q."""
@@ -277,15 +250,10 @@ class MemberScraper:
                 )
 
             async def send_op8(ws, q: str, *, limit: int) -> str:
-<<<<<<< HEAD
-                if should_stop():
-                    raise asyncio.CancelledError()
-=======
                 if user_cancelled():
                     raise asyncio.CancelledError()
                 if target_reached():
                     return "" 
->>>>>>> web-ui
                 n = mk_nonce(q)
                 payload = {
                     "op": 8,
@@ -314,19 +282,11 @@ class MemberScraper:
             async def pump_more(ws, reason: str):
                 """Dispatch more op:8 requests, respecting per-session parallelism."""
                 nonlocal dispatched_since_connect
-<<<<<<< HEAD
-                if should_stop():
-                    return
-                started = 0
-                while search_queue and len(in_flight_nonces) < max_parallel_per_session:
-                    if should_stop():
-=======
                 if user_cancelled() or target_reached():
                     return
                 started = 0
                 while search_queue and len(in_flight_nonces) < max_parallel_per_session:
                     if user_cancelled() or target_reached():
->>>>>>> web-ui
                         return
                     q = search_queue.popleft()
                     try:
@@ -352,14 +312,10 @@ class MemberScraper:
                 """Requeue long-stuck inflight requests; trigger recycle on stalls."""
                 try:
                     while True:
-<<<<<<< HEAD
-                        if should_stop():
-=======
                         if user_cancelled():
                             recycle_now.set()
                             return
                         if target_reached():
->>>>>>> web-ui
                             recycle_now.set()
                             return
                         await asyncio.sleep(0.5)
@@ -434,20 +390,12 @@ class MemberScraper:
 
             # ---------------------------- main WS loop ----------------------------
             while True:
-<<<<<<< HEAD
-                if should_stop():
-                    self.log.debug(
-                        f"[S{session_index}] should_stop() at loop top → raise CancelledError"
-                    )
-                    raise asyncio.CancelledError()
-=======
                 if user_cancelled():
                     self.log.debug(f"[S{session_index}] user cancel → CancelledError")
                     raise asyncio.CancelledError()
                 if target_reached():
                     self.log.debug(f"[S{session_index}] target reached → normal return")
                     return
->>>>>>> web-ui
 
                 await ensure_prefix_seeded()
 
@@ -504,20 +452,6 @@ class MemberScraper:
                                         pass
                                     break
 
-<<<<<<< HEAD
-                                if (
-                                    (stop_task in done)
-                                    or (cnl_task in done)
-                                    or should_stop()
-                                ):
-                                    self.log.debug(
-                                        f"[S{session_index}:ws] cancel/stop detected → closing and raising CancelledError"
-                                    )
-                                    try:
-                                        await ws.close(
-                                            code=1000, message=b"target_or_cancel"
-                                        )
-=======
                                 if stop_task in done or target_reached():
                                     self.log.debug(f"[S{session_index}:ws] target reached → close & return")
                                     try:
@@ -530,7 +464,6 @@ class MemberScraper:
                                     self.log.debug(f"[S{session_index}:ws] user cancel → close & CancelledError")
                                     try:
                                         await ws.close(code=1000, message=b"user_cancel")
->>>>>>> web-ui
                                     except Exception:
                                         pass
                                     raise asyncio.CancelledError()
@@ -652,31 +585,6 @@ class MemberScraper:
                                                     uid = u.get("id")
                                                     if not uid or uid in members:
                                                         continue
-<<<<<<< HEAD
-                                                    rec = {
-                                                        "id": uid,
-                                                        "bot": bool(
-                                                            u.get("bot", False)
-                                                        ),
-                                                    }
-                                                    if include_names:
-                                                        rec.update(
-                                                            {
-                                                                "username": u.get(
-                                                                    "username"
-                                                                ),
-                                                                "discriminator": u.get(
-                                                                    "discriminator"
-                                                                ),
-                                                                "avatar": u.get(
-                                                                    "avatar"
-                                                                ),
-                                                                "joined_at": m.get(
-                                                                    "joined_at"
-                                                                ),
-                                                            }
-                                                        )
-=======
                                                     rec = {"id": uid}
 
                                                     # Optional fields
@@ -690,7 +598,6 @@ class MemberScraper:
                                                     if include_bio:
                                                         bios_needed.add(uid)
 
->>>>>>> web-ui
                                                     members[uid] = rec
                                                     added_here += 1
                                             if added_here:
@@ -835,8 +742,6 @@ class MemberScraper:
                 f"[Copycord Scraper Beta ✨] Starting member scrape in {gname}"
             )
             await asyncio.gather(*(run_session(i) for i in range(num_sessions)))
-<<<<<<< HEAD
-=======
             if include_bio and bios_needed:
                 conc = int(getattr(self.config, "BIO_FETCH_CONCURRENCY", 3))
                 limit = int(getattr(self.config, "BIO_FETCH_LIMIT", 500))  # safety cap
@@ -879,7 +784,6 @@ class MemberScraper:
                         await asyncio.gather(*(bound(u) for u in subset))
                 except Exception:
                     pass
->>>>>>> web-ui
             if dynamic_leads_added_global:
                 self.log.info(
                     "[discover] %d dynamic leading characters discovered this run: %s",
@@ -899,161 +803,3 @@ class MemberScraper:
             )
             self._cancel_event.set()
             raise
-<<<<<<< HEAD
-
-
-class StreamManager:
-    """
-    Spools large JSON results to a temp .gz file and serves them in fixed-size chunks.
-    """
-
-    def __init__(self, logger=None, default_ttl_seconds: int = 3600):
-        self._streams: Dict[str, Dict[str, Any]] = {}
-        self._ttl = int(default_ttl_seconds)
-        self._logger = logger
-
-    def pack_json(
-        self,
-        result: Any,
-        *,
-        max_inline_bytes: int = 1_500_000,
-        chunk_size: int = 512 * 1024,
-        compresslevel: int = 6,
-    ) -> Dict[str, Any]:
-        """
-        Return a response dict:
-          {"ok": True, "data": <result>}                                  # small
-          {"ok": True, "stream": {"id", "encoding", "size", "chunk_size"}} # large
-        """
-        try:
-            raw = json.dumps(result, separators=(",", ":")).encode("utf-8")
-        except Exception as e:
-            return {"ok": False, "error": f"json-serialize-failed: {e!r}"}
-
-        if len(raw) <= max_inline_bytes:
-            return {"ok": True, "data": result}
-
-        try:
-            gz = gzip.compress(raw, compresslevel=compresslevel)
-            tf = tempfile.NamedTemporaryFile(delete=False)
-            try:
-                tf.write(gz)
-                tf.flush()
-                size = tf.tell()
-            finally:
-                tf.close()
-        except Exception as e:
-            return {"ok": False, "error": f"spool-failed: {e!r}"}
-
-        sid = str(uuid.uuid4())
-        now = time.time()
-        self._streams[sid] = {
-            "path": tf.name,
-            "size": size,
-            "encoding": "json.gz",
-            "created": now,
-            "expires": now + self._ttl,
-            "chunk_size": int(chunk_size),
-        }
-        if self._logger:
-            self._logger.debug(
-                "[📦] Spooled stream %s → %s (%d bytes)", sid, tf.name, size
-            )
-
-        return {
-            "ok": True,
-            "stream": {
-                "id": sid,
-                "encoding": "json.gz",
-                "size": size,
-                "chunk_size": int(chunk_size),
-            },
-        }
-
-    def next(
-        self, sid: str, offset: int = 0, length: Optional[int] = None
-    ) -> Dict[str, Any]:
-        """
-        Return a chunk response dict:
-          {"ok": True, "id", "offset", "next", "eof": False, "encoding", "data_b64"}
-          {"ok": True, "id", "offset", "eof": True}  # also deletes the file/entry
-        Errors:
-          {"ok": False, "error": "..."}
-        """
-        meta = self._streams.get(sid)
-        if not meta:
-            return {"ok": False, "error": "stream-not-found"}
-
-        if time.time() > meta["expires"]:
-            self._cleanup(sid, meta)
-            return {"ok": False, "error": "stream-expired"}
-
-        size = int(meta["size"])
-        offset = int(max(0, offset))
-        if offset >= size:
-            self._cleanup(sid, meta)
-            return {"ok": True, "id": sid, "offset": offset, "eof": True}
-
-        chunk_size = int(
-            length if length is not None else meta.get("chunk_size", 512 * 1024)
-        )
-        chunk_size = max(1, min(chunk_size, size - offset))
-
-        try:
-            with open(meta["path"], "rb") as f:
-                f.seek(offset)
-                chunk = f.read(chunk_size)
-        except Exception as e:
-            return {"ok": False, "error": f"read-failed: {e!r}"}
-
-        return {
-            "ok": True,
-            "id": sid,
-            "offset": offset,
-            "next": offset + len(chunk),
-            "eof": False,
-            "encoding": meta["encoding"],
-            "data_b64": base64.b64encode(chunk).decode("ascii"),
-        }
-
-    def abort(self, sid: str) -> Dict[str, Any]:
-        """Abort and cleanup a stream."""
-        meta = self._streams.pop(sid, None)
-        if not meta:
-            return {"ok": True}  # idempotent
-        self._unlink_silent(meta.get("path"))
-        if self._logger:
-            self._logger.debug("[🧹] Aborted stream %s", sid)
-        return {"ok": True}
-
-    def gc_expired(self, *, max_delete: int = 50) -> int:
-        """
-        Delete expired streams (best-effort). Returns number cleaned.
-        Call periodically from a task, or just rely on lazy cleanup in .next().
-        """
-        now = time.time()
-        cleaned = 0
-        for sid, meta in list(self._streams.items()):
-            if cleaned >= max_delete:
-                break
-            if now > float(meta.get("expires", 0)):
-                self._cleanup(sid, meta)
-                cleaned += 1
-        return cleaned
-
-    def _cleanup(self, sid: str, meta: Dict[str, Any]) -> None:
-        self._streams.pop(sid, None)
-        self._unlink_silent(meta.get("path"))
-        if self._logger:
-            self._logger.debug("[🧹] Cleaned stream %s", sid)
-
-    @staticmethod
-    def _unlink_silent(path: Optional[str]) -> None:
-        if not path:
-            return
-        try:
-            os.unlink(path)
-        except Exception:
-            pass
-=======
->>>>>>> web-ui

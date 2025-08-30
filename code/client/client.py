@@ -9,19 +9,12 @@
 
 import asyncio
 import contextlib
-<<<<<<< HEAD
-=======
 import json
->>>>>>> web-ui
 import re
 import signal
 import unicodedata
 from datetime import datetime, timezone
 import logging
-<<<<<<< HEAD
-from logging.handlers import RotatingFileHandler
-=======
->>>>>>> web-ui
 from typing import Optional
 import discord
 from discord import ChannelType, MessageType
@@ -29,15 +22,6 @@ from discord.errors import Forbidden, HTTPException
 import os
 import sys
 from discord.ext import commands
-<<<<<<< HEAD
-from common.config import Config
-from common.db import DBManager
-from client.sitemap import SitemapService
-from client.message_utils import MessageUtils
-from common.websockets import WebsocketManager
-from client.scraper import MemberScraper
-from client.scraper import StreamManager
-=======
 from common.config import Config, CURRENT_VERSION
 from common.db import DBManager
 from client.sitemap import SitemapService
@@ -45,7 +29,6 @@ from client.message_utils import MessageUtils
 from common.websockets import WebsocketManager, AdminBus
 from client.scraper import MemberScraper
 from client.helpers import ClientUiController
->>>>>>> web-ui
 
 
 LOG_DIR = "/data"
@@ -67,20 +50,6 @@ ch.setFormatter(formatter)
 ch.setLevel(LEVEL)
 root.addHandler(ch)
 
-<<<<<<< HEAD
-log_file = os.path.join(LOG_DIR, "client.log")
-fh = RotatingFileHandler(
-    log_file,
-    maxBytes=10 * 1024 * 1024,
-    backupCount=1,
-    encoding="utf-8",
-)
-fh.setFormatter(formatter)
-fh.setLevel(LEVEL)
-root.addHandler(fh)
-
-=======
->>>>>>> web-ui
 # keep library noise down
 for name in ("websockets.server", "websockets.protocol"):
     logging.getLogger(name).setLevel(logging.WARNING)
@@ -114,17 +83,10 @@ class ClientListener:
         self._m_user = re.compile(r"<@!?(\d+)>")
         self.scraper = getattr(self, "scraper", None)
         self._scrape_lock = getattr(self, "_scrape_lock", asyncio.Lock())
-<<<<<<< HEAD
-        self.streams = getattr(self, "streams", StreamManager(logger))
-        self._scrape_task: asyncio.Task | None = None
-        self._last_cancel_at: float | None = None
-        self._cancelling: bool = False
-=======
         self._last_cancel_at: float | None = None
         self._cancelling: bool = False
         self._scrape_task = None
         self._scrape_gid = None
->>>>>>> web-ui
         self.do_precount = True
         self.bot.event(self.on_ready)
         self.bot.event(self.on_message)
@@ -137,15 +99,12 @@ class ClientListener:
         self.bot.event(self.on_guild_role_create)
         self.bot.event(self.on_guild_role_delete)
         self.bot.event(self.on_guild_role_update)
-<<<<<<< HEAD
-=======
         self.bot.event(self.on_guild_join)
         self.bot.event(self.on_guild_remove)
         self.bot.event(self.on_guild_update)
         self.bus = AdminBus(
             role="client", logger=logger, admin_ws_url=self.config.ADMIN_WS_URL
         )
->>>>>>> web-ui
         self.ws = WebsocketManager(
             send_url=self.config.SERVER_WS_URL,
             listen_host=self.config.CLIENT_WS_HOST,
@@ -160,8 +119,6 @@ class ClientListener:
             host_guild_id=self.host_guild_id,
             logger=logger,
         )
-<<<<<<< HEAD
-=======
         self.ui_controller = ClientUiController(
             bus=self.bus,
             admin_base_url=self.config.ADMIN_WS_URL,
@@ -170,7 +127,6 @@ class ClientListener:
             listener=self,
             logger=logging.getLogger("client.ui"),
         )
->>>>>>> web-ui
 
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -209,12 +165,6 @@ class ClientListener:
                     "client_start_time": self.start_time.isoformat(),
                 },
             }
-<<<<<<< HEAD
-
-        elif typ == "clone_messages":
-            chan_id = int(data.get("channel_id"))
-            asyncio.create_task(self._backfill_channel(chan_id))
-=======
         elif typ == "filters_reload":
             self.config._load_filters_from_db()
             logger.info("[⚙️] Filters reloaded from DB")
@@ -256,7 +206,6 @@ class ClientListener:
                 before_iso=before_iso,   # NEW
                 last_n=last_n,
             ))
->>>>>>> web-ui
             return {"ok": True}
 
         elif typ == "sitemap_request":
@@ -268,9 +217,6 @@ class ClientListener:
                 return {"ok": False, "error": "Cloning is disabled"}
 
         elif typ == "scrape_members":
-<<<<<<< HEAD
-            include_names = bool(data.get("include_names", True))
-=======
             data = data or {}
 
             inc_username   = bool(data.get("include_username", False))
@@ -278,7 +224,6 @@ class ClientListener:
             inc_bio        = bool(data.get("include_bio", False))
             gid            = str(data.get("guild_id") or "")     # echo back to UI so it can highlight the right card
             self._scrape_gid = gid
->>>>>>> web-ui
 
             def clamp(v, lo, hi):
                 return max(lo, min(hi, v))
@@ -293,9 +238,6 @@ class ClientListener:
             if mpps is None:
                 mpps = clamp(8 // ns, 1, 5)
             else:
-<<<<<<< HEAD
-                mpps = clamp(int(mpps), 1, 5)
-=======
                 try:
                     mpps = clamp(int(mpps), 1, 5)
                 except Exception:
@@ -305,7 +247,6 @@ class ClientListener:
             def _err_msg(e: BaseException) -> str:
                 msg = str(e).strip()
                 return msg or type(e).__name__
->>>>>>> web-ui
 
             try:
                 if self.scraper is None:
@@ -313,76 +254,6 @@ class ClientListener:
 
                 async with self._scrape_lock:
                     if self._scrape_task and not self._scrape_task.done():
-<<<<<<< HEAD
-                        logger.debug("[scrape] REJECT: already-running task")
-                        return {"ok": False, "error": "scrape-already-running"}
-
-                    self._scrape_task = asyncio.create_task(
-                        self.scraper.scrape(
-                            include_names=include_names,
-                            num_sessions=ns,
-                            max_parallel_per_session=mpps,
-                        ),
-                        name="scrape",
-                    )
-                    try:
-                        result = await self._scrape_task
-                        logger.debug(
-                            "[scrape] TASK_AWAITED_OK count=%d",
-                            len((result or {}).get("members", [])),
-                        )
-                        return {"ok": True, "data": result}
-                    except asyncio.CancelledError:
-                        logger.debug("[scrape] TASK_AWAITED_CANCELLED")
-                        return {"ok": False, "error": "cancelled"}
-                    except BaseException as e:
-                        logger.exception("[❌] OP8 scrape failed: %r", e)
-                        return {"ok": False, "error": str(e)}
-                    finally:
-                        self._scrape_task = None
-            except BaseException as e:
-                logger.exception("[❌] OP8 scrape failed (outer): %r", e)
-                return {"ok": False, "error": str(e)}
-
-        elif typ == "stream_next":
-            sid = data.get("id")
-            offset = int(data.get("offset", 0))
-            length = int(data.get("length", 0) or 0)
-            return self.streams.next(sid, offset, length or None)
-
-        elif typ == "stream_abort":
-            return self.streams.abort(data.get("id"))
-
-        elif typ == "scrape_cancel":
-            try:
-                self._cancelling = True
-                t = getattr(self, "_scrape_task", None)
-                if getattr(self, "scraper", None):
-                    self.scraper.request_cancel()
-                    logger.debug("[scrape] CANCEL → cooperative flag set")
-                if t and not t.done():
-                    t.cancel()
-                    logger.debug("[scrape] CANCEL → hard cancel issued to task")
-                return {"ok": True}
-            except Exception as e:
-                logger.exception("[scrape] CANCEL failed")
-                return {"ok": False, "error": str(e)}
-
-        elif typ == "scrape_snapshot":
-            try:
-                include_names = bool((data or {}).get("include_names", True))
-                if getattr(self, "scraper", None):
-                    members = await self.scraper.snapshot_members()
-                    return self.streams.pack_json(
-                        {"members": members, "count": len(members)},
-                        max_inline_bytes=800_000,
-                    )
-                return self.streams.pack_json(
-                    {"members": [], "count": 0}, max_inline_bytes=800_000
-                )
-            except Exception as e:
-                logger.exception("[❌] scrape_snapshot failed")
-=======
                         # another scrape is still running
                         return {"ok": False, "error": "scrape-already-running"}
 
@@ -582,7 +453,6 @@ class ClientListener:
                 return {"ok": True, "cancelling": True}
             except Exception as e:
                 logger.exception("[scrape_cancel] failed: %r", e)
->>>>>>> web-ui
                 return {"ok": False, "error": str(e)}
 
         return None
@@ -686,16 +556,12 @@ class ClientListener:
             )
             sys.exit(1)
         asyncio.create_task(self.config.setup_release_watcher(self, should_dm=False))
-<<<<<<< HEAD
-        logger.info("[🤖] Logged in as %s in guild %s", self.bot.user, host_guild.name)
-=======
         msg = f"Logged in as {self.bot.user.display_name} in {host_guild.name}"
         self.ui_controller.start() # Start UI Listener
         await self.bus.status(
             running=True, status=msg, discord={"ready": True}
         )
         logger.info("[🤖] %s", msg)
->>>>>>> web-ui
         if self.config.ENABLE_CLONING:
             if self._sync_task is None:
                 self._sync_task = asyncio.create_task(self.periodic_sync_loop())
@@ -703,10 +569,7 @@ class ClientListener:
             logger.info("[🔕] Server cloning is disabled...")
         if self._ws_task is None:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
-<<<<<<< HEAD
-=======
         asyncio.create_task(self._snapshot_all_guilds_once())
->>>>>>> web-ui
 
     def _rebuild_blocklist(self, keywords: list[str] | None = None) -> None:
         if keywords is None:
@@ -1047,11 +910,6 @@ class ClientListener:
                     getattr(before, "id", None),
                 )
                 return
-<<<<<<< HEAD
-
-            # Only resync if name or parent category changed
-=======
->>>>>>> web-ui
             name_changed = before.name != after.name
             parent_before = getattr(before, "category_id", None)
             parent_after = getattr(after, "category_id", None)
@@ -1100,8 +958,6 @@ class ClientListener:
             "[roles] update: %s (%d) → scheduling sitemap", after.name, after.id
         )
         self.schedule_sync()
-<<<<<<< HEAD
-=======
         
     async def on_guild_join(self, guild: discord.Guild):
         try:
@@ -1125,7 +981,6 @@ class ClientListener:
             logger.debug("[guilds] update → upsert %s (%s)", after.name, after.id)
         except Exception:
             logger.exception("[guilds] on_guild_update failed")
->>>>>>> web-ui
 
     async def on_member_join(self, member: discord.Member):
         try:
@@ -1161,21 +1016,6 @@ class ClientListener:
         except Exception:
             logger.exception("Failed to forward member_joined")
 
-<<<<<<< HEAD
-    async def _backfill_channel(self, original_channel_id: int):
-        """Grab all human/bot messages from a channel and send to server"""
-        await self.ws.send(
-            {"type": "backfill_started", "data": {"channel_id": original_channel_id}}
-        )
-
-        guild = self.bot.get_guild(self.host_guild_id)
-        if not guild:
-            logger.error("[⛔] Host guild %s not available", self.host_guild_id)
-            await self.ws.send(
-                {"type": "backfill_done", "data": {"channel_id": original_channel_id}}
-            )
-            return
-=======
     async def _backfill_channel(
         self,
         original_channel_id: int,
@@ -1255,25 +1095,11 @@ class ClientListener:
                                     "data": {"channel_id": original_channel_id}})
             return
         logger.debug("[backfill] guild OK | id=%s name=%s", getattr(guild, "id", None), getattr(guild, "name", None))
->>>>>>> web-ui
 
         ch = guild.get_channel(original_channel_id)
         if not ch:
             try:
                 ch = await self.bot.fetch_channel(original_channel_id)
-<<<<<<< HEAD
-            except Exception as e:
-                logger.error("[⛔] Cannot fetch channel %s: %s", original_channel_id, e)
-                await self.ws.send(
-                    {
-                        "type": "backfill_done",
-                        "data": {"channel_id": original_channel_id},
-                    }
-                )
-                return
-
-        # ----- filter: only human/bot messages, exclude all system messages -----
-=======
                 logger.debug("[backfill] channel fetched | id=%s name=%s type=%s",
                             getattr(ch, "id", None), getattr(ch, "name", None),
                             getattr(getattr(ch, "type", None), "value", None))
@@ -1297,56 +1123,20 @@ class ClientListener:
                 getattr(getattr(ch, "guild", None), "id", None), self.host_guild_id
             )
 
->>>>>>> web-ui
         ALLOWED_TYPES = {MessageType.default}
         for _name in ("reply", "application_command", "context_menu_command"):
             _t = getattr(MessageType, _name, None)
             if _t is not None:
                 ALLOWED_TYPES.add(_t)
-<<<<<<< HEAD
-
-        def _is_normal(msg) -> bool:
-            # skip if Discord flags it as system
-=======
         logger.debug("[backfill] allowed message types: %s",
                     sorted(getattr(t, "value", str(t)) for t in ALLOWED_TYPES))
 
         def _is_normal(msg) -> bool:
->>>>>>> web-ui
             try:
                 if callable(getattr(msg, "is_system", None)) and msg.is_system():
                     return False
             except Exception:
                 pass
-<<<<<<< HEAD
-            # skip if author is a system user
-            if getattr(getattr(msg, "author", None), "system", False):
-                return False
-            # allow only specific message types
-            if getattr(msg, "type", None) not in ALLOWED_TYPES:
-                return False
-            return True
-
-        sent = 0
-        last_ping = 0.0
-
-        try:
-            if getattr(self, "do_precount", False):
-                total = 0
-                async for m in ch.history(limit=None, oldest_first=True):
-                    if not _is_normal(m):
-                        continue
-                    total += 1
-                await self.ws.send(
-                    {
-                        "type": "backfill_progress",
-                        "data": {"channel_id": original_channel_id, "count": total},
-                    }
-                )
-            async for m in ch.history(limit=None, oldest_first=True):
-                if not _is_normal(m):
-                    continue
-=======
             if getattr(getattr(msg, "author", None), "system", False):
                 return False
             if getattr(msg, "type", None) not in ALLOWED_TYPES:
@@ -1369,76 +1159,10 @@ class ClientListener:
                 if not _is_normal(m):
                     skipped += 1
                     return
->>>>>>> web-ui
 
                 raw = m.content or ""
                 system = getattr(m, "system_content", "") or ""
                 content = system if (not raw and system) else raw
-<<<<<<< HEAD
-                author = "System" if (not raw and system) else m.author.name
-
-                # Embeds & mentions
-                raw_embeds = [e.to_dict() for e in m.embeds]
-                mention_map = await self.msg.build_mention_map(m, raw_embeds)
-                embeds = [
-                    self.msg.sanitize_embed_dict(e, m, mention_map) for e in raw_embeds
-                ]
-                content = self.msg.sanitize_inline(content, m, mention_map)
-
-                stickers_payload = self.msg.stickers_payload(getattr(m, "stickers", []))
-
-                payload = {
-                    "type": "message",
-                    "data": {
-                        "channel_id": m.channel.id,
-                        "channel_name": m.channel.name,
-                        "channel_type": m.channel.type.value,
-                        "author": author,
-                        "author_id": m.author.id,
-                        "avatar_url": (
-                            str(m.author.display_avatar.url)
-                            if getattr(m.author, "display_avatar", None)
-                            else None
-                        ),
-                        "content": content,
-                        "embeds": embeds,
-                        "attachments": [
-                            {"url": a.url, "filename": a.filename, "size": a.size}
-                            for a in m.attachments
-                        ],
-                        "stickers": stickers_payload,
-                        "__backfill__": True,
-                    },
-                }
-
-                await self.ws.send(payload)
-
-                sent += 1
-                now = asyncio.get_event_loop().time()
-                if sent % 50 == 0 or (now - last_ping) >= 2.0:
-                    await self.ws.send(
-                        {
-                            "type": "backfill_progress",
-                            "data": {"channel_id": original_channel_id, "count": sent},
-                        }
-                    )
-                    last_ping = now
-
-        except Forbidden as e:
-            # Prevent the unhandled task exception and report cleanly
-            logger.info(
-                "[backfill] history forbidden channel=%s: %s", original_channel_id, e
-            )
-        except HTTPException as e:
-            logger.warning(
-                "[backfill] HTTP error channel=%s: %s", original_channel_id, e
-            )
-        finally:
-            await self.ws.send(
-                {"type": "backfill_done", "data": {"channel_id": original_channel_id}}
-            )
-
-=======
                 author = "System" if (not raw and system) else getattr(m.author, "name", "Unknown")
 
                 raw_embeds = [e.to_dict() for e in m.embeds]
@@ -1574,15 +1298,12 @@ class ClientListener:
         except Exception:
             logger.exception("[guilds] snapshot failed (outer)")
             
->>>>>>> web-ui
     async def _shutdown(self):
         """
         Asynchronously shuts down the client.
         """
         logger.info("Shutting down client…")
         self.ws.begin_shutdown()
-<<<<<<< HEAD
-=======
         self.bus.begin_shutdown()  # make AdminBus sends fast + no retries
         with contextlib.suppress(Exception):
             await self.ui_controller.stop()
@@ -1590,7 +1311,6 @@ class ClientListener:
             await asyncio.wait_for(
                 self.bus.status(running=False, status="Stopped"), 0.4
             )
->>>>>>> web-ui
         try:
             t = getattr(self, "_scrape_task", None)
             if getattr(self, "scraper", None):
@@ -1614,11 +1334,7 @@ class ClientListener:
         provided client token from the configuration. It ensures proper shutdown
         of the bot and cleanup of pending tasks when the event loop is closed.
         """
-<<<<<<< HEAD
-        logger.info("[✨] Starting Copycord Client %s", self.config.CURRENT_VERSION)
-=======
         logger.info("[✨] Starting Copycord Client %s", CURRENT_VERSION)
->>>>>>> web-ui
         loop = asyncio.get_event_loop()
         try:
             loop.run_until_complete(self.bot.start(self.config.CLIENT_TOKEN))
@@ -1631,10 +1347,6 @@ class ClientListener:
             loop.close()
 
 
-<<<<<<< HEAD
-if __name__ == "__main__":
-    ClientListener().run()
-=======
 def _autostart_enabled() -> bool:
     import os
 
@@ -1649,4 +1361,3 @@ if __name__ == "__main__":
 
         while True:
             time.sleep(3600)
->>>>>>> web-ui

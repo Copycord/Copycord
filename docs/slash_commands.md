@@ -59,10 +59,6 @@ This document provides easy-to-follow instructions on how to use the available s
 
 ---
 
-<<<<<<< HEAD
-
-### 5. `/announcement_trigger <keyword> <user_id> [channel_id]`
-=======
 ### 5. `/verify_structure [delete:<true|false>]`
 
 **Description:** Reports channels and categories not present in the last sitemap. Optionally deletes them.
@@ -83,7 +79,6 @@ This document provides easy-to-follow instructions on how to use the available s
 
 
 ### 6. `/announcement_trigger <keyword> <user_id> [channel_id]`
->>>>>>> web-ui
 
 **Description:** Registers a trigger so that when a specific user posts a message containing the keyword, a DM is sent to subscribers.
 
@@ -102,11 +97,7 @@ This document provides easy-to-follow instructions on how to use the available s
 
 ---
 
-<<<<<<< HEAD
-### 6. `/announcement_user [@user] [keyword]`
-=======
 ### 7. `/announcement_user [@user] [keyword]`
->>>>>>> web-ui
 
 **Description:** Subscribes or unsubscribes a user to announcements for a keyword—or all keywords.
 
@@ -126,11 +117,7 @@ This document provides easy-to-follow instructions on how to use the available s
 
 ---
 
-<<<<<<< HEAD
-### 7. `/announcement_list [delete:<n>]`
-=======
 ### 8. `/announcement_list [delete:<n>]`
->>>>>>> web-ui
 
 **Description:** Lists current announcement triggers or deletes one by its index.
 
@@ -144,11 +131,6 @@ This document provides easy-to-follow instructions on how to use the available s
 /announcement_list            # show all triggers
 /announcement_list delete:2   # remove trigger #2
 ```
-<<<<<<< HEAD
----
-
-### 8. `/onjoin_dm <server_id>`
-=======
 
 
 ---
@@ -193,7 +175,6 @@ This document provides easy-to-follow instructions on how to use the available s
 ---
 
 ### 12. `/onjoin_dm <server_id>`
->>>>>>> web-ui
 
 **Description:** Toggles DM notifications when someone joins the specified server. (Only works for servers with 1k or less members)
 If enabled, you’ll receive a direct message with the new member’s details whenever someone joins that guild.

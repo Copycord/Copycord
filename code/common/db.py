@@ -8,20 +8,11 @@
 # =============================================================================
 
 
-<<<<<<< HEAD
-import sqlite3
-=======
 import sqlite3, threading
->>>>>>> web-ui
 from typing import List, Optional
 
 
 class DBManager:
-<<<<<<< HEAD
-    def __init__(self, path: str):
-        self.conn = sqlite3.connect(path)
-        self.conn.row_factory = sqlite3.Row
-=======
     def __init__(self, db_path: str):
         self.path = db_path
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
@@ -38,7 +29,6 @@ class DBManager:
         self.conn.execute("PRAGMA synchronous = FULL;")     # durability like default
         self.conn.execute("PRAGMA busy_timeout = 5000;")    # friendlier under contention
         self.lock = threading.RLock()
->>>>>>> web-ui
         self._init_schema()
 
     def _init_schema(self):
@@ -48,8 +38,6 @@ class DBManager:
         """
         c = self.conn.cursor()
 
-<<<<<<< HEAD
-=======
         c.execute("""
         CREATE TABLE IF NOT EXISTS app_config(
         key           TEXT PRIMARY KEY,
@@ -68,19 +56,12 @@ class DBManager:
         );
         """)
 
->>>>>>> web-ui
         c.execute(
             """
         CREATE TABLE IF NOT EXISTS category_mappings (
           original_category_id   INTEGER PRIMARY KEY,
           original_category_name TEXT    NOT NULL,
           cloned_category_id     INTEGER,
-<<<<<<< HEAD
-          cloned_category_name   TEXT
-        );
-        """
-        )
-=======
           cloned_category_name   TEXT,
           last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -90,42 +71,10 @@ class DBManager:
         CREATE UNIQUE INDEX IF NOT EXISTS uq_category_mappings_cloned_id
         ON category_mappings(cloned_category_id);
         """)
->>>>>>> web-ui
 
         c.execute(
             """
         CREATE TABLE IF NOT EXISTS channel_mappings (
-<<<<<<< HEAD
-          original_channel_id           INTEGER PRIMARY KEY,
-          original_channel_name         TEXT    NOT NULL,
-          cloned_channel_id             INTEGER UNIQUE,
-          channel_webhook_url           TEXT,
-          original_parent_category_id   INTEGER,
-          cloned_parent_category_id     INTEGER,
-          FOREIGN KEY(original_parent_category_id)
-            REFERENCES category_mappings(original_category_id),
-          FOREIGN KEY(cloned_parent_category_id)
-            REFERENCES category_mappings(cloned_category_id)
-        );
-        """
-        )
-        cols = [r[1] for r in c.execute("PRAGMA table_info(channel_mappings)").fetchall()]
-        if "channel_type" not in cols:
-            c.execute("ALTER TABLE channel_mappings ADD COLUMN channel_type INTEGER NOT NULL DEFAULT 0")
-
-        c.execute(
-            """
-        CREATE TABLE IF NOT EXISTS threads (
-          original_thread_id     INTEGER PRIMARY KEY,
-          original_thread_name   TEXT    NOT NULL,
-          cloned_thread_id       INTEGER,
-          forum_original_id      INTEGER NOT NULL,
-          forum_cloned_id        INTEGER,
-          FOREIGN KEY(forum_original_id)
-            REFERENCES channel_mappings(original_channel_id),
-          FOREIGN KEY(forum_cloned_id)
-            REFERENCES channel_mappings(cloned_channel_id)
-=======
         original_channel_id           INTEGER PRIMARY KEY,
         original_channel_name         TEXT    NOT NULL,
         cloned_channel_id             INTEGER UNIQUE,
@@ -166,7 +115,6 @@ class DBManager:
             REFERENCES channel_mappings(original_channel_id) ON DELETE SET NULL,
         FOREIGN KEY(forum_cloned_id)
             REFERENCES channel_mappings(cloned_channel_id)   ON DELETE SET NULL
->>>>>>> web-ui
         );
         """
         )
@@ -177,12 +125,8 @@ class DBManager:
           original_emoji_id   INTEGER PRIMARY KEY,
           original_emoji_name TEXT    NOT NULL,
           cloned_emoji_id     INTEGER UNIQUE,
-<<<<<<< HEAD
-          cloned_emoji_name   TEXT    NOT NULL
-=======
           cloned_emoji_name   TEXT    NOT NULL,
           last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
->>>>>>> web-ui
         );
         """
         )
@@ -193,12 +137,8 @@ class DBManager:
         original_sticker_id   INTEGER PRIMARY KEY,
         original_sticker_name TEXT    NOT NULL,
         cloned_sticker_id     INTEGER UNIQUE,
-<<<<<<< HEAD
-        cloned_sticker_name   TEXT    NOT NULL
-=======
         cloned_sticker_name   TEXT    NOT NULL,
         last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
->>>>>>> web-ui
         );
         """
         )
@@ -210,11 +150,7 @@ class DBManager:
             original_role_name TEXT    NOT NULL,
             cloned_role_id     INTEGER UNIQUE,
             cloned_role_name   TEXT    NOT NULL,
-<<<<<<< HEAD
-            last_updated       DATETIME
-=======
             last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
->>>>>>> web-ui
             );
             """
         )
@@ -223,14 +159,10 @@ class DBManager:
             """
         CREATE TABLE IF NOT EXISTS settings (
           id                INTEGER PRIMARY KEY CHECK (id = 1),
-<<<<<<< HEAD
-          blocked_keywords  TEXT    NOT NULL DEFAULT ''
-=======
           blocked_keywords  TEXT    NOT NULL DEFAULT '',
           version TEXT NOT NULL DEFAULT '',
           notified_version TEXT NOT NULL DEFAULT '',
           last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
->>>>>>> web-ui
         );
         """
         )
@@ -240,10 +172,7 @@ class DBManager:
         CREATE TABLE IF NOT EXISTS announcement_subscriptions (
           keyword   TEXT    NOT NULL,
           user_id   INTEGER NOT NULL,
-<<<<<<< HEAD
-=======
           last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
->>>>>>> web-ui
           PRIMARY KEY(keyword, user_id)
         );
         """
@@ -255,10 +184,7 @@ class DBManager:
           keyword        TEXT    NOT NULL,
           filter_user_id INTEGER NOT NULL,
           channel_id     INTEGER NOT NULL DEFAULT 0,
-<<<<<<< HEAD
-=======
           last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
->>>>>>> web-ui
           PRIMARY KEY(keyword, filter_user_id, channel_id)
         );
         """
@@ -268,84 +194,6 @@ class DBManager:
         CREATE TABLE IF NOT EXISTS join_dm_subscriptions (
             guild_id INTEGER NOT NULL,
             user_id  INTEGER NOT NULL,
-<<<<<<< HEAD
-            PRIMARY KEY (guild_id, user_id)
-        );
-        """)
-
-        cols = [r[1] for r in c.execute("PRAGMA table_info(settings)").fetchall()]
-        if "version" not in cols:
-            c.execute(
-                "ALTER TABLE settings ADD COLUMN version TEXT NOT NULL DEFAULT ''"
-            )
-        if "notified_version" not in cols:
-            c.execute(
-                "ALTER TABLE settings ADD COLUMN notified_version TEXT NOT NULL DEFAULT ''"
-            )
-
-        c.execute(
-            "INSERT OR IGNORE INTO settings (id, blocked_keywords) VALUES (1, '')"
-        )
-
-        tables = [
-            ("category_mappings", "original_category_id"),
-            ("channel_mappings", "original_channel_id"),
-            ("threads", "original_thread_id"),
-            ("emoji_mappings", "original_emoji_id"),
-            ("settings", "id"),
-            ("announcement_subscriptions", "keyword"),
-            ("announcement_triggers", "keyword"),
-            ("sticker_mappings", "original_sticker_id"),
-            ("join_dm_subscriptions", "guild_id"),
-            ("role_mappings", "original_role_id"),
-        ]
-
-        for table, pk in tables:
-            cols = [row[1] for row in c.execute(f"PRAGMA table_info({table})")]
-            if "last_updated" not in cols:
-                c.execute(f"ALTER TABLE {table} ADD COLUMN last_updated DATETIME")
-
-                c.execute(f"UPDATE {table} SET last_updated = CURRENT_TIMESTAMP")
-
-            insert_trig = f"trg_{table}_stamp_insert"
-            if not c.execute(
-                "SELECT name FROM sqlite_master WHERE type='trigger' AND name=?",
-                (insert_trig,),
-            ).fetchone():
-                c.execute(
-                    f"""
-                CREATE TRIGGER {insert_trig}
-                  AFTER INSERT ON {table}
-                  FOR EACH ROW
-                BEGIN
-                  UPDATE {table}
-                    SET last_updated = CURRENT_TIMESTAMP
-                  WHERE {pk} = NEW.{pk};
-                END;
-                """
-                )
-
-            update_trig = f"trg_{table}_stamp_update"
-            if not c.execute(
-                "SELECT name FROM sqlite_master WHERE type='trigger' AND name=?",
-                (update_trig,),
-            ).fetchone():
-                c.execute(
-                    f"""
-                CREATE TRIGGER {update_trig}
-                  AFTER UPDATE ON {table}
-                  FOR EACH ROW
-                BEGIN
-                  UPDATE {table}
-                    SET last_updated = CURRENT_TIMESTAMP
-                  WHERE {pk} = OLD.{pk};
-                END;
-                """
-                )
-
-        self.conn.commit()
-
-=======
             last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (guild_id, user_id)
         );
@@ -381,7 +229,6 @@ class DBManager:
     def get_all_config(self) -> dict[str, str]:
         return {r["key"]: r["value"] for r in self.conn.execute("SELECT key, value FROM app_config")}
 
->>>>>>> web-ui
     def get_version(self) -> str:
         """
         Retrieves the version information from the settings table in the database.
@@ -420,34 +267,6 @@ class DBManager:
         """
         return self.conn.execute("SELECT * FROM category_mappings").fetchall()
 
-<<<<<<< HEAD
-    def upsert_category_mapping(
-        self,
-        orig_id: int,
-        orig_name: str,
-        clone_id: Optional[int],
-        clone_name: Optional[str],
-    ):
-        """
-        Inserts or updates a category mapping in the database.
-        """
-        self.conn.execute(
-            """INSERT OR REPLACE INTO category_mappings
-               (original_category_id, original_category_name, cloned_category_id, cloned_category_name)
-               VALUES (?, ?, ?, ?)""",
-            (orig_id, orig_name, clone_id, clone_name),
-        )
-        self.conn.commit()
-
-    def delete_category_mapping(self, orig_id: int):
-        """
-        Deletes a category mapping from the database based on the original category ID.
-        """
-        self.conn.execute(
-            "DELETE FROM category_mappings WHERE original_category_id = ?", (orig_id,)
-        )
-        self.conn.commit()
-=======
     def upsert_category_mapping(self, orig_id: int, orig_name: str,
                                 clone_id: Optional[int], clone_name: Optional[str]):
         """
@@ -518,7 +337,6 @@ class DBManager:
                 "DELETE FROM category_mappings WHERE original_category_id=?",
                 (orig_id,),
             )
->>>>>>> web-ui
 
     def count_categories(self) -> int:
         """
@@ -531,8 +349,6 @@ class DBManager:
         Retrieves all channel mappings from the database.
         """
         return self.conn.execute("SELECT * FROM channel_mappings").fetchall()
-<<<<<<< HEAD
-=======
     
     def get_all_channel_mappings(self) -> List[sqlite3.Row]:
         """
@@ -586,7 +402,6 @@ class DBManager:
 
         # Fallback: we weren't able to find a mapping entry; treat the input as already-original.
         return int(any_channel_id), None, "assumed_original"
->>>>>>> web-ui
 
     def get_all_threads(self) -> List[sqlite3.Row]:
         """
@@ -594,35 +409,6 @@ class DBManager:
         """
         return self.conn.execute("SELECT * FROM threads").fetchall()
 
-<<<<<<< HEAD
-    def upsert_forum_thread_mapping(
-        self,
-        orig_thread_id: int,
-        orig_thread_name: str,
-        clone_thread_id: Optional[int],
-        forum_orig_id: int,
-        forum_clone_id: Optional[int],
-    ):
-        """
-        Inserts or updates a mapping of forum thread information in the database.
-        """
-        self.conn.execute(
-            """INSERT OR REPLACE INTO threads
-               (original_thread_id, original_thread_name,
-                cloned_thread_id, forum_original_id,
-                forum_cloned_id)
-               VALUES (?, ?, ?, ?, ?)""",
-            (
-                orig_thread_id,
-                orig_thread_name,
-                clone_thread_id,
-                forum_orig_id,
-                forum_clone_id,
-            ),
-        )
-        self.conn.commit()
-
-=======
     def upsert_forum_thread_mapping(self, orig_thread_id: int, orig_thread_name: str,
                                     clone_thread_id: Optional[int],
                                     forum_orig_id: int, forum_clone_id: Optional[int]):
@@ -642,7 +428,6 @@ class DBManager:
         self.conn.commit()
 
 
->>>>>>> web-ui
     def delete_forum_thread_mapping(self, orig_thread_id: int):
         """
         Deletes a forum thread mapping from the database.
@@ -655,26 +440,6 @@ class DBManager:
 
     def upsert_channel_mapping(
         self,
-<<<<<<< HEAD
-        orig_id: int,
-        orig_name: str,
-        clone_id: Optional[int],
-        webhook_url: Optional[str],
-        orig_cat_id: Optional[int],
-        clone_cat_id: Optional[int],
-        channel_type: int,
-    ):
-        """
-        Inserts or updates a channel mapping in the database.
-        """
-        self.conn.execute(
-            """INSERT OR REPLACE INTO channel_mappings
-               (original_channel_id, original_channel_name,
-                cloned_channel_id, channel_webhook_url,
-                original_parent_category_id, cloned_parent_category_id, channel_type)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (orig_id, orig_name, clone_id, webhook_url, orig_cat_id, clone_cat_id, channel_type),
-=======
         original_channel_id: int,
         original_channel_name: str,
         cloned_channel_id: int | None,
@@ -719,20 +484,10 @@ class DBManager:
                 int(channel_type),
                 (clone_name.strip() if isinstance(clone_name, str) else None),
             ),
->>>>>>> web-ui
         )
         self.conn.commit()
 
     def delete_channel_mapping(self, orig_id: int):
-<<<<<<< HEAD
-        """
-        Deletes a channel mapping from the database based on the original channel ID.
-        """
-        self.conn.execute(
-            "DELETE FROM channel_mappings WHERE original_channel_id = ?", (orig_id,)
-        )
-        self.conn.commit()
-=======
         with self.lock, self.conn:
             row = self.conn.execute(
                 "SELECT cloned_channel_id FROM channel_mappings WHERE original_channel_id=?",
@@ -754,7 +509,6 @@ class DBManager:
                 "DELETE FROM channel_mappings WHERE original_channel_id=?",
                 (orig_id,),
             )
->>>>>>> web-ui
 
     def count_channels(self) -> int:
         """
@@ -815,20 +569,6 @@ class DBManager:
         """
         return self.conn.execute("SELECT * FROM emoji_mappings").fetchall()
 
-<<<<<<< HEAD
-    def upsert_emoji_mapping(
-        self, orig_id: int, orig_name: str, clone_id: int, clone_name: str
-    ):
-        """
-        Inserts or updates a mapping between original and cloned emoji details
-        in the emoji_mappings database table.
-        """
-        self.conn.execute(
-            """INSERT OR REPLACE INTO emoji_mappings
-               (original_emoji_id, original_emoji_name,
-                cloned_emoji_id, cloned_emoji_name)
-               VALUES (?, ?, ?, ?)""",
-=======
     def upsert_emoji_mapping(self, orig_id: int, orig_name: str,
                             clone_id: int, clone_name: str):
         self.conn.execute(
@@ -840,7 +580,6 @@ class DBManager:
                 cloned_emoji_id    =excluded.cloned_emoji_id,
                 cloned_emoji_name  =excluded.cloned_emoji_name
             """,
->>>>>>> web-ui
             (orig_id, orig_name, clone_id, clone_name),
         )
         self.conn.commit()
@@ -995,16 +734,6 @@ class DBManager:
             (original_id,),
         ).fetchone()
 
-<<<<<<< HEAD
-    def upsert_sticker_mapping(
-        self, orig_id: int, orig_name: str, clone_id: int, clone_name: str
-    ):
-        self.conn.execute(
-            """INSERT OR REPLACE INTO sticker_mappings
-            (original_sticker_id, original_sticker_name,
-                cloned_sticker_id, cloned_sticker_name)
-            VALUES (?, ?, ?, ?)""",
-=======
     def upsert_sticker_mapping(self, orig_id: int, orig_name: str,
                             clone_id: int, clone_name: str):
         self.conn.execute(
@@ -1016,7 +745,6 @@ class DBManager:
                 cloned_sticker_id    =excluded.cloned_sticker_id,
                 cloned_sticker_name  =excluded.cloned_sticker_name
             """,
->>>>>>> web-ui
             (orig_id, orig_name, clone_id, clone_name),
         )
         self.conn.commit()
@@ -1031,19 +759,6 @@ class DBManager:
     def get_all_role_mappings(self) -> List[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM role_mappings").fetchall()
 
-<<<<<<< HEAD
-    def upsert_role_mapping(
-        self,
-        orig_id: int,
-        orig_name: str,
-        clone_id: Optional[int],
-        clone_name: Optional[str],
-    ):
-        self.conn.execute(
-            """INSERT OR REPLACE INTO role_mappings
-            (original_role_id, original_role_name, cloned_role_id, cloned_role_name)
-            VALUES (?, ?, ?, ?)""",
-=======
     def upsert_role_mapping(self, orig_id: int, orig_name: str,
                             clone_id: Optional[int], clone_name: Optional[str]):
         self.conn.execute(
@@ -1055,7 +770,6 @@ class DBManager:
                 cloned_role_id    =excluded.cloned_role_id,
                 cloned_role_name  =excluded.cloned_role_name
             """,
->>>>>>> web-ui
             (orig_id, orig_name, clone_id, clone_name),
         )
         self.conn.commit()
@@ -1068,9 +782,6 @@ class DBManager:
         return self.conn.execute(
             "SELECT * FROM role_mappings WHERE original_role_id = ?",
             (orig_id,)
-<<<<<<< HEAD
-        ).fetchone()
-=======
         ).fetchone()
         
     def get_filters(self) -> dict:
@@ -1197,4 +908,3 @@ class DBManager:
                 "UPDATE channel_mappings SET clone_channel_name = :name WHERE original_channel_id = :ocid",
                 {"name": clone_name, "ocid": int(original_channel_id)},
             )
->>>>>>> web-ui

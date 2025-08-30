@@ -199,8 +199,6 @@ class SitemapService:
     # ----------------------------
     # Event helpers used by client
     # ----------------------------
-<<<<<<< HEAD
-=======
     
     def reload_filters_and_resend(self):
         """
@@ -209,7 +207,6 @@ class SitemapService:
         """
         # lightweight debounce: if you like, collapse bursts
         self.schedule_sync(delay=0.2)
->>>>>>> web-ui
 
     def in_scope_channel(self, ch) -> bool:
         """True if channel/category belongs in filtered sitemap."""
@@ -308,10 +305,6 @@ class SitemapService:
 
     def _filter_sitemap(self, sitemap: dict) -> dict:
         self._log_filter_settings()
-<<<<<<< HEAD
-        wl_on   = bool(self.config.whitelist_enabled)
-        inc_cats = getattr(self.config, "include_category_ids", set())
-=======
 
         # ---- Sets from config ----
         inc_cats = getattr(self.config, "include_category_ids", set())
@@ -364,14 +357,10 @@ class SitemapService:
             if ex_cat and not (wl_cat or wl_ch):
                 return "excluded category"
             return "allowed"
->>>>>>> web-ui
 
         kept_cat_cnt = kept_chan_cnt = kept_standalone_cnt = kept_forum_cnt = kept_thread_cnt = 0
         drop_cat_cnt = drop_chan_cnt = drop_standalone_cnt = drop_forum_cnt = drop_thread_cnt = 0
 
-<<<<<<< HEAD
-        # Categories (+ text channels)
-=======
         # ---- Precompute forum membership by category & which forums will be kept ----
         forums_raw = list(sitemap.get("forums", []))
         forums_by_cat: dict[int | None, set[int]] = {}
@@ -395,33 +384,21 @@ class SitemapService:
                 kept_forums_by_cat.setdefault(f_cat_id, set()).add(f_id)
 
         # ---- Categories (+ text channels) ----
->>>>>>> web-ui
         new_categories = []
         for cat in sitemap.get("categories", []):
             cat_id = int(cat["id"])
             cat_name = cat.get("name", str(cat_id))
 
-<<<<<<< HEAD
-=======
             # Filter text channels
->>>>>>> web-ui
             kept_children = []
             for ch in cat.get("channels", []):
                 ch_id = int(ch["id"])
                 ch_name = ch.get("name", str(ch_id))
-<<<<<<< HEAD
-                if self._is_filtered_out(ch_id, cat_id):
-                    drop_chan_cnt += 1
-                    self.logger.debug(
-                        "[filter] drop channel %s (%d) in category %s (%d): %s",
-                        ch_name, ch_id, cat_name, cat_id, self._filter_reason(ch_id, cat_id)
-=======
                 if is_out(ch_id, cat_id):
                     drop_chan_cnt += 1
                     self.logger.debug(
                         "[filter] drop channel %s (%d) in category %s (%d): %s",
                         ch_name, ch_id, cat_name, cat_id, reason(ch_id, cat_id)
->>>>>>> web-ui
                     )
                 else:
                     kept_children.append(ch)
@@ -432,17 +409,6 @@ class SitemapService:
                 kept_cat_cnt += 1
                 continue
 
-<<<<<<< HEAD
-            if self._is_filtered_out(None, cat_id):
-                drop_cat_cnt += 1
-                self.logger.debug(
-                    "[filter] drop category %s (%d): %s",
-                    cat_name, cat_id, self._filter_reason(None, cat_id)
-                )
-                continue
-
-            keep_empty = (not wl_on) or (cat_id in inc_cats)
-=======
             # No kept text channels -> decide whether to keep an empty shell.
             # Keep shell if:
             #  - WL is OFF, OR
@@ -464,79 +430,37 @@ class SitemapService:
                 or has_kept_forum
             )
 
->>>>>>> web-ui
             if keep_empty:
                 new_categories.append({**cat, "channels": []})
                 kept_cat_cnt += 1
                 self.logger.debug(
-<<<<<<< HEAD
-                    "[filter] keep empty category shell %s (%d) [keep_empty=%s wl_on=%s cat_in_wl=%s]",
-                    cat_name, cat_id, keep_empty, wl_on, (cat_id in inc_cats)
-=======
                     "[filter] keep empty category shell %s (%d) "
                     "[wl_on=%s cat_in_wl=%s wl_text=%s wl_forum=%s kept_forum=%s]",
                     cat_name, cat_id, wl_on, (cat_id in inc_cats),
                     has_wl_text_child, has_wl_forum_child, has_kept_forum
->>>>>>> web-ui
                 )
             else:
                 drop_cat_cnt += 1
                 self.logger.debug(
-<<<<<<< HEAD
-                    "[filter] drop empty category %s (%d): no kept children and keep_empty=False",
-                    cat_name, cat_id
-                )
-
-        # Standalone channels
-=======
                     "[filter] drop empty category %s (%d): no kept children and no WL/kept forum in cat",
                     cat_name, cat_id
                 )
 
         # ---- Standalone channels (no category) ----
->>>>>>> web-ui
         standalones = []
         for ch in sitemap.get("standalone_channels", []):
             ch_id = int(ch["id"])
             ch_name = ch.get("name", str(ch_id))
-<<<<<<< HEAD
-            if self._is_filtered_out(ch_id, None):
-                drop_standalone_cnt += 1
-                self.logger.debug(
-                    "[filter] drop standalone channel %s (%d): %s",
-                    ch_name, ch_id, self._filter_reason(ch_id, None)
-=======
             if is_out(ch_id, None):
                 drop_standalone_cnt += 1
                 self.logger.debug(
                     "[filter] drop standalone channel %s (%d): %s",
                     ch_name, ch_id, reason(ch_id, None)
->>>>>>> web-ui
                 )
             else:
                 standalones.append(ch)
                 kept_standalone_cnt += 1
 
-<<<<<<< HEAD
-        # Forums
-        forums = []
-        for f in sitemap.get("forums", []):
-            f_id = int(f["id"])
-            f_name = f.get("name", str(f_id))
-            f_cat_id = int(f.get("category_id") or 0) or None
-            if self._is_filtered_out(f_id, f_cat_id):
-                drop_forum_cnt += 1
-                self.logger.debug(
-                    "[filter] drop forum %s (%d) under cat_id=%s: %s",
-                    f_name, f_id, f_cat_id, self._filter_reason(f_id, f_cat_id)
-                )
-            else:
-                forums.append(f)
-                kept_forum_cnt += 1
-
-        # Threads only for kept forums
-        keep_forum_ids = {int(f["id"]) for f in forums}
-=======
         # ---- Forums (use the precomputed keep/drop) ----
         forums = []
         for f in forums_raw:
@@ -550,16 +474,11 @@ class SitemapService:
 
         # ---- Threads: keep only if parent forum survived ----
         keep_forum_ids_set = set(kept_forum_ids)
->>>>>>> web-ui
         threads = []
         for t in sitemap.get("threads", []):
             t_id = int(t["id"])
             forum_id = int(t.get("forum_id", 0)) or 0
-<<<<<<< HEAD
-            if forum_id in keep_forum_ids:
-=======
             if forum_id in keep_forum_ids_set:
->>>>>>> web-ui
                 threads.append(t)
                 kept_thread_cnt += 1
             else:
@@ -583,45 +502,6 @@ class SitemapService:
         out["threads"] = threads
         return out
 
-<<<<<<< HEAD
-    # Core predicate used everywhere
-    def _is_filtered_out(self, channel_id: int | None, category_id: int | None) -> bool:
-        """
-        True if this (channel, category) should be dropped.
-        Whitelist (if enabled) gates inclusion; excludes still apply, but practical
-        precedence is:
-          1) Channel whitelist > channel exclude
-          2) Channel exclude > category whitelist  (carve-out)
-          3) Category whitelist > category exclude
-        """
-        cfg = self.config
-
-        # Whitelist gate
-        if cfg.whitelist_enabled:
-            allowed = False
-            if channel_id and channel_id in cfg.include_channel_ids:
-                allowed = True
-            elif category_id and category_id in cfg.include_category_ids:
-                allowed = True
-            if not allowed:
-                return True
-
-        # Channel exclude (whitelist beats it if channel explicitly whitelisted)
-        if channel_id and channel_id in cfg.excluded_channel_ids:
-            if channel_id in cfg.include_channel_ids:
-                return False
-            if category_id and category_id in cfg.include_category_ids:
-                # carve-out: category WL does NOT override channel exclude
-                return True
-            return True
-
-        # Category exclude (overridden by either category WL or channel WL)
-        if category_id and category_id in cfg.excluded_category_ids:
-            if category_id in cfg.include_category_ids:
-                return False
-            if channel_id and channel_id in cfg.include_channel_ids:
-                return False
-=======
 
     # Core predicate used everywhere
     def _is_filtered_out(self, channel_id: int | None, category_id: int | None) -> bool:
@@ -645,7 +525,6 @@ class SitemapService:
 
         # Category exclude wins unless either the category or channel is explicitly WL’d
         if ex_cat and not (wl_cat or wl_ch):
->>>>>>> web-ui
             return True
 
         return False

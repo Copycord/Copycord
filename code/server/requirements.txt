@@ -1,10 +1,5 @@
 py-cord==2.6.1
-<<<<<<< HEAD
-websockets==11.0
-aiohttp==3.8.6
-=======
 websockets==11.0.3
 aiohttp>=3.9,<4
->>>>>>> web-ui
 Pillow==11.3.0
 PyYAML==6.0.2

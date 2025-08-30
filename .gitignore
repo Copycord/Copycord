@@ -1,11 +1,8 @@
 /data
 /backup
-<<<<<<< HEAD
-=======
 code/admin/frontend/node_modules
 code/admin/static/assets
 __pycache__/
 *.pyc
->>>>>>> web-ui
 .env
 compose.yml

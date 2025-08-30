@@ -8,22 +8,15 @@
 # =============================================================================
 
 import asyncio
-<<<<<<< HEAD
-=======
 import contextlib
 from dataclasses import dataclass, field
->>>>>>> web-ui
 import logging
 from collections import defaultdict
 from datetime import datetime, timezone
 import re
-<<<<<<< HEAD
-import unicodedata
-=======
 import time
 import unicodedata
 import uuid
->>>>>>> web-ui
 import discord
 from server.rate_limiter import RateLimitManager, ActionType
 
@@ -48,10 +41,7 @@ class BackfillManager:
         self._rotate_pool: dict[int, list[str]] = {}
         self._rotate_idx: dict[int, int] = {}
         self._rot_locks: dict[int, asyncio.Lock] = {}
-<<<<<<< HEAD
-=======
         self._attached: dict[int, set[asyncio.Task]] = defaultdict(set)
->>>>>>> web-ui
         self._global_sync: dict | None = None
         self._temp_prefix_canon = "Copycord"
         self._temp_prefix_key = re.sub(
@@ -63,9 +53,6 @@ class BackfillManager:
             1  # temp webhooks allowed to be used to support primary webhook
         )
 
-<<<<<<< HEAD
-    async def on_started(self, original_id: int) -> None:
-=======
 
     def attach_task(self, original_id: int, task: asyncio.Task) -> None:
         """
@@ -99,7 +86,6 @@ class BackfillManager:
         return int(st.get("delivered", 0))
 
     async def on_started(self, original_id: int, *, meta: dict | None = None) -> None:
->>>>>>> web-ui
         cid = int(original_id)
         self._flags.add(cid)
 
@@ -108,13 +94,10 @@ class BackfillManager:
             self.register_sink(cid, user_id=None, clone_channel_id=None, msg=None)
             st = self._progress[cid]
 
-<<<<<<< HEAD
-=======
         # keep whatever the server passed (e.g., {"range": {...}})
         if meta is not None:
             st["meta"] = meta
 
->>>>>>> web-ui
         loop = asyncio.get_event_loop()
         st.setdefault("started_at", loop.time())
         st.setdefault("started_dt", datetime.now(timezone.utc))
@@ -123,10 +106,7 @@ class BackfillManager:
         st.setdefault("last_edit_ts", 0.0)
         st.setdefault("temp_webhook_ids", [])
         st.setdefault("temp_webhook_urls", [])
-<<<<<<< HEAD
-=======
         st.setdefault("temp_created_ids", []) 
->>>>>>> web-ui
 
         clone_id = st.get("clone_channel_id")
         if clone_id:
@@ -173,17 +153,6 @@ class BackfillManager:
         """
         self._progress.pop(int(channel_id), None)
 
-<<<<<<< HEAD
-    def attach_task(self, original_id: int, task: asyncio.Task) -> None:
-        """
-        Attaches a task to the inflight tracking system and sets up a callback
-        to handle its completion.
-        """
-        cid = int(original_id)
-        self._inflight[cid] += 1
-        task.add_done_callback(lambda t, c=cid: self._on_task_done(c, t))
-=======
->>>>>>> web-ui
 
     async def on_progress(self, original_id: int, count: int) -> None:
         st = self._progress.get(int(original_id))
@@ -192,10 +161,6 @@ class BackfillManager:
 
         prev = int(st.get("last_count", 0))
         st["last_count"] = max(prev, int(count))
-<<<<<<< HEAD
-        st["expected_total"] = max(int(st.get("expected_total", 0)), int(count))
-=======
->>>>>>> web-ui
 
         if st.get("msg"):
             now = asyncio.get_event_loop().time()
@@ -218,30 +183,11 @@ class BackfillManager:
         st["delivered"] = int(st.get("delivered", 0)) + 1
 
     def update_expected_total(self, channel_id: int, total: int) -> None:
-<<<<<<< HEAD
-        """Optionally set/raise an expected total (from a meta/progress message)."""
-=======
         """Set/raise expected total (from client precount)."""
->>>>>>> web-ui
         cid = int(channel_id)
         st = self._progress.get(cid)
         if not st:
             return
-<<<<<<< HEAD
-        st["expected_total"] = max(int(st.get("expected_total", 0)), int(total))
-
-    def get_progress(self, channel_id: int) -> tuple[int, int]:
-        """
-        Return (delivered, total). If total is unknown, it may be 0.
-        We prefer 'expected_total' (from meta), otherwise fall back to last_count.
-        """
-        cid = int(channel_id)
-        st = self._progress.get(cid) or {}
-        delivered = int(st.get("delivered", 0))
-        total = int(st.get("expected_total") or st.get("last_count") or 0)
-        if total < delivered:
-            total = delivered
-=======
         prev = int(st.get("expected_total") or 0)
         st["expected_total"] = max(prev, int(total))
         logger.debug("[bf] set expected_total | channel=%s total=%s (prev=%s)",
@@ -256,7 +202,6 @@ class BackfillManager:
             total = int(total) if total is not None else None
         except Exception:
             total = None
->>>>>>> web-ui
         return delivered, total
 
     async def try_begin_global_sync(
@@ -294,14 +239,10 @@ class BackfillManager:
         """
         cid = int(original_id)
 
-<<<<<<< HEAD
-        await self._wait_drain(cid, timeout=None)
-=======
         await self._wait_drain(
             cid,
             timeout=5.0 if getattr(self.r, "_shutting_down", False) else None
         )
->>>>>>> web-ui
 
         self._flags.discard(cid)
         await self.r._flush_channel_buffer(cid)
@@ -345,8 +286,6 @@ class BackfillManager:
                 (logger.warning if not shutting_down else logger.debug)(
                     "[⚠️] Could not DM user %s: %s", uid, e
                 )
-<<<<<<< HEAD
-=======
                 
         if clone_id and not shutting_down:
             # delete only the temps CREATED during this run in this channel
@@ -356,7 +295,6 @@ class BackfillManager:
             except Exception:
                 logger.debug("[cleanup] temp deletion failed for #%s", clone_id, exc_info=True)
 
->>>>>>> web-ui
         if clone_id:
             self._rotate_pool.pop(int(clone_id), None)
             self._rotate_idx.pop(int(clone_id), None)
@@ -364,10 +302,7 @@ class BackfillManager:
 
         await self.clear_sink(cid)
         await self.end_global_sync(cid)
-<<<<<<< HEAD
-=======
         await self._wait_drain(cid, timeout=5.0 if getattr(self.r, "_shutting_down", False) else None)
->>>>>>> web-ui
 
         if not shutting_down:
             logger.debug(
@@ -402,25 +337,6 @@ class BackfillManager:
         self._progress.pop(channel_id, None)
 
     def _on_task_done(self, cid: int, task: asyncio.Task) -> None:
-<<<<<<< HEAD
-        """
-        Handles the completion of an asynchronous task associated with a specific ID.
-        """
-        try:
-            task.result()
-        except Exception:
-            pass
-        else:
-            st = self._progress.get(cid)
-            if st:
-                st["last_count"] = (st.get("last_count") or 0) + 1
-        finally:
-            n = self._inflight.get(cid, 0)
-            if n <= 1:
-                self._inflight.pop(cid, None)
-            else:
-                self._inflight[cid] = n - 1
-=======
         try:
             task.result()
         except asyncio.CancelledError:
@@ -432,7 +348,6 @@ class BackfillManager:
             self._inflight[cid] = max(0, n - 1)
             if self._inflight[cid] == 0:
                 self._inflight.pop(cid, None)
->>>>>>> web-ui
 
     async def _wait_drain(self, cid: int, timeout: float | None = 30.0) -> None:
         """
@@ -481,106 +396,6 @@ class BackfillManager:
         self._rotate_idx[clone_channel_id] = idx
         return pool[idx]
 
-<<<<<<< HEAD
-    async def cleanup_orphan_temp_webhooks(self) -> None:
-        """
-        On startup, remove any temporary webhooks we created previously but didn't delete.
-        Looks for webhooks named 'Copycord' in all cloned channels.
-        Safe to run even if there are none; logs what it finds. (Not Used)
-        """
-        try:
-            if getattr(self.r, "_shutting_down", False):
-                return
-
-            self.r._load_mappings()
-
-            guild = self.bot.get_guild(self.r.clone_guild_id)
-            if not guild:
-                logger.warning(
-                    "[cleanup] Clone guild %s not available; skipping temp webhook cleanup",
-                    self.r.clone_guild_id,
-                )
-                return
-
-            clone_ids = {
-                row["cloned_channel_id"]
-                for row in self.r.chan_map.values()
-                if row.get("cloned_channel_id")
-            }
-            if not clone_ids:
-                logger.debug(
-                    "[cleanup] No cloned channels in mapping; nothing to clean"
-                )
-                return
-
-            deleted = 0
-            checked = 0
-
-            for cid in clone_ids:
-                if getattr(self.r, "_shutting_down", False):
-                    break
-
-                ch = guild.get_channel(int(cid))
-                if not ch:
-                    try:
-                        ch = await self.bot.fetch_channel(int(cid))
-                    except Exception:
-                        ch = None
-                if not ch:
-                    continue
-
-                try:
-                    hooks = await ch.webhooks()
-                except Exception as e:
-                    logger.debug(
-                        "[cleanup] Could not list webhooks for #%s: %s", cid, e
-                    )
-                    continue
-
-                for wh in hooks:
-                    is_temp_name = (wh.name or "").strip().lower() == "copycord"
-                    made_by_us = False
-                    try:
-                        # wh.user may be None if not expanded; guard it
-                        if getattr(wh, "user", None) and getattr(wh.user, "id", None):
-                            made_by_us = wh.user.id == self.bot.user.id
-                    except Exception:
-                        pass
-
-                    if is_temp_name and (made_by_us or True):
-                        try:
-                            await self.ratelimit.acquire(ActionType.WEBHOOK_CREATE)
-                            await wh.delete(
-                                reason="Startup cleanup of orphan temp webhook"
-                            )
-                            deleted += 1
-                            logger.info(
-                                "[🧹] Deleted orphan temp webhook %s in #%s",
-                                wh.id,
-                                ch.name,
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                "[⚠️] Failed to delete temp webhook %s in #%s: %s",
-                                wh.id,
-                                ch.name,
-                                e,
-                            )
-
-                checked += 1
-                await asyncio.sleep(0)
-
-            logger.debug(
-                "[🧹] Temp webhook cleanup complete: checked %d channels, deleted %d webhooks",
-                checked,
-                deleted,
-            )
-
-        except Exception:
-            logger.exception("[cleanup] Unexpected error while cleaning temp webhooks")
-
-=======
->>>>>>> web-ui
     @staticmethod
     def _fmt_duration(seconds: int) -> str:
         """
@@ -594,22 +409,6 @@ class BackfillManager:
             return f"{m}m {s}s"
         return f"{s}s"
 
-<<<<<<< HEAD
-    async def _ensure_temp_webhooks(
-        self, clone_channel_id: int
-    ) -> tuple[list[int], list[str]]:
-        """
-        Ensure there are exactly N 'Copycord' webhooks in the cloned channel
-        (N = self.temp_webhook_max). Reuse existing; create only what's missing.
-        Return (ids, urls) in a stable order (sorted by webhook id).
-        """
-        try:
-            ch = self.bot.get_channel(clone_channel_id) or await self.bot.fetch_channel(
-                clone_channel_id
-            )
-            hooks = await ch.webhooks()
-
-=======
     async def _ensure_temp_webhooks(self, clone_channel_id: int) -> tuple[list[int], list[str]]:
         """
         Ensure there are exactly N temp webhooks for rotation in this channel.
@@ -783,69 +582,12 @@ class BackfillManager:
             hooks = await ch.webhooks()
 
             # primary url for exclusion
->>>>>>> web-ui
             primary_url = None
             orig = self._by_clone.get(clone_channel_id)
             if orig is not None:
                 row = self.r.chan_map.get(orig) or {}
                 primary_url = row.get("channel_webhook_url")
 
-<<<<<<< HEAD
-            temps = [
-                (wh.id, wh.url, (wh.name or ""))
-                for wh in hooks
-                if self._is_temp_name(wh.name) and wh.url != primary_url
-            ]
-
-            temps.sort(key=lambda t: int(t[0]))
-
-            N = max(0, int(getattr(self, "temp_webhook_max", 4)))
-            have = len(temps)
-
-            for _ in range(max(0, N - have)):
-                await self.ratelimit.acquire(ActionType.WEBHOOK_CREATE)
-                wh = await ch.create_webhook(
-                    name=self._canonical_temp_name(), reason="Backfill rotation"
-                )
-                temps.append((wh.id, wh.url, wh.name or "Copycord"))
-
-            temps.sort(key=lambda t: int(t[0]))
-
-            temps = temps[:N]
-            ids = [t[0] for t in temps]
-            urls = [t[1] for t in temps]
-
-            self._rotate_pool.pop(clone_channel_id, None)
-            self._rotate_idx.pop(clone_channel_id, None)
-
-            return ids, urls
-
-        except Exception as e:
-            logger.warning(
-                "[⚠️] Could not ensure temp webhooks in #%s: %s", clone_channel_id, e
-            )
-            return [], []
-
-    async def _list_temp_webhook_urls(self, clone_channel_id: int) -> list[str]:
-        """
-        Return existing 'Copycord' webhook URLs for the channel (sorted by webhook id),
-        without creating any. (No capping here; the picker will cap after excluding primary.)
-        """
-        try:
-            ch = self.bot.get_channel(clone_channel_id) or await self.bot.fetch_channel(
-                clone_channel_id
-            )
-            hooks = await ch.webhooks()
-
-            temps = [
-                (wh.id, wh.url, (wh.name or ""))
-                for wh in hooks
-                if self._is_temp_name(wh.name)
-            ]
-            temps.sort(key=lambda t: int(t[0]))  # stable order: oldest → newest
-
-            return [u for (_id, u, _name) in temps]
-=======
             pairs = []
             for wh in hooks:
                 try:
@@ -858,15 +600,11 @@ class BackfillManager:
 
             pairs.sort(key=lambda t: t[0])
             return [u for (_id, u) in pairs]
->>>>>>> web-ui
         except Exception as e:
             logger.debug("[temps] list failed for #%s: %s", clone_channel_id, e)
             return []
 
-<<<<<<< HEAD
-=======
 
->>>>>>> web-ui
     async def pick_url_for_send(
         self, clone_channel_id: int, primary_url: str, create_missing: bool
     ):
@@ -929,8 +667,6 @@ class BackfillManager:
         if hasattr(self, "_temp_ready"):
             self._temp_ready.pop(int(clone_channel_id), None)
         logger.debug("[rotate] invalidated pool for #%s", clone_channel_id)
-<<<<<<< HEAD
-=======
         
     async def delete_created_temps_for(self, clone_channel_id: int, *, dry_run: bool = False) -> dict:
         """
@@ -1221,4 +957,3 @@ class BackfillTracker:
     async def is_running(self, channel_id: str) -> bool:
         async with self._lock:
             return channel_id in self._by_channel
->>>>>>> web-ui
