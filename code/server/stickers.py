@@ -404,7 +404,7 @@ class StickerManager:
             base_content=(msg.get("content") or "").strip() or None,
         )
         if sent_std:
-            logger.info("[💬] Forwarded standard-sticker message to #%s from %s (%s)",
+            logger.info("[💬] Forwarded sticker message to #%s from %s (%s)",
                     msg["channel_name"], msg["author"], msg["author_id"])
             return True
 
@@ -415,7 +415,7 @@ class StickerManager:
             msg["embeds"] = (msg.get("embeds") or []) + [
                 {"type": "rich", "image": {"url": url}} for (_, url) in pairs
             ]
-            logger.info(
+            logger.debug(
                 "[💬] Image-embed fallback — %d sticker(s) from %s in #%s",
                 len(pairs),
                 msg.get("author", "Unknown"),
