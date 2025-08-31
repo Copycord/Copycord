@@ -2700,21 +2700,43 @@ class ServerReceiver:
         tag = self._log_tag(msg)
         source_id = msg["channel_id"]
         is_backfill = bool(msg.get("__backfill__"))
+        
+        # Handle sticker messages
+        mapping = self.chan_map.get(source_id)
+        if mapping is None:
+            self._load_mappings()
+            mapping = self.chan_map.get(source_id)
+
+        stickers = msg.get("stickers") or []
+        if stickers:
+            guild = self.bot.get_guild(self.clone_guild_id)
+            ch = (guild.get_channel(mapping["cloned_channel_id"]) if (guild and mapping) else None)
+            handled = await self.stickers.send_with_fallback(
+                receiver=self, ch=ch, stickers=stickers, mapping=mapping, msg=msg, source_id=source_id,
+            )
+            if handled:
+                if is_backfill:
+                    self.backfill.note_sent(source_id)
+                    d, t = self.backfill.get_progress(source_id)
+                    suffix = f" [{d}/{t}]" if t else f" [{d}]"
+                return
 
         # ----- Build payload up-front so both forced and normal paths can use it -----
         payload = self._build_webhook_payload(msg)
         if payload is None:
             logger.debug("No webhook payload built for #%s; skipping", msg.get("channel_name"))
             return
-        if not payload.get("content") and not payload.get("embeds"):
+        
+            
+        if not payload.get("content") and not payload.get("embeds") and not (msg.get("stickers") or []):
             logger.info(
                 "[⚠️]%s Skipping empty message in #%s (attachments=%d stickers=%d)",
-                tag,
-                msg.get("channel_name"),
+                tag, msg.get("channel_name"),
                 len(msg.get("attachments") or []),
                 len(msg.get("stickers") or []),
             )
             return
+        
         if payload.get("content"):
             try:
                 import json
