@@ -34,6 +34,7 @@ class RoleManager:
         self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
         self._last_roles: List[Dict] = []
+        self.MAX_ROLES = 250  # Discord hard limit is 250 roles per guild
 
     def set_last_sitemap(self, roles: List[Dict] | None):
         self._last_roles = roles or []
@@ -176,6 +177,10 @@ class RoleManager:
             # ---- Create
             if not mapping:
                 try:
+                    if len(guild.roles) >= self.MAX_ROLES:
+                        logger.warning("[⚠️] Guild has hit max role count (%d). Skipping new role '%s'.",
+                                    self.MAX_ROLES, want_name)
+                        continue
                     await self.ratelimit.acquire(ActionType.ROLE)
                     kwargs = dict(
                         name=want_name,
