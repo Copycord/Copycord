@@ -94,6 +94,9 @@ class RoleManager:
         }
 
         clone_by_id = {r.id: r for r in guild.roles}
+        
+        can_create = len(guild.roles) < self.MAX_ROLES
+        create_suppressed_logged = False
 
         deleted = updated = created = 0
 
@@ -176,12 +179,19 @@ class RoleManager:
 
             # ---- Create
             if not mapping:
+                # If we can't create, skip all creates this pass and move to updates
+                if not can_create:
+                    if not create_suppressed_logged:
+                        logger.warning(
+                            "[⚠️] Can't create more roles. Guild is at max role count (%d).",
+                            self.MAX_ROLES
+                        )
+                        create_suppressed_logged = True
+                    continue
+
                 try:
-                    if len(guild.roles) >= self.MAX_ROLES:
-                        logger.warning("[⚠️] Guild has hit max role count (%d). Skipping new role '%s'.",
-                                    self.MAX_ROLES, want_name)
-                        continue
                     await self.ratelimit.acquire(ActionType.ROLE)
+
                     kwargs = dict(
                         name=want_name,
                         colour=want_color,
@@ -194,11 +204,14 @@ class RoleManager:
 
                     cloned = await guild.create_role(**kwargs)
                     created += 1
-                    self.db.upsert_role_mapping(
-                        orig_id, want_name, cloned.id, cloned.name
-                    )
+
+                    # Track mapping and live cache
+                    self.db.upsert_role_mapping(orig_id, want_name, cloned.id, cloned.name)
                     clone_by_id[cloned.id] = cloned
                     logger.info("[🧩] Created role %s", cloned.name)
+
+                    # Recompute creation gate after each create
+                    can_create = len(guild.roles) < self.MAX_ROLES
                     if self.mirror_permissions:
                         logger.debug(
                             "[🧩] create details: name=%r perms=%d color=#%06X hoist=%s mentionable=%s",
