@@ -10,24 +10,20 @@
 import discord
 from discord.ext import commands
 from discord import (
-    CategoryChannel,
     Option,
     Embed,
     Color,
-    ChannelType,
-    SlashCommandOptionType,
 )
 from discord.errors import NotFound, Forbidden
 from discord import errors as discord_errors
 from datetime import datetime, timezone
 import time
 import logging
-import asyncio
 import time
 from common.config import Config
 from common.db import DBManager
 from server.rate_limiter import RateLimitManager, ActionType
-from server.helpers import MemberExportService, ExportJob
+from server.helpers import MemberExportService, ExportJob, PurgeAssetHelper
 
 logger = logging.getLogger("server")
 
@@ -520,6 +516,169 @@ class CloneCommands(commands.Cog):
             embed=Embed(title=title, description=desc, color=color),
             ephemeral=True,
         )
+        
+    @commands.slash_command(
+        name="purge_assets",
+        description="Delete ALL emojis, stickers, or roles.",
+        guild_ids=[GUILD_ID],
+    )
+    async def purge_assets(
+        self,
+        ctx: discord.ApplicationContext,
+        kind: str = Option(str, "What to delete", required=True, choices=["emojis", "stickers", "roles"]),
+        confirm: str = Option(str, "Type 'confirm' to run this DESTRUCTIVE action", required=True),
+    ):
+        await ctx.defer(ephemeral=True)
+
+        if (confirm or "").strip().lower() != "confirm":
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Confirmation required",
+                    "Re-run the command and type **confirm** to proceed."
+                ),
+                ephemeral=True,
+            )
+
+        helper = PurgeAssetHelper(self)
+        guild = ctx.guild
+        if not guild:
+            return await ctx.followup.send("No guild context.", ephemeral=True)
+
+        RL_EMOJI   = getattr(ActionType, "EMOJI", "EMOJI")
+        RL_STICKER = getattr(ActionType, "STICKER", "STICKER")
+        RL_ROLE    = getattr(ActionType, "ROLE", "ROLE")
+
+        deleted = skipped = failed = 0
+        await ctx.followup.send(
+            embed=self._ok_embed("Starting purge…", f"Target: `{kind}`\nI'll DM you when finished."),
+            ephemeral=True,
+        )
+        helper._log_purge_event(kind=kind, outcome="begin", guild_id=guild.id, user_id=ctx.user.id)
+
+        try:
+            # =============================
+            # EMOJIS
+            # =============================
+            if kind == "emojis":
+                for em in list(guild.emojis):
+                    try:
+                        await self.ratelimit.acquire(RL_EMOJI)
+                        await em.delete(reason=f"Purge by {ctx.user.id}")
+                        deleted += 1
+                        helper._log_purge_event(kind="emojis", outcome="deleted",
+                                                guild_id=guild.id, user_id=ctx.user.id,
+                                                obj_id=em.id, name=em.name)
+                    except discord.Forbidden as e:
+                        skipped += 1
+                        helper._log_purge_event(kind="emojis", outcome="skipped",
+                                                guild_id=guild.id, user_id=ctx.user.id,
+                                                obj_id=em.id, name=em.name, reason=str(e))
+                    except Exception as e:
+                        failed += 1
+                        helper._log_purge_event(kind="emojis", outcome="failed",
+                                                guild_id=guild.id, user_id=ctx.user.id,
+                                                obj_id=em.id, name=em.name, reason=str(e))
+                self.db.conn.execute("DELETE FROM emoji_mappings")
+                self.db.conn.commit()
+                helper._log_purge_event(kind="emojis", outcome="db_clear",
+                                        guild_id=guild.id, user_id=ctx.user.id)
+
+            # =============================
+            # STICKERS
+            # =============================
+            elif kind == "stickers":
+                stickers = list(getattr(guild, "stickers", []))
+                if not stickers:
+                    try:
+                        stickers = list(await guild.fetch_stickers())
+                    except Exception:
+                        stickers = []
+                for st in stickers:
+                    try:
+                        await self.ratelimit.acquire(RL_STICKER)
+                        await st.delete(reason=f"Purge by {ctx.user.id}")
+                        deleted += 1
+                        helper._log_purge_event(kind="stickers", outcome="deleted",
+                                                guild_id=guild.id, user_id=ctx.user.id,
+                                                obj_id=st.id, name=st.name)
+                    except discord.Forbidden as e:
+                        skipped += 1
+                        helper._log_purge_event(kind="stickers", outcome="skipped",
+                                                guild_id=guild.id, user_id=ctx.user.id,
+                                                obj_id=st.id, name=st.name, reason=str(e))
+                    except Exception as e:
+                        failed += 1
+                        helper._log_purge_event(kind="stickers", outcome="failed",
+                                                guild_id=guild.id, user_id=ctx.user.id,
+                                                obj_id=st.id, name=st.name, reason=str(e))
+                self.db.conn.execute("DELETE FROM sticker_mappings")
+                self.db.conn.commit()
+                helper._log_purge_event(kind="stickers", outcome="db_clear",
+                                        guild_id=guild.id, user_id=ctx.user.id)
+
+            # =============================
+            # ROLES
+            # =============================
+            elif kind == "roles":
+                me, top_role, roles = await helper._resolve_me_and_top(guild)
+                if not me or not top_role:
+                    return await ctx.followup.send(
+                        embed=self._err_embed("Top role not found",
+                                              "Could not resolve my top role. Try again later."),
+                        ephemeral=True,
+                    )
+                if not me.guild_permissions.manage_roles:
+                    return await ctx.followup.send(
+                        embed=self._err_embed("Missing permission", "I need **Manage Roles**."),
+                        ephemeral=True,
+                    )
+
+                def _undeletable(r: discord.Role) -> bool:
+                    prem = getattr(r, "is_premium_subscriber", None)
+                    return bool(r.is_default() or r.managed or (prem() if callable(prem) else False))
+
+                eligible = [r for r in roles if not _undeletable(r) and r < top_role]
+                for role in sorted(eligible, key=lambda r: r.position):
+                    try:
+                        await self.ratelimit.acquire(RL_ROLE)
+                        await role.delete(reason=f"Purge by {ctx.user.id}")
+                        deleted += 1
+                        helper._log_purge_event(kind="roles", outcome="deleted",
+                                                guild_id=guild.id, user_id=ctx.user.id,
+                                                obj_id=role.id, name=role.name)
+                    except discord.Forbidden as e:
+                        skipped += 1
+                        helper._log_purge_event(kind="roles", outcome="skipped",
+                                                guild_id=guild.id, user_id=ctx.user.id,
+                                                obj_id=role.id, name=role.name, reason=str(e))
+                    except Exception as e:
+                        failed += 1
+                        helper._log_purge_event(kind="roles", outcome="failed",
+                                                guild_id=guild.id, user_id=ctx.user.id,
+                                                obj_id=role.id, name=role.name, reason=str(e))
+                self.db.conn.execute("DELETE FROM role_mappings")
+                self.db.conn.commit()
+                helper._log_purge_event(kind="roles", outcome="db_clear",
+                                        guild_id=guild.id, user_id=ctx.user.id)
+
+            # =============================
+            # Finalize
+            # =============================
+            summary = f"**Target:** `{kind}`\n**Deleted:** {deleted}\n**Skipped:** {skipped}\n**Failed:** {failed}"
+            color = discord.Color.green() if failed == 0 else discord.Color.orange()
+            await ctx.followup.send(embed=self._ok_embed("🧹 Purge complete", summary, color=color), ephemeral=True)
+            await helper._dm_summary(ctx, "🧹 Purge complete", summary, self._ok_embed)
+            helper._log_purge_event(kind=kind, outcome="done",
+                                    guild_id=guild.id, user_id=ctx.user.id,
+                                    counts={"deleted": deleted, "skipped": skipped, "failed": failed})
+
+        except Exception as e:
+            err_text = f"{type(e).__name__}: {e}"
+            await ctx.followup.send(embed=self._err_embed("Purge failed", err_text), ephemeral=True)
+            await helper._dm_summary(ctx, "Purge failed", err_text, self._err_embed)
+            helper._log_purge_event(kind=kind, outcome="failed",
+                                    guild_id=guild.id, user_id=ctx.user.id,
+                                    reason=err_text)
 
 
 def setup(bot: commands.Bot):

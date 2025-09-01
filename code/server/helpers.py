@@ -17,6 +17,7 @@ import json
 import logging
 import time
 import random
+from discord.ext import commands
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
@@ -871,6 +872,75 @@ class VerifyController:
                 return pcat.name
         return None
 
+
+class PurgeAssetHelper:
+    def __init__(self, cog: commands.Cog):
+        self.cog = cog
+        self.logger = getattr(cog, "logger", None)
+
+    def _log_purge_event(
+        self,
+        *,
+        kind: str,
+        outcome: str,
+        guild_id: int | None = None,
+        user_id: int | None = None,
+        obj_id: int | None = None,
+        name: str | None = None,
+        reason: str | None = None,
+        counts: dict | None = None,
+    ) -> None:
+        """Structured purge event logging."""
+        lg = self.logger or __import__("logging").getLogger(__name__)
+        msg = f"[purge:{kind}] {outcome}"
+        extras = {
+            "guild": guild_id,
+            "by": user_id,
+            "id": obj_id,
+            "name": name,
+            "reason": reason,
+            **(counts or {}),
+        }
+        if outcome in ("begin", "db_clear", "done"):
+            lg.warning(f"{msg} {extras}")
+        elif outcome == "deleted":
+            lg.info(f"{msg} {extras}")
+        elif outcome == "skipped":
+            lg.debug(f"{msg} {extras}")
+        elif outcome == "failed":
+            lg.error(f"{msg} {extras}")
+        else:
+            lg.debug(f"{msg} {extras}")
+
+    async def _resolve_me_and_top(self, guild: discord.Guild):
+        """Resolve bot’s Member, its top role, and all roles."""
+        me = getattr(guild, "me", None) or guild.get_member(self.cog.bot.user.id)
+        if me is None:
+            try:
+                me = await guild.fetch_member(self.cog.bot.user.id)
+            except discord.HTTPException:
+                me = None
+        try:
+            roles = await guild.fetch_roles()
+        except Exception:
+            roles = list(guild.roles)
+        top_role = None
+        if me and me.top_role:
+            for r in roles:
+                if r.id == me.top_role.id:
+                    top_role = r
+                    break
+        return me, top_role, roles
+
+    async def _dm_summary(self, ctx: discord.ApplicationContext, title: str, body: str, embed_builder):
+        """Try to DM the executor with purge results."""
+        try:
+            dm = await ctx.user.create_dm()
+            await dm.send(embed=embed_builder(title, body))
+        except Exception as e:
+            self._log_purge_event(kind="dm", outcome="failed",
+                                  guild_id=ctx.guild.id if ctx.guild else None,
+                                  user_id=ctx.user.id, reason=f"DM failed: {e}")
 
 # -------- helpers --------
 def _safe_preview(obj) -> str:
