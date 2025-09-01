@@ -7,7 +7,6 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-
 import sqlite3, threading
 from typing import List, Optional
 
@@ -18,16 +17,16 @@ class DBManager:
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
 
-        # Always enable FK constraints
+        
         self.conn.execute("PRAGMA foreign_keys = ON;")
 
-        # If this DB was previously in WAL, checkpoint and flip off WAL:
-        self.conn.execute("PRAGMA wal_checkpoint(FULL);")   # drain any -wal into main db
-        self.conn.execute("PRAGMA journal_mode = DELETE;")  # or TRUNCATE if you prefer
+        
+        self.conn.execute("PRAGMA wal_checkpoint(FULL);")   
+        self.conn.execute("PRAGMA journal_mode = DELETE;")  
 
-        # Reasonable defaults when not using WAL:
-        self.conn.execute("PRAGMA synchronous = FULL;")     # durability like default
-        self.conn.execute("PRAGMA busy_timeout = 5000;")    # friendlier under contention
+        
+        self.conn.execute("PRAGMA synchronous = FULL;")     
+        self.conn.execute("PRAGMA busy_timeout = 5000;")    
         self.lock = threading.RLock()
         self._init_schema()
 
@@ -267,16 +266,13 @@ class DBManager:
         """
         return self.conn.execute("SELECT * FROM category_mappings").fetchall()
 
-    def upsert_category_mapping(self, orig_id: int, orig_name: str,
-                                clone_id: Optional[int], clone_name: Optional[str]):
-        """
-        Safe upsert that handles cloned_category_id changes without violating FKs.
-        Strategy:
-        - If the cloned_category_id is changing, NULL out children's cloned_parent_category_id first
-            (so the parent update won't violate FK).
-        - Upsert the category row.
-        - Reattach children where original_parent_category_id == orig_id to the NEW clone id.
-        """
+    def upsert_category_mapping(
+        self,
+        orig_id: int,
+        orig_name: str,
+        clone_id: Optional[int],
+        clone_name: Optional[str] = None,
+    ):
         with self.lock, self.conn:
             row = self.conn.execute(
                 "SELECT cloned_category_id FROM category_mappings WHERE original_category_id=?",
@@ -284,8 +280,16 @@ class DBManager:
             ).fetchone()
             old_clone = (row["cloned_category_id"] if row else None)
 
-            will_change = (row is not None and clone_id is not None and old_clone != clone_id)
-            if will_change and old_clone is not None:
+            will_change_to_new = (row is not None and clone_id is not None and old_clone != clone_id)
+            if will_change_to_new and old_clone is not None:
+                self.conn.execute(
+                    "UPDATE channel_mappings SET cloned_parent_category_id=NULL "
+                    "WHERE cloned_parent_category_id=?",
+                    (old_clone,),
+                )
+
+            clearing_parent = (row is not None and old_clone is not None and clone_id is None)
+            if clearing_parent:
                 self.conn.execute(
                     "UPDATE channel_mappings SET cloned_parent_category_id=NULL "
                     "WHERE cloned_parent_category_id=?",
@@ -293,13 +297,18 @@ class DBManager:
                 )
 
             self.conn.execute(
-                """INSERT INTO category_mappings
+                """
+                INSERT INTO category_mappings
                     (original_category_id, original_category_name, cloned_category_id, cloned_category_name)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(original_category_id) DO UPDATE SET
-                    original_category_name=excluded.original_category_name,
-                    cloned_category_id    =excluded.cloned_category_id,
-                    cloned_category_name  =excluded.cloned_category_name
+                    original_category_name = excluded.original_category_name,
+                    cloned_category_id     = excluded.cloned_category_id,
+                    cloned_category_name   = CASE
+                        WHEN excluded.cloned_category_id IS NULL THEN NULL
+                        WHEN excluded.cloned_category_name IS NOT NULL THEN excluded.cloned_category_name
+                        ELSE category_mappings.cloned_category_name
+                    END
                 """,
                 (orig_id, orig_name, clone_id, clone_name),
             )
@@ -313,6 +322,7 @@ class DBManager:
 
             self.conn.commit()
 
+
     def delete_category_mapping(self, orig_id: int):
         with self.lock, self.conn:
             row = self.conn.execute(
@@ -321,7 +331,7 @@ class DBManager:
             ).fetchone()
             cloned_id = row["cloned_category_id"] if row else None
 
-            # Detach children
+            
             self.conn.execute(
                 "UPDATE channel_mappings SET original_parent_category_id=NULL WHERE original_parent_category_id=?",
                 (orig_id,),
@@ -332,7 +342,7 @@ class DBManager:
                     (cloned_id,),
                 )
 
-            # Delete parent
+            
             self.conn.execute(
                 "DELETE FROM category_mappings WHERE original_category_id=?",
                 (orig_id,),
@@ -896,7 +906,7 @@ class DBManager:
             "SELECT clone_channel_name FROM channel_mappings WHERE original_channel_id = ?",
             (int(original_channel_id),),
         ).fetchone()
-        # NOTE: returns None for SQL NULL, and "" if an empty string is stored
+        
         return row[0] if row else None
 
     def set_channel_clone_name(self, original_channel_id: int, clone_name: str | None) -> None:
@@ -908,3 +918,48 @@ class DBManager:
                 "UPDATE channel_mappings SET clone_channel_name = :name WHERE original_channel_id = :ocid",
                 {"name": clone_name, "ocid": int(original_channel_id)},
             )
+            
+    def get_original_category_name(self, original_category_id: int) -> str | None:
+        row = self.conn.execute(
+            "SELECT original_category_name FROM category_mappings WHERE original_category_id = ?",
+            (int(original_category_id),),
+        ).fetchone()
+        return row[0] if row else None
+
+    def get_clone_category_name(self, original_category_id: int) -> str | None:
+        row = self.conn.execute(
+            "SELECT cloned_category_name FROM category_mappings WHERE original_category_id = ?",
+            (int(original_category_id),),
+        ).fetchone()
+        return row[0] if row else None
+
+    def set_category_clone_name(self, original_category_id: int, clone_name: str | None) -> None:
+        """
+        Directly set cloned_category_name to a value or NULL (no COALESCE here).
+        """
+        with self.conn as con:
+            con.execute(
+                "UPDATE category_mappings SET cloned_category_name = :name WHERE original_category_id = :ocid",
+                {"name": clone_name, "ocid": int(original_category_id)},
+            )
+
+    def resolve_original_category_id_by_name(self, name: str) -> int | None:
+        """
+        Resolve an original_category_id using a human name.
+        Prefer current upstream name; fall back to pinned clone name.
+        Case-insensitive exact match.
+        """
+        n = name.strip()
+        if not n:
+            return None
+        row = self.conn.execute(
+            "SELECT original_category_id FROM category_mappings WHERE LOWER(original_category_name)=LOWER(?) LIMIT 1",
+            (n,),
+        ).fetchone()
+        if row:
+            return int(row[0])
+        row = self.conn.execute(
+            "SELECT original_category_id FROM category_mappings WHERE cloned_category_name IS NOT NULL AND LOWER(cloned_category_name)=LOWER(?) LIMIT 1",
+            (n,),
+        ).fetchone()
+        return int(row[0]) if row else None
