@@ -1481,39 +1481,58 @@ async def channels_page(request: Request):
 @app.get("/api/channels", response_class=JSONResponse)
 async def channels_api():
     chans = [dict(r) for r in db.get_all_channel_mappings()]
-    cats = {
+
+    cat_rows = [dict(r) for r in db.get_all_category_mappings()]
+    cats_by_id = {
         int(r["original_category_id"]): r["original_category_name"]
-        for r in db.get_all_category_mappings()
+        for r in cat_rows
     }
+    pins_by_id = {}
+    for r in cat_rows:
+        pin = (
+            r.get("cloned_category_name")
+            or None
+        )
+        if pin:
+            pins_by_id[int(r["original_category_id"])] = pin
+
+    out = []
     for ch in chans:
         pid = ch.get("original_parent_category_id")
-        ch["category_name"] = cats.get(int(pid)) if pid not in (None, "", 0) else None
+        pid_int = int(pid) if pid not in (None, "", 0) else None
 
-    out = [
-        {
-            "original_channel_id": (
-                str(ch["original_channel_id"])
-                if ch.get("original_channel_id") is not None
-                else ""
-            ),
-            "original_channel_name": ch.get("original_channel_name") or "",
-            "cloned_channel_id": (
-                str(ch["cloned_channel_id"])
-                if ch.get("cloned_channel_id") is not None
-                else None
-            ),
-            "channel_type": int(ch.get("channel_type", 0)),
-            "category_name": ch.get("category_name"),
-            "original_parent_category_id": (
-                str(ch["original_parent_category_id"])
-                if ch.get("original_parent_category_id") not in (None, "", 0)
-                else None
-            ),
-            "channel_webhook_url": ch.get("channel_webhook_url"),
-            "clone_channel_name": ch.get("clone_channel_name") or None,
-        }
-        for ch in chans
-    ]
+        original_cat = cats_by_id.get(pid_int)
+        custom_cat   = pins_by_id.get(pid_int)  # may be None
+
+        out.append(
+            {
+                "original_channel_id": (
+                    str(ch["original_channel_id"])
+                    if ch.get("original_channel_id") is not None
+                    else ""
+                ),
+                "original_channel_name": ch.get("original_channel_name") or "",
+                "cloned_channel_id": (
+                    str(ch["cloned_channel_id"])
+                    if ch.get("cloned_channel_id") is not None
+                    else None
+                ),
+                "channel_type": int(ch.get("channel_type", 0)),
+
+                "category_name": original_cat,                    
+                "original_category_name": original_cat,           
+                "cloned_category_name": custom_cat or None,       
+
+                "original_parent_category_id": (
+                    str(ch["original_parent_category_id"])
+                    if ch.get("original_parent_category_id") not in (None, "", 0)
+                    else None
+                ),
+                "channel_webhook_url": ch.get("channel_webhook_url"),
+                "clone_channel_name": ch.get("clone_channel_name") or None,
+            }
+        )
+
     return {"items": out}
 
 
@@ -1914,6 +1933,80 @@ async def api_channels_customize(payload: dict = Body(...)):
         }
     )
 
+@app.post("/api/categories/customize", response_class=JSONResponse)
+async def api_categories_customize(payload: dict = Body(...)):
+    """
+    Set or clear a category's custom display name.
+    """
+
+    import unicodedata
+
+    def _norm_display(s):
+        if s is None:
+            return None
+        s = unicodedata.normalize("NFKC", str(s)).strip()
+        return s if s else None
+
+    ocid = None
+    if "original_category_id" in payload:
+        try:
+            ocid = int(payload.get("original_category_id"))
+        except Exception:
+            return JSONResponse({"ok": False, "error": "invalid-original_category_id"}, status_code=400)
+    else:
+        name = _norm_display(payload.get("category_name"))
+        ocid = db.resolve_original_category_id_by_name(name) if name else None
+        if not ocid:
+            return JSONResponse({"ok": False, "error": "missing-or-unresolvable-category"}, status_code=400)
+
+    # Desired custom/pinned name (no slugging)
+    desired = _norm_display(payload.get("custom_category_name", payload.get("clone_category_name")))
+
+    try:
+        orig = db.get_original_category_name(ocid)
+    except Exception:
+        orig = None
+
+    same_as_original = False
+    if desired is not None and _norm_display(orig) == _norm_display(desired):
+        desired = None
+        same_as_original = True
+
+    try:
+        current_raw = db.get_clone_category_name(ocid)
+    except Exception:
+        current_raw = None
+
+    # Only update if different (compare on display-normalized text)
+    needs_update = _norm_display(current_raw) != _norm_display(desired)
+    if not needs_update:
+        LOGGER.info("Customize category | original_id=%s no change (kept=%r)", ocid, current_raw)
+        return JSONResponse({"ok": True, "changed": False, "normalized": desired is not None})
+
+    # Persist (store the exact user-facing text, or NULL to clear)
+    try:
+        db.set_category_clone_name(ocid, desired)
+        LOGGER.info(
+            "Customize category | original_id=%s updated to %r (orig=%r, was=%r)",
+            ocid, desired, orig, current_raw
+        )
+    except Exception as e:
+        LOGGER.exception("Failed to set cloned_category_name: %s", e)
+        return JSONResponse({"ok": False, "error": "db-failure"}, status_code=500)
+
+    should_nudge = not (desired is None and same_as_original)
+    if should_nudge:
+        try:
+            asyncio.create_task(_ws_cmd(CLIENT_AGENT_URL, {"type": "sitemap_request"}, timeout=1.0))
+        except Exception:
+            LOGGER.debug("WS sitemap_request dispatch failed", exc_info=True)
+
+    return JSONResponse({
+        "ok": True,
+        "changed": True,
+        "nudged": should_nudge,
+        "normalized_name": desired, 
+    })
 
 @app.get("/version")
 def get_version():

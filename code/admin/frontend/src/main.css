@@ -1,3 +1,11 @@
+:root {
+  --custom-ink: #facc15;
+}
+.ch-display-name.is-custom,
+.cat-chip.is-custom {
+  color: var(--custom-ink);
+}
+
 @media (max-width: 640px) {
   .runtime-container {
     overflow-x: auto;
@@ -3551,6 +3559,141 @@ body {
   animation: cpc-flash 1s infinite alternate;
 }
 @keyframes cpc-flash {
-  from { opacity: 1; }
-  to   { opacity: 0.35; }
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.35;
+  }
+}
+
+.cat-menu-trigger {
+  background: transparent;
+  border: none;
+  padding: 0 4px;
+  margin-left: 6px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  color: inherit;
+}
+
+.cat-menu-trigger:hover,
+.cat-menu-trigger:focus {
+  background: transparent;
+  outline: none;
+  color: var(--warn, #8b8b8b);
+}
+
+#customize-cat-modal .modal-content {
+  width: min(520px, 92vw) !important;
+  max-height: min(60vh, 640px) !important;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+#customize-cat-modal .modal-header,
+#customize-cat-modal .btns,
+#customize-cat-modal .modal-foot {
+  border-top: 0 !important;
+  border-bottom: 0 !important;
+  box-shadow: none !important;
+}
+#customize-cat-modal .modal-header::before,
+#customize-cat-modal .modal-header::after,
+#customize-cat-modal .btns::before,
+#customize-cat-modal .btns::after {
+  content: none !important;
+}
+
+#customize-cat-modal .modal-body {
+  padding: 10px 12px !important;
+  color: var(--text, #e7e9ef) !important;
+  font: 500 14px/1.35 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  max-height: 42vh;
+  overflow: auto;
+  display: grid;
+  gap: 8px;
+}
+
+#customize-cat-modal .modal-body .label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#customize-cat-modal .modal-body .input {
+  display: block;
+  width: 100%;
+}
+#customize-cat-modal .modal-body .input:focus {
+  outline: none;
+  border-color: var(--brand, #7c5cff) !important;
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--brand, #7c5cff) 28%, transparent);
+  caret-color: var(--brand, #7c5cff);
+}
+
+#customize-cat-modal .cc-tip,
+#customize-cat-modal .info-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font: 700 12px/1 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  background: color-mix(in srgb, var(--brand, #7c5cff) 18%, #000);
+  border: 1px solid
+    color-mix(in srgb, var(--brand, #7c5cff) 45%, rgba(255, 255, 255, 0.12));
+  color: var(--text, #fff);
+  user-select: none;
+  cursor: default;
+  transition: box-shadow 0.18s ease, background-color 0.18s ease,
+    border-color 0.18s ease, transform 0.1s ease;
+  box-shadow: none;
+}
+#customize-cat-modal .cc-tip:hover,
+#customize-cat-modal .cc-tip:focus-visible,
+#customize-cat-modal .info-dot:hover,
+#customize-cat-modal .info-dot:focus-visible {
+  background: color-mix(in srgb, var(--brand, #7c5cff) 35%, #000);
+  border-color: color-mix(
+    in srgb,
+    var(--brand, #7c5cff) 80%,
+    rgba(255, 255, 255, 0.12)
+  );
+  box-shadow: 0 0 0 3px
+      color-mix(in srgb, var(--brand, #7c5cff) 28%, transparent),
+    0 0 16px color-mix(in srgb, var(--brand, #7c5cff) 55%, transparent),
+    inset 0 0 8px color-mix(in srgb, var(--brand, #7c5cff) 35%, transparent);
+}
+
+#customize-cat-modal .btns {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 10px 12px 12px 12px !important;
+}
+#customize-cat-modal .btns .btn {
+  padding: 8px 10px;
+  font-size: 12px;
+  border-radius: 10px;
+}
+
+.badge.cat-chip.badge-custom {
+  background-color: rgba(250, 204, 21, 0.12);
+  border: 1px solid rgba(250, 204, 21, 0.45);
+  color: #facc15;
+
+  border: 1px solid
+    color-mix(in srgb, var(--warn, #facc15) 45%, rgba(255, 255, 255, 0.12));
+  background: color-mix(
+    in srgb,
+    var(--warn, #facc15) 12%,
+    rgba(255, 255, 255, 0.045)
+  );
+  color: var(--warn, #facc15);
+
+  background-image: none;
 }
