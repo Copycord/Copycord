@@ -981,7 +981,6 @@ class ServerReceiver:
                     orig_cat_id,
                     name_for[orig_cat_id],
                     new_cat.id,
-                    new_cat.name,
                 )
 
                 for ch_orig_id, ch_row in self.chan_map.items():
@@ -1706,43 +1705,89 @@ class ServerReceiver:
             removed += 1
 
         return removed
+    
+    async def _maybe_rename_category(
+        self,
+        cat: discord.CategoryChannel,
+        upstream_name: str,
+        orig_cat_id: int,
+    ) -> tuple[bool, str]:
+        """
+        Apply a pinned name (if any) for this category; otherwise match upstream.
+        """
+        try:
+            # Get mapping (refresh if needed)
+            mapping = self.cat_map.get(orig_cat_id)
+            if mapping is None:
+                with contextlib.suppress(Exception):
+                    self._load_mappings()
+                    mapping = self.cat_map.get(orig_cat_id)
+
+            # Extract pin
+            pinned_raw = (mapping or {}).get("cloned_category_name") or ""
+            pinned_name = pinned_raw.strip()
+            has_pin = bool(pinned_name)
+
+            if mapping is not None:
+                try:
+                    self.db.upsert_category_mapping(
+                        orig_cat_id,
+                        upstream_name,
+                        int(mapping.get("cloned_category_id") or cat.id),
+                        clone_name=pinned_name if has_pin else None,
+                    )
+                    mapping["original_category_name"] = upstream_name
+                    if has_pin:
+                        mapping["cloned_category_name"] = pinned_name
+                except Exception:
+                    logger.debug("[rename] category mapping upsert failed", exc_info=True)
+
+            desired = pinned_name if has_pin else upstream_name
+            if cat.name == desired:
+                return (False, "skipped_already_ok")
+
+            old = cat.name
+            await self.ratelimit.acquire(ActionType.EDIT_CHANNEL)
+            await cat.edit(name=desired)
+
+            if has_pin:
+                logger.info("[📌] Enforced pinned category name on %d: %r → %r", cat.id, old, desired)
+                return (True, "pinned_enforced")
+            else:
+                logger.info("[✏️] Renamed category %d: %r → %r", cat.id, old, desired)
+                return (True, "match_upstream")
+
+        except Exception:
+            logger.debug("[rename] _maybe_rename_category error", exc_info=True)
+            return (False, "skipped_error")
+
 
     async def _handle_renamed_categories(
-        self, guild: discord.Guild, sitemap: Dict
+    self, guild: discord.Guild, sitemap: Dict
     ) -> int:
         """
-        Handles renaming of cloned categories in the clone guild based on the sitemap.
-        This method compares the current names of cloned categories in the guild
-        with the desired names specified in the sitemap. If a mismatch is found,
-        the category is renamed, and the changes are persisted in the database
-        and the in-memory mapping.
+        Handles the renaming of cloned categories.
         """
         renamed = 0
-        # Build a quick lookup of desired names
         desired = {c["id"]: c["name"] for c in sitemap.get("categories", [])}
 
-        for orig_id, row in self.cat_map.items():
-            new_name = desired.get(orig_id)
-            if not new_name:
-                continue  # no such category in sitemap
+        for orig_id, row in list(self.cat_map.items()):
+            upstream_name = desired.get(orig_id)
+            if not upstream_name:
+                continue
 
-            clone_cat = guild.get_channel(row["cloned_category_id"])
-            if clone_cat and clone_cat.name != new_name:
-                old_name = clone_cat.name
-                await self.ratelimit.acquire(ActionType.EDIT_CHANNEL)
-                await clone_cat.edit(name=new_name)
-                logger.info("[✏️] Renamed category %s → %s", old_name, new_name)
+            clone_id = row.get("cloned_category_id")
+            if not clone_id:
+                continue
 
-                # persist change to DB
-                self.db.upsert_category_mapping(
-                    orig_id,
-                    new_name,
-                    clone_cat.id,
-                    new_name,
-                )
-                # keep in-memory map up to date
-                row["cloned_category_name"] = new_name
+            clone_cat = guild.get_channel(int(clone_id))
+            if not clone_cat:
+                continue
 
+            did, _reason = await self._maybe_rename_category(
+                clone_cat, upstream_name, orig_id
+            )
+            if did:
                 renamed += 1
 
         return renamed
@@ -1775,14 +1820,12 @@ class ServerReceiver:
             original_id,
             name,
             cat.id,
-            cat.name,
         )
         # update in-memory map
         self.cat_map[original_id] = {
             "original_category_id": original_id,
             "cloned_category_id": cat.id,
             "original_category_name": name,
-            "cloned_category_name": cat.name,
         }
         return cat, True
 
