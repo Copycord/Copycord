@@ -183,7 +183,7 @@ class RoleManager:
                 if not can_create:
                     if not create_suppressed_logged:
                         logger.warning(
-                            "[⚠️] Can't create more roles. Guild is at max role count (%d).",
+                            "[🧩] Can't create more roles. Guild is at max role count (%d).",
                             self.MAX_ROLES
                         )
                         create_suppressed_logged = True
