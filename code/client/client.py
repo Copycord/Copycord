@@ -50,7 +50,7 @@ ch.setFormatter(formatter)
 ch.setLevel(LEVEL)
 root.addHandler(ch)
 
-# keep library noise down
+
 for name in ("websockets.server", "websockets.protocol"):
     logging.getLogger(name).setLevel(logging.WARNING)
 for lib in (
@@ -147,7 +147,7 @@ class ClientListener:
             logger.info(
                 "[⚙️] Updated block list: %d keywords", len(self.blocked_keywords)
             )
-            return  # optional ack if your WS expects it
+            return
 
         elif typ == "ping":
             now = datetime.now(timezone.utc)
@@ -168,7 +168,7 @@ class ClientListener:
         elif typ == "filters_reload":
             self.config._load_filters_from_db()
             logger.info("[⚙️] Filters reloaded from DB")
-            # let SitemapService take the new sets into account
+
             try:
                 self.sitemap.reload_filters_and_resend()
             except AttributeError:
@@ -178,7 +178,7 @@ class ClientListener:
 
         elif typ == "clone_messages":
             chan_id = int(data.get("channel_id"))
-            rng  = (data.get("range") or {}) if isinstance(data, dict) else {}
+            rng = (data.get("range") or {}) if isinstance(data, dict) else {}
             mode = (data.get("mode") or rng.get("mode") or "").lower()
 
             after_iso = (
@@ -187,25 +187,28 @@ class ClientListener:
                 or (rng.get("value") if mode == "since" else None)
             )
 
-            # NEW: upper bound
             before_iso = (
                 data.get("before_iso")
                 or (rng.get("before") if mode in ("between", "range") else None)
                 or data.get("until")
             )
 
-            _n = data.get("last_n") or (rng.get("value") if mode in ("last", "last_n") else None)
+            _n = data.get("last_n") or (
+                rng.get("value") if mode in ("last", "last_n") else None
+            )
             try:
                 last_n = int(_n) if _n is not None else None
             except Exception:
                 last_n = None
 
-            asyncio.create_task(self._backfill_channel(
-                chan_id,
-                after_iso=after_iso,
-                before_iso=before_iso,   # NEW
-                last_n=last_n,
-            ))
+            asyncio.create_task(
+                self._backfill_channel(
+                    chan_id,
+                    after_iso=after_iso,
+                    before_iso=before_iso,
+                    last_n=last_n,
+                )
+            )
             return {"ok": True}
 
         elif typ == "sitemap_request":
@@ -219,10 +222,10 @@ class ClientListener:
         elif typ == "scrape_members":
             data = data or {}
 
-            inc_username   = bool(data.get("include_username", False))
+            inc_username = bool(data.get("include_username", False))
             inc_avatar_url = bool(data.get("include_avatar_url", False))
-            inc_bio        = bool(data.get("include_bio", False))
-            gid            = str(data.get("guild_id") or "")     # echo back to UI so it can highlight the right card
+            inc_bio = bool(data.get("include_bio", False))
+            gid = str(data.get("guild_id") or "")
             self._scrape_gid = gid
 
             def clamp(v, lo, hi):
@@ -243,7 +246,6 @@ class ClientListener:
                 except Exception:
                     mpps = 1
 
-            # Helper to make sure we never emit an empty error string
             def _err_msg(e: BaseException) -> str:
                 msg = str(e).strip()
                 return msg or type(e).__name__
@@ -254,10 +256,9 @@ class ClientListener:
 
                 async with self._scrape_lock:
                     if self._scrape_task and not self._scrape_task.done():
-                        # another scrape is still running
+
                         return {"ok": False, "error": "scrape-already-running"}
 
-                    # Announce start (include options for observability)
                     try:
                         await self.bus.publish(
                             kind="client",
@@ -283,7 +284,6 @@ class ClientListener:
                 except Exception:
                     target_gid = None
 
-                # Launch the scrape task (do NOT await here)
                 self._scrape_task = asyncio.create_task(
                     self.scraper.scrape(
                         guild_id=target_gid,
@@ -302,15 +302,16 @@ class ClientListener:
                         count = len((result or {}).get("members", []))
                         logger.debug("[scrape] TASK_DONE count=%d", count)
 
-                        # ---- Persist to /data/scrapes ----
                         import os, json, datetime as _dt
 
                         scrapes_dir = "/data/scrapes"
                         os.makedirs(scrapes_dir, exist_ok=True)
 
-                        rgid  = str((result or {}).get("guild_id") or gid or "unknown")
+                        rgid = str((result or {}).get("guild_id") or gid or "unknown")
                         gname = (result or {}).get("guild_name", "guild")
-                        slug  = "".join(ch if ch.isalnum() else "_" for ch in gname).strip("_")
+                        slug = "".join(
+                            ch if ch.isalnum() else "_" for ch in gname
+                        ).strip("_")
                         while "__" in slug:
                             slug = slug.replace("__", "_")
 
@@ -338,12 +339,17 @@ class ClientListener:
                             pass
 
                     except asyncio.CancelledError:
-                        # Write a partial snapshot on cancel
+
                         import os, json, datetime as _dt
 
                         snap = await self.scraper.snapshot_members()
                         try:
-                            rgid = str(self._scrape_gid or gid or self.host_guild_id or "unknown")
+                            rgid = str(
+                                self._scrape_gid
+                                or gid
+                                or self.host_guild_id
+                                or "unknown"
+                            )
                             try:
                                 g = self.bot.get_guild(int(rgid))
                             except Exception:
@@ -353,16 +359,25 @@ class ClientListener:
                             scrapes_dir = "/data/scrapes"
                             os.makedirs(scrapes_dir, exist_ok=True)
 
-                            slug = "".join(ch if ch.isalnum() else "_" for ch in gname).strip("_")
+                            slug = "".join(
+                                ch if ch.isalnum() else "_" for ch in gname
+                            ).strip("_")
                             while "__" in slug:
                                 slug = slug.replace("__", "_")
 
                             ts = _dt.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-                            outfile = os.path.join(scrapes_dir, f"{slug}_{rgid}_{ts}.json")
+                            outfile = os.path.join(
+                                scrapes_dir, f"{slug}_{rgid}_{ts}.json"
+                            )
 
                             with open(outfile, "w", encoding="utf-8") as f:
                                 json.dump(
-                                    {"members": snap, "count": len(snap), "guild_id": rgid, "guild_name": gname},
+                                    {
+                                        "members": snap,
+                                        "count": len(snap),
+                                        "guild_id": rgid,
+                                        "guild_name": gname,
+                                    },
                                     f,
                                     ensure_ascii=False,
                                     indent=2,
@@ -382,11 +397,14 @@ class ClientListener:
                                 },
                             )
                         except Exception:
-                            # If writing or publishing fails, still tell the UI it was cancelled
+
                             try:
                                 await self.bus.publish(
                                     kind="client",
-                                    payload={"type": "scrape_cancelled", "data": {"guild_id": self._scrape_gid or gid}},
+                                    payload={
+                                        "type": "scrape_cancelled",
+                                        "data": {"guild_id": self._scrape_gid or gid},
+                                    },
                                 )
                             except Exception:
                                 pass
@@ -396,7 +414,10 @@ class ClientListener:
                         try:
                             await self.bus.publish(
                                 kind="client",
-                                payload={"type": "scrape_failed", "data": {"guild_id": gid, "error": _err_msg(e)}},
+                                payload={
+                                    "type": "scrape_failed",
+                                    "data": {"guild_id": gid, "error": _err_msg(e)},
+                                },
                             )
                         except Exception:
                             pass
@@ -404,10 +425,8 @@ class ClientListener:
                         self._scrape_task = None
                         self._scrape_gid = None
 
-                # Detach the follow-up work
                 asyncio.create_task(_finish_scrape())
 
-                # Immediate response to HTTP caller (no long await)
                 return {"ok": True, "accepted": True, "guild_id": gid}
 
             except BaseException as e:
@@ -415,14 +434,17 @@ class ClientListener:
                 try:
                     await self.bus.publish(
                         kind="client",
-                        payload={"type": "scrape_failed", "data": {"guild_id": gid, "error": _err_msg(e)}},
+                        payload={
+                            "type": "scrape_failed",
+                            "data": {"guild_id": gid, "error": _err_msg(e)},
+                        },
                     )
                 except Exception:
                     pass
                 return {"ok": False, "error": _err_msg(e)}
 
         elif typ == "scrape_status":
-            # Are we currently scraping?
+
             running = bool(self._scrape_task and not self._scrape_task.done())
             return {"ok": True, "running": running, "guild_id": self._scrape_gid}
 
@@ -435,18 +457,19 @@ class ClientListener:
             try:
                 if self.scraper:
                     self.scraper.request_cancel()
-                # Nudge the running task so the CancelledError path triggers promptly
+
                 try:
                     self._scrape_task.cancel()
                 except Exception:
                     pass
 
-                # Tell UI immediately so the card resets; the CancelledError handler
-                # will later publish `scrape_done` with partial: true after writing the file.
                 try:
                     await self.bus.publish(
                         kind="client",
-                        payload={"type": "scrape_cancelled", "data": {"guild_id": self._scrape_gid or req_gid}}
+                        payload={
+                            "type": "scrape_cancelled",
+                            "data": {"guild_id": self._scrape_gid or req_gid},
+                        },
                     )
                 except Exception:
                     pass
@@ -467,7 +490,6 @@ class ClientListener:
         """
         logger = logging.getLogger("client")
 
-        # 1) Map cloned -> host channel id BEFORE any fetches
         channel_id = int(orig_channel_id)
         if hasattr(self, "chan_map"):
             for src_id, row in self.chan_map.items():
@@ -478,7 +500,6 @@ class ClientListener:
                     channel_id = int(src_id)
                     break
 
-        # 2) Try cache, then fetch
         channel = self.bot.get_channel(channel_id)
         if not channel:
             try:
@@ -486,14 +507,13 @@ class ClientListener:
             except discord.Forbidden:
                 channel = None
 
-        # 3) Resolve guild
         guild = getattr(channel, "guild", None)
         if guild is None:
-            # Prefer an explicit host guild id if your client has it
+
             host_guild = None
             if hasattr(self, "host_guild_id") and self.host_guild_id:
                 host_guild = self.bot.get_guild(int(self.host_guild_id))
-            # Fallback: try to guess (last resort)
+
             if host_guild is None and self.bot.guilds:
                 host_guild = self.bot.guilds[0]
             guild = host_guild
@@ -503,7 +523,6 @@ class ClientListener:
                 None, {"message": "No guild available for fallback"}
             )
 
-        # 4) If we couldn’t fetch the requested channel (or it’s None), pick the first readable text channel
         if channel is None:
             me = guild.me or guild.get_member(
                 getattr(getattr(self.bot, "user", None), "id", 0)
@@ -557,10 +576,8 @@ class ClientListener:
             sys.exit(1)
         asyncio.create_task(self.config.setup_release_watcher(self, should_dm=False))
         msg = f"Logged in as {self.bot.user.display_name} in {host_guild.name}"
-        self.ui_controller.start() # Start UI Listener
-        await self.bus.status(
-            running=True, status=msg, discord={"ready": True}
-        )
+        self.ui_controller.start()
+        await self.bus.status(running=True, status=msg, discord={"ready": True})
         logger.info("[🤖] %s", msg)
         if self.config.ENABLE_CLONING:
             if self._sync_task is None:
@@ -574,11 +591,11 @@ class ClientListener:
     def _rebuild_blocklist(self, keywords: list[str] | None = None) -> None:
         if keywords is None:
             keywords = self.db.get_blocked_keywords()
-        # normalize and store canonical list
+
         self.blocked_keywords = [
             k.lower().strip() for k in (keywords or []) if k and k.strip()
         ]
-        # word-boundary patterns; matches "yo" but not "you"
+
         self._blocked_patterns = [
             re.compile(rf"(?<!\w){re.escape(k)}(?!\w)", re.IGNORECASE)
             for k in self.blocked_keywords
@@ -591,18 +608,17 @@ class ClientListener:
         """
         ch = message.channel
         try:
-            # For text channels
+
             ch_id = getattr(ch, "id", None)
             cat_id = getattr(ch, "category_id", None)
 
-            # For threads: category_id lives on the parent forum
             if (
                 isinstance(getattr(ch, "__class__", None), type)
                 and getattr(ch.__class__, "__name__", "") == "Thread"
             ):
                 parent = getattr(ch, "parent", None)
                 if parent is not None:
-                    # parent is a ForumChannel (has its own category_id)
+
                     cat_id = getattr(parent, "category_id", cat_id)
 
             if self.sitemap.is_excluded_ids(ch_id, cat_id):
@@ -611,23 +627,19 @@ class ClientListener:
             # Fail-safe: don't break message flow
             pass
 
-        # Ignore thread_created events in text channels
         if message.type == MessageType.thread_created:
             return True
 
-        # Ignore channel name change system messages in threads
         if message.type == MessageType.channel_name_change:
             return True
 
-        # Ignore DMs or wrong guild
         if message.guild is None or message.guild.id != self.host_guild_id:
             return True
 
         if message.channel.type in (ChannelType.voice, ChannelType.stage_voice):
-            # This is a voice channel text chat; unsupported → skip.
+
             return True
 
-        # Ignore blocked keywords
         content = unicodedata.normalize("NFKC", message.content or "")
         for pat in getattr(self, "_blocked_patterns", []):
             if pat.search(content):
@@ -656,22 +668,21 @@ class ClientListener:
             key = kw.lower()
 
             matched = False
-            # try word-boundary match for simple alphanumerics
+
             if re.match(r"^\w+$", key):
                 if re.search(rf"\b{re.escape(key)}\b", lower):
                     matched = True
-            # try custom-emoji markup: <:name:digits> or <a:name:digits>
+
             if not matched and re.match(r"^[A-Za-z0-9_]+$", key):
                 if re.search(rf"<a?:{re.escape(key)}:\d+>", content):
                     matched = True
-            # fallback: substring (for Unicode emoji, punctuation, spaces, etc)
+
             if not matched and key in lower:
                 matched = True
 
             if not matched:
                 continue
 
-            # check filters
             for filter_id, allowed_chan in entries:
                 if (filter_id == 0 or author.id == filter_id) and (
                     allowed_chan == 0 or chan_id == allowed_chan
@@ -706,7 +717,6 @@ class ClientListener:
 
             await self.maybe_send_announcement(message)
 
-            # Normalize content and detect system messages
             raw = message.content or ""
             system = getattr(message, "system_content", "") or ""
             if not raw and system:
@@ -958,7 +968,7 @@ class ClientListener:
             "[roles] update: %s (%d) → scheduling sitemap", after.name, after.id
         )
         self.schedule_sync()
-        
+
     async def on_guild_join(self, guild: discord.Guild):
         try:
             row = self._guild_row_from_obj(guild)
@@ -1027,44 +1037,57 @@ class ClientListener:
         import asyncio
         import os
         from datetime import datetime, timezone
-        
+
         def _coerce_int(x):
             try:
                 return int(x)
             except Exception:
                 return None
+
         try:
-            from zoneinfo import ZoneInfo  # py>=3.9
+            from zoneinfo import ZoneInfo
+
             _DEFAULT_UI_TZ = os.getenv("UI_TZ", "America/New_York")
             LOCAL_TZ = ZoneInfo(_DEFAULT_UI_TZ)
         except Exception:
             LOCAL_TZ = datetime.now().astimezone().tzinfo or timezone.utc
 
         def _parse_iso(s: str | None) -> datetime | None:
-            if not s: return None
+            if not s:
+                return None
             try:
                 dt = datetime.fromisoformat(s)
             except Exception:
-                try: dt = datetime.fromisoformat(s + ":00")
-                except Exception: return None
+                try:
+                    dt = datetime.fromisoformat(s + ":00")
+                except Exception:
+                    return None
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=LOCAL_TZ).astimezone(timezone.utc)
             else:
                 dt = dt.astimezone(timezone.utc)
             return dt
 
-        after_dt  = _parse_iso(after_iso)
+        after_dt = _parse_iso(after_iso)
         before_dt = _parse_iso(before_iso)
 
         mode = (
-            "last_n" if _coerce_int(last_n)
-            else ("between" if (after_iso and before_iso)
-                else ("since" if after_iso else "all"))
+            "last_n"
+            if _coerce_int(last_n)
+            else (
+                "between"
+                if (after_iso and before_iso)
+                else ("since" if after_iso else "all")
+            )
         )
 
         logger.debug(
             "[backfill] INIT | channel=%s mode=%s after_iso=%r before_iso=%r last_n=%r",
-            original_channel_id, mode, after_iso, before_iso, last_n
+            original_channel_id,
+            mode,
+            after_iso,
+            before_iso,
+            last_n,
         )
 
         loop = asyncio.get_event_loop()
@@ -1076,51 +1099,90 @@ class ClientListener:
         PROGRESS_EVERY = 50
         LOG_EVERY_SEC = 5.0
 
-        await self.ws.send({
-            "type": "backfill_started",
-            "data": {
-                "channel_id": original_channel_id,
-                "range": {"after": after_iso, "before": before_iso, "last_n": last_n},
-            },
-        })
+        await self.ws.send(
+            {
+                "type": "backfill_started",
+                "data": {
+                    "channel_id": original_channel_id,
+                    "range": {
+                        "after": after_iso,
+                        "before": before_iso,
+                        "last_n": last_n,
+                    },
+                },
+            }
+        )
 
         guild = self.bot.get_guild(self.host_guild_id)
         if not guild:
-            logger.error("[backfill] ⛔ host guild missing | guild_id=%s", self.host_guild_id)
+            logger.error(
+                "[backfill] ⛔ host guild missing | guild_id=%s", self.host_guild_id
+            )
             try:
-                await self.ws.send({"type": "backfill_progress",
-                                    "data": {"channel_id": original_channel_id, "sent": sent}})
+                await self.ws.send(
+                    {
+                        "type": "backfill_progress",
+                        "data": {"channel_id": original_channel_id, "sent": sent},
+                    }
+                )
             finally:
-                await self.ws.send({"type": "backfill_stream_end",
-                                    "data": {"channel_id": original_channel_id}})
+                await self.ws.send(
+                    {
+                        "type": "backfill_stream_end",
+                        "data": {"channel_id": original_channel_id},
+                    }
+                )
             return
-        logger.debug("[backfill] guild OK | id=%s name=%s", getattr(guild, "id", None), getattr(guild, "name", None))
+        logger.debug(
+            "[backfill] guild OK | id=%s name=%s",
+            getattr(guild, "id", None),
+            getattr(guild, "name", None),
+        )
 
         ch = guild.get_channel(original_channel_id)
         if not ch:
             try:
                 ch = await self.bot.fetch_channel(original_channel_id)
-                logger.debug("[backfill] channel fetched | id=%s name=%s type=%s",
-                            getattr(ch, "id", None), getattr(ch, "name", None),
-                            getattr(getattr(ch, "type", None), "value", None))
+                logger.debug(
+                    "[backfill] channel fetched | id=%s name=%s type=%s",
+                    getattr(ch, "id", None),
+                    getattr(ch, "name", None),
+                    getattr(getattr(ch, "type", None), "value", None),
+                )
             except Exception as e:
-                logger.error("[backfill] ⛔ cannot fetch channel | id=%s err=%s", original_channel_id, e)
+                logger.error(
+                    "[backfill] ⛔ cannot fetch channel | id=%s err=%s",
+                    original_channel_id,
+                    e,
+                )
                 try:
-                    await self.ws.send({"type": "backfill_progress",
-                                        "data": {"channel_id": original_channel_id, "sent": sent}})
+                    await self.ws.send(
+                        {
+                            "type": "backfill_progress",
+                            "data": {"channel_id": original_channel_id, "sent": sent},
+                        }
+                    )
                 finally:
-                    await self.ws.send({"type": "backfill_stream_end",
-                                        "data": {"channel_id": original_channel_id}})
+                    await self.ws.send(
+                        {
+                            "type": "backfill_stream_end",
+                            "data": {"channel_id": original_channel_id},
+                        }
+                    )
                 return
         else:
-            logger.debug("[backfill] channel OK | id=%s name=%s type=%s",
-                        getattr(ch, "id", None), getattr(ch, "name", None),
-                        getattr(getattr(ch, "type", None), "value", None))
+            logger.debug(
+                "[backfill] channel OK | id=%s name=%s type=%s",
+                getattr(ch, "id", None),
+                getattr(ch, "name", None),
+                getattr(getattr(ch, "type", None), "value", None),
+            )
 
         if getattr(getattr(ch, "guild", None), "id", None) != self.host_guild_id:
             logger.warning(
                 "[backfill] channel is not in host guild | got_guild=%s expected=%s (was a clone id passed?)",
-                getattr(getattr(ch, "guild", None), "id", None), self.host_guild_id
+                getattr(getattr(ch, "guild", None), "id", None),
+                self.host_guild_id,
             )
 
         ALLOWED_TYPES = {MessageType.default}
@@ -1128,8 +1190,10 @@ class ClientListener:
             _t = getattr(MessageType, _name, None)
             if _t is not None:
                 ALLOWED_TYPES.add(_t)
-        logger.debug("[backfill] allowed message types: %s",
-                    sorted(getattr(t, "value", str(t)) for t in ALLOWED_TYPES))
+        logger.debug(
+            "[backfill] allowed message types: %s",
+            sorted(getattr(t, "value", str(t)) for t in ALLOWED_TYPES),
+        )
 
         def _is_normal(msg) -> bool:
             try:
@@ -1142,18 +1206,29 @@ class ClientListener:
             if getattr(msg, "type", None) not in ALLOWED_TYPES:
                 return False
             return True
-        
+
         if after_iso and after_dt:
-            logger.debug("[backfill] since filter parsed | utc=%s", after_dt.isoformat())
+            logger.debug(
+                "[backfill] since filter parsed | utc=%s", after_dt.isoformat()
+            )
         elif after_iso and not after_dt:
-            logger.warning("[backfill] since filter parse failed | after_iso=%r (ignoring)", after_iso)
+            logger.warning(
+                "[backfill] since filter parse failed | after_iso=%r (ignoring)",
+                after_iso,
+            )
 
         if before_iso and before_dt:
-            logger.debug("[backfill] before filter parsed | utc=%s", before_dt.isoformat())
+            logger.debug(
+                "[backfill] before filter parsed | utc=%s", before_dt.isoformat()
+            )
         elif before_iso and not before_dt:
-            logger.warning("[backfill] before filter parse failed | before_iso=%r (ignoring)", before_iso)
-            
+            logger.warning(
+                "[backfill] before filter parse failed | before_iso=%r (ignoring)",
+                before_iso,
+            )
+
         try:
+
             async def emit_msg(m):
                 nonlocal sent, skipped, last_ping, last_log
                 if not _is_normal(m):
@@ -1163,108 +1238,184 @@ class ClientListener:
                 raw = m.content or ""
                 system = getattr(m, "system_content", "") or ""
                 content = system if (not raw and system) else raw
-                author = "System" if (not raw and system) else getattr(m.author, "name", "Unknown")
+                author = (
+                    "System"
+                    if (not raw and system)
+                    else getattr(m.author, "name", "Unknown")
+                )
 
                 raw_embeds = [e.to_dict() for e in m.embeds]
                 mention_map = await self.msg.build_mention_map(m, raw_embeds)
-                embeds = [self.msg.sanitize_embed_dict(e, m, mention_map) for e in raw_embeds]
+                embeds = [
+                    self.msg.sanitize_embed_dict(e, m, mention_map) for e in raw_embeds
+                ]
                 content = self.msg.sanitize_inline(content, m, mention_map)
                 stickers_payload = self.msg.stickers_payload(getattr(m, "stickers", []))
 
-                await self.ws.send({
-                    "type": "message",
-                    "data": {
-                        "channel_id": m.channel.id,
-                        "channel_name": getattr(m.channel, "name", None),
-                        "channel_type": getattr(m.channel, "type", None).value if getattr(m.channel, "type", None) else None,
-                        "author": author,
-                        "author_id": getattr(m, "author", None) and getattr(m.author, "id", None),
-                        "avatar_url": (str(m.author.display_avatar.url)
-                                    if getattr(m.author, "display_avatar", None) else None),
-                        "content": content,
-                        "embeds": embeds,
-                        "attachments": [{"url": a.url, "filename": a.filename, "size": a.size} for a in m.attachments],
-                        "stickers": stickers_payload,
-                        "__backfill__": True,
-                    },
-                })
+                await self.ws.send(
+                    {
+                        "type": "message",
+                        "data": {
+                            "channel_id": m.channel.id,
+                            "channel_name": getattr(m.channel, "name", None),
+                            "channel_type": (
+                                getattr(m.channel, "type", None).value
+                                if getattr(m.channel, "type", None)
+                                else None
+                            ),
+                            "author": author,
+                            "author_id": getattr(m, "author", None)
+                            and getattr(m.author, "id", None),
+                            "avatar_url": (
+                                str(m.author.display_avatar.url)
+                                if getattr(m.author, "display_avatar", None)
+                                else None
+                            ),
+                            "content": content,
+                            "embeds": embeds,
+                            "attachments": [
+                                {"url": a.url, "filename": a.filename, "size": a.size}
+                                for a in m.attachments
+                            ],
+                            "stickers": stickers_payload,
+                            "__backfill__": True,
+                        },
+                    }
+                )
                 sent += 1
                 await asyncio.sleep(2)
 
                 now = loop.time()
                 if sent % PROGRESS_EVERY == 0 or (now - last_ping) >= 2.0:
-                    await self.ws.send({"type": "backfill_progress",
-                                        "data": {"channel_id": original_channel_id, "sent": sent}})
+                    await self.ws.send(
+                        {
+                            "type": "backfill_progress",
+                            "data": {"channel_id": original_channel_id, "sent": sent},
+                        }
+                    )
                     last_ping = now
 
                 if (now - last_log) >= LOG_EVERY_SEC:
                     dt = now - t0
                     rate = (sent / dt) if dt > 0 else 0.0
-                    logger.debug("[backfill] progress | channel=%s sent=%d skipped=%d rate=%.1f msg/s",
-                                original_channel_id, sent, skipped, rate)
+                    logger.debug(
+                        "[backfill] progress | channel=%s sent=%d skipped=%d rate=%.1f msg/s",
+                        original_channel_id,
+                        sent,
+                        skipped,
+                        rate,
+                    )
                     last_log = now
 
             n = _coerce_int(last_n)
 
             if n and n > 0:
-                # ---------- LAST N: fetch, compute true total, announce, then emit ----------
+
                 buf = []
                 logger.debug(
                     "[backfill] mode=last_n | n=%d %s",
-                    n, f"(after {after_dt.isoformat()})" if after_dt else "(no since bound)"
+                    n,
+                    (
+                        f"(after {after_dt.isoformat()})"
+                        if after_dt
+                        else "(no since bound)"
+                    ),
                 )
-                async for m in ch.history(limit=n, oldest_first=False, after=after_dt, before=before_dt):
+                async for m in ch.history(
+                    limit=n, oldest_first=False, after=after_dt, before=before_dt
+                ):
                     buf.append(m)
-                # True total = only messages we will actually emit
-                total = sum(1 for m in buf if _is_normal(m))
-                logger.debug("[backfill] fetched buffer | size=%d, total_normal=%d", len(buf), total)
 
-                # Announce actual total so server can count DOWN correctly
-                await self.ws.send({"type": "backfill_progress",
-                                    "data": {"channel_id": original_channel_id, "total": total}})
+                total = sum(1 for m in buf if _is_normal(m))
+                logger.debug(
+                    "[backfill] fetched buffer | size=%d, total_normal=%d",
+                    len(buf),
+                    total,
+                )
+
+                await self.ws.send(
+                    {
+                        "type": "backfill_progress",
+                        "data": {"channel_id": original_channel_id, "total": total},
+                    }
+                )
 
                 for m in reversed(buf):
                     await emit_msg(m)
 
             else:
-                # ---------- ALL/SINCE: pre-buffer to know true total, announce, then emit ----------
+
                 logger.debug(
                     "[backfill] mode=%s | streaming oldest→newest%s",
                     "since" if after_dt else "all",
-                    f" (after {after_dt.isoformat()})" if after_dt else ""
+                    f" (after {after_dt.isoformat()})" if after_dt else "",
                 )
-                buf = [m async for m in ch.history(limit=None, oldest_first=True, after=after_dt, before=before_dt)]
+                buf = [
+                    m
+                    async for m in ch.history(
+                        limit=None, oldest_first=True, after=after_dt, before=before_dt
+                    )
+                ]
                 total = sum(1 for m in buf if _is_normal(m))
-                logger.debug("[backfill] pre-count complete | fetched=%d total_normal=%d", len(buf), total)
+                logger.debug(
+                    "[backfill] pre-count complete | fetched=%d total_normal=%d",
+                    len(buf),
+                    total,
+                )
 
-                await self.ws.send({"type": "backfill_progress",
-                                    "data": {"channel_id": original_channel_id, "total": total}})
+                await self.ws.send(
+                    {
+                        "type": "backfill_progress",
+                        "data": {"channel_id": original_channel_id, "total": total},
+                    }
+                )
 
                 for m in buf:
                     await emit_msg(m)
 
         except Forbidden as e:
-            logger.debug("[backfill] history forbidden | channel=%s err=%s", original_channel_id, e)
+            logger.debug(
+                "[backfill] history forbidden | channel=%s err=%s",
+                original_channel_id,
+                e,
+            )
         except HTTPException as e:
-            logger.warning("[backfill] HTTP error | channel=%s err=%s", original_channel_id, e)
+            logger.warning(
+                "[backfill] HTTP error | channel=%s err=%s", original_channel_id, e
+            )
         except Exception as e:
-            logger.exception("[backfill] unexpected error | channel=%s err=%s", original_channel_id, e)
+            logger.exception(
+                "[backfill] unexpected error | channel=%s err=%s",
+                original_channel_id,
+                e,
+            )
         finally:
             try:
-                await self.ws.send({"type": "backfill_progress",
-                                    "data": {"channel_id": original_channel_id, "sent": sent}})
+                await self.ws.send(
+                    {
+                        "type": "backfill_progress",
+                        "data": {"channel_id": original_channel_id, "sent": sent},
+                    }
+                )
             except Exception:
                 pass
 
             dur = loop.time() - t0
-            logger.debug("[backfill] STREAM END | channel=%s mode=%s sent=%d skipped=%d dur=%.1fs",
-                        original_channel_id, mode, sent, skipped, dur)
-            await self.ws.send({
-                "type": "backfill_stream_end",
-                "data": {"channel_id": original_channel_id}
-            })
+            logger.debug(
+                "[backfill] STREAM END | channel=%s mode=%s sent=%d skipped=%d dur=%.1fs",
+                original_channel_id,
+                mode,
+                sent,
+                skipped,
+                dur,
+            )
+            await self.ws.send(
+                {
+                    "type": "backfill_stream_end",
+                    "data": {"channel_id": original_channel_id},
+                }
+            )
 
-            
     def _guild_row_from_obj(self, g: discord.Guild) -> dict:
         try:
             icon_url = str(g.icon.url) if getattr(g, "icon", None) else None
@@ -1289,7 +1440,11 @@ class ClientListener:
                     row = self._guild_row_from_obj(g)
                     self.db.upsert_guild(**row)
                 except Exception:
-                    logger.exception("[guilds] snapshot: failed guild %s (%s)", getattr(g, "name", "?"), getattr(g, "id", "?"))
+                    logger.exception(
+                        "[guilds] snapshot: failed guild %s (%s)",
+                        getattr(g, "name", "?"),
+                        getattr(g, "id", "?"),
+                    )
 
             known = set(self.db.get_all_guild_ids())
             stale = known - current_ids
@@ -1297,14 +1452,14 @@ class ClientListener:
                 self.db.delete_guild(gid)
         except Exception:
             logger.exception("[guilds] snapshot failed (outer)")
-            
+
     async def _shutdown(self):
         """
         Asynchronously shuts down the client.
         """
         logger.info("Shutting down client…")
         self.ws.begin_shutdown()
-        self.bus.begin_shutdown()  # make AdminBus sends fast + no retries
+        self.bus.begin_shutdown()
         with contextlib.suppress(Exception):
             await self.ui_controller.stop()
         with contextlib.suppress(Exception, asyncio.TimeoutError):
@@ -1321,7 +1476,7 @@ class ClientListener:
                     await asyncio.wait_for(t, timeout=5.0)
         except Exception as e:
             logger.debug("Shutdown error: %r", e)
-        # close the discord client last
+
         with contextlib.suppress(Exception):
             await self.bot.close()
         logger.info("Client shutdown complete.")

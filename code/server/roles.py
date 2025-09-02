@@ -30,11 +30,11 @@ class RoleManager:
         self.ratelimit = ratelimit
         self.clone_guild_id = clone_guild_id
         self.delete_roles = delete_roles
-        self.mirror_permissions = mirror_permissions 
+        self.mirror_permissions = mirror_permissions
         self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
         self._last_roles: List[Dict] = []
-        self.MAX_ROLES = 250  # Discord hard limit is 250 roles per guild
+        self.MAX_ROLES = 250
 
     def set_last_sitemap(self, roles: List[Dict] | None):
         self._last_roles = roles or []
@@ -74,7 +74,6 @@ class RoleManager:
             finally:
                 self._task = None
 
-
     async def _sync(
         self, guild: discord.Guild, incoming: List[Dict]
     ) -> Tuple[int, int, int]:
@@ -85,7 +84,9 @@ class RoleManager:
         me = guild.me
         bot_top = me.top_role.position if me and me.top_role else 0
 
-        current = {r["original_role_id"]: dict(r) for r in self.db.get_all_role_mappings()}
+        current = {
+            r["original_role_id"]: dict(r) for r in self.db.get_all_role_mappings()
+        }
         incoming_filtered = {
             r["id"]: r
             for r in incoming
@@ -93,21 +94,20 @@ class RoleManager:
         }
 
         clone_by_id = {r.id: r for r in guild.roles}
-        
+
         blocked = set(self.db.get_blocked_role_ids())
-        
+
         can_create = len(guild.roles) < self.MAX_ROLES
         create_suppressed_logged = False
 
         deleted = updated = created = 0
 
-        # ---------------------
-        # Deletions
-        # ---------------------
         for orig_id in list(current.keys()):
             if orig_id not in incoming_filtered:
                 row = current[orig_id]
-                cloned_id = row["cloned_role_id"] if "cloned_role_id" in row.keys() else None
+                cloned_id = (
+                    row["cloned_role_id"] if "cloned_role_id" in row.keys() else None
+                )
                 cloned = clone_by_id.get(int(cloned_id), None) if cloned_id else None
 
                 if not self.delete_roles:
@@ -115,7 +115,8 @@ class RoleManager:
                     if cloned:
                         logger.info(
                             "[🧩] Host role deleted; kept cloned role %s (%d), removed mapping.",
-                            cloned.name, cloned.id
+                            cloned.name,
+                            cloned.id,
                         )
                     else:
                         logger.info(
@@ -129,12 +130,13 @@ class RoleManager:
                     or cloned.managed
                     or cloned.position >= bot_top
                 ):
-                    # Can't/shouldn't delete → still remove mapping
+
                     self.db.delete_role_mapping(orig_id)
                     if cloned:
                         logger.info(
                             "[🧩] Skipped deleting role %s (%d); removed mapping.",
-                            cloned.name, cloned.id
+                            cloned.name,
+                            cloned.id,
                         )
                     else:
                         logger.info("[🧩] Cloned role missing; removed mapping.")
@@ -148,18 +150,18 @@ class RoleManager:
                 except Exception as e:
                     logger.warning(
                         "[⚠️] Failed deleting role %s (%s); removing mapping anyway: %s",
-                        getattr(cloned, "name", "?"), cloned_id, e
+                        getattr(cloned, "name", "?"),
+                        cloned_id,
+                        e,
                     )
                 finally:
                     self.db.delete_role_mapping(orig_id)
 
-        # Refresh live lookups after deletions
-        current = {r["original_role_id"]: dict(r) for r in self.db.get_all_role_mappings()}
+        current = {
+            r["original_role_id"]: dict(r) for r in self.db.get_all_role_mappings()
+        }
         clone_by_id = {r.id: r for r in guild.roles}
 
-        # ---------------------
-        # Creates / Updates
-        # ---------------------
         for orig_id, info in incoming_filtered.items():
             mapping = current.get(orig_id)
             cloned = None
@@ -177,29 +179,35 @@ class RoleManager:
             want_hoist = bool(info.get("hoist", False))
             want_mention = bool(info.get("mentionable", False))
 
-            # ---- Blocked role: remove mapping & delete the clone if we can, then skip
             if orig_id in blocked:
-                if cloned and (not cloned.is_default()) and (not cloned.managed) and cloned.position < bot_top:
+                if (
+                    cloned
+                    and (not cloned.is_default())
+                    and (not cloned.managed)
+                    and cloned.position < bot_top
+                ):
                     try:
                         await self.ratelimit.acquire(ActionType.ROLE)
                         await cloned.delete(reason="Blocked by Copycord role blocklist")
-                        logger.info("[🧩] Deleted blocked role %s (%d)", cloned.name, cloned.id)
+                        logger.info(
+                            "[🧩] Deleted blocked role %s (%d)", cloned.name, cloned.id
+                        )
                     except Exception as e:
                         logger.warning(
                             "[⚠️] Failed deleting blocked role %s: %s",
-                            getattr(cloned, "name", "?"), e
+                            getattr(cloned, "name", "?"),
+                            e,
                         )
                 if mapping:
                     self.db.delete_role_mapping(orig_id)
                 continue
 
-            # ---- Create (no mapping yet)
             if not mapping:
                 if not can_create:
                     if not create_suppressed_logged:
                         logger.warning(
                             "[🧩] Can't create more roles. Guild is at max role count (%d).",
-                            self.MAX_ROLES
+                            self.MAX_ROLES,
                         )
                         create_suppressed_logged = True
                     continue
@@ -219,7 +227,9 @@ class RoleManager:
                     cloned = await guild.create_role(**kwargs)
                     created += 1
 
-                    self.db.upsert_role_mapping(orig_id, want_name, cloned.id, cloned.name)
+                    self.db.upsert_role_mapping(
+                        orig_id, want_name, cloned.id, cloned.name
+                    )
                     clone_by_id[cloned.id] = cloned
                     logger.info("[🧩] Created role %s", cloned.name)
 
@@ -227,19 +237,24 @@ class RoleManager:
                     if self.mirror_permissions:
                         logger.debug(
                             "[🧩] create details: name=%r perms=%d color=#%06X hoist=%s mentionable=%s",
-                            want_name, want_perms.value, self._color_int(want_color),
-                            want_hoist, want_mention,
+                            want_name,
+                            want_perms.value,
+                            self._color_int(want_color),
+                            want_hoist,
+                            want_mention,
                         )
                     else:
                         logger.debug(
                             "[🧩] create details: name=%r perms=(skipped) color=#%06X hoist=%s mentionable=%s",
-                            want_name, self._color_int(want_color), want_hoist, want_mention,
+                            want_name,
+                            self._color_int(want_color),
+                            want_hoist,
+                            want_mention,
                         )
                 except Exception as e:
                     logger.warning("[⚠️] Failed creating role %s: %s", want_name, e)
                 continue
 
-            # ---- Update (mapping exists; 'cloned' may or may not exist)
             if (
                 cloned
                 and (not cloned.is_default())
@@ -251,7 +266,9 @@ class RoleManager:
                 if cloned.name != want_name:
                     changes.append(f"name: {cloned.name!r} -> {want_name!r}")
 
-                if self.mirror_permissions and (cloned.permissions.value != want_perms.value):
+                if self.mirror_permissions and (
+                    cloned.permissions.value != want_perms.value
+                ):
                     added, removed = self._perm_diff(cloned.permissions, want_perms)
                     parts = []
                     if added:
@@ -262,10 +279,13 @@ class RoleManager:
                         f"perms: {' '.join(parts) if parts else '(bitfield change)'} "
                         f"({cloned.permissions.value} -> {want_perms.value})"
                     )
-                elif (not self.mirror_permissions) and (cloned.permissions.value != want_perms.value):
+                elif (not self.mirror_permissions) and (
+                    cloned.permissions.value != want_perms.value
+                ):
                     logger.debug(
                         "[🧩] permissions differ for %s (%d) but MIRROR_ROLE_PERMISSIONS=False; skipping perms update.",
-                        cloned.name, cloned.id
+                        cloned.name,
+                        cloned.id,
                     )
 
                 old_color = self._color_int(cloned.color)
@@ -277,12 +297,16 @@ class RoleManager:
                     changes.append(f"hoist: {cloned.hoist} -> {want_hoist}")
 
                 if cloned.mentionable != want_mention:
-                    changes.append(f"mentionable: {cloned.mentionable} -> {want_mention}")
+                    changes.append(
+                        f"mentionable: {cloned.mentionable} -> {want_mention}"
+                    )
 
                 if changes:
                     logger.debug(
                         "[🧩] update details for %s (%d): %s",
-                        cloned.name, cloned.id, "; ".join(changes),
+                        cloned.name,
+                        cloned.id,
+                        "; ".join(changes),
                     )
                     try:
                         await self.ratelimit.acquire(ActionType.ROLE)
@@ -298,23 +322,29 @@ class RoleManager:
 
                         await cloned.edit(**kwargs)
                         updated += 1
-                        self.db.upsert_role_mapping(orig_id, want_name, cloned.id, cloned.name)
+                        self.db.upsert_role_mapping(
+                            orig_id, want_name, cloned.id, cloned.name
+                        )
                         logger.info("[🧩] Updated role %s", cloned.name)
                     except Exception as e:
-                        logger.warning("[⚠️] Failed updating role %s: %s", cloned.name, e)
+                        logger.warning(
+                            "[⚠️] Failed updating role %s: %s", cloned.name, e
+                        )
 
         return deleted, updated, created
-    
+
     def _color_int(self, c) -> int:
         try:
             return int(c.value)
         except Exception:
             return int(c)
 
-    def _perm_diff(self, before_perm: discord.Permissions, after_perm: discord.Permissions) -> tuple[list[str], list[str]]:
+    def _perm_diff(
+        self, before_perm: discord.Permissions, after_perm: discord.Permissions
+    ) -> tuple[list[str], list[str]]:
         """Return (added_flags, removed_flags) between two Permissions."""
         added, removed = [], []
-        # Permissions is iterable: yields (name, bool)
+
         for name, new in after_perm:
             old = getattr(before_perm, name)
             if new and not old:

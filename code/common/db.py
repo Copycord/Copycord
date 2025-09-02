@@ -17,16 +17,13 @@ class DBManager:
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
 
-        
         self.conn.execute("PRAGMA foreign_keys = ON;")
 
-        
-        self.conn.execute("PRAGMA wal_checkpoint(FULL);")   
-        self.conn.execute("PRAGMA journal_mode = DELETE;")  
+        self.conn.execute("PRAGMA wal_checkpoint(FULL);")
+        self.conn.execute("PRAGMA journal_mode = DELETE;")
 
-        
-        self.conn.execute("PRAGMA synchronous = FULL;")     
-        self.conn.execute("PRAGMA busy_timeout = 5000;")    
+        self.conn.execute("PRAGMA synchronous = FULL;")
+        self.conn.execute("PRAGMA busy_timeout = 5000;")
         self.lock = threading.RLock()
         self._init_schema()
 
@@ -37,15 +34,18 @@ class DBManager:
         """
         c = self.conn.cursor()
 
-        c.execute("""
+        c.execute(
+            """
         CREATE TABLE IF NOT EXISTS app_config(
         key           TEXT PRIMARY KEY,
         value         TEXT NOT NULL DEFAULT '',
         last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-        """)
+        """
+        )
 
-        c.execute("""
+        c.execute(
+            """
         CREATE TABLE IF NOT EXISTS filters (
         kind          TEXT NOT NULL CHECK(kind IN ('whitelist','exclude')),
         scope         TEXT NOT NULL CHECK(scope IN ('category','channel')),
@@ -53,7 +53,8 @@ class DBManager:
         last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY(kind, scope, obj_id)
         );
-        """)
+        """
+        )
 
         c.execute(
             """
@@ -66,10 +67,12 @@ class DBManager:
         );
         """
         )
-        c.execute("""
+        c.execute(
+            """
         CREATE UNIQUE INDEX IF NOT EXISTS uq_category_mappings_cloned_id
         ON category_mappings(cloned_category_id);
-        """)
+        """
+        )
 
         c.execute(
             """
@@ -91,16 +94,19 @@ class DBManager:
         """
         )
 
-    
-        c.execute("""
+        c.execute(
+            """
         CREATE INDEX IF NOT EXISTS ix_channel_parent_orig
         ON channel_mappings(original_parent_category_id);
-        """)
-        c.execute("""
+        """
+        )
+        c.execute(
+            """
         CREATE INDEX IF NOT EXISTS ix_channel_parent_clone
         ON channel_mappings(cloned_parent_category_id);
-        """)
-        
+        """
+        )
+
         c.execute(
             """
         CREATE TABLE IF NOT EXISTS threads (
@@ -129,7 +135,7 @@ class DBManager:
         );
         """
         )
-        
+
         c.execute(
             """
         CREATE TABLE IF NOT EXISTS sticker_mappings (
@@ -141,7 +147,7 @@ class DBManager:
         );
         """
         )
-        
+
         c.execute(
             """
             CREATE TABLE IF NOT EXISTS role_mappings (
@@ -188,17 +194,20 @@ class DBManager:
         );
         """
         )
-        
-        c.execute("""
+
+        c.execute(
+            """
         CREATE TABLE IF NOT EXISTS join_dm_subscriptions (
             guild_id INTEGER NOT NULL,
             user_id  INTEGER NOT NULL,
             last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             PRIMARY KEY (guild_id, user_id)
         );
-        """)
-        
-        c.execute("""
+        """
+        )
+
+        c.execute(
+            """
         CREATE TABLE IF NOT EXISTS guilds (
         guild_id     INTEGER PRIMARY KEY,
         name         TEXT    NOT NULL,
@@ -209,18 +218,20 @@ class DBManager:
         last_seen    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-        """)
+        """
+        )
         self.conn.commit()
-        
-        c.execute("""
+
+        c.execute(
+            """
         CREATE TABLE IF NOT EXISTS role_blocks (
         original_role_id INTEGER PRIMARY KEY,
         added_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-        """)
+        """
+        )
         self.conn.commit()
 
-        
     def set_config(self, key: str, value: str) -> None:
         with self.lock, self.conn:
             self.conn.execute(
@@ -230,11 +241,16 @@ class DBManager:
             )
 
     def get_config(self, key: str, default: str = "") -> str:
-        row = self.conn.execute("SELECT value FROM app_config WHERE key=?",(key,)).fetchone()
+        row = self.conn.execute(
+            "SELECT value FROM app_config WHERE key=?", (key,)
+        ).fetchone()
         return row["value"] if row else default
 
     def get_all_config(self) -> dict[str, str]:
-        return {r["key"]: r["value"] for r in self.conn.execute("SELECT key, value FROM app_config")}
+        return {
+            r["key"]: r["value"]
+            for r in self.conn.execute("SELECT key, value FROM app_config")
+        }
 
     def get_version(self) -> str:
         """
@@ -286,9 +302,11 @@ class DBManager:
                 "SELECT cloned_category_id FROM category_mappings WHERE original_category_id=?",
                 (orig_id,),
             ).fetchone()
-            old_clone = (row["cloned_category_id"] if row else None)
+            old_clone = row["cloned_category_id"] if row else None
 
-            will_change_to_new = (row is not None and clone_id is not None and old_clone != clone_id)
+            will_change_to_new = (
+                row is not None and clone_id is not None and old_clone != clone_id
+            )
             if will_change_to_new and old_clone is not None:
                 self.conn.execute(
                     "UPDATE channel_mappings SET cloned_parent_category_id=NULL "
@@ -296,7 +314,9 @@ class DBManager:
                     (old_clone,),
                 )
 
-            clearing_parent = (row is not None and old_clone is not None and clone_id is None)
+            clearing_parent = (
+                row is not None and old_clone is not None and clone_id is None
+            )
             if clearing_parent:
                 self.conn.execute(
                     "UPDATE channel_mappings SET cloned_parent_category_id=NULL "
@@ -330,7 +350,6 @@ class DBManager:
 
             self.conn.commit()
 
-
     def delete_category_mapping(self, orig_id: int):
         with self.lock, self.conn:
             row = self.conn.execute(
@@ -339,18 +358,16 @@ class DBManager:
             ).fetchone()
             cloned_id = row["cloned_category_id"] if row else None
 
-            
             self.conn.execute(
                 "UPDATE channel_mappings SET original_parent_category_id=NULL WHERE original_parent_category_id=?",
                 (orig_id,),
-            )                
+            )
             if cloned_id is not None:
                 self.conn.execute(
                     "UPDATE channel_mappings SET cloned_parent_category_id=NULL WHERE cloned_parent_category_id=?",
                     (cloned_id,),
                 )
 
-            
             self.conn.execute(
                 "DELETE FROM category_mappings WHERE original_category_id=?",
                 (orig_id,),
@@ -367,14 +384,16 @@ class DBManager:
         Retrieves all channel mappings from the database.
         """
         return self.conn.execute("SELECT * FROM channel_mappings").fetchall()
-    
+
     def get_all_channel_mappings(self) -> List[sqlite3.Row]:
         """
         Retrieves all channel mappings from the database.
         """
         return self.conn.execute("SELECT * FROM channel_mappings").fetchall()
-    
-    def get_channel_mapping_by_clone_id(self, cloned_channel_id: int) -> Optional[sqlite3.Row]:
+
+    def get_channel_mapping_by_clone_id(
+        self, cloned_channel_id: int
+    ) -> Optional[sqlite3.Row]:
         """
         Look up a single channel mapping by the cloned (destination) channel id.
 
@@ -386,12 +405,14 @@ class DBManager:
             "SELECT * FROM channel_mappings WHERE cloned_channel_id = ? LIMIT 1",
             (cloned_channel_id,),
         ).fetchone()
-        
+
     def get_original_channel_id(self, cloned_channel_id: int) -> Optional[int]:
         row = self.get_channel_mapping_by_clone_id(cloned_channel_id)
         return int(row["original_channel_id"]) if row else None
-    
-    def get_channel_mapping_by_original_id(self, original_channel_id: int) -> Optional[sqlite3.Row]:
+
+    def get_channel_mapping_by_original_id(
+        self, original_channel_id: int
+    ) -> Optional[sqlite3.Row]:
         """
         Look up a single channel mapping by the original (source) channel id.
         """
@@ -400,7 +421,9 @@ class DBManager:
             (original_channel_id,),
         ).fetchone()
 
-    def resolve_original_from_any_id(self, any_channel_id: int) -> tuple[Optional[int], Optional[int], str]:
+    def resolve_original_from_any_id(
+        self, any_channel_id: int
+    ) -> tuple[Optional[int], Optional[int], str]:
         """
         Accept either a cloned id or an original id.
 
@@ -410,13 +433,21 @@ class DBManager:
         """
         row = self.get_channel_mapping_by_clone_id(any_channel_id)
         if row:
-            return int(row["original_channel_id"]), int(row["cloned_channel_id"]), "from_clone"
+            return (
+                int(row["original_channel_id"]),
+                int(row["cloned_channel_id"]),
+                "from_clone",
+            )
 
         row = self.get_channel_mapping_by_original_id(any_channel_id)
         if row:
             # mapping exists and confirms it's original
             cloned = row["cloned_channel_id"]
-            return int(row["original_channel_id"]), (int(cloned) if cloned is not None else None), "from_original"
+            return (
+                int(row["original_channel_id"]),
+                (int(cloned) if cloned is not None else None),
+                "from_original",
+            )
 
         # Fallback: we weren't able to find a mapping entry; treat the input as already-original.
         return int(any_channel_id), None, "assumed_original"
@@ -427,9 +458,14 @@ class DBManager:
         """
         return self.conn.execute("SELECT * FROM threads").fetchall()
 
-    def upsert_forum_thread_mapping(self, orig_thread_id: int, orig_thread_name: str,
-                                    clone_thread_id: Optional[int],
-                                    forum_orig_id: int, forum_clone_id: Optional[int]):
+    def upsert_forum_thread_mapping(
+        self,
+        orig_thread_id: int,
+        orig_thread_name: str,
+        clone_thread_id: Optional[int],
+        forum_orig_id: int,
+        forum_clone_id: Optional[int],
+    ):
         self.conn.execute(
             """INSERT INTO threads
                 (original_thread_id, original_thread_name, cloned_thread_id,
@@ -441,10 +477,15 @@ class DBManager:
                 forum_original_id    =excluded.forum_original_id,
                 forum_cloned_id      =excluded.forum_cloned_id
             """,
-            (orig_thread_id, orig_thread_name, clone_thread_id, forum_orig_id, forum_clone_id),
+            (
+                orig_thread_id,
+                orig_thread_name,
+                clone_thread_id,
+                forum_orig_id,
+                forum_clone_id,
+            ),
         )
         self.conn.commit()
-
 
     def delete_forum_thread_mapping(self, orig_thread_id: int):
         """
@@ -497,7 +538,11 @@ class DBManager:
                 original_channel_name,
                 int(cloned_channel_id) if cloned_channel_id else None,
                 channel_webhook_url,
-                int(original_parent_category_id) if original_parent_category_id else None,
+                (
+                    int(original_parent_category_id)
+                    if original_parent_category_id
+                    else None
+                ),
                 int(cloned_parent_category_id) if cloned_parent_category_id else None,
                 int(channel_type),
                 (clone_name.strip() if isinstance(clone_name, str) else None),
@@ -587,8 +632,9 @@ class DBManager:
         """
         return self.conn.execute("SELECT * FROM emoji_mappings").fetchall()
 
-    def upsert_emoji_mapping(self, orig_id: int, orig_name: str,
-                            clone_id: int, clone_name: str):
+    def upsert_emoji_mapping(
+        self, orig_id: int, orig_name: str, clone_id: int, clone_name: str
+    ):
         self.conn.execute(
             """INSERT INTO emoji_mappings
                 (original_emoji_id, original_emoji_name, cloned_emoji_id, cloned_emoji_name)
@@ -752,8 +798,9 @@ class DBManager:
             (original_id,),
         ).fetchone()
 
-    def upsert_sticker_mapping(self, orig_id: int, orig_name: str,
-                            clone_id: int, clone_name: str):
+    def upsert_sticker_mapping(
+        self, orig_id: int, orig_name: str, clone_id: int, clone_name: str
+    ):
         self.conn.execute(
             """INSERT INTO sticker_mappings
                 (original_sticker_id, original_sticker_name, cloned_sticker_id, cloned_sticker_name)
@@ -772,13 +819,17 @@ class DBManager:
             "DELETE FROM sticker_mappings WHERE original_sticker_id = ?", (orig_id,)
         )
         self.conn.commit()
-        
 
     def get_all_role_mappings(self) -> List[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM role_mappings").fetchall()
 
-    def upsert_role_mapping(self, orig_id: int, orig_name: str,
-                            clone_id: Optional[int], clone_name: Optional[str]):
+    def upsert_role_mapping(
+        self,
+        orig_id: int,
+        orig_name: str,
+        clone_id: Optional[int],
+        clone_name: Optional[str],
+    ):
         self.conn.execute(
             """INSERT INTO role_mappings
                 (original_role_id, original_role_name, cloned_role_id, cloned_role_name)
@@ -793,15 +844,16 @@ class DBManager:
         self.conn.commit()
 
     def delete_role_mapping(self, orig_id: int):
-        self.conn.execute("DELETE FROM role_mappings WHERE original_role_id = ?", (orig_id,))
+        self.conn.execute(
+            "DELETE FROM role_mappings WHERE original_role_id = ?", (orig_id,)
+        )
         self.conn.commit()
-        
+
     def get_role_mapping(self, orig_id: int):
         return self.conn.execute(
-            "SELECT * FROM role_mappings WHERE original_role_id = ?",
-            (orig_id,)
+            "SELECT * FROM role_mappings WHERE original_role_id = ?", (orig_id,)
         ).fetchone()
-        
+
     def get_filters(self) -> dict:
         """
         Returns {
@@ -811,7 +863,7 @@ class DBManager:
         """
         out = {
             "whitelist": {"category": set(), "channel": set()},
-            "exclude":   {"category": set(), "channel": set()},
+            "exclude": {"category": set(), "channel": set()},
         }
         for row in self.conn.execute("SELECT kind, scope, obj_id FROM filters"):
             out[row["kind"]][row["scope"]].add(int(row["obj_id"]))
@@ -826,17 +878,18 @@ class DBManager:
     ) -> None:
         cur = self.conn.cursor()
         cur.execute("DELETE FROM filters")
+
         def ins(kind: str, scope: str, ids: list[int]):
             cur.executemany(
                 "INSERT OR IGNORE INTO filters(kind,scope,obj_id) VALUES(?,?,?)",
                 [(kind, scope, int(i)) for i in ids if str(i).strip()],
             )
+
         ins("whitelist", "category", whitelist_categories)
-        ins("whitelist", "channel",  whitelist_channels)
-        ins("exclude",   "category", exclude_categories)
-        ins("exclude",   "channel",  exclude_channels)
+        ins("whitelist", "channel", whitelist_channels)
+        ins("exclude", "category", exclude_categories)
+        ins("exclude", "channel", exclude_channels)
         self.conn.commit()
-        
 
     def upsert_guild(
         self,
@@ -886,7 +939,9 @@ class DBManager:
         return [int(r[0]) for r in rows]
 
     def get_guild(self, guild_id: int):
-        return self.conn.execute("SELECT * FROM guilds WHERE guild_id = ?", (int(guild_id),)).fetchone()
+        return self.conn.execute(
+            "SELECT * FROM guilds WHERE guild_id = ?", (int(guild_id),)
+        ).fetchone()
 
     def get_all_guilds(self) -> list[dict]:
         """
@@ -894,14 +949,16 @@ class DBManager:
         guild_id, name, icon_url, owner_id, member_count, description, last_seen, last_updated
         """
         with self.lock:
-            cur = self.conn.execute("""
+            cur = self.conn.execute(
+                """
                 SELECT guild_id, name, icon_url, owner_id, member_count, description, last_seen, last_updated
                 FROM guilds
                 ORDER BY LOWER(name) ASC
-            """)
+            """
+            )
             cols = [c[0] for c in cur.description]
             return [dict(zip(cols, row)) for row in cur.fetchall()]
-        
+
     def get_original_channel_name(self, original_channel_id: int) -> str | None:
         row = self.conn.execute(
             "SELECT original_channel_name FROM channel_mappings WHERE original_channel_id = ?",
@@ -914,10 +971,12 @@ class DBManager:
             "SELECT clone_channel_name FROM channel_mappings WHERE original_channel_id = ?",
             (int(original_channel_id),),
         ).fetchone()
-        
+
         return row[0] if row else None
 
-    def set_channel_clone_name(self, original_channel_id: int, clone_name: str | None) -> None:
+    def set_channel_clone_name(
+        self, original_channel_id: int, clone_name: str | None
+    ) -> None:
         """
         Directly set clone_channel_name to a value or NULL (no COALESCE here).
         """
@@ -926,7 +985,7 @@ class DBManager:
                 "UPDATE channel_mappings SET clone_channel_name = :name WHERE original_channel_id = :ocid",
                 {"name": clone_name, "ocid": int(original_channel_id)},
             )
-            
+
     def get_original_category_name(self, original_category_id: int) -> str | None:
         row = self.conn.execute(
             "SELECT original_category_name FROM category_mappings WHERE original_category_id = ?",
@@ -941,7 +1000,9 @@ class DBManager:
         ).fetchone()
         return row[0] if row else None
 
-    def set_category_clone_name(self, original_category_id: int, clone_name: str | None) -> None:
+    def set_category_clone_name(
+        self, original_category_id: int, clone_name: str | None
+    ) -> None:
         """
         Directly set cloned_category_name to a value or NULL (no COALESCE here).
         """
@@ -971,13 +1032,13 @@ class DBManager:
             (n,),
         ).fetchone()
         return int(row[0]) if row else None
-    
+
     def add_role_block(self, original_role_id: int) -> bool:
         """Block this original role id from being created/updated. Returns True if newly added."""
         with self.lock, self.conn:
             cur = self.conn.execute(
                 "INSERT OR IGNORE INTO role_blocks(original_role_id) VALUES (?)",
-                (int(original_role_id),)
+                (int(original_role_id),),
             )
             return cur.rowcount > 0
 
@@ -986,31 +1047,31 @@ class DBManager:
         with self.lock, self.conn:
             cur = self.conn.execute(
                 "DELETE FROM role_blocks WHERE original_role_id = ?",
-                (int(original_role_id),)
+                (int(original_role_id),),
             )
             return cur.rowcount > 0
 
     def is_role_blocked(self, original_role_id: int) -> bool:
         row = self.conn.execute(
             "SELECT 1 FROM role_blocks WHERE original_role_id = ?",
-            (int(original_role_id),)
+            (int(original_role_id),),
         ).fetchone()
         return bool(row)
 
     def get_blocked_role_ids(self) -> list[int]:
         rows = self.conn.execute("SELECT original_role_id FROM role_blocks").fetchall()
         return [int(r[0]) for r in rows]
-    
+
     def get_role_mapping_by_cloned_id(self, cloned_role_id: int):
         return self.conn.execute(
             "SELECT * FROM role_mappings WHERE cloned_role_id = ?",
-            (int(cloned_role_id),)
+            (int(cloned_role_id),),
         ).fetchone()
-        
+
     def clear_role_blocks(self) -> int:
         """Delete all entries from the role_blocks table. Returns number of rows removed."""
         with self.lock, self.conn:
-            # Get count first for reliable reporting
+
             cnt_row = self.conn.execute("SELECT COUNT(*) FROM role_blocks").fetchone()
             count = int(cnt_row[0] if cnt_row else 0)
             self.conn.execute("DELETE FROM role_blocks")

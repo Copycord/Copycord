@@ -9,7 +9,6 @@
 
 import asyncio
 import os
-import sys
 import logging
 from typing import Optional
 import aiohttp
@@ -28,7 +27,7 @@ class Config:
             "https://api.github.com/repos/Copycord/Copycord/releases/latest"
         )
         self._release_interval = 3600
-        # ─── Server-side settings ─────────────────────────────────
+
         self.DEFAULT_WEBHOOK_AVATAR_URL = "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/logo/logo.png"
         self.SERVER_TOKEN = os.getenv("SERVER_TOKEN")
         self.CLONE_GUILD_ID = os.getenv("CLONE_GUILD_ID", "0")
@@ -87,16 +86,17 @@ class Config:
             "yes",
         )
 
-        self.logger = (logger or logging.getLogger(__name__)).getChild(self.__class__.__name__)
+        self.logger = (logger or logging.getLogger(__name__)).getChild(
+            self.__class__.__name__
+        )
         self.excluded_category_ids: set[int] = set()
         self.excluded_channel_ids: set[int] = set()
-        # DB first, YAML deprecated
+
         self.db = DBManager(self.DB_PATH)
         self._load_filters_from_db()
         raw = os.getenv("COMMAND_USERS", "")
         self.COMMAND_USERS = [int(u) for u in raw.split(",") if u.strip()]
 
-        # ─── Client-side settings ─────────────────────────────────
         self.CLIENT_TOKEN = os.getenv("CLIENT_TOKEN")
         self.HOST_GUILD_ID = os.getenv("HOST_GUILD_ID", "0")
         self.CLIENT_WS_HOST = os.getenv("CLIENT_WS_HOST", "client")
@@ -159,7 +159,7 @@ class Config:
                 )
 
                 async with aiohttp.ClientSession() as session:
-                    # Fetch recent releases (incl. prereleases)
+
                     releases = []
                     try:
                         async with session.get(
@@ -176,7 +176,6 @@ class Config:
                     except Exception:
                         self.logger.exception("Failed to fetch releases")
 
-                    # Fetch recent tags (extra/fallback)
                     tags = []
                     try:
                         async with session.get(
@@ -191,7 +190,6 @@ class Config:
                     except Exception:
                         self.logger.exception("Failed to fetch tags")
 
-                # Build candidate (tag, url)
                 candidates: list[tuple[str, str]] = []
                 for r in releases:
                     t = (r.get("tag_name") or "").strip()
@@ -207,31 +205,28 @@ class Config:
                     await asyncio.sleep(self._release_interval)
                     continue
 
-                # Highest semver from candidates
                 tag, url = max(candidates, key=lambda x: _ver_tuple(x[0]))
-                
+
                 try:
                     db.set_config("latest_tag", tag or "")
                     db.set_config("latest_url", url or "")
                 except Exception:
-                    self.logger.debug("Failed to persist latest_tag/latest_url", exc_info=True)
+                    self.logger.debug(
+                        "Failed to persist latest_tag/latest_url", exc_info=True
+                    )
 
-                # Compare GitHub latest vs our running version
                 cmp_remote_local = _cmp_versions(tag, CURRENT_VERSION)
 
-                # Visibility log if observed tag changed (independent of notifications)
                 last_seen = db.get_notified_version() or ""
                 if _norm_version(tag) != _norm_version(last_seen):
                     self.logger.debug("[📢] GitHub latest observed: %s (%s)", tag, url)
 
                 if cmp_remote_local > 0:
-                    # Remote > local → update available (ALWAYS log this)
+
                     self.logger.info("[⬆️] Update available: %s %s", tag, url)
 
-                    # Server-only presence
                     await _maybe_update_status("New update available!")
 
-                    # DM only if enabled and not yet notified for this specific tag
                     if (
                         should_dm
                         and guild_id
@@ -255,16 +250,14 @@ class Config:
                                     "[⚠️] Failed to send new version DM: %s", e
                                 )
                 else:
-                    # Equal or ahead → show local version (server only)
+
                     await _maybe_update_status(f"{CURRENT_VERSION}")
 
-                    # If we just matched GitHub, align notified_version
                     if cmp_remote_local == 0 and _norm_version(tag) != _norm_version(
                         last_seen
                     ):
                         db.set_notified_version(tag)
 
-                # Keep DB "running version" aligned
                 if db.get_version() != CURRENT_VERSION:
                     db.set_version(CURRENT_VERSION)
 
@@ -281,12 +274,16 @@ class Config:
         try:
             f = self.db.get_filters()
         except Exception:
-            # Safe defaults
-            f = {"whitelist": {"category": set(), "channel": set()},
-                "exclude":   {"category": set(), "channel": set()}}
 
-        self.include_category_ids   = {int(x) for x in f["whitelist"]["category"]}
-        self.include_channel_ids    = {int(x) for x in f["whitelist"]["channel"]}
-        self.excluded_category_ids  = {int(x) for x in f["exclude"]["category"]}
-        self.excluded_channel_ids   = {int(x) for x in f["exclude"]["channel"]}
-        self.whitelist_enabled      = bool(self.include_category_ids or self.include_channel_ids)
+            f = {
+                "whitelist": {"category": set(), "channel": set()},
+                "exclude": {"category": set(), "channel": set()},
+            }
+
+        self.include_category_ids = {int(x) for x in f["whitelist"]["category"]}
+        self.include_channel_ids = {int(x) for x in f["whitelist"]["channel"]}
+        self.excluded_category_ids = {int(x) for x in f["exclude"]["category"]}
+        self.excluded_channel_ids = {int(x) for x in f["exclude"]["channel"]}
+        self.whitelist_enabled = bool(
+            self.include_category_ids or self.include_channel_ids
+        )
