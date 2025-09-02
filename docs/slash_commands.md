@@ -59,27 +59,6 @@ This document provides easy-to-follow instructions on how to use the available s
 
 ---
 
-
-### `/announcement_trigger <keyword> <user_id> [channel_id]`
-
-
-**Description:** Reports channels and categories not present in the last sitemap. Optionally deletes them.
-
-**Usage:**
-
-```
-/verify_structure
-/verify_structure delete:true
-```
-
-**Parameters:**
-
-* `delete` (optional): `true` to delete orphans, `false` (default) to only report.
-
-
----
-
-
 ### `/announcement_trigger <keyword> <user_id> [channel_id]`
 
 
