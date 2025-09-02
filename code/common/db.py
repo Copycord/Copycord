@@ -1006,3 +1006,12 @@ class DBManager:
             "SELECT * FROM role_mappings WHERE cloned_role_id = ?",
             (int(cloned_role_id),)
         ).fetchone()
+        
+    def clear_role_blocks(self) -> int:
+        """Delete all entries from the role_blocks table. Returns number of rows removed."""
+        with self.lock, self.conn:
+            # Get count first for reliable reporting
+            cnt_row = self.conn.execute("SELECT COUNT(*) FROM role_blocks").fetchone()
+            count = int(cnt_row[0] if cnt_row else 0)
+            self.conn.execute("DELETE FROM role_blocks")
+            return count

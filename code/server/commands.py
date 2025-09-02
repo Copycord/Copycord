@@ -858,6 +858,47 @@ class CloneCommands(commands.Cog):
 
         await ctx.followup.send(embed=self._ok_embed(title, desc, color=color), ephemeral=True)
 
+    @commands.slash_command(
+        name="role_block_clear",
+        description="Clear the entire role block list (allows previously blocked roles to be synced again).",
+        guild_ids=[GUILD_ID],
+    )
+    async def role_block_clear(self, ctx: discord.ApplicationContext):
+        """
+        Clears all entries in the role block list.
+        This does NOT recreate any roles automatically; it only removes the block entries.
+        Future role syncs may recreate those roles if they exist on the source.
+        """
+        await ctx.defer(ephemeral=True)
+
+        try:
+            removed = self.db.clear_role_blocks()
+            if removed == 0:
+                return await ctx.followup.send(
+                    embed=self._ok_embed(
+                        "Role Block List",
+                        "The block list is already empty."
+                    ),
+                    ephemeral=True,
+                )
+
+            await ctx.followup.send(
+                embed=self._ok_embed(
+                    "Role Block List Cleared",
+                    f"Removed **{removed}** entr{'y' if removed == 1 else 'ies'} from the role block list.\n"
+                    "Previously blocked roles may be recreated on the next role sync if they still exist on the source."
+                ),
+                ephemeral=True,
+            )
+        except Exception as e:
+            await ctx.followup.send(
+                embed=self._err_embed(
+                    "Failed to Clear Block List",
+                    f"An error occurred while clearing the role block list:\n`{e}`"
+                ),
+                ephemeral=True,
+            )
+
 
 def setup(bot: commands.Bot):
     bot.add_cog(CloneCommands(bot))
