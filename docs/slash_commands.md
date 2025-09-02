@@ -167,10 +167,20 @@ If enabled, you’ll receive a direct message with the new member’s details wh
 > **Note:** Make sure the copycord role is positioned at the top.
 
 ---
+
 ### `/role_block <role> <roleid>`
 **Description:** Block a role from being added during sync.
 
 **Usage Example:**
 ```
 /purge_assets roles confirm
+```
+
+---
+### `/role_block_clear`
+**Description:** Clear all blocked roles.
+
+**Usage Example:**
+```
+/role_block_clear
 ```
