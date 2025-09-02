@@ -1144,6 +1144,16 @@
     menu.classList.add("customize-skin");
 
     const isChannel = ctx.type === "channel";
+    let isOrphanChannel = false;
+    if (isChannel && ctx.id != null) {
+      try {
+        const selId = String(ctx.id);
+        const card = document.querySelector(
+          `.ch-card[data-cid="${window.CSS && CSS.escape ? CSS.escape(selId) : selId.replace(/"/g, '\\"')}"]`
+        );
+        isOrphanChannel = !!card?.dataset?.orphan;
+      } catch {}
+    }
     const isCategory = ctx.type === "category";
     const isOrphanCat = ctx.type === "orphan-cat";
     const cloneItem = menu.querySelector('[data-action="clone"]');
@@ -1203,19 +1213,15 @@
 
     if (cloneItem) {
       const isLocked = isChannel && cloneIsLocked(ctx.id);
-      const hideClone = !isChannel;
+      const hideClone = !isChannel || isOrphanChannel;
+    
       cloneItem.hidden = hideClone;
       cloneItem.setAttribute("aria-hidden", hideClone ? "true" : "false");
       cloneItem.disabled = hideClone || isLocked;
-      cloneItem.setAttribute(
-        "aria-disabled",
-        cloneItem.disabled ? "true" : "false"
-      );
+      cloneItem.setAttribute("aria-disabled", cloneItem.disabled ? "true" : "false");
       cloneItem.title = hideClone
         ? ""
-        : isLocked
-        ? "Backfill still in progress"
-        : "Clone messages";
+        : (isLocked ? "Backfill still in progress" : "Clone messages");
       cloneItem.classList.toggle("is-disabled", cloneItem.disabled);
     }
 
