@@ -2,7 +2,6 @@
   const root = document.getElementById("guilds-root");
   const empty = document.getElementById("guilds-empty");
   const search = document.getElementById("g-search");
-  const sortSel = document.getElementById("g-sort");
   const dirBtn = document.getElementById("g-sortdir");
   if (!root) return;
 
@@ -597,10 +596,14 @@
               <span>Avatar</span>
             </label>
 
-            <label class="check">
-              <input type="checkbox" id="scr-inc-bio">
-              <span>Bio</span>
-            </label>
+          <label class="check has-tip">
+            <input type="checkbox" id="scr-inc-bio">
+            <span class="label-text">Bio</span>
+            <button type="button" class="info-dot" aria-expanded="false" aria-controls="scr-bio-tip"></button>
+            <span id="scr-bio-tip" class="tip-bubble" hidden>
+              Fetching bios is slow — Discord rate-limits these requests heavily, so fetching all user bios can take a long time.
+            </span>
+          </label>
 
             <p class="hint">If none are selected, we’ll scrape <b>IDs only</b>.</p>
           </fieldset>
@@ -614,12 +617,55 @@
         </div>
 
         <footer class="scraper-actions">
-          <button class="btn btn-ghost" data-act="cancel">Cancel</button>
           <button class="btn btn-primary" data-act="start">Start scrape</button>
         </footer>
       </div>
     `;
     document.body.appendChild(modal);
+
+    (() => {
+      const dots = modal.querySelectorAll(".check.has-tip .info-dot");
+
+      dots.forEach((dot) => {
+        const bubbleId = dot.getAttribute("aria-controls");
+        const bubble =
+          (bubbleId && modal.querySelector(`#${CSS.escape(bubbleId)}`)) ||
+          dot.nextElementSibling;
+
+        if (!bubble) return;
+
+        const closeOutside = (ev) => {
+          if (ev.target === dot || bubble.contains(ev.target)) return;
+          dot.setAttribute("aria-expanded", "false");
+          bubble.hidden = true;
+          document.removeEventListener("click", closeOutside, true);
+        };
+
+        dot.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          const expanded = dot.getAttribute("aria-expanded") === "true";
+          const nextState = !expanded;
+
+          dot.setAttribute("aria-expanded", String(nextState));
+          bubble.hidden = !nextState;
+
+          document.removeEventListener("click", closeOutside, true);
+          if (nextState)
+            setTimeout(
+              () => document.addEventListener("click", closeOutside, true),
+              0
+            );
+        });
+
+        dot.addEventListener("keydown", (ev) => {
+          if (ev.key === "Escape") {
+            dot.setAttribute("aria-expanded", "false");
+            bubble.hidden = true;
+            dot.blur();
+          }
+        });
+      });
+    })();
 
     const close = () => modal.remove();
 
@@ -762,10 +808,6 @@
   }
 
   search?.addEventListener("input", applySearch);
-  sortSel?.addEventListener("change", () => {
-    sortBy = sortSel.value || "name";
-    render();
-  });
   dirBtn?.addEventListener("click", toggleDir);
 
   document.addEventListener("DOMContentLoaded", () => {
@@ -782,7 +824,6 @@
         "#guilds-root",
         "#guilds-empty",
         "#g-search",
-        "#g-sort",
         "#g-sortdir",
       ],
     });

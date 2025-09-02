@@ -3102,12 +3102,13 @@ body {
   border-color: var(--accent);
   box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.18);
 }
-#GUILDS .titlebar-actions #g-sortdir[aria-pressed='true'],
-.titlebar-actions .btn-select[aria-pressed='true'] {
-  background: linear-gradient(180deg, var(--primary), var(--primary-700));
-  border-color: #3b2168;
-  color: #fff;
+#GUILDS .titlebar-actions #g-sortdir:hover,
+.titlebar-actions .btn-select:hover {
+  outline: none;
+  box-shadow: 0 0 0 0.25px var(--brand, #7c5cff);
+  border-color: var(--brand, #7c5cff);
 }
+
 .guild-details-modal .modal-backdrop {
   backdrop-filter: blur(2px) !important;
   -webkit-backdrop-filter: blur(2px) !important;
@@ -3696,4 +3697,151 @@ body {
   color: var(--warn, #facc15);
 
   background-image: none;
+}
+
+#log-modal .modal-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.log-search-input {
+  margin-left: auto;
+  min-width: 220px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-weak, #3b365a);
+  background: var(--surface-2, #1c1830);
+  color: var(--text-strong, #e6e1ff);
+  caret-color: var(--brand, #7c5cff);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease,
+    background-color 0.15s ease;
+}
+
+.log-search-input::placeholder {
+  color: color-mix(in srgb, var(--text-strong, #e6e1ff) 55%, transparent);
+  opacity: 0.75;
+}
+
+#log-modal .modal-header .log-search-input:hover,
+#log-modal .modal-header .log-search-input:focus,
+#log-modal .modal-header .log-search-input:focus-visible {
+  outline: none;
+  border-color: var(--brand, #7c5cff);
+  box-shadow: 0 0 0 0.25px var(--brand, #7c5cff);
+}
+
+@supports not (color-mix(in srgb, white, black)) {
+  #log-modal .modal-header .log-search-input:hover,
+  #log-modal .modal-header .log-search-input:focus,
+  #log-modal .modal-header .log-search-input:focus-visible {
+    border-color: #7c5cff;
+    box-shadow: 0 0 0 0.25px #7c5cff;
+  }
+}
+
+#ch-search,
+#g-search {
+  min-width: 220px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border-weak, #3b365a);
+  background: var(--surface-2, #1c1830);
+  color: var(--text-strong, #e6e1ff);
+  caret-color: var(--brand, #7c5cff);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease,
+    background-color 0.15s ease;
+}
+
+#ch-search::placeholder,
+#g-search::placeholder {
+  color: color-mix(in srgb, var(--text-strong, #e6e1ff) 55%, transparent);
+  opacity: 0.75;
+}
+
+#ch-search:hover,
+#ch-search:focus,
+#ch-search:focus-visible,
+#g-search:hover,
+#g-search:focus,
+#g-search:focus-visible {
+  outline: none;
+  border-color: var(--brand, #7c5cff);
+  box-shadow: 0 0 0 1px var(--brand, #7c5cff);
+}
+
+@supports not (color-mix(in srgb, white, black)) {
+  #ch-search:hover,
+  #ch-search:focus,
+  #ch-search:focus-visible,
+  #g-search:hover,
+  #g-search:focus,
+  #g-search:focus-visible {
+    border-color: #7c5cff;
+    box-shadow: 0 0 0 1px #7c5cff;
+  }
+}
+
+#ch-search,
+#g-search,
+#customize-name,
+#customize-cat-name {
+  border: 0.25px solid var(--border-weak, #3b365a);
+  background: var(--surface-2, #1c1830);
+  color: var(--text-strong, #e6e1ff);
+  caret-color: var(--brand, #7c5cff);
+  transition: border-color 0.15s ease;
+}
+
+#ch-search:hover,
+#ch-search:focus,
+#g-search:hover,
+#g-search:focus,
+#customize-name:hover,
+#customize-name:focus,
+#customize-cat-name:hover,
+#customize-cat-name:focus {
+  outline: none !important;
+  border-color: var(--brand, #7c5cff);
+  box-shadow: none !important;
+}
+
+.dd select#ch-filter + .dd-toggle,
+.dd select#ch-sort + .dd-toggle {
+}
+
+.dd select#ch-filter + .dd-toggle:hover,
+.dd select#ch-filter + .dd-toggle:focus-visible,
+.dd select#ch-sort + .dd-toggle:hover,
+.dd select#ch-sort + .dd-toggle:focus-visible {
+  border-color: transparent !important;
+  box-shadow: 0 0 0 1px var(--brand, #7c5cff) !important;
+  outline: none !important;
+}
+
+.dd select#ch-filter + .dd-toggle:hover,
+.dd select#ch-sort + .dd-toggle:hover {
+  box-shadow: 0 0 0 1px var(--brand, #7c5cff) !important;
+}
+
+.dd select#ch-filter + .dd-toggle:focus-visible,
+.dd select#ch-sort + .dd-toggle:focus-visible {
+  box-shadow: 0 0 0 1px var(--brand, #7c5cff) !important;
+  outline: none !important;
+}
+
+.field > select#ch-filter:focus,
+.field > select#ch-sort:focus {
+  box-shadow: none !important;
+}
+
+.check.has-tip {
+  position: relative;
+}
+
+.check.has-tip .tip-bubble {
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+  max-width: 260px;
 }

@@ -303,6 +303,8 @@
       <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="log-title">
         <div class="modal-header">
           <h4 id="log-title" class="modal-title">Logs</h4>
+          <input id="log-search-input" class="log-search-input" type="text" placeholder="Search…"
+            aria-label="Search logs" />
           <button type="button" id="log-close" class="icon-btn verify-close" aria-label="Close">✕</button>
         </div>
         <pre id="log-body" class="log-output"></pre>
@@ -335,11 +337,9 @@
           <span class="brand-sep" aria-hidden="true"></span>
           <bdi class="brand-version" id="footer-version">
             {% if version %}
-            <a id="footer-version-link"
-               href="https://github.com/Copycord/Copycord/releases/tag/{{ version }}"
-               target="_blank" rel="noopener"
-               class="footer-link"
-               data-default-href="https://github.com/Copycord/Copycord/releases/tag/{{ version }}">
+            <a id="footer-version-link" href="https://github.com/Copycord/Copycord/releases/tag/{{ version }}"
+              target="_blank" rel="noopener" class="footer-link"
+              data-default-href="https://github.com/Copycord/Copycord/releases/tag/{{ version }}">
               {{ version }}
             </a>
             {% else %}

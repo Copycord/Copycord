@@ -39,11 +39,6 @@
         <h2 class="card-title">Guilds</h2>
         <div class="titlebar-actions">
           <input id="g-search" class="input" type="text" placeholder="Search guilds…" aria-label="Search guilds">
-          <div class="select">
-            <select id="g-sort" aria-label="Sort">
-              <option value="name">Name</option>
-            </select>
-          </div>
           <button id="g-sortdir" class="btn btn-select" type="button" aria-label="Toggle sort direction">
             A → Z
           </button>
@@ -92,11 +87,9 @@
         <span class="brand-sep" aria-hidden="true"></span>
         <bdi class="brand-version" id="footer-version">
           {% if version %}
-          <a id="footer-version-link"
-             href="https://github.com/Copycord/Copycord/releases/tag/{{ version }}"
-             target="_blank" rel="noopener"
-             class="footer-link"
-             data-default-href="https://github.com/Copycord/Copycord/releases/tag/{{ version }}">
+          <a id="footer-version-link" href="https://github.com/Copycord/Copycord/releases/tag/{{ version }}"
+            target="_blank" rel="noopener" class="footer-link"
+            data-default-href="https://github.com/Copycord/Copycord/releases/tag/{{ version }}">
             {{ version }}
           </a>
           {% else %}

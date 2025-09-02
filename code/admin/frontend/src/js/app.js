@@ -253,15 +253,6 @@
     });
   })();
 
-  function setToggleDisabled(on) {
-    const btn = document.getElementById("toggle-btn");
-    const form = document.getElementById("toggle-form");
-    if (form) form.dataset.locked = on ? "1" : "0";
-    if (btn) {
-      btn.disabled = on;
-      btn.classList.toggle("is-loading", on);
-    }
-  }
 
   function getCurrentRunning(data) {
     return !!(data.server?.running || data.client?.running);
@@ -422,35 +413,61 @@
   const logTitle = document.getElementById("log-title");
   const closeBtn = document.getElementById("log-close");
   const backdrop = modal ? modal.querySelector(".modal-backdrop") : null;
+  let LOG_LINES = [];  
+  let LOG_QUERY = "";    
 
   let es = null;
   let autoFollow = true;
   const THRESH = 24;
+
+  function renderLogView({ preserveScroll = false } = {}) {
+    if (!logBody) return;
+  
+    // stick-to-bottom detection (keeps your existing autoscroll behavior)
+    const shouldStick =
+      logBody.scrollHeight - logBody.scrollTop - logBody.clientHeight <= THRESH;
+  
+    const q = LOG_QUERY.trim().toLowerCase();
+    let view = LOG_LINES;
+  
+    if (q) {
+      view = LOG_LINES.filter(l => l.toLowerCase().includes(q));
+    }
+  
+    // Fast render as plain text
+    logBody.textContent = (view.length ? view.join("\n") + "\n" : "");
+  
+    if (shouldStick || !preserveScroll) {
+      logBody.scrollTop = logBody.scrollHeight;
+    }
+  }
 
   function onScroll() {
     autoFollow =
       logBody.scrollHeight - logBody.scrollTop - logBody.clientHeight <= THRESH;
   }
 
-  function appendLines(lines) {
-    const stick = autoFollow;
-    const frag = document.createDocumentFragment();
-    for (const l of lines)
-      frag.appendChild(document.createTextNode((l || "") + "\n"));
-    logBody.appendChild(frag);
-    if (stick) logBody.scrollTop = logBody.scrollHeight;
-  }
-
   const MAX_LINES = 10000;
-  function appendLine(line) {
-    const shouldStick = autoFollow;
-    logBody.appendChild(document.createTextNode((line || "") + "\n"));
-    while (logBody.childNodes.length > MAX_LINES) {
-      logBody.removeChild(logBody.firstChild);
-    }
-    if (shouldStick) logBody.scrollTop = logBody.scrollHeight;
-  }
 
+  function appendLines(lines) {
+    if (!Array.isArray(lines) || lines.length === 0) return;
+    for (const l of lines) {
+      LOG_LINES.push(String(l ?? ""));
+    }
+    if (LOG_LINES.length > MAX_LINES) {
+      LOG_LINES.splice(0, LOG_LINES.length - MAX_LINES);
+    }
+    renderLogView({ preserveScroll: true });
+  }
+  
+  function appendLine(line) {
+    LOG_LINES.push(String(line ?? ""));
+    if (LOG_LINES.length > MAX_LINES) {
+      LOG_LINES.splice(0, LOG_LINES.length - MAX_LINES);
+    }
+    renderLogView({ preserveScroll: true });
+  }
+  
   function openLogs(which) {
     if (!modal || !logBody) return;
     if (es) {
@@ -467,13 +484,48 @@
     setInert(modal, false);
     modal.setAttribute("aria-hidden", "false");
 
+    LOG_LINES = [];
+    LOG_QUERY = "";
+    renderLogView();
+    
+    const qInput = document.getElementById("log-search-input");
+    if (qInput) {
+      qInput.value = "";
+      // Optional: focus when opened
+      setTimeout(() => qInput.focus(), 0);
+    
+      // Filter as you type
+      let t;
+      qInput.oninput = () => {
+        // (tiny debounce to avoid re-rendering on every keystroke burst)
+        clearTimeout(t);
+        const val = qInput.value || "";
+        t = setTimeout(() => {
+          LOG_QUERY = val;
+          renderLogView();
+        }, 60);
+      };
+    
+      // Quick clear with Escape
+      qInput.onkeydown = (e) => {
+        if (e.key === "Escape") {
+          qInput.value = "";
+          LOG_QUERY = "";
+          renderLogView();
+          e.preventDefault();
+        }
+      };
+    }
+
     autoFollow = true;
     logBody.addEventListener("scroll", onScroll, { passive: true });
-    const firstFocusable =
-      modal.querySelector(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      ) || logBody;
-    setTimeout(() => firstFocusable?.focus(), 0);
+     const firstFocusable =
+       document.getElementById("log-search-input") ||
+       modal.querySelector(
+         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+       ) ||
+       logBody;
+     setTimeout(() => firstFocusable?.focus(), 0);
 
     let retryTimer = null;
     function startStream() {

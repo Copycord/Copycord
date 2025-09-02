@@ -23,7 +23,6 @@
   const cancelledThisSession = new Set();
   document.documentElement.classList.remove("boot");
 
-
   function setInert(el, on) {
     if (!el) return;
     try {
@@ -93,20 +92,16 @@
     catPinByOrig = new Map();
     catOrigByEither = new Map();
     for (const ch of rows || []) {
-      
       const orig = String(
         ch.original_category_name ??
-        ch.category_original_name ??
-        ch.category_upstream_name ??
-        ch.category_name ?? 
-        ""
+          ch.category_original_name ??
+          ch.category_upstream_name ??
+          ch.category_name ??
+          ""
       ).trim();
-  
-      const pin = String(
-        ch.cloned_category_name ??
-        ""
-      ).trim();
-  
+
+      const pin = String(ch.cloned_category_name ?? "").trim();
+
       if (orig) {
         const oKey = orig.toLowerCase();
         if (!catOrigByEither.has(oKey)) catOrigByEither.set(oKey, orig);
@@ -116,15 +111,15 @@
         catPinByOrig.set(orig, pin);
       }
     }
-      
-      for (const [orig, pin] of pinsByOrig) {
-        if (!orig || !pin || pin === orig) continue;
-        catPinByOrig.set(orig, pin);
-        if (!catOrigByEither.has(orig.toLowerCase())) {
-          catOrigByEither.set(orig.toLowerCase(), orig);
-        }
-        catOrigByEither.set(pin.toLowerCase(), orig);
+
+    for (const [orig, pin] of pinsByOrig) {
+      if (!orig || !pin || pin === orig) continue;
+      catPinByOrig.set(orig, pin);
+      if (!catOrigByEither.has(orig.toLowerCase())) {
+        catOrigByEither.set(orig.toLowerCase(), orig);
       }
+      catOrigByEither.set(pin.toLowerCase(), orig);
+    }
   }
 
   function clearBackfillBootResidue() {
@@ -318,9 +313,13 @@
         }
         window.showToast("Saved channel customization.", { type: "success" });
         close();
-        try { await load(); } catch {}
+        try {
+          await load();
+        } catch {}
       } catch {
-        window.showToast("Network error saving customization.", { type: "error" });
+        window.showToast("Network error saving customization.", {
+          type: "error",
+        });
       }
     };
 
@@ -331,34 +330,42 @@
     modal.querySelector(".modal-content")?.focus?.({ preventScroll: true });
   }
 
-  function openCustomizeCategoryDialog(categoryName, originalCategoryId = null) {
+  function openCustomizeCategoryDialog(
+    categoryName,
+    originalCategoryId = null
+  ) {
     injectCustomizeCategoryModal();
-  
-    const modal   = document.getElementById("customize-cat-modal");
-    const back    = modal.querySelector('[data-role="backdrop"]');
-    const dlg     = modal.querySelector(".modal-content");
+
+    const modal = document.getElementById("customize-cat-modal");
+    const back = modal.querySelector('[data-role="backdrop"]');
+    const dlg = modal.querySelector(".modal-content");
     const nameInp = document.getElementById("customize-cat-name");
     const btnSave = document.getElementById("customize-cat-save");
-    const btnClose= document.getElementById("customize-cat-close");
+    const btnClose = document.getElementById("customize-cat-close");
     const titleEl = document.getElementById("customize-cat-title");
-  
+
     titleEl.textContent = `Customize category`;
     const resolvedOrig =
-    catOrigByEither.get(String(categoryName).toLowerCase()) || categoryName;
+      catOrigByEither.get(String(categoryName).toLowerCase()) || categoryName;
     const pinned = catPinByOrig.get(resolvedOrig);
-    const initial = (pinned && pinned.trim()) ? pinned : resolvedOrig;
+    const initial = pinned && pinned.trim() ? pinned : resolvedOrig;
     nameInp.value = initial;
-    
+
     function close() {
       blurIfInside(modal);
       setInert(modal, true);
       modal.setAttribute("aria-hidden", "true");
       modal.classList.remove("show");
     }
-  
-    btnClose.onclick = (e) => { e?.preventDefault?.(); close(); };
-    back.onclick = (e) => { if (e.target === back) close(); };
-  
+
+    btnClose.onclick = (e) => {
+      e?.preventDefault?.();
+      close();
+    };
+    back.onclick = (e) => {
+      if (e.target === back) close();
+    };
+
     document.addEventListener(
       "keydown",
       function onEsc(e) {
@@ -369,10 +376,10 @@
       },
       { once: true }
     );
-  
+
     btnSave.onclick = async (e) => {
       e.preventDefault();
-  
+
       const raw = String(nameInp.value || "").trim();
       const body = originalCategoryId
         ? {
@@ -383,7 +390,7 @@
             category_name: String(categoryName),
             custom_category_name: raw,
           };
-  
+
       try {
         const res = await fetch("/api/categories/customize", {
           method: "POST",
@@ -399,9 +406,13 @@
         }
         window.showToast("Saved category customization.", { type: "success" });
         close();
-        try { await load(); } catch {}
+        try {
+          await load();
+        } catch {}
       } catch {
-        window.showToast("Network error saving customization.", { type: "error" });
+        window.showToast("Network error saving customization.", {
+          type: "error",
+        });
       }
     };
 
@@ -420,50 +431,46 @@
     if (!pin || pin.trim() === "" || pin === orig) return "";
     return `Cloned category = ${orig}\nCustomized category = ${pin}`;
   }
-  
+
   function updateCategoryChipUI(originalName, pinnedName) {
-    
-    const sel =
-      `.cat-chip[data-cat-name="${(window.CSS && CSS.escape)
+    const sel = `.cat-chip[data-cat-name="${
+      window.CSS && CSS.escape
         ? CSS.escape(originalName)
-        : String(originalName).replace(/"/g, '\\"')}"]`;
-  
+        : String(originalName).replace(/"/g, '\\"')
+    }"]`;
+
     const chip = document.querySelector(sel);
     if (!chip) return;
-  
+
     const isOrphan = chip.classList.contains("badge-orphan");
-  
-    
-    
+
     const display = pinnedName && pinnedName.trim() ? pinnedName : originalName;
-  
+
     chip.innerHTML = `
       ${escapeHtml(display)}
       <button class="cat-menu-trigger" aria-haspopup="menu" aria-controls="ch-menu" aria-label="Category menu" type="button">⋯</button>
     `;
 
-     chip.classList.toggle(
-         "badge-custom",
-         !!(pinnedName && pinnedName.trim() && pinnedName !== originalName)
-       );
-  
-    
+    chip.classList.toggle(
+      "badge-custom",
+      !!(pinnedName && pinnedName.trim() && pinnedName !== originalName)
+    );
+
     const tip = tooltipForCategory(originalName, pinnedName);
     if (tip) chip.setAttribute("title", tip);
     else chip.removeAttribute("title");
-  
-    
+
     chip.setAttribute("data-cat-name", originalName);
   }
 
   function injectCustomizeCategoryModal() {
     if (document.getElementById("customize-cat-modal")) return;
-  
+
     const wrap = document.createElement("div");
     wrap.id = "customize-cat-modal";
     wrap.className = "modal";
     wrap.setAttribute("aria-hidden", "true");
-  
+
     wrap.innerHTML = `
       <div class="modal-backdrop" data-role="backdrop"></div>
       <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="customize-cat-title" tabindex="-1">
@@ -488,7 +495,6 @@
     `;
     document.body.appendChild(wrap);
   }
-  
 
   (function injectCustomizeModal() {
     if (document.getElementById("customize-modal")) return;
@@ -691,9 +697,9 @@
   async function load() {
     try {
       const chRes = await fetch("/api/channels");
-        const chJson = await chRes.json();
-        data = chJson.items || [];
-        pinsByOrig = new Map();
+      const chJson = await chRes.json();
+      data = chJson.items || [];
+      pinsByOrig = new Map();
       data = chJson.items || [];
       filtered = [...data];
       rebuildCategoryPinMaps(data);
@@ -777,30 +783,31 @@
     }
   };
 
-  function getOriginalCategoryFromRow(ch){
+  function getOriginalCategoryFromRow(ch) {
     return String(
       ch.original_category_name ??
-      ch.category_original_name ??
-      ch.category_upstream_name ??
-      ch.category_name ?? ""
+        ch.category_original_name ??
+        ch.category_upstream_name ??
+        ch.category_name ??
+        ""
     ).trim();
   }
 
   function applyFilterAndSort() {
     const q = normalize(search.value);
-  
+
     filtered = !q
       ? [...data]
       : data.filter((ch) => {
           const origCat = getOriginalCategoryFromRow(ch);
-          const pinnedCat = origCat ? (catPinByOrig.get(origCat) || "") : "";
-  
+          const pinnedCat = origCat ? catPinByOrig.get(origCat) || "" : "";
+
           return (
             normalize(ch.original_channel_name).includes(q) ||
             normalize(ch.clone_channel_name).includes(q) ||
-            normalize(ch.category_name).includes(q) ||     
-            normalize(origCat).includes(q) ||              
-            normalize(pinnedCat).includes(q) ||            
+            normalize(ch.category_name).includes(q) ||
+            normalize(origCat).includes(q) ||
+            normalize(pinnedCat).includes(q) ||
             normalize(ch.original_channel_id).includes(q) ||
             normalize(ch.cloned_channel_id).includes(q)
           );
@@ -1006,7 +1013,7 @@
       section.className = "ch-section";
 
       const resolvedOrig =
-      catOrigByEither.get(String(cat).toLowerCase()) || cat;
+        catOrigByEither.get(String(cat).toLowerCase()) || cat;
       const pin = catPinByOrig.get(resolvedOrig);
       const isCustom = !!(pin && pin.trim() && pin !== resolvedOrig);
       const displayCat = isCustom ? pin : resolvedOrig;
@@ -1017,11 +1024,17 @@
         <h3 class="ch-section-title ${isOrphanCategory ? "orphan-title" : ""}">
           <span
          class="badge cat-chip ${
-           isOrphanCategory ? "badge-orphan" : (isCustom ? "badge-custom" : "good")
+           isOrphanCategory
+             ? "badge-orphan"
+             : isCustom
+             ? "badge-custom"
+             : "good"
          } ${isCustom ? "is-custom" : ""}"
             ${
               isOrphanCategory
-                ? `data-orphan-cat-id="${escapeAttr(orphanCatId)}" data-cat-name="${escapeAttr(resolvedOrig)}"`
+                ? `data-orphan-cat-id="${escapeAttr(
+                    orphanCatId
+                  )}" data-cat-name="${escapeAttr(resolvedOrig)}"`
                 : `data-cat-name="${escapeAttr(resolvedOrig)}"`
             }
             ${tooltip ? `title="${escapeAttr(tooltip)}"` : ""}
@@ -1047,26 +1060,37 @@
           card.dataset.orphan = "1";
           card.dataset.kind = "channel";
         }
-        const isCustomized = !!(ch.clone_channel_name && String(ch.clone_channel_name).trim());
+        const isCustomized = !!(
+          ch.clone_channel_name && String(ch.clone_channel_name).trim()
+        );
 
-        const displayName = isCustomized ? ch.clone_channel_name : ch.original_channel_name;
-        const tip = tooltipForChannel(ch.original_channel_name, ch.clone_channel_name);
+        const displayName = isCustomized
+          ? ch.clone_channel_name
+          : ch.original_channel_name;
+        const tip = tooltipForChannel(
+          ch.original_channel_name,
+          ch.clone_channel_name
+        );
 
         const type = chTypeLabel(ch.channel_type);
 
         const cloneChip = ch.cloned_channel_id
-        ? `<span class="badge good" title="Part of the host servers structure">Clone</span>${
-            isCustomized
-              ? ` <span class="badge badge-custom" title="Customized channel">Custom</span>`
-              : ""
-          }`
-        : "";
-      
-      card.innerHTML = `
+          ? `<span class="badge good" title="Part of the host servers structure">Clone</span>${
+              isCustomized
+                ? ` <span class="badge badge-custom" title="Customized channel">Custom</span>`
+                : ""
+            }`
+          : "";
+
+        card.innerHTML = `
         <div class="ch-head">
           <div class="ch-name">
             <span class="ch-display-name ${isCustomized ? "is-custom" : ""}"
-              ${tip ? `title="${escapeAttr(tip)}"` : `title="${escapeAttr(ch.original_channel_name)}"`}
+              ${
+                tip
+                  ? `title="${escapeAttr(tip)}"`
+                  : `title="${escapeAttr(ch.original_channel_name)}"`
+              }
             >
               # ${escapeHtml(displayName)}
             </span>
@@ -1177,7 +1201,6 @@
       menu.appendChild(delOrphanCatItem);
     }
 
-
     if (cloneItem) {
       const isLocked = isChannel && cloneIsLocked(ctx.id);
       const hideClone = !isChannel;
@@ -1277,33 +1300,32 @@
   root.addEventListener("click", (e) => {
     const btn = e.target.closest(".cat-menu-trigger");
     if (!btn) return;
-  
+
     const chip = btn.closest(".cat-chip");
     const orphanCatId = chip?.dataset.orphanCatId || null;
-    const catName = chip?.dataset.catName || chip?.textContent?.trim() || "Category";
-  
+    const catName =
+      chip?.dataset.catName || chip?.textContent?.trim() || "Category";
+
     const ctx = orphanCatId
       ? { type: "orphan-cat", id: String(orphanCatId), name: catName }
       : { type: "category", id: null, name: catName };
-  
+
     const isOpenForThis =
       !menu.hidden &&
       menuContext &&
-      (
-        (ctx.type === "orphan-cat" &&
-         menuContext.type === "orphan-cat" &&
-         menuContext.id === ctx.id) ||
+      ((ctx.type === "orphan-cat" &&
+        menuContext.type === "orphan-cat" &&
+        menuContext.id === ctx.id) ||
         (ctx.type === "category" &&
-         menuContext.type === "category" &&
-         menuContext.name === ctx.name)
-      );
-  
+          menuContext.type === "category" &&
+          menuContext.name === ctx.name));
+
     if (isOpenForThis) {
       hideMenu({ restoreFocus: false });
     } else {
       showMenu(btn, ctx);
     }
-  
+
     e.stopPropagation();
   });
 
