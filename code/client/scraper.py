@@ -254,7 +254,6 @@ class MemberScraper:
 
         async def bio_worker(sess: aiohttp.ClientSession, stop_event: asyncio.Event):
             nonlocal global_reset_at, next_allowed_at, bio_processed
-            self.log.info("[Copycord Scraper] Bio worker started")
             max_retries_per_uid = 5
             retry_counts: dict[str, int] = {}
 
