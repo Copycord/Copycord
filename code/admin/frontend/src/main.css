@@ -3846,3 +3846,17 @@ body {
   overflow-wrap: anywhere;
   max-width: 260px;
 }
+
+#scr-inc-bio + .label-text + .info-dot {
+  background-color: #b22222;
+  border: 1px solid #8b0000;
+  color: #fff;
+}
+
+#scr-inc-bio + .label-text + .info-dot:hover,
+#scr-inc-bio + .label-text + .info-dot:focus,
+#scr-inc-bio + .label-text + .info-dot:focus-visible {
+  box-shadow: none !important;
+  outline: none !important;
+  border-color: #8b0000;
+}
