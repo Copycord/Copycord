@@ -155,7 +155,7 @@ class RoleManager:
                     self.db.delete_role_mapping(orig_id)
 
         # Refresh live lookups after deletions
-        current = {r["original_role_id"]: r for r in self.db.get_all_role_mappings()}
+        current = {r["original_role_id"]: dict(r) for r in self.db.get_all_role_mappings()}
         clone_by_id = {r.id: r for r in guild.roles}
 
         # ---------------------
