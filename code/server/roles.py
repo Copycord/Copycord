@@ -95,6 +95,8 @@ class RoleManager:
 
         clone_by_id = {r.id: r for r in guild.roles}
         
+        blocked = set(self.db.get_blocked_role_ids())
+        
         can_create = len(guild.roles) < self.MAX_ROLES
         create_suppressed_logged = False
 
@@ -165,17 +167,26 @@ class RoleManager:
             want_color = discord.Color(info.get("color", 0))
             want_hoist = bool(info.get("hoist", False))
             want_mention = bool(info.get("mentionable", False))
-
-            mapping = current.get(orig_id)
-            cloned = None
-            if mapping:
-                cloned_id = int(mapping["cloned_role_id"])
-                cloned = clone_by_id.get(cloned_id)
-
-            # Orphan mapping
-            if mapping and not cloned:
-                self.db.delete_role_mapping(orig_id)
-                mapping = None
+            
+            if orig_id in blocked:
+                mapping = current.get(orig_id)
+                cloned = None
+                if mapping:
+                    cloned_id = mapping.get("cloned_role_id")
+                    if cloned_id:
+                        cloned = clone_by_id.get(int(cloned_id))
+                if cloned and (not cloned.is_default()) and (not cloned.managed) and cloned.position < bot_top:
+                    try:
+                        await self.ratelimit.acquire(ActionType.ROLE)
+                        await cloned.delete(reason="Blocked by Copycord role blocklist")
+                        logger.info("[🧩] Deleted blocked role %s (%d)", cloned.name, cloned.id)
+                    except Exception as e:
+                        logger.warning("[⚠️] Failed deleting blocked role %s: %s",
+                                    getattr(cloned, "name", "?"), e)
+                if mapping:
+                    self.db.delete_role_mapping(orig_id)
+                # Skip any create/update for blocked role
+                continue
 
             # ---- Create
             if not mapping:
