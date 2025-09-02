@@ -13,12 +13,7 @@ import json
 import time
 import random
 from collections import deque
-from typing import Dict, Any, Optional, List, Tuple
-import base64
-import gzip
-import os
-import tempfile
-import uuid
+from typing import Dict, Any, Optional
 import aiohttp
 import discord
 
@@ -51,8 +46,7 @@ class MemberScraper:
         self._cancel_event = asyncio.Event()
         self._members_ref: Optional[Dict[str, Dict[str, Any]]] = None
         self._members_lock_ref: Optional[asyncio.Lock] = None
-
-    # ---------------------------- public API ----------------------------
+        self._fingerprint: Optional[dict] = None
 
     def request_cancel(self) -> None:
         """Cooperative cancellation signal."""
@@ -67,9 +61,80 @@ class MemberScraper:
                 return list(mem.values())
         return []
 
+    def _build_headers(self, token: str) -> dict:
+        import base64, json, random
+
+        if self._fingerprint is not None:
+            super_props_b64 = self._fingerprint["super_props_b64"]
+            return {
+                **self._fingerprint["headers"],
+                "Authorization": token,
+                "X-Super-Properties": super_props_b64,
+            }
+
+        client_versions = ["1.0.9163", "1.0.9156", "1.0.9154"]
+        chrome_versions = ["108.0.5359.215", "139.0.7258.155"]
+        electron_versions = ["22.3.26", "22.3.18"]
+        win_builds = ["10.0.22621", "10.0.22631"]
+
+        client_version = random.choice(client_versions)
+        chrome_version = random.choice(chrome_versions)
+        electron_version = random.choice(electron_versions)
+        os_version = random.choice(win_builds)
+
+        locales = ["en-US", "en-GB", "de", "fr", "es-ES"]
+        timezones = [
+            "America/New_York",
+            "America/Chicago",
+            "Europe/Berlin",
+            "Asia/Tokyo",
+        ]
+        locale = random.choice(locales)
+        tz = random.choice(timezones)
+
+        super_props = {
+            "os": "Windows",
+            "browser": "Discord Client",
+            "release_channel": "stable",
+            "client_version": client_version,
+            "os_version": os_version,
+            "os_arch": "x64",
+            "system_locale": locale,
+        }
+        super_props_b64 = base64.b64encode(
+            json.dumps(super_props, separators=(",", ":")).encode()
+        ).decode()
+
+        headers = {
+            "User-Agent": (
+                f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                f"AppleWebKit/537.36 (KHTML, like Gecko) "
+                f"discord/{client_version} "
+                f"Chrome/{chrome_version} "
+                f"Electron/{electron_version} Safari/537.36"
+            ),
+            "X-Discord-Locale": locale,
+            "X-Discord-Timezone": tz,
+            "Accept": "*/*",
+            "Accept-Language": f"{locale},en;q=0.9",
+            "DNT": "1",
+            "Referer": "https://discord.com/channels/@me",
+            "Origin": "https://discord.com",
+            "Sec-CH-UA": '"Not A(Brand";v="99", "Chromium";v="108", "Google Chrome";v="108"',
+            "Sec-CH-UA-Mobile": "?0",
+            "Sec-CH-UA-Platform": '"Windows"',
+        }
+
+        self._fingerprint = {"headers": headers, "super_props_b64": super_props_b64}
+        return {
+            **headers,
+            "Authorization": token,
+            "X-Super-Properties": super_props_b64,
+        }
+
     async def scrape(
         self,
-        channel_id: int | str | None = None,  # kept for compatibility
+        channel_id: int | str | None = None,
         *,
         guild_id: int | str | None = None,
         include_username: bool = False,
@@ -85,11 +150,16 @@ class MemberScraper:
         num_sessions: int = 1,
         strict_complete: bool = False,
     ) -> Dict[str, Any]:
-        # reset cancel flag for this run
+
         self._cancel_event = asyncio.Event()
 
-        # ---------------------------- resolve guild ----------------------------
-        gid_in = guild_id if guild_id is not None else getattr(self.config, "HOST_GUILD_ID", None)
+        bio_processed = 0
+
+        gid_in = (
+            guild_id
+            if guild_id is not None
+            else getattr(self.config, "HOST_GUILD_ID", None)
+        )
         try:
             gid_int = int(gid_in) if gid_in is not None else None
         except Exception:
@@ -103,7 +173,9 @@ class MemberScraper:
             raise RuntimeError(f"Guild {gid_int} not found or not cached")
 
         gname = getattr(guild, "name", "UNKNOWN")
-        self.log.debug(f"[guild] Target guild: {gname} ({guild.id}) (source={'caller' if guild_id is not None else 'config'})")
+        self.log.debug(
+            f"[guild] Target guild: {gname} ({guild.id}) (source={'caller' if guild_id is not None else 'config'})"
+        )
 
         gname = getattr(guild, "name", "UNKNOWN")
         self.log.debug(f"[guild] Target guild: {gname} ({guild.id})")
@@ -114,7 +186,6 @@ class MemberScraper:
         def ts() -> str:
             return time.strftime("%H:%M:%S", time.localtime())
 
-        # ---------------------------- alphabet prep ----------------------------
         def _dedup_chars(s: str) -> str:
             seen = set()
             out = []
@@ -127,15 +198,11 @@ class MemberScraper:
         cfg_alpha = getattr(self.config, "SCRAPER_ALPHABET", None)
         ext = getattr(self.config, "EXTENDED_CHARS", "")
         alphabet_l = _dedup_chars((cfg_alpha or alphabet) + (ext or ""))
-        base_alpha_set = set(alphabet_l)  # what you configured
-        dynamic_leads_added_global: set[str] = (
-            set()
-        )  # discovered this run (not in base)
+        base_alpha_set = set(alphabet_l)
+        dynamic_leads_added_global: set[str] = set()
 
-        # Dynamic alphabet (for discovery of non-ASCII lead chars)
         alpha_dynamic = set(alphabet_l)
 
-        # ---------------------------- identify payload ----------------------------
         try:
             is_bot = bool(getattr(getattr(self.bot, "user", None), "bot", False))
         except Exception:
@@ -148,28 +215,26 @@ class MemberScraper:
             "large_threshold": 250,
         }
         if is_bot:
-            # GUILDS (1<<0) + GUILD_MEMBERS (1<<1) to make member chunks flow
+
             identify_d["intents"] = (1 << 0) | (1 << 1)
-            
+
         def build_avatar_url(uid: str, avatar_hash: str | None) -> str | None:
             if not uid or not avatar_hash:
                 return None
             ext = "gif" if str(avatar_hash).startswith("a_") else "png"
             return f"https://cdn.discordapp.com/avatars/{uid}/{avatar_hash}.{ext}?size=1024"
 
-        # ---------------------------- shared stores ----------------------------
         members: Dict[str, Dict[str, Any]] = {}
         members_lock = asyncio.Lock()
         self._members_ref = members
         self._members_lock_ref = members_lock
 
-        # Global warm-up guards (only once per whole run)
         warmup_lock = asyncio.Lock()
         warmup_done = asyncio.Event()
-                
-        bios_needed: set[str] = set() if include_bio else set()
 
-        # ---------------------------- helpers ----------------------------
+        bio_queue: asyncio.Queue[str] = asyncio.Queue()
+        global_reset_at: float = 0.0
+
         def shard_alphabet(alpha: str, k: int, n: int) -> str:
             return "".join(list(alpha)[k::n]) if n > 1 else alpha
 
@@ -192,28 +257,252 @@ class MemberScraper:
                 return q[:-1] + alpha[i + 1]
             return None
 
-        # ---------------------------- per-session worker ----------------------------
-        async def run_session(session_index: int) -> None:
+        bio_semaphore = asyncio.Semaphore(1)
+        next_allowed_at: float = 0.0
+
+        async def bio_worker(sess: aiohttp.ClientSession, stop_event: asyncio.Event):
+            nonlocal global_reset_at, next_allowed_at, bio_processed
+            self.log.info("[Copycord Scraper] Bio worker started")
+            max_retries_per_uid = 5
+            retry_counts: dict[str, int] = {}
+
+            async def rotate_session(
+                old: aiohttp.ClientSession,
+            ) -> aiohttp.ClientSession:
+                """Tear down old session and build a new one with fresh headers/fingerprint."""
+                self._fingerprint = None
+                tok = getattr(self.config, "CLIENT_TOKEN", None)
+                headers = self._build_headers(tok)
+                try:
+                    await old.close()
+                except Exception:
+                    pass
+                return aiohttp.ClientSession(headers=headers)
+
+            current_sess = sess
+            try:
+                while True:
+
+                    if (
+                        stop_event.is_set() or self._cancel_event.is_set()
+                    ) and bio_queue.empty():
+                        self.log.debug(
+                            "[Copycord Scraper] stop_event or cancel_event set → exiting bio session"
+                        )
+                        break
+
+                    if self._cancel_event.is_set() and not bio_queue.empty():
+                        self.log.debug(
+                            "[Copycord Scraper] Cancelled bio scrape — purging bio queue"
+                        )
+                        while not bio_queue.empty():
+                            try:
+                                bio_queue.get_nowait()
+                                bio_queue.task_done()
+                            except Exception:
+                                break
+                        break
+
+                    try:
+                        uid = await asyncio.wait_for(bio_queue.get(), timeout=1.0)
+                    except asyncio.TimeoutError:
+                        continue
+
+                    if self._cancel_event.is_set():
+                        self.log.debug(
+                            "[Copycord Scraper] Cancelled bio scrape mid-loop — exiting before next request"
+                        )
+                        bio_queue.task_done()
+                        return
+
+                    url = f"https://discord.com/api/v10/users/{uid}/profile"
+                    success = False
+                    last_status = None
+
+                    for attempt in range(3):
+                        now = time.time()
+                        wait_until = max(global_reset_at, next_allowed_at)
+                        if now < wait_until:
+                            sleep_for = wait_until - now + 0.05
+                            self.log.debug(
+                                "[Copycord Scraper] Bio scrape rate limit → sleeping %.2fs before next request",
+                                sleep_for,
+                            )
+                            await asyncio.sleep(sleep_for)
+
+                        if self._cancel_event.is_set():
+                            self.log.debug(
+                                "[Copycord Scraper] Cancelled bio scrape mid-retry — exiting cleanly"
+                            )
+                            bio_queue.task_done()
+                            return
+
+                        try:
+                            async with bio_semaphore:
+                                r = await current_sess.get(url, timeout=15)
+
+                        except RuntimeError as e:
+
+                            if (
+                                "Session is closed" in str(e)
+                                and self._cancel_event.is_set()
+                            ):
+                                self.log.debug(
+                                    "[Copycord Scraper] Bio scrape session already closed on cancel — stopping"
+                                )
+                                bio_queue.task_done()
+                                return
+                            raise
+
+                        status = r.status
+                        last_status = status
+
+                        if status == 429:
+                            retry_after = 1.0
+                            used_header = False
+                            try:
+                                body = await r.json()
+                                if "retry_after" in body:
+                                    retry_after = float(body["retry_after"])
+                            except Exception as e:
+                                hdr = r.headers.get("Retry-After")
+                                if hdr:
+                                    try:
+                                        retry_after = float(hdr)
+                                        used_header = True
+                                    except Exception:
+                                        pass
+                                self.log.debug(
+                                    "[Copycord Scraper] uid=%s bio 429 non-JSON (%r) → header Retry-After=%s",
+                                    uid,
+                                    e,
+                                    r.headers.get("Retry-After"),
+                                )
+
+                            if used_header and retry_after >= 300:
+                                self.log.debug(
+                                    "[Copycord Scraper] Severe 429 in bio scrape session for uid=%s → Retry-After=%ss. Starting new session..",
+                                    uid,
+                                    retry_after,
+                                )
+                                async with members_lock:
+                                    if uid in members:
+                                        members[uid]["bio_error"] = "rate_limited"
+
+                                current_sess = await rotate_session(current_sess)
+                                sleep_for = 30 + random.uniform(0, 15)
+                                self.log.warning(
+                                    "[Copycord Scraper] Recycled session, sleeping %.1fs before retry",
+                                    sleep_for,
+                                )
+                                await asyncio.sleep(sleep_for)
+
+                                bio_queue.task_done()
+                                success = True
+                                break
+
+                            buffer = max(0.25, retry_after * 0.25)
+                            global_reset_at = max(
+                                global_reset_at, time.time() + retry_after + buffer
+                            )
+                            next_allowed_at = global_reset_at
+
+                            retry_counts[uid] = retry_counts.get(uid, 0) + 1
+                            if retry_counts[uid] > max_retries_per_uid:
+                                async with members_lock:
+                                    if uid in members:
+                                        members[uid]["bio_error"] = "rate_limited"
+                                self.log.warning(
+                                    "[Copycord Scraper] uid=%s bio permanently rate-limited after %d retries",
+                                    uid,
+                                    retry_counts[uid],
+                                )
+                                success = True
+                            else:
+                                await bio_queue.put(uid)
+                                self.log.warning(
+                                    "[Copycord Scraper] uid=%s bio 429 → backoff %.2fs (attempt %d/%d)",
+                                    uid,
+                                    retry_after,
+                                    retry_counts[uid],
+                                    max_retries_per_uid,
+                                )
+                            break
+
+                        if status != 200:
+                            self.log.warning(
+                                "[Copycord Scraper] bio uid=%s status=%s (attempt %d/3)",
+                                uid,
+                                status,
+                                attempt + 1,
+                            )
+                            if 500 <= status < 600:
+                                await asyncio.sleep(1.0 + attempt)
+                                continue
+                            break
+
+                        j = await r.json()
+                        bio_val = (j.get("user") or {}).get("bio") or j.get("bio")
+
+                        async with members_lock:
+                            if uid in members and bio_val is not None:
+                                members[uid]["bio"] = bio_val
+
+                            nonlocal bio_processed
+                            bio_processed += 1
+                            remaining = bio_queue.qsize()
+                            if bio_val:
+                                self.log.info(
+                                    "[Copycord Scraper] [📜] Found bio for user %s — %d checked %d remaining",
+                                    uid,
+                                    bio_processed,
+                                    remaining,
+                                )
+                            else:
+                                members[uid]["bio_error"] = "empty_or_hidden"
+                                self.log.debug(
+                                    "[Copycord Scraper] [📜] User %s bio empty — %d found %d remaining",
+                                    uid,
+                                    bio_processed,
+                                    remaining,
+                                )
+
+                        success = True
+                        break
+
+                    if not success and last_status != 429:
+                        async with members_lock:
+                            if uid in members:
+                                members[uid][
+                                    "bio_error"
+                                ] = f"failed_after_retries_status_{last_status}"
+
+                    next_allowed_at = time.time() + 1.25 + random.uniform(0.1, 0.4)
+                    bio_queue.task_done()
+            finally:
+                if not current_sess.closed:
+                    self.log.debug("[Copycord Scraper] Closing bio session on exit")
+                    await current_sess.close()
+
+        async def run_session(
+            session_index: int, session: aiohttp.ClientSession
+        ) -> None:
             # This session's top-level shard
             top_level = shard_alphabet(alphabet_l, session_index, num_sessions)
 
-            # Per-session worklists
             search_queue: deque[str] = deque()
             visited_prefixes = set()
             seeded_top = False
 
-            # Counters / timers
             dispatched_since_connect = 0
             last_progress_at = time.time()
 
-            # In-flight tracking
             in_flight_nonces: set[str] = set()
             nonce_to_query: Dict[str, str] = {}
             nonce_sent_at: Dict[str, float] = {}
             query_retry_count: Dict[str, int] = {}
             nonce_seq = 0
 
-            # Control signals
             recycle_now = asyncio.Event()
 
             async def _safe_send_json(ws, payload) -> bool:
@@ -253,7 +542,7 @@ class MemberScraper:
                 if user_cancelled():
                     raise asyncio.CancelledError()
                 if target_reached():
-                    return "" 
+                    return ""
                 n = mk_nonce(q)
                 payload = {
                     "op": 8,
@@ -297,10 +586,10 @@ class MemberScraper:
                         self.log.warning(
                             f"[S{session_index}:op8] send failed q={q!r}: {e}"
                         )
-                        # put it back and try again after reconnect
+
                         search_queue.appendleft(q)
                         break
-                    # Small pacing to avoid bursty 400s
+
                     await asyncio.sleep(0.06)
                 if started:
                     self.log.debug(
@@ -330,12 +619,11 @@ class MemberScraper:
                             q = nonce_to_query.get(n)
                             if q is None:
                                 continue
-                            # remove from tracking
+
                             in_flight_nonces.discard(n)
                             nonce_to_query.pop(n, None)
                             nonce_sent_at.pop(n, None)
 
-                            # Do NOT retry the global warm-up
                             if q == "":
                                 self.log.debug(
                                     f"[S{session_index}:retry] skipping warm-up retry"
@@ -388,7 +676,6 @@ class MemberScraper:
                 except Exception as e:
                     self.log.warning(f"[ws] Heartbeat error: {e}")
 
-            # ---------------------------- main WS loop ----------------------------
             while True:
                 if user_cancelled():
                     self.log.debug(f"[S{session_index}] user cancel → CancelledError")
@@ -406,311 +693,283 @@ class MemberScraper:
                 recycle_now.clear()
                 last_progress_at = time.time()
 
-                headers = {"User-Agent": "DiscordBot"}
                 try:
-                    async with aiohttp.ClientSession(headers=headers) as session:
-                        async with session.ws_connect(
-                            self.GATEWAY_URL,
-                            heartbeat=None,
-                            max_msg_size=0,
-                            autoclose=True,
-                            autoping=True,
-                        ) as ws:
-                            # Identify
-                            await ws.send_json({"op": 2, "d": identify_d})
+                    async with session.ws_connect(
+                        self.GATEWAY_URL,
+                        heartbeat=None,
+                        max_msg_size=0,
+                        autoclose=True,
+                        autoping=True,
+                    ) as ws:
+                        await ws.send_json({"op": 2, "d": identify_d})
 
-                            while True:
-                                if dispatched_since_connect >= recycle_after_dispatch:
-                                    self.log.debug(
-                                        f"[S{session_index}] recycle_after_dispatch → reconnect"
-                                    )
-                                    recycle_now.set()
-
-                                recv_task = asyncio.create_task(ws.receive())
-                                rec_task = asyncio.create_task(recycle_now.wait())
-                                stop_task = asyncio.create_task(stop_event.wait())
-                                cnl_task = asyncio.create_task(
-                                    self._cancel_event.wait()
+                        while True:
+                            if dispatched_since_connect >= recycle_after_dispatch:
+                                self.log.debug(
+                                    f"[S{session_index}] recycle_after_dispatch → reconnect"
                                 )
+                                recycle_now.set()
 
-                                done, pending = await asyncio.wait(
-                                    {recv_task, rec_task, stop_task, cnl_task},
-                                    return_when=asyncio.FIRST_COMPLETED,
+                            recv_task = asyncio.create_task(ws.receive())
+                            rec_task = asyncio.create_task(recycle_now.wait())
+                            stop_task = asyncio.create_task(stop_event.wait())
+                            cnl_task = asyncio.create_task(self._cancel_event.wait())
+
+                            done, pending = await asyncio.wait(
+                                {recv_task, rec_task, stop_task, cnl_task},
+                                return_when=asyncio.FIRST_COMPLETED,
+                            )
+                            for p in pending:
+                                p.cancel()
+
+                            if rec_task in done:
+                                self.log.debug(
+                                    f"[S{session_index}:ws] recycle_now set → reconnect"
                                 )
-                                for p in pending:
-                                    p.cancel()
-
-                                if rec_task in done:
-                                    self.log.debug(
-                                        f"[S{session_index}:ws] recycle_now set → reconnect"
-                                    )
-                                    try:
-                                        await ws.close(
-                                            code=1000, message=b"recycle_stall"
-                                        )
-                                    except Exception:
-                                        pass
-                                    break
-
-                                if stop_task in done or target_reached():
-                                    self.log.debug(f"[S{session_index}:ws] target reached → close & return")
-                                    try:
-                                        await ws.close(code=1000, message=b"target_reached")
-                                    except Exception:
-                                        pass
-                                    return  # normal success exit for this session
-
-                                if cnl_task in done or user_cancelled():
-                                    self.log.debug(f"[S{session_index}:ws] user cancel → close & CancelledError")
-                                    try:
-                                        await ws.close(code=1000, message=b"user_cancel")
-                                    except Exception:
-                                        pass
-                                    raise asyncio.CancelledError()
-
-                                msg = recv_task.result()
-                                if msg.type == aiohttp.WSMsgType.CLOSE:
-                                    code = ws.close_code
-                                    exc = ws.exception()
-                                    if code == 1006:
-                                        self.log.debug(
-                                            f"[S{session_index}:ws] CLOSE 1006 during shutdown; reconnecting"
-                                        )
-                                    else:
-                                        self.log.warning(
-                                            f"[S{session_index}:ws] CLOSE code={code} exc={exc}"
-                                        )
-                                    break
-                                if msg.type != aiohttp.WSMsgType.TEXT:
-                                    continue
-
-                                raw = msg.data
-                                if len(raw) <= 4096:
-                                    self.log.debug(f"[S{session_index}:ws] IN: {raw}")
-                                else:
-                                    self.log.debug(
-                                        f"[S{session_index}:ws] IN: <{len(raw)} bytes>"
-                                    )
-
                                 try:
-                                    data_in = json.loads(raw)
-                                except Exception as e:
+                                    await ws.close(code=1000, message=b"recycle_stall")
+                                except Exception:
+                                    pass
+                                break
+
+                            if stop_task in done or target_reached():
+                                self.log.debug(
+                                    f"[S{session_index}:ws] target reached → close & return"
+                                )
+                                try:
+                                    await ws.close(code=1000, message=b"target_reached")
+                                except Exception:
+                                    pass
+                                return
+
+                            if cnl_task in done or user_cancelled():
+                                self.log.debug(
+                                    f"[S{session_index}:ws] user cancel → close & CancelledError"
+                                )
+                                try:
+                                    await ws.close(code=1000, message=b"user_cancel")
+                                except Exception:
+                                    pass
+                                raise asyncio.CancelledError()
+
+                            msg = recv_task.result()
+                            if msg.type == aiohttp.WSMsgType.CLOSE:
+                                code = ws.close_code
+                                exc = ws.exception()
+                                if code == 1006:
+                                    self.log.debug(
+                                        f"[S{session_index}:ws] CLOSE 1006 during shutdown; reconnecting"
+                                    )
+                                else:
                                     self.log.warning(
-                                        f"[S{session_index}:ws] JSON parse error: {e}"
+                                        f"[S{session_index}:ws] CLOSE code={code} exc={exc}"
                                     )
-                                    continue
+                                break
+                            if msg.type != aiohttp.WSMsgType.TEXT:
+                                continue
 
-                                op = data_in.get("op")
-                                t = data_in.get("t")
-                                d = data_in.get("d")
+                            raw = msg.data
+                            if len(raw) <= 4096:
+                                self.log.debug(f"[S{session_index}:ws] IN: {raw}")
+                            else:
+                                self.log.debug(
+                                    f"[S{session_index}:ws] IN: <{len(raw)} bytes>"
+                                )
 
-                                if op == 10:
-                                    hb_ms = int(
-                                        (d or {}).get("heartbeat_interval", 41250)
-                                    )
-                                    if heartbeat_task:
-                                        heartbeat_task.cancel()
-                                    heartbeat_task = asyncio.create_task(
-                                        heartbeat(ws, hb_ms)
-                                    )
-                                    last_progress_at = time.time()
+                            try:
+                                data_in = json.loads(raw)
+                            except Exception as e:
+                                self.log.warning(
+                                    f"[S{session_index}:ws] JSON parse error: {e}"
+                                )
+                                continue
 
-                                    if scavenger_task:
-                                        scavenger_task.cancel()
-                                    scavenger_task = asyncio.create_task(
-                                        expiry_scavenger(ws)
-                                    )
-                                    continue
+                            op = data_in.get("op")
+                            t = data_in.get("t")
+                            d = data_in.get("d")
 
-                                if op == 11:
-                                    # Heartbeat ACK — optionally pump, but READY is better
-                                    await pump_more(ws, reason="ack")
-                                    continue
+                            if op == 10:
+                                hb_ms = int((d or {}).get("heartbeat_interval", 41250))
+                                if heartbeat_task:
+                                    heartbeat_task.cancel()
+                                heartbeat_task = asyncio.create_task(
+                                    heartbeat(ws, hb_ms)
+                                )
+                                last_progress_at = time.time()
 
-                                # INVALID_SESSION - Back off with jitter, then re-identify (start a new session)
-                                if op == 9:
-                                    self.log.warning(
-                                        f"[S{session_index}:ws] INVALID_SESSION → backoff & re-identify"
-                                    )
-                                    await asyncio.sleep(
-                                        1.0
-                                        + (session_index * 0.5)
-                                        + (random.random() * 1.5)
-                                    )
-                                    try:
-                                        await ws.send_json({"op": 2, "d": identify_d})
-                                    except Exception:
-                                        break  # force reconnect path
-                                    continue
+                                if scavenger_task:
+                                    scavenger_task.cancel()
+                                scavenger_task = asyncio.create_task(
+                                    expiry_scavenger(ws)
+                                )
+                                continue
 
-                                if op == 0:
-                                    if t == "READY":
-                                        # Global warm-up sample to discover non-ASCII leads (send once per entire run)
-                                        if not warmup_done.is_set():
-                                            try:
-                                                async with warmup_lock:
-                                                    if not warmup_done.is_set():
-                                                        await send_op8(
-                                                            ws, "", limit=100
-                                                        )
-                                                        warmup_done.set()
-                                            except Exception:
-                                                pass
+                            if op == 11:
 
-                                        await asyncio.sleep(hello_ready_delay)
-                                        await pump_more(ws, reason="ready")
+                                await pump_more(ws, reason="ack")
+                                continue
 
-                                    elif t == "GUILD_CREATE":
-                                        await pump_more(ws, reason="guild_create")
+                            if op == 9:
+                                self.log.warning(
+                                    f"[S{session_index}:ws] INVALID_SESSION → backoff & re-identify"
+                                )
+                                await asyncio.sleep(
+                                    1.0
+                                    + (session_index * 0.5)
+                                    + (random.random() * 1.5)
+                                )
+                                try:
+                                    await ws.send_json({"op": 2, "d": identify_d})
+                                except Exception:
+                                    break
+                                continue
 
-                                    elif t == "GUILD_MEMBERS_CHUNK":
-                                        nonce = (d or {}).get("nonce")
-                                        got = (d or {}).get("members") or []
+                            if op == 0:
+                                if t == "READY":
 
-                                        if nonce and nonce in in_flight_nonces:
-                                            in_flight_nonces.discard(nonce)
-                                            q_for_nonce = nonce_to_query.pop(
-                                                nonce, None
-                                            )
-                                            nonce_sent_at.pop(nonce, None)
-                                        else:
-                                            q_for_nonce = None
+                                    if not warmup_done.is_set():
+                                        try:
+                                            async with warmup_lock:
+                                                if not warmup_done.is_set():
+                                                    await send_op8(ws, "", limit=100)
+                                                    warmup_done.set()
+                                        except Exception:
+                                            pass
 
-                                        # ----- collect members -----
-                                        added_here = 0
-                                        if got:
-                                            async with members_lock:
-                                                for m in got:
-                                                    u = (m or {}).get("user") or {}
-                                                    uid = u.get("id")
-                                                    if not uid or uid in members:
-                                                        continue
-                                                    rec = {"id": uid}
+                                    await asyncio.sleep(hello_ready_delay)
+                                    await pump_more(ws, reason="ready")
 
-                                                    # Optional fields
-                                                    if include_username:
-                                                        rec["username"] = u.get("username")
+                                elif t == "GUILD_CREATE":
+                                    await pump_more(ws, reason="guild_create")
 
-                                                    if include_avatar_url:
-                                                        rec["avatar_url"] = build_avatar_url(uid, u.get("avatar"))
+                                elif t == "GUILD_MEMBERS_CHUNK":
+                                    nonce = (d or {}).get("nonce")
+                                    got = (d or {}).get("members") or []
 
-                                                    # Optional: mark for later bio enrichment
-                                                    if include_bio:
-                                                        bios_needed.add(uid)
+                                    if nonce and nonce in in_flight_nonces:
+                                        in_flight_nonces.discard(nonce)
+                                        q_for_nonce = nonce_to_query.pop(nonce, None)
+                                        nonce_sent_at.pop(nonce, None)
+                                    else:
+                                        q_for_nonce = None
 
-                                                    members[uid] = rec
-                                                    added_here += 1
-                                            if added_here:
-                                                last_progress_at = time.time()
-
-                                        # ----- dynamic lead-char discovery from *any* chunk -----
-                                        if got:
-                                            newly_seeded = 0
-                                            newly_seen_this_chunk: list[str] = []
+                                    added_here = 0
+                                    if got:
+                                        async with members_lock:
                                             for m in got:
                                                 u = (m or {}).get("user") or {}
-                                                ln = u.get("username") or ""
-                                                if not ln:
+                                                uid = u.get("id")
+                                                if not uid or uid in members:
                                                     continue
-                                                lead = ln[
-                                                    :1
-                                                ]  # keep original glyph for seeding/logging
+                                                rec = {"id": uid}
 
-                                                # Session-scope learning to avoid repeated discovery work
-                                                if lead not in alpha_dynamic:
-                                                    alpha_dynamic.add(lead)
+                                                if include_username:
+                                                    rec["username"] = u.get("username")
 
-                                                # Only treat as "dynamic" if not in configured base alphabet
-                                                if lead and (
-                                                    lead not in base_alpha_set
+                                                if include_avatar_url:
+                                                    rec["avatar_url"] = (
+                                                        build_avatar_url(
+                                                            uid, u.get("avatar")
+                                                        )
+                                                    )
+
+                                                if include_bio:
+                                                    await bio_queue.put(uid)
+
+                                                members[uid] = rec
+                                                added_here += 1
+                                        if added_here:
+                                            last_progress_at = time.time()
+
+                                    if got:
+                                        newly_seeded = 0
+                                        newly_seen_this_chunk: list[str] = []
+                                        for m in got:
+                                            u = (m or {}).get("user") or {}
+                                            ln = u.get("username") or ""
+                                            if not ln:
+                                                continue
+                                            lead = ln[:1]
+
+                                            if lead not in alpha_dynamic:
+                                                alpha_dynamic.add(lead)
+
+                                            if lead and (lead not in base_alpha_set):
+                                                newly_seen_this_chunk.append(lead)
+
+                                                if (
+                                                    session_index == 0
+                                                    and lead not in visited_prefixes
                                                 ):
-                                                    newly_seen_this_chunk.append(lead)
+                                                    visited_prefixes.add(lead)
+                                                    search_queue.append(lead)
+                                                    newly_seeded += 1
 
-                                                    # Seed top-level once (session 0 claims it to avoid dupes)
-                                                    if (
-                                                        session_index == 0
-                                                        and lead not in visited_prefixes
-                                                    ):
-                                                        visited_prefixes.add(lead)
-                                                        search_queue.append(lead)
-                                                        newly_seeded += 1
-
-                                            if newly_seen_this_chunk:
-                                                uniq = sorted(
-                                                    set(newly_seen_this_chunk)
-                                                )
-                                                dynamic_leads_added_global.update(uniq)
-                                                self.log.info(
-                                                    "[discover] S%d saw dynamic leads: %s",
-                                                    session_index,
-                                                    " ".join(repr(c) for c in uniq),
-                                                )
-
-                                            if newly_seeded:
-                                                self.log.debug(
-                                                    f"[S{session_index}:discover] +{newly_seeded} dynamic top-level leads"
-                                                )
-
-                                        # ----- logging & soft stop on target_count (non-strict) -----
-                                        if q_for_nonce is not None:
-                                            total_now = len(members)
-                                            worker = f"worker {session_index + 1}"
+                                        if newly_seen_this_chunk:
+                                            uniq = sorted(set(newly_seen_this_chunk))
+                                            dynamic_leads_added_global.update(uniq)
                                             self.log.info(
-                                                "[Copycord Scraper Beta ✨] %s » Query %s [+%d] Total=%d",
-                                                worker,
-                                                q_for_nonce if q_for_nonce else "∅",
-                                                added_here,
-                                                total_now,
+                                                "[discover] S%d saw dynamic leads: %s",
+                                                session_index,
+                                                " ".join(repr(c) for c in uniq),
                                             )
-                                            if (
-                                                not strict_complete
-                                                and (target_count is not None)
-                                                and (total_now >= int(target_count))
-                                                and not stop_event.is_set()
-                                            ):
-                                                self.log.debug(
-                                                    "[🎯][%s] %s » Reached guild.member_count: %d/%d — stopping (non-strict)",
-                                                    ts(),
-                                                    worker,
-                                                    total_now,
-                                                    int(target_count),
-                                                )
-                                                stop_event.set()
-                                                recycle_now.set()
 
-                                        # ----- EXPAND-ALL on saturation -----
-                                        # NOTE: For the warm-up empty prefix (q == ""), we skip expansion to avoid
-                                        # exploding the queue; it is used only for discovery + collection.
+                                        if newly_seeded:
+                                            self.log.debug(
+                                                f"[S{session_index}:discover] +{newly_seeded} dynamic top-level leads"
+                                            )
+
+                                    if q_for_nonce is not None:
+                                        total_now = len(members)
+                                        worker = f"worker {session_index + 1}"
+                                        self.log.info(
+                                            "[Copycord Scraper] %s » Query %s [+%d] Total=%d",
+                                            worker,
+                                            q_for_nonce if q_for_nonce else "∅",
+                                            added_here,
+                                            total_now,
+                                        )
                                         if (
-                                            q_for_nonce is not None
-                                            and q_for_nonce != ""
+                                            not strict_complete
+                                            and (target_count is not None)
+                                            and (total_now >= int(target_count))
+                                            and not stop_event.is_set()
                                         ):
-                                            if len(got) >= 100:
-                                                # Enqueue ALL children for this prefix to avoid missing rare branches
-                                                for ch in alphabet_l:
-                                                    child = q_for_nonce + ch
-                                                    if child not in visited_prefixes:
-                                                        visited_prefixes.add(child)
-                                                        search_queue.append(child)
+                                            self.log.debug(
+                                                "[🎯][%s] %s » Reached guild.member_count: %d/%d — stopping (non-strict)",
+                                                ts(),
+                                                worker,
+                                                total_now,
+                                                int(target_count),
+                                            )
+                                            stop_event.set()
+                                            recycle_now.set()
 
-                                            # Opportunistic sibling walk (same depth)
-                                            if len(q_for_nonce) > 0:
-                                                sib = next_sibling_prefix(
-                                                    q_for_nonce, alphabet_l
-                                                )
-                                                if sib and sib not in visited_prefixes:
-                                                    visited_prefixes.add(sib)
-                                                    search_queue.append(sib)
+                                    if q_for_nonce is not None and q_for_nonce != "":
+                                        if len(got) >= 100:
 
-                                        # Continue pumping until both queues are empty
-                                        if search_queue or in_flight_nonces:
-                                            await pump_more(ws, reason="chunk")
-                                        else:
-                                            # Frontier exhausted on this connection
-                                            break
+                                            for ch in alphabet_l:
+                                                child = q_for_nonce + ch
+                                                if child not in visited_prefixes:
+                                                    visited_prefixes.add(child)
+                                                    search_queue.append(child)
 
+                                        if len(q_for_nonce) > 0:
+                                            sib = next_sibling_prefix(
+                                                q_for_nonce, alphabet_l
+                                            )
+                                            if sib and sib not in visited_prefixes:
+                                                visited_prefixes.add(sib)
+                                                search_queue.append(sib)
+
+                                    if search_queue or in_flight_nonces:
+                                        await pump_more(ws, reason="chunk")
                                     else:
-                                        await pump_more(ws, reason=f"dispatch:{t}")
+
+                                        break
+
+                                else:
+                                    await pump_more(ws, reason=f"dispatch:{t}")
 
                 except asyncio.CancelledError:
                     self._cancel_event.set()
@@ -721,7 +980,6 @@ class MemberScraper:
                 except Exception as e:
                     self.log.warning(f"[S{session_index}] WS session error: {e}")
 
-                # Cleanup background tasks
                 try:
                     if scavenger_task:
                         scavenger_task.cancel()
@@ -730,73 +988,78 @@ class MemberScraper:
                 except Exception:
                     pass
 
-                # If no more work locally, end this session; otherwise reconnect and continue
                 if not search_queue and not in_flight_nonces:
                     return
 
-                continue  # reconnect loop
+                continue
 
-        # ---------------------------- run all sessions ----------------------------
         try:
-            self.log.info(
-                f"[Copycord Scraper Beta ✨] Starting member scrape in {gname}"
-            )
-            await asyncio.gather(*(run_session(i) for i in range(num_sessions)))
-            if include_bio and bios_needed:
-                conc = int(getattr(self.config, "BIO_FETCH_CONCURRENCY", 3))
-                limit = int(getattr(self.config, "BIO_FETCH_LIMIT", 500))  # safety cap
-                headers = {}
-                tok = getattr(self.config, "CLIENT_TOKEN", None)
-                if tok:
-                    low = str(tok).lower()
-                    if low.startswith("bot ") or low.startswith("bearer "):
-                        headers["Authorization"] = tok
-                    else:
-                        # If the running identity is a bot, most tokens are raw; prefix with Bot
+            tok = getattr(self.config, "CLIENT_TOKEN", None)
+            if not tok:
+                raise RuntimeError("CLIENT_TOKEN must be set for bio lookups")
+
+            headers = self._build_headers(tok)
+
+            async with aiohttp.ClientSession(headers=headers) as gw_session:
+                async with aiohttp.ClientSession(headers=headers) as rest_session:
+                    bio_stop = asyncio.Event()
+                    bio_worker_task = None
+
+                    if include_bio:
+
+                        bio_worker_task = asyncio.create_task(
+                            bio_worker(rest_session, bio_stop)
+                        )
+
+                    await asyncio.gather(
+                        *(run_session(i, gw_session) for i in range(num_sessions))
+                    )
+
+                    if include_bio:
                         try:
-                            is_bot = bool(getattr(getattr(self.bot, "user", None), "bot", False))
-                        except Exception:
-                            is_bot = False
-                        headers["Authorization"] = f"Bot {tok}" if is_bot else tok
+                            await bio_queue.join()
+                        finally:
+                            bio_stop.set()
+                            if bio_worker_task:
+                                await bio_worker_task
 
-                async def fetch_bio_one(sess, uid: str) -> None:
-                    url = f"https://discord.com/api/v10/users/{uid}/profile"
-                    try:
-                        async with sess.get(url, timeout=15) as r:
-                            if r.status != 200:
-                                return
-                            j = await r.json()
-                            bio_val = (j.get("user") or {}).get("bio") or j.get("bio")
-                            if bio_val is not None:
-                                async with members_lock:
-                                    if uid in members:
-                                        members[uid]["bio"] = bio_val
-                    except Exception:
-                        return  # swallow errors; keep best-effort
-
-                try:
-                    sem = asyncio.Semaphore(max(1, conc))
-                    subset = list(bios_needed)[:max(0, limit)]
-                    async with aiohttp.ClientSession(headers=headers) as sess_bio:
-                        async def bound(u):
-                            async with sem:
-                                await fetch_bio_one(sess_bio, u)
-                        await asyncio.gather(*(bound(u) for u in subset))
-                except Exception:
-                    pass
             if dynamic_leads_added_global:
                 self.log.info(
                     "[discover] %d dynamic leading characters discovered this run: %s",
                     len(dynamic_leads_added_global),
                     " ".join(repr(c) for c in sorted(dynamic_leads_added_global)),
                 )
-            self.log.info(f"[✅] Found {len(members)} members in {gname}")
+
+            if include_bio:
+                total = len(members)
+                with_bio = sum(1 for m in members.values() if "bio" in m and m["bio"])
+                empty = sum(
+                    1
+                    for m in members.values()
+                    if m.get("bio_error") == "empty_or_hidden"
+                )
+                failed = sum(
+                    1
+                    for m in members.values()
+                    if m.get("bio_error", "").startswith("failed_after_retries")
+                )
+                self.log.info(
+                    "[Copycord Scraper] 📜 Bio scrape: has_bio=%d no_bio=%d failed=%d",
+                    with_bio,
+                    empty,
+                    failed,
+                )
+
+            self.log.info(
+                f"[Copycord Scraper] ✅ Found {len(members)} members in {gname}"
+            )
             return {
                 "members": list(members.values()),
                 "count": len(members),
                 "guild_id": str(guild.id),
                 "guild_name": gname,
             }
+
         except asyncio.CancelledError:
             self.log.info(
                 f"[🛑] Scrape canceled early in {gname} — collected: {len(members)} members"
