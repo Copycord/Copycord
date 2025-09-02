@@ -176,10 +176,12 @@ class SitemapService:
         # Threads (from DB so we know forums we cloned)
         seen = {t["id"] for t in sitemap["threads"]}
         for row in self.db.get_all_threads():
-            orig_tid = row["original_thread_id"]
-            forum_orig = row["forum_original_id"]
-            if orig_tid in seen:
+            try:
+                orig_tid = int(row["original_thread_id"])
+                forum_orig = int(row["forum_original_id"]) if row["forum_original_id"] is not None else None
+            except (TypeError, ValueError):
                 continue
+
             thr = guild.get_channel(orig_tid)
             if not thr:
                 try:
@@ -188,6 +190,7 @@ class SitemapService:
                     continue
             if not isinstance(thr, discord.Thread):
                 continue
+
             sitemap["threads"].append(
                 {"id": thr.id, "forum_id": forum_orig, "name": thr.name, "archived": thr.archived}
             )
