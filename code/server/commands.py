@@ -14,7 +14,7 @@ from discord import (
     Embed,
     Color,
 )
-from discord.errors import NotFound, Forbidden
+from discord.errors import NotFound, Forbidden, HTTPException  
 from discord import errors as discord_errors
 from datetime import datetime, timezone
 import time
@@ -23,7 +23,7 @@ import time
 from common.config import Config
 from common.db import DBManager
 from server.rate_limiter import RateLimitManager, ActionType
-from server.helpers import MemberExportService, ExportJob, PurgeAssetHelper
+from server.helpers import PurgeAssetHelper
 
 logger = logging.getLogger("server")
 
@@ -42,8 +42,7 @@ class CloneCommands(commands.Cog):
         self.ratelimit = RateLimitManager()
         self.start_time = time.time()
         self.allowed_users = getattr(config, "COMMAND_USERS", []) or []
-        self.export = MemberExportService(self.bot, self.bot.ws_manager, logger=logger)
-        self._export_jobs: dict[int, ExportJob] = {}
+
 
     async def cog_check(self, ctx: commands.Context):
         """
@@ -91,31 +90,64 @@ class CloneCommands(commands.Cog):
         else:
             logger.debug(f"[⚙️] Commands permissions set for users: {self.allowed_users}")
 
-    async def _reply_or_dm(self, ctx: discord.ApplicationContext, content: str) -> None:
-        """Try ephemeral followup; if the channel is gone, DM the user instead."""
-        try:
-            await ctx.followup.send(content, ephemeral=True)
-            return
-        except NotFound:
-            pass
-        except Forbidden:
-            pass
+    async def _reply_or_dm(
+        self,
+        ctx: discord.ApplicationContext,
+        content: str | None = None,
+        *,
+        embed: discord.Embed | None = None,
+        ephemeral: bool = True,
+        mention_on_channel_fallback: bool = True,
+    ) -> None:
+        """
+        DM-first delivery:
+        1) Try DM (uses bot token, no webhook expiry)
+        2) If DM blocked, try interaction response/followup (ephemeral)
+        3) If 401 (invalid/expired token) or other failure, try channel.send (optional @mention)
+        4) Log if everything fails
+        """
+        user = getattr(ctx, "user", None) or getattr(ctx, "author", None)
+        
+        if user:
+            try:
+                if content and len(content) > 2000:
+                    start = 0
+                    while start < len(content):
+                        end = min(start + 2000, len(content))
+                        nl = content.rfind("\n", start, end)
+                        if nl == -1 or nl <= start + 100:
+                            nl = end
+                        await user.send(content[start:nl], embed=None if start else embed)
+                        start = nl
+                else:
+                    await user.send(content=content, embed=embed)
+                return
+            except (Forbidden, NotFound):
+                pass 
 
         try:
-            MAX = 2000
-            if len(content) <= MAX:
-                await ctx.user.send(content)
-            else:
-                start = 0
-                while start < len(content):
-                    end = min(start + MAX, len(content))
-                    nl = content.rfind("\n", start, end)
-                    if nl == -1 or nl <= start + 100:
-                        nl = end
-                    await ctx.user.send(content[start:nl])
-                    start = nl
-        except Forbidden:
-            logger.warning("[verify_structure] Could not DM user; DMs are closed.")
+            if not ctx.response.is_done():
+                await ctx.respond(content=content, embed=embed, ephemeral=ephemeral)
+                return
+            await ctx.followup.send(content=content, embed=embed, ephemeral=ephemeral)
+            return
+        except HTTPException as e:
+            if getattr(e, "status", None) != 401:
+                pass
+
+        ch = getattr(ctx, "channel", None)
+        if ch:
+            try:
+                prefix = f"{user.mention} " if (mention_on_channel_fallback and user) else ""
+                await ch.send(prefix + (content or ""), embed=embed)
+                return
+            except (Forbidden, NotFound):
+                pass
+
+        if hasattr(self, "log"):
+            self.log.warning("[_reply_or_dm] Failed to deliver via DM, followup, and channel.")
+        else:
+            logger.warning("[_reply_or_dm] Failed to deliver via DM, followup, and channel.")
 
     def _ok_embed(
         self,
@@ -553,7 +585,7 @@ class CloneCommands(commands.Cog):
             embed=self._ok_embed("Starting purge…", f"Target: `{kind}`\nI'll DM you when finished."),
             ephemeral=True,
         )
-        helper._log_purge_event(kind=kind, outcome="begin", guild_id=guild.id, user_id=ctx.user.id)
+        helper._log_purge_event(kind=kind, outcome="begin", guild_id=guild.id, user_id=ctx.user.id, reason="Manual purge")
 
         try:
             # =============================
@@ -565,23 +597,35 @@ class CloneCommands(commands.Cog):
                         await self.ratelimit.acquire(RL_EMOJI)
                         await em.delete(reason=f"Purge by {ctx.user.id}")
                         deleted += 1
-                        helper._log_purge_event(kind="emojis", outcome="deleted",
-                                                guild_id=guild.id, user_id=ctx.user.id,
-                                                obj_id=em.id, name=em.name)
+                        helper._log_purge_event(
+                            kind="emojis", outcome="deleted",
+                            guild_id=guild.id, user_id=ctx.user.id,
+                            obj_id=em.id, name=em.name,
+                            reason="Manual purge",
+                        )
                     except discord.Forbidden as e:
                         skipped += 1
-                        helper._log_purge_event(kind="emojis", outcome="skipped",
-                                                guild_id=guild.id, user_id=ctx.user.id,
-                                                obj_id=em.id, name=em.name, reason=str(e))
+                        helper._log_purge_event(
+                            kind="emojis", outcome="skipped",
+                            guild_id=guild.id, user_id=ctx.user.id,
+                            obj_id=em.id, name=em.name,
+                            reason=f"Manual purge: {e}",
+                        )
                     except Exception as e:
                         failed += 1
-                        helper._log_purge_event(kind="emojis", outcome="failed",
-                                                guild_id=guild.id, user_id=ctx.user.id,
-                                                obj_id=em.id, name=em.name, reason=str(e))
+                        helper._log_purge_event(
+                            kind="emojis", outcome="failed",
+                            guild_id=guild.id, user_id=ctx.user.id,
+                            obj_id=em.id, name=em.name,
+                            reason=f"Manual purge: {e}",
+                        )
                 self.db.conn.execute("DELETE FROM emoji_mappings")
                 self.db.conn.commit()
-                helper._log_purge_event(kind="emojis", outcome="db_clear",
-                                        guild_id=guild.id, user_id=ctx.user.id)
+                helper._log_purge_event(
+                    kind="emojis", outcome="db_clear",
+                    guild_id=guild.id, user_id=ctx.user.id,
+                    reason="Manual purge",
+                )
 
             # =============================
             # STICKERS
@@ -598,23 +642,35 @@ class CloneCommands(commands.Cog):
                         await self.ratelimit.acquire(RL_STICKER)
                         await st.delete(reason=f"Purge by {ctx.user.id}")
                         deleted += 1
-                        helper._log_purge_event(kind="stickers", outcome="deleted",
-                                                guild_id=guild.id, user_id=ctx.user.id,
-                                                obj_id=st.id, name=st.name)
+                        helper._log_purge_event(
+                            kind="stickers", outcome="deleted",
+                            guild_id=guild.id, user_id=ctx.user.id,
+                            obj_id=st.id, name=st.name,
+                            reason="Manual purge",
+                        )
                     except discord.Forbidden as e:
                         skipped += 1
-                        helper._log_purge_event(kind="stickers", outcome="skipped",
-                                                guild_id=guild.id, user_id=ctx.user.id,
-                                                obj_id=st.id, name=st.name, reason=str(e))
+                        helper._log_purge_event(
+                            kind="stickers", outcome="skipped",
+                            guild_id=guild.id, user_id=ctx.user.id,
+                            obj_id=st.id, name=st.name,
+                            reason=f"Manual purge: {e}",
+                        )
                     except Exception as e:
                         failed += 1
-                        helper._log_purge_event(kind="stickers", outcome="failed",
-                                                guild_id=guild.id, user_id=ctx.user.id,
-                                                obj_id=st.id, name=st.name, reason=str(e))
+                        helper._log_purge_event(
+                            kind="stickers", outcome="failed",
+                            guild_id=guild.id, user_id=ctx.user.id,
+                            obj_id=st.id, name=st.name,
+                            reason=f"Manual purge: {e}",
+                        )
                 self.db.conn.execute("DELETE FROM sticker_mappings")
                 self.db.conn.commit()
-                helper._log_purge_event(kind="stickers", outcome="db_clear",
-                                        guild_id=guild.id, user_id=ctx.user.id)
+                helper._log_purge_event(
+                    kind="stickers", outcome="db_clear",
+                    guild_id=guild.id, user_id=ctx.user.id,
+                    reason="Manual purge",
+                )
 
             # =============================
             # ROLES
@@ -622,12 +678,21 @@ class CloneCommands(commands.Cog):
             elif kind == "roles":
                 me, top_role, roles = await helper._resolve_me_and_top(guild)
                 if not me or not top_role:
+                    helper._log_purge_event(
+                        kind="roles", outcome="failed",
+                        guild_id=guild.id, user_id=ctx.user.id,
+                        reason="Manual purge: Top role not found",
+                    )
                     return await ctx.followup.send(
-                        embed=self._err_embed("Top role not found",
-                                              "Could not resolve my top role. Try again later."),
+                        embed=self._err_embed("Top role not found", "Could not resolve my top role. Try again later."),
                         ephemeral=True,
                     )
                 if not me.guild_permissions.manage_roles:
+                    helper._log_purge_event(
+                        kind="roles", outcome="failed",
+                        guild_id=guild.id, user_id=ctx.user.id,
+                        reason="Manual purge: Missing Manage Roles permission",
+                    )
                     return await ctx.followup.send(
                         embed=self._err_embed("Missing permission", "I need **Manage Roles**."),
                         ephemeral=True,
@@ -643,42 +708,155 @@ class CloneCommands(commands.Cog):
                         await self.ratelimit.acquire(RL_ROLE)
                         await role.delete(reason=f"Purge by {ctx.user.id}")
                         deleted += 1
-                        helper._log_purge_event(kind="roles", outcome="deleted",
-                                                guild_id=guild.id, user_id=ctx.user.id,
-                                                obj_id=role.id, name=role.name)
+                        helper._log_purge_event(
+                            kind="roles", outcome="deleted",
+                            guild_id=guild.id, user_id=ctx.user.id,
+                            obj_id=role.id, name=role.name,
+                            reason="Manual purge",
+                        )
                     except discord.Forbidden as e:
                         skipped += 1
-                        helper._log_purge_event(kind="roles", outcome="skipped",
-                                                guild_id=guild.id, user_id=ctx.user.id,
-                                                obj_id=role.id, name=role.name, reason=str(e))
+                        helper._log_purge_event(
+                            kind="roles", outcome="skipped",
+                            guild_id=guild.id, user_id=ctx.user.id,
+                            obj_id=role.id, name=role.name,
+                            reason=f"Manual purge: {e}",
+                        )
                     except Exception as e:
                         failed += 1
-                        helper._log_purge_event(kind="roles", outcome="failed",
-                                                guild_id=guild.id, user_id=ctx.user.id,
-                                                obj_id=role.id, name=role.name, reason=str(e))
+                        helper._log_purge_event(
+                            kind="roles", outcome="failed",
+                            guild_id=guild.id, user_id=ctx.user.id,
+                            obj_id=role.id, name=role.name,
+                            reason=f"Manual purge: {e}",
+                        )
                 self.db.conn.execute("DELETE FROM role_mappings")
                 self.db.conn.commit()
-                helper._log_purge_event(kind="roles", outcome="db_clear",
-                                        guild_id=guild.id, user_id=ctx.user.id)
+                helper._log_purge_event(
+                    kind="roles", outcome="db_clear",
+                    guild_id=guild.id, user_id=ctx.user.id,
+                    reason="Manual purge",
+                )
 
             # =============================
             # Finalize
             # =============================
             summary = f"**Target:** `{kind}`\n**Deleted:** {deleted}\n**Skipped:** {skipped}\n**Failed:** {failed}"
             color = discord.Color.green() if failed == 0 else discord.Color.orange()
-            await ctx.followup.send(embed=self._ok_embed("🧹 Purge complete", summary, color=color), ephemeral=True)
-            await helper._dm_summary(ctx, "🧹 Purge complete", summary, self._ok_embed)
-            helper._log_purge_event(kind=kind, outcome="done",
-                                    guild_id=guild.id, user_id=ctx.user.id,
-                                    counts={"deleted": deleted, "skipped": skipped, "failed": failed})
+            await self._reply_or_dm(
+                ctx,
+                embed=self._ok_embed("Purge complete", summary, color=color),
+                ephemeral=True,
+                mention_on_channel_fallback=True,
+            )
+            helper._log_purge_event(
+                kind=kind, outcome="done",
+                guild_id=guild.id, user_id=ctx.user.id,
+                counts={"deleted": deleted, "skipped": skipped, "failed": failed},
+                reason="Manual purge",
+            )
 
         except Exception as e:
             err_text = f"{type(e).__name__}: {e}"
-            await ctx.followup.send(embed=self._err_embed("Purge failed", err_text), ephemeral=True)
-            await helper._dm_summary(ctx, "Purge failed", err_text, self._err_embed)
-            helper._log_purge_event(kind=kind, outcome="failed",
-                                    guild_id=guild.id, user_id=ctx.user.id,
-                                    reason=err_text)
+            await self._reply_or_dm(
+                ctx,
+                embed=self._err_embed("Purge failed", err_text),
+                ephemeral=True,
+                mention_on_channel_fallback=True,
+            )
+            helper._log_purge_event(
+                kind=kind, outcome="failed",
+                guild_id=guild.id, user_id=ctx.user.id,
+                reason=f"Manual purge: {err_text}",
+            )
+
+
+    @commands.slash_command(
+        name="role_block",
+        description="Block a role from being cloned/updated. Provide either the cloned role (picker) or its ID.",
+        guild_ids=[GUILD_ID],
+    )
+    async def role_block(
+        self,
+        ctx: discord.ApplicationContext,
+        role: discord.Role = Option(discord.Role, "Pick the CLONED role to block", required=False),
+        role_id: str = Option(str, "CLONED role ID to block", required=False, min_length=17, max_length=20),
+    ):
+        """
+        Adds a role to the block list using its original_role_id from the DB.
+        If a clone exists, it is deleted and its mapping removed to enforce the block.
+        """
+        await ctx.defer(ephemeral=True)
+
+        if not role and not role_id:
+            return await ctx.followup.send(
+                embed=self._err_embed("Missing input", "Provide either a role selection or a role ID."),
+                ephemeral=True,
+            )
+        if role and role_id:
+            return await ctx.followup.send(
+                embed=self._err_embed("Too many inputs", "Provide only one of: role OR role_id."),
+                ephemeral=True,
+            )
+
+        # Resolve cloned role id
+        try:
+            cloned_id = int(role.id if role else role_id)
+        except ValueError:
+            return await ctx.followup.send(
+                embed=self._err_embed("Invalid ID", f"`{role_id}` is not a valid numeric role ID."),
+                ephemeral=True,
+            )
+
+        # Find original via mapping
+        mapping = self.db.get_role_mapping_by_cloned_id(cloned_id)
+        if not mapping:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Mapping not found",
+                    "I couldn't find a role mapping for that cloned role. Make sure this role was created by Copycord."
+                ),
+                ephemeral=True,
+            )
+
+        original_role_id = int(mapping["original_role_id"])
+        original_role_name = mapping["original_role_name"]
+
+        newly_added = self.db.add_role_block(original_role_id)
+        # Enforce the block immediately: delete clone if present and remove mapping
+        g = ctx.guild
+        cloned_obj = g.get_role(cloned_id) if g else None
+
+        # Try to delete if safe
+        deleted = False
+        if cloned_obj:
+            me = g.me if g else None
+            bot_top = me.top_role.position if me and me.top_role else 0
+            if (not cloned_obj.is_default()) and (not cloned_obj.managed) and cloned_obj.position < bot_top:
+                try:
+                    await self.ratelimit.acquire(ActionType.ROLE)
+                    await cloned_obj.delete(reason=f"Blocked by {ctx.user.id}")
+                    deleted = True
+                except Exception as e:
+                    logger.warning("[role_block] Failed deleting role %s (%d): %s",
+                                getattr(cloned_obj, 'name', '?'), cloned_id, e)
+
+        # Always drop the mapping so it won't be updated/re-created
+        self.db.delete_role_mapping(original_role_id)
+
+        if newly_added:
+            title = "Role Blocked"
+            desc = f"**{original_role_name}** (`orig:{original_role_id}`) is now blocked.\n" \
+                f"{'🗑️ Deleted cloned role.' if deleted else '↩️ No clone deleted (not found / not permitted).'}\n" \
+                "It will be skipped during future role syncs."
+            color = discord.Color.green()
+        else:
+            title = "Role Already Blocked"
+            desc = f"**{original_role_name}** (`orig:{original_role_id}`) was already on the block list.\n" \
+                f"{'🗑️ Deleted cloned role.' if deleted else '↩️ No clone deleted (not found / not permitted).'}"
+            color = discord.Color.blurple()
+
+        await ctx.followup.send(embed=self._ok_embed(title, desc, color=color), ephemeral=True)
 
 
 def setup(bot: commands.Bot):
