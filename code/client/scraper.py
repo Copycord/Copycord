@@ -19,14 +19,6 @@ import discord
 
 
 class MemberScraper:
-    """
-    Version: 0.1.0
-    MemberScraper scrapes member information from a Discord guild
-    using the Discord Gateway API. It provides functionality to collect and manage member
-    data in a thread-safe manner, with support for dynamic discovery of usernames and
-    on request cancellation.
-    """
-
     GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json"
 
     def __init__(
