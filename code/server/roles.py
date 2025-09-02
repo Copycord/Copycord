@@ -85,8 +85,7 @@ class RoleManager:
         me = guild.me
         bot_top = me.top_role.position if me and me.top_role else 0
 
-        # Map in DB
-        current = {r["original_role_id"]: r for r in self.db.get_all_role_mappings()}
+        current = {r["original_role_id"]: dict(r) for r in self.db.get_all_role_mappings()}
         incoming_filtered = {
             r["id"]: r
             for r in incoming
