@@ -211,6 +211,14 @@ class DBManager:
         );
         """)
         self.conn.commit()
+        
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS role_blocks (
+        original_role_id INTEGER PRIMARY KEY,
+        added_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+        self.conn.commit()
 
         
     def set_config(self, key: str, value: str) -> None:
@@ -963,3 +971,38 @@ class DBManager:
             (n,),
         ).fetchone()
         return int(row[0]) if row else None
+    
+    def add_role_block(self, original_role_id: int) -> bool:
+        """Block this original role id from being created/updated. Returns True if newly added."""
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                "INSERT OR IGNORE INTO role_blocks(original_role_id) VALUES (?)",
+                (int(original_role_id),)
+            )
+            return cur.rowcount > 0
+
+    def remove_role_block(self, original_role_id: int) -> bool:
+        """Remove a block. Returns True if removed."""
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                "DELETE FROM role_blocks WHERE original_role_id = ?",
+                (int(original_role_id),)
+            )
+            return cur.rowcount > 0
+
+    def is_role_blocked(self, original_role_id: int) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM role_blocks WHERE original_role_id = ?",
+            (int(original_role_id),)
+        ).fetchone()
+        return bool(row)
+
+    def get_blocked_role_ids(self) -> list[int]:
+        rows = self.conn.execute("SELECT original_role_id FROM role_blocks").fetchall()
+        return [int(r[0]) for r in rows]
+    
+    def get_role_mapping_by_cloned_id(self, cloned_role_id: int):
+        return self.conn.execute(
+            "SELECT * FROM role_mappings WHERE cloned_role_id = ?",
+            (int(cloned_role_id),)
+        ).fetchone()
