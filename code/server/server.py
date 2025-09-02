@@ -2244,9 +2244,16 @@ class ServerReceiver:
             self._pending_thread_msgs.append(data)
             return
 
-        # build payload
         payload = self._build_webhook_payload(data)
-        meta = await self._get_webhook_meta(parent_id, webhook_url)
+
+        webhook_url = (
+            chan_map.get("channel_webhook_url")
+            or await self._ensure_primary_webhook_url(parent_id)
+        )
+
+        meta = {}
+        if webhook_url:
+            meta = await self._get_webhook_meta(parent_id, webhook_url)
         if meta.get("custom"):
             # remove author spoofing if webhook was modified
             payload.pop("username", None)
@@ -2255,10 +2262,8 @@ class ServerReceiver:
             logger.info("[⚠️] Skipping empty payload for '%s'", data["thread_name"])
             return
 
-        # prepare webhook & session
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession()
-        webhook_url = chan_map["channel_webhook_url"]
         thread_webhook = Webhook.from_url(webhook_url, session=self.session)
 
         orig_tid = data["thread_id"]
@@ -2368,7 +2373,7 @@ class ServerReceiver:
                         orig_thread_id=orig_tid,
                         orig_thread_name=data["thread_name"],
                         clone_thread_id=new_id,
-                        forum_orig_id=data["thread_id"],
+                        forum_orig_id=parent_id,
                         forum_clone_id=chan_map["cloned_channel_id"],
                     )
 
@@ -2521,8 +2526,8 @@ class ServerReceiver:
             orig_thread_id,
             new_name,
             cloned_id,
-            row["original_thread_id"],
-            row["cloned_thread_id"],
+            row["forum_original_id"],
+            row["forum_cloned_id"],
         )
 
     async def _enforce_thread_limit(self, guild: discord.Guild):
