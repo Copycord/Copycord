@@ -173,7 +173,7 @@ If enabled, you’ll receive a direct message with the new member’s details wh
 
 **Usage Example:**
 ```
-/purge_assets roles confirm
+/role_block @member 12345678987654321
 ```
 
 ---
