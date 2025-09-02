@@ -1251,7 +1251,7 @@ class ServerReceiver:
         if deleted_original_gone:
             parts.append(f"Deleted {deleted_original_gone} threads (original gone)")
         if cleared_missing_clone:
-            parts.append(f"Cleared {cleared_missing_clone} missing-clone mappings")
+            parts.append(f"Cleared {cleared_missing_clone} missing clone thread mappings")
 
         renamed = 0
         for src in sitemap.get("threads", []):
