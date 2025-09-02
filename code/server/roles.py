@@ -162,35 +162,40 @@ class RoleManager:
         # Creates / Updates
         # ---------------------
         for orig_id, info in incoming_filtered.items():
+            mapping = current.get(orig_id)
+            cloned = None
+            if mapping:
+                cloned_id = mapping.get("cloned_role_id")
+                if cloned_id:
+                    try:
+                        cloned = clone_by_id.get(int(cloned_id))
+                    except Exception:
+                        cloned = None
+
             want_name = info["name"]
             want_perms = discord.Permissions(info.get("permissions", 0))
             want_color = discord.Color(info.get("color", 0))
             want_hoist = bool(info.get("hoist", False))
             want_mention = bool(info.get("mentionable", False))
-            
+
+            # ---- Blocked role: remove mapping & delete the clone if we can, then skip
             if orig_id in blocked:
-                mapping = current.get(orig_id)
-                cloned = None
-                if mapping:
-                    cloned_id = mapping.get("cloned_role_id")
-                    if cloned_id:
-                        cloned = clone_by_id.get(int(cloned_id))
                 if cloned and (not cloned.is_default()) and (not cloned.managed) and cloned.position < bot_top:
                     try:
                         await self.ratelimit.acquire(ActionType.ROLE)
                         await cloned.delete(reason="Blocked by Copycord role blocklist")
                         logger.info("[🧩] Deleted blocked role %s (%d)", cloned.name, cloned.id)
                     except Exception as e:
-                        logger.warning("[⚠️] Failed deleting blocked role %s: %s",
-                                    getattr(cloned, "name", "?"), e)
+                        logger.warning(
+                            "[⚠️] Failed deleting blocked role %s: %s",
+                            getattr(cloned, "name", "?"), e
+                        )
                 if mapping:
                     self.db.delete_role_mapping(orig_id)
-                # Skip any create/update for blocked role
                 continue
 
-            # ---- Create
+            # ---- Create (no mapping yet)
             if not mapping:
-                # If we can't create, skip all creates this pass and move to updates
                 if not can_create:
                     if not create_suppressed_logged:
                         logger.warning(
@@ -202,7 +207,6 @@ class RoleManager:
 
                 try:
                     await self.ratelimit.acquire(ActionType.ROLE)
-
                     kwargs = dict(
                         name=want_name,
                         colour=want_color,
@@ -216,12 +220,10 @@ class RoleManager:
                     cloned = await guild.create_role(**kwargs)
                     created += 1
 
-                    # Track mapping and live cache
                     self.db.upsert_role_mapping(orig_id, want_name, cloned.id, cloned.name)
                     clone_by_id[cloned.id] = cloned
                     logger.info("[🧩] Created role %s", cloned.name)
 
-                    # Recompute creation gate after each create
                     can_create = len(guild.roles) < self.MAX_ROLES
                     if self.mirror_permissions:
                         logger.debug(
@@ -238,14 +240,13 @@ class RoleManager:
                     logger.warning("[⚠️] Failed creating role %s: %s", want_name, e)
                 continue
 
-            # ---- Update
+            # ---- Update (mapping exists; 'cloned' may or may not exist)
             if (
                 cloned
                 and (not cloned.is_default())
                 and (not cloned.managed)
                 and cloned.position < bot_top
             ):
-                # Detect exact changes we plan to apply
                 changes: list[str] = []
 
                 if cloned.name != want_name:
@@ -263,7 +264,6 @@ class RoleManager:
                         f"({cloned.permissions.value} -> {want_perms.value})"
                     )
                 elif (not self.mirror_permissions) and (cloned.permissions.value != want_perms.value):
-                    # permissions differ but we're not mirroring them
                     logger.debug(
                         "[🧩] permissions differ for %s (%d) but MIRROR_ROLE_PERMISSIONS=False; skipping perms update.",
                         cloned.name, cloned.id
@@ -299,9 +299,7 @@ class RoleManager:
 
                         await cloned.edit(**kwargs)
                         updated += 1
-                        self.db.upsert_role_mapping(
-                            orig_id, want_name, cloned.id, cloned.name
-                        )
+                        self.db.upsert_role_mapping(orig_id, want_name, cloned.id, cloned.name)
                         logger.info("[🧩] Updated role %s", cloned.name)
                     except Exception as e:
                         logger.warning("[⚠️] Failed updating role %s: %s", cloned.name, e)
