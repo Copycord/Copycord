@@ -3702,11 +3702,12 @@ body {
 #log-modal .modal-header {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
 }
 
 .log-search-input {
-  margin-left: auto;
+  margin-left: 0;
   min-width: 220px;
   padding: 6px 10px;
   border-radius: 8px;
