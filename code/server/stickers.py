@@ -18,6 +18,7 @@ from server.rate_limiter import RateLimitManager, ActionType
 
 logger = logging.getLogger("server.stickers")
 
+
 class StickerManager:
     def __init__(
         self,
@@ -33,14 +34,12 @@ class StickerManager:
         self.clone_guild_id = clone_guild_id
         self.session = session
 
-        # caches + state
         self._cache: dict[int, discord.GuildSticker] = {}
         self._cache_ts: float | None = None
         self._last_sitemap: list[dict] = []
         self._task: asyncio.Task | None = None
         self._lock = asyncio.Lock()
 
-        # standard sticker heuristics
         self._std_ok: set[int] = set()
         self._std_bad: set[int] = set()
 
@@ -87,15 +86,28 @@ class StickerManager:
                 except Exception:
                     clone_list = []
                 mappings = len(list(self.db.get_all_sticker_mappings()))
-                logger.debug("[🎟️] Sticker sync start: upstream=%d, clone=%d, mappings=%d",
-                            upstream, len(clone_list), mappings)
+                logger.debug(
+                    "[🎟️] Sticker sync start: upstream=%d, clone=%d, mappings=%d",
+                    upstream,
+                    len(clone_list),
+                    mappings,
+                )
 
                 d, r, c = await self._sync(guild, stickers or [])
                 if any((d, r, c)):
                     await self.refresh_cache()
-                    logger.debug("[🎟️] Sticker sync: %s", ", ".join(
-                        f"{label} {n}" for label, n in (("Deleted", d), ("Renamed", r), ("Created", c)) if n
-                    ))
+                    logger.debug(
+                        "[🎟️] Sticker sync: %s",
+                        ", ".join(
+                            f"{label} {n}"
+                            for label, n in (
+                                ("Deleted", d),
+                                ("Renamed", r),
+                                ("Created", c),
+                            )
+                            if n
+                        ),
+                    )
                 else:
                     logger.debug("[🎟️] Sticker sync: no changes needed")
             except Exception:
@@ -103,7 +115,9 @@ class StickerManager:
             finally:
                 self._task = None
 
-    async def _sync(self, guild: discord.Guild, stickers: list[dict]) -> Tuple[int,int,int]:
+    async def _sync(
+        self, guild: discord.Guild, stickers: list[dict]
+    ) -> Tuple[int, int, int]:
         """
         Synchronizes stickers between the provided guild and the given list of stickers.
         This method performs the following operations:
@@ -125,10 +139,11 @@ class StickerManager:
         current_count = len(clone_stickers)
         clone_by_id = {s.id: s for s in clone_stickers}
 
-        current = {r["original_sticker_id"]: r for r in self.db.get_all_sticker_mappings()}
+        current = {
+            r["original_sticker_id"]: r for r in self.db.get_all_sticker_mappings()
+        }
         incoming = {int(s["id"]): s for s in stickers if s.get("id")}
 
-        # deletions
         for orig_id in set(current) - set(incoming):
             row = current[orig_id]
             cloned = clone_by_id.get(row["cloned_sticker_id"])
@@ -140,32 +155,40 @@ class StickerManager:
                     current_count = max(0, current_count - 1)
                     logger.info(f"[🎟️] Deleted sticker {row['cloned_sticker_name']}")
                 except discord.Forbidden:
-                    logger.warning(f"[⚠️] No permission to delete sticker {row['cloned_sticker_name']}")
+                    logger.warning(
+                        f"[⚠️] No permission to delete sticker {row['cloned_sticker_name']}"
+                    )
                 except discord.HTTPException as e:
-                    logger.error(f"[⛔] Error deleting sticker {row['cloned_sticker_name']}: {e}")
+                    logger.error(
+                        f"[⛔] Error deleting sticker {row['cloned_sticker_name']}: {e}"
+                    )
             self.db.delete_sticker_mapping(orig_id)
 
-        # upserts
         for orig_id, info in incoming.items():
             name = info.get("name") or f"sticker_{orig_id}"
-            url  = info.get("url") or ""
+            url = info.get("url") or ""
             mapping = current.get(orig_id)
             cloned = None
             if mapping:
                 cloned = clone_by_id.get(mapping["cloned_sticker_id"])
                 if mapping and not cloned:
-                    logger.warning(f"[⚠️] Sticker {mapping['original_sticker_name']} missing in clone; will recreate")
+                    logger.warning(
+                        f"[⚠️] Sticker {mapping['original_sticker_name']} missing in clone; will recreate"
+                    )
                     self.db.delete_sticker_mapping(orig_id)
                     mapping = None
 
-            # rename
             if mapping and cloned and mapping["original_sticker_name"] != name:
                 try:
                     await self.ratelimit.acquire(ActionType.STICKER_CREATE)
                     await cloned.edit(name=name)
                     renamed += 1
-                    self.db.upsert_sticker_mapping(orig_id, name, cloned.id, cloned.name)
-                    logger.info(f"[🎟️] Renamed sticker {mapping['original_sticker_name']} → {name}")
+                    self.db.upsert_sticker_mapping(
+                        orig_id, name, cloned.id, cloned.name
+                    )
+                    logger.info(
+                        f"[🎟️] Renamed sticker {mapping['original_sticker_name']} → {name}"
+                    )
                 except discord.HTTPException as e:
                     logger.error(f"[⛔] Failed renaming sticker {cloned.name}: {e}")
                 continue
@@ -204,34 +227,48 @@ class StickerManager:
             try:
                 await self.ratelimit.acquire(ActionType.STICKER_CREATE)
                 created_stk = await guild.create_sticker(
-                    name=name, description=desc, emoji=tag, file=file, reason="Clonecord sync",
+                    name=name,
+                    description=desc,
+                    emoji=tag,
+                    file=file,
+                    reason="Clonecord sync",
                 )
                 created += 1
                 current_count += 1
-                self.db.upsert_sticker_mapping(orig_id, name, created_stk.id, created_stk.name)
+                self.db.upsert_sticker_mapping(
+                    orig_id, name, created_stk.id, created_stk.name
+                )
                 logger.info(f"[🎟️] Created sticker {name}")
             except discord.HTTPException as e:
                 if getattr(e, "code", None) == 30039 or "30039" in str(e):
                     skipped_limit += 1
-                    logger.info("[🎟️] Skipped creating sticker due to clone guild sticker limit.")
+                    logger.info(
+                        "[🎟️] Skipped creating sticker due to clone guild sticker limit."
+                    )
                 else:
                     logger.error(f"[⛔] Failed creating sticker {name}: {e}")
 
         if skipped_limit:
-            logger.info(f"[🎟️] Skipped {skipped_limit} stickers due to clone guild limit ({limit}).")
+            logger.info(
+                f"[🎟️] Skipped {skipped_limit} stickers due to clone guild limit ({limit})."
+            )
         if size_failed:
-            logger.info(f"[🎟️] Skipped {size_failed} stickers because they exceed 512 KiB.")
+            logger.info(
+                f"[🎟️] Skipped {size_failed} stickers because they exceed 512 KiB."
+            )
 
         return deleted, renamed, created
 
-    def resolve_cloned(self, stickers: list[dict]) -> Tuple[List[discord.StickerItem], List[str]]:
+    def resolve_cloned(
+        self, stickers: list[dict]
+    ) -> Tuple[List[discord.StickerItem], List[str]]:
         """
         Resolves cloned stickers based on a provided list of sticker dictionaries.
         This method matches stickers from the input list with their corresponding
         cloned stickers using a preloaded database mapping. It returns a tuple
         containing a list of `discord.StickerItem` objects and a list of sticker names.
         """
-        # Use preloaded DB mapping
+
         rows = {r["original_sticker_id"]: r for r in self.db.get_all_sticker_mappings()}
         guild = self.bot.get_guild(self.clone_guild_id)
 
@@ -248,13 +285,20 @@ class StickerManager:
             clone_id = int(row["cloned_sticker_id"])
             stk = self._cache.get(clone_id)
             if not stk and guild:
-                stk = next((cs for cs in getattr(guild, "stickers", []) if int(cs.id) == clone_id), None)
+                stk = next(
+                    (
+                        cs
+                        for cs in getattr(guild, "stickers", [])
+                        if int(cs.id) == clone_id
+                    ),
+                    None,
+                )
             if not stk:
                 continue
             items.append(discord.Object(id=stk.id))
             names.append(getattr(stk, "name", s.get("name", "sticker")))
         return items, names
-    
+
     def _compose_content(self, author: str, base_content: str | None) -> str:
         """Always prefix with From {author}:, even if there is no content."""
         base = (base_content or "").strip()
@@ -284,7 +328,9 @@ class StickerManager:
         content = self._compose_content(author, base_content)
 
         try:
-            await channel.send(content=content, stickers=[discord.Object(id=i) for i in cand_ids])
+            await channel.send(
+                content=content, stickers=[discord.Object(id=i) for i in cand_ids]
+            )
             self._std_ok.update(cand_ids)
             return True
         except discord.HTTPException:
@@ -293,7 +339,7 @@ class StickerManager:
         except Exception:
             self._std_bad.update(cand_ids)
             return False
-        
+
     def _is_image_url(self, u: str | None) -> bool:
         """
         Checks if the given URL corresponds to an image file based on its extension.
@@ -302,7 +348,7 @@ class StickerManager:
             return False
         u = u.lower()
         return u.endswith((".png", ".webp", ".gif", ".apng", ".jpg", ".jpeg"))
-    
+
     def lookup_original_urls(self, stickers: list[dict]) -> list[tuple[str, str]]:
         """
         For each incoming sticker (up to 3), try to find an original CDN URL
@@ -338,7 +384,7 @@ class StickerManager:
 
             url = row.get("url")
             if not url or not self._is_image_url(url):
-                # Skip non-image formats (e.g., lottie .json) for pure image-embed fallback
+
                 continue
 
             name = row.get("name") or s.get("name") or "sticker"
@@ -360,7 +406,63 @@ class StickerManager:
         Returns True if the message was sent or queued (no further action needed by caller).
         Returns False if we prepared embeds in `msg` and the caller should continue with webhook send.
         """
+
+        suppress_text = bool(msg.get("__stickers_no_text__"))
+        prefer_embeds = bool(msg.get("__stickers_prefer_embeds__"))
+
+        if msg.get("__stickers_embeds_added__"):
+            return False
+
+        def _is_custom_sticker_dict(s: dict) -> bool:
+
+            try:
+                if int(s.get("type", 0)) == 2:
+                    return True
+            except Exception:
+                pass
+            return (
+                bool(s.get("guild_id"))
+                or bool(s.get("custom"))
+                or bool(s.get("is_custom"))
+            )
+
+        def _collect_pairs(sts: list[dict]) -> tuple[list[tuple[str, str]], bool]:
+            """
+            Returns (pairs, all_custom)
+            pairs: [(name, url)]
+            all_custom: True if every pair came from a custom/guild sticker
+            """
+            pairs: list[tuple[str, str]] = []
+            all_custom = True
+            for s in (sts or [])[:3]:
+                url = s.get("url")
+                if not url:
+                    continue
+                name = s.get("name") or "sticker"
+                pairs.append((name, url))
+                all_custom = all_custom and _is_custom_sticker_dict(s)
+            if not pairs:
+
+                extra = self.lookup_original_urls(sts)
+                if extra:
+                    pairs.extend(extra[: max(0, 3 - len(pairs))])
+
+                    all_custom = False if extra else all_custom
+            return pairs, all_custom
+
+        if prefer_embeds:
+            pairs, all_custom = _collect_pairs(stickers)
+            if pairs:
+                msg["embeds"] = (msg.get("embeds") or []) + [
+                    {"type": "rich", "image": {"url": url}} for (_n, url) in pairs
+                ]
+                msg["__stickers_embeds_added__"] = True
+                msg["__stickers_embeds_custom__"] = all_custom
+                msg["__stickers_embeds_count__"] = len(pairs)
+            return False
+
         if (not mapping) or (not ch):
+
             msg["__buffered__"] = True
             receiver._pending_msgs.setdefault(source_id, []).append(msg)
             logger.info(
@@ -370,64 +472,84 @@ class StickerManager:
             )
             return True
 
-        # Try mapped/cloned stickers
         objs, _ = self.resolve_cloned(stickers)
         if objs:
             author = msg.get("author")
             base_content = (msg.get("content") or "").strip()
-            content = f"From {author}: {base_content}" if base_content else f"From {author}:"
+            all_custom = all(_is_custom_sticker_dict(s) for s in (stickers or []))
+
+            auth_disp = author or "Unknown"
+            if suppress_text and all_custom and not base_content:
+
+                content = None
+            elif base_content:
+
+                content = f"From {auth_disp}: {base_content}"
+            else:
+
+                content = f"From {auth_disp}:"
+
             try:
-                await receiver.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=str(mapping["cloned_channel_id"]))
+                await receiver.ratelimit.acquire(
+                    ActionType.WEBHOOK_MESSAGE, key=str(mapping["cloned_channel_id"])
+                )
                 await ch.send(content=content, stickers=objs[:3])
-                logger.info("[💬] Forwarded cloned-sticker message to #%s from %s (%s)",
-                        msg["channel_name"], msg["author"], msg["author_id"])
+                logger.info(
+                    "[💬] Forwarded cloned-sticker message to #%s from %s (%s)",
+                    msg.get("channel_name"),
+                    msg.get("author"),
+                    msg.get("author_id"),
+                )
                 return True
             except discord.HTTPException:
-                logger.debug("[⚠️] Cloned sticker send failed; will try standard or embed fallback.")
+                logger.debug(
+                    "[⚠️] Cloned sticker send failed; will try standard or embed fallback."
+                )
 
-        # Helper: collect image URLs for embed fallback
-        def _collect_pairs(sts: list[dict]) -> list[tuple[str, str]]:
-            pairs: list[tuple[str, str]] = []
-            for s in (sts or [])[:3]:
-                url = s.get("url")
-                if url and self._is_image_url(url):
-                    pairs.append((s.get("name") or "sticker", url))
-            if not pairs:
-                pairs.extend(self.lookup_original_urls(sts))
-            return pairs
-
-        # Try standard/global stickers
         sent_std = await self.try_send_standard(
             channel=ch,
             author=msg.get("author"),
             stickers=stickers,
-            base_content=(msg.get("content") or "").strip() or None,
+            base_content=(
+                None if suppress_text else ((msg.get("content") or "").strip() or None)
+            ),
         )
         if sent_std:
-            logger.info("[💬] Forwarded sticker message to #%s from %s (%s)",
-                    msg["channel_name"], msg["author"], msg["author_id"])
+            logger.info(
+                "[💬] Forwarded standard sticker message to #%s from %s (%s)",
+                msg.get("channel_name"),
+                msg.get("author"),
+                msg.get("author_id"),
+            )
             return True
 
-        # Webhook image-embed fallback (pure image: no content, no titles)
-        pairs = _collect_pairs(stickers)
+        pairs, all_custom = _collect_pairs(stickers)
         if pairs:
-            msg["content"] = None
             msg["embeds"] = (msg.get("embeds") or []) + [
-                {"type": "rich", "image": {"url": url}} for (_, url) in pairs
+                {"type": "rich", "image": {"url": url}} for (_n, url) in pairs
             ]
-            logger.debug(
-                "[💬] Image-embed fallback — %d sticker(s) from %s in #%s",
-                len(pairs),
+
+            msg["__stickers_embeds_added__"] = True
+            msg["__stickers_embeds_custom__"] = all_custom
+            msg["__stickers_embeds_count__"] = len(pairs)
+            logger.info(
+                "[💬] Sticker-embed fallback message sent from %s in #%s",
                 msg.get("author", "Unknown"),
-                msg.get("channel_name", "Unknown")
+                msg.get("channel_name", "Unknown"),
             )
             return False
 
-        # Final degrade
-        failed_info = ", ".join(
-            f"{s.get('name','unknown')} ({s.get('id','no-id')}) [{s.get('url','no-url')}]"
-            for s in stickers
-        ) or "no stickers in payload"
-        logger.warning("[⚠️] Sticker(s) not embeddable for #%s — %s", msg["channel_name"], failed_info)
+        failed_info = (
+            ", ".join(
+                f"{s.get('name','unknown')} ({s.get('id','no-id')}) [{s.get('url','no-url')}]"
+                for s in (stickers or [])
+            )
+            or "no stickers in payload"
+        )
+        logger.warning(
+            "[⚠️] Sticker(s) not embeddable for #%s — %s",
+            msg.get("channel_name"),
+            failed_info,
+        )
         await ch.send(content=f"From {msg.get('author')}: sticker unavailable in clone")
         return True

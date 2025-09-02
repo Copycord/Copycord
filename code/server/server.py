@@ -1251,7 +1251,9 @@ class ServerReceiver:
         if deleted_original_gone:
             parts.append(f"Deleted {deleted_original_gone} threads (original gone)")
         if cleared_missing_clone:
-            parts.append(f"Cleared {cleared_missing_clone} missing clone thread mappings")
+            parts.append(
+                f"Cleared {cleared_missing_clone} missing clone thread mappings"
+            )
 
         renamed = 0
         for src in sitemap.get("threads", []):
@@ -2225,218 +2227,6 @@ class ServerReceiver:
                 logger.exception("Failed to recreate webhook for #%s", original_id)
                 return None
 
-    async def handle_thread_message(self, data: dict):
-        """
-        Handles the forwarding of thread messages from the original guild to the cloned guild.
-        This method ensures that the thread messages are properly forwarded to the corresponding
-        cloned thread in the cloned guild. If the cloned thread or its parent channel does not
-        exist yet, the message is queued for later processing.
-        """
-        if self._shutting_down:
-            return
-
-        guild = self.bot.get_guild(self.clone_guild_id)
-        if not guild:
-            logger.error("[⛔] Clone guild %s not available", self.clone_guild_id)
-            return
-
-        self._load_mappings()
-        orig_tid = int(data["thread_id"])
-        parent_id = int(data["thread_parent_id"])
-        tag = self._log_tag(data)
-
-        chan_map = self.chan_map.get(parent_id)
-        if not chan_map:
-            async with self._warn_lock:
-                if orig_tid not in self._unmapped_threads_warned:
-                    logger.info(
-                        "[⌛] No mapping yet for thread '%s' (thread_id=%s, parent=%s); msg from %s queued until after sync",
-                        data.get("thread_name", "<unnamed>"),
-                        orig_tid,
-                        data.get("thread_parent_name")
-                        or data.get("channel_name")
-                        or parent_id,
-                        data.get("author", "<unknown>"),
-                    )
-                    self._unmapped_threads_warned.add(orig_tid)
-            self._pending_thread_msgs.append(data)
-            return
-        if not isinstance(chan_map, dict):
-            chan_map = dict(chan_map)
-
-        cloned_parent = guild.get_channel(chan_map["cloned_channel_id"])
-        cloned_id = chan_map["cloned_channel_id"]
-        if cloned_id is None:
-            logger.warning(
-                "[⚠️] Channel %s not cloned yet; queueing message until it’s created",
-                data["channel_name"],
-            )
-            self._pending_thread_msgs.append(data)
-            return
-
-        if not cloned_parent:
-            logger.info(
-                "[⌛] Channel %s not cloned yet; queueing message until it’s created",
-                cloned_id,
-            )
-            self._pending_thread_msgs.append(data)
-            return
-
-        payload = self._build_webhook_payload(data)
-
-        webhook_url = chan_map.get(
-            "channel_webhook_url"
-        ) or await self._ensure_primary_webhook_url(parent_id)
-
-        meta = {}
-        if webhook_url:
-            meta = await self._get_webhook_meta(parent_id, webhook_url)
-        if meta.get("custom"):
-
-            payload.pop("username", None)
-            payload.pop("avatar_url", None)
-        if not payload or (not payload.get("content") and not payload.get("embeds")):
-            logger.info("[⚠️] Skipping empty payload for '%s'", data["thread_name"])
-            return
-
-        if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession()
-        thread_webhook = Webhook.from_url(webhook_url, session=self.session)
-
-        lock = self._thread_locks.setdefault(orig_tid, asyncio.Lock())
-        created = False
-
-        try:
-            async with lock:
-
-                thr_map = next(
-                    (
-                        r
-                        for r in self.db.get_all_threads()
-                        if r["original_thread_id"] == orig_tid
-                    ),
-                    None,
-                )
-
-                clone_thread = None
-
-                def drop_mapping():
-                    self.db.delete_forum_thread_mapping(orig_tid)
-                    return None
-
-                if thr_map:
-                    try:
-                        clone_thread = guild.get_channel(
-                            thr_map["cloned_thread_id"]
-                        ) or await self.bot.fetch_channel(thr_map["cloned_thread_id"])
-                    except HTTPException as e:
-                        if e.status == 404:
-                            drop_mapping()
-                            thr_map = None
-                            clone_thread = None
-                        else:
-                            logger.warning(
-                                "[⌛] Error fetching thread %s; adding to queue, waiting for next sync",
-                                thr_map["cloned_thread_id"],
-                            )
-                            self._pending_thread_msgs.append(data)
-                            return
-
-                if thr_map is None:
-                    logger.info(
-                        "[🧵]%s Creating thread '%s' in #%s by %s (%s)",
-                        tag,
-                        data["thread_name"],
-                        cloned_parent.name,
-                        data["author"],
-                        data["author_id"],
-                    )
-                    await self.ratelimit.acquire(ActionType.THREAD)
-
-                    if isinstance(cloned_parent, ForumChannel):
-
-                        resp_msg = await thread_webhook.send(
-                            content=payload.get("content"),
-                            embeds=payload.get("embeds"),
-                            username=payload.get("username"),
-                            avatar_url=payload.get("avatar_url"),
-                            thread_name=data["thread_name"],
-                            wait=True,
-                        )
-
-                        clone_thread = (
-                            next(
-                                (
-                                    t
-                                    for t in cloned_parent.threads
-                                    if t.name == data["thread_name"]
-                                ),
-                                None,
-                            )
-                            or (await cloned_parent.fetch_active_threads()).threads[0]
-                        )
-                        new_id = clone_thread.id
-                        await clone_thread.edit(auto_archive_duration=60)
-
-                    else:
-
-                        new_thread = await cloned_parent.create_thread(
-                            name=data["thread_name"],
-                            type=ChannelType.public_thread,
-                            auto_archive_duration=60,
-                        )
-                        new_id = new_thread.id
-                        clone_thread = new_thread
-
-                        await self.ratelimit.acquire(
-                            ActionType.WEBHOOK_MESSAGE, key=webhook_url
-                        )
-                        await thread_webhook.send(
-                            content=payload.get("content"),
-                            embeds=payload.get("embeds"),
-                            username=payload.get("username"),
-                            avatar_url=payload.get("avatar_url"),
-                            thread=clone_thread,
-                            wait=True,
-                        )
-
-                    created = True
-
-                    self.db.upsert_forum_thread_mapping(
-                        orig_thread_id=orig_tid,
-                        orig_thread_name=data["thread_name"],
-                        clone_thread_id=new_id,
-                        forum_orig_id=parent_id,
-                        forum_clone_id=cloned_id,
-                    )
-
-            if not created:
-                logger.info(
-                    "[💬]%s Forwarding message to thread '%s' in #%s from %s (%s)",
-                    tag,
-                    data["thread_name"],
-                    data["thread_parent_name"],
-                    data["author"],
-                    data["author_id"],
-                )
-                await self.ratelimit.acquire(
-                    ActionType.WEBHOOK_MESSAGE, key=webhook_url
-                )
-                await thread_webhook.send(
-                    content=payload.get("content"),
-                    embeds=payload.get("embeds"),
-                    username=payload.get("username"),
-                    avatar_url=payload.get("avatar_url"),
-                    thread=clone_thread,
-                    wait=True,
-                )
-
-        finally:
-            try:
-                await self._enforce_thread_limit(guild)
-            except Exception:
-                logger.exception("Error enforcing thread limit.")
-
     async def handle_thread_delete(self, data: dict):
         """
         Handles the deletion of a thread in the host server and optionally deletes
@@ -3191,6 +2981,543 @@ class ServerReceiver:
             use_webhook_identity=primary_customized,
             override_identity=None,
         )
+
+    async def handle_thread_message(self, data: dict):
+        """
+        Handles forwarding of thread messages from the original guild to the cloned guild.
+
+        Rules:
+        - If message has TEXT + STICKERS:
+            • If stickers are CUSTOM (guild) -> build image embeds and send a SINGLE webhook message (content + embeds).
+            Do NOT prepend "From {user}:" in this case.
+            • If stickers are STANDARD (Discord built-in) -> try to send ONE native bot message:
+                "From {user}: <content>" + the native sticker(s).
+            If native fails, fall back to a single webhook send (content + embeds).
+        - If STICKERS-ONLY:
+            • CUSTOM -> embed fallback (no "From {user}:").
+            • STANDARD -> try native; if native fails, fall back to embeds and (optionally) caption.
+        - If TEXT-ONLY -> single webhook send.
+        - Any dict-based embeds are converted to discord.Embed to avoid .to_dict() errors.
+        """
+        if self._shutting_down:
+            return
+
+        guild = self.bot.get_guild(self.clone_guild_id)
+        if not guild:
+            logger.error("[⛔] Clone guild %s not available", self.clone_guild_id)
+            return
+
+        self._load_mappings()
+        orig_tid = int(data["thread_id"])
+        parent_id = int(data["thread_parent_id"])
+        tag = self._log_tag(data)
+        is_backfill = bool(data.get("__backfill__"))
+
+        chan_map = self.chan_map.get(parent_id)
+        if not chan_map:
+            async with self._warn_lock:
+                if orig_tid not in self._unmapped_threads_warned:
+                    logger.info(
+                        "[⌛] No mapping yet for thread '%s' (thread_id=%s, parent=%s); msg from %s queued until after sync",
+                        data.get("thread_name", "<unnamed>"),
+                        orig_tid,
+                        data.get("thread_parent_name")
+                        or data.get("channel_name")
+                        or parent_id,
+                        data.get("author", "<unknown>"),
+                    )
+                    self._unmapped_threads_warned.add(orig_tid)
+            self._pending_thread_msgs.append(data)
+            return
+
+        if not isinstance(chan_map, dict):
+            chan_map = dict(chan_map)
+
+        cloned_parent = guild.get_channel(chan_map["cloned_channel_id"])
+        cloned_id = chan_map["cloned_channel_id"]
+        if cloned_id is None or not cloned_parent:
+            logger.info(
+                "[⌛] Channel %s not cloned yet; queueing message until it’s created",
+                cloned_id or data.get("channel_name"),
+            )
+            self._pending_thread_msgs.append(data)
+            return
+
+        payload = self._build_webhook_payload(data)
+
+        webhook_url = chan_map.get(
+            "channel_webhook_url"
+        ) or await self._ensure_primary_webhook_url(parent_id)
+        if not webhook_url:
+            logger.warning(
+                "[⚠️] No webhook for parent %s; queueing thread msg", parent_id
+            )
+            self._pending_thread_msgs.append(data)
+            return
+
+        meta = await self._get_webhook_meta(parent_id, webhook_url)
+        if meta.get("custom"):
+
+            payload.pop("username", None)
+            payload.pop("avatar_url", None)
+
+        stickers = data.get("stickers") or []
+        has_textish = bool(
+            payload and (payload.get("content") or payload.get("embeds"))
+        )
+
+        def _is_custom_sticker(s: dict) -> bool:
+
+            try:
+                return int(s.get("type", 0)) == 2
+            except Exception:
+                return (
+                    bool(s.get("guild_id"))
+                    or bool(s.get("custom"))
+                    or bool(s.get("is_custom"))
+                )
+
+        def _has_custom(sts: list[dict]) -> bool:
+            return any(_is_custom_sticker(s) for s in (sts or []))
+
+        def _has_standard(sts: list[dict]) -> bool:
+            return any(not _is_custom_sticker(s) for s in (sts or []))
+
+        has_custom = _has_custom(stickers)
+        has_standard = _has_standard(stickers)
+
+        if not has_textish and not stickers:
+            logger.info("[⚠️] Skipping empty payload for '%s'", data.get("thread_name"))
+            return
+
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
+        thread_webhook = Webhook.from_url(webhook_url, session=self.session)
+
+        lock = self._thread_locks.setdefault(orig_tid, asyncio.Lock())
+        created = False
+        clone_thread: discord.Thread | None = None
+
+        def _thread_mapping(thread_id: int) -> dict:
+
+            m = dict(chan_map)
+            m["cloned_channel_id"] = int(thread_id)
+            return m
+
+        def _merge_embeds_into_payload(dst_payload: dict, src_msg: dict):
+            if not dst_payload:
+                return
+            dst_payload["embeds"] = (dst_payload.get("embeds") or []) + (
+                src_msg.get("embeds") or []
+            )
+
+        def _coerce_embeds_inplace(p: dict) -> None:
+            """Ensure p['embeds'] is a list[discord.Embed], converting dict fallbacks."""
+            lst = p.get("embeds")
+            if not lst:
+
+                p["embeds"] = []
+                return
+            converted = []
+            for e in lst:
+                if isinstance(e, discord.Embed):
+                    converted.append(e)
+                elif isinstance(e, dict):
+                    emb = discord.Embed(
+                        title=e.get("title"), description=e.get("description")
+                    )
+                    if isinstance(e.get("image"), dict) and e["image"].get("url"):
+                        emb.set_image(url=e["image"]["url"])
+                    if isinstance(e.get("thumbnail"), dict) and e["thumbnail"].get(
+                        "url"
+                    ):
+                        emb.set_thumbnail(url=e["thumbnail"]["url"])
+                    converted.append(emb)
+            p["embeds"] = converted
+
+        async def _send_webhook_into_thread(p: dict, *, include_text: bool, thread_obj):
+            """Send one webhook message into the thread, with spoofing unless meta['custom']."""
+            _coerce_embeds_inplace(p)
+            kw = {
+                "content": (p.get("content") if include_text else None),
+                "embeds": p.get("embeds"),
+                "thread": thread_obj,
+                "wait": True,
+            }
+            if not meta.get("custom"):
+                if p.get("username"):
+                    kw["username"] = p.get("username")
+                if p.get("avatar_url"):
+                    kw["avatar_url"] = p.get("avatar_url")
+            await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=webhook_url)
+            await thread_webhook.send(**kw)
+
+        try:
+            async with lock:
+
+                thr_map = next(
+                    (
+                        r
+                        for r in self.db.get_all_threads()
+                        if int(r["original_thread_id"]) == orig_tid
+                    ),
+                    None,
+                )
+
+                if thr_map:
+                    try:
+                        clone_thread = guild.get_channel(
+                            int(thr_map["cloned_thread_id"])
+                        ) or await self.bot.fetch_channel(
+                            int(thr_map["cloned_thread_id"])
+                        )
+                    except HTTPException as e:
+                        if e.status == 404:
+                            self.db.delete_forum_thread_mapping(orig_tid)
+                            thr_map = None
+                            clone_thread = None
+                        else:
+                            logger.warning(
+                                "[⌛] Error fetching thread %s; queueing for next sync",
+                                thr_map["cloned_thread_id"],
+                            )
+                            self._pending_thread_msgs.append(data)
+                            return
+
+                if thr_map is None:
+                    logger.info(
+                        "[🧵]%s Creating thread '%s' in #%s by %s (%s)",
+                        tag,
+                        data["thread_name"],
+                        getattr(cloned_parent, "name", "<forum>"),
+                        data["author"],
+                        data["author_id"],
+                    )
+                    await self.ratelimit.acquire(ActionType.THREAD)
+
+                    if isinstance(cloned_parent, ForumChannel):
+
+                        tmp = {
+                            "content": (payload.get("content") or None),
+                            "embeds": payload.get("embeds"),
+                            "username": payload.get("username"),
+                            "avatar_url": payload.get("avatar_url"),
+                        }
+
+                        if stickers and has_textish:
+                            if has_custom:
+
+                                data["__stickers_no_text__"] = True
+                                data["__stickers_prefer_embeds__"] = True
+                                await self.stickers.send_with_fallback(
+                                    receiver=self,
+                                    ch=None,
+                                    stickers=stickers,
+                                    mapping=chan_map,
+                                    msg=data,
+                                    source_id=orig_tid,
+                                )
+                                _merge_embeds_into_payload(tmp, data)
+                            elif has_standard:
+
+                                tmp["content"] = "\u200b"
+                                tmp["embeds"] = None
+
+                        elif stickers and not has_textish:
+                            if has_custom:
+
+                                data["__stickers_no_text__"] = True
+                                data["__stickers_prefer_embeds__"] = True
+                                await self.stickers.send_with_fallback(
+                                    receiver=self,
+                                    ch=None,
+                                    stickers=stickers,
+                                    mapping=chan_map,
+                                    msg=data,
+                                    source_id=orig_tid,
+                                )
+                                _merge_embeds_into_payload(tmp, data)
+
+                            elif has_standard:
+                                # Standard stickers only -> we'll post natively after creation
+                                tmp["content"] = "\u200b"
+                                tmp["embeds"] = None
+
+                        _coerce_embeds_inplace(tmp)
+                        await thread_webhook.send(
+                            content=(tmp.get("content") or None),
+                            embeds=tmp.get("embeds"),
+                            username=(
+                                None if meta.get("custom") else tmp.get("username")
+                            ),
+                            avatar_url=(
+                                None if meta.get("custom") else tmp.get("avatar_url")
+                            ),
+                            thread_name=data["thread_name"],
+                            wait=True,
+                        )
+
+                        clone_thread = (
+                            next(
+                                (
+                                    t
+                                    for t in cloned_parent.threads
+                                    if t.name == data["thread_name"]
+                                ),
+                                None,
+                            )
+                            or (await cloned_parent.fetch_active_threads()).threads[0]
+                        )
+                        new_id = clone_thread.id
+                        await clone_thread.edit(auto_archive_duration=60)
+
+                        if stickers and has_standard:
+
+                            sent = await self.stickers.send_with_fallback(
+                                receiver=self,
+                                ch=clone_thread,
+                                stickers=stickers,
+                                mapping=_thread_mapping(new_id),
+                                msg=data,  # should include original text in helper's content formatting
+                                source_id=orig_tid,
+                            )
+                            if sent:
+                                if is_backfill and hasattr(self, "backfill"):
+                                    self.backfill.note_sent(parent_id)
+                                self.db.upsert_forum_thread_mapping(
+                                    orig_thread_id=orig_tid,
+                                    orig_thread_name=data["thread_name"],
+                                    clone_thread_id=new_id,
+                                    forum_orig_id=parent_id,
+                                    forum_clone_id=cloned_id,
+                                )
+                                return
+
+                            payload2 = self._build_webhook_payload(data)
+                            if meta.get("custom"):
+                                payload2.pop("username", None)
+                                payload2.pop("avatar_url", None)
+
+                            if not _has_custom(stickers):
+                                payload2.setdefault("content", payload2.get("content"))
+                            await _send_webhook_into_thread(
+                                payload2, include_text=True, thread_obj=clone_thread
+                            )
+
+                    else:
+
+                        new_thread = await cloned_parent.create_thread(
+                            name=data["thread_name"],
+                            type=ChannelType.public_thread,
+                            auto_archive_duration=60,
+                        )
+                        new_id = new_thread.id
+                        clone_thread = new_thread
+
+                        if stickers and has_textish:
+                            if has_custom:
+
+                                data["__stickers_no_text__"] = True
+                                data["__stickers_prefer_embeds__"] = True
+                                await self.stickers.send_with_fallback(
+                                    receiver=self,
+                                    ch=clone_thread,
+                                    stickers=stickers,
+                                    mapping=_thread_mapping(new_id),
+                                    msg=data,
+                                    source_id=orig_tid,
+                                )
+                                _merge_embeds_into_payload(payload, data)
+                                await _send_webhook_into_thread(
+                                    payload, include_text=True, thread_obj=clone_thread
+                                )
+                            elif has_standard:
+
+                                data.pop("__stickers_no_text__", None)
+                                data.pop("__stickers_prefer_embeds__", None)
+                                sent = await self.stickers.send_with_fallback(
+                                    receiver=self,
+                                    ch=clone_thread,
+                                    stickers=stickers,
+                                    mapping=_thread_mapping(new_id),
+                                    msg=data,
+                                    source_id=orig_tid,
+                                )
+                                if sent:
+                                    if is_backfill and hasattr(self, "backfill"):
+                                        self.backfill.note_sent(parent_id)
+
+                                else:
+
+                                    _merge_embeds_into_payload(payload, data)
+                                    await _send_webhook_into_thread(
+                                        payload,
+                                        include_text=True,
+                                        thread_obj=clone_thread,
+                                    )
+
+                        elif stickers and not has_textish:
+                            if has_custom:
+
+                                data["__stickers_no_text__"] = True
+                                data["__stickers_prefer_embeds__"] = True
+                                await self.stickers.send_with_fallback(
+                                    receiver=self,
+                                    ch=clone_thread,
+                                    stickers=stickers,
+                                    mapping=_thread_mapping(new_id),
+                                    msg=data,
+                                    source_id=orig_tid,
+                                )
+                                payload2 = self._build_webhook_payload(data)
+                                if meta.get("custom"):
+                                    payload2.pop("username", None)
+                                    payload2.pop("avatar_url", None)
+                                await _send_webhook_into_thread(
+                                    payload2, include_text=True, thread_obj=clone_thread
+                                )
+                            else:
+
+                                sent = await self.stickers.send_with_fallback(
+                                    receiver=self,
+                                    ch=clone_thread,
+                                    stickers=stickers,
+                                    mapping=_thread_mapping(new_id),
+                                    msg=data,
+                                    source_id=orig_tid,
+                                )
+                                if not sent:
+
+                                    payload2 = self._build_webhook_payload(data)
+                                    if meta.get("custom"):
+                                        payload2.pop("username", None)
+                                        payload2.pop("avatar_url", None)
+                                    await _send_webhook_into_thread(
+                                        payload2,
+                                        include_text=True,
+                                        thread_obj=clone_thread,
+                                    )
+
+                        else:
+                            await _send_webhook_into_thread(
+                                payload, include_text=True, thread_obj=clone_thread
+                            )
+
+                    created = True
+
+                    self.db.upsert_forum_thread_mapping(
+                        orig_thread_id=orig_tid,
+                        orig_thread_name=data["thread_name"],
+                        clone_thread_id=new_id,
+                        forum_orig_id=parent_id,
+                        forum_clone_id=cloned_id,
+                    )
+
+                if not created:
+
+                    if stickers and not has_textish:
+                        if has_custom:
+
+                            data["__stickers_no_text__"] = True
+                            data["__stickers_prefer_embeds__"] = True
+
+                            _ = await self.stickers.send_with_fallback(
+                                receiver=self,
+                                ch=clone_thread,
+                                stickers=stickers,
+                                mapping=_thread_mapping(clone_thread.id),
+                                msg=data,
+                                source_id=orig_tid,
+                            )
+                            payload2 = self._build_webhook_payload(data)
+                            if meta.get("custom"):
+                                payload2.pop("username", None)
+                                payload2.pop("avatar_url", None)
+                            await _send_webhook_into_thread(
+                                payload2, include_text=True, thread_obj=clone_thread
+                            )
+                            return
+                        else:
+
+                            sent = await self.stickers.send_with_fallback(
+                                receiver=self,
+                                ch=clone_thread,
+                                stickers=stickers,
+                                mapping=_thread_mapping(clone_thread.id),
+                                msg=data,
+                                source_id=orig_tid,
+                            )
+                            if sent:
+                                if is_backfill and hasattr(self, "backfill"):
+                                    self.backfill.note_sent(parent_id)
+                                return
+                            payload2 = self._build_webhook_payload(data)
+                            if meta.get("custom"):
+                                payload2.pop("username", None)
+                                payload2.pop("avatar_url", None)
+                            await _send_webhook_into_thread(
+                                payload2, include_text=True, thread_obj=clone_thread
+                            )
+                            return
+
+                    if stickers and has_textish:
+                        if has_custom:
+
+                            data["__stickers_no_text__"] = True
+                            data["__stickers_prefer_embeds__"] = True
+                            _ = await self.stickers.send_with_fallback(
+                                receiver=self,
+                                ch=clone_thread,
+                                stickers=stickers,
+                                mapping=_thread_mapping(clone_thread.id),
+                                msg=data,
+                                source_id=orig_tid,
+                            )
+                            _merge_embeds_into_payload(payload, data)
+                            await _send_webhook_into_thread(
+                                payload, include_text=True, thread_obj=clone_thread
+                            )
+                            return
+                        elif has_standard:
+
+                            data.pop("__stickers_no_text__", None)
+                            data.pop("__stickers_prefer_embeds__", None)
+                            sent = await self.stickers.send_with_fallback(
+                                receiver=self,
+                                ch=clone_thread,
+                                stickers=stickers,
+                                mapping=_thread_mapping(clone_thread.id),
+                                msg=data,
+                                source_id=orig_tid,
+                            )
+                            if sent:
+                                if is_backfill and hasattr(self, "backfill"):
+                                    self.backfill.note_sent(parent_id)
+                                return
+                            _merge_embeds_into_payload(payload, data)
+                            await _send_webhook_into_thread(
+                                payload, include_text=True, thread_obj=clone_thread
+                            )
+                            return
+
+                    if has_textish:
+                        logger.info(
+                            "[💬]%s Forwarding message to thread '%s' in #%s from %s (%s)",
+                            tag,
+                            data["thread_name"],
+                            data.get("thread_parent_name"),
+                            data["author"],
+                            data["author_id"],
+                        )
+                        await _send_webhook_into_thread(
+                            payload, include_text=True, thread_obj=clone_thread
+                        )
+
+        finally:
+            try:
+                await self._enforce_thread_limit(guild)
+            except Exception:
+                logger.exception("Error enforcing thread limit.")
 
     async def _handle_backfill_message(self, data: dict) -> None:
         if self._shutting_down:
