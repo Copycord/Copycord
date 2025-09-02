@@ -784,13 +784,14 @@
   };
 
   function getOriginalCategoryFromRow(ch) {
-    return String(
+    const v = String(
       ch.original_category_name ??
         ch.category_original_name ??
         ch.category_upstream_name ??
         ch.category_name ??
         ""
     ).trim();
+    return v || UNGROUPED_LABEL;
   }
 
   function applyFilterAndSort() {
@@ -799,14 +800,19 @@
     filtered = !q
       ? [...data]
       : data.filter((ch) => {
-          const origCat = getOriginalCategoryFromRow(ch);
-          const pinnedCat = origCat ? catPinByOrig.get(origCat) || "" : "";
+          const origCatRaw = getOriginalCategoryFromRow(ch);
+          const origCat = (origCatRaw && origCatRaw.trim()) || "";
+          const resolvedOrig = origCat || UNGROUPED_LABEL;
+          const pinnedCat = catPinByOrig.get(resolvedOrig) || "";
+
+          const catName =
+            (ch.category_name && ch.category_name.trim()) || UNGROUPED_LABEL;
 
           return (
             normalize(ch.original_channel_name).includes(q) ||
             normalize(ch.clone_channel_name).includes(q) ||
-            normalize(ch.category_name).includes(q) ||
-            normalize(origCat).includes(q) ||
+            normalize(catName).includes(q) ||
+            normalize(resolvedOrig).includes(q) ||
             normalize(pinnedCat).includes(q) ||
             normalize(ch.original_channel_id).includes(q) ||
             normalize(ch.cloned_channel_id).includes(q)
@@ -885,10 +891,6 @@
   }
 
   function compareCategoryNames(aName, bName) {
-    const UN = UNGROUPED_LABEL;
-    const aUng = aName === UN,
-      bUng = bName === UN;
-    if (aUng !== bUng) return aUng ? 1 : -1;
     return String(aName || "").localeCompare(String(bName || ""));
   }
 
@@ -982,11 +984,7 @@
     let entries = [...merged.entries()];
     if (sortMode === "category") {
       entries.sort(([aName], [bName]) => compareCategoryNames(aName, bName));
-      if (sortDir === "desc") {
-        const tail = entries.filter(([n]) => n === UNGROUPED_LABEL);
-        const head = entries.filter(([n]) => n !== UNGROUPED_LABEL).reverse();
-        entries = [...head, ...tail];
-      }
+      if (sortDir === "desc") entries.reverse();
     }
 
     const baseCmp = makeChannelCmp(sortMode);
@@ -1022,7 +1020,9 @@
 
       section.innerHTML = `
         <div class="ch-section-head">
-          <h3 class="ch-section-title ${isOrphanCategory ? "orphan-title" : ""}">
+          <h3 class="ch-section-title ${
+            isOrphanCategory ? "orphan-title" : ""
+          }">
             <span class="badge cat-chip ${
               isOrphanCategory
                 ? "badge-orphan"
@@ -1032,10 +1032,14 @@
             } ${isCustom ? "is-custom" : ""}"
               ${
                 isOrphanCategory
-                  ? "data-orphan-cat-id=\"" + escapeAttr(orphanCatId) + "\" data-cat-name=\"" + escapeAttr(resolvedOrig) + "\""
-                  : "data-cat-name=\"" + escapeAttr(resolvedOrig) + "\""
+                  ? 'data-orphan-cat-id="' +
+                    escapeAttr(orphanCatId) +
+                    '" data-cat-name="' +
+                    escapeAttr(resolvedOrig) +
+                    '"'
+                  : 'data-cat-name="' + escapeAttr(resolvedOrig) + '"'
               }
-              ${tooltip ? "title=\"" + escapeAttr(tooltip) + "\"" : ""}
+              ${tooltip ? 'title="' + escapeAttr(tooltip) + '"' : ""}
             >
               ${escapeHtml(displayCat)}
               ${
@@ -1152,7 +1156,11 @@
       try {
         const selId = String(ctx.id);
         const card = document.querySelector(
-          `.ch-card[data-cid="${window.CSS && CSS.escape ? CSS.escape(selId) : selId.replace(/"/g, '\\"')}"]`
+          `.ch-card[data-cid="${
+            window.CSS && CSS.escape
+              ? CSS.escape(selId)
+              : selId.replace(/"/g, '\\"')
+          }"]`
         );
         isOrphanChannel = !!card?.dataset?.orphan;
       } catch {}
@@ -1217,14 +1225,19 @@
     if (cloneItem) {
       const isLocked = isChannel && cloneIsLocked(ctx.id);
       const hideClone = !isChannel || isOrphanChannel;
-    
+
       cloneItem.hidden = hideClone;
       cloneItem.setAttribute("aria-hidden", hideClone ? "true" : "false");
       cloneItem.disabled = hideClone || isLocked;
-      cloneItem.setAttribute("aria-disabled", cloneItem.disabled ? "true" : "false");
+      cloneItem.setAttribute(
+        "aria-disabled",
+        cloneItem.disabled ? "true" : "false"
+      );
       cloneItem.title = hideClone
         ? ""
-        : (isLocked ? "Backfill still in progress" : "Clone messages");
+        : isLocked
+        ? "Backfill still in progress"
+        : "Clone messages";
       cloneItem.classList.toggle("is-disabled", cloneItem.disabled);
     }
 
@@ -1454,38 +1467,48 @@
       openCustomizeCategoryDialog(ctx.name);
       return;
     }
-  
+
     if (act === "delete-orphan") {
       e.preventDefault();
       const ctx = menuContext;
       if (!ctx || ctx.type !== "channel" || !ctx.id) {
         hideMenu();
-        window.showToast("This item is not an orphan channel.", { type: "warn" });
+        window.showToast("This item is not an orphan channel.", {
+          type: "warn",
+        });
         return;
       }
-    
+
       // verify it's actually an orphan channel
       const selId = String(ctx.id);
       const card = document.querySelector(
-        `.ch-card[data-cid="${window.CSS && CSS.escape ? CSS.escape(selId) : selId.replace(/"/g, '\\"')}"]`
+        `.ch-card[data-cid="${
+          window.CSS && CSS.escape
+            ? CSS.escape(selId)
+            : selId.replace(/"/g, '\\"')
+        }"]`
       );
       const isOrphanChannel = card?.dataset?.orphan === "1";
       const chName =
-        card?.querySelector(".ch-display-name")?.textContent?.replace(/^#\s*/, "").trim() ||
-        "Channel";
-    
+        card
+          ?.querySelector(".ch-display-name")
+          ?.textContent?.replace(/^#\s*/, "")
+          .trim() || "Channel";
+
       if (!isOrphanChannel) {
         hideMenu();
         window.showToast("This is not an orphan channel.", { type: "warn" });
         return;
       }
-    
+
       hideMenu();
-    
+
       openConfirm(
         {
           title: "Delete orphan channel?",
-          body: `This will delete <b>${escapeHtml(chName)}</b> <span class="muted">(${escapeHtml(selId)})</span>.`,
+          body: `This will delete <b>${escapeHtml(
+            chName
+          )}</b> <span class="muted">(${escapeHtml(selId)})</span>.`,
           okText: "Delete",
         },
         () => {
