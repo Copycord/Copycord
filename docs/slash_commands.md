@@ -11,7 +11,7 @@ This document provides easy-to-follow instructions on how to use the available s
 
 ---
 
-### 1. `/ping_server`
+### `/ping_server`
 
 **Description:** Shows the bot's latency, server name, member count, and uptime.
 
@@ -23,7 +23,7 @@ This document provides easy-to-follow instructions on how to use the available s
 
 ---
 
-### 2. `/ping_client`
+### `/ping_client`
 
 **Description:** Measures client latency, round‑trip time, and client uptime.
 
@@ -35,7 +35,7 @@ This document provides easy-to-follow instructions on how to use the available s
 
 ---
 
-### 3. `/block_add <keyword>`
+### `/block_add <keyword>`
 
 **Description:** Toggles a keyword in the block list. Messages with blocked keywords will be dropped.
 
@@ -47,7 +47,7 @@ This document provides easy-to-follow instructions on how to use the available s
 
 ---
 
-### 4. `/block_list`
+### `/block_list`
 
 **Description:** Lists all currently blocked keywords.
 
@@ -59,11 +59,9 @@ This document provides easy-to-follow instructions on how to use the available s
 
 ---
 
-<<<<<<< HEAD
 
-### 5. `/announcement_trigger <keyword> <user_id> [channel_id]`
-=======
-### 5. `/verify_structure [delete:<true|false>]`
+### `/announcement_trigger <keyword> <user_id> [channel_id]`
+
 
 **Description:** Reports channels and categories not present in the last sitemap. Optionally deletes them.
 
@@ -82,8 +80,8 @@ This document provides easy-to-follow instructions on how to use the available s
 ---
 
 
-### 6. `/announcement_trigger <keyword> <user_id> [channel_id]`
->>>>>>> web-ui
+### `/announcement_trigger <keyword> <user_id> [channel_id]`
+
 
 **Description:** Registers a trigger so that when a specific user posts a message containing the keyword, a DM is sent to subscribers.
 
@@ -102,11 +100,9 @@ This document provides easy-to-follow instructions on how to use the available s
 
 ---
 
-<<<<<<< HEAD
-### 6. `/announcement_user [@user] [keyword]`
-=======
-### 7. `/announcement_user [@user] [keyword]`
->>>>>>> web-ui
+
+### `/announcement_user [@user] [keyword]`
+
 
 **Description:** Subscribes or unsubscribes a user to announcements for a keyword—or all keywords.
 
@@ -126,11 +122,8 @@ This document provides easy-to-follow instructions on how to use the available s
 
 ---
 
-<<<<<<< HEAD
-### 7. `/announcement_list [delete:<n>]`
-=======
-### 8. `/announcement_list [delete:<n>]`
->>>>>>> web-ui
+### `/announcement_list [delete:<n>]`
+
 
 **Description:** Lists current announcement triggers or deletes one by its index.
 
@@ -144,56 +137,10 @@ This document provides easy-to-follow instructions on how to use the available s
 /announcement_list            # show all triggers
 /announcement_list delete:2   # remove trigger #2
 ```
-<<<<<<< HEAD
----
-
-### 8. `/onjoin_dm <server_id>`
-=======
-
 
 ---
 
-### 9. `/clone_messages <#cloned_channel>`
-
-**Description:** Clones the full message history from the mapped **host** channel into the specified **cloned** channel, streaming **oldest → newest**. While the backfill runs, new (live) messages for that channel are **buffered** and sent immediately after the backfill completes. You’ll receive a **DM summary** when it’s done.
-
-**Parameters:**
-
-* `#cloned_channel` (required): The cloned channel to populate with history.
-
-**Usage Examples:**
-
-```
-/clone_messages <#general>
-```
-
----
-
-### 10. `/start_member_export <include_names> <num_sessions>`
-
-**Description:** Begins scraping all members from the host guild using Discord’s member list gateway API. The scraper will run until it reaches the reported **guild member count**, ensuring near-complete coverage.  
-
-**Parameters:**
-* `include_names` (true/false): Whether to include usernames alongside IDs.  
-* `num_sessions` (1–5): Number of parallel sessions to use. More sessions = faster scrape, but higher chance of flagging your account.
-
-**Usage Examples:**
-
-```
-/start_member_export include_names:true num_sessions:3
-/start_member_export include_names:false num_sessions:5
-```
-
----
-
-### 11. `/cancel_member_export`
-
-**Description:** Cancels any running member export job. The scraper stops safely and send you a DM with any results found.
-
----
-
-### 12. `/onjoin_dm <server_id>`
->>>>>>> web-ui
+### `/onjoin_dm <server_id>`
 
 **Description:** Toggles DM notifications when someone joins the specified server. (Only works for servers with 1k or less members)
 If enabled, you’ll receive a direct message with the new member’s details whenever someone joins that guild.
@@ -207,4 +154,23 @@ If enabled, you’ll receive a direct message with the new member’s details wh
 
 ```
 /onjoin_dm 123456789012345678
+```
+
+---
+### `/purge_assets <type> <confirm>`
+**Description:** Purge all stickers, emojis, or roles.
+
+**Usage Example:**
+```
+/purge_assets roles confirm
+```
+> **Note:** Make sure the copycord role is positioned at the top.
+
+---
+### `/role_block <role> <roleid>`
+**Description:** Block a role from being added during sync.
+
+**Usage Example:**
+```
+/purge_assets roles confirm
 ```
