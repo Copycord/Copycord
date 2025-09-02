@@ -1018,34 +1018,37 @@
       const isCustom = !!(pin && pin.trim() && pin !== resolvedOrig);
       const displayCat = isCustom ? pin : resolvedOrig;
       const tooltip = tooltipForCategory(resolvedOrig, pin);
+      const isUncategorized = resolvedOrig === UNGROUPED_LABEL;
 
       section.innerHTML = `
-      <div class="ch-section-head">
-        <h3 class="ch-section-title ${isOrphanCategory ? "orphan-title" : ""}">
-          <span
-         class="badge cat-chip ${
-           isOrphanCategory
-             ? "badge-orphan"
-             : isCustom
-             ? "badge-custom"
-             : "good"
-         } ${isCustom ? "is-custom" : ""}"
-            ${
+        <div class="ch-section-head">
+          <h3 class="ch-section-title ${isOrphanCategory ? "orphan-title" : ""}">
+            <span class="badge cat-chip ${
               isOrphanCategory
-                ? `data-orphan-cat-id="${escapeAttr(
-                    orphanCatId
-                  )}" data-cat-name="${escapeAttr(resolvedOrig)}"`
-                : `data-cat-name="${escapeAttr(resolvedOrig)}"`
-            }
-            ${tooltip ? `title="${escapeAttr(tooltip)}"` : ""}
-          >
-            ${escapeHtml(displayCat)}
-            <button class="cat-menu-trigger" aria-haspopup="menu" aria-controls="ch-menu" aria-label="Category menu" type="button">⋯</button>
-          </span>
-        </h3>
-      </div>
-      <div class="ch-cards"></div>
-    `;
+                ? "badge-orphan"
+                : isCustom
+                ? "badge-custom"
+                : "good"
+            } ${isCustom ? "is-custom" : ""}"
+              ${
+                isOrphanCategory
+                  ? "data-orphan-cat-id=\"" + escapeAttr(orphanCatId) + "\" data-cat-name=\"" + escapeAttr(resolvedOrig) + "\""
+                  : "data-cat-name=\"" + escapeAttr(resolvedOrig) + "\""
+              }
+              ${tooltip ? "title=\"" + escapeAttr(tooltip) + "\"" : ""}
+            >
+              ${escapeHtml(displayCat)}
+              ${
+                !isUncategorized
+                  ? `<button class="cat-menu-trigger" aria-haspopup="true"
+                       aria-controls="ch-menu" aria-label="Category menu" type="button">⋯</button>`
+                  : ""
+              }
+            </span>
+          </h3>
+        </div>
+        <div class="ch-cards"></div>
+      `;
       const grid = section.querySelector(".ch-cards");
 
       for (const ch of items) {
@@ -1449,6 +1452,48 @@
       }
       hideMenu({ restoreFocus: false });
       openCustomizeCategoryDialog(ctx.name);
+      return;
+    }
+  
+    if (act === "delete-orphan") {
+      e.preventDefault();
+      const ctx = menuContext;
+      if (!ctx || ctx.type !== "channel" || !ctx.id) {
+        hideMenu();
+        window.showToast("This item is not an orphan channel.", { type: "warn" });
+        return;
+      }
+    
+      // verify it's actually an orphan channel
+      const selId = String(ctx.id);
+      const card = document.querySelector(
+        `.ch-card[data-cid="${window.CSS && CSS.escape ? CSS.escape(selId) : selId.replace(/"/g, '\\"')}"]`
+      );
+      const isOrphanChannel = card?.dataset?.orphan === "1";
+      const chName =
+        card?.querySelector(".ch-display-name")?.textContent?.replace(/^#\s*/, "").trim() ||
+        "Channel";
+    
+      if (!isOrphanChannel) {
+        hideMenu();
+        window.showToast("This is not an orphan channel.", { type: "warn" });
+        return;
+      }
+    
+      hideMenu();
+    
+      openConfirm(
+        {
+          title: "Delete orphan channel?",
+          body: `This will delete <b>${escapeHtml(chName)}</b> <span class="muted">(${escapeHtml(selId)})</span>.`,
+          okText: "Delete",
+        },
+        () => {
+          markPending(selId);
+          sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
+          sendVerify({ action: "delete_one", kind: "channel", id: selId });
+        }
+      );
       return;
     }
 
