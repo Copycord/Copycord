@@ -559,15 +559,13 @@ class CloneCommands(commands.Cog):
         ctx: discord.ApplicationContext,
         kind: str = Option(str, "What to delete", required=True, choices=["emojis", "stickers", "roles"]),
         confirm: str = Option(str, "Type 'confirm' to run this DESTRUCTIVE action", required=True),
+        unmapped_only: bool = Option(bool, "Only delete assets that are NOT mapped in the DB", required=False, default=False),
     ):
         await ctx.defer(ephemeral=True)
 
         if (confirm or "").strip().lower() != "confirm":
             return await ctx.followup.send(
-                embed=self._err_embed(
-                    "Confirmation required",
-                    "Re-run the command and type **confirm** to proceed."
-                ),
+                embed=self._err_embed("Confirmation required", "Re-run the command and type **confirm** to proceed."),
                 ephemeral=True,
             )
 
@@ -581,11 +579,26 @@ class CloneCommands(commands.Cog):
         RL_ROLE    = getattr(ActionType, "ROLE", "ROLE")
 
         deleted = skipped = failed = 0
+        deleted_ids: list[int] = []
+
         await ctx.followup.send(
-            embed=self._ok_embed("Starting purge…", f"Target: `{kind}`\nI'll DM you when finished."),
+            embed=self._ok_embed("Starting purge…", f"Target: `{kind}`\nMode: `{'unmapped_only' if unmapped_only else 'ALL'}`\nI'll DM you when finished."),
             ephemeral=True,
         )
-        helper._log_purge_event(kind=kind, outcome="begin", guild_id=guild.id, user_id=ctx.user.id, reason="Manual purge")
+        helper._log_purge_event(kind=kind, outcome="begin", guild_id=guild.id, user_id=ctx.user.id,
+                                reason=f"Manual purge (mode={'unmapped_only' if unmapped_only else 'all'})")
+
+        def _is_mapped(kind_name: str, cloned_id: int) -> bool:
+            if kind_name == "emojis":
+                row = self.db.conn.execute("SELECT 1 FROM emoji_mappings WHERE cloned_emoji_id=? LIMIT 1", (int(cloned_id),)).fetchone()
+                return bool(row)
+            if kind_name == "stickers":
+                row = self.db.conn.execute("SELECT 1 FROM sticker_mappings WHERE cloned_sticker_id=? LIMIT 1", (int(cloned_id),)).fetchone()
+                return bool(row)
+            if kind_name == "roles":
+                row = self.db.conn.execute("SELECT 1 FROM role_mappings WHERE cloned_role_id=? LIMIT 1", (int(cloned_id),)).fetchone()
+                return bool(row)
+            return False
 
         try:
             # =============================
@@ -593,39 +606,35 @@ class CloneCommands(commands.Cog):
             # =============================
             if kind == "emojis":
                 for em in list(guild.emojis):
+                    if unmapped_only and _is_mapped("emojis", em.id):
+                        skipped += 1
+                        helper._log_purge_event("emojis", "skipped", guild.id, ctx.user.id, em.id, em.name,
+                                                "Unmapped-only mode: mapped in DB")
+                        continue
                     try:
                         await self.ratelimit.acquire(RL_EMOJI)
                         await em.delete(reason=f"Purge by {ctx.user.id}")
                         deleted += 1
-                        helper._log_purge_event(
-                            kind="emojis", outcome="deleted",
-                            guild_id=guild.id, user_id=ctx.user.id,
-                            obj_id=em.id, name=em.name,
-                            reason="Manual purge",
-                        )
+                        deleted_ids.append(int(em.id))
+                        helper._log_purge_event("emojis", "deleted", guild.id, ctx.user.id, em.id, em.name, "Manual purge")
                     except discord.Forbidden as e:
                         skipped += 1
-                        helper._log_purge_event(
-                            kind="emojis", outcome="skipped",
-                            guild_id=guild.id, user_id=ctx.user.id,
-                            obj_id=em.id, name=em.name,
-                            reason=f"Manual purge: {e}",
-                        )
+                        helper._log_purge_event("emojis", "skipped", guild.id, ctx.user.id, em.id, em.name, f"Manual purge: {e}")
                     except Exception as e:
                         failed += 1
-                        helper._log_purge_event(
-                            kind="emojis", outcome="failed",
-                            guild_id=guild.id, user_id=ctx.user.id,
-                            obj_id=em.id, name=em.name,
-                            reason=f"Manual purge: {e}",
+                        helper._log_purge_event("emojis", "failed", guild.id, ctx.user.id, em.id, em.name, f"Manual purge: {e}")
+
+                if unmapped_only:
+                    if deleted_ids:
+                        placeholders = ",".join("?" * len(deleted_ids))
+                        self.db.conn.execute(
+                            f"DELETE FROM emoji_mappings WHERE cloned_emoji_id IN ({placeholders})",
+                            (*deleted_ids,)
                         )
-                self.db.conn.execute("DELETE FROM emoji_mappings")
-                self.db.conn.commit()
-                helper._log_purge_event(
-                    kind="emojis", outcome="db_clear",
-                    guild_id=guild.id, user_id=ctx.user.id,
-                    reason="Manual purge",
-                )
+                        self.db.conn.commit()
+                else:
+                    self.db.conn.execute("DELETE FROM emoji_mappings")
+                    self.db.conn.commit()
 
             # =============================
             # STICKERS
@@ -638,39 +647,35 @@ class CloneCommands(commands.Cog):
                     except Exception:
                         stickers = []
                 for st in stickers:
+                    if unmapped_only and _is_mapped("stickers", st.id):
+                        skipped += 1
+                        helper._log_purge_event("stickers", "skipped", guild.id, ctx.user.id, st.id, st.name,
+                                                "Unmapped-only mode: mapped in DB")
+                        continue
                     try:
                         await self.ratelimit.acquire(RL_STICKER)
                         await st.delete(reason=f"Purge by {ctx.user.id}")
                         deleted += 1
-                        helper._log_purge_event(
-                            kind="stickers", outcome="deleted",
-                            guild_id=guild.id, user_id=ctx.user.id,
-                            obj_id=st.id, name=st.name,
-                            reason="Manual purge",
-                        )
+                        deleted_ids.append(int(st.id))
+                        helper._log_purge_event("stickers", "deleted", guild.id, ctx.user.id, st.id, st.name, "Manual purge")
                     except discord.Forbidden as e:
                         skipped += 1
-                        helper._log_purge_event(
-                            kind="stickers", outcome="skipped",
-                            guild_id=guild.id, user_id=ctx.user.id,
-                            obj_id=st.id, name=st.name,
-                            reason=f"Manual purge: {e}",
-                        )
+                        helper._log_purge_event("stickers", "skipped", guild.id, ctx.user.id, st.id, st.name, f"Manual purge: {e}")
                     except Exception as e:
                         failed += 1
-                        helper._log_purge_event(
-                            kind="stickers", outcome="failed",
-                            guild_id=guild.id, user_id=ctx.user.id,
-                            obj_id=st.id, name=st.name,
-                            reason=f"Manual purge: {e}",
+                        helper._log_purge_event("stickers", "failed", guild.id, ctx.user.id, st.id, st.name, f"Manual purge: {e}")
+
+                if unmapped_only:
+                    if deleted_ids:
+                        placeholders = ",".join("?" * len(deleted_ids))
+                        self.db.conn.execute(
+                            f"DELETE FROM sticker_mappings WHERE cloned_sticker_id IN ({placeholders})",
+                            (*deleted_ids,)
                         )
-                self.db.conn.execute("DELETE FROM sticker_mappings")
-                self.db.conn.commit()
-                helper._log_purge_event(
-                    kind="stickers", outcome="db_clear",
-                    guild_id=guild.id, user_id=ctx.user.id,
-                    reason="Manual purge",
-                )
+                        self.db.conn.commit()
+                else:
+                    self.db.conn.execute("DELETE FROM sticker_mappings")
+                    self.db.conn.commit()
 
             # =============================
             # ROLES
@@ -678,21 +683,11 @@ class CloneCommands(commands.Cog):
             elif kind == "roles":
                 me, top_role, roles = await helper._resolve_me_and_top(guild)
                 if not me or not top_role:
-                    helper._log_purge_event(
-                        kind="roles", outcome="failed",
-                        guild_id=guild.id, user_id=ctx.user.id,
-                        reason="Manual purge: Top role not found",
-                    )
                     return await ctx.followup.send(
                         embed=self._err_embed("Top role not found", "Could not resolve my top role. Try again later."),
                         ephemeral=True,
                     )
                 if not me.guild_permissions.manage_roles:
-                    helper._log_purge_event(
-                        kind="roles", outcome="failed",
-                        guild_id=guild.id, user_id=ctx.user.id,
-                        reason="Manual purge: Missing Manage Roles permission",
-                    )
                     return await ctx.followup.send(
                         embed=self._err_embed("Missing permission", "I need **Manage Roles**."),
                         ephemeral=True,
@@ -704,56 +699,50 @@ class CloneCommands(commands.Cog):
 
                 eligible = [r for r in roles if not _undeletable(r) and r < top_role]
                 for role in sorted(eligible, key=lambda r: r.position):
+                    if unmapped_only and _is_mapped("roles", role.id):
+                        skipped += 1
+                        helper._log_purge_event("roles", "skipped", guild.id, ctx.user.id, role.id, role.name,
+                                                "Unmapped-only mode: mapped in DB")
+                        continue
                     try:
                         await self.ratelimit.acquire(RL_ROLE)
                         await role.delete(reason=f"Purge by {ctx.user.id}")
                         deleted += 1
-                        helper._log_purge_event(
-                            kind="roles", outcome="deleted",
-                            guild_id=guild.id, user_id=ctx.user.id,
-                            obj_id=role.id, name=role.name,
-                            reason="Manual purge",
-                        )
+                        deleted_ids.append(int(role.id))
+                        helper._log_purge_event("roles", "deleted", guild.id, ctx.user.id, role.id, role.name, "Manual purge")
                     except discord.Forbidden as e:
                         skipped += 1
-                        helper._log_purge_event(
-                            kind="roles", outcome="skipped",
-                            guild_id=guild.id, user_id=ctx.user.id,
-                            obj_id=role.id, name=role.name,
-                            reason=f"Manual purge: {e}",
-                        )
+                        helper._log_purge_event("roles", "skipped", guild.id, ctx.user.id, role.id, role.name, f"Manual purge: {e}")
                     except Exception as e:
                         failed += 1
-                        helper._log_purge_event(
-                            kind="roles", outcome="failed",
-                            guild_id=guild.id, user_id=ctx.user.id,
-                            obj_id=role.id, name=role.name,
-                            reason=f"Manual purge: {e}",
+                        helper._log_purge_event("roles", "failed", guild.id, ctx.user.id, role.id, role.name, f"Manual purge: {e}")
+
+                if unmapped_only:
+                    if deleted_ids:
+                        placeholders = ",".join("?" * len(deleted_ids))
+                        self.db.conn.execute(
+                            f"DELETE FROM role_mappings WHERE cloned_role_id IN ({placeholders})",
+                            (*deleted_ids,)
                         )
-                self.db.conn.execute("DELETE FROM role_mappings")
-                self.db.conn.commit()
-                helper._log_purge_event(
-                    kind="roles", outcome="db_clear",
-                    guild_id=guild.id, user_id=ctx.user.id,
-                    reason="Manual purge",
-                )
+                        self.db.conn.commit()
+                else:
+                    self.db.conn.execute("DELETE FROM role_mappings")
+                    self.db.conn.commit()
 
             # =============================
             # Finalize
             # =============================
-            summary = f"**Target:** `{kind}`\n**Deleted:** {deleted}\n**Skipped:** {skipped}\n**Failed:** {failed}"
+            summary = (
+                f"**Target:** `{kind}`\n"
+                f"**Mode:** `{'unmapped_only' if unmapped_only else 'ALL'}`\n"
+                f"**Deleted:** {deleted}\n**Skipped:** {skipped}\n**Failed:** {failed}"
+            )
             color = discord.Color.green() if failed == 0 else discord.Color.orange()
             await self._reply_or_dm(
                 ctx,
                 embed=self._ok_embed("Purge complete", summary, color=color),
                 ephemeral=True,
                 mention_on_channel_fallback=True,
-            )
-            helper._log_purge_event(
-                kind=kind, outcome="done",
-                guild_id=guild.id, user_id=ctx.user.id,
-                counts={"deleted": deleted, "skipped": skipped, "failed": failed},
-                reason="Manual purge",
             )
 
         except Exception as e:
@@ -763,11 +752,6 @@ class CloneCommands(commands.Cog):
                 embed=self._err_embed("Purge failed", err_text),
                 ephemeral=True,
                 mention_on_channel_fallback=True,
-            )
-            helper._log_purge_event(
-                kind=kind, outcome="failed",
-                guild_id=guild.id, user_id=ctx.user.id,
-                reason=f"Manual purge: {err_text}",
             )
 
 
