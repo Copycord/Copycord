@@ -19,7 +19,9 @@ _ROUTE_MAP: Tuple[Tuple[re.Pattern, ActionType], ...] = (
     (re.compile(r"/guilds/\{guild_id\}/stickers"), ActionType.STICKER_CREATE),
     (re.compile(r"/guilds/\{guild_id\}/channels"), ActionType.CREATE_CHANNEL),
     (
-        re.compile(r"^/(?:api/v\d+/)?guilds/\d+/roles(?:/\d+)?(?:\?.*)?$"),
+        re.compile(
+            r"^/(?:api/v\d+/)?guilds/(?:\d+|\{guild_id\})/roles(?:/(?:\d+|\{role_id\}))?(?:\?.*)?$"
+        ),
         ActionType.ROLE,
     ),
     (re.compile(r"/channels/\{channel_id\}"), ActionType.EDIT_CHANNEL),
