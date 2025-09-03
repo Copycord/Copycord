@@ -898,6 +898,18 @@ class DBManager:
         ins("exclude", "category", exclude_categories)
         ins("exclude", "channel", exclude_channels)
         self.conn.commit()
+        
+    def add_filter(self, kind: str, scope: str, obj_id: int) -> None:
+        """
+        Insert a single filter row (no-op if it already exists).
+        kind: 'whitelist' | 'exclude'
+        scope: 'category' | 'channel'
+        """
+        with self.lock, self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO filters(kind,scope,obj_id) VALUES(?,?,?)",
+                (str(kind), str(scope), int(obj_id)),
+            )
 
     def upsert_guild(
         self,

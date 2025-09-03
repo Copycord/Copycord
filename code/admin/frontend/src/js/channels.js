@@ -344,7 +344,7 @@
     const btnClose = document.getElementById("customize-cat-close");
     const titleEl = document.getElementById("customize-cat-title");
 
-    titleEl.textContent = `Customize category`;
+    titleEl.textContent = `Customize`;
     const resolvedOrig =
       catOrigByEither.get(String(categoryName).toLowerCase()) || categoryName;
     const pinned = catPinByOrig.get(resolvedOrig);
@@ -1147,10 +1147,14 @@
 
     menuContext = ctx;
     menu.hidden = false;
-
     menu.classList.add("customize-skin");
 
+    const LOCAL_UNGROUPED = UNGROUPED_LABEL;
+
     const isChannel = ctx.type === "channel";
+    const isCategory = ctx.type === "category";
+    const isOrphanCat = ctx.type === "orphan-cat";
+
     let isOrphanChannel = false;
     if (isChannel && ctx.id != null) {
       try {
@@ -1162,11 +1166,11 @@
               : selId.replace(/"/g, '\\"')
           }"]`
         );
-        isOrphanChannel = !!card?.dataset?.orphan;
+        isOrphanChannel =
+          card?.dataset?.orphan === "1" || !!card?.dataset?.orphan;
       } catch {}
     }
-    const isCategory = ctx.type === "category";
-    const isOrphanCat = ctx.type === "orphan-cat";
+
     const cloneItem = menu.querySelector('[data-action="clone"]');
     menuForId = isChannel ? String(ctx.id) : null;
 
@@ -1191,14 +1195,16 @@
       customizeCatItem.role = "menuitem";
       customizeCatItem.type = "button";
       customizeCatItem.textContent = "Customize category";
-
       const after = menu.querySelector('[data-act="customize"]');
       if (after?.nextSibling)
         menu.insertBefore(customizeCatItem, after.nextSibling);
       else menu.insertBefore(customizeCatItem, menu.firstChild);
     }
-
     customizeCatItem.hidden = !(isCategory && !isOrphanCat);
+    customizeCatItem.setAttribute(
+      "aria-hidden",
+      (!!customizeCatItem.hidden).toString()
+    );
 
     let delOrphanChItem = menu.querySelector('[data-act="delete-orphan"]');
     if (!delOrphanChItem) {
@@ -1210,6 +1216,8 @@
       delOrphanChItem.textContent = "Delete orphan";
       menu.appendChild(delOrphanChItem);
     }
+    delOrphanChItem.hidden = !isOrphanChannel;
+    if (!delOrphanChItem.hidden) delOrphanChItem.dataset.kind = "channel";
 
     let delOrphanCatItem = menu.querySelector('[data-act="delete-orphan-cat"]');
     if (!delOrphanCatItem) {
@@ -1221,11 +1229,11 @@
       delOrphanCatItem.textContent = "Delete orphan category";
       menu.appendChild(delOrphanCatItem);
     }
+    delOrphanCatItem.hidden = !isOrphanCat;
 
     if (cloneItem) {
       const isLocked = isChannel && cloneIsLocked(ctx.id);
       const hideClone = !isChannel || isOrphanChannel;
-
       cloneItem.hidden = hideClone;
       cloneItem.setAttribute("aria-hidden", hideClone ? "true" : "false");
       cloneItem.disabled = hideClone || isLocked;
@@ -1250,18 +1258,399 @@
     } else {
       customizeItem.hidden = true;
     }
+    customizeItem.setAttribute(
+      "aria-hidden",
+      (!!customizeItem.hidden).toString()
+    );
 
-    delOrphanChItem.hidden = true;
-    if (isChannel) {
-      const card = document.querySelector(`.ch-card[data-cid="${ctx.id}"]`);
-      const isOrphanChannel = card?.dataset.orphan === "1";
-      delOrphanChItem.hidden = !isOrphanChannel;
-      if (!delOrphanChItem.hidden) delOrphanChItem.dataset.kind = "channel";
+    function findChannelRowByOrigId(origId) {
+      const k = String(origId || "");
+      return (
+        (data || []).find((r) => String(r.original_channel_id) === k) || null
+      );
     }
 
-    delOrphanCatItem.hidden = !isOrphanCat;
+    let sep = menu.querySelector('[data-act="sep-general"]');
+    if (!sep) {
+      sep = document.createElement("div");
+      sep.className = "ctxmenu-sep";
+      sep.dataset.act = "sep-general";
+      menu.appendChild(sep);
+    }
 
-    menu.style.position = "fixed";
+    let blCh = menu.querySelector('[data-act="bl-channel"]');
+    if (!blCh) {
+      blCh = document.createElement("button");
+      blCh.className = "ctxmenu-item";
+      blCh.dataset.act = "bl-channel";
+      blCh.role = "menuitem";
+      blCh.type = "button";
+      blCh.textContent = "Add channel to blacklist";
+      blCh.setAttribute("aria-label", "Add channel to blacklist");
+      blCh.addEventListener("click", () => {
+        const row = findChannelRowByOrigId(menuForId);
+        const originalId = row?.original_channel_id;
+        const displayName =
+          (row?.clone_channel_name && row.clone_channel_name.trim()) ||
+          row?.original_channel_name ||
+          "Channel";
+
+        if (!originalId) {
+          window.showToast("Could not resolve channel ID.", { type: "error" });
+          hideMenu({ restoreFocus: false });
+          return;
+        }
+
+        hideMenu({ restoreFocus: false });
+        openConfirm(
+          {
+            title: "Add channel to blacklist?",
+            body: `This will blacklist <b>#${escapeHtml(
+              displayName
+            )}</b> <span class="muted">(${escapeHtml(
+              String(originalId)
+            )})</span>.`,
+            okText: "Add to blacklist",
+          },
+          async () => {
+            try {
+              const res = await fetch("/api/filters/blacklist", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
+                body: JSON.stringify({
+                  scope: "channel",
+                  obj_id: String(originalId),
+                }),
+              });
+              const j = await res.json().catch(() => ({}));
+              if (!res.ok || j?.ok === false)
+                throw new Error(j?.detail || j?.error || "failed");
+              window.showToast("Channel added to blacklist.", {
+                type: "success",
+              });
+            } catch {
+              window.showToast("Failed to add to blacklist.", {
+                type: "error",
+              });
+            }
+          }
+        );
+      });
+      menu.appendChild(blCh);
+    }
+
+    let copyOrig = menu.querySelector('[data-act="copy-orig-id"]');
+    if (!copyOrig) {
+      copyOrig = document.createElement("button");
+      copyOrig.className = "ctxmenu-item";
+      copyOrig.dataset.act = "copy-orig-id";
+      copyOrig.role = "menuitem";
+      copyOrig.type = "button";
+      copyOrig.textContent = "Copy original channel ID";
+      copyOrig.setAttribute("aria-label", "Copy original ID");
+      copyOrig.addEventListener("click", async () => {
+        if (!menuForId) return;
+        try {
+          await navigator.clipboard.writeText(String(menuForId));
+          window.showToast("Copied original channel ID to clipboard.", {
+            type: "success",
+          });
+        } catch {
+          window.showToast("Could not copy channel ID.", { type: "error" });
+        }
+        hideMenu({ restoreFocus: false });
+      });
+      menu.appendChild(copyOrig);
+    }
+
+    let copyClone = menu.querySelector('[data-act="copy-clone-id"]');
+    if (!copyClone) {
+      copyClone = document.createElement("button");
+      copyClone.className = "ctxmenu-item";
+      copyClone.dataset.act = "copy-clone-id";
+      copyClone.role = "menuitem";
+      copyClone.type = "button";
+      copyClone.textContent = "Copy clone channel ID";
+      copyClone.setAttribute("aria-label", "Copy clone ID");
+      copyClone.addEventListener("click", async () => {
+        const row = findChannelRowByOrigId(menuForId);
+        const cid =
+          row && row.cloned_channel_id ? String(row.cloned_channel_id) : "";
+        if (!cid) {
+          window.showToast("No clone channel ID found.", { type: "error" });
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(cid);
+          window.showToast("Copied clone channel ID to clipboard.", {
+            type: "success",
+          });
+        } catch {
+          window.showToast("Could not copy channel ID.", { type: "error" });
+        }
+        hideMenu({ restoreFocus: false });
+      });
+      menu.appendChild(copyClone);
+    }
+
+    let blCat = menu.querySelector('[data-act="bl-category"]');
+    if (!blCat) {
+      blCat = document.createElement("button");
+      blCat.className = "ctxmenu-item";
+      blCat.dataset.act = "bl-category";
+      blCat.role = "menuitem";
+      blCat.type = "button";
+      blCat.textContent = "Add category to blacklist";
+      blCat.setAttribute("aria-label", "Add category to blacklist");
+      blCat.addEventListener("click", () => {
+        const name = menuContext?.name ? String(menuContext.name) : "";
+        const { originalCatId } = resolveCategoryIdsByName(name);
+
+        if (!originalCatId) {
+          window.showToast("Could not resolve category ID.", { type: "error" });
+          hideMenu({ restoreFocus: false });
+          return;
+        }
+
+        hideMenu({ restoreFocus: false });
+        openConfirm(
+          {
+            title: "Add category to blacklist?",
+            body: `This will blacklist <b>${escapeHtml(
+              name
+            )}</b> <span class="muted">(${escapeHtml(
+              String(originalCatId)
+            )})</span>.`,
+            okText: "Add to blacklist",
+          },
+          async () => {
+            try {
+              const res = await fetch("/api/filters/blacklist", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
+                body: JSON.stringify({
+                  scope: "category",
+                  obj_id: String(originalCatId),
+                }),
+              });
+              const j = await res.json().catch(() => ({}));
+              if (!res.ok || j?.ok === false)
+                throw new Error(j?.detail || j?.error || "failed");
+              window.showToast("Category added to blacklist.", {
+                type: "success",
+              });
+            } catch {
+              window.showToast("Failed to add to blacklist.", {
+                type: "error",
+              });
+            }
+          }
+        );
+      });
+      menu.appendChild(blCat);
+    }
+
+    function firstId(row, keys) {
+      for (const k of keys) {
+        const v = row?.[k];
+        if (v != null && String(v).trim() !== "") return String(v).trim();
+      }
+      return null;
+    }
+
+    function heuristicId(rows, testFn) {
+      for (const r of rows) {
+        for (const [k, v] of Object.entries(r || {})) {
+          if (v == null || String(v).trim() === "") continue;
+          const key = k.toLowerCase();
+          if (testFn(key)) return String(v).trim();
+        }
+      }
+      return null;
+    }
+
+    function resolveCategoryIdsByName(name) {
+      const raw = String(name || "").trim();
+      if (!raw)
+        return { originalCatId: null, clonedCatId: null, hasClone: false };
+
+      const resolvedOriginal =
+        (catOrigByEither && catOrigByEither.get(raw.toLowerCase())) || raw;
+
+      const norm = (s) =>
+        String(s || "")
+          .trim()
+          .toLowerCase();
+      const wantA = norm(raw);
+      const wantB = norm(resolvedOriginal);
+
+      const rows = (data || []).filter((r) => {
+        const candidates = [
+          r?.category_name,
+          r?.original_category_name,
+          r?.category_original_name,
+          r?.category_upstream_name,
+          String(r?.category_name || "").trim()
+            ? r?.category_name
+            : UNGROUPED_LABEL,
+        ];
+        return candidates.some((c) => {
+          const n = norm(c);
+          return n && (n === wantA || n === wantB);
+        });
+      });
+
+      const origKeys = [
+        "original_parent_category_id",
+        "original_category_id",
+        "category_original_id",
+        "parent_category_id",
+        "category_id",
+        "category_upstream_id",
+      ];
+      const cloneKeys = [
+        "cloned_parent_category_id",
+        "cloned_category_id",
+        "category_cloned_id",
+        "parent_cloned_category_id",
+      ];
+
+      let originalCatId = null;
+      let clonedCatId = null;
+
+      for (const r of rows) {
+        if (!originalCatId) originalCatId = firstId(r, origKeys);
+        if (!clonedCatId) clonedCatId = firstId(r, cloneKeys);
+        if (originalCatId && clonedCatId) break;
+      }
+
+      if (!clonedCatId) {
+        clonedCatId = heuristicId(
+          rows,
+          (key) =>
+            key.includes("clon") &&
+            key.includes("categor") &&
+            key.endsWith("id")
+        );
+      }
+      if (!originalCatId) {
+        originalCatId = heuristicId(
+          rows,
+          (key) =>
+            !key.includes("clon") &&
+            key.includes("categor") &&
+            key.endsWith("id")
+        );
+      }
+
+      console.debug("cat ids for", name, { originalCatId, clonedCatId, rows });
+
+      return { originalCatId, clonedCatId, hasClone: !!clonedCatId };
+    }
+
+    let copyCatOrig = menu.querySelector('[data-act="copy-cat-orig-id"]');
+    if (!copyCatOrig) {
+      copyCatOrig = document.createElement("button");
+      copyCatOrig.className = "ctxmenu-item";
+      copyCatOrig.dataset.act = "copy-cat-orig-id";
+      copyCatOrig.role = "menuitem";
+      copyCatOrig.type = "button";
+      copyCatOrig.textContent = "Copy original category ID";
+      copyCatOrig.setAttribute("aria-label", "Copy original category ID");
+      copyCatOrig.addEventListener("click", async () => {
+        const name =
+          menuContext && menuContext.name ? String(menuContext.name) : "";
+        const { originalCatId } = resolveCategoryIdsByName(name);
+        if (!originalCatId) {
+          window.showToast("No original category ID found.", { type: "error" });
+          return hideMenu({ restoreFocus: false });
+        }
+        try {
+          await navigator.clipboard.writeText(String(originalCatId));
+          window.showToast("Copied original category ID.", { type: "success" });
+        } catch {
+          window.showToast("Could not copy ID.", { type: "error" });
+        }
+        hideMenu({ restoreFocus: false });
+      });
+      menu.appendChild(copyCatOrig);
+    }
+
+    let copyCatClone = menu.querySelector('[data-act="copy-cat-clone-id"]');
+    if (!copyCatClone) {
+      copyCatClone = document.createElement("button");
+      copyCatClone.className = "ctxmenu-item";
+      copyCatClone.dataset.act = "copy-cat-clone-id";
+      copyCatClone.role = "menuitem";
+      copyCatClone.type = "button";
+      copyCatClone.textContent = "Copy clone category ID";
+      copyCatClone.setAttribute("aria-label", "Copy clone category ID");
+      copyCatClone.addEventListener("click", async () => {
+        const name =
+          menuContext && menuContext.name ? String(menuContext.name) : "";
+        const { clonedCatId } = resolveCategoryIdsByName(name);
+        if (!clonedCatId) {
+          window.showToast("No clone category ID found.", { type: "error" });
+          return hideMenu({ restoreFocus: false });
+        }
+        try {
+          await navigator.clipboard.writeText(String(clonedCatId));
+          window.showToast("Copied clone category ID.", { type: "success" });
+        } catch {
+          window.showToast("Could not copy ID.", { type: "error" });
+        }
+        hideMenu({ restoreFocus: false });
+      });
+      menu.appendChild(copyCatClone);
+    }
+
+    let showCopyOrig = false,
+      showCopyClone = false,
+      showBlCh = false;
+    let showCopyCatOrig = false,
+      showCopyCatClone = false,
+      showBlCat = false;
+
+    if (isChannel && menuForId != null) {
+      const row = findChannelRowByOrigId(menuForId);
+      const isCloned = !!row?.cloned_channel_id;
+      showCopyOrig = isCloned;
+      showCopyClone = isCloned;
+      showBlCh = isCloned;
+    }
+
+    if (isCategory) {
+      if (!isOrphanCat) {
+        const name =
+          menuContext && menuContext.name ? String(menuContext.name) : "";
+        const { originalCatId, clonedCatId } = resolveCategoryIdsByName(name);
+
+        showCopyCatOrig = !!originalCatId;
+        showCopyCatClone = !!clonedCatId;
+
+        showBlCat = !!originalCatId;
+      } else {
+        showCopyCatOrig = false;
+        showCopyCatClone = false;
+        showBlCat = false;
+      }
+    }
+
+    copyOrig.hidden = !showCopyOrig;
+    copyClone.hidden = !showCopyClone;
+    blCh.hidden = !showBlCh;
+
+    copyCatOrig.hidden = !showCopyCatOrig;
+    copyCatClone.hidden = !showCopyCatClone;
+    blCat.hidden = !showBlCat;
+
+    copyCatOrig.setAttribute("aria-hidden", (!showCopyCatOrig).toString());
+    copyCatClone.setAttribute("aria-hidden", (!showCopyCatClone).toString());
+    blCh.setAttribute("aria-hidden", (!showBlCh).toString());
+    blCat.setAttribute("aria-hidden", (!showBlCat).toString());
+
     const gap = 6,
       pad = 12,
       vw = window.innerWidth,
@@ -1269,10 +1658,11 @@
     const maxH = Math.max(160, Math.min(360, vh - 2 * pad));
     menu.style.maxHeight = `${maxH}px`;
     menu.style.overflowY = "auto";
+    menu.style.position = "fixed";
 
     const r = btn.getBoundingClientRect();
     const mw = menu.offsetWidth || 180;
-    const mh = menu.offsetHeight;
+    const mh = menu.offsetHeight || 0;
 
     let top = r.bottom + gap;
     let left = Math.min(r.left, vw - mw - pad);

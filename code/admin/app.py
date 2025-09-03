@@ -22,7 +22,7 @@ import re
 import time
 import logging
 from typing import Dict, List, Set, Literal
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Body, status
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Body, status, HTTPException
 from fastapi.responses import (
     RedirectResponse,
     PlainTextResponse,
@@ -1421,6 +1421,30 @@ async def save_filters(request: Request):
     )
     return RedirectResponse("/", status_code=303)
 
+@app.post("/api/filters/blacklist", response_class=JSONResponse)
+async def api_blacklist_add(payload: dict = Body(...)):
+    try:
+        scope = str(payload.get("scope", "")).strip().lower()
+        if scope not in ("category", "channel"):
+            raise ValueError("invalid-scope")
+
+        raw_id = str(payload.get("obj_id", "")).strip()
+        if not raw_id.isdigit():
+            raise ValueError("invalid-obj_id")
+        obj_id = int(raw_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid-input")
+
+    try:
+        db.add_filter("exclude", scope, obj_id)
+        asyncio.create_task(
+            _ws_cmd(CLIENT_AGENT_URL, {"type": "filters_reload"}, timeout=1.0)
+        )
+        return {"ok": True, "scope": scope, "obj_id": str(obj_id)}
+
+    except Exception:
+        raise HTTPException(status_code=500, detail="db-failure")
+
 
 def _read_env() -> Dict[str, str]:
     vals = DEFAULTS.copy()
@@ -1486,63 +1510,49 @@ async def channels_page(request: Request):
         },
     )
 
-
 @app.get("/api/channels", response_class=JSONResponse)
 async def channels_api():
     chans = [dict(r) for r in db.get_all_channel_mappings()]
-
     cat_rows = [dict(r) for r in db.get_all_category_mappings()]
-    cats_by_id = {
-        int(r["original_category_id"]): r["original_category_name"]
-        for r in cat_rows
-    }
-    pins_by_id = {}
-    for r in cat_rows:
-        pin = (
-            r.get("cloned_category_name")
-            or None
-        )
-        if pin:
-            pins_by_id[int(r["original_category_id"])] = pin
+
+    # Maps for category lookups
+    cats_by_id = {int(r["original_category_id"]): r for r in cat_rows}
 
     out = []
     for ch in chans:
         pid = ch.get("original_parent_category_id")
         pid_int = int(pid) if pid not in (None, "", 0) else None
 
-        original_cat = cats_by_id.get(pid_int)
-        custom_cat   = pins_by_id.get(pid_int)  # may be None
+        cat_info = cats_by_id.get(pid_int, {})
+        original_cat_name = cat_info.get("original_category_name")
+        cloned_cat_name   = cat_info.get("cloned_category_name") or None
+        cloned_cat_id     = (
+            str(cat_info.get("cloned_category_id"))
+            if cat_info.get("cloned_category_id") not in (None, "", 0)
+            else None
+        )
 
         out.append(
             {
-                "original_channel_id": (
-                    str(ch["original_channel_id"])
-                    if ch.get("original_channel_id") is not None
-                    else ""
-                ),
+                "original_channel_id": str(ch["original_channel_id"]) if ch.get("original_channel_id") else "",
                 "original_channel_name": ch.get("original_channel_name") or "",
-                "cloned_channel_id": (
-                    str(ch["cloned_channel_id"])
-                    if ch.get("cloned_channel_id") is not None
-                    else None
-                ),
+                "cloned_channel_id": str(ch["cloned_channel_id"]) if ch.get("cloned_channel_id") else None,
                 "channel_type": int(ch.get("channel_type", 0)),
 
-                "category_name": original_cat,                    
-                "original_category_name": original_cat,           
-                "cloned_category_name": custom_cat or None,       
+                # category info
+                "category_name": original_cat_name,
+                "original_category_name": original_cat_name,
+                "cloned_category_name": cloned_cat_name,
+                "original_parent_category_id": str(pid_int) if pid_int else None,
+                "cloned_category_id": cloned_cat_id,   # <-- NEW FIELD
 
-                "original_parent_category_id": (
-                    str(ch["original_parent_category_id"])
-                    if ch.get("original_parent_category_id") not in (None, "", 0)
-                    else None
-                ),
                 "channel_webhook_url": ch.get("channel_webhook_url"),
                 "clone_channel_name": ch.get("clone_channel_name") or None,
             }
         )
 
     return {"items": out}
+
 
 
 @app.post("/api/backfill/start", response_class=JSONResponse)
