@@ -173,6 +173,10 @@ class DBManager:
         )
 
         c.execute(
+            "INSERT OR IGNORE INTO settings (id, blocked_keywords, version, notified_version) VALUES (1, '', '', '')"
+        )
+
+        c.execute(
             """
         CREATE TABLE IF NOT EXISTS announcement_subscriptions (
           keyword   TEXT    NOT NULL,
@@ -260,11 +264,14 @@ class DBManager:
         return row[0] if row else ""
 
     def set_version(self, version: str):
-        """
-        Updates the version in the settings table of the database.
-        """
-        self.conn.execute("UPDATE settings SET version = ? WHERE id = 1", (version,))
-        self.conn.commit()
+        with self.lock, self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO settings (id, version) VALUES (1, ?)
+                ON CONFLICT(id) DO UPDATE SET version = excluded.version
+                """,
+                (version,),
+            )
 
     def get_notified_version(self) -> str:
         """
@@ -276,13 +283,14 @@ class DBManager:
         return row[0] if row else ""
 
     def set_notified_version(self, version: str):
-        """
-        Updates the notified_version field in the settings table to the specified version.
-        """
-        self.conn.execute(
-            "UPDATE settings SET notified_version = ? WHERE id = 1", (version,)
-        )
-        self.conn.commit()
+        with self.lock, self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO settings (id, notified_version) VALUES (1, ?)
+                ON CONFLICT(id) DO UPDATE SET notified_version = excluded.notified_version
+                """,
+                (version,),
+            )
 
     def get_all_category_mappings(self) -> List[sqlite3.Row]:
         """
