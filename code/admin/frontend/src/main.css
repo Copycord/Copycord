@@ -3860,3 +3860,21 @@ body {
   outline: none !important;
   border-color: #8b0000;
 }
+
+#fixed-footer {
+  position: relative;
+}
+
+#update-notice {
+  display: none;
+  position: absolute;
+  bottom: -1em;
+  left: 0;
+  width: 100%;
+  color: #e53935;
+  font-weight: bold;
+  text-align: center;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  cursor: pointer;
+}

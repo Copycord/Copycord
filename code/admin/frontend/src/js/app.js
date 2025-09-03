@@ -41,7 +41,6 @@
     const wrap = document.getElementById("footer-version");
     if (!wrap) return;
   
-    
     const link = document.getElementById("footer-version-link");
     const plain = document.getElementById("footer-version-text");
   
@@ -50,41 +49,34 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const v = await res.json();
   
-      const textWhenUpdate = `${v.latest}`;
-      const textWhenNormal = `Version ${v.current}`;
-  
       if (v.update_available) {
-        
         if (link) {
-          link.textContent = textWhenUpdate;
-          link.href = v.url;
-          link.classList.add("update-flash");
+          link.textContent = v.current || "dev";
+          link.classList.add("update-flash");  
+          link.href = v.url;              
           link.setAttribute("aria-label", "New update available");
         } else if (plain) {
-          plain.textContent = textWhenUpdate;
+          plain.textContent = v.current ? `Version ${v.current}` : "dev";
           plain.classList.add("update-flash");
           plain.style.cursor = "pointer";
           plain.onclick = () => window.open(v.url, "_blank", "noopener");
-        } else {
-          
-          const a = document.createElement("a");
-          a.id = "footer-version-link";
-          a.target = "_blank";
-          a.rel = "noopener";
-          a.className = "footer-link update-flash";
-          a.textContent = textWhenUpdate;
-          a.href = v.url;
-          wrap.innerHTML = "";
-          wrap.appendChild(a);
+        }
+  
+        const notice = document.getElementById("update-notice");
+        if (notice) {
+          notice.style.display = "block";
+          notice.textContent = "New Update Available";
+          notice.onclick = () => window.open(v.url, "_blank", "noopener");
         }
       } else {
-        
         if (link) {
           link.textContent = v.current || "dev";
           link.classList.remove("update-flash");
-          
+  
           const def = link.getAttribute("data-default-href");
-          link.href = def || `https://github.com/Copycord/Copycord/releases/tag/${v.current}`;
+          link.href =
+            def ||
+            `https://github.com/Copycord/Copycord/releases/tag/${v.current}`;
           link.setAttribute("aria-label", `Copycord ${v.current}`);
         } else if (plain) {
           plain.textContent = v.current ? `Version ${v.current}` : "dev";
@@ -92,15 +84,20 @@
           plain.onclick = null;
           plain.style.cursor = "";
         }
+  
+        const notice = document.getElementById("update-notice");
+        if (notice) {
+          notice.style.display = "none";
+          notice.onclick = null;
+        }
       }
     } catch (err) {
-      
       console.debug("Footer version check failed:", err);
     }
   }
+  
 
   (function initToasts() {
-    // Create the #toast-root if it doesn't exist
     function ensureToastRoot() {
       if (!document.getElementById("toast-root")) {
         const div = document.createElement("div");
@@ -128,7 +125,6 @@
 
       const shouldAnnounceNow = () => Date.now() - BOOT_TS > BOOT_MS;
 
-      // TTL'd sessionStorage helpers (persist across reloads briefly)
       function ssSet(key, value, ttlMs = 15000) {
         try {
           if (value == null) {
@@ -252,7 +248,6 @@
       window.clearAllToasts();
     });
   })();
-
 
   function getCurrentRunning(data) {
     return !!(data.server?.running || data.client?.running);
@@ -413,8 +408,8 @@
   const logTitle = document.getElementById("log-title");
   const closeBtn = document.getElementById("log-close");
   const backdrop = modal ? modal.querySelector(".modal-backdrop") : null;
-  let LOG_LINES = [];  
-  let LOG_QUERY = "";    
+  let LOG_LINES = [];
+  let LOG_QUERY = "";
 
   let es = null;
   let autoFollow = true;
@@ -422,21 +417,19 @@
 
   function renderLogView({ preserveScroll = false } = {}) {
     if (!logBody) return;
-  
-    // stick-to-bottom detection (keeps your existing autoscroll behavior)
+
     const shouldStick =
       logBody.scrollHeight - logBody.scrollTop - logBody.clientHeight <= THRESH;
-  
+
     const q = LOG_QUERY.trim().toLowerCase();
     let view = LOG_LINES;
-  
+
     if (q) {
-      view = LOG_LINES.filter(l => l.toLowerCase().includes(q));
+      view = LOG_LINES.filter((l) => l.toLowerCase().includes(q));
     }
-  
-    // Fast render as plain text
-    logBody.textContent = (view.length ? view.join("\n") + "\n" : "");
-  
+
+    logBody.textContent = view.length ? view.join("\n") + "\n" : "";
+
     if (shouldStick || !preserveScroll) {
       logBody.scrollTop = logBody.scrollHeight;
     }
@@ -459,7 +452,7 @@
     }
     renderLogView({ preserveScroll: true });
   }
-  
+
   function appendLine(line) {
     LOG_LINES.push(String(line ?? ""));
     if (LOG_LINES.length > MAX_LINES) {
@@ -467,7 +460,7 @@
     }
     renderLogView({ preserveScroll: true });
   }
-  
+
   function openLogs(which) {
     if (!modal || !logBody) return;
     if (es) {
@@ -487,17 +480,15 @@
     LOG_LINES = [];
     LOG_QUERY = "";
     renderLogView();
-    
+
     const qInput = document.getElementById("log-search-input");
     if (qInput) {
       qInput.value = "";
-      // Optional: focus when opened
+
       setTimeout(() => qInput.focus(), 0);
-    
-      // Filter as you type
+
       let t;
       qInput.oninput = () => {
-        // (tiny debounce to avoid re-rendering on every keystroke burst)
         clearTimeout(t);
         const val = qInput.value || "";
         t = setTimeout(() => {
@@ -505,8 +496,7 @@
           renderLogView();
         }, 60);
       };
-    
-      // Quick clear with Escape
+
       qInput.onkeydown = (e) => {
         if (e.key === "Escape") {
           qInput.value = "";
@@ -519,13 +509,13 @@
 
     autoFollow = true;
     logBody.addEventListener("scroll", onScroll, { passive: true });
-     const firstFocusable =
-       document.getElementById("log-search-input") ||
-       modal.querySelector(
-         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-       ) ||
-       logBody;
-     setTimeout(() => firstFocusable?.focus(), 0);
+    const firstFocusable =
+      document.getElementById("log-search-input") ||
+      modal.querySelector(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      ) ||
+      logBody;
+    setTimeout(() => firstFocusable?.focus(), 0);
 
     let retryTimer = null;
     function startStream() {
