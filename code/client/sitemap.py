@@ -490,17 +490,21 @@ class SitemapService:
         threads = []
         for t in sitemap.get("threads", []):
             t_id = int(t["id"])
-            forum_id = int(t.get("forum_id", 0)) or 0
+            raw_forum_id = t.get("forum_id")
+            try:
+                forum_id = int(raw_forum_id) if raw_forum_id is not None else 0
+            except (TypeError, ValueError):
+                forum_id = 0
             if forum_id in keep_forum_ids_set:
                 threads.append(t)
                 kept_thread_cnt += 1
             else:
                 drop_thread_cnt += 1
                 self.logger.debug(
-                    "[filter] drop thread %s (%d): parent forum %d not kept",
+                    "[filter] drop thread %s (%d): parent forum %s not kept",
                     t.get("name", str(t_id)),
                     t_id,
-                    forum_id,
+                    raw_forum_id,
                 )
 
         self.logger.debug(
