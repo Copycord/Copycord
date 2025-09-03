@@ -2019,7 +2019,7 @@ async def api_categories_customize(payload: dict = Body(...)):
 
 @app.get("/version")
 def get_version():
-    current = db.get_version() or CURRENT_VERSION
+    current = CURRENT_VERSION or db.get_version()
     latest = db.get_config("latest_tag", "")
     url = db.get_config("latest_url", "")
 
