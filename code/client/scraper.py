@@ -853,6 +853,7 @@ class MemberScraper:
                                                 if not uid or uid in members:
                                                     continue
                                                 rec = {"id": uid}
+                                                rec["bot"] = bool(u.get("bot", False))
 
                                                 if include_username:
                                                     rec["username"] = u.get("username")
@@ -1044,12 +1045,19 @@ class MemberScraper:
             self.log.info(
                 f"[Copycord Scraper] ✅ Found {len(members)} members in {gname}"
             )
+            
+            clean_members = []
+            for m in members.values():
+                filtered = {k: v for k, v in m.items() if k != "bio_error"}
+                clean_members.append(filtered)
+                
             return {
-                "members": list(members.values()),
-                "count": len(members),
+                "members": clean_members,
+                "count": len(clean_members),
                 "guild_id": str(guild.id),
                 "guild_name": gname,
             }
+
 
         except asyncio.CancelledError:
             self.log.info(
