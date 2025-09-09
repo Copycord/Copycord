@@ -22,8 +22,7 @@ class Config:
         self,
         logger: Optional[logging.Logger] = None,
     ):
-        self._release_interval = 1810
-
+        self.RELEASE_CHECK_INTERVAL_SECONDS  = 1810
         self.DEFAULT_WEBHOOK_AVATAR_URL = "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/logo/logo.png"
         self.SERVER_TOKEN = os.getenv("SERVER_TOKEN")
         self.CLONE_GUILD_ID = os.getenv("CLONE_GUILD_ID", "0")
@@ -161,7 +160,7 @@ class Config:
                 if not latest_tag:
                     self.logger.debug("No latest_tag in db_config yet; skipping this cycle")
                     await _maybe_update_status(f"{running_ver}")
-                    await asyncio.sleep(self._release_interval)
+                    await asyncio.sleep(self.RELEASE_CHECK_INTERVAL_SECONDS)
                     continue
 
                 cmp_remote_local = _cmp_versions(latest_tag, running_ver)
