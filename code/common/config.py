@@ -11,7 +11,6 @@ import asyncio
 import os
 import logging
 from typing import Optional
-import aiohttp
 from common.db import DBManager
 
 logger = logging.getLogger(__name__)
@@ -23,10 +22,7 @@ class Config:
         self,
         logger: Optional[logging.Logger] = None,
     ):
-        self.GITHUB_API_LATEST = (
-            "https://api.github.com/repos/Copycord/Copycord/releases/latest"
-        )
-        self._release_interval = 3600
+        self._release_interval = 1810
 
         self.DEFAULT_WEBHOOK_AVATAR_URL = "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/logo/logo.png"
         self.SERVER_TOKEN = os.getenv("SERVER_TOKEN")
@@ -107,15 +103,8 @@ class Config:
         self.SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "3600"))
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):
-        """Poll GitHub and (optionally) update presence/DM if remote > local.
-        Safe to run from both server and client; client has no update_status.
-        """
         await receiver.bot.wait_until_ready()
         db = receiver.db
-
-        # Keep DB's "running version" in sync with the binary
-        if db.get_version() != CURRENT_VERSION:
-            db.set_version(CURRENT_VERSION)
 
         import re
 
@@ -148,9 +137,7 @@ class Config:
                 except Exception:
                     self.logger.debug("update_status failed", exc_info=True)
             else:
-                self.logger.debug(
-                    "Skipping status update (receiver has no update_status)"
-                )
+                self.logger.debug("Skipping status update (receiver has no update_status)")
 
         while not receiver.bot.is_closed():
             try:
@@ -158,108 +145,59 @@ class Config:
                     receiver, "host_guild_id", None
                 )
 
-                async with aiohttp.ClientSession() as session:
+                try:
+                    if db.get_version() != CURRENT_VERSION:
+                        db.set_version(CURRENT_VERSION)
+                    running_ver = db.get_version()
+                except AttributeError:
+                    current_in_cfg = db.get_config("current_version", "")
+                    if current_in_cfg != CURRENT_VERSION:
+                        db.set_config("current_version", CURRENT_VERSION)
+                    running_ver = CURRENT_VERSION
 
-                    releases = []
-                    try:
-                        async with session.get(
-                            "https://api.github.com/repos/Copycord/Copycord/releases?per_page=20"
-                        ) as resp:
-                            if resp.status == 200:
-                                releases = await resp.json()
-                            else:
-                                self.logger.debug(
-                                    "Releases API %d: %s",
-                                    resp.status,
-                                    await resp.text(),
-                                )
-                    except Exception:
-                        self.logger.exception("Failed to fetch releases")
+                latest_tag = (db.get_config("latest_tag") or "").strip()
+                latest_url = db.get_config("latest_url") or ""
 
-                    tags = []
-                    try:
-                        async with session.get(
-                            "https://api.github.com/repos/Copycord/Copycord/tags?per_page=20"
-                        ) as resp:
-                            if resp.status == 200:
-                                tags = await resp.json()
-                            else:
-                                self.logger.debug(
-                                    "Tags API %d: %s", resp.status, await resp.text()
-                                )
-                    except Exception:
-                        self.logger.exception("Failed to fetch tags")
-
-                candidates: list[tuple[str, str]] = []
-                for r in releases:
-                    t = (r.get("tag_name") or "").strip()
-                    if t:
-                        candidates.append((t, r.get("html_url") or ""))
-                for t in tags:
-                    name = (t.get("name") or "").strip()
-                    if name:
-                        candidates.append((name, t.get("zipball_url") or ""))
-
-                if not candidates:
-                    self.logger.debug("No version candidates; skipping this cycle")
+                if not latest_tag:
+                    self.logger.debug("No latest_tag in db_config yet; skipping this cycle")
+                    await _maybe_update_status(f"{running_ver}")
                     await asyncio.sleep(self._release_interval)
                     continue
 
-                tag, url = max(candidates, key=lambda x: _ver_tuple(x[0]))
-
-                try:
-                    db.set_config("latest_tag", tag or "")
-                    db.set_config("latest_url", url or "")
-                except Exception:
-                    self.logger.debug(
-                        "Failed to persist latest_tag/latest_url", exc_info=True
-                    )
-
-                cmp_remote_local = _cmp_versions(tag, CURRENT_VERSION)
-
+                cmp_remote_local = _cmp_versions(latest_tag, running_ver)
                 last_seen = db.get_notified_version() or ""
-                if _norm_version(tag) != _norm_version(last_seen):
-                    self.logger.debug("[📢] GitHub latest observed: %s (%s)", tag, url)
+
+                if _norm_version(latest_tag) != _norm_version(last_seen):
+                    self.logger.debug("[📢] latest_tag observed from DB: %s (%s)", latest_tag, latest_url)
 
                 if cmp_remote_local > 0:
-
-                    self.logger.info("[⬆️] Update available: %s %s", tag, url)
-
+                    self.logger.info("[⬆️] Update available: %s %s", latest_tag, latest_url)
                     await _maybe_update_status("New update available!")
 
-                    if (
-                        should_dm
-                        and guild_id
-                        and _norm_version(tag) != _norm_version(last_seen)
-                    ):
+                    if should_dm and guild_id and _norm_version(latest_tag) != _norm_version(last_seen):
                         guild = receiver.bot.get_guild(guild_id)
                         if guild:
                             try:
-                                owner = guild.owner or await guild.fetch_member(
-                                    guild.owner_id
-                                )
+                                owner = guild.owner or await guild.fetch_member(guild.owner_id)
                                 await owner.send(
-                                    f"A new Copycord release is available: **{tag}**\n{url}"
+                                    f"A new Copycord release is available: **{latest_tag}**\n{latest_url}"
                                 )
-                                self.logger.debug(
-                                    "Sent release DM to guild owner %s", owner
-                                )
-                                db.set_notified_version(tag)
+                                self.logger.debug("Sent release DM to guild owner %s", owner)
+                                db.set_notified_version(latest_tag)
                             except Exception as e:
-                                self.logger.warning(
-                                    "[⚠️] Failed to send new version DM: %s", e
-                                )
+                                self.logger.warning("[⚠️] Failed to send new version DM: %s", e)
                 else:
+                    await _maybe_update_status(f"{running_ver}")
 
-                    await _maybe_update_status(f"{CURRENT_VERSION}")
+                    if cmp_remote_local == 0 and _norm_version(latest_tag) != _norm_version(last_seen):
+                        db.set_notified_version(latest_tag)
 
-                    if cmp_remote_local == 0 and _norm_version(tag) != _norm_version(
-                        last_seen
-                    ):
-                        db.set_notified_version(tag)
-
-                if db.get_version() != CURRENT_VERSION:
-                    db.set_version(CURRENT_VERSION)
+                try:
+                    if db.get_version() != CURRENT_VERSION:
+                        db.set_version(CURRENT_VERSION)
+                except AttributeError:
+                    if db.get_config("current_version", "") != CURRENT_VERSION:
+                        db.set_config("current_version", CURRENT_VERSION)
 
             except Exception:
                 self.logger.exception("[⛔] Error in version release watcher loop")
@@ -287,3 +225,4 @@ class Config:
         self.whitelist_enabled = bool(
             self.include_category_ids or self.include_channel_ids
         )
+

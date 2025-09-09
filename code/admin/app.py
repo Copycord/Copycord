@@ -15,7 +15,6 @@ import os
 import uuid
 import asyncio
 import websockets
-from contextlib import closing
 from pathlib import Path
 import unicodedata
 import re
@@ -40,9 +39,12 @@ from contextlib import suppress
 from time import perf_counter
 import sys as _sys, json as _json, contextvars
 from datetime import datetime
+import aiohttp
 
 
 REDACT_KEYS = {"SERVER_TOKEN", "CLIENT_TOKEN"}
+GITHUB_REPO = os.getenv("GITHUB_REPO", "Copycord/Copycord")
+RELEASE_POLL_SECONDS = int(os.getenv("RELEASE_POLL_SECONDS", "1800"))
 
 
 req_id_var = contextvars.ContextVar("req_id", default="-")
@@ -1124,6 +1126,10 @@ async def _apply_db_log_level_and_banner():
 @app.on_event("startup")
 async def _start_bg_tasks():
     asyncio.create_task(_lock_listener())
+    
+@app.on_event("startup")
+async def _start_release_watcher():
+    asyncio.create_task(_release_watch_loop())
 
 
 @app.get("/logs/stream/{which}")
@@ -2055,6 +2061,67 @@ def get_version():
         or f"https://github.com/Copycord/Copycord/releases/tag/{latest or current}",
         "update_available": bool(latest) and (lb > ca),
     }
+
+async def _fetch_latest_release(session: aiohttp.ClientSession) -> dict | None:
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "copycord-app",
+    }
+
+    etag = db.get_config("gh_releases_etag", "")
+    if etag:
+        headers["If-None-Match"] = etag
+
+    url = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
+    async with session.get(url, headers=headers, timeout=20) as r:
+        if r.status == 304:
+            return None
+        r.raise_for_status()
+        data = await r.json()
+        new_etag = r.headers.get("ETag") or ""
+        if new_etag and new_etag != etag:
+            db.set_config("gh_releases_etag", new_etag)
+
+    tag = data.get("tag_name")
+    html_url = data.get("html_url")
+    published_at = data.get("published_at")
+    if not tag or not html_url:
+        return None
+    return {"tag": tag, "url": html_url, "published_at": published_at}
+
+
+async def _release_watch_loop():
+    await asyncio.sleep(2)
+    LOGGER.debug("Starting GitHub release watcher for %s", GITHUB_REPO)
+    async with aiohttp.ClientSession() as session:
+        while not shutdown_event.is_set():
+            try:
+                try:
+                    recorded_ver = db.get_version()
+                    if recorded_ver != CURRENT_VERSION:
+                        db.set_version(CURRENT_VERSION)
+                except AttributeError:
+                    recorded_ver = db.get_config("current_version", "")
+                    if recorded_ver != CURRENT_VERSION:
+                        db.set_config("current_version", CURRENT_VERSION)
+                        
+                rel = await _fetch_latest_release(session)
+                if rel:
+                    prev = db.get_config("latest_tag", "")
+                    if rel["tag"] != prev:
+                        db.set_config("latest_tag", rel["tag"])
+                        db.set_config("latest_url", rel["url"])
+                        if rel.get("published_at"):
+                            db.set_config("latest_published_at", rel["published_at"])
+
+                        LOGGER.info("Detected new release: %s", rel["tag"])
+            except Exception:
+                LOGGER.exception("release watcher error")
+
+            try:
+                await asyncio.wait_for(shutdown_event.wait(), timeout=RELEASE_POLL_SECONDS)
+            except asyncio.TimeoutError:
+                pass
 
 
 app = ConnCloseOnShutdownASGI(app)
