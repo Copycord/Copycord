@@ -201,7 +201,7 @@ class Config:
             except Exception:
                 self.logger.exception("[⛔] Error in version release watcher loop")
 
-            await asyncio.sleep(self._release_interval)
+            await asyncio.sleep(self.RELEASE_CHECK_INTERVAL_SECONDS)
 
     def _load_filters_from_db(self):
         """

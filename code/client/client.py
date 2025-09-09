@@ -574,6 +574,7 @@ class ClientListener:
                 self.host_guild_id,
             )
             sys.exit(1)
+        asyncio.create_task(self.config.setup_release_watcher(self, should_dm=False))
         msg = f"Logged in as {self.bot.user.display_name} in {host_guild.name}"
         self.ui_controller.start()
         await self.bus.status(running=True, status=msg, discord={"ready": True})
