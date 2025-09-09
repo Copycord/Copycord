@@ -227,7 +227,6 @@
     if (running && !badgeExists) {
       const b = document.createElement("div");
       b.className = "scrape-badge-global";
-      b.textContent = "Scraping…";
       document.body.appendChild(b);
     } else if (!running && badgeExists) {
       document.querySelector(".scrape-badge-global")?.remove();
