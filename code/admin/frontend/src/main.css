@@ -3878,3 +3878,269 @@ body {
   line-height: 1.2;
   cursor: pointer;
 }
+
+.promo-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.promo-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 14px;
+  text-decoration: none;
+  color: inherit;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.04),
+    rgba(255, 255, 255, 0.02)
+  );
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  transform: translateY(0);
+  transition: transform 0.18s ease, box-shadow 0.18s ease,
+    border-color 0.18s ease;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.promo-card::after {
+  content: '';
+  position: absolute;
+  inset: -20% -30%;
+  pointer-events: none;
+
+  background: radial-gradient(
+    160px 280px at 50% 50%,
+    rgba(255, 255, 255, 0.08) 0%,
+    rgba(255, 255, 255, 0.02) 36%,
+    rgba(255, 255, 255, 0) 72%
+  );
+  mix-blend-mode: screen;
+  filter: blur(1px);
+
+  transform: translateX(-60%);
+  transition: transform 0.45s linear 0s;
+  will-change: transform;
+}
+
+.promo-card:hover::after,
+.promo-card:focus-visible::after {
+  transform: translateX(70%);
+}
+
+.promo-card:hover,
+.promo-card:focus,
+.promo-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(214, 188, 250, 0.35);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.32);
+  outline: none;
+}
+
+.promo-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 9999px;
+  display: grid;
+  place-items: center;
+  color: white;
+  flex: 0 0 auto;
+  box-shadow: inset 0 0 1px rgba(255, 255, 255, 0.35);
+  position: relative;
+}
+
+.promo-text {
+  display: grid;
+  gap: 2px;
+}
+.promo-title {
+  font-weight: 600;
+  line-height: 1.15;
+}
+.promo-sub {
+  font-size: 0.92rem;
+  opacity: 0.8;
+}
+
+.promo-star .promo-icon {
+  background: radial-gradient(105% 105% at 20% 20%, #24292f, #0d1117);
+}
+.promo-sponsor .promo-icon {
+  background: radial-gradient(105% 105% at 20% 20%, #c4b5fd, #8b5cf6);
+}
+.promo-donate .promo-icon {
+  background: radial-gradient(105% 105% at 20% 20%, #fca5a5, #ec4899);
+}
+
+.promo-card[role='button']:focus,
+.promo-card[role='button']:focus-visible {
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.4), 0 12px 28px rgba(0, 0, 0, 0.32);
+}
+
+.promo-icon svg {
+  display: block;
+  overflow: visible;
+}
+
+.promo-card .promo-badge {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  pointer-events: none;
+  z-index: 1;
+}
+.promo-card .promo-badge svg {
+  color: #ffd54f;
+  filter: drop-shadow(0 0 6px rgba(255, 213, 79, 0.55));
+  transform-origin: 50% 50%;
+  display: block;
+  overflow: visible;
+}
+.promo-card .promo-badge svg path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+@keyframes cc-star-wobble {
+  0% {
+    transform: rotate(-12deg);
+  }
+  50% {
+    transform: rotate(12deg);
+  }
+  100% {
+    transform: rotate(-12deg);
+  }
+}
+@keyframes cc-spin-360 {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.promo-card.promo-star .promo-badge svg {
+  animation: cc-star-wobble 2.6s ease-in-out infinite;
+}
+.promo-card.promo-star:hover .promo-badge svg {
+  animation: cc-spin-360 650ms linear 1 forwards;
+}
+
+@keyframes cc-heartbeat {
+  0% {
+    transform: scale(1);
+  }
+  14% {
+    transform: scale(1.15);
+  }
+  28% {
+    transform: scale(1);
+  }
+  42% {
+    transform: scale(1.15);
+  }
+  70% {
+    transform: scale(1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.promo-card.promo-donate:hover .promo-icon svg {
+  animation: cc-heartbeat 1.2s ease-in-out infinite;
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+
+.promo-card .promo-icon > svg {
+  filter: none !important;
+  color: inherit;
+  transition: none;
+}
+
+.promo-card .promo-icon {
+  transition: box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.promo-card.promo-star {
+  --icon-glow-rgb: 255, 213, 79;
+}
+.promo-card.promo-sponsor {
+  --icon-glow-rgb: 96, 165, 250;
+}
+.promo-card.promo-donate {
+  --icon-glow-rgb: 236, 72, 153;
+}
+
+.promo-card:hover .promo-icon,
+.promo-card:focus-visible .promo-icon {
+  box-shadow: inset 0 0 1px rgba(255, 255, 255, 0.35),
+    0 0 0 2px rgba(var(--icon-glow-rgb), 0.18),
+    0 0 10px rgba(var(--icon-glow-rgb), 0.5),
+    0 0 22px rgba(var(--icon-glow-rgb), 0.32),
+    0 0 36px rgba(var(--icon-glow-rgb), 0.2);
+  transform: translateY(-1px);
+}
+
+.promo-card .promo-badge svg {
+  color: #ffd54f;
+  filter: drop-shadow(0 0 6px rgba(255, 213, 79, 0.55));
+}
+
+.promo-card:focus:not(:focus-visible) {
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.promo-card[role='button']:focus {
+  box-shadow: none;
+}
+.promo-card[role='button']:focus-visible {
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0), 0 12px 28px rgba(0, 0, 0, 0.32);
+}
+
+.promo-card.promo-star:focus-visible {
+  border-color: rgba(245, 158, 11, 0.35);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.35),
+    0 12px 28px rgba(0, 0, 0, 0.32);
+}
+
+.promo-card.promo-donate:focus-visible {
+  border-color: rgba(236, 72, 153, 0.4);
+  box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.35),
+    0 12px 28px rgba(0, 0, 0, 0.32);
+}
+
+.promo-card.promo-discord {
+  --icon-glow-rgb: 88, 101, 242;
+}
+.promo-card.promo-discord .promo-icon {
+  background: radial-gradient(
+    130% 130% at 25% 20%,
+    #8ea1f2 0%,
+    #5865f2 55%,
+    #404eed 100%
+  );
+}
+
+.promo-card.promo-discord:hover .promo-icon,
+.promo-card.promo-discord:focus-visible .promo-icon {
+  background: radial-gradient(
+    140% 140% at 30% 15%,
+    #a9b7ff 0%,
+    #6d7ef7 50%,
+    #5865f2 100%
+  );
+}
+
+.promo-card.promo-discord:focus-visible {
+  border-color: rgba(88, 101, 242, 0.45);
+  box-shadow: 0 0 0 3px rgba(88, 101, 242, 0.35),
+    0 12px 28px rgba(0, 0, 0, 0.32);
+}
