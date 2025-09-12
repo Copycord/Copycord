@@ -12,10 +12,506 @@ import asyncio
 import json
 import time
 import random
-from collections import deque
-from typing import Dict, Any, Optional
+import heapq
+import itertools
+from enum import IntEnum
+from dataclasses import dataclass, field
+from typing import Dict, Any, Optional, Callable, List
+import contextlib
 import aiohttp
 import discord
+
+
+@dataclass(order=True)
+class _PQItem:
+    priority: float
+    prefix: str = field(compare=False)
+
+
+class QueryPlanner:
+    """
+    Global, bigram-aware planner for search prefixes.
+    - Intended to be wrapped by SharedPlanner to make it async-safe and shared across sessions.
+    - Learns unigram + bigram models from observed usernames.
+    - Class-aware children (letters first, careful with digits/punct).
+    - Guarantees completion: when no work AND no saturated unexplored branch.
+    """
+
+    def __init__(
+        self,
+        *,
+        alphabet: str,
+        limit: int = 100,
+        max_repeat_run: int = 4,
+        allow_char: Optional[Callable[[str], bool]] = None,
+    ) -> None:
+        self.limit = limit
+        self.alphabet_base = list(dict.fromkeys(alphabet))
+        self.max_repeat_run = max_repeat_run
+        self.allow_char = allow_char
+
+        self.visited: set[str] = set()
+        self.dead: set[str] = set()
+        self.leaves: set[str] = set()
+        self.stats: dict[str, int] = {}
+        self.char_freq: dict[str, int] = {}
+        self.bi_freq: dict[tuple[str, str], int] = {}
+
+        for c in self.alphabet_base:
+            self.char_freq[c] = 1
+
+        for ch, boost in zip(
+            "aeiours tnlcmpdbhgkuywvfjzxq".replace(" ", ""),
+            [
+                50,
+                45,
+                42,
+                40,
+                38,
+                36,
+                34,
+                30,
+                28,
+                26,
+                24,
+                22,
+                20,
+                18,
+                16,
+                14,
+                12,
+                10,
+                9,
+                8,
+                7,
+                6,
+                5,
+                4,
+                3,
+                2,
+            ],
+        ):
+            if ch in self.char_freq:
+                self.char_freq[ch] += boost
+
+        self._pq: list[_PQItem] = []
+        self._in_queue: set[str] = set()
+
+        self._expansion_k_used: dict[str, int] = {}
+
+        self._saw_digit_lead: bool = False
+
+        self._session_slots: int = 1
+
+    @staticmethod
+    def _tail_run_len(s: str) -> int:
+        if not s:
+            return 0
+        last = s[-1]
+        i = len(s) - 1
+        n = 0
+        while i >= 0 and s[i] == last:
+            n += 1
+            i -= 1
+        return n
+
+    def set_session_slots(self, n: int) -> None:
+        self._session_slots = max(1, min(5, int(n or 1)))
+
+    def note_digit_lead(self) -> None:
+        self._saw_digit_lead = True
+
+    def _sorted_alphabet(self) -> list[str]:
+        """
+        Restrict expansion/closure strictly to the declared base alphabet.
+        We still use learned frequencies for ranking but never introduce new chars here.
+        """
+        base = self.alphabet_base
+        return sorted(base, key=lambda c: (-self.char_freq.get(c, 1), base.index(c)))
+
+    def _score_prefix(self, prefix: str) -> float:
+        """
+        Rank prefixes in PQ: unseen 2-grams win over saturated deep branches.
+        Session-aware tweaks bias what unseen 2-grams to try first when slots are few.
+        """
+        s = self.stats.get(prefix, -1)
+        L = len(prefix)
+
+        if L == 2 and s < 0:
+            base = 2.10
+            lead = prefix[0]
+
+            if lead.isalpha():
+                bias = 0.20 if self._session_slots <= 2 else 0.0
+            elif lead.isdigit():
+                bias = (
+                    -0.10
+                    if self._session_slots <= 2 and not self._saw_digit_lead
+                    else 0.0
+                )
+            else:
+                bias = -0.35 if self._session_slots <= 3 else -0.15
+            return base + bias
+
+        if s < 0:
+            base = 0.50
+        elif s == 0:
+            base = 0.10
+        elif s < self.limit:
+            base = 0.90
+        else:
+            base = 1.40
+
+        length_bonus = 0.10 * (1.0 / (1 + L))
+        depth_penalty = 0.05 * max(0, L - 2)
+        return base + length_bonus - depth_penalty
+
+    def _push_internal(self, prefix: str) -> None:
+        if prefix in self.visited or prefix in self._in_queue or prefix in self.dead:
+            return
+        if self._tail_run_len(prefix) > self.max_repeat_run:
+            return
+        heapq.heappush(
+            self._pq, _PQItem(priority=-self._score_prefix(prefix), prefix=prefix)
+        )
+        self._in_queue.add(prefix)
+
+    def seed_top_level(self, top_level: str) -> None:
+        for ch in top_level:
+            self._push_internal(ch)
+
+    def add_dynamic_lead(self, lead: str) -> None:
+
+        lead = (lead or "").casefold()
+        if not lead:
+            return
+        self._push_internal(lead)
+
+    def mark_observed_username(self, username: str) -> None:
+        if not username:
+            return
+        u = username.casefold()
+
+        for ch in u[:3]:
+            if ch not in self.char_freq:
+                self.char_freq[ch] = 1
+            self.char_freq[ch] += 1
+
+        for i in range(len(u) - 1):
+            a, b = u[i], u[i + 1]
+            self.bi_freq[(a, b)] = self.bi_freq.get((a, b), 0) + 1
+
+        if u and u[0].isdigit():
+            self._saw_digit_lead = True
+
+    def on_chunk_result(self, prefix: str, size: int) -> None:
+        self.stats[prefix] = size
+        self.visited.add(prefix)
+        self._in_queue.discard(prefix)
+        if size == 0:
+            self.dead.add(prefix)
+        elif size < self.limit:
+            self.leaves.add(prefix)
+
+    def _class_gate(self, prefix: str, ch: str) -> bool:
+        """Heuristics to avoid low-signal punctuation/digit trails (tightened)."""
+        L = len(prefix)
+        if self.allow_char and not self.allow_char(ch):
+            return False
+
+        is_letter = ch.isalpha()
+        is_digit = ch.isdigit()
+        is_punct = ch in "._-"
+
+        if L < 3 and not (is_letter or is_digit):
+            return False
+
+        if L >= 1 and prefix[-1] in "._-" and ch in "._-":
+            return False
+
+        if L >= 1 and prefix[-1] in "_-":
+            if is_letter:
+                return True
+            return self.bi_freq.get((prefix[-1], ch), 0) >= 4
+
+        if is_digit:
+            if L < 4:
+
+                parent_sat = self.stats.get(prefix, 0) >= self.limit
+                prev = prefix[-1] if L else None
+                has_bigram = prev is not None and (self.bi_freq.get((prev, ch), 0) >= 1)
+                if not (parent_sat or self._saw_digit_lead or has_bigram):
+                    return False
+
+        if is_punct:
+            if L < 4:
+                return False
+            prev = prefix[-1] if L else None
+            if not prev or self.bi_freq.get((prev, ch), 0) < 4:
+                return False
+
+        return True
+
+    def _score_next_char(self, prev: Optional[str], ch: str) -> float:
+        """Blend bigram (if prev) with unigram."""
+        uni = self.char_freq.get(ch, 1)
+        uni_norm = uni / (sum(self.char_freq.values()) or 1)
+
+        if not prev:
+            return 0.2 * uni_norm
+
+        num = self.bi_freq.get((prev, ch), 0) + 1
+        denom = sum(self.bi_freq.get((prev, x), 0) + 1 for x in self.char_freq.keys())
+        p_bigram = num / (denom or 1)
+
+        return 0.8 * p_bigram + 0.2 * uni_norm
+
+    def children_for(
+        self, prefix: str, top_k: Optional[int] = 12, *, ignore_gate: bool = False
+    ) -> list[str]:
+        if self.stats.get(prefix, 0) < self.limit:
+            return []
+        prev = prefix[-1] if prefix else None
+        chars = self._sorted_alphabet()
+
+        ranked: list[tuple[float, str]] = []
+        for ch in chars:
+            if not ignore_gate and not self._class_gate(prefix, ch):
+                continue
+            ranked.append((self._score_next_char(prev, ch), ch))
+
+        ranked.sort(reverse=True, key=lambda t: t[0])
+        if top_k is None:
+            top_k = 12
+        return [prefix + c for _, c in ranked[:top_k]]
+
+    def enqueue_children(
+        self, prefix: str, top_k: Optional[int] = 12, *, ignore_gate: bool = False
+    ) -> int:
+        cnt = 0
+        for child in self.children_for(prefix, top_k=top_k, ignore_gate=ignore_gate):
+            self._push_internal(child)
+            cnt += 1
+        self._expansion_k_used[prefix] = max(
+            self._expansion_k_used.get(prefix, 0), top_k or 0
+        )
+        return cnt
+
+    def ensure_children(
+        self,
+        prefix: str,
+        *,
+        step: int = 6,
+        force_full: bool = False,
+        ignore_gate: bool = False,
+    ) -> int:
+        """Escalate k for a saturated prefix, stepwise or force full fanout."""
+        if force_full:
+            target = len(self.alphabet_base)
+        else:
+            current = self._expansion_k_used.get(prefix, 0)
+            target = min(len(self.alphabet_base), max(6, current + step))
+        return self.enqueue_children(prefix, top_k=target, ignore_gate=ignore_gate)
+
+    def next_batch(self, k: int) -> list[str]:
+        if k <= 0:
+            return []
+        out = []
+        while self._pq and len(out) < k:
+            it = heapq.heappop(self._pq)
+            p = it.prefix
+            self._in_queue.discard(p)
+            if p in self.visited or p in self.dead:
+                continue
+            out.append(p)
+        return out
+
+    def has_work(self) -> bool:
+        return bool(self._pq)
+
+    def queue_len(self) -> int:
+        return len(self._pq)
+
+    def all_leaves_exhausted(self, *, ignore_gate: bool = True) -> bool:
+        """
+        Return True only if:
+          - there is no queued work, AND
+          - every saturated prefix has had ALL single-char extensions
+            (over the alphabet) explored/ruled-out.
+        By default we **ignore** the class gate for the final check to guarantee closure.
+        """
+        if self.has_work():
+            return False
+
+        for p, s in self.stats.items():
+            if s < self.limit:
+                continue
+
+            for ch in self._sorted_alphabet():
+                if not ignore_gate and not self._class_gate(p, ch):
+                    continue
+                c = p + ch
+                if (
+                    (c not in self.visited)
+                    and (c not in self.dead)
+                    and (c not in self._in_queue)
+                ):
+                    return False
+
+        return True
+
+    def requeue(self, prefix: str) -> None:
+        self._push_internal(prefix)
+
+    def push(self, prefix: str) -> None:
+        self._push_internal(prefix)
+
+    def two_gram_roots(self) -> list[str]:
+        return [a + b for a in self.alphabet_base for b in self.alphabet_base]
+
+
+class SharedPlanner:
+    """
+    Async-safe shared planner wrapper.
+    All sessions pull from the same PQ/frontier.
+    """
+
+    def __init__(self, planner: QueryPlanner):
+        self.p = planner
+        self._lock = asyncio.Lock()
+        self._roots_seeded = False
+
+        self._seeded_roots_set: Optional[set[str]] = None
+
+    async def seed_two_gram_roots_once(self, roots: Optional[List[str]] = None):
+        if self._roots_seeded:
+            return
+        async with self._lock:
+            if self._roots_seeded:
+                return
+            if roots is None:
+                roots = self.p.two_gram_roots()
+            for r in roots:
+                self.p.push(r)
+            self._seeded_roots_set = set(roots)
+            self._roots_seeded = True
+
+    async def seed_top_level(self, s: str):
+        async with self._lock:
+            self.p.seed_top_level(s)
+
+    async def add_dynamic_lead(self, lead: str):
+        async with self._lock:
+
+            self.p.add_dynamic_lead(lead)
+
+            for ch in self.p._sorted_alphabet()[:8]:
+                self.p.push(lead + ch)
+
+    async def mark_observed_username(self, name: str):
+        async with self._lock:
+            self.p.mark_observed_username(name)
+
+    async def note_digit_lead(self):
+        async with self._lock:
+            self.p.note_digit_lead()
+
+    async def on_chunk_result(self, prefix: str, size: int):
+        async with self._lock:
+            self.p.on_chunk_result(prefix, size)
+
+    async def next_batch(self, k: int) -> list[str]:
+        async with self._lock:
+            return self.p.next_batch(k)
+
+    async def ensure_children(
+        self,
+        prefix: str,
+        *,
+        step: int = 6,
+        force_full: bool = False,
+        ignore_gate: bool = False,
+    ) -> int:
+        async with self._lock:
+            return self.p.ensure_children(
+                prefix, step=step, force_full=force_full, ignore_gate=ignore_gate
+            )
+
+    async def requeue(self, prefix: str):
+        async with self._lock:
+            self.p.requeue(prefix)
+
+    async def push(self, prefix: str):
+        async with self._lock:
+            self.p.push(prefix)
+
+    async def has_work(self) -> bool:
+        async with self._lock:
+            return self.p.has_work()
+
+    async def all_leaves_exhausted(self) -> bool:
+        async with self._lock:
+            return self.p.all_leaves_exhausted(ignore_gate=True)
+
+    async def queue_len(self) -> int:
+        async with self._lock:
+            return self.p.queue_len()
+
+    async def sweep_full_children_for_saturated(self) -> int:
+        """Force full fan-out for any saturated parent, ignoring class gates (to guarantee closure)."""
+        async with self._lock:
+            added = 0
+            for p, s in list(self.p.stats.items()):
+                if s >= self.p.limit:
+                    added += self.p.ensure_children(
+                        p, force_full=True, ignore_gate=True
+                    )
+            return added
+
+    async def missing_roots(self) -> list[str]:
+        async with self._lock:
+            if not self._roots_seeded:
+                return []
+            assert self._seeded_roots_set is not None
+            miss: list[str] = []
+            for r in self._seeded_roots_set:
+                if r not in self.p.stats:
+                    miss.append(r)
+            return miss
+
+    async def refill_if_starving(self, *, threshold: int = 128, step: int = 12) -> int:
+        """
+        If PQ is small, aggressively fan out saturated parents to refill work.
+        Prevents tunnel on a single branch (e.g., 'john*') when frontier shrinks.
+        """
+        async with self._lock:
+            if len(self.p._pq) >= threshold:
+                return 0
+            added = 0
+
+            for p, s in sorted(self.p.stats.items(), key=lambda kv: -kv[1]):
+                if s >= self.p.limit and self.p._expansion_k_used.get(p, 0) < len(
+                    self.p.alphabet_base
+                ):
+                    added += self.p.ensure_children(p, step=step, force_full=False)
+                    if len(self.p._pq) >= threshold:
+                        break
+            return added
+
+    async def snapshot_metrics(self) -> dict:
+        """Lightweight metrics for progress logging."""
+        async with self._lock:
+            return {
+                "pq_len": len(self.p._pq),
+                "visited": len(self.p.visited),
+                "leaves": len(self.p.leaves),
+                "saturated": sum(1 for s in self.p.stats.values() if s >= self.p.limit),
+                "stats_size": len(self.p.stats),
+            }
+
+    async def set_session_slots(self, n: int):
+        async with self._lock:
+            self.p.set_session_slots(n)
 
 
 class MemberScraper:
@@ -40,9 +536,19 @@ class MemberScraper:
         self._members_lock_ref: Optional[asyncio.Lock] = None
         self._fingerprint: Optional[dict] = None
 
+        self._progress_stop: Optional[asyncio.Event] = None
+        self._progress_task: Optional[asyncio.Task] = None
+
     def request_cancel(self) -> None:
         """Cooperative cancellation signal."""
         self._cancel_event.set()
+
+        ps = getattr(self, "_progress_stop", None)
+        if ps is not None:
+            ps.set()
+        pt = getattr(self, "_progress_task", None)
+        if pt is not None:
+            pt.cancel()
 
     async def snapshot_members(self) -> list[dict]:
         """Return a thread-safe snapshot of members collected so far."""
@@ -54,7 +560,7 @@ class MemberScraper:
         return []
 
     def _build_headers(self, token: str) -> dict:
-        import base64, json, random
+        import base64, json as _json, random as _random
 
         if self._fingerprint is not None:
             super_props_b64 = self._fingerprint["super_props_b64"]
@@ -69,10 +575,10 @@ class MemberScraper:
         electron_versions = ["22.3.26", "22.3.18"]
         win_builds = ["10.0.22621", "10.0.22631"]
 
-        client_version = random.choice(client_versions)
-        chrome_version = random.choice(chrome_versions)
-        electron_version = random.choice(electron_versions)
-        os_version = random.choice(win_builds)
+        client_version = _random.choice(client_versions)
+        chrome_version = _random.choice(chrome_versions)
+        electron_version = _random.choice(electron_versions)
+        os_version = _random.choice(win_builds)
 
         locales = ["en-US", "en-GB", "de", "fr", "es-ES"]
         timezones = [
@@ -81,8 +587,8 @@ class MemberScraper:
             "Europe/Berlin",
             "Asia/Tokyo",
         ]
-        locale = random.choice(locales)
-        tz = random.choice(timezones)
+        locale = _random.choice(locales)
+        tz = _random.choice(timezones)
 
         super_props = {
             "os": "Windows",
@@ -94,7 +600,7 @@ class MemberScraper:
             "system_locale": locale,
         }
         super_props_b64 = base64.b64encode(
-            json.dumps(super_props, separators=(",", ":")).encode()
+            _json.dumps(super_props, separators=(",", ":")).encode()
         ).decode()
 
         headers = {
@@ -132,19 +638,33 @@ class MemberScraper:
         include_username: bool = False,
         include_avatar_url: bool = False,
         include_bio: bool = False,
-        alphabet: str = "abcdefghijklmnopqrstuvwxyz0123456789_- .!@#$%^&*()+={}[]|:;\"'<>,.?/~`",
-        max_parallel_per_session: int = 1,
+        alphabet: str = "abcdefghijklmnopqrstuvwxyz0123456789_-.",
+        max_parallel_per_session: int = 3,
         hello_ready_delay: float = 2.5,
-        inflight_timeout: float = 10.0,
-        downstream_retries: int = 1,
-        recycle_after_dispatch: int = 2000,
+        recycle_after_dispatch: int = 2500,
         stall_timeout: float = 120.0,
         num_sessions: int = 1,
-        strict_complete: bool = False,
+        strict_complete: bool = True,
+        final_sweep_seconds: float = 15.0,
+        final_no_growth_seconds: float = 6.0,
+        final_sweep_burst: int = 5,
+        final_sweep_pause: float = 0.15,
+        refresh_total_once: bool = True,
     ) -> Dict[str, Any]:
 
-        self._cancel_event = asyncio.Event()
+        t0 = time.perf_counter()
 
+        def _fmt_dur(seconds: float) -> str:
+            s = int(seconds)
+            m, s = divmod(s, 60)
+            h, m = divmod(m, 60)
+            if h:
+                return f"{h}h {m}m {s}s"
+            if m:
+                return f"{m}m {s}s"
+            return f"{s}s"
+
+        self._cancel_event = asyncio.Event()
         bio_processed = 0
 
         gid_in = (
@@ -168,11 +688,16 @@ class MemberScraper:
         self.log.debug(
             f"[guild] Target guild: {gname} ({guild.id}) (source={'caller' if guild_id is not None else 'config'})"
         )
-
-        gname = getattr(guild, "name", "UNKNOWN")
         self.log.debug(f"[guild] Target guild: {gname} ({guild.id})")
 
-        target_count = getattr(guild, "member_count", None)
+        target_count_cached = getattr(guild, "member_count", None)
+
+        max_total_seen = (
+            int(target_count_cached)
+            if isinstance(target_count_cached, int) and target_count_cached > 0
+            else 0
+        )
+
         stop_event = asyncio.Event()
 
         def ts() -> str:
@@ -180,7 +705,7 @@ class MemberScraper:
 
         def _dedup_chars(s: str) -> str:
             seen = set()
-            out = []
+            out: List[str] = []
             for ch in s or "":
                 if ch not in seen:
                     seen.add(ch)
@@ -189,11 +714,26 @@ class MemberScraper:
 
         cfg_alpha = getattr(self.config, "SCRAPER_ALPHABET", None)
         ext = getattr(self.config, "EXTENDED_CHARS", "")
-        alphabet_l = _dedup_chars((cfg_alpha or alphabet) + (ext or ""))
+        alphabet_l = _dedup_chars(
+            ((cfg_alpha or alphabet).casefold()) + ((ext or "").casefold())
+        )
+        letters_only = "".join(ch for ch in alphabet_l if ch.isalpha())
+        digits_punct = "".join(ch for ch in alphabet_l if not ch.isalpha())
         base_alpha_set = set(alphabet_l)
         dynamic_leads_added_global: set[str] = set()
+        allow_empty_queries: bool = False
 
-        alpha_dynamic = set(alphabet_l)
+        small_guild_hint = (
+            isinstance(target_count_cached, int) and target_count_cached <= 150
+        )
+
+        shared_planner = SharedPlanner(
+            QueryPlanner(
+                alphabet=alphabet_l,
+                limit=100,
+                max_repeat_run=4,
+            )
+        )
 
         try:
             is_bot = bool(getattr(getattr(self.bot, "user", None), "bot", False))
@@ -207,8 +747,20 @@ class MemberScraper:
             "large_threshold": 250,
         }
         if is_bot:
-
             identify_d["intents"] = (1 << 0) | (1 << 1)
+
+        identify_lock = asyncio.Lock()
+        identify_next_allowed = 0.0
+
+        async def gated_identify(ws):
+            nonlocal identify_next_allowed
+            async with identify_lock:
+                now = time.time()
+                if now < identify_next_allowed:
+                    await asyncio.sleep(identify_next_allowed - now)
+                await ws.send_json({"op": 2, "d": identify_d})
+
+                identify_next_allowed = time.time() + 5.5 + random.uniform(0.0, 1.0)
 
         def build_avatar_url(uid: str, avatar_hash: str | None) -> str | None:
             if not uid or not avatar_hash:
@@ -225,10 +777,58 @@ class MemberScraper:
         warmup_done = asyncio.Event()
 
         bio_queue: asyncio.Queue[str] = asyncio.Queue()
+        bio_status: Dict[str, str] = {}
         global_reset_at: float = 0.0
 
-        def shard_alphabet(alpha: str, k: int, n: int) -> str:
-            return "".join(list(alpha)[k::n]) if n > 1 else alpha
+        final_sweep_lock = asyncio.Lock()
+        final_sweep_done = asyncio.Event()
+
+        rest_session_handle: Optional[aiohttp.ClientSession] = None
+
+        async def refresh_guild_total() -> Optional[int]:
+            """Try to refresh guild total using REST with with_counts=true."""
+            s = rest_session_handle
+            if s is None:
+                return None
+            try:
+                url = f"https://discord.com/api/v10/guilds/{guild.id}?with_counts=true"
+                r = await s.get(url, timeout=10)
+                if r.status != 200:
+                    return None
+                j = await r.json()
+
+                return (
+                    int(j.get("member_count") or j.get("approximate_member_count") or 0)
+                    or None
+                )
+            except Exception as e:
+                self.log.debug("[refresh_total] failed: %r", e)
+                return None
+
+        class PState(IntEnum):
+            PENDING = 0
+            INFLIGHT = 1
+            DONE = 2
+
+        prefix_state_lock = asyncio.Lock()
+        prefix_state: dict[str, PState] = {}
+
+        async def claim_prefix(prefix: str) -> bool:
+            async with prefix_state_lock:
+                st = prefix_state.get(prefix, PState.PENDING)
+                if st != PState.PENDING:
+                    return False
+                prefix_state[prefix] = PState.INFLIGHT
+                return True
+
+        async def finalize_prefix(prefix: str) -> None:
+            async with prefix_state_lock:
+                prefix_state[prefix] = PState.DONE
+
+        async def abort_claim(prefix: str) -> None:
+            async with prefix_state_lock:
+                if prefix_state.get(prefix) == PState.INFLIGHT:
+                    prefix_state[prefix] = PState.PENDING
 
         def user_cancelled() -> bool:
             return self._cancel_event.is_set()
@@ -237,7 +837,6 @@ class MemberScraper:
             return stop_event.is_set()
 
         def next_sibling_prefix(q: str, alpha: str) -> Optional[str]:
-            """Find the lexicographic next prefix at the same depth as q."""
             if not q:
                 return None
             last = q[-1]
@@ -248,6 +847,78 @@ class MemberScraper:
             if i + 1 < len(alpha):
                 return q[:-1] + alpha[i + 1]
             return None
+
+        progress_stop = asyncio.Event()
+        self._progress_stop = progress_stop
+        spinner_cycle = itertools.cycle("|/-\\")
+        bar_width = 28
+        printed_planner_init = False
+
+        def _bar(p: float, width: int = bar_width) -> str:
+            p = max(0.0, min(1.0, p))
+            filled = int(round(p * width))
+            return "[" + "#" * filled + "-" * (width - filled) + "]"
+
+        async def _progress_reporter():
+            nonlocal printed_planner_init, max_total_seen
+
+            try:
+                while not progress_stop.is_set():
+
+                    if self._cancel_event.is_set() or stop_event.is_set():
+                        break
+
+                    async with members_lock:
+                        done = len(members)
+
+                    live_total = max_total_seen
+                    total = live_total if live_total > 0 else None
+
+                    snap = await shared_planner.snapshot_metrics()
+                    if not printed_planner_init:
+                        self.log.debug(
+                            "[planner:init] base_alpha=%d charfreq_keys=%d",
+                            len(shared_planner.p.alphabet_base),
+                            len(shared_planner.p.char_freq),
+                        )
+                        printed_planner_init = True
+
+                    pq_len = snap["pq_len"]
+                    visited = snap["visited"]
+                    leaves = snap["leaves"]
+                    saturated = snap["saturated"]
+
+                    if total:
+                        pct_raw = done / max(1, total)
+
+                        finished_by_count = done >= total
+                        pct = pct_raw if finished_by_count else min(pct_raw, 0.999)
+                        self.log.info(
+                            "[⛏️ Scraping] %s %5.1f%% (%s/%s) | pq=%d visited=%d leaves=%d sat=%d",
+                            _bar(pct),
+                            pct * 100.0,
+                            f"{done:,}",
+                            f"{total:,}",
+                            pq_len,
+                            visited,
+                            leaves,
+                            saturated,
+                        )
+                    else:
+                        sp = next(spinner_cycle)
+                        self.log.info(
+                            "[⛏️ Scraping] %s collected=%s | pq=%d visited=%d leaves=%d sat=%d (total unknown)",
+                            sp,
+                            f"{done:,}",
+                            pq_len,
+                            visited,
+                            leaves,
+                            saturated,
+                        )
+
+                    await asyncio.sleep(1.0)
+            except asyncio.CancelledError:
+                return
 
         bio_semaphore = asyncio.Semaphore(1)
         next_allowed_at: float = 0.0
@@ -260,7 +931,6 @@ class MemberScraper:
             async def rotate_session(
                 old: aiohttp.ClientSession,
             ) -> aiohttp.ClientSession:
-                """Tear down old session and build a new one with fresh headers/fingerprint."""
                 self._fingerprint = None
                 tok = getattr(self.config, "CLIENT_TOKEN", None)
                 headers = self._build_headers(tok)
@@ -273,7 +943,6 @@ class MemberScraper:
             current_sess = sess
             try:
                 while True:
-
                     if (
                         stop_event.is_set() or self._cancel_event.is_set()
                     ) and bio_queue.empty():
@@ -331,13 +1000,10 @@ class MemberScraper:
                         try:
                             async with bio_semaphore:
                                 r = await current_sess.get(url, timeout=15)
-
                         except RuntimeError as e:
-
                             if (
                                 "Session is closed" in str(e)
-                                and self._cancel_event.is_set()
-                            ):
+                            ) and self._cancel_event.is_set():
                                 self.log.debug(
                                     "[Copycord Scraper] Bio scrape session already closed on cancel — stopping"
                                 )
@@ -376,9 +1042,8 @@ class MemberScraper:
                                     uid,
                                     retry_after,
                                 )
-                                async with members_lock:
-                                    if uid in members:
-                                        members[uid]["bio_error"] = "rate_limited"
+                            async with members_lock:
+                                bio_status[uid] = "rate_limited"
 
                                 current_sess = await rotate_session(current_sess)
                                 sleep_for = 30 + random.uniform(0, 15)
@@ -401,8 +1066,7 @@ class MemberScraper:
                             retry_counts[uid] = retry_counts.get(uid, 0) + 1
                             if retry_counts[uid] > max_retries_per_uid:
                                 async with members_lock:
-                                    if uid in members:
-                                        members[uid]["bio_error"] = "rate_limited"
+                                    bio_status[uid] = "rate_limited"
                                 self.log.warning(
                                     "[Copycord Scraper] uid=%s bio permanently rate-limited after %d retries",
                                     uid,
@@ -438,21 +1102,22 @@ class MemberScraper:
                         async with members_lock:
                             if uid in members and bio_val is not None:
                                 members[uid]["bio"] = bio_val
-
-                            nonlocal bio_processed
+                                bio_status[uid] = "found" if bio_val else "empty"
+                            else:
+                                bio_status[uid] = "empty"
                             bio_processed += 1
                             remaining = bio_queue.qsize()
+
                             if bio_val:
                                 self.log.info(
-                                    "[Copycord Scraper] [📜] Found bio for user %s — %d checked %d remaining",
+                                    "[Bio Scraper] Found bio for user %s — %d checked %d remaining",
                                     uid,
                                     bio_processed,
                                     remaining,
                                 )
                             else:
-                                members[uid]["bio_error"] = "empty_or_hidden"
                                 self.log.debug(
-                                    "[Copycord Scraper] [📜] User %s bio empty — %d found %d remaining",
+                                    "[Bio Scraper] User %s bio empty — %d found %d remaining",
                                     uid,
                                     bio_processed,
                                     remaining,
@@ -463,10 +1128,7 @@ class MemberScraper:
 
                     if not success and last_status != 429:
                         async with members_lock:
-                            if uid in members:
-                                members[uid][
-                                    "bio_error"
-                                ] = f"failed_after_retries_status_{last_status}"
+                            bio_status[uid] = f"failed_{last_status}"
 
                     next_allowed_at = time.time() + 1.25 + random.uniform(0.1, 0.4)
                     bio_queue.task_done()
@@ -478,15 +1140,30 @@ class MemberScraper:
         async def run_session(
             session_index: int, session: aiohttp.ClientSession
         ) -> None:
-            # This session's top-level shard
-            top_level = shard_alphabet(alphabet_l, session_index, num_sessions)
-
-            search_queue: deque[str] = deque()
-            visited_prefixes = set()
-            seeded_top = False
-
+            nonlocal target_count_cached, max_total_seen
             dispatched_since_connect = 0
             last_progress_at = time.time()
+            last_empty_sweep_ts = 0.0
+            EMPTY_SWEEP_INTERVAL = 1.25
+            EMPTY_SWEEP_BURST = 3
+
+            parallel_limit = max_parallel_per_session
+
+            try_total_hint = (
+                int(max_total_seen)
+                if max_total_seen > 0
+                else (
+                    int(target_count_cached)
+                    if target_count_cached is not None
+                    else None
+                )
+            )
+            small_guild = (
+                try_total_hint is not None and try_total_hint <= 150
+            ) or small_guild_hint
+
+            if num_sessions == 1 and (try_total_hint or 0) > 100:
+                parallel_limit = max(4, int(parallel_limit))
 
             in_flight_nonces: set[str] = set()
             nonce_to_query: Dict[str, str] = {}
@@ -495,6 +1172,80 @@ class MemberScraper:
             nonce_seq = 0
 
             recycle_now = asyncio.Event()
+
+            queries_total = 0
+            queries_nonzero = 0
+
+            letter_priority = [
+                c for c in "etaoinrshlcmdupfgwybvkxjqz" if c in letters_only
+            ]
+            for c in letters_only:
+                if c not in letter_priority:
+                    letter_priority.append(c)
+
+            nonletter_priority = [c for c in "0123456789_-." if c in digits_punct]
+            for c in digits_punct:
+                if c not in nonletter_priority:
+                    nonletter_priority.append(c)
+
+            def session_mode(num_sessions: int, total_hint: Optional[int]) -> str:
+
+                huge = (total_hint or 0) >= 200_000
+                if num_sessions <= 1:
+                    return "lean_plus" if huge else "lean"
+                if num_sessions == 2:
+                    return "balanced"
+                if num_sessions == 3:
+                    return "wide" if not huge else "full-lite"
+                if num_sessions == 4:
+                    return "full-lite"
+                return "full"
+
+            def build_roots_for_mode(mode: str) -> list[str]:
+                letters = [c for c in letter_priority]
+                digits = [c for c in nonletter_priority if c.isdigit()]
+                puncts = [c for c in nonletter_priority if not c.isdigit()]
+
+                roots: list[str] = []
+
+                def grid(A: list[str], B: list[str]) -> list[str]:
+                    out = []
+                    for a in A:
+                        for b in B:
+                            out.append(a + b)
+                    return out
+
+                if mode in ("lean", "lean_plus"):
+                    L = 8 if mode == "lean" else 10
+                    topL = letters[:L]
+                    roots += grid(topL, topL)
+
+                    roots += grid(topL[:6], digits[:4])
+                    return roots
+
+                if mode == "balanced":
+                    topL = letters[:12]
+                    roots += grid(topL, topL)
+                    roots += grid(topL[:8], digits[:6])
+                    roots += grid(digits[:4], topL[:10])
+                    return roots
+
+                if mode == "wide":
+                    roots += grid(letters, letters)
+                    roots += grid(letters[:12], digits[:8])
+                    roots += grid(digits[:8], letters[:12])
+                    return roots
+
+                if mode == "full-lite":
+
+                    all_letters = letters
+                    roots += grid(all_letters, all_letters)
+                    roots += grid(all_letters, digits)
+                    roots += grid(digits, all_letters)
+                    return roots
+
+                base = [c for c in (letters + digits + puncts)]
+                return [a + b for a in base for b in base]
 
             async def _safe_send_json(ws, payload) -> bool:
                 if (
@@ -516,18 +1267,19 @@ class MemberScraper:
                 return f"s{session_index}-n{nonce_seq}:{q}"
 
             async def ensure_prefix_seeded():
-                """Seed the initial one-character top-level shard."""
-                nonlocal seeded_top
-                if seeded_top:
+
+                if small_guild:
+                    await shared_planner.seed_top_level(letters_only + digits_punct)
+                    await shared_planner.set_session_slots(num_sessions)
                     return
-                for ch in top_level:
-                    if ch not in visited_prefixes:
-                        visited_prefixes.add(ch)
-                        search_queue.append(ch)
-                seeded_top = True
-                self.log.debug(
-                    f"[S{session_index}:prefix] seeded {len(search_queue)} top-level prefixes"
-                )
+
+                await shared_planner.set_session_slots(num_sessions)
+                mode = session_mode(num_sessions, try_total_hint)
+
+                await shared_planner.seed_top_level(alphabet_l)
+
+                roots = build_roots_for_mode(mode)
+                await shared_planner.seed_two_gram_roots_once(roots)
 
             async def send_op8(ws, q: str, *, limit: int) -> str:
                 if user_cancelled():
@@ -549,97 +1301,312 @@ class MemberScraper:
                 if not ok:
                     recycle_now.set()
                     raise RuntimeError("ws closing during send")
-
                 in_flight_nonces.add(n)
                 nonce_to_query[n] = q
                 nonce_sent_at[n] = time.time()
-
                 self.log.debug(
                     f"[DISPATCH][{ts()}] » S{session_index} Query {q if q else '∅'} → limit={limit} nonce={n}"
                 )
                 return n
 
             async def pump_more(ws, reason: str):
-                """Dispatch more op:8 requests, respecting per-session parallelism."""
-                nonlocal dispatched_since_connect
+                nonlocal dispatched_since_connect, queries_total
                 if user_cancelled() or target_reached():
                     return
+
+                slots = parallel_limit - len(in_flight_nonces)
+                if slots <= 0:
+                    return
+
                 started = 0
-                while search_queue and len(in_flight_nonces) < max_parallel_per_session:
-                    if user_cancelled() or target_reached():
-                        return
-                    q = search_queue.popleft()
+
+                if small_guild:
+
+                    for ch in letter_priority:
+                        if slots <= 0:
+                            break
+                        if not await claim_prefix(ch):
+                            continue
+                        try:
+                            await send_op8(ws, ch, limit=100)
+                            started += 1
+                            dispatched_since_connect += 1
+                            queries_total += 1
+                            slots -= 1
+                        except Exception as e:
+                            self.log.warning(
+                                f"[S{session_index}:op8] small-guild send failed ch={ch!r}: {e}"
+                            )
+                            await abort_claim(ch)
+                            await shared_planner.requeue(ch)
+                            break
+                        await asyncio.sleep(0.05)
+
+                    for ch in nonletter_priority:
+                        if slots <= 0:
+                            break
+                        if not await claim_prefix(ch):
+                            continue
+                        try:
+                            await send_op8(ws, ch, limit=100)
+                            started += 1
+                            dispatched_since_connect += 1
+                            queries_total += 1
+                            slots -= 1
+                        except Exception as e:
+                            self.log.warning(
+                                f"[S{session_index}:op8] small-guild send failed ch={ch!r}: {e}"
+                            )
+                            await abort_claim(ch)
+                            await shared_planner.requeue(ch)
+                            break
+                        await asyncio.sleep(0.05)
+
+                    return
+
+                coverage_ratio = {1: 0.20, 2: 0.33, 3: 0.50, 4: 0.67, 5: 0.75}.get(
+                    num_sessions, 0.33
+                )
+                roots = await shared_planner.missing_roots()
+                if roots:
+                    cov_slots = max(1, min(slots, int(round(slots * coverage_ratio))))
+                    for r in roots[:cov_slots]:
+                        if not await claim_prefix(r):
+                            continue
+                        try:
+                            await send_op8(ws, r, limit=100)
+                            started += 1
+                            dispatched_since_connect += 1
+                            queries_total += 1
+                        except Exception as e:
+                            self.log.warning(
+                                f"[S{session_index}:op8] coverage send failed r={r!r}: {e}"
+                            )
+                            await abort_claim(r)
+                            await shared_planner.requeue(r)
+                            break
+                        await asyncio.sleep(0.06)
+
+                remaining = slots - started
+
+                if remaining > 0:
+
+                    refill_threshold = max(48, 48 * (num_sessions**2))
+                    refill_step = max(6, 6 + 2 * (num_sessions - 1))
+                    await shared_planner.refill_if_starving(
+                        threshold=refill_threshold, step=refill_step
+                    )
+
+                batch = (
+                    await shared_planner.next_batch(remaining) if remaining > 0 else []
+                )
+
+                for q in batch:
+                    if not await claim_prefix(q):
+                        continue
+
+                    if q != "" and len(q) < 2:
+                        await shared_planner.on_chunk_result(q, 100)
+                        pushed = await shared_planner.ensure_children(
+                            q, force_full=True
+                        )
+                        if pushed:
+                            self.log.debug("[expand:1-char] %s → +%d (full)", q, pushed)
+                        await finalize_prefix(q)
+                        continue
+
                     try:
                         await send_op8(ws, q, limit=100)
                         started += 1
                         dispatched_since_connect += 1
+                        queries_total += 1
                     except Exception as e:
                         self.log.warning(
                             f"[S{session_index}:op8] send failed q={q!r}: {e}"
                         )
-
-                        search_queue.appendleft(q)
+                        await abort_claim(q)
+                        await shared_planner.requeue(q)
                         break
-
                     await asyncio.sleep(0.06)
-                if started:
+
+                if started == 0 and not in_flight_nonces:
+                    if (
+                        strict_complete
+                        and not await shared_planner.all_leaves_exhausted()
+                    ):
+                        missing_children = (
+                            await shared_planner.sweep_full_children_for_saturated()
+                        )
+                        miss = await shared_planner.missing_roots()
+                        for r in miss:
+                            await shared_planner.requeue(r)
+                        if missing_children or miss:
+                            self.log.debug(
+                                "[pump:last-resort] swept children=%d roots_missing=%d → retry dispatch",
+                                missing_children,
+                                len(miss),
+                            )
+
+                            batch2 = await shared_planner.next_batch(slots)
+                            for q in batch2:
+                                if not await claim_prefix(q):
+                                    continue
+                                try:
+                                    await send_op8(ws, q, limit=100)
+                                    started += 1
+                                    dispatched_since_connect += 1
+                                    queries_total += 1
+                                except Exception:
+                                    await abort_claim(q)
+                                    await shared_planner.requeue(q)
+                                    break
+                                await asyncio.sleep(0.06)
+
+            async def final_empty_sweep(ws) -> None:
+                """Run a stronger final sweep with empty queries to catch stragglers."""
+                start = time.time()
+                async with final_sweep_lock:
+                    if final_sweep_done.is_set():
+                        return
+                    self.log.debug("[final-sweep] starting last empty sweep window")
+                    last_growth_at = time.time()
+                    async with members_lock:
+                        last_count = len(members)
+                    while (time.time() - start) < final_sweep_seconds:
+                        if user_cancelled() or target_reached():
+                            break
+
+                        for _ in range(max(1, int(final_sweep_burst))):
+                            try:
+                                await send_op8(ws, "", limit=100)
+                            except Exception:
+                                break
+                            await asyncio.sleep(final_sweep_pause)
+
+                        await asyncio.sleep(0.4)
+                        async with members_lock:
+                            cur = len(members)
+                        if cur > last_count:
+                            last_count = cur
+                            last_growth_at = time.time()
+
+                        if (
+                            time.time() - last_growth_at
+                        ) >= final_no_growth_seconds and (time.time() - start) > 3.0:
+                            break
+                    final_sweep_done.set()
                     self.log.debug(
-                        f"[S{session_index}:pump] dispatched {started} (reason={reason}); "
-                        f"inflight={len(in_flight_nonces)} qlen={len(search_queue)}"
+                        "[final-sweep] done; duration=%.1fs", time.time() - start
                     )
 
             async def expiry_scavenger(ws):
-                """Requeue long-stuck inflight requests; trigger recycle on stalls."""
-                try:
-                    while True:
-                        if user_cancelled():
+                nonlocal last_empty_sweep_ts, target_count_cached, max_total_seen
+
+                while True:
+                    try:
+                        if user_cancelled() or target_reached():
                             recycle_now.set()
                             return
-                        if target_reached():
-                            recycle_now.set()
-                            return
+
                         await asyncio.sleep(0.5)
                         now = time.time()
 
-                        timed_out = [
-                            n
-                            for n, ts_ in list(nonce_sent_at.items())
-                            if now - ts_ > inflight_timeout
-                        ]
-                        for n in timed_out:
-                            q = nonce_to_query.get(n)
-                            if q is None:
-                                continue
+                        idle = (not in_flight_nonces) and (
+                            not await shared_planner.has_work()
+                        )
 
-                            in_flight_nonces.discard(n)
-                            nonce_to_query.pop(n, None)
-                            nonce_sent_at.pop(n, None)
+                        if not in_flight_nonces and await shared_planner.has_work():
+                            await pump_more(ws, reason="scavenge-has-work")
+                            continue
 
-                            if q == "":
-                                self.log.debug(
-                                    f"[S{session_index}:retry] skipping warm-up retry"
+                        if idle:
+
+                            try_total = (
+                                max_total_seen
+                                if max_total_seen > 0
+                                else (
+                                    int(target_count_cached)
+                                    if target_count_cached is not None
+                                    else None
                                 )
-                                continue
+                            )
+                            async with members_lock:
+                                current = len(members)
 
-                            rc = query_retry_count.get(q, 0)
-                            if rc < downstream_retries + 1:
-                                query_retry_count[q] = rc + 1
-                                search_queue.appendleft(q)
-                                self.log.debug(
-                                    f"[S{session_index}:retry] timeout requeue q={q!r}"
+                            small = small_guild
+
+                            if (
+                                strict_complete
+                                and try_total
+                                and current < try_total
+                                and not small
+                            ):
+                                if (now - last_empty_sweep_ts) >= EMPTY_SWEEP_INTERVAL:
+                                    for _ in range(EMPTY_SWEEP_BURST):
+                                        try:
+                                            await send_op8(ws, "", limit=100)
+                                        except Exception:
+                                            break
+                                        await asyncio.sleep(0.15)
+                                    last_empty_sweep_ts = time.time()
+
+                            if not await shared_planner.all_leaves_exhausted():
+                                missing_children = (
+                                    await shared_planner.sweep_full_children_for_saturated()
                                 )
+                                miss = await shared_planner.missing_roots()
+                                if not small:
+                                    for r in miss:
+                                        await shared_planner.requeue(r)
+                                if (
+                                    missing_children or (miss and not small)
+                                ) and await shared_planner.has_work():
+                                    await pump_more(ws, reason="scavenge-sweep")
+                                    continue
 
-                        if (now - last_progress_at) > stall_timeout:
+                            if await shared_planner.all_leaves_exhausted():
+                                if (try_total is not None) and (current < try_total):
+
+                                    if not final_sweep_done.is_set() and not small:
+                                        await final_empty_sweep(ws)
+
+                                    if refresh_total_once:
+                                        new_total = await refresh_guild_total()
+                                        if new_total:
+                                            n = int(new_total)
+                                            if n > max_total_seen:
+                                                max_total_seen = n
+                                            if (target_count_cached is None) or (
+                                                n > int(target_count_cached)
+                                            ):
+                                                target_count_cached = n
+
+                                    async with members_lock:
+                                        current = len(members)
+
+                                self.log.debug(
+                                    f"[S{session_index}] completion watcher → stopping: done={current} total={try_total} pq=0 inflight=0"
+                                )
+                                stop_event.set()
+                                recycle_now.set()
+                                return
+
+                        if (time.time() - last_progress_at) > stall_timeout:
                             self.log.debug(
                                 f"[S{session_index}] stall_timeout hit → recycle"
                             )
                             recycle_now.set()
                             return
-                except asyncio.CancelledError:
-                    return
+
+                    except asyncio.CancelledError:
+                        return
+                    except Exception as e:
+
+                        self.log.warning(f"[S{session_index}:scavenger] error: {e}")
+                        await asyncio.sleep(0.5)
+                        continue
 
             async def heartbeat(ws, interval_ms: int):
-                """Sends heartbeats; exits quietly if the socket is closing."""
                 try:
                     while True:
                         await asyncio.sleep((interval_ms or 41250) / 1000)
@@ -658,7 +1625,7 @@ class MemberScraper:
                                 or "closing transport" in str(e).lower()
                             ):
                                 self.log.debug(
-                                    "[ws] HEARTBEAT → transport closing; stopping"
+                                    "[ws] HEARTBEAT] → transport closing; stopping"
                                 )
                                 return
                             raise
@@ -685,6 +1652,9 @@ class MemberScraper:
                 last_progress_at = time.time()
 
                 try:
+
+                    self._fingerprint = None
+
                     async with session.ws_connect(
                         self.GATEWAY_URL,
                         heartbeat=None,
@@ -692,7 +1662,7 @@ class MemberScraper:
                         autoclose=True,
                         autoping=True,
                     ) as ws:
-                        await ws.send_json({"op": 2, "d": identify_d})
+                        await gated_identify(ws)
 
                         while True:
                             if dispatched_since_connect >= recycle_after_dispatch:
@@ -752,7 +1722,7 @@ class MemberScraper:
                                         f"[S{session_index}:ws] CLOSE 1006 during shutdown; reconnecting"
                                     )
                                 else:
-                                    self.log.warning(
+                                    self.log.debug(
                                         f"[S{session_index}:ws] CLOSE code={code} exc={exc}"
                                     )
                                 break
@@ -760,12 +1730,6 @@ class MemberScraper:
                                 continue
 
                             raw = msg.data
-                            if len(raw) <= 4096:
-                                self.log.debug(f"[S{session_index}:ws] IN: {raw}")
-                            else:
-                                self.log.debug(
-                                    f"[S{session_index}:ws] IN: <{len(raw)} bytes>"
-                                )
 
                             try:
                                 data_in = json.loads(raw)
@@ -793,16 +1757,17 @@ class MemberScraper:
                                 scavenger_task = asyncio.create_task(
                                     expiry_scavenger(ws)
                                 )
+
+                                await pump_more(ws, reason="hello")
                                 continue
 
                             if op == 11:
-
                                 await pump_more(ws, reason="ack")
                                 continue
 
                             if op == 9:
                                 self.log.warning(
-                                    f"[S{session_index}:ws] INVALID_SESSION → backoff & re-identify"
+                                    f"[S{session_index}:ws] INVALID_SESSION → backoff & reconnect"
                                 )
                                 await asyncio.sleep(
                                     1.0
@@ -810,23 +1775,52 @@ class MemberScraper:
                                     + (random.random() * 1.5)
                                 )
                                 try:
-                                    await ws.send_json({"op": 2, "d": identify_d})
+                                    await ws.close(
+                                        code=1000, message=b"invalid_session_reconnect"
+                                    )
                                 except Exception:
-                                    break
-                                continue
+                                    pass
+                                break
 
                             if op == 0:
                                 if t == "READY":
-
                                     if not warmup_done.is_set():
                                         try:
                                             async with warmup_lock:
                                                 if not warmup_done.is_set():
-                                                    await send_op8(ws, "", limit=100)
-                                                    warmup_done.set()
+
+                                                    n = (
+                                                        getattr(
+                                                            guild, "member_count", None
+                                                        )
+                                                        or 0
+                                                    )
+
+                                                    if n and n <= 100:
+                                                        await send_op8(
+                                                            ws, "", limit=100
+                                                        )
+                                                        warmup_done.set()
+                                                    else:
+                                                        desired = (
+                                                            4 if num_sessions > 1 else 2
+                                                        )
+                                                        can_send = max(
+                                                            0,
+                                                            parallel_limit
+                                                            - len(in_flight_nonces),
+                                                        )
+                                                        burst = max(
+                                                            1, min(desired, can_send)
+                                                        )
+                                                        for _ in range(burst):
+                                                            await send_op8(
+                                                                ws, "", limit=100
+                                                            )
+                                                            await asyncio.sleep(0.05)
+                                                        warmup_done.set()
                                         except Exception:
                                             pass
-
                                     await asyncio.sleep(hello_ready_delay)
                                     await pump_more(ws, reason="ready")
 
@@ -852,112 +1846,160 @@ class MemberScraper:
                                                 uid = u.get("id")
                                                 if not uid or uid in members:
                                                     continue
-                                                rec = {"id": uid}
-                                                rec["bot"] = bool(u.get("bot", False))
-
+                                                rec = {
+                                                    "id": uid,
+                                                    "bot": bool(u.get("bot", False)),
+                                                }
                                                 if include_username:
                                                     rec["username"] = u.get("username")
-
                                                 if include_avatar_url:
+                                                    av = u.get("avatar")
                                                     rec["avatar_url"] = (
-                                                        build_avatar_url(
-                                                            uid, u.get("avatar")
-                                                        )
+                                                        build_avatar_url(uid, av)
                                                     )
-
                                                 if include_bio:
+                                                    rec["bio"] = None
                                                     await bio_queue.put(uid)
-
                                                 members[uid] = rec
                                                 added_here += 1
                                         if added_here:
                                             last_progress_at = time.time()
 
                                     if got:
-                                        newly_seeded = 0
-                                        newly_seen_this_chunk: list[str] = []
                                         for m in got:
                                             u = (m or {}).get("user") or {}
-                                            ln = u.get("username") or ""
-                                            if not ln:
-                                                continue
+                                            ln_raw = u.get("username") or ""
+                                            ln = ln_raw.casefold()
+                                            if ln:
+                                                await shared_planner.mark_observed_username(
+                                                    ln
+                                                )
                                             lead = ln[:1]
-
-                                            if lead not in alpha_dynamic:
-                                                alpha_dynamic.add(lead)
+                                            if lead and lead.isdigit():
+                                                await shared_planner.note_digit_lead()
 
                                             if lead and (lead not in base_alpha_set):
-                                                newly_seen_this_chunk.append(lead)
+                                                if small_guild:
 
-                                                if (
-                                                    session_index == 0
-                                                    and lead not in visited_prefixes
-                                                ):
-                                                    visited_prefixes.add(lead)
-                                                    search_queue.append(lead)
-                                                    newly_seeded += 1
-
-                                        if newly_seen_this_chunk:
-                                            uniq = sorted(set(newly_seen_this_chunk))
-                                            dynamic_leads_added_global.update(uniq)
-                                            self.log.info(
-                                                "[discover] S%d saw dynamic leads: %s",
-                                                session_index,
-                                                " ".join(repr(c) for c in uniq),
-                                            )
-
-                                        if newly_seeded:
-                                            self.log.debug(
-                                                f"[S{session_index}:discover] +{newly_seeded} dynamic top-level leads"
-                                            )
+                                                    await shared_planner.push(lead)
+                                                else:
+                                                    await shared_planner.add_dynamic_lead(
+                                                        lead
+                                                    )
+                                                dynamic_leads_added_global.add(lead)
 
                                     if q_for_nonce is not None:
+                                        size_here = len(got)
+                                        await shared_planner.on_chunk_result(
+                                            q_for_nonce, size_here
+                                        )
+                                        await finalize_prefix(q_for_nonce)
+
+                                        if size_here >= 100:
+                                            expand_step = {
+                                                1: 12,
+                                                2: 10,
+                                                3: 8,
+                                                4: 6,
+                                                5: 6,
+                                            }.get(num_sessions, 8)
+                                            pushed_now = (
+                                                await shared_planner.ensure_children(
+                                                    q_for_nonce, step=expand_step
+                                                )
+                                            )
+                                            if pushed_now:
+                                                self.log.debug(
+                                                    "[expand] %s → +%d children (step=%d)",
+                                                    q_for_nonce,
+                                                    pushed_now,
+                                                    expand_step,
+                                                )
+
                                         total_now = len(members)
                                         worker = f"worker {session_index + 1}"
-                                        self.log.info(
+                                        self.log.debug(
                                             "[Copycord Scraper] %s » Query %s [+%d] Total=%d",
                                             worker,
                                             q_for_nonce if q_for_nonce else "∅",
                                             added_here,
                                             total_now,
                                         )
-                                        if (
-                                            not strict_complete
-                                            and (target_count is not None)
-                                            and (total_now >= int(target_count))
-                                            and not stop_event.is_set()
-                                        ):
+
+                                        if size_here > 0:
+                                            queries_nonzero += 1
+                                        if queries_total and (queries_total % 50) == 0:
+                                            hr = (
+                                                100.0
+                                                * queries_nonzero
+                                                / max(1, queries_total)
+                                            )
+                                            pq_len = await shared_planner.queue_len()
                                             self.log.debug(
-                                                "[🎯][%s] %s » Reached guild.member_count: %d/%d — stopping (non-strict)",
+                                                "[planner] hit_rate=%.1f%% total=%d nonzero=%d pq_len=%d",
+                                                hr,
+                                                queries_total,
+                                                queries_nonzero,
+                                                pq_len,
+                                            )
+
+                                        if (
+                                            max_total_seen
+                                            and total_now >= max_total_seen
+                                        ) and not stop_event.is_set():
+                                            self.log.debug(
+                                                "[🎯][%s] %s » Count matched: %d/%d — stopping",
                                                 ts(),
                                                 worker,
                                                 total_now,
-                                                int(target_count),
+                                                max_total_seen,
                                             )
                                             stop_event.set()
                                             recycle_now.set()
 
-                                    if q_for_nonce is not None and q_for_nonce != "":
-                                        if len(got) >= 100:
-
-                                            for ch in alphabet_l:
-                                                child = q_for_nonce + ch
-                                                if child not in visited_prefixes:
-                                                    visited_prefixes.add(child)
-                                                    search_queue.append(child)
-
-                                        if len(q_for_nonce) > 0:
+                                        if (
+                                            (not small_guild)
+                                            and q_for_nonce != ""
+                                            and size_here > 0
+                                        ):
                                             sib = next_sibling_prefix(
                                                 q_for_nonce, alphabet_l
                                             )
-                                            if sib and sib not in visited_prefixes:
-                                                visited_prefixes.add(sib)
-                                                search_queue.append(sib)
+                                            if sib:
+                                                await shared_planner.push(sib)
 
-                                    if search_queue or in_flight_nonces:
+                                    if (
+                                        await shared_planner.has_work()
+                                        or in_flight_nonces
+                                    ):
                                         await pump_more(ws, reason="chunk")
                                     else:
+                                        if (
+                                            strict_complete
+                                            and not await shared_planner.all_leaves_exhausted()
+                                        ):
 
+                                            missing_children = (
+                                                await shared_planner.sweep_full_children_for_saturated()
+                                            )
+
+                                            if not small_guild:
+                                                miss = (
+                                                    await shared_planner.missing_roots()
+                                                )
+                                                for r in miss:
+                                                    await shared_planner.requeue(r)
+                                            else:
+                                                miss = []
+
+                                            if missing_children or miss:
+                                                self.log.debug(
+                                                    "[sweeper] children=%d roots_missing=%d",
+                                                    missing_children,
+                                                    len(miss),
+                                                )
+                                                await pump_more(ws, reason="sweeper")
+                                                continue
                                         break
 
                                 else:
@@ -973,6 +2015,20 @@ class MemberScraper:
                     self.log.warning(f"[S{session_index}] WS session error: {e}")
 
                 try:
+                    pending_qs = []
+                    for n in list(in_flight_nonces):
+                        q = nonce_to_query.pop(n, None)
+                        in_flight_nonces.discard(n)
+                        nonce_sent_at.pop(n, None)
+                        if q and q != "":
+                            pending_qs.append(q)
+                    for q in pending_qs:
+                        await abort_claim(q)
+                        await shared_planner.requeue(q)
+                except Exception:
+                    pass
+
+                try:
                     if scavenger_task:
                         scavenger_task.cancel()
                     if heartbeat_task:
@@ -980,11 +2036,32 @@ class MemberScraper:
                 except Exception:
                     pass
 
-                if not search_queue and not in_flight_nonces:
-                    return
+                if not await shared_planner.has_work() and not in_flight_nonces:
+                    if (
+                        strict_complete
+                        and not await shared_planner.all_leaves_exhausted()
+                    ):
 
+                        missing_children = (
+                            await shared_planner.sweep_full_children_for_saturated()
+                        )
+
+                        if not small_guild:
+                            miss = await shared_planner.missing_roots()
+                            for r in miss:
+                                await shared_planner.requeue(r)
+
+                        if missing_children:
+                            self.log.debug(
+                                "[post-ws-sweep] children=%d → reconnect & continue",
+                                missing_children,
+                            )
+                            continue
+                    return
                 continue
 
+        bio_stop = None
+        bio_worker_task = None
         try:
             tok = getattr(self.config, "CLIENT_TOKEN", None)
             if not tok:
@@ -992,13 +2069,13 @@ class MemberScraper:
 
             headers = self._build_headers(tok)
 
+            self._progress_task = asyncio.create_task(_progress_reporter())
+
             async with aiohttp.ClientSession(headers=headers) as gw_session:
                 async with aiohttp.ClientSession(headers=headers) as rest_session:
+                    rest_session_handle = rest_session
                     bio_stop = asyncio.Event()
-                    bio_worker_task = None
-
                     if include_bio:
-
                         bio_worker_task = asyncio.create_task(
                             bio_worker(rest_session, bio_stop)
                         )
@@ -1016,41 +2093,72 @@ class MemberScraper:
                                 await bio_worker_task
 
             if dynamic_leads_added_global:
-                self.log.info(
+                self.log.debug(
                     "[discover] %d dynamic leading characters discovered this run: %s",
                     len(dynamic_leads_added_global),
                     " ".join(repr(c) for c in sorted(dynamic_leads_added_global)),
                 )
 
             if include_bio:
-                total = len(members)
-                with_bio = sum(1 for m in members.values() if "bio" in m and m["bio"])
-                empty = sum(
-                    1
-                    for m in members.values()
-                    if m.get("bio_error") == "empty_or_hidden"
+                total = len(self._members_ref or {})
+                with_bio = sum(
+                    1 for m in (self._members_ref or {}).values() if m.get("bio")
                 )
+                no_bio = total - with_bio
                 failed = sum(
                     1
-                    for m in members.values()
-                    if m.get("bio_error", "").startswith("failed_after_retries")
+                    for s in bio_status.values()
+                    if s.startswith("failed_") or s == "rate_limited"
                 )
-                self.log.info(
+                self.log.debug(
                     "[Copycord Scraper] 📜 Bio scrape: has_bio=%d no_bio=%d failed=%d",
                     with_bio,
-                    empty,
+                    no_bio,
                     failed,
                 )
 
-            self.log.info(
-                f"[Copycord Scraper] ✅ Found {len(members)} members in {gname}"
-            )
-            
+            elapsed = time.perf_counter() - t0
+            total_known = max_total_seen if max_total_seen > 0 else None
+            if total_known:
+                denom = max(1, total_known)
+                pct_raw = (len(self._members_ref or {}) / denom) * 100.0
+                pct = min(
+                    pct_raw,
+                    99.9 if len(self._members_ref or {}) < total_known else 100.0,
+                )
+                self.log.info(
+                    "[Copycord Scraper] ✅ Finished in %s. Collected %d/%d members in %s (%.1f%%)",
+                    _fmt_dur(elapsed),
+                    len(self._members_ref or {}),
+                    total_known,
+                    gname,
+                    pct,
+                )
+            else:
+                self.log.info(
+                    "[Copycord Scraper] ✅ Finished in %s. Collected %d members in %s",
+                    _fmt_dur(elapsed),
+                    len(self._members_ref or {}),
+                    gname,
+                )
+
             clean_members = []
-            for m in members.values():
-                filtered = {k: v for k, v in m.items() if k != "bio_error"}
+            for m in (self._members_ref or {}).values():
+                allowed = {"id", "bot"}
+                if include_username:
+                    allowed.add("username")
+                if include_avatar_url:
+                    allowed.add("avatar_url")
+                if include_bio:
+                    allowed.add("bio")
+
+                filtered = {k: v for k, v in m.items() if k in allowed}
+
+                if include_bio and "bio" not in filtered:
+                    filtered["bio"] = None
+
                 clean_members.append(filtered)
-                
+
             return {
                 "members": clean_members,
                 "count": len(clean_members),
@@ -1058,10 +2166,30 @@ class MemberScraper:
                 "guild_name": gname,
             }
 
-
         except asyncio.CancelledError:
+            elapsed = time.perf_counter() - t0
             self.log.info(
-                f"[🛑] Scrape canceled early in {gname} — collected: {len(members)} members"
+                "[🛑] Scrape canceled early in %s after %s — collected: %d members",
+                gname,
+                _fmt_dur(elapsed),
+                len(self._members_ref or {}),
             )
             self._cancel_event.set()
             raise
+        finally:
+
+            if self._progress_stop is None:
+                self._progress_stop = asyncio.Event()
+            self._progress_stop.set()
+            if self._progress_task is not None:
+                self._progress_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await self._progress_task
+            self._progress_task = None
+            self._progress_stop = None
+
+            if bio_stop is not None:
+                bio_stop.set()
+            if bio_worker_task is not None:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await bio_worker_task
