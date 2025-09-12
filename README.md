@@ -1,7 +1,7 @@
-[![Release](https://img.shields.io/github/v/release/copycord/copycord?label=Release)](https://github.com/copycord/copycord/releases/latest)
-[![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/ArFdqrJHBj)
+[![Release](https://img.shields.io/github/v/release/copycord/copycord?label=Release)](https://github.com/copycord/copycord/releases/latest) [![Discord](https://img.shields.io/discord/1406152440377638952?color=7289DA&label=Discord&logo=discord)](https://discord.gg/ArFdqrJHBj)
 
-_Love this project? Give it a ⭐️ and let others know!_
+
+_⭐️ Love Copycord? Give us a star and join the conversation in our Discord community!_
 
 <p align="left">
   <img src="logo/logo.png" alt="Copycord Logo" width="100"/>
