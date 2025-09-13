@@ -640,8 +640,8 @@ class MemberScraper:
         include_bio: bool = False,
         alphabet: str = "abcdefghijklmnopqrstuvwxyz0123456789_-.",
         max_parallel_per_session: int = 3,
-        hello_ready_delay: float = 2.5,
-        recycle_after_dispatch: int = 2500,
+        hello_ready_delay: float = 0.8,
+        recycle_after_dispatch: int = 10000,
         stall_timeout: float = 120.0,
         num_sessions: int = 1,
         strict_complete: bool = True,
@@ -1148,6 +1148,7 @@ class MemberScraper:
             EMPTY_SWEEP_BURST = 3
 
             parallel_limit = max_parallel_per_session
+        
 
             try_total_hint = (
                 int(max_total_seen)
@@ -1158,6 +1159,10 @@ class MemberScraper:
                     else None
                 )
             )
+
+            if (try_total_hint or 0) >= 500_000:
+                parallel_limit = max(parallel_limit, 8)
+                
             small_guild = (
                 try_total_hint is not None and try_total_hint <= 150
             ) or small_guild_hint
@@ -1189,17 +1194,14 @@ class MemberScraper:
                     nonletter_priority.append(c)
 
             def session_mode(num_sessions: int, total_hint: Optional[int]) -> str:
-
                 huge = (total_hint or 0) >= 200_000
-                if num_sessions <= 1:
-                    return "lean_plus" if huge else "lean"
-                if num_sessions == 2:
-                    return "balanced"
-                if num_sessions == 3:
-                    return "wide" if not huge else "full-lite"
-                if num_sessions == 4:
-                    return "full-lite"
+                if num_sessions <= 1: return "lean_plus" if huge else "lean"
+                if num_sessions == 2: return "balanced"
+                if num_sessions >= 3 and huge: return "full-lite"
+                if num_sessions == 3: return "wide"
+                if num_sessions == 4: return "full-lite"
                 return "full"
+
 
             def build_roots_for_mode(mode: str) -> list[str]:
                 letters = [c for c in letter_priority]
@@ -1340,7 +1342,7 @@ class MemberScraper:
                             await abort_claim(ch)
                             await shared_planner.requeue(ch)
                             break
-                        await asyncio.sleep(0.05)
+                        await asyncio.sleep(0.03)
 
                     for ch in nonletter_priority:
                         if slots <= 0:
@@ -1360,7 +1362,7 @@ class MemberScraper:
                             await abort_claim(ch)
                             await shared_planner.requeue(ch)
                             break
-                        await asyncio.sleep(0.05)
+                        await asyncio.sleep(0.03)
 
                     return
 
@@ -1385,7 +1387,7 @@ class MemberScraper:
                             await abort_claim(r)
                             await shared_planner.requeue(r)
                             break
-                        await asyncio.sleep(0.06)
+                        await asyncio.sleep(0.03)
 
                 remaining = slots - started
 
@@ -1427,7 +1429,7 @@ class MemberScraper:
                         await abort_claim(q)
                         await shared_planner.requeue(q)
                         break
-                    await asyncio.sleep(0.06)
+                    await asyncio.sleep(0.03)
 
                 if started == 0 and not in_flight_nonces:
                     if (
@@ -1460,7 +1462,7 @@ class MemberScraper:
                                     await abort_claim(q)
                                     await shared_planner.requeue(q)
                                     break
-                                await asyncio.sleep(0.06)
+                                await asyncio.sleep(0.03)
 
             async def final_empty_sweep(ws) -> None:
                 """Run a stronger final sweep with empty queries to catch stragglers."""
