@@ -81,3 +81,15 @@ npm run build
 # Test server/client changes
 docker compose up -d
 ```
+
+---
+
+## Need help or have suggestions?
+
+- **Stuck or need a hand?** Hop into our Discord: [Join the server](https://discord.com/invite/ArFdqrJHBj) — we’re happy to help.
+- **Found a bug or have a process improvement idea?** Open an issue:  
+  - 🐞 Bug reports: include steps to reproduce, expected vs. actual, logs/screenshots.
+  - 🛠️ Process improvements: tell us what could be clearer or faster and why.
+  - ➡️ [Create an issue](https://github.com/Copycord/Copycord/issues)
+
+Prefer to chat first? Drop your idea in Discord and we can help shape it into an issue or PR.
