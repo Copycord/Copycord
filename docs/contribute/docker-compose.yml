@@ -1,0 +1,37 @@
+# This docker-compose file is used to build & run CopyCord in your local environment
+services:
+  admin:
+    build:
+      context: .
+      dockerfile: code/Dockerfile
+    container_name: copycord-admin
+    environment:
+      - ROLE=admin
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+
+  server:
+    build:
+      context: .
+      dockerfile: code/Dockerfile
+    container_name: copycord-server
+    environment:
+      - ROLE=server
+    volumes:
+      - ./data:/data
+    depends_on:
+      - admin
+
+  client:
+    build:
+      context: .
+      dockerfile: code/Dockerfile
+    container_name: copycord-client
+    environment:
+      - ROLE=client
+    volumes:
+      - ./data:/data
+    depends_on:
+      - admin
