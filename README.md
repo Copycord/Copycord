@@ -162,7 +162,8 @@ We appreciate all contributions:
 
 1. Fork the repository.  
 2. Create a new branch from `main` with a descriptive name.  
-3. Commit your changes and open a [Pull Request](https://github.com/copycord/copycord/pulls), detailing your feature or fix.
+3. Commit your changes and open a [Pull Request](https://github.com/Copycord/Copycord/pulls), detailing your feature or fix.  
+4. See the [Contributing Guide](https://github.com/Copycord/Copycord/tree/main/docs/contribute/CONTRIBUTING.md) for build & testing instructions.
 
 Thank you for helping improve Copycord!
 
