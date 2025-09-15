@@ -42,7 +42,7 @@ from server.emojis import EmojiManager
 from server.stickers import StickerManager
 from server.roles import RoleManager
 from server.backfill import BackfillManager, BackfillTask, BackfillTracker
-from server.helpers import OnJoinService, VerifyController
+from server.helpers import OnJoinService, VerifyController, WebhookDMExporter
 
 LOG_DIR = "/data"
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -223,6 +223,7 @@ class ServerReceiver:
 
         asyncio.create_task(self.config.setup_release_watcher(self))
         self.session = aiohttp.ClientSession()
+        self.webhook_exporter = WebhookDMExporter(self.session, logger) # DM Exporter
         # Ensure we're in the clone guild
         clone_guild = self.bot.get_guild(self.clone_guild_id)
         if clone_guild is None:
@@ -585,6 +586,12 @@ class ServerReceiver:
 
         elif typ == "member_joined":
             asyncio.create_task(self.onjoin.handle_member_joined(data))
+            
+        elif typ == "export_dm_message":
+            await self.webhook_exporter.handle_ws_export_dm_message(data)
+
+        elif typ == "export_dm_done":
+            await self.webhook_exporter.handle_ws_export_dm_done(data)
 
     async def process_sitemap_queue(self):
         """Continuously process only the newest sitemap, discarding any others."""
@@ -2981,6 +2988,15 @@ class ServerReceiver:
             use_webhook_identity=primary_customized,
             override_identity=None,
         )
+
+    async def forward_to_webhook(self, msg_data: dict, webhook_url: str):
+        async with self.session.post(webhook_url, json={
+            "username": msg_data["author"]["name"],
+            "avatar_url": msg_data["author"].get("avatar_url"),
+            "content": msg_data["content"],
+        }) as resp:
+            if resp.status != 200 and resp.status != 204:
+                logger.warning(f"Webhook send failed: {resp.status}")
 
     async def handle_thread_message(self, data: dict):
         """
