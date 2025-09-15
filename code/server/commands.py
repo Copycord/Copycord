@@ -882,23 +882,18 @@ class CloneCommands(commands.Cog):
                 ),
                 ephemeral=True,
             )
-            
+                
     @commands.slash_command(
         name="export_dms",
-        description="Export DM history for a given user and send to a webhook",
+        description="Export DM history for a given user and stream to a webhook (server forwards).",
         guild_ids=[GUILD_ID],
     )
     async def export_dm_history_cmd(
         self,
         ctx: discord.ApplicationContext,
         user_id: str = Option(str, "Target user ID to export DMs from", required=True),
-        webhook_url: str = Option(str, "Webhook URL to send DM history to", required=True),
+        webhook_url: str = Option(str, "Webhook URL to receive the stream", required=True),
     ):
-        """
-        /export_dms <user_id> <webhook_url>
-        Uses websocket request/response: waits for client to return DM history,
-        then sends those messages to the given webhook.
-        """
         await ctx.defer(ephemeral=True)
 
         try:
@@ -908,52 +903,36 @@ class CloneCommands(commands.Cog):
                 embed=self._err_embed("Invalid User ID", f"`{user_id}` is not a valid user ID."),
                 ephemeral=True,
             )
+        payload = {
+            "type": "export_dm_history",
+            "data": {
+                "user_id": target_id,
+                "webhook_url": webhook_url,
+            },
+        }
 
-        # Ask client to export DMs
-        resp = await self.bot.ws_manager.request(
-            {"type": "export_dm_history", "data": {"user_id": target_id}},
-            timeout=60,
-        )
+        try:
+            resp = await self.bot.ws_manager.request(payload, timeout=15)
+        except Exception as e:
+            return await ctx.followup.send(
+                embed=self._err_embed("Export Failed", f"WebSocket request error: {e}"),
+                ephemeral=True,
+            )
 
         if not resp or not resp.get("ok"):
+            err = (resp or {}).get("error") or "Client did not accept the request."
             return await ctx.followup.send(
-                embed=self._err_embed("Export Failed", f"Client error: {resp}"),
+                embed=self._err_embed("Export Rejected", err),
                 ephemeral=True,
             )
-
-        export_data = resp.get("data") or {}
-        messages = export_data.get("messages", [])
-
-        if not messages:
-            return await ctx.followup.send(
-                embed=self._err_embed("No Messages", f"No DMs found for user `{target_id}`."),
-                ephemeral=True,
-            )
-
-        # Send to webhook
-        import aiohttp, asyncio
-        async with aiohttp.ClientSession() as session:
-            for m in messages:
-                payload = {
-                    "username": m["author"]["name"],
-                    "avatar_url": m["author"].get("avatar_url"),
-                    "content": m.get("content") or "",
-                }
-                if "attachments" in m:
-                    payload.setdefault("attachments", m["attachments"])
-                if "embeds" in m:
-                    payload.setdefault("embeds", m["embeds"])
-
-                await session.post(webhook_url, json=payload)
-                await asyncio.sleep(2)
-
-        await ctx.followup.send(
+        return await ctx.followup.send(
             embed=self._ok_embed(
-                "Export Complete",
-                f"Sent `{len(messages)}` DMs from user `{target_id}` to the webhook."
+                "Export Started",
+                f"Streaming DMs for user `{target_id}` → webhook. You'll see messages arriving shortly."
             ),
             ephemeral=True,
         )
+
 
 
 def setup(bot: commands.Bot):
