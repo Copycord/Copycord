@@ -478,6 +478,16 @@ class ClientListener:
                 logger.exception("[scrape_cancel] failed: %r", e)
                 return {"ok": False, "error": str(e)}
 
+        elif typ == "export_dm_history":
+            uid = int(data.get("user_id"))
+
+            try:
+                export_data = await self.export_dm_history(uid)
+                return {"ok": True, "data": export_data}
+            except Exception as e:
+                logger.exception("DM export failed")
+                return {"ok": False, "error": str(e)}
+    
         return None
 
     async def _resolve_accessible_host_channel(self, orig_channel_id: int):
@@ -584,6 +594,7 @@ class ClientListener:
                 self._sync_task = asyncio.create_task(self.periodic_sync_loop())
         else:
             logger.info("[🔕] Server cloning is disabled...")
+
         if self._ws_task is None:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
         asyncio.create_task(self._snapshot_all_guilds_once())
@@ -1452,6 +1463,143 @@ class ClientListener:
                 self.db.delete_guild(gid)
         except Exception:
             logger.exception("[guilds] snapshot failed (outer)")
+
+    async def export_dm_history(
+        self,
+        user_id: int,
+        include_attachments: bool = True,
+        include_embeds: bool = True
+    ) -> dict:
+        """
+        Retrieve all DM history with a specific user as structured data.
+        
+        Args:
+            user_id: The ID of the user to export DM history with
+            include_attachments: Whether to include attachment metadata
+            include_embeds: Whether to include embed data
+            
+        Returns:
+            Dictionary containing the DM history data
+        """
+        try:
+            # Get the user
+            user = self.bot.get_user(user_id)
+            dm_channel = None
+
+            if user and user.dm_channel:
+                dm_channel = user.dm_channel
+
+            # Fall back: search private_channels
+            if dm_channel is None:
+                for dm in self.bot.private_channels:
+                    if isinstance(dm, discord.DMChannel) and dm.recipient.id == user_id:
+                        dm_channel = dm
+                        user = dm.recipient
+                        break
+
+            if dm_channel is None:
+                raise ValueError(f"DM channel with {user_id} not found in cache")
+            
+            logger.info(f"[💬] Starting DM export with {user} ({user_id})")
+            
+            # Collect all messages
+            messages = []
+            async for message in dm_channel.history(limit=None, oldest_first=True):
+                message_data = {
+                    "id": str(message.id),
+                    "timestamp": message.created_at.isoformat(),
+                    "author": {
+                        "id": str(message.author.id),
+                        "name": message.author.name,
+                        "discriminator": message.author.discriminator,
+                        "bot": message.author.bot,
+                        "avatar_url": str(message.author.avatar.url) if message.author.avatar else None
+                    },
+                    "content": message.content,
+                    "type": str(message.type),
+                    "edited_timestamp": message.edited_at.isoformat() if message.edited_at else None
+                }
+                
+                # Add attachments if requested
+                if include_attachments and message.attachments:
+                    message_data["attachments"] = [
+                        {
+                            "id": str(att.id),
+                            "filename": att.filename,
+                            "url": att.url,
+                            "size": att.size,
+                            "content_type": att.content_type
+                        }
+                        for att in message.attachments
+                    ]
+                
+                # Add embeds if requested
+                if include_embeds and message.embeds:
+                    message_data["embeds"] = [
+                        {
+                            "title": embed.title,
+                            "description": embed.description,
+                            "url": embed.url,
+                            "timestamp": embed.timestamp.isoformat() if embed.timestamp else None,
+                            "color": embed.color.value if embed.color else None,
+                            "footer": {
+                                "text": embed.footer.text,
+                                "icon_url": embed.footer.icon_url
+                            } if embed.footer else None,
+                            "image": {
+                                "url": embed.image.url
+                            } if embed.image else None,
+                            "thumbnail": {
+                                "url": embed.thumbnail.url
+                            } if embed.thumbnail else None,
+                            "author": {
+                                "name": embed.author.name,
+                                "url": embed.author.url,
+                                "icon_url": embed.author.icon_url
+                            } if embed.author else None,
+                            "fields": [
+                                {
+                                    "name": field.name,
+                                    "value": field.value,
+                                    "inline": field.inline
+                                }
+                                for field in embed.fields
+                            ]
+                        }
+                        for embed in message.embeds
+                    ]
+                
+                messages.append(message_data)
+            
+            # Create final data structure
+            export_data = {
+                "metadata": {
+                    "export_timestamp": datetime.now(timezone.utc).isoformat(),
+                    "user_id": str(user_id),
+                    "user_name": user.name,
+                    "user_discriminator": user.discriminator,
+                    "total_messages": len(messages),
+                    "export_settings": {
+                        "include_attachments": include_attachments,
+                        "include_embeds": include_embeds
+                    }
+                },
+                "messages": messages
+            }
+            
+            logger.info(f"[✅] DM export complete: {len(messages)} messages retrieved")
+            return export_data
+            
+        except discord.Forbidden:
+            logger.error(f"[❌] Cannot access DM history with user {user_id} (forbidden)")
+            raise
+        except discord.HTTPException as e:
+            logger.error(f"[❌] HTTP error during DM export: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"[❌] Unexpected error during DM export: {e}")
+            raise
+
 
     async def _shutdown(self):
         """
