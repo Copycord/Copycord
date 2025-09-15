@@ -479,14 +479,58 @@ class ClientListener:
                 return {"ok": False, "error": str(e)}
 
         elif typ == "export_dm_history":
-            uid = int(data.get("user_id"))
+            uid = int(data["user_id"])
+            webhook_url = data.get("webhook_url")
 
-            try:
-                export_data = await self.export_dm_history(uid)
-                return {"ok": True, "data": export_data}
-            except Exception as e:
-                logger.exception("DM export failed")
-                return {"ok": False, "error": str(e)}
+            async def _export():
+                try:
+                    # ---- resolve DM channel from cache only (no REST) ----
+                    user = self.bot.get_user(uid)
+                    dm = None
+                    if user and user.dm_channel:
+                        dm = user.dm_channel
+                    if dm is None:
+                        for ch in self.bot.private_channels:
+                            if isinstance(ch, discord.DMChannel) and ch.recipient and ch.recipient.id == uid:
+                                dm = ch
+                                user = ch.recipient
+                                break
+
+                    if dm is None:
+                        # No cached DM; cannot proceed without REST (which self-bots can’t use)
+                        await self.ws.send({
+                            "type": "export_dm_done",
+                            "data": {"user_id": uid, "webhook_url": webhook_url, "error": "dm-not-in-cache"}
+                        })
+                        return
+
+                    # ---- stream oldest → newest, one message per WS event ----
+                    async for msg in dm.history(limit=None, oldest_first=True):
+                        payload = {
+                            "type": "export_dm_message",
+                            "data": {
+                                "user_id": uid,
+                                "webhook_url": webhook_url,
+                                "message": self.msg.serialize(msg),  # uses MessageUtils.serialize
+                            },
+                        }
+                        await self.ws.send(payload)
+                        await asyncio.sleep(2)
+
+                    # tell server we’re done
+                    await self.ws.send({
+                        "type": "export_dm_done",
+                        "data": {"user_id": uid, "webhook_url": webhook_url},
+                    })
+
+                except Exception as e:
+                    await self.ws.send({
+                        "type": "export_dm_done",
+                        "data": {"user_id": uid, "webhook_url": webhook_url, "error": str(e)},
+                    })
+
+            asyncio.create_task(_export())
+            return {"ok": True}
     
         return None
 
