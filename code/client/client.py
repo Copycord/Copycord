@@ -484,6 +484,7 @@ class ClientListener:
 
             async def _export():
                 try:
+                    # --- resolve DM from cache only ---
                     user = self.bot.get_user(uid)
                     dm = None
                     if user and user.dm_channel:
@@ -498,9 +499,11 @@ class ClientListener:
                     if dm is None:
                         await self.ws.send({
                             "type": "export_dm_done",
-                            "data": {"user_id": uid, "webhook_url": webhook_url, "error": "dm-not-in-cache"}
+                            "data": {"user_id": uid, "username": None, "webhook_url": webhook_url, "error": "dm-not-in-cache"},
                         })
                         return
+
+                    uname = getattr(user, "global_name", None) or getattr(user, "display_name", None) or user.name
 
                     async for msg in dm.history(limit=None, oldest_first=True):
                         payload = {
@@ -508,25 +511,26 @@ class ClientListener:
                             "data": {
                                 "user_id": uid,
                                 "webhook_url": webhook_url,
-                                "message": self.msg.serialize(msg),  # uses MessageUtils.serialize
+                                "message": self.msg.serialize(msg),
                             },
                         }
                         await self.ws.send(payload)
-                        await asyncio.sleep(2)
+                        await asyncio.sleep(0)
 
                     await self.ws.send({
                         "type": "export_dm_done",
-                        "data": {"user_id": uid, "webhook_url": webhook_url},
+                        "data": {"user_id": uid, "username": uname, "webhook_url": webhook_url},
                     })
 
                 except Exception as e:
                     await self.ws.send({
                         "type": "export_dm_done",
-                        "data": {"user_id": uid, "webhook_url": webhook_url, "error": str(e)},
+                        "data": {"user_id": uid, "username": None, "webhook_url": webhook_url, "error": str(e)},
                     })
 
             asyncio.create_task(_export())
             return {"ok": True}
+
     
         return None
 

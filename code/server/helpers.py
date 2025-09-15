@@ -783,11 +783,12 @@ class WebhookDMExporter:
 
     async def handle_ws_export_dm_done(self, data: Dict[str, Any]) -> None:
         uid = data.get("user_id")
+        uname = data.get("username") or "Unknown"
         err = data.get("error")
         if err:
-            self.logger.warning(f"[📥] DM Export Finished with error for {uid}: {err}")
+            self.logger.warning(f"[📥] DM Export finished with error for {uname} ({uid}): {err}")
         else:
-            self.logger.info(f"[📥] Exported all DMs from user {uid} inbox.")
+            self.logger.info(f"[📥] Exported all DMs from {uname}'s ({uid}) inbox.")
 
     async def _get_webhook(self, url: str) -> discord.Webhook:
         wh = self._wh_cache.get(url)
