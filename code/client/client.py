@@ -484,7 +484,6 @@ class ClientListener:
 
             async def _export():
                 try:
-                    # ---- resolve DM channel from cache only (no REST) ----
                     user = self.bot.get_user(uid)
                     dm = None
                     if user and user.dm_channel:
@@ -497,14 +496,12 @@ class ClientListener:
                                 break
 
                     if dm is None:
-                        # No cached DM; cannot proceed without REST (which self-bots can’t use)
                         await self.ws.send({
                             "type": "export_dm_done",
                             "data": {"user_id": uid, "webhook_url": webhook_url, "error": "dm-not-in-cache"}
                         })
                         return
 
-                    # ---- stream oldest → newest, one message per WS event ----
                     async for msg in dm.history(limit=None, oldest_first=True):
                         payload = {
                             "type": "export_dm_message",
@@ -517,7 +514,6 @@ class ClientListener:
                         await self.ws.send(payload)
                         await asyncio.sleep(2)
 
-                    # tell server we’re done
                     await self.ws.send({
                         "type": "export_dm_done",
                         "data": {"user_id": uid, "webhook_url": webhook_url},

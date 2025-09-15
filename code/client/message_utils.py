@@ -194,7 +194,7 @@ class MessageUtils:
         return attrs
     
     def serialize(self, message: discord.Message) -> dict:
-        """Convert a Discord message into a serializable dict for export."""
+        """Convert a Discord message into a serializable dict for dm export."""
         data = {
             "id": str(message.id),
             "timestamp": message.created_at.isoformat(),
@@ -224,7 +224,7 @@ class MessageUtils:
 
         if message.embeds:
             embed_dicts = [e.to_dict() for e in message.embeds]
-            id_map = {}  # optionally from build_mention_map
+            id_map = {}
             data["embeds"] = [
                 self.sanitize_embed_dict(e, message, id_map) for e in embed_dicts
             ]
