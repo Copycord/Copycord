@@ -588,6 +588,8 @@ class ServerReceiver:
             asyncio.create_task(self.onjoin.handle_member_joined(data))
             
         elif typ == "export_dm_message":
+            if getattr(self, "shutting_down", False) or self.webhook_exporter.is_stopped:
+                return
             await self.webhook_exporter.handle_ws_export_dm_message(data)
 
         elif typ == "export_dm_done":

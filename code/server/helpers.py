@@ -767,6 +767,20 @@ class WebhookDMExporter:
         self.session = session
         self.logger = logger
         self._wh_cache: Dict[str, discord.Webhook] = {}
+        self._stopped: bool = False
+        
+    @property
+    def is_stopped(self) -> bool:
+        return self._stopped
+
+    async def stop(self) -> None:
+        """Prevent any future webhook sends. Safe to call multiple times."""
+        if self._stopped:
+            return
+        self._stopped = True
+        # Clear webhook cache to avoid reusing handles after stop.
+        self._wh_cache.clear()
+        self.logger.info("[Shutdown] WebhookDMExporter stopped; dropping further sends.")
 
     async def handle_ws_export_dm_message(self, data: Dict[str, Any]) -> None:
         """
@@ -805,6 +819,11 @@ class WebhookDMExporter:
         - Non-image attachments appended as links
         - Skips empty payloads (prevents 400)
         """
+        if self._stopped:
+            mid = msg_data.get("id")
+            self.logger.debug(f"[Shutdown] Dropping send for msg_id={mid} (exporter stopped)")
+            return
+        
         author = msg_data.get("author") or {}
         raw_content = (msg_data.get("content") or "").strip()
         embeds_in: List[dict] = msg_data.get("embeds") or []

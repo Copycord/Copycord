@@ -515,7 +515,7 @@ class ClientListener:
                             },
                         }
                         await self.ws.send(payload)
-                        await asyncio.sleep(0)
+                        await asyncio.sleep(2)
 
                     await self.ws.send({
                         "type": "export_dm_done",
