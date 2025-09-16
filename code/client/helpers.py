@@ -231,7 +231,7 @@ class ClientUiController:
             self.log.debug("_listen_loop cancelled"); raise
         except Exception as e:
             self.log.exception("Fatal error in _listen_loop subscribe | err=%s", e)
-            await asyncio.sleep(0.5)\
+            await asyncio.sleep(0.5)
                 
     def _pick_guild(self) -> Optional["discord.Guild"]:
         """Return the configured guild if available, otherwise the first guild (fallback)."""

@@ -73,7 +73,7 @@ class SitemapService:
             "[sitemap] using guild %s (%s)%s",
             getattr(guild, "name", "?"),
             getattr(guild, "id", "?"),
-            "" if (self.host_guild_id and guild.id == self.host_guild_id) else " [fallback]"
+            "" if (self.host_guild_id and guild is not None and getattr(guild, "id", None) == self.host_guild_id) else " [fallback]"
         )
         if not guild:
             self.logger.warning("[⛔] No accessible guild found to build a sitemap.")
