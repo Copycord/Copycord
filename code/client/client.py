@@ -89,6 +89,9 @@ class ClientListener:
         self._scrape_task = None
         self._scrape_gid = None
         self.do_precount = True
+        self._dm_export_lock = asyncio.Lock()
+        self._dm_export_task: asyncio.Task | None = None
+        self._dm_export_running: bool = False
         self.bot.event(self.on_ready)
         self.bot.event(self.on_message)
         self.bot.event(self.on_guild_channel_create)
@@ -495,87 +498,96 @@ class ClientListener:
             uid = int(data["user_id"])
             webhook_url = data.get("webhook_url")
 
-            async def _export():
-                try:
-                    user = self.bot.get_user(uid)
-                    dm = None
-                    if user and user.dm_channel:
-                        dm = user.dm_channel
-                    if dm is None:
-                        for ch in self.bot.private_channels:
-                            if isinstance(ch, discord.DMChannel) and ch.recipient and ch.recipient.id == uid:
-                                dm = ch
-                                user = ch.recipient
+            async with self._dm_export_lock:
+                if getattr(self, "_dm_export_running", False) and self._dm_export_task and not self._dm_export_task.done():
+                    return {"ok": False, "error": "dm-export-in-progress"}
+
+                async def _export():
+                    try:
+                        user = self.bot.get_user(uid)
+                        dm = None
+                        if user and user.dm_channel:
+                            dm = user.dm_channel
+                        if dm is None:
+                            for ch in self.bot.private_channels:
+                                if isinstance(ch, discord.DMChannel) and ch.recipient and ch.recipient.id == uid:
+                                    dm = ch
+                                    user = ch.recipient
+                                    break
+
+                        if dm is None:
+                            logger.warning(f"[📥] DM export aborted: DM not in cache for user_id={uid}")
+                            await self.ws.send({
+                                "type": "export_dm_done",
+                                "data": {
+                                    "user_id": uid,
+                                    "username": None,
+                                    "webhook_url": webhook_url,
+                                    "error": "dm-not-in-cache",
+                                },
+                            })
+                            return
+
+                        uname = getattr(user, "global_name", None) or getattr(user, "display_name", None) or user.name
+
+                        found = 0
+                        async for _ in dm.history(limit=None, oldest_first=True):
+                            found += 1
+
+                        logger.info(f"[📥] Starting DM export for {uname} ({uid}) — messages found: {found}")
+
+                        if found == 0:
+                            await self.ws.send({
+                                "type": "export_dm_done",
+                                "data": {"user_id": uid, "username": uname, "webhook_url": webhook_url},
+                            })
+                            return
+
+                        sent = 0
+                        async for msg in dm.history(limit=None, oldest_first=True):
+                            serialized = self.msg.serialize(msg)
+                            payload = {
+                                "type": "export_dm_message",
+                                "data": {
+                                    "user_id": uid,
+                                    "webhook_url": webhook_url,
+                                    "message": serialized,
+                                },
+                            }
+
+                            try:
+                                await self.ws.send(payload)
+                                sent += 1
+                                author_tag = f"{getattr(msg.author, 'global_name', None) or msg.author.name}"
+                                logger.info(f"[📥] DM Export: sent msg_id={msg.id} author={author_tag}")
+                            except Exception as send_err:
+                                logger.warning(
+                                    f"[📥] DM Export: websocket send failed (likely closed) for msg_id={getattr(msg, 'id', 'unknown')}: {send_err}"
+                                )
                                 break
 
-                    if dm is None:
-                        logger.warning(f"[📥] DM export aborted: DM not in cache for user_id={uid}")
-                        await self.ws.send({
-                            "type": "export_dm_done",
-                            "data": {
-                                "user_id": uid,
-                                "username": None,
-                                "webhook_url": webhook_url,
-                                "error": "dm-not-in-cache",
-                            },
-                        })
-                        return
+                            await asyncio.sleep(2)  # throttle
 
-                    uname = getattr(user, "global_name", None) or getattr(user, "display_name", None) or user.name
+                        logger.info(f"[📥] DM export finished for {uname} ({uid}) — total sent: {sent}/{found}")
 
-                    found = 0
-                    async for _ in dm.history(limit=None, oldest_first=True):
-                        found += 1
-
-                    logger.info(f"[📥] Starting DM export for {uname} ({uid}) — messages found: {found}")
-
-                    if found == 0:
                         await self.ws.send({
                             "type": "export_dm_done",
                             "data": {"user_id": uid, "username": uname, "webhook_url": webhook_url},
                         })
-                        return
 
-                    sent = 0
-                    async for msg in dm.history(limit=None, oldest_first=True):
-                        serialized = self.msg.serialize(msg)
-                        payload = {
-                            "type": "export_dm_message",
-                            "data": {
-                                "user_id": uid,
-                                "webhook_url": webhook_url,
-                                "message": serialized,
-                            },
-                        }
+                    except Exception as e:
+                        logger.exception(f"[📥] DM export error for user_id={uid}: {e}")
+                        await self.ws.send({
+                            "type": "export_dm_done",
+                            "data": {"user_id": uid, "username": None, "webhook_url": webhook_url, "error": str(e)},
+                        })
+                    finally:
+                        self._dm_export_running = False
+                        self._dm_export_task = None
 
-                        try:
-                            await self.ws.send(payload)
-                            sent += 1
-                            author_tag = (
-                                f"{getattr(msg.author, 'global_name', None) or msg.author.name}"
-                            )
-                            logger.info(f"[📥] DM Export: sent msg_id={msg.id} author={author_tag}")
-                        except Exception as send_err:
-                            logger.warning(f"[📥] DM Export: websocket send failed (likely closed) for msg_id={getattr(msg, 'id', 'unknown')}: {send_err}")
-                            break
+                self._dm_export_running = True
+                self._dm_export_task = asyncio.create_task(_export())
 
-                        await asyncio.sleep(2)  # throttle
-
-                    logger.info(f"[📥] DM export finished for {uname} ({uid}) — total sent: {sent}/{found}")
-
-                    await self.ws.send({
-                        "type": "export_dm_done",
-                        "data": {"user_id": uid, "username": uname, "webhook_url": webhook_url},
-                    })
-
-                except Exception as e:
-                    logger.exception(f"[📥] DM export error for user_id={uid}: {e}")
-                    await self.ws.send({
-                        "type": "export_dm_done",
-                        "data": {"user_id": uid, "username": None, "webhook_url": webhook_url, "error": str(e)},
-                    })
-
-            asyncio.create_task(_export())
             return {"ok": True}
 
     
