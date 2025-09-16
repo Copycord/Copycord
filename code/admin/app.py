@@ -1482,21 +1482,33 @@ def _write_env(values: Dict[str, str]) -> None:
 
 def _validate(values: Dict[str, str]) -> List[str]:
     errs: List[str] = []
+
     for k in REQUIRED:
-        if not values.get(k):
+        if not (values.get(k) or "").strip():
             errs.append(f"Missing {k}")
-    for k in ("HOST_GUILD_ID", "CLONE_GUILD_ID"):
-        raw = values.get(k, "")
+
+    raw_clone = (values.get("CLONE_GUILD_ID", "") or "").strip()
+    try:
+        if int(raw_clone) <= 0:
+            errs.append("CLONE_GUILD_ID must be a positive integer")
+    except Exception:
+        errs.append("CLONE_GUILD_ID must be an integer")
+
+    raw_host = (values.get("HOST_GUILD_ID", "") or "").strip()
+    if raw_host != "":
         try:
-            if int(raw) <= 0:
-                errs.append(f"{k} must be a positive integer")
+            if int(raw_host) <= 0:
+                errs.append("HOST_GUILD_ID must be a positive integer")
         except Exception:
-            errs.append(f"{k} must be an integer")
+            errs.append("HOST_GUILD_ID must be an integer")
+
     if errs:
         LOGGER.warning("Config validation failed | errs=%s", errs)
     else:
         LOGGER.debug("Config validation ok")
+
     return errs
+
 
 
 def _norm_bool_str(v: str) -> str:
