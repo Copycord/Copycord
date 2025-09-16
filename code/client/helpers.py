@@ -26,7 +26,7 @@ class ClientUiController:
         bus,          
         admin_base_url: str,      
         bot: discord.Client,
-        guild_id: int,
+        guild_id: Optional[int], 
         listener,  
         logger: Optional[logging.Logger] = None,
         topic: str = "client",
@@ -34,7 +34,10 @@ class ClientUiController:
         self.bus = bus
         self.admin_base_url = admin_base_url.rstrip("/")
         self.bot = bot
-        self.guild_id = int(guild_id)
+        try:
+            self.guild_id = int(guild_id) if guild_id is not None else None
+        except (TypeError, ValueError):
+            self.guild_id = None
         self.listener = listener
         self.topic = topic
         self.log = logger or logging.getLogger("ClientUiController")
@@ -48,8 +51,9 @@ class ClientUiController:
             return
         self._stopping = False
         self._task = asyncio.create_task(self._listen_loop(), name="ui-listen")
+        gid_dbg = self.guild_id if self.guild_id is not None else "(none)"
         self.log.debug("ClientUiController started | task=%s guild_id=%s admin_base_url=%s topic=%s",
-                      self._task.get_name(), self.guild_id, self.admin_base_url, self.topic)
+                    self._task.get_name(), gid_dbg, self.admin_base_url, self.topic)
 
     async def stop(self) -> None:
         self._stopping = True
@@ -227,11 +231,20 @@ class ClientUiController:
             self.log.debug("_listen_loop cancelled"); raise
         except Exception as e:
             self.log.exception("Fatal error in _listen_loop subscribe | err=%s", e)
-            await asyncio.sleep(0.5)
-
+            await asyncio.sleep(0.5)\
+                
+    def _pick_guild(self) -> Optional["discord.Guild"]:
+        """Return the configured guild if available, otherwise the first guild (fallback)."""
+        g = None
+        if self.guild_id:
+            g = self.bot.get_guild(self.guild_id)
+        if not g and self.bot.guilds:
+            g = self.bot.guilds[0]
+        return g
+    
     # -------- actions --------
     async def _act_status(self, *, req_id: str, data: Dict[str, Any]):
-        guild = self.bot.get_guild(self.guild_id)
+        guild = self._pick_guild()
         discord_ready = getattr(self.bot, "is_ready", lambda: False)()
         info = {
             "type": "status",
