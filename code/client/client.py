@@ -567,25 +567,30 @@ class ClientListener:
         Event handler that is triggered when the bot is ready.
         """
         host_guild = self.bot.get_guild(self.host_guild_id)
+
         if host_guild is None:
-            logger.error(
-                "[⛔] %s is not a member of the guild %s; shutting down.",
-                self.bot.user,
-                self.host_guild_id,
-            )
-            sys.exit(1)
+            # Do NOT exit; just disable cloning and keep the rest of the app alive.
+            await self._disable_cloning(self, f"bot is not a member of guild {self.host_guild_id}")
+            host_name = f"guild:{self.host_guild_id} (missing)"
+        else:
+            host_name = host_guild.name
+
         asyncio.create_task(self.config.setup_release_watcher(self, should_dm=False))
-        msg = f"Logged in as {self.bot.user.display_name} in {host_guild.name}"
         self.ui_controller.start()
+
+        msg = f"Logged in as {self.bot.user.display_name}"
         await self.bus.status(running=True, status=msg, discord={"ready": True})
         logger.info("[🤖] %s", msg)
-        if self.config.ENABLE_CLONING:
+
+        if self.config.ENABLE_CLONING and host_guild is not None:
             if self._sync_task is None:
                 self._sync_task = asyncio.create_task(self.periodic_sync_loop())
         else:
             logger.info("[🔕] Server cloning is disabled...")
+
         if self._ws_task is None:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
+
         asyncio.create_task(self._snapshot_all_guilds_once())
 
     def _rebuild_blocklist(self, keywords: list[str] | None = None) -> None:
