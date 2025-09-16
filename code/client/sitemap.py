@@ -29,14 +29,17 @@ class SitemapService:
         config,
         db,
         ws,
-        host_guild_id: int,
+        host_guild_id: Optional[int],
         logger: Optional[logging.Logger] = None,
     ):
         self.bot = bot
         self.config = config
         self.db = db
         self.ws = ws
-        self.host_guild_id = int(host_guild_id)
+        try:
+            self.host_guild_id = int(host_guild_id) if host_guild_id is not None else None
+        except (TypeError, ValueError):
+            self.host_guild_id = None
         self.logger = logger or logging.getLogger("client.sitemap")
         self._debounce_task: asyncio.Task | None = None
 
@@ -44,6 +47,16 @@ class SitemapService:
         """Debounced sitemap send."""
         if self._debounce_task is None:
             self._debounce_task = asyncio.create_task(self._debounced(delay))
+            
+    def _pick_guild(self) -> Optional["discord.Guild"]:
+        """Return the configured host guild, or a sensible fallback (first guild)."""
+        g = None
+        if self.host_guild_id:
+            g = self.bot.get_guild(self.host_guild_id)
+        if not g and self.bot.guilds:
+            # fallback: first guild the bot is in
+            g = self.bot.guilds[0]
+        return g
 
     async def build_and_send(self) -> None:
         """Build, filter, and send the sitemap via websocket."""
@@ -55,10 +68,25 @@ class SitemapService:
 
     async def build(self) -> Dict:
         """Build the raw sitemap, then filter it per config."""
-        guild = self.bot.get_guild(self.host_guild_id)
+        guild = self._pick_guild()
+        self.logger.debug(
+            "[sitemap] using guild %s (%s)%s",
+            getattr(guild, "name", "?"),
+            getattr(guild, "id", "?"),
+            "" if (self.host_guild_id and guild is not None and getattr(guild, "id", None) == self.host_guild_id) else " [fallback]"
+        )
         if not guild:
-            self.logger.error("[⛔] Guild %s not found", self.host_guild_id)
-            return {}
+            self.logger.warning("[⛔] No accessible guild found to build a sitemap.")
+            return {
+                "categories": [],
+                "standalone_channels": [],
+                "forums": [],
+                "threads": [],
+                "emojis": [],
+                "stickers": [],
+                "roles": [],
+                "community": {"enabled": False, "rules_channel_id": None, "public_updates_channel_id": None},
+            }
 
         def _enum_int(val, default=0):
             if val is None:

@@ -72,7 +72,8 @@ class ClientListener:
     def __init__(self):
         self.config = Config(logger=logger)
         self.db = DBManager(self.config.DB_PATH)
-        self.host_guild_id = int(self.config.HOST_GUILD_ID)
+        raw = (self.config.HOST_GUILD_ID or "").strip()
+        self.host_guild_id = int(raw) if raw.isdigit() else None
         self.blocked_keywords = self.db.get_blocked_keywords()
         self._rebuild_blocklist(self.blocked_keywords)
         self.start_time = datetime.now(timezone.utc)
@@ -166,6 +167,10 @@ class ClientListener:
                 },
             }
         elif typ == "filters_reload":
+            if not self.host_guild_id or not self.config.ENABLE_CLONING:
+                logger.debug("[⚙️] Ignoring filters_reload: no host guild or cloning disabled")
+                return {"ok": False, "skipped": True, "reason": "no-host-or-cloning-disabled"}
+
             self.config._load_filters_from_db()
             logger.info("[⚙️] Filters reloaded from DB")
 
@@ -212,12 +217,20 @@ class ClientListener:
             return {"ok": True}
 
         elif typ == "sitemap_request":
-            if self.config.ENABLE_CLONING:
-                self.schedule_sync()
-                logger.info("[🌐] Received sitemap request")
-                return {"ok": True}
-            else:
+            if not self.config.ENABLE_CLONING:
                 return {"ok": False, "error": "Cloning is disabled"}
+
+            if not self.host_guild_id:
+                logger.warning("[🌐] sitemap_request ignored: no host guild configured")
+                return {"ok": False, "error": "No host guild configured"}
+
+            if not self.bot.get_guild(int(self.host_guild_id)):
+                logger.warning("[🌐] sitemap_request ignored: not a member of host guild %s", self.host_guild_id)
+                return {"ok": False, "error": f"Not a member of host guild {self.host_guild_id}"}
+
+            self.schedule_sync()
+            logger.info("[🌐] Received sitemap request")
+            return {"ok": True}
 
         elif typ == "scrape_members":
             data = data or {}
@@ -615,32 +628,50 @@ class ClientListener:
 
     def schedule_sync(self):
         self.sitemap.schedule_sync()
+        
+    def _is_host_guild(self, g: "discord.Guild | None") -> bool:
+        if not self.config.ENABLE_CLONING:
+            return False
+        if self.host_guild_id is None:
+            return False
+        return bool(g and g.id == self.host_guild_id)
+    
+    async def _disable_cloning(self, reason: str = ""):
+        logger.info("[🔕] Disabling server cloning: %s", reason or "(no reason)")
+        self.config.ENABLE_CLONING = False
+        if self._sync_task:
+            try:
+                self._sync_task.cancel()
+            except Exception:
+                pass
+            self._sync_task = None
 
     async def on_ready(self):
-        """
-        Event handler that is triggered when the bot is ready.
-        """
-        host_guild = self.bot.get_guild(self.host_guild_id)
-        if host_guild is None:
-            logger.error(
-                "[⛔] %s is not a member of the guild %s; shutting down.",
-                self.bot.user,
-                self.host_guild_id,
-            )
-            sys.exit(1)
+        host_guild = self.bot.get_guild(self.host_guild_id) if self.host_guild_id else None
+
+        if host_guild is None and self.config.ENABLE_CLONING:
+            await self._disable_cloning("No host guild configured or not a member of host guild.")
+            host_name = "(no host guild)"
+        else:
+            host_name = host_guild.name if host_guild else "(no host guild)"
+
         asyncio.create_task(self.config.setup_release_watcher(self, should_dm=False))
-        msg = f"Logged in as {self.bot.user.display_name} in {host_guild.name}"
         self.ui_controller.start()
+
+        msg = f"Logged in as {self.bot.user.display_name}"
         await self.bus.status(running=True, status=msg, discord={"ready": True})
         logger.info("[🤖] %s", msg)
-        if self.config.ENABLE_CLONING:
+
+        if self.config.ENABLE_CLONING and host_guild is not None:
             if self._sync_task is None:
                 self._sync_task = asyncio.create_task(self.periodic_sync_loop())
         else:
-            logger.info("[🔕] Server cloning is disabled...")
+            if self.host_guild_id is not None:
+                logger.info("[🔕] Server cloning is disabled...")
 
         if self._ws_task is None:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
+
         asyncio.create_task(self._snapshot_all_guilds_once())
 
     def _rebuild_blocklist(self, keywords: list[str] | None = None) -> None:
@@ -688,7 +719,7 @@ class ClientListener:
         if message.type == MessageType.channel_name_change:
             return True
 
-        if message.guild is None or message.guild.id != self.host_guild_id:
+        if not self._is_host_guild(message.guild):
             return True
 
         if message.channel.type in (ChannelType.voice, ChannelType.stage_voice):
@@ -765,107 +796,112 @@ class ClientListener:
         Handles incoming Discord messages and processes them for forwarding.
         This method is triggered whenever a message is sent in a channel the bot has access to.
         """
-        if self.config.ENABLE_CLONING:
 
-            if self.should_ignore(message):
-                return
+        if not self.config.ENABLE_CLONING:
+            return
 
-            await self.maybe_send_announcement(message)
+        if not self._is_host_guild(message.guild):
+            return
+        
+        if self.should_ignore(message):
+            return
 
-            raw = message.content or ""
-            system = getattr(message, "system_content", "") or ""
-            if not raw and system:
-                content = system
-                author = "System"
-            else:
-                content = raw
-                author = message.author.name
+        await self.maybe_send_announcement(message)
 
-            attachments = [
-                {
-                    "url": att.url,
-                    "filename": att.filename,
-                    "size": att.size,
-                }
-                for att in message.attachments
-            ]
+        raw = message.content or ""
+        system = getattr(message, "system_content", "") or ""
+        if not raw and system:
+            content = system
+            author = "System"
+        else:
+            content = raw
+            author = message.author.name
 
-            raw_embeds = [e.to_dict() for e in message.embeds]
-            mention_map = await self.msg.build_mention_map(message, raw_embeds)
-            embeds = [
-                self.msg.sanitize_embed_dict(e, message, mention_map)
-                for e in raw_embeds
-            ]
-            content = self.msg.sanitize_inline(content, message, mention_map)
-
-            components: list[dict] = []
-            for comp in message.components:
-                try:
-                    components.append(comp.to_dict())
-                except NotImplementedError:
-                    row: dict = {"type": getattr(comp, "type", None), "components": []}
-                    for child in getattr(comp, "children", []):
-                        child_data: dict = {}
-                        for attr in ("custom_id", "label", "style", "url", "disabled"):
-                            if hasattr(child, attr):
-                                child_data[attr] = getattr(child, attr)
-                        if hasattr(child, "emoji") and child.emoji:
-                            emoji = child.emoji
-                            emoji_data: dict = {}
-                            if hasattr(emoji, "name"):
-                                emoji_data["name"] = emoji.name
-                            if getattr(emoji, "id", None):
-                                emoji_data["id"] = emoji.id
-                            child_data["emoji"] = emoji_data
-                        row["components"].append(child_data)
-                    components.append(row)
-
-            is_thread = message.channel.type in (
-                ChannelType.public_thread,
-                ChannelType.private_thread,
-            )
-
-            stickers_payload = self.msg.stickers_payload(
-                getattr(message, "stickers", [])
-            )
-
-            payload = {
-                "type": "thread_message" if is_thread else "message",
-                "data": {
-                    "channel_id": message.channel.id,
-                    "channel_name": message.channel.name,
-                    "channel_type": message.channel.type.value,
-                    "author": author,
-                    "author_id": message.author.id,
-                    "avatar_url": (
-                        str(message.author.display_avatar.url)
-                        if message.author.display_avatar
-                        else None
-                    ),
-                    "content": content,
-                    "timestamp": str(message.created_at),
-                    "attachments": attachments,
-                    "components": components,
-                    "stickers": stickers_payload,
-                    "embeds": embeds,
-                    **(
-                        {
-                            "thread_parent_id": message.channel.parent.id,
-                            "thread_parent_name": message.channel.parent.name,
-                            "thread_id": message.channel.id,
-                            "thread_name": message.channel.name,
-                        }
-                        if is_thread
-                        else {}
-                    ),
-                },
+        attachments = [
+            {
+                "url": att.url,
+                "filename": att.filename,
+                "size": att.size,
             }
-            await self.ws.send(payload)
-            logger.info(
-                "[📩] New msg detected in #%s from %s; forwarding to server",
-                message.channel.name,
-                message.author.name,
-            )
+            for att in message.attachments
+        ]
+
+        raw_embeds = [e.to_dict() for e in message.embeds]
+        mention_map = await self.msg.build_mention_map(message, raw_embeds)
+        embeds = [
+            self.msg.sanitize_embed_dict(e, message, mention_map)
+            for e in raw_embeds
+        ]
+        content = self.msg.sanitize_inline(content, message, mention_map)
+
+        components: list[dict] = []
+        for comp in message.components:
+            try:
+                components.append(comp.to_dict())
+            except NotImplementedError:
+                row: dict = {"type": getattr(comp, "type", None), "components": []}
+                for child in getattr(comp, "children", []):
+                    child_data: dict = {}
+                    for attr in ("custom_id", "label", "style", "url", "disabled"):
+                        if hasattr(child, attr):
+                            child_data[attr] = getattr(child, attr)
+                    if hasattr(child, "emoji") and child.emoji:
+                        emoji = child.emoji
+                        emoji_data: dict = {}
+                        if hasattr(emoji, "name"):
+                            emoji_data["name"] = emoji.name
+                        if getattr(emoji, "id", None):
+                            emoji_data["id"] = emoji.id
+                        child_data["emoji"] = emoji_data
+                    row["components"].append(child_data)
+                components.append(row)
+
+        is_thread = message.channel.type in (
+            ChannelType.public_thread,
+            ChannelType.private_thread,
+        )
+
+        stickers_payload = self.msg.stickers_payload(
+            getattr(message, "stickers", [])
+        )
+
+        payload = {
+            "type": "thread_message" if is_thread else "message",
+            "data": {
+                "channel_id": message.channel.id,
+                "channel_name": message.channel.name,
+                "channel_type": message.channel.type.value,
+                "author": author,
+                "author_id": message.author.id,
+                "avatar_url": (
+                    str(message.author.display_avatar.url)
+                    if message.author.display_avatar
+                    else None
+                ),
+                "content": content,
+                "timestamp": str(message.created_at),
+                "attachments": attachments,
+                "components": components,
+                "stickers": stickers_payload,
+                "embeds": embeds,
+                **(
+                    {
+                        "thread_parent_id": message.channel.parent.id,
+                        "thread_parent_name": message.channel.parent.name,
+                        "thread_id": message.channel.id,
+                        "thread_name": message.channel.name,
+                    }
+                    if is_thread
+                    else {}
+                ),
+            },
+        }
+        await self.ws.send(payload)
+        logger.info(
+            "[📩] New msg detected in #%s from %s; forwarding to server",
+            message.channel.name,
+            message.author.name,
+        )
 
     async def on_thread_delete(self, thread: discord.Thread):
         """
@@ -875,7 +911,7 @@ class ClientListener:
         it sends a notification payload to the WebSocket server with the thread's ID.
         """
         if self.config.ENABLE_CLONING:
-            if thread.guild.id != self.host_guild_id:
+            if not self._is_host_guild(thread.guild):
                 return
             if not self.sitemap.in_scope_thread(thread):
                 logger.debug(
@@ -894,7 +930,7 @@ class ClientListener:
         """
         if not self.config.ENABLE_CLONING:
             return
-        if not (before.guild and before.guild.id == self.host_guild_id):
+        if not (before.guild and self._is_host_guild(before.guild)):
             return
 
         if not (
@@ -928,7 +964,7 @@ class ClientListener:
         Event handler that is triggered when a new channel is created in a guild.
         """
         if self.config.ENABLE_CLONING:
-            if channel.guild.id != self.host_guild_id:
+            if not self._is_host_guild(channel.guild):
                 return
 
             if not self.sitemap.in_scope_channel(channel):
@@ -944,7 +980,7 @@ class ClientListener:
         Event handler that is triggered when a guild channel is deleted.
         """
         if self.config.ENABLE_CLONING:
-            if channel.guild.id != self.host_guild_id:
+            if not self._is_host_guild(channel.guild):
                 return
             if not self.sitemap.in_scope_channel(channel):
                 logger.debug(
@@ -963,7 +999,7 @@ class ClientListener:
         If a structural change is detected, it schedules a synchronization process.
         """
         if self.config.ENABLE_CLONING:
-            if before.guild.id != self.host_guild_id:
+            if not self._is_host_guild(before.guild):
                 return
 
             if not (
@@ -992,7 +1028,7 @@ class ClientListener:
             self.config, "CLONE_ROLES", True
         ):
             return
-        if role.guild.id != self.host_guild_id:
+        if not self._is_host_guild(role.guild):
             return
         logger.debug("[roles] create: %s (%d) → scheduling sitemap", role.name, role.id)
         self.schedule_sync()
@@ -1002,7 +1038,7 @@ class ClientListener:
             self.config, "CLONE_ROLES", True
         ):
             return
-        if role.guild.id != self.host_guild_id:
+        if not self._is_host_guild(role.guild):
             return
         logger.debug("[roles] delete: %s (%d) → scheduling sitemap", role.name, role.id)
         self.schedule_sync()
@@ -1012,7 +1048,7 @@ class ClientListener:
             self.config, "CLONE_ROLES", True
         ):
             return
-        if after.guild.id != self.host_guild_id:
+        if not self._is_host_guild(after.guild):
             return
         if not self.sitemap.role_change_is_relevant(before, after):
             logger.debug(
@@ -1168,11 +1204,24 @@ class ClientListener:
             }
         )
 
-        guild = self.bot.get_guild(self.host_guild_id)
+        guild = None
+        if self.host_guild_id:
+            guild = self.bot.get_guild(self.host_guild_id)
+
         if not guild:
-            logger.error(
-                "[backfill] ⛔ host guild missing | guild_id=%s", self.host_guild_id
-            )
+            ch_probe = None
+            try:
+                ch_probe = self.bot.get_channel(original_channel_id) or await self.bot.fetch_channel(original_channel_id)
+            except Exception:
+                ch_probe = None
+            if ch_probe and getattr(ch_probe, "guild", None):
+                guild = ch_probe.guild
+
+        if not guild and self.bot.guilds:
+            guild = self.bot.guilds[0]
+
+        if not guild:
+            logger.error("[backfill] ⛔ no accessible guild found for channel=%s", original_channel_id)
             try:
                 await self.ws.send(
                     {
@@ -1188,11 +1237,13 @@ class ClientListener:
                     }
                 )
             return
+
         logger.debug(
             "[backfill] guild OK | id=%s name=%s",
             getattr(guild, "id", None),
             getattr(guild, "name", None),
         )
+
 
         ch = guild.get_channel(original_channel_id)
         if not ch:
@@ -1233,7 +1284,7 @@ class ClientListener:
                 getattr(getattr(ch, "type", None), "value", None),
             )
 
-        if getattr(getattr(ch, "guild", None), "id", None) != self.host_guild_id:
+        if self.host_guild_id and getattr(getattr(ch, "guild", None), "id", None) != self.host_guild_id:
             logger.warning(
                 "[backfill] channel is not in host guild | got_guild=%s expected=%s (was a clone id passed?)",
                 getattr(getattr(ch, "guild", None), "id", None),
