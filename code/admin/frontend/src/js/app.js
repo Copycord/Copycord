@@ -1099,7 +1099,6 @@
   const REQUIRED_KEYS = [
     "SERVER_TOKEN",
     "CLIENT_TOKEN",
-    "HOST_GUILD_ID",
     "CLONE_GUILD_ID",
   ];
   let cfgValidated = false;
@@ -1107,14 +1106,12 @@
   function configState() {
     const get = (id) => (document.getElementById(id)?.value || "").trim();
     const vals = Object.fromEntries(REQUIRED_KEYS.map((k) => [k, get(k)]));
-    const idsOK =
-      /^\d+$/.test(vals.HOST_GUILD_ID) && /^\d+$/.test(vals.CLONE_GUILD_ID);
+    const idsOK = /^\d+$/.test(vals.CLONE_GUILD_ID);
     const ok = !!(vals.SERVER_TOKEN && vals.CLIENT_TOKEN && idsOK);
 
     const missing = [];
     if (!vals.SERVER_TOKEN) missing.push("SERVER_TOKEN");
     if (!vals.CLIENT_TOKEN) missing.push("CLIENT_TOKEN");
-    if (!/^\d+$/.test(vals.HOST_GUILD_ID)) missing.push("HOST_GUILD_ID");
     if (!/^\d+$/.test(vals.CLONE_GUILD_ID)) missing.push("CLONE_GUILD_ID");
 
     return { ok, missing };
@@ -1154,7 +1151,7 @@
     const blockStart = !ok && !running;
     btn.dataset.invalid = blockStart ? "1" : "0";
     btn.title = blockStart
-      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, HOST_GUILD_ID, CLONE_GUILD_ID to start."
+      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, CLONE_GUILD_ID to start."
       : "";
     btn.disabled = !!toggleLocked || blockStart;
   }
@@ -1703,7 +1700,7 @@
 
   function isFieldValid(key, raw) {
     const v = String(raw || "").trim();
-    if (key === "HOST_GUILD_ID" || key === "CLONE_GUILD_ID")
+    if (key === "CLONE_GUILD_ID")
       return /^\d+$/.test(v);
     return v.length > 0;
   }
@@ -1728,7 +1725,7 @@
 
     btn.dataset.invalid = blockStart ? "1" : "0";
     btn.title = blockStart
-      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, HOST_GUILD_ID, CLONE_GUILD_ID to start."
+      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, CLONE_GUILD_ID to start."
       : "";
     btn.disabled = !!toggleLocked || blockStart;
   }

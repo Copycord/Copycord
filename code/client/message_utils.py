@@ -192,3 +192,44 @@ class MessageUtils:
                 continue
             attrs[name] = value
         return attrs
+    
+    def serialize(self, message: discord.Message) -> dict:
+        """Convert a Discord message into a serializable dict for dm export."""
+        data = {
+            "id": str(message.id),
+            "timestamp": message.created_at.isoformat(),
+            "author": {
+                "id": str(message.author.id),
+                "name": message.author.name,
+                "discriminator": message.author.discriminator,
+                "bot": message.author.bot,
+                "avatar_url": str(message.author.avatar.url) if message.author.avatar else None,
+            },
+            "content": self.humanize_user_mentions(message.content, message),
+            "type": str(message.type),
+            "edited_timestamp": message.edited_at.isoformat() if message.edited_at else None,
+        }
+
+        if message.attachments:
+            data["attachments"] = [
+                {
+                    "id": str(att.id),
+                    "filename": att.filename,
+                    "url": att.url,
+                    "size": att.size,
+                    "content_type": att.content_type,
+                }
+                for att in message.attachments
+            ]
+
+        if message.embeds:
+            embed_dicts = [e.to_dict() for e in message.embeds]
+            id_map = {}
+            data["embeds"] = [
+                self.sanitize_embed_dict(e, message, id_map) for e in embed_dicts
+            ]
+
+        if message.stickers:
+            data["stickers"] = self.stickers_payload(message.stickers)
+
+        return data
