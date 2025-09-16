@@ -912,7 +912,23 @@ class CloneCommands(commands.Cog):
         }
 
         try:
-            resp = await self.bot.ws_manager.request(payload, timeout=15)
+            resp = await self.bot.ws_manager.request(payload)
+            
+            if not resp or not resp.get("ok"):
+                err = (resp or {}).get("error") or "Client did not accept the request."
+                if err == "dm-export-in-progress":
+                    return await ctx.followup.send(
+                        embed=self._err_embed(
+                            "Export Already Running",
+                            "A DM export is currently in progress. Please wait until it finishes before starting another."
+                        ),
+                        ephemeral=True,
+                    )
+                return await ctx.followup.send(
+                    embed=self._err_embed("Export Rejected", err),
+                    ephemeral=True,
+                )
+
         except Exception as e:
             return await ctx.followup.send(
                 embed=self._err_embed("Export Failed", f"WebSocket request error: {e}"),
