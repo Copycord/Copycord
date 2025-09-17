@@ -1,7 +1,12 @@
 name: Build & publish Copycord testing containers
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag (leave blank to auto-derive from branch name)'
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -27,17 +32,27 @@ jobs:
         id: vars
         run: echo "owner=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
 
-      - name: Compute tag from branch
+      - name: Compute tag
         id: tag
         shell: bash
         run: |
+          IN_TAG='${{ github.event.inputs.tag }}'
           BRANCH='${{ github.ref_name }}'
-          TAG=$(echo "$BRANCH" \
+
+          if [ -n "$IN_TAG" ]; then
+            TAG_SRC="$IN_TAG"
+          else
+            TAG_SRC="$BRANCH"
+          fi
+
+          TAG=$(echo "$TAG_SRC" \
             | tr '[:upper:]' '[:lower:]' \
             | sed -E 's|[^a-z0-9._-]|-|g' \
             | sed -E 's/^-+//; s/-+$//')
+
           # enforce 128-char docker tag limit
           if [ ${#TAG} -gt 128 ]; then TAG="${TAG:0:128}"; fi
+
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Using tag: $TAG"
 
