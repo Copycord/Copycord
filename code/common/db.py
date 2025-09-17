@@ -907,6 +907,39 @@ class DBManager:
             ORDER BY guild_id ASC, LOWER(keyword) ASC, filter_user_id ASC, channel_id ASC
             """
         ).fetchall()
+        
+    def get_all_announcement_subscriptions_flat(self) -> list[sqlite3.Row]:
+        """
+        Returns every row in announcement_subscriptions with no grouping.
+        Columns: guild_id, keyword, user_id, last_updated
+        """
+        return self.conn.execute(
+            """
+            SELECT guild_id, keyword, user_id, last_updated
+            FROM announcement_subscriptions
+            ORDER BY guild_id ASC, LOWER(keyword) ASC, user_id ASC
+            """
+        ).fetchall()
+
+    def get_effective_announcement_triggers(self, guild_id: int) -> dict[str, list[tuple[int, int]]]:
+        """
+        Triggers that apply to this guild: rows where guild_id IN (guild_id, 0).
+        Returns {keyword: [(filter_user_id, channel_id), ...]} with duplicates removed.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT keyword, filter_user_id, channel_id
+            FROM announcement_triggers
+            WHERE guild_id IN (?, 0)
+            """,
+            (guild_id,),
+        ).fetchall()
+
+        out: dict[str, set[tuple[int, int]]] = {}
+        for r in rows:
+            out.setdefault(r["keyword"], set()).add((int(r["filter_user_id"]), int(r["channel_id"])))
+        return {k: list(v) for k, v in out.items()}
+
 
     def add_onjoin_subscription(self, guild_id: int, user_id: int) -> bool:
         cur = self.conn.execute(
