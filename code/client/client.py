@@ -785,56 +785,46 @@ class ClientListener:
         return False
 
     async def maybe_send_announcement(self, message: discord.Message) -> bool:
-        """
-        Checks if a message contains any announcement triggers and sends an announcement
-        if the conditions are met.
-        """
         content = message.content
         lower = content.lower()
         author = message.author
         chan_id = message.channel.id
+        guild_id = message.guild.id if message.guild else 0
 
-        triggers = self.db.get_announcement_triggers()
+        triggers = self.db.get_announcement_triggers(guild_id)
+        if not triggers:
+            return False
 
         for kw, entries in triggers.items():
             key = kw.lower()
-
             matched = False
 
-            if re.match(r"^\w+$", key):
-                if re.search(rf"\b{re.escape(key)}\b", lower):
-                    matched = True
-
-            if not matched and re.match(r"^[A-Za-z0-9_]+$", key):
-                if re.search(rf"<a?:{re.escape(key)}:\d+>", content):
-                    matched = True
-
+            if re.match(r"^\w+$", key) and re.search(rf"\b{re.escape(key)}\b", lower):
+                matched = True
+            if not matched and re.match(r"^[A-Za-z0-9_]+$", key) and re.search(rf"<a?:{re.escape(key)}:\d+>", content):
+                matched = True
             if not matched and key in lower:
                 matched = True
-
             if not matched:
                 continue
 
             for filter_id, allowed_chan in entries:
-                if (filter_id == 0 or author.id == filter_id) and (
-                    allowed_chan == 0 or chan_id == allowed_chan
-                ):
-
+                if (filter_id == 0 or author.id == filter_id) and (allowed_chan == 0 or chan_id == allowed_chan):
                     payload = {
                         "type": "announce",
                         "data": {
+                            "guild_id": guild_id,
                             "keyword": kw,
                             "content": content,
                             "author": author.name,
                             "channel_id": chan_id,
-                            "channel_name": message.channel.name,
+                            "channel_name": getattr(message.channel, "name", str(chan_id)),
                             "timestamp": str(message.created_at),
                         },
                     }
                     await self.ws.send(payload)
-                    logger.info(f"[📢] Announcement `{kw}` by {author} (filtered).")
+                    logger.info(f"[📢] Announcement `{kw}` by {author} in g={guild_id}.")
                     return True
-
         return False
 
     async def on_message(self, message: discord.Message):
@@ -842,6 +832,7 @@ class ClientListener:
         Handles incoming Discord messages and processes them for forwarding.
         This method is triggered whenever a message is sent in a channel the bot has access to.
         """
+        await self.maybe_send_announcement(message)
 
         if not self.config.ENABLE_CLONING:
             return
@@ -851,8 +842,6 @@ class ClientListener:
         
         if self.should_ignore(message):
             return
-
-        await self.maybe_send_announcement(message)
 
         raw = message.content or ""
         system = getattr(message, "system_content", "") or ""
