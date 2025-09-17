@@ -789,9 +789,10 @@ class ClientListener:
         lower = content.lower()
         author = message.author
         chan_id = message.channel.id
-        guild_id = message.guild.id if message.guild else 0
+        guild_id = message.guild.id if message.guild else 0  # 0 = DMs / no guild
 
-        triggers = self.db.get_announcement_triggers(guild_id)
+        # Load triggers that apply here: this guild + global (guild_id=0)
+        triggers = self.db.get_effective_announcement_triggers(guild_id)
         if not triggers:
             return False
 
@@ -799,21 +800,29 @@ class ClientListener:
             key = kw.lower()
             matched = False
 
+            # 1) bare word (letters/digits/_)
             if re.match(r"^\w+$", key) and re.search(rf"\b{re.escape(key)}\b", lower):
                 matched = True
+
+            # 2) custom/standard emoji like <:key:123> or <a:key:123>
             if not matched and re.match(r"^[A-Za-z0-9_]+$", key) and re.search(rf"<a?:{re.escape(key)}:\d+>", content):
                 matched = True
+
+            # 3) simple substring fallback
             if not matched and key in lower:
                 matched = True
+
             if not matched:
                 continue
 
+            # Filter by author/channel. Note: channel_id filters with guild_id=0 still work
+            # because Discord channel IDs are globally unique.
             for filter_id, allowed_chan in entries:
                 if (filter_id == 0 or author.id == filter_id) and (allowed_chan == 0 or chan_id == allowed_chan):
                     payload = {
                         "type": "announce",
                         "data": {
-                            "guild_id": guild_id,
+                            "guild_id": guild_id,  # the guild where it fired
                             "keyword": kw,
                             "content": content,
                             "author": author.name,
@@ -825,6 +834,7 @@ class ClientListener:
                     await self.ws.send(payload)
                     logger.info(f"[📢] Announcement `{kw}` by {author} in g={guild_id}.")
                     return True
+
         return False
 
     async def on_message(self, message: discord.Message):
