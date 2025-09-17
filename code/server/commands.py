@@ -14,7 +14,7 @@ from discord import (
     Embed,
     Color,
 )
-from discord.errors import NotFound, Forbidden, HTTPException  
+from discord.errors import NotFound, Forbidden, HTTPException
 from discord import errors as discord_errors
 from datetime import datetime, timezone
 import time
@@ -42,7 +42,6 @@ class CloneCommands(commands.Cog):
         self.ratelimit = RateLimitManager()
         self.start_time = time.time()
         self.allowed_users = getattr(config, "COMMAND_USERS", []) or []
-
 
     async def cog_check(self, ctx: commands.Context):
         """
@@ -88,7 +87,9 @@ class CloneCommands(commands.Cog):
                 "[⚠️] No allowed users configured: commands will not work for anyone."
             )
         else:
-            logger.debug(f"[⚙️] Commands permissions set for users: {self.allowed_users}")
+            logger.debug(
+                f"[⚙️] Commands permissions set for users: {self.allowed_users}"
+            )
 
     async def _reply_or_dm(
         self,
@@ -107,7 +108,7 @@ class CloneCommands(commands.Cog):
         4) Log if everything fails
         """
         user = getattr(ctx, "user", None) or getattr(ctx, "author", None)
-        
+
         if user:
             try:
                 if content and len(content) > 2000:
@@ -117,13 +118,15 @@ class CloneCommands(commands.Cog):
                         nl = content.rfind("\n", start, end)
                         if nl == -1 or nl <= start + 100:
                             nl = end
-                        await user.send(content[start:nl], embed=None if start else embed)
+                        await user.send(
+                            content[start:nl], embed=None if start else embed
+                        )
                         start = nl
                 else:
                     await user.send(content=content, embed=embed)
                 return
             except (Forbidden, NotFound):
-                pass 
+                pass
 
         try:
             if not ctx.response.is_done():
@@ -138,16 +141,22 @@ class CloneCommands(commands.Cog):
         ch = getattr(ctx, "channel", None)
         if ch:
             try:
-                prefix = f"{user.mention} " if (mention_on_channel_fallback and user) else ""
+                prefix = (
+                    f"{user.mention} " if (mention_on_channel_fallback and user) else ""
+                )
                 await ch.send(prefix + (content or ""), embed=embed)
                 return
             except (Forbidden, NotFound):
                 pass
 
         if hasattr(self, "log"):
-            self.log.warning("[_reply_or_dm] Failed to deliver via DM, followup, and channel.")
+            self.log.warning(
+                "[_reply_or_dm] Failed to deliver via DM, followup, and channel."
+            )
         else:
-            logger.warning("[_reply_or_dm] Failed to deliver via DM, followup, and channel.")
+            logger.warning(
+                "[_reply_or_dm] Failed to deliver via DM, followup, and channel."
+            )
 
     def _ok_embed(
         self,
@@ -300,19 +309,37 @@ class CloneCommands(commands.Cog):
             formatted = "\n".join(f"• `{kw}`" for kw in kws)
             await ctx.respond(f"📋 **Blocked keywords:**\n{formatted}", ephemeral=True)
 
-
     @commands.slash_command(
-        name="announcement_trigger",
+        name="announcement_trigger_add",
         description="Register a trigger: guild_id + keyword + user_id + optional channel_id",
         guild_ids=[GUILD_ID],
     )
     async def announcement_trigger(
         self,
         ctx: discord.ApplicationContext,
-        guild_id: str = Option(str, "Guild ID to scope this trigger", required=True, min_length=17, max_length=20),
+        guild_id: str = Option(
+            str,
+            "Guild ID to scope this trigger",
+            required=True,
+            min_length=17,
+            max_length=20,
+            regex=r"^\d{17,20}$",
+        ),
         keyword: str = Option(str, "Keyword to trigger on", required=True),
-        user_id: str = Option(str, "User ID to filter on (0=any user)", required=True, min_length=1, max_length=20),
-        channel_id: str = Option(str, "Channel ID to listen in (0=any channel)", required=False, min_length=1, max_length=20),
+        user_id: str = Option(
+            str,
+            "User ID to filter on (0=any user)",
+            required=True,
+            min_length=1,
+            max_length=20,
+        ),
+        channel_id: str = Option(
+            str,
+            "Channel ID to listen in (0=any channel)",
+            required=False,
+            min_length=1,
+            max_length=20,
+        ),
     ):
         try:
             gid = int(guild_id)
@@ -333,7 +360,9 @@ class CloneCommands(commands.Cog):
             return await ctx.respond(
                 embed=Embed(
                     title="Global Trigger Exists",
-                    description=(f"A global trigger for **{keyword}** (user `{filter_id}`) already exists."),
+                    description=(
+                        f"A global trigger for **{keyword}** (user `{filter_id}`) already exists."
+                    ),
                     color=Color.blue(),
                 ),
                 ephemeral=True,
@@ -350,23 +379,41 @@ class CloneCommands(commands.Cog):
                 color=Color.orange(),
             )
         else:
-            title = "Global Trigger Registered" if chan_id == 0 else "Trigger Registered"
-            desc = f"[Guild: `{gid}`] Will announce **{keyword}** from {who} in {where}."
+            title = (
+                "Global Trigger Registered" if chan_id == 0 else "Trigger Registered"
+            )
+            desc = (
+                f"[Guild: `{gid}`] Will announce **{keyword}** from {who} in {where}."
+            )
             embed = Embed(title=title, description=desc, color=Color.green())
 
         await ctx.respond(embed=embed, ephemeral=True)
 
     @commands.slash_command(
-        name="announcement_user",
+        name="announce_subscription_toggle",
         description="Toggle a user's subscription to a keyword (or all) announcements in a guild",
         guild_ids=[GUILD_ID],
     )
     async def announcement_user(
         self,
         ctx: discord.ApplicationContext,
-        guild_id: str = Option(str, "Guild ID to scope the subscription (0 = all guilds)", required=True, min_length=1, max_length=20),
-        user: discord.User = Option(discord.User, "User to subscribe/unsubscribe (defaults to you)", required=False),
-        keyword: str = Option(str, "Keyword to subscribe to (leave empty to subscribe to all)", required=False),
+        guild_id: str = Option(
+            str,
+            "Guild ID to scope the subscription (0 = all guilds)",
+            required=True,
+            min_length=1,
+            max_length=20,
+        ),
+        user: discord.User = Option(
+            discord.User,
+            "User to subscribe (defaults to you)",
+            required=False,
+        ),
+        keyword: str = Option(
+            str,
+            "Keyword to subscribe to (leave empty to subscribe to all)",
+            required=False,
+        ),
     ):
         target = user or ctx.user
         sub_key = keyword or "*"
@@ -410,8 +457,8 @@ class CloneCommands(commands.Cog):
         await ctx.respond(embed=embed, ephemeral=True)
 
     @commands.slash_command(
-        name="announcement_list",
-        description="List/delete ALL announcement triggers across every guild (IDs only).",
+        name="announce_trigger_list",
+        description="List/delete ALL announcement triggers across every guild",
         guild_ids=[GUILD_ID],
     )
     async def announcement_list(
@@ -431,11 +478,11 @@ class CloneCommands(commands.Cog):
                     ephemeral=True,
                 )
 
-            r   = rows[idx]
+            r = rows[idx]
             gid = int(r["guild_id"])
-            kw  = r["keyword"]
+            kw = r["keyword"]
             fuid = int(r["filter_user_id"])
-            cid  = int(r["channel_id"])
+            cid = int(r["channel_id"])
 
             removed = self.db.remove_announcement_trigger(gid, kw, fuid, cid)
 
@@ -451,29 +498,31 @@ class CloneCommands(commands.Cog):
             self.db.conn.commit()
 
             if removed:
-                who   = "any user" if fuid == 0 else f"user `{fuid}`"
+                who = "any user" if fuid == 0 else f"user `{fuid}`"
                 where = "any channel" if cid == 0 else f"`#{cid}`"
                 return await ctx.respond(
                     f"🗑️ Deleted: [Guild: `{gid}`] **{kw}** — {who}, {where}",
                     ephemeral=True,
                 )
             else:
-                return await ctx.respond("Nothing was deleted (row no longer exists).", ephemeral=True)
+                return await ctx.respond(
+                    "Nothing was deleted (row no longer exists).", ephemeral=True
+                )
 
         lines: list[str] = []
         for i, r in enumerate(rows, start=1):
-            gid  = int(r["guild_id"])
-            kw   = r["keyword"]
+            gid = int(r["guild_id"])
+            kw = r["keyword"]
             fuid = int(r["filter_user_id"])
-            cid  = int(r["channel_id"])
-            who   = "any user" if fuid == 0 else f"user `{fuid}`"
+            cid = int(r["channel_id"])
+            who = "any user" if fuid == 0 else f"user `{fuid}`"
             where = "any channel" if cid == 0 else f"`#{cid}`"
             lines.append(f"{i}. [Guild: `{gid}`] **{kw}** — {who}, {where}")
 
         def _chunk_lines(xs: list[str], limit: int = 1024) -> list[str]:
             chunks, cur = [], ""
             for line in xs:
-                add = (("\n" if cur else "") + line)
+                add = ("\n" if cur else "") + line
                 if len(cur) + len(add) > limit:
                     chunks.append(cur or "—")
                     cur = line
@@ -487,15 +536,198 @@ class CloneCommands(commands.Cog):
 
         embed = discord.Embed(
             title="📋 Announcement Triggers",
-            description="Use `/announcement_list delete:<index>` to delete a specific row.",
+            description="Use `/announce_trigger_list delete:<index>` to delete a specific row.",
             color=discord.Color.blurple(),
         )
         for j, chunk in enumerate(_chunk_lines(lines)):
-            embed.add_field(name="Triggers" if j == 0 else "Triggers (cont.)", value=chunk, inline=False)
+            embed.add_field(
+                name="Triggers" if j == 0 else "Triggers (cont.)",
+                value=chunk,
+                inline=False,
+            )
 
         await ctx.respond(embed=embed, ephemeral=True)
 
-        
+    @commands.slash_command(
+        name="announce_subscription_list",
+        description="List/delete ALL announcement subscriptions",
+        guild_ids=[GUILD_ID],
+    )
+    async def announcement_subscriptions(
+        self,
+        ctx: discord.ApplicationContext,
+        delete: int = Option(int, "Index to delete", required=False, min_value=1),
+    ):
+        rows = self.db.get_all_announcement_subscriptions_flat()
+        if not rows:
+            return await ctx.respond("No announcement subscriptions found.", ephemeral=True)
+
+        # Delete by flat index
+        if delete is not None:
+            idx = delete - 1
+            if idx < 0 or idx >= len(rows):
+                return await ctx.respond(
+                    f"⚠️ Invalid index `{delete}`; pick 1–{len(rows)}.",
+                    ephemeral=True,
+                )
+
+            r = rows[idx]
+            gid = int(r["guild_id"])
+            kw = r["keyword"]
+            uid = int(r["user_id"])
+
+            removed = self.db.remove_announcement_user(gid, kw, uid)
+            if removed:
+                who = f"<@{uid}> ({uid})"
+                scope = f"[Guild: `{gid}`] **{kw}**"
+                return await ctx.respond(f"🗑️ Deleted subscription: {scope} — {who}", ephemeral=True)
+            else:
+                return await ctx.respond("Nothing was deleted (row no longer exists).", ephemeral=True)
+
+        # Build the list (chunked to fit embed field limits)
+        lines: list[str] = []
+        for i, r in enumerate(rows, start=1):
+            gid = int(r["guild_id"])
+            kw  = r["keyword"]
+            uid = int(r["user_id"])
+            lines.append(f"{i}. [Guild: `{gid}`] **{kw}** — <@{uid}> ({uid})")
+
+        def _chunk_lines(xs: list[str], limit: int = 1024) -> list[str]:
+            chunks, cur = [], ""
+            for line in xs:
+                add = ("\n" if cur else "") + line
+                if len(cur) + len(add) > limit:
+                    chunks.append(cur or "—")
+                    cur = line
+                else:
+                    cur += add
+            if cur:
+                chunks.append(cur)
+            if not chunks:
+                chunks.append("—")
+            return chunks
+
+        embed = discord.Embed(
+            title="🔔 Announcement Subscriptions",
+            description="Use `/announce_subscription_list delete:<index>` to delete a specific row.",
+            color=discord.Color.green(),
+        )
+        for j, chunk in enumerate(_chunk_lines(lines)):
+            embed.add_field(
+                name="Subscriptions" if j == 0 else "Subscriptions (cont.)",
+                value=chunk,
+                inline=False,
+            )
+
+        await ctx.respond(embed=embed, ephemeral=True)
+
+    @commands.slash_command(
+        name="announce_help",
+        description="How to use the announcement trigger & subscription commands",
+        guild_ids=[GUILD_ID],
+    )
+    async def announce_help(self, ctx: discord.ApplicationContext):
+        def spacer():
+            # Zero-width space section divider
+            embed.add_field(name="\u200B", value="\u200B", inline=False)
+
+        embed = discord.Embed(
+            title="🧭 Announcements — Help",
+            description=(
+                "Set up **triggers** that fire on messages, and **subscriptions** for who should be notified.\n"
+                "IDs are raw numbers. Use `0` to mean **global** (any user / any channel / any guild*).\n"
+            ),
+            color=discord.Color.purple(),
+        )
+
+        embed.add_field(
+            name="Basics",
+            value=(
+                "• `guild_id`: server ID — `0` = *all guilds*.\n"
+                "• `user_id`: `0` = *any user*.\n"
+                "• `channel_id`: `0` = *any channel*.\n"
+                "• Use the `delete:` option on list commands to remove by **index**.\n"
+            ),
+            inline=False,
+        )
+
+        spacer()
+
+        embed.add_field(
+            name="🟢 Add a Trigger",
+            value=(
+                "**/announcement_trigger_add**\n"
+                "Register: `guild_id + keyword + user_id [+ channel_id]`\n\n"
+                "**Examples**\n"
+                "```\n"
+                "/announcement_trigger_add guild_id:0 keyword:long user_id:0\n"
+                "/announcement_trigger_add guild_id:123456789012345678 keyword:short user_id:123456789 channel_id:987654321098765432\n"
+                "```\n"
+            ),
+            inline=False,
+        )
+
+        spacer()
+
+        embed.add_field(
+            name="📋 List/Delete Triggers",
+            value=(
+                "**/announce_trigger_list**\n"
+                "Shows all triggers across every guild.\n\n"
+                "**Delete by index**\n"
+                "```\n"
+                "/announce_trigger_list delete:3\n"
+                "```\n"
+            ),
+            inline=False,
+        )
+
+        spacer()
+
+        embed.add_field(
+            name="🔔 Toggle Subscription",
+            value=(
+                "**/announce_subscription_toggle**\n"
+                "Subscribe/unsubscribe a user to a keyword (or all) in a guild.\n\n"
+                "**Examples**\n"
+                "```\n"
+                "/announce_subscription_toggle guild_id:0 keyword:lol\n"
+                "/announce_subscription_toggle guild_id:123456789012345678 keyword:* user:@SomeUser\n"
+                "```\n"
+            ),
+            inline=False,
+        )
+
+        spacer()
+
+        embed.add_field(
+            name="📬 List/Delete Subscriptions",
+            value=(
+                "**/announce_subscription_list**\n"
+                "Shows all subscriptions.\n\n"
+                "**Delete by index**\n"
+                "```\n"
+                "/announce_subscription_list delete:7\n"
+                "```\n"
+            ),
+            inline=False,
+        )
+
+        spacer()
+
+        embed.add_field(
+            name="Notes",
+            value=(
+                "• Deleting the *last* trigger for a keyword in a guild also removes its subscriptions for that keyword/guild.\n"
+                "• Matching: whole word, emoji name (`<:name:ID>`/`<a:name:ID>`), or substring fallback.\n"
+                "• Get IDs via **Developer Mode** → right-click → *Copy ID*.\n"
+            ),
+            inline=False,
+        )
+
+        await ctx.respond(embed=embed, ephemeral=True)
+
+
     @commands.slash_command(
         name="onjoin_dm",
         description="Toggle DM notifications to you when someone joins the given server ID",
@@ -535,7 +767,7 @@ class CloneCommands(commands.Cog):
             embed=Embed(title=title, description=desc, color=color),
             ephemeral=True,
         )
-        
+
     @commands.slash_command(
         name="purge_assets",
         description="Delete ALL emojis, stickers, or roles.",
@@ -544,15 +776,30 @@ class CloneCommands(commands.Cog):
     async def purge_assets(
         self,
         ctx: discord.ApplicationContext,
-        kind: str = Option(str, "What to delete", required=True, choices=["emojis", "stickers", "roles"]),
-        confirm: str = Option(str, "Type 'confirm' to run this DESTRUCTIVE action", required=True),
-        unmapped_only: bool = Option(bool, "Only delete assets that are NOT mapped in the DB", required=False, default=False),
+        kind: str = Option(
+            str,
+            "What to delete",
+            required=True,
+            choices=["emojis", "stickers", "roles"],
+        ),
+        confirm: str = Option(
+            str, "Type 'confirm' to run this DESTRUCTIVE action", required=True
+        ),
+        unmapped_only: bool = Option(
+            bool,
+            "Only delete assets that are NOT mapped in the DB",
+            required=False,
+            default=False,
+        ),
     ):
         await ctx.defer(ephemeral=True)
 
         if (confirm or "").strip().lower() != "confirm":
             return await ctx.followup.send(
-                embed=self._err_embed("Confirmation required", "Re-run the command and type **confirm** to proceed."),
+                embed=self._err_embed(
+                    "Confirmation required",
+                    "Re-run the command and type **confirm** to proceed.",
+                ),
                 ephemeral=True,
             )
 
@@ -561,29 +808,46 @@ class CloneCommands(commands.Cog):
         if not guild:
             return await ctx.followup.send("No guild context.", ephemeral=True)
 
-        RL_EMOJI   = getattr(ActionType, "EMOJI", "EMOJI")
+        RL_EMOJI = getattr(ActionType, "EMOJI", "EMOJI")
         RL_STICKER = getattr(ActionType, "STICKER", "STICKER")
-        RL_ROLE    = getattr(ActionType, "ROLE", "ROLE")
+        RL_ROLE = getattr(ActionType, "ROLE", "ROLE")
 
         deleted = skipped = failed = 0
         deleted_ids: list[int] = []
 
         await ctx.followup.send(
-            embed=self._ok_embed("Starting purge…", f"Target: `{kind}`\nMode: `{'unmapped_only' if unmapped_only else 'ALL'}`\nI'll DM you when finished."),
+            embed=self._ok_embed(
+                "Starting purge…",
+                f"Target: `{kind}`\nMode: `{'unmapped_only' if unmapped_only else 'ALL'}`\nI'll DM you when finished.",
+            ),
             ephemeral=True,
         )
-        helper._log_purge_event(kind=kind, outcome="begin", guild_id=guild.id, user_id=ctx.user.id,
-                                reason=f"Manual purge (mode={'unmapped_only' if unmapped_only else 'all'})")
+        helper._log_purge_event(
+            kind=kind,
+            outcome="begin",
+            guild_id=guild.id,
+            user_id=ctx.user.id,
+            reason=f"Manual purge (mode={'unmapped_only' if unmapped_only else 'all'})",
+        )
 
         def _is_mapped(kind_name: str, cloned_id: int) -> bool:
             if kind_name == "emojis":
-                row = self.db.conn.execute("SELECT 1 FROM emoji_mappings WHERE cloned_emoji_id=? LIMIT 1", (int(cloned_id),)).fetchone()
+                row = self.db.conn.execute(
+                    "SELECT 1 FROM emoji_mappings WHERE cloned_emoji_id=? LIMIT 1",
+                    (int(cloned_id),),
+                ).fetchone()
                 return bool(row)
             if kind_name == "stickers":
-                row = self.db.conn.execute("SELECT 1 FROM sticker_mappings WHERE cloned_sticker_id=? LIMIT 1", (int(cloned_id),)).fetchone()
+                row = self.db.conn.execute(
+                    "SELECT 1 FROM sticker_mappings WHERE cloned_sticker_id=? LIMIT 1",
+                    (int(cloned_id),),
+                ).fetchone()
                 return bool(row)
             if kind_name == "roles":
-                row = self.db.conn.execute("SELECT 1 FROM role_mappings WHERE cloned_role_id=? LIMIT 1", (int(cloned_id),)).fetchone()
+                row = self.db.conn.execute(
+                    "SELECT 1 FROM role_mappings WHERE cloned_role_id=? LIMIT 1",
+                    (int(cloned_id),),
+                ).fetchone()
                 return bool(row)
             return False
 
@@ -595,28 +859,59 @@ class CloneCommands(commands.Cog):
                 for em in list(guild.emojis):
                     if unmapped_only and _is_mapped("emojis", em.id):
                         skipped += 1
-                        helper._log_purge_event("emojis", "skipped", guild.id, ctx.user.id, em.id, em.name,
-                                                "Unmapped-only mode: mapped in DB")
+                        helper._log_purge_event(
+                            "emojis",
+                            "skipped",
+                            guild.id,
+                            ctx.user.id,
+                            em.id,
+                            em.name,
+                            "Unmapped-only mode: mapped in DB",
+                        )
                         continue
                     try:
                         await self.ratelimit.acquire(RL_EMOJI)
                         await em.delete(reason=f"Purge by {ctx.user.id}")
                         deleted += 1
                         deleted_ids.append(int(em.id))
-                        helper._log_purge_event("emojis", "deleted", guild.id, ctx.user.id, em.id, em.name, "Manual purge")
+                        helper._log_purge_event(
+                            "emojis",
+                            "deleted",
+                            guild.id,
+                            ctx.user.id,
+                            em.id,
+                            em.name,
+                            "Manual purge",
+                        )
                     except discord.Forbidden as e:
                         skipped += 1
-                        helper._log_purge_event("emojis", "skipped", guild.id, ctx.user.id, em.id, em.name, f"Manual purge: {e}")
+                        helper._log_purge_event(
+                            "emojis",
+                            "skipped",
+                            guild.id,
+                            ctx.user.id,
+                            em.id,
+                            em.name,
+                            f"Manual purge: {e}",
+                        )
                     except Exception as e:
                         failed += 1
-                        helper._log_purge_event("emojis", "failed", guild.id, ctx.user.id, em.id, em.name, f"Manual purge: {e}")
+                        helper._log_purge_event(
+                            "emojis",
+                            "failed",
+                            guild.id,
+                            ctx.user.id,
+                            em.id,
+                            em.name,
+                            f"Manual purge: {e}",
+                        )
 
                 if unmapped_only:
                     if deleted_ids:
                         placeholders = ",".join("?" * len(deleted_ids))
                         self.db.conn.execute(
                             f"DELETE FROM emoji_mappings WHERE cloned_emoji_id IN ({placeholders})",
-                            (*deleted_ids,)
+                            (*deleted_ids,),
                         )
                         self.db.conn.commit()
                 else:
@@ -636,28 +931,59 @@ class CloneCommands(commands.Cog):
                 for st in stickers:
                     if unmapped_only and _is_mapped("stickers", st.id):
                         skipped += 1
-                        helper._log_purge_event("stickers", "skipped", guild.id, ctx.user.id, st.id, st.name,
-                                                "Unmapped-only mode: mapped in DB")
+                        helper._log_purge_event(
+                            "stickers",
+                            "skipped",
+                            guild.id,
+                            ctx.user.id,
+                            st.id,
+                            st.name,
+                            "Unmapped-only mode: mapped in DB",
+                        )
                         continue
                     try:
                         await self.ratelimit.acquire(RL_STICKER)
                         await st.delete(reason=f"Purge by {ctx.user.id}")
                         deleted += 1
                         deleted_ids.append(int(st.id))
-                        helper._log_purge_event("stickers", "deleted", guild.id, ctx.user.id, st.id, st.name, "Manual purge")
+                        helper._log_purge_event(
+                            "stickers",
+                            "deleted",
+                            guild.id,
+                            ctx.user.id,
+                            st.id,
+                            st.name,
+                            "Manual purge",
+                        )
                     except discord.Forbidden as e:
                         skipped += 1
-                        helper._log_purge_event("stickers", "skipped", guild.id, ctx.user.id, st.id, st.name, f"Manual purge: {e}")
+                        helper._log_purge_event(
+                            "stickers",
+                            "skipped",
+                            guild.id,
+                            ctx.user.id,
+                            st.id,
+                            st.name,
+                            f"Manual purge: {e}",
+                        )
                     except Exception as e:
                         failed += 1
-                        helper._log_purge_event("stickers", "failed", guild.id, ctx.user.id, st.id, st.name, f"Manual purge: {e}")
+                        helper._log_purge_event(
+                            "stickers",
+                            "failed",
+                            guild.id,
+                            ctx.user.id,
+                            st.id,
+                            st.name,
+                            f"Manual purge: {e}",
+                        )
 
                 if unmapped_only:
                     if deleted_ids:
                         placeholders = ",".join("?" * len(deleted_ids))
                         self.db.conn.execute(
                             f"DELETE FROM sticker_mappings WHERE cloned_sticker_id IN ({placeholders})",
-                            (*deleted_ids,)
+                            (*deleted_ids,),
                         )
                         self.db.conn.commit()
                 else:
@@ -671,45 +997,85 @@ class CloneCommands(commands.Cog):
                 me, top_role, roles = await helper._resolve_me_and_top(guild)
                 if not me or not top_role:
                     return await ctx.followup.send(
-                        embed=self._err_embed("Top role not found", "Could not resolve my top role. Try again later."),
+                        embed=self._err_embed(
+                            "Top role not found",
+                            "Could not resolve my top role. Try again later.",
+                        ),
                         ephemeral=True,
                     )
                 if not me.guild_permissions.manage_roles:
                     return await ctx.followup.send(
-                        embed=self._err_embed("Missing permission", "I need **Manage Roles**."),
+                        embed=self._err_embed(
+                            "Missing permission", "I need **Manage Roles**."
+                        ),
                         ephemeral=True,
                     )
 
                 def _undeletable(r: discord.Role) -> bool:
                     prem = getattr(r, "is_premium_subscriber", None)
-                    return bool(r.is_default() or r.managed or (prem() if callable(prem) else False))
+                    return bool(
+                        r.is_default()
+                        or r.managed
+                        or (prem() if callable(prem) else False)
+                    )
 
                 eligible = [r for r in roles if not _undeletable(r) and r < top_role]
                 for role in sorted(eligible, key=lambda r: r.position):
                     if unmapped_only and _is_mapped("roles", role.id):
                         skipped += 1
-                        helper._log_purge_event("roles", "skipped", guild.id, ctx.user.id, role.id, role.name,
-                                                "Unmapped-only mode: mapped in DB")
+                        helper._log_purge_event(
+                            "roles",
+                            "skipped",
+                            guild.id,
+                            ctx.user.id,
+                            role.id,
+                            role.name,
+                            "Unmapped-only mode: mapped in DB",
+                        )
                         continue
                     try:
                         await self.ratelimit.acquire(RL_ROLE)
                         await role.delete(reason=f"Purge by {ctx.user.id}")
                         deleted += 1
                         deleted_ids.append(int(role.id))
-                        helper._log_purge_event("roles", "deleted", guild.id, ctx.user.id, role.id, role.name, "Manual purge")
+                        helper._log_purge_event(
+                            "roles",
+                            "deleted",
+                            guild.id,
+                            ctx.user.id,
+                            role.id,
+                            role.name,
+                            "Manual purge",
+                        )
                     except discord.Forbidden as e:
                         skipped += 1
-                        helper._log_purge_event("roles", "skipped", guild.id, ctx.user.id, role.id, role.name, f"Manual purge: {e}")
+                        helper._log_purge_event(
+                            "roles",
+                            "skipped",
+                            guild.id,
+                            ctx.user.id,
+                            role.id,
+                            role.name,
+                            f"Manual purge: {e}",
+                        )
                     except Exception as e:
                         failed += 1
-                        helper._log_purge_event("roles", "failed", guild.id, ctx.user.id, role.id, role.name, f"Manual purge: {e}")
+                        helper._log_purge_event(
+                            "roles",
+                            "failed",
+                            guild.id,
+                            ctx.user.id,
+                            role.id,
+                            role.name,
+                            f"Manual purge: {e}",
+                        )
 
                 if unmapped_only:
                     if deleted_ids:
                         placeholders = ",".join("?" * len(deleted_ids))
                         self.db.conn.execute(
                             f"DELETE FROM role_mappings WHERE cloned_role_id IN ({placeholders})",
-                            (*deleted_ids,)
+                            (*deleted_ids,),
                         )
                         self.db.conn.commit()
                 else:
@@ -741,7 +1107,6 @@ class CloneCommands(commands.Cog):
                 mention_on_channel_fallback=True,
             )
 
-
     @commands.slash_command(
         name="role_block",
         description="Block a role from being cloned/updated. Provide either the cloned role (picker) or its ID.",
@@ -750,8 +1115,12 @@ class CloneCommands(commands.Cog):
     async def role_block(
         self,
         ctx: discord.ApplicationContext,
-        role: discord.Role = Option(discord.Role, "Pick the CLONED role to block", required=False),
-        role_id: str = Option(str, "CLONED role ID to block", required=False, min_length=17, max_length=20),
+        role: discord.Role = Option(
+            discord.Role, "Pick the CLONED role to block", required=False
+        ),
+        role_id: str = Option(
+            str, "CLONED role ID to block", required=False, min_length=17, max_length=20
+        ),
     ):
         """
         Adds a role to the block list using its original_role_id from the DB.
@@ -761,12 +1130,16 @@ class CloneCommands(commands.Cog):
 
         if not role and not role_id:
             return await ctx.followup.send(
-                embed=self._err_embed("Missing input", "Provide either a role selection or a role ID."),
+                embed=self._err_embed(
+                    "Missing input", "Provide either a role selection or a role ID."
+                ),
                 ephemeral=True,
             )
         if role and role_id:
             return await ctx.followup.send(
-                embed=self._err_embed("Too many inputs", "Provide only one of: role OR role_id."),
+                embed=self._err_embed(
+                    "Too many inputs", "Provide only one of: role OR role_id."
+                ),
                 ephemeral=True,
             )
 
@@ -775,7 +1148,9 @@ class CloneCommands(commands.Cog):
             cloned_id = int(role.id if role else role_id)
         except ValueError:
             return await ctx.followup.send(
-                embed=self._err_embed("Invalid ID", f"`{role_id}` is not a valid numeric role ID."),
+                embed=self._err_embed(
+                    "Invalid ID", f"`{role_id}` is not a valid numeric role ID."
+                ),
                 ephemeral=True,
             )
 
@@ -785,7 +1160,7 @@ class CloneCommands(commands.Cog):
             return await ctx.followup.send(
                 embed=self._err_embed(
                     "Mapping not found",
-                    "I couldn't find a role mapping for that cloned role. Make sure this role was created by Copycord."
+                    "I couldn't find a role mapping for that cloned role. Make sure this role was created by Copycord.",
                 ),
                 ephemeral=True,
             )
@@ -803,31 +1178,45 @@ class CloneCommands(commands.Cog):
         if cloned_obj:
             me = g.me if g else None
             bot_top = me.top_role.position if me and me.top_role else 0
-            if (not cloned_obj.is_default()) and (not cloned_obj.managed) and cloned_obj.position < bot_top:
+            if (
+                (not cloned_obj.is_default())
+                and (not cloned_obj.managed)
+                and cloned_obj.position < bot_top
+            ):
                 try:
                     await self.ratelimit.acquire(ActionType.ROLE)
                     await cloned_obj.delete(reason=f"Blocked by {ctx.user.id}")
                     deleted = True
                 except Exception as e:
-                    logger.warning("[role_block] Failed deleting role %s (%d): %s",
-                                getattr(cloned_obj, 'name', '?'), cloned_id, e)
+                    logger.warning(
+                        "[role_block] Failed deleting role %s (%d): %s",
+                        getattr(cloned_obj, "name", "?"),
+                        cloned_id,
+                        e,
+                    )
 
         # Always drop the mapping so it won't be updated/re-created
         self.db.delete_role_mapping(original_role_id)
 
         if newly_added:
             title = "Role Blocked"
-            desc = f"**{original_role_name}** (`orig:{original_role_id}`) is now blocked.\n" \
-                f"{'🗑️ Deleted cloned role.' if deleted else '↩️ No clone deleted (not found / not permitted).'}\n" \
+            desc = (
+                f"**{original_role_name}** (`orig:{original_role_id}`) is now blocked.\n"
+                f"{'🗑️ Deleted cloned role.' if deleted else '↩️ No clone deleted (not found / not permitted).'}\n"
                 "It will be skipped during future role syncs."
+            )
             color = discord.Color.green()
         else:
             title = "Role Already Blocked"
-            desc = f"**{original_role_name}** (`orig:{original_role_id}`) was already on the block list.\n" \
+            desc = (
+                f"**{original_role_name}** (`orig:{original_role_id}`) was already on the block list.\n"
                 f"{'🗑️ Deleted cloned role.' if deleted else '↩️ No clone deleted (not found / not permitted).'}"
+            )
             color = discord.Color.blurple()
 
-        await ctx.followup.send(embed=self._ok_embed(title, desc, color=color), ephemeral=True)
+        await ctx.followup.send(
+            embed=self._ok_embed(title, desc, color=color), ephemeral=True
+        )
 
     @commands.slash_command(
         name="role_block_clear",
@@ -847,8 +1236,7 @@ class CloneCommands(commands.Cog):
             if removed == 0:
                 return await ctx.followup.send(
                     embed=self._ok_embed(
-                        "Role Block List",
-                        "The block list is already empty."
+                        "Role Block List", "The block list is already empty."
                     ),
                     ephemeral=True,
                 )
@@ -857,7 +1245,7 @@ class CloneCommands(commands.Cog):
                 embed=self._ok_embed(
                     "Role Block List Cleared",
                     f"Removed **{removed}** entr{'y' if removed == 1 else 'ies'} from the role block list.\n"
-                    "Previously blocked roles may be recreated on the next role sync if they still exist on the source."
+                    "Previously blocked roles may be recreated on the next role sync if they still exist on the source.",
                 ),
                 ephemeral=True,
             )
@@ -865,11 +1253,11 @@ class CloneCommands(commands.Cog):
             await ctx.followup.send(
                 embed=self._err_embed(
                     "Failed to Clear Block List",
-                    f"An error occurred while clearing the role block list:\n`{e}`"
+                    f"An error occurred while clearing the role block list:\n`{e}`",
                 ),
                 ephemeral=True,
             )
-                
+
     @commands.slash_command(
         name="export_dms",
         description="Export DM history for a given user and stream to a webhook (server forwards).",
@@ -879,7 +1267,9 @@ class CloneCommands(commands.Cog):
         self,
         ctx: discord.ApplicationContext,
         user_id: str = Option(str, "Target user ID to export DMs from", required=True),
-        webhook_url: str = Option(str, "Webhook URL to receive the stream", required=True),
+        webhook_url: str = Option(
+            str, "Webhook URL to receive the stream", required=True
+        ),
     ):
         await ctx.defer(ephemeral=True)
 
@@ -887,7 +1277,9 @@ class CloneCommands(commands.Cog):
             target_id = int(user_id)
         except ValueError:
             return await ctx.followup.send(
-                embed=self._err_embed("Invalid User ID", f"`{user_id}` is not a valid user ID."),
+                embed=self._err_embed(
+                    "Invalid User ID", f"`{user_id}` is not a valid user ID."
+                ),
                 ephemeral=True,
             )
         payload = {
@@ -900,14 +1292,14 @@ class CloneCommands(commands.Cog):
 
         try:
             resp = await self.bot.ws_manager.request(payload)
-            
+
             if not resp or not resp.get("ok"):
                 err = (resp or {}).get("error") or "Client did not accept the request."
                 if err == "dm-export-in-progress":
                     return await ctx.followup.send(
                         embed=self._err_embed(
                             "Export Already Running",
-                            "A DM export is currently in progress. Please wait until it finishes before starting another."
+                            "A DM export is currently in progress. Please wait until it finishes before starting another.",
                         ),
                         ephemeral=True,
                     )
@@ -931,11 +1323,10 @@ class CloneCommands(commands.Cog):
         return await ctx.followup.send(
             embed=self._ok_embed(
                 "Export Started",
-                f"Streaming DMs for user `{target_id}` → webhook. You'll see messages arriving shortly."
+                f"Streaming DMs for user `{target_id}` → webhook. You'll see messages arriving shortly.",
             ),
             ephemeral=True,
         )
-
 
 
 def setup(bot: commands.Bot):
