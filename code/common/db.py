@@ -820,83 +820,73 @@ class DBManager:
             "SELECT * FROM emoji_mappings WHERE original_emoji_id = ?", (original_id,)
         ).fetchone()
 
-    def add_announcement_user(self, keyword: str, user_id: int) -> bool:
-        """Returns True if newly added, False if already present."""
+    def add_announcement_user(self, guild_id: int, keyword: str, user_id: int) -> bool:
         cur = self.conn.execute(
-            "INSERT OR IGNORE INTO announcement_subscriptions(keyword, user_id) VALUES (?, ?)",
-            (keyword, user_id),
+            "INSERT OR IGNORE INTO announcement_subscriptions(guild_id, keyword, user_id) VALUES (?, ?, ?)",
+            (guild_id, keyword, user_id),
         )
         self.conn.commit()
         return cur.rowcount > 0
 
-    def remove_announcement_user(self, keyword: str, user_id: int) -> bool:
-        """Returns True if removed, False if none existed."""
+    def remove_announcement_user(
+        self, guild_id: int, keyword: str, user_id: int
+    ) -> bool:
         cur = self.conn.execute(
-            "DELETE FROM announcement_subscriptions WHERE keyword = ? AND user_id = ?",
-            (keyword, user_id),
+            "DELETE FROM announcement_subscriptions WHERE guild_id = ? AND keyword = ? AND user_id = ?",
+            (guild_id, keyword, user_id),
         )
         self.conn.commit()
         return cur.rowcount > 0
 
-    def get_announcement_users(self, keyword: str) -> list[int]:
+    def get_announcement_users(self, guild_id: int, keyword: str) -> list[int]:
         """
-        Returns all user IDs who subscribed to this keyword
-        OR who subscribed globally (keyword='*').
+        Users subscribed to this keyword in this guild, plus:
+        - '*' in this guild (all keywords), and
+        - if you support cross-guild global subs: guild_id=0 records.
         """
         rows = self.conn.execute(
             "SELECT user_id FROM announcement_subscriptions "
-            "WHERE keyword = ? OR keyword = '*'",
-            (keyword,),
+            "WHERE (guild_id = ? AND (keyword = ? OR keyword = '*')) "
+            "   OR (guild_id = 0 AND (keyword = ? OR keyword = '*'))",
+            (guild_id, keyword, keyword),
         ).fetchall()
         return [r["user_id"] for r in rows]
 
-    def get_announcement_keywords(self) -> list[str]:
-        """Distinct list of all keywords with at least one subscriber."""
+    def add_announcement_trigger(
+        self, guild_id: int, keyword: str, filter_user_id: int = 0, channel_id: int = 0
+    ) -> bool:
+        cur = self.conn.execute(
+            "INSERT OR IGNORE INTO announcement_triggers(guild_id, keyword, filter_user_id, channel_id) "
+            "VALUES (?, ?, ?, ?)",
+            (guild_id, keyword, filter_user_id, channel_id),
+        )
+        self.conn.commit()
+        return cur.rowcount > 0
+
+    def get_announcement_keywords(self, guild_id: int) -> list[str]:
         rows = self.conn.execute(
-            "SELECT DISTINCT keyword FROM announcement_subscriptions"
+            "SELECT DISTINCT keyword FROM announcement_subscriptions WHERE guild_id IN (?, 0)",
+            (guild_id,),
         ).fetchall()
         return [r["keyword"] for r in rows]
 
-    def add_announcement_trigger(
-        self,
-        keyword: str,
-        filter_user_id: int = 0,
-        channel_id: int = 0,
-    ) -> bool:
-        """
-        Adds a new announcement trigger to the database.
-        """
-        cur = self.conn.execute(
-            "INSERT OR IGNORE INTO announcement_triggers(keyword, filter_user_id, channel_id) "
-            "VALUES (?, ?, ?)",
-            (keyword, filter_user_id, channel_id),
-        )
-        self.conn.commit()
-        return cur.rowcount > 0
-
     def remove_announcement_trigger(
-        self,
-        keyword: str,
-        filter_user_id: int = 0,
-        channel_id: int = 0,
+        self, guild_id: int, keyword: str, filter_user_id: int = 0, channel_id: int = 0
     ) -> bool:
-        """
-        Removes an announcement trigger from the database.
-        """
         cur = self.conn.execute(
             "DELETE FROM announcement_triggers "
-            "WHERE keyword = ? AND filter_user_id = ? AND channel_id = ?",
-            (keyword, filter_user_id, channel_id),
+            "WHERE guild_id = ? AND keyword = ? AND filter_user_id = ? AND channel_id = ?",
+            (guild_id, keyword, filter_user_id, channel_id),
         )
         self.conn.commit()
         return cur.rowcount > 0
 
-    def get_announcement_triggers(self) -> dict[str, list[tuple[int, int]]]:
-        """
-        Retrieves announcement triggers from the database.
-        """
+    def get_announcement_triggers(
+        self, guild_id: int
+    ) -> dict[str, list[tuple[int, int]]]:
         rows = self.conn.execute(
-            "SELECT keyword, filter_user_id, channel_id FROM announcement_triggers"
+            "SELECT keyword, filter_user_id, channel_id FROM announcement_triggers WHERE guild_id = ?",
+            (guild_id,),
         ).fetchall()
         d: dict[str, list[tuple[int, int]]] = {}
         for r in rows:
@@ -904,6 +894,19 @@ class DBManager:
                 (r["filter_user_id"], r["channel_id"])
             )
         return d
+
+    def get_all_announcement_triggers_flat(self) -> list[sqlite3.Row]:
+        """
+        Returns every row in announcement_triggers with no grouping.
+        Columns: guild_id, keyword, filter_user_id, channel_id, last_updated
+        """
+        return self.conn.execute(
+            """
+            SELECT guild_id, keyword, filter_user_id, channel_id, last_updated
+            FROM announcement_triggers
+            ORDER BY guild_id ASC, LOWER(keyword) ASC, filter_user_id ASC, channel_id ASC
+            """
+        ).fetchall()
 
     def add_onjoin_subscription(self, guild_id: int, user_id: int) -> bool:
         cur = self.conn.execute(
@@ -1043,7 +1046,7 @@ class DBManager:
         ins("exclude", "category", exclude_categories)
         ins("exclude", "channel", exclude_channels)
         self.conn.commit()
-        
+
     def add_filter(self, kind: str, scope: str, obj_id: int) -> None:
         """
         Insert a single filter row (no-op if it already exists).
