@@ -303,207 +303,195 @@ class CloneCommands(commands.Cog):
 
     @commands.slash_command(
         name="announcement_trigger",
-        description="Register a trigger: keyword + user_id + optional channel_id",
+        description="Register a trigger: guild_id + keyword + user_id + optional channel_id",
         guild_ids=[GUILD_ID],
     )
     async def announcement_trigger(
         self,
         ctx: discord.ApplicationContext,
+        guild_id: str = Option(str, "Guild ID to scope this trigger", required=True, min_length=17, max_length=20),
         keyword: str = Option(str, "Keyword to trigger on", required=True),
-        user_id: str = Option(
-            str,
-            "User ID to filter on",
-            required=True,
-            min_length=17,
-            max_length=20,
-        ),
-        channel_id: str = Option(
-            str,
-            "Channel ID to listen in (omit for any channel)",
-            required=False,
-            min_length=17,
-            max_length=20,
-        ),
+        user_id: str = Option(str, "User ID to filter on (0=any user)", required=True, min_length=1, max_length=20),
+        channel_id: str = Option(str, "Channel ID to listen in (0=any channel)", required=False, min_length=1, max_length=20),
     ):
         try:
+            gid = int(guild_id)
             filter_id = int(user_id)
+            chan_id = int(channel_id) if channel_id else 0
         except ValueError:
-            return await ctx.respond(
-                embed=Embed(
-                    title="⚠️ Invalid User ID",
-                    description=f"`{user_id}` is not a valid user ID.",
-                    color=Color.red(),
-                ),
-                ephemeral=True,
-            )
+            return await ctx.respond("Invalid numeric IDs.", ephemeral=True)
 
-        if channel_id:
-            try:
-                chan_id = int(channel_id)
-            except ValueError:
-                return await ctx.respond(
-                    embed=Embed(
-                        title="⚠️ Invalid Channel ID",
-                        description=f"`{channel_id}` is not a valid channel ID.",
-                        color=Color.red(),
-                    ),
-                    ephemeral=True,
-                )
-        else:
-            chan_id = 0
-
-        triggers = self.db.get_announcement_triggers()
+        triggers = self.db.get_announcement_triggers(gid)
         existing = triggers.get(keyword, [])
 
         if chan_id == 0:
-            cleared = 0
             for fid, cid in existing:
                 if fid == filter_id and cid != 0:
-                    self.db.remove_announcement_trigger(keyword, filter_id, cid)
-                    cleared += 1
+                    self.db.remove_announcement_trigger(gid, keyword, filter_id, cid)
 
         if chan_id != 0 and (filter_id, 0) in existing:
             return await ctx.respond(
                 embed=Embed(
                     title="Global Trigger Exists",
-                    description=(
-                        f"A global trigger for **{keyword}** by user ID `{filter_id}` "
-                        "already exists. Please remove it first if you want to add a specific channel trigger."
-                    ),
+                    description=(f"A global trigger for **{keyword}** (user `{filter_id}`) already exists."),
                     color=Color.blue(),
                 ),
                 ephemeral=True,
             )
 
-        added = self.db.add_announcement_trigger(keyword, filter_id, chan_id)
-        who = f"user ID `{filter_id}`"
-        where = f"in channel `#{chan_id}`" if chan_id else "in any channel"
+        added = self.db.add_announcement_trigger(gid, keyword, filter_id, chan_id)
+        who = "any user" if filter_id == 0 else f"user `{filter_id}`"
+        where = "any channel" if chan_id == 0 else f"channel `#{chan_id}`"
 
         if not added:
             embed = Embed(
                 title="Trigger Already Exists",
-                description=f"Trigger for **{keyword}** by {who} {where} already exists.",
+                description=f"[Guild: `{gid}`] **{keyword}** from {who} in {where} already exists.",
                 color=Color.orange(),
             )
         else:
-            title = (
-                "Global Trigger Registered" if chan_id == 0 else "Trigger Registered"
-            )
-            desc = f"Will announce **{keyword}** by {who} {where}."
+            title = "Global Trigger Registered" if chan_id == 0 else "Trigger Registered"
+            desc = f"[Guild: `{gid}`] Will announce **{keyword}** from {who} in {where}."
             embed = Embed(title=title, description=desc, color=Color.green())
 
         await ctx.respond(embed=embed, ephemeral=True)
 
     @commands.slash_command(
         name="announcement_user",
-        description="Toggle a user's subscription to a keyword (or all) announcements",
+        description="Toggle a user's subscription to a keyword (or all) announcements in a guild",
         guild_ids=[GUILD_ID],
     )
     async def announcement_user(
         self,
         ctx: discord.ApplicationContext,
-        user: discord.User = Option(
-            discord.User, "User to (un)subscribe (defaults to you)", required=False
-        ),
-        keyword: str = Option(
-            str, "Keyword to subscribe to (omit for ALL announcements)", required=False
-        ),
+        guild_id: str = Option(str, "Guild ID to scope the subscription (0 = all guilds)", required=True, min_length=1, max_length=20),
+        user: discord.User = Option(discord.User, "User to subscribe/unsubscribe (defaults to you)", required=False),
+        keyword: str = Option(str, "Keyword to subscribe to (leave empty to subscribe to all)", required=False),
     ):
-        """
-        /announcement_user [@user] [keyword]
-        • With keyword → toggles that user’s subscription to that keyword.
-        • Without keyword → toggles GLOBAL subscription (receives all).
-        Clears prior per-keyword subs when subscribing globally.
-        """
         target = user or ctx.user
-
         sub_key = keyword or "*"
 
-        if sub_key != "*" and self.db.get_announcement_users("*").count(target.id) > 0:
-            embed = Embed(
-                title="Already Subscribed Globally",
-                description=f"{target.mention} is already subscribed to **all** announcements. Unsubscribe them first to subscribe to specific keywords.",
-                color=Color.blue(),
-            )
-            return await ctx.respond(embed=embed, ephemeral=True)
+        try:
+            gid = int(guild_id)
+        except ValueError:
+            return await ctx.respond("Invalid guild_id.", ephemeral=True)
 
         if sub_key == "*":
             self.db.conn.execute(
-                "DELETE FROM announcement_subscriptions WHERE user_id = ? AND keyword != '*'",
-                (target.id,),
+                "DELETE FROM announcement_subscriptions WHERE guild_id = ? AND user_id = ? AND keyword != '*'",
+                (gid, target.id),
             )
             self.db.conn.commit()
 
-        if self.db.add_announcement_user(sub_key, target.id):
-            action = "Subscribed"
-            color = Color.green()
+        if sub_key != "*":
+            rows = self.db.conn.execute(
+                "SELECT 1 FROM announcement_subscriptions WHERE guild_id = ? AND user_id = ? AND keyword = '*'",
+                (gid, target.id),
+            ).fetchone()
+            if rows:
+                embed = Embed(
+                    title="Already Subscribed to All",
+                    description=f"{target.mention} already receives all announcements in this guild.",
+                    color=Color.blue(),
+                )
+                return await ctx.respond(embed=embed, ephemeral=True)
+
+        if self.db.add_announcement_user(gid, sub_key, target.id):
+            action, color = "Subscribed", Color.green()
         else:
-            self.db.remove_announcement_user(sub_key, target.id)
-            action = "Unsubscribed"
-            color = Color.orange()
+            self.db.remove_announcement_user(gid, sub_key, target.id)
+            action, color = "Unsubscribed", Color.orange()
 
-        embed = Embed(title="🔔 Announcement Subscription Updated", color=color)
+        embed = Embed(title="🔔 Subscription Updated", color=color)
+        embed.add_field(name="Guild", value=str(gid), inline=True)
         embed.add_field(name="User", value=target.mention, inline=True)
-        scope = keyword if keyword else "All announcements"
-        embed.add_field(name="Scope", value=scope, inline=True)
+        embed.add_field(name="Scope", value=sub_key, inline=True)
         embed.add_field(name="Action", value=action, inline=True)
-
         await ctx.respond(embed=embed, ephemeral=True)
 
     @commands.slash_command(
         name="announcement_list",
-        description="List all announcement triggers, or delete by index",
+        description="List/delete ALL announcement triggers across every guild (IDs only).",
         guild_ids=[GUILD_ID],
     )
     async def announcement_list(
         self,
         ctx: discord.ApplicationContext,
-        delete: int = Option(
-            int, "Index of the trigger to delete", required=False, min_value=1
-        ),
+        delete: int = Option(int, "Index to delete", required=False, min_value=1),
     ):
-        """
-        /announcement_list [delete]
-        • No args → shows all active triggers (keyword + user + channel) in an embed.
-        • With delete → removes that trigger and clears its subscriptions.
-        """
-        triggers = self.db.get_announcement_triggers()
-        keys = list(triggers.keys())
+        rows = self.db.get_all_announcement_triggers_flat()
+        if not rows:
+            return await ctx.respond("No announcement triggers found.", ephemeral=True)
 
-        if not keys:
-            return await ctx.respond("No announcement triggers set.", ephemeral=True)
-
-        # Deletion path
         if delete is not None:
             idx = delete - 1
-            if idx < 0 or idx >= len(keys):
+            if idx < 0 or idx >= len(rows):
                 return await ctx.respond(
-                    f"⚠️ Invalid index `{delete}`; pick 1–{len(keys)}.", ephemeral=True
+                    f"⚠️ Invalid index `{delete}`; pick 1–{len(rows)}.",
+                    ephemeral=True,
                 )
-            kw = keys[idx]
-            for filter_id, chan_id in triggers[kw]:
-                self.db.remove_announcement_trigger(kw, filter_id, chan_id)
-            self.db.conn.execute(
-                "DELETE FROM announcement_subscriptions WHERE keyword = ?", (kw,)
-            )
+
+            r   = rows[idx]
+            gid = int(r["guild_id"])
+            kw  = r["keyword"]
+            fuid = int(r["filter_user_id"])
+            cid  = int(r["channel_id"])
+
+            removed = self.db.remove_announcement_trigger(gid, kw, fuid, cid)
+
+            still_has = self.db.conn.execute(
+                "SELECT 1 FROM announcement_triggers WHERE guild_id = ? AND keyword = ? LIMIT 1",
+                (gid, kw),
+            ).fetchone()
+            if not still_has:
+                self.db.conn.execute(
+                    "DELETE FROM announcement_subscriptions WHERE guild_id = ? AND keyword = ?",
+                    (gid, kw),
+                )
             self.db.conn.commit()
-            return await ctx.respond(
-                f"Deleted announcement trigger **{kw}** and cleared its subscribers.",
-                ephemeral=True,
-            )
+
+            if removed:
+                who   = "any user" if fuid == 0 else f"user `{fuid}`"
+                where = "any channel" if cid == 0 else f"`#{cid}`"
+                return await ctx.respond(
+                    f"🗑️ Deleted: [Guild: `{gid}`] **{kw}** — {who}, {where}",
+                    ephemeral=True,
+                )
+            else:
+                return await ctx.respond("Nothing was deleted (row no longer exists).", ephemeral=True)
+
+        lines: list[str] = []
+        for i, r in enumerate(rows, start=1):
+            gid  = int(r["guild_id"])
+            kw   = r["keyword"]
+            fuid = int(r["filter_user_id"])
+            cid  = int(r["channel_id"])
+            who   = "any user" if fuid == 0 else f"user `{fuid}`"
+            where = "any channel" if cid == 0 else f"`#{cid}`"
+            lines.append(f"{i}. [Guild: `{gid}`] **{kw}** — {who}, {where}")
+
+        def _chunk_lines(xs: list[str], limit: int = 1024) -> list[str]:
+            chunks, cur = [], ""
+            for line in xs:
+                add = (("\n" if cur else "") + line)
+                if len(cur) + len(add) > limit:
+                    chunks.append(cur or "—")
+                    cur = line
+                else:
+                    cur += add
+            if cur:
+                chunks.append(cur)
+            if not chunks:
+                chunks.append("—")
+            return chunks
 
         embed = discord.Embed(
-            title="📋 Announcement Triggers", color=discord.Color.blurple()
+            title="📋 Announcement Triggers",
+            description="Use `/announcement_list delete:<index>` to delete a specific row.",
+            color=discord.Color.blurple(),
         )
-
-        for i, kw in enumerate(keys, start=1):
-            entries = triggers[kw]
-            lines = []
-            for filter_id, chan_id in entries:
-                user_desc = "any user" if filter_id == 0 else f"user `{filter_id}`"
-                chan_desc = "any channel" if chan_id == 0 else f"channel `#{chan_id}`"
-                lines.append(f"> From {user_desc} in {chan_desc}")
-            embed.add_field(name=f"{i}. {kw}", value="\n".join(lines), inline=False)
+        for j, chunk in enumerate(_chunk_lines(lines)):
+            embed.add_field(name="Triggers" if j == 0 else "Triggers (cont.)", value=chunk, inline=False)
 
         await ctx.respond(embed=embed, ephemeral=True)
 
@@ -532,7 +520,6 @@ class CloneCommands(commands.Cog):
                 ephemeral=True,
             )
 
-        # Toggle behavior
         if self.db.has_onjoin_subscription(gid, ctx.user.id):
             self.db.remove_onjoin_subscription(gid, ctx.user.id)
             title = "On-Join DM Disabled"
