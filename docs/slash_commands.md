@@ -59,63 +59,82 @@ This document provides easy-to-follow instructions on how to use the available s
 
 ---
 
-### `/announcement_trigger <keyword> <user_id> [channel_id]`
+### `/announcement_trigger_add <guild_id> <keyword> <user_id> [channel_id]`
 
-
-**Description:** Registers a trigger so that when a specific user posts a message containing the keyword, a DM is sent to subscribers.
+**Description:**  
+Registers a trigger so that when a message in the given guild matches the keyword (and optional filters), it will announce to subscribers.
 
 **Parameters:**
-
-* `keyword`: Word to match
-* `user_id`: Discord user ID to filter messages
-* `channel_id`: Channel ID to listen in (omit for any channel)
+- `guild_id`: Discord server ID (`0 = all guilds`)  
+- `keyword`: Word to match  
+- `user_id`: Discord user ID (`0 = any user`)  
+- `channel_id`: Channel ID to listen in (`0 = any channel`, omit for any)
 
 **Usage Examples:**
-
 ```
-/announcement_trigger `trade update` 123456789012345678
-/announcement_trigger `I'm taking a long` 123456789012345678 987654321098765432
+/announcement_trigger_add guild_id:0 keyword:lol user_id:0
+/announcement_trigger_add guild_id:123456789012345678 keyword:trade user_id:111111111111111111
+/announcement_trigger_add guild_id:123456789012345678 keyword:raid user_id:0 channel_id:987654321098765432
 ```
 
 ---
 
+### `/announce_trigger_list [delete:<n>]`
 
-### `/announcement_user [@user] [keyword]`
-
-
-**Description:** Subscribes or unsubscribes a user to announcements for a keyword—or all keywords.
+**Description:**  
+Lists all current announcement triggers across every guild, or deletes one by its index.
 
 **Parameters:**
-
-* `@user` (optional): The Discord user to toggle (defaults to yourself)
-* `keyword` (optional): The keyword to subscribe to (omit for all)
+- `delete`: The 1-based index of the trigger to remove
 
 **Usage Examples:**
-
 ```
-/announcement_user            # toggle yourself for all keywords
-/announcement_user @Tom        # toggle Tom for all keywords
-/announcement_user trade       # toggle yourself for 'trade' only
-/announcement_user @Tom trade  # toggle Tom for 'trade'
+/announce_trigger_list
+/announce_trigger_list delete:2
 ```
 
 ---
 
-### `/announcement_list [delete:<n>]`
+### `/announce_subscription_toggle <guild_id> [@user] [keyword]`
 
-
-**Description:** Lists current announcement triggers or deletes one by its index.
+**Description:**  
+Subscribes or unsubscribes a user to announcements for a keyword — or for all keywords.
 
 **Parameters:**
-
-* `delete`: The 1-based index of the trigger to remove
+- `guild_id`: Discord server ID (`0 = all guilds`)  
+- `@user` (optional): The Discord user to toggle (defaults to yourself)  
+- `keyword` (optional): The keyword to subscribe to (`* = all keywords`)  
 
 **Usage Examples:**
+```
+/announce_subscription_toggle guild_id:0 keyword:lol
+/announce_subscription_toggle guild_id:123456789012345678
+/announce_subscription_toggle guild_id:123456789012345678 keyword:* user:@Mac
+/announce_subscription_toggle guild_id:123456789012345678 keyword:trade user:@Mac
+```
 
+---
+
+### `/announce_subscription_list [delete:<n>]`
+
+**Description:**  
+Lists all announcement subscriptions across every guild, or deletes one by its index.
+
+**Parameters:**
+- `delete`: The 1-based index of the subscription to remove
+
+**Usage Examples:**
 ```
-/announcement_list            # show all triggers
-/announcement_list delete:2   # remove trigger #2
+/announce_subscription_list
+/announce_subscription_list delete:7
 ```
+
+---
+
+### `/announce_help`
+
+**Description:**  
+Shows a formatted help embed that explains how to use all the announcement commands.
 
 ---
 
