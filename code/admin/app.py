@@ -2142,7 +2142,6 @@ async def api_export_messages(request: Request):
     except Exception:
         return JSONResponse({"ok": False, "error": "invalid-json"}, status_code=400)
 
-    # Webhook is OPTIONAL now
     webhook = (payload.get("webhook_url") or "").strip() or None
 
     data = {
