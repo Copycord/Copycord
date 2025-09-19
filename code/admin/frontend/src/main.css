@@ -5218,7 +5218,6 @@ body {
 .export-modal #ex-filters .ex-metrics {
   margin-top: 6px;
   padding-top: 10px;
-  border-top: 1px solid var(--hairline, rgba(255, 255, 255, 0.08));
   transform: translateY(-2px);
 }
 
