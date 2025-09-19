@@ -2135,5 +2135,43 @@ async def _release_watch_loop():
             except asyncio.TimeoutError:
                 pass
 
+@app.post("/api/export/messages", response_class=JSONResponse)
+async def api_export_messages(request: Request):
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid-json"}, status_code=400)
+
+    # Webhook is OPTIONAL now
+    webhook = (payload.get("webhook_url") or "").strip() or None
+
+    data = {
+        "guild_id": payload.get("guild_id"),
+        "channel_id": payload.get("channel_id"),
+        "user_id": payload.get("user_id"),
+        "webhook_url": webhook,  # may be None
+        "has_attachments": bool(payload.get("has_attachments", False)),
+        "after_iso": payload.get("after_iso"),
+        "before_iso": payload.get("before_iso"),
+        "filters": payload.get("filters") or {},
+    }
+
+    try:
+        res = await _ws_cmd(
+            CLIENT_AGENT_URL,
+            {"type": "export_messages", "data": data},
+            timeout=CLIENT_AGENT_TIMEOUT,
+        )
+    except asyncio.TimeoutError:
+        return JSONResponse({"ok": False, "error": "client-agent-timeout"}, status_code=504)
+    except ConnectionRefusedError:
+        return JSONResponse({"ok": False, "error": "client-agent-unreachable"}, status_code=502)
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": f"client-agent-error: {type(e).__name__}: {e}"}, status_code=502)
+
+    if not res.get("ok", True):
+        return JSONResponse({"ok": False, "error": res.get("error") or "client-agent-failed"}, status_code=502)
+    return JSONResponse({"ok": True, "accepted": True})
+
 
 app = ConnCloseOnShutdownASGI(app)
