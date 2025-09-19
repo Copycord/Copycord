@@ -590,7 +590,26 @@ class ClientListener:
 
             return {"ok": True}
 
-    
+
+        elif typ == "export_messages":
+            d = data or {}
+            gid = str(d.get("guild_id") or "").strip() or None
+
+            try:
+                target_gid = int(gid) if gid else None
+            except Exception:
+                target_gid = None
+
+            guild = self.bot.get_guild(target_gid) if target_gid else None
+            if guild is None and self.bot.guilds:
+                guild = self.bot.guilds[0]
+            if guild is None:
+                return {"ok": False, "error": "no-guild"}
+
+            asyncio.create_task(self._run_export_messages_task(d, guild))
+            return {"ok": True, "accepted": True}
+
+
         return None
 
     async def _resolve_accessible_host_channel(self, orig_channel_id: int):
@@ -1603,6 +1622,364 @@ class ClientListener:
                 self.db.delete_guild(gid)
         except Exception:
             logger.exception("[guilds] snapshot failed (outer)")
+            
+    async def _run_export_messages_task(self, d, guild):
+        import asyncio, os, json, time, re
+        from datetime import datetime, timezone
+
+        def _parse_iso(s):
+            try:
+                return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
+            except Exception:
+                return None
+
+        # ---- Inputs & basics
+        chan_id_raw = (d.get("channel_id") or "").strip() or None
+        user_id_raw = (d.get("user_id") or "").strip() or None
+        webhook_url = (d.get("webhook_url") or "").strip() or None
+        only_with_attachments = bool(d.get("has_attachments", False))  # legacy toggle (kept)
+        after_dt = _parse_iso(d.get("after_iso") or None)
+        before_dt = _parse_iso(d.get("before_iso") or None)
+        user_id = int(user_id_raw) if (user_id_raw and user_id_raw.isdigit()) else None
+
+        # Throttles
+        scan_sleep = 0.0    # scanning
+        send_sleep = 2.0    # 2s between WS sends
+
+        gid_log = getattr(guild, "id", None)
+        gname = getattr(guild, "name", "") or "Unknown"
+        wh_tail = webhook_url[-6:] if webhook_url else "None"
+        do_forward = bool(webhook_url)
+
+        # ---- UI filters (all default to "include"/True)
+        filters = d.get("filters") or {}
+        F = {
+            "embeds":        filters.get("embeds", True),
+            "attachments":   filters.get("attachments", True),
+
+            # Normalize att_types
+            "att_types":     (filters.get("att_types") or {"images": True, "videos": True, "audio": True, "other": True}),
+
+            "links":         filters.get("links", True),
+            "emojis":        filters.get("emojis", True),
+
+            # Was True; make it False to mirror UI default
+            "word_on":       filters.get("word_on", False),
+            "word":          (filters.get("word") or "").strip(),
+
+            "replies":       filters.get("replies", True),
+            "bots":          filters.get("bots", True),
+            "system":        filters.get("system", True),
+            "min_length":    int(filters.get("min_length", 0) or 0),
+            "min_reactions": int(filters.get("min_reactions", 0) or 0),
+            "pinned":        filters.get("pinned", True),
+            "stickers":      filters.get("stickers", True),
+            "mentions":      filters.get("mentions", True),
+        }
+        
+        if F["attachments"]:
+            # If attachments are enabled but no kinds are selected, treat as attachments disabled
+            kinds = F["att_types"]
+            if not any(bool(kinds.get(k)) for k in ("images", "videos", "audio", "other")):
+                F["attachments"] = False
+                
+        if after_dt and before_dt and after_dt > before_dt:
+            # If the user picks an after that’s later than before, silently swap to avoid a no-results scan:
+            after_dt, before_dt = before_dt, after_dt
+
+        _link_re  = re.compile(r'https?://\S+', re.I)
+        # Matches custom <:name:id> and a broad range of Unicode emoji
+        _emoji_re = re.compile(r'(<a?:\w+:\d+>)|([\U0001F300-\U0001FAFF])')
+        word_re   = re.compile(re.escape(F["word"]), re.I) if (F["word_on"] and F["word"]) else None
+
+        def _att_kind(att):
+            ct = (getattr(att, "content_type", "") or "").lower()
+            name = (getattr(att, "filename", "") or "").lower()
+
+            def has_any(kw):
+                return any(k in ct or name.endswith(k) for k in kw)
+
+            if has_any(("image/", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff")):
+                return "images"
+            if has_any(("video/", ".mp4", ".mov", ".webm", ".mkv", ".avi")):
+                return "videos"
+            if has_any(("audio/", ".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac")):
+                return "audio"
+            return "other"
+
+        def _has_any_attachment_type(msg):
+            atts = getattr(msg, "attachments", []) or []
+            if not atts:
+                return False
+            for a in atts:
+                k = _att_kind(a)
+                if F["att_types"].get(k, True):
+                    return True
+            return False
+
+        def _passes_filters(msg):
+            # Bots/system
+            is_bot = bool(getattr(getattr(msg, "author", None), "bot", False))
+            if not F["bots"] and is_bot:
+                return False
+
+            if not F["system"]:
+                mtype = getattr(msg, "type", None)
+                if mtype and getattr(mtype, "name", "").lower() != "default":
+                    return False
+
+            # Length
+            content = getattr(msg, "content", "") or ""
+            if F["min_length"] > 0 and len(content) < F["min_length"]:
+                return False
+
+            # Reactions
+            reacts = getattr(msg, "reactions", []) or []
+            if F["min_reactions"] > 0:
+                total_reacts = sum(int(getattr(r, "count", 0) or 0) for r in reacts)
+                if total_reacts < F["min_reactions"]:
+                    return False
+
+            # Pinned
+            if not F["pinned"] and getattr(msg, "pinned", False):
+                return False
+
+            # Stickers
+            if not F["stickers"] and (getattr(msg, "stickers", []) or []):
+                return False
+
+            # Mentions (users, roles, channels)
+            if not F["mentions"]:
+                if (getattr(msg, "mentions", []) or []) or (getattr(msg, "role_mentions", []) or []) or (getattr(msg, "channel_mentions", []) or []):
+                    return False
+
+            # Replies (has a resolved reference)
+            has_ref = bool(getattr(msg, "reference", None) and getattr(getattr(msg, "reference", None), "resolved", None))
+            if not F["replies"] and has_ref:
+                return False
+
+            # Embeds
+            if not F["embeds"] and (getattr(msg, "embeds", []) or []):
+                return False
+
+            # Attachments (+ enforce selected kinds)
+            if not F["attachments"]:
+                if (getattr(msg, "attachments", []) or []):
+                    return False
+            else:
+                atts = getattr(msg, "attachments", []) or []
+                if atts and not _has_any_attachment_type(msg):
+                    return False
+
+            # Links (content or common embed fields)
+            if not F["links"]:
+                if _link_re.search(content):
+                    return False
+                for e in getattr(msg, "embeds", []) or []:
+                    if any(_link_re.search(str(v)) for v in (getattr(e, "url", None), getattr(e, "title", None), getattr(e, "description", None)) if v):
+                        return False
+
+            # Emojis
+            if not F["emojis"] and _emoji_re.search(content):
+                return False
+
+            # Include word (must appear if enabled & provided)
+            if word_re and not word_re.search(content):
+                return False
+
+            return True
+
+        # ---- Resolve channels safely
+        me = None
+        try:
+            me = guild.get_member(getattr(self.bot.user, "id", None))
+        except Exception:
+            me = getattr(guild, "me", None)
+
+        channels = []
+        if chan_id_raw:
+            ch = None
+            try:
+                ch = await self.bot.fetch_channel(int(chan_id_raw))
+            except Exception as e:
+                logger.debug(f"[export] fetch_channel({chan_id_raw}) failed: {e}; falling back to cache")
+                if chan_id_raw.isdigit():
+                    ch = self.bot.get_channel(int(chan_id_raw))
+            if ch:
+                channels = [ch]
+
+        if not channels:
+            if me:
+                channels = [c for c in getattr(guild, "text_channels", []) if c.permissions_for(me).read_message_history]
+            else:
+                channels = list(getattr(guild, "text_channels", []))
+
+        t0 = time.perf_counter()
+        logger.info(
+            f"[export] Start task guild={gid_log} ({gname}) "
+            f"filters: chan={chan_id_raw or 'ALL'}, user={user_id or 'ANY'}, "
+            f"attachments_only={only_with_attachments}, after={after_dt}, before={before_dt}, "
+            f"forward_webhook={do_forward}({('…'+wh_tail) if do_forward else '—'}), "
+            f"scan_sleep={scan_sleep}, send_sleep={send_sleep}, ui_filters={filters}"
+        )
+
+        if not channels:
+            logger.warning(f"[export] No readable text channels in guild {gid_log}. Aborting.")
+            await self.ws.send({"type": "export_messages_done", "data": {"guild_id": gid_log, "forwarded": 0, "scanned": 0}})
+            return
+
+        ch_ids_preview = [getattr(c, "id", None) for c in channels[:8]]
+        more_note = "" if len(channels) <= 8 else f" (+{len(channels)-8} more)"
+        logger.info(f"[export] Channels to scan: {len(channels)} -> {ch_ids_preview}{more_note}")
+
+        total_scanned = 0
+        total_matched = 0
+        forwarded = 0
+        buffer_rows = []  # Always buffer first so we can save JSON before any forwarding
+
+        # ---- Scan
+        for ch in channels:
+            cid = getattr(ch, "id", None)
+            cname = getattr(ch, "name", "") or "unknown"
+            logger.info(f"[export] Scanning channel #{cname} ({cid}) …")
+            ch_scanned = 0
+            ch_matched = 0
+
+            try:
+                kwargs = {"limit": None, "oldest_first": True}
+                if after_dt:
+                    kwargs["after"] = after_dt
+                if before_dt:
+                    kwargs["before"] = before_dt
+
+                async for msg in ch.history(**kwargs):
+                    ch_scanned += 1
+                    total_scanned += 1
+
+                    if user_id and getattr(msg.author, "id", None) != user_id:
+                        if scan_sleep:
+                            await asyncio.sleep(scan_sleep)
+                        continue
+
+                    # legacy toggle
+                    if only_with_attachments and not getattr(msg, "attachments", []):
+                        if scan_sleep:
+                            await asyncio.sleep(scan_sleep)
+                        continue
+
+                    # comprehensive UI filters
+                    if not _passes_filters(msg):
+                        if scan_sleep:
+                            await asyncio.sleep(scan_sleep)
+                        continue
+
+                    ch_matched += 1
+                    total_matched += 1
+
+                    serialized = self.msg.serialize(msg)
+                    buffer_rows.append(
+                        {
+                            "guild_id": getattr(guild, "id", None),
+                            "channel_id": getattr(ch, "id", None),
+                            "message": serialized,
+                        }
+                    )
+
+                    if ch_scanned % 200 == 0:
+                        logger.info(
+                            f"[export] Progress ch={cid}: scanned={ch_scanned}, matched={ch_matched}, "
+                            f"total_scanned={total_scanned}, total_matched={total_matched}, buffered={len(buffer_rows)}"
+                        )
+
+                    if scan_sleep:
+                        await asyncio.sleep(scan_sleep)
+            except Exception as e:
+                logger.warning(f"[export] Channel {cid} failed: {e}")
+                continue
+
+            logger.info(f"[export] Done channel #{cname} ({cid}): scanned={ch_scanned}, matched={ch_matched}")
+
+        # ---- Save JSON snapshot first — /data/exports/<guild>/<YYYYMMDD-HHMMSS>/messages.json
+        json_file = None
+        try:
+            out_root = "/data/exports"
+            ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+            gid_str = str(getattr(guild, "id", "unknown"))
+            subdir = os.path.join(out_root, gid_str, ts)
+            os.makedirs(subdir, exist_ok=True)
+            json_file = os.path.join(subdir, "messages.json")
+            logger.info(f"[export] Writing JSON snapshot ({len(buffer_rows)} messages) → {json_file}")
+            with open(json_file, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "guild_id": gid_str,
+                        "exported_at": ts + "Z",
+                        "count": len(buffer_rows),
+                        "messages": [row["message"] for row in buffer_rows],
+                    },
+                    f,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            logger.info(f"[export] JSON saved: {json_file}")
+        except Exception as e:
+            logger.warning(f"[export] Failed to write JSON: {e}")
+            json_file = None
+
+        # ---- Forward buffered messages if a webhook URL was provided
+        if do_forward and buffer_rows:
+            logger.info(f"[export] Forwarding buffered messages: {len(buffer_rows)} → webhook(…{wh_tail})")
+            for idx, row in enumerate(buffer_rows, 1):
+                try:
+                    await self.ws.send(
+                        {
+                            "type": "export_message",
+                            "data": {
+                                "guild_id": row.get("guild_id"),
+                                "channel_id": row.get("channel_id"),
+                                "webhook_url": webhook_url,
+                                "message": row.get("message"),
+                            },
+                        }
+                    )
+                    forwarded += 1
+                    if send_sleep:
+                        await asyncio.sleep(send_sleep)  # 2s between WS sends
+                except Exception as e:
+                    logger.warning(f"[📤] export_message send failed (post-JSON) idx={idx}: {e}")
+                    break
+
+                if idx % 200 == 0:
+                    logger.info(f"[export] Forwarded {idx}/{len(buffer_rows)} (total_forwarded={forwarded})")
+        else:
+            logger.info("[export] No webhook URL provided — skipping forwarding step.")
+
+        dur = time.perf_counter() - t0
+        logger.info(
+            f"[export] Complete guild={gid_log} ({gname}) scanned={total_scanned}, matched={total_matched}, "
+            f"forwarded={forwarded}, json={'saved '+json_file if json_file else 'none'}, elapsed={dur:.1f}s"
+        )
+
+        # ---- Done – notify server
+        try:
+            await self.ws.send(
+                {
+                    "type": "export_messages_done",
+                    "data": {
+                        "guild_id": getattr(guild, "id", None),
+                        "forwarded": forwarded,
+                        "scanned": total_scanned,
+                        "matched": total_matched,
+                        **({"json_path": json_file} if json_file else {}),
+                    },
+                }
+            )
+        except Exception as e:
+            logger.debug(f"[export] emit export_messages_done failed: {e}")
+
+
+
+
 
     async def _shutdown(self):
         """

@@ -34,7 +34,7 @@
 
   function openMenuAsPopover(menuEl, clickEvent, cardEl) {
     const layer = ensurePopoverLayer();
-  
+
     menuEl.dataset.gid = cardEl.dataset.gid;
     menuEl.hidden = false;
     menuEl.classList.add("popover");
@@ -80,7 +80,7 @@
       menuEl.classList.remove("popover");
       menuEl.style.left = menuEl.style.top = menuEl.style.right = "";
     }
-  
+
     const onDocClick = (e) => {
       if (!menuEl.contains(e.target)) teardown();
     };
@@ -91,7 +91,7 @@
       }
     };
     const onWin = () => teardown();
-  
+
     setTimeout(() => {
       document.addEventListener("click", onDocClick, true);
     }, 0);
@@ -293,18 +293,18 @@
       return;
     }
     empty.hidden = true;
-  
+
     const frag = document.createDocumentFragment();
-  
+
     for (const g of filtered) {
       const card = document.createElement("article");
       card.className = "guild-card";
       card.dataset.gid = String(g.id);
-  
+
       const icon = g.icon_url
         ? `<img class="guild-icon" src="${encodeURI(g.icon_url)}" alt="">`
         : `<img class="guild-icon" src="/static/logo.png" alt="">`;
-  
+
       const actions = `
         <div class="guild-actions">
           <div class="action-menu" role="menu" hidden>
@@ -314,7 +314,7 @@
           </div>
         </div>
       `;
-  
+
       card.innerHTML = `
         ${actions}
         <div class="guild-card-body">
@@ -323,12 +323,12 @@
           <div class="scrape-badge" hidden>Scraping…</div>
         </div>
       `;
-  
+
       frag.appendChild(card);
     }
-  
+
     root.appendChild(frag);
-  
+
     requestAnimationFrame(() => {
       root.querySelectorAll(".guild-card").forEach((cardEl) => {
         const gid = cardEl.dataset.gid;
@@ -337,54 +337,54 @@
         if (nameEl) setEllipsisTitle(nameEl, g?.name ?? nameEl.textContent);
       });
     });
-  
+
     const hideAllCardMenus = () => {
       root.querySelectorAll(".guild-actions .action-menu").forEach((m) => {
         m.hidden = true;
         m.classList.remove("popover");
         m.style.left = m.style.top = m.style.right = "";
       });
-  
+
       document.querySelectorAll("#popover-layer .action-menu").forEach((m) => {
         const gid = m.dataset.gid;
-        const card = root.querySelector(`.guild-card[data-gid="${CSS.escape(gid)}"]`);
+        const card = root.querySelector(
+          `.guild-card[data-gid="${CSS.escape(gid)}"]`
+        );
         if (card) card.querySelector(".guild-actions")?.appendChild(m);
         m.hidden = true;
         m.classList.remove("popover");
         m.style.left = m.style.top = m.style.right = "";
       });
     };
-  
-    // 🔑 Restore card click to open its menu
+
     root.querySelectorAll(".guild-card").forEach((cardEl) => {
       cardEl.addEventListener("click", (e) => {
         if (e.target.closest(".action-menu")) return;
-  
+
         const menu = cardEl.querySelector(".guild-actions .action-menu");
         const isOpen =
           menu && !menu.hidden && menu.parentElement?.id === "popover-layer";
-  
+
         hideAllCardMenus();
         if (!menu || isOpen) return;
-  
+
         openMenuAsPopover(menu, e, cardEl);
       });
     });
-  
-    // Handle clicks on menu items
+
     root.addEventListener("click", (e) => {
       const item = e.target.closest(
         ".guild-actions .action-menu button[role='menuitem'], #popover-layer .action-menu button[role='menuitem']"
       );
       if (!item) return;
-  
+
       e.stopPropagation();
       const menu = item.closest(".action-menu");
       const gid = menu?.dataset.gid;
       const g = data.find((x) => x.id === gid);
-  
+
       hideAllCardMenus();
-  
+
       switch (item.dataset.act) {
         case "scrape":
           openScraperDialog(g);
@@ -400,14 +400,14 @@
           break;
       }
     });
-  
+
     document.addEventListener("click", (e) => {
       if (!root.contains(e.target)) hideAllCardMenus();
     });
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") hideAllCardMenus();
     });
-  
+
     setScrapeState(scrapeRunning);
   }
 
@@ -667,7 +667,6 @@
               0
             );
         });
-
 
         dot.addEventListener("keydown", (ev) => {
           if (ev.key === "Escape") {

@@ -4144,3 +4144,1209 @@ body {
   box-shadow: 0 0 0 3px rgba(88, 101, 242, 0.35),
     0 12px 28px rgba(0, 0, 0, 0.32);
 }
+
+.export-modal,
+.export-modal * {
+  box-sizing: border-box;
+}
+
+.export-modal .modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+  z-index: 9998;
+}
+
+.export-modal .modal-content {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  width: min(720px, 92vw);
+  max-height: min(84vh, 860px);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel, #0f1115);
+  color: var(--fg, #e7eaf0);
+  border: 1px solid var(--hairline, rgba(255, 255, 255, 0.08));
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+  z-index: 9999;
+  overflow: hidden;
+}
+
+.export-modal .export-head {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--hairline, rgba(255, 255, 255, 0.08));
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.02),
+    rgba(255, 255, 255, 0)
+  );
+}
+
+.export-modal .scraper-title-wrap {
+  display: grid;
+  gap: 4px;
+}
+
+.export-modal .scraper-title-wrap .scraper-title {
+  margin: 0;
+  font: 600 18px/1.25 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+.export-modal .scraper-title-wrap .muted.small {
+  margin: 0;
+  opacity: 0.8;
+  font-size: 12px;
+}
+
+.export-modal .scraper-body {
+  padding: 14px 18px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.export-modal .scraper-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--hairline, rgba(255, 255, 255, 0.08));
+  background: linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.02),
+    rgba(255, 255, 255, 0)
+  );
+}
+
+.export-modal .form-field {
+  display: block;
+}
+.export-modal .form-field .label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.export-modal .form-field .input {
+  width: 100%;
+  height: 36px;
+  line-height: 36px;
+  padding: 0 10px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  outline: none;
+}
+.export-modal .form-field .input:focus {
+  border-color: rgba(130, 160, 255, 0.6);
+  box-shadow: 0 0 0 3px rgba(130, 160, 255, 0.18);
+}
+.export-modal .form-field .hint {
+  display: block;
+  margin-top: 6px;
+  opacity: 0.75;
+  font-size: 12px;
+}
+
+.export-modal .check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  font-size: 14px;
+}
+
+.export-modal .export-body-wrap {
+  display: grid;
+  gap: 14px;
+}
+
+.export-modal .grid {
+  display: grid;
+}
+.export-modal .gap-2 {
+  gap: 8px;
+}
+.export-modal .mt-2 {
+  margin-top: 8px;
+}
+.export-modal .ml-6 {
+  margin-left: 1.5rem;
+}
+
+.export-modal .two-col {
+  display: grid;
+  gap: 12px;
+}
+@media (min-width: 720px) {
+  .export-modal .two-col {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.export-modal .items-center {
+  align-items: center;
+}
+
+.export-modal .export-advanced {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  padding: 0 10px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.export-modal .export-advanced + .export-advanced {
+  margin-top: 10px;
+}
+
+.export-modal .export-advanced > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 10px 4px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  user-select: none;
+}
+.export-modal .export-advanced > summary::marker {
+  display: none;
+}
+.export-modal .export-advanced > summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 8px;
+  transition: transform 0.18s ease;
+  opacity: 0.9;
+}
+.export-modal .export-advanced[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.export-modal #ex-filters .grid {
+  gap: 8px;
+}
+
+.export-modal .btn {
+  border-radius: 10px;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  cursor: pointer;
+}
+.export-modal .btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.export-modal .btn.btn-primary {
+  background: #5562ff;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: white;
+}
+.export-modal .btn.btn-primary:hover {
+  filter: brightness(1.05);
+}
+
+.export-modal .scraper-close {
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+}
+.export-modal .scraper-close:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.export-modal .scraper-body::-webkit-scrollbar {
+  width: 10px;
+}
+.export-modal .scraper-body::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+}
+.export-modal .scraper-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  border: 2px solid rgba(0, 0, 0, 0);
+  background-clip: padding-box;
+}
+.export-modal .scraper-body::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.export-modal .scraper-body {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) rgba(255, 255, 255, 0.06);
+}
+
+.export-modal .modal-content {
+  background: #0f0820;
+  border-color: var(--border, #2c1d4a);
+  box-shadow: 0 20px 56px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(167, 139, 250, 0.06) inset;
+}
+.export-modal .export-head {
+  background: linear-gradient(
+    180deg,
+    rgba(167, 139, 250, 0.06),
+    rgba(167, 139, 250, 0)
+  );
+}
+.export-modal .scraper-title {
+  color: var(--accent, #a78bfa);
+}
+.export-modal .muted.small {
+  color: var(--muted, #c8b8e8);
+}
+
+.export-modal .btn.btn-primary {
+  background: linear-gradient(
+    180deg,
+    var(--primary, #8b5cf6),
+    var(--primary-700, #6d28d9)
+  );
+  border-color: #3b2168;
+}
+.export-modal .btn.btn-primary:hover {
+  filter: brightness(1.05);
+}
+
+.export-modal .form-field .input:focus {
+  border-color: var(--accent, #a78bfa);
+  box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.18);
+}
+
+.export-modal .check input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border, #2c1d4a);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  display: inline-block;
+  position: relative;
+  cursor: pointer;
+  outline: 0;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.export-modal .check input[type='checkbox']:hover {
+  border-color: var(--accent, #a78bfa);
+}
+.export-modal .check input[type='checkbox']:focus-visible {
+  box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.18);
+}
+.export-modal .check input[type='checkbox']:checked {
+  background: var(--primary, #8b5cf6);
+  border-color: var(--primary-600, #7c3aed);
+}
+.export-modal .check input[type='checkbox']:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.export-modal .check span,
+.export-modal .label {
+  color: var(--text, #f6f2ff);
+}
+
+.export-modal #ex-filters.export-advanced {
+  border-color: rgba(167, 139, 250, 0.18);
+  background: linear-gradient(
+    180deg,
+    rgba(167, 139, 250, 0.06),
+    rgba(167, 139, 250, 0.03)
+  );
+}
+
+.export-modal #ex-f-attachments-children {
+  margin: 6px 0 0 0;
+  padding: 10px;
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  background: rgba(167, 139, 250, 0.06);
+  border-radius: 10px;
+
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+@media (min-width: 860px) {
+  .export-modal #ex-f-attachments-children {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.export-modal #ex-f-attachments:checked ~ #ex-f-attachments-children::before {
+  content: 'Attachment types';
+  grid-column: 1 / -1;
+  display: inline-block;
+  margin: 2px 0 4px 0;
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--accent, #a78bfa);
+  opacity: 0.95;
+}
+
+.export-modal #ex-f-attachments-children .check {
+  min-height: 28px;
+}
+
+.export-modal #ex-f-attachments-children {
+  overflow: hidden;
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.export-modal #ex-f-attachments:not(:checked) ~ #ex-f-attachments-children {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+
+.export-modal .scraper-body {
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+
+.export-modal .scraper-body::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    180deg,
+    var(--primary, #8b5cf6),
+    var(--primary-700, #6d28d9)
+  );
+  border: 2px solid #140b26;
+}
+.export-modal .scraper-body {
+  scrollbar-color: var(--primary-700, #6d28d9) #140b26;
+}
+
+.export-modal .visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.export-modal .att-types-modal .att-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 10000;
+}
+.export-modal .att-types-modal .att-panel {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  width: min(480px, 92vw);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: #160c30;
+  color: var(--fg, #f4f0ff);
+  border: 1px solid rgba(167, 139, 250, 0.25);
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(167, 139, 250, 0.08) inset;
+  z-index: 10001;
+  overflow: hidden;
+}
+
+.export-modal .att-types-modal .att-head {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(167, 139, 250, 0.18);
+  background: linear-gradient(
+    180deg,
+    rgba(167, 139, 250, 0.08),
+    rgba(167, 139, 250, 0)
+  );
+  display: flex;
+  align-items: center;
+}
+.export-modal .att-types-modal .att-title {
+  margin: 0;
+  font: 600 16px/1.2 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: var(--accent, #c4b5fd);
+}
+.export-modal .att-types-modal .att-x {
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+.export-modal .att-types-modal .att-x:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.export-modal .att-types-modal .att-body {
+  padding: 14px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+@media (min-width: 720px) {
+  .export-modal .att-types-modal .att-body {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.export-modal .att-types-modal .att-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 12px 14px 14px;
+  border-top: 1px solid rgba(167, 139, 250, 0.18);
+  background: linear-gradient(
+    0deg,
+    rgba(167, 139, 250, 0.06),
+    rgba(167, 139, 250, 0)
+  );
+}
+
+.export-modal .att-types-modal .check input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border, #2c1d4a);
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 6px;
+  display: inline-block;
+  position: relative;
+  cursor: pointer;
+  outline: 0;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.export-modal .att-types-modal .check input[type='checkbox']:hover {
+  border-color: var(--accent, #a78bfa);
+}
+.export-modal .att-types-modal .check input[type='checkbox']:focus-visible {
+  box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.18);
+}
+.export-modal .att-types-modal .check input[type='checkbox']:checked {
+  background: var(--primary, #8b5cf6);
+  border-color: var(--primary-600, #7c3aed);
+}
+
+.export-modal .btn-tip {
+  --tip-size: 16px;
+  --tip-bg: rgba(167, 139, 250, 0.14);
+  --tip-border: rgba(167, 139, 250, 0.28);
+  --tip-text: var(--accent, #c4b5fd);
+
+  width: var(--tip-size);
+  height: var(--tip-size);
+  padding: 0;
+  margin-left: 6px;
+
+  display: inline-grid;
+  place-items: center;
+  border-radius: 4px;
+  background: var(--tip-bg);
+  border: 1px solid var(--tip-border);
+  color: var(--tip-text);
+  font: 600 11px/1 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background 0.12s ease, border-color 0.12s ease,
+    box-shadow 0.12s ease, transform 0.06s ease;
+}
+
+.export-modal .btn-tip:hover {
+  background: rgba(167, 139, 250, 0.2);
+  border-color: rgba(167, 139, 250, 0.42);
+}
+
+.export-modal .btn-tip:active {
+  transform: translateY(1px);
+}
+
+.export-modal .btn-tip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.22);
+}
+
+.export-modal .btn-tip.is-disabled,
+.export-modal .btn-tip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: rgba(167, 139, 250, 0.08);
+}
+
+.export-modal .btn-tip[data-tooltip] {
+  position: relative;
+}
+
+.export-modal .btn-tip[data-tooltip]:hover::after,
+.export-modal .btn-tip[data-tooltip]:focus-visible::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: #eee9ff;
+  background: #1a0f34;
+  border: 1px solid rgba(167, 139, 250, 0.28);
+  border-radius: 6px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
+  z-index: 10002;
+}
+
+.export-modal .btn-tip[data-tooltip]:hover::before,
+.export-modal .btn-tip[data-tooltip]:focus-visible::before {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: rgba(167, 139, 250, 0.28);
+}
+
+.export-modal .btn-tip[data-tooltip]:hover::after {
+  margin-top: 2px;
+}
+
+.export-modal .visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.export-modal .btn-tip {
+  --tip-size: 14px;
+  width: var(--tip-size);
+  height: var(--tip-size);
+
+  margin-left: 4px;
+  padding: 0;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--accent, #a78bfa);
+
+  border-radius: 50%;
+  background: rgba(167, 139, 250, 0.14);
+  border: 1px solid rgba(167, 139, 250, 0.28);
+
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    transform 0.08s ease;
+}
+
+.export-modal .btn-tip:hover {
+  background: rgba(167, 139, 250, 0.24);
+  border-color: rgba(167, 139, 250, 0.42);
+}
+
+.export-modal .btn-tip:active {
+  transform: scale(0.95);
+}
+
+.export-modal .btn-tip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.25);
+}
+
+.export-modal .btn-tip.is-disabled,
+.export-modal .btn-tip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: rgba(167, 139, 250, 0.08);
+}
+
+.export-modal .check {
+  align-items: baseline;
+  gap: 6px;
+}
+
+.export-modal #ex-f-att-tip.btn-tip {
+  --tip-size: 14px;
+
+  width: var(--tip-size);
+  height: var(--tip-size);
+
+  margin-inline-start: 2px;
+
+  transform: translateY(-0.5px);
+
+  display: grid;
+  place-items: center;
+  padding: 0;
+
+  font-size: 10px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--accent, #a78bfa);
+
+  border-radius: 50%;
+  background: rgba(167, 139, 250, 0.14);
+  border: 1px solid rgba(167, 139, 250, 0.28);
+
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    transform 0.08s ease;
+}
+
+.export-modal #ex-f-att-tip.btn-tip:hover {
+  background: rgba(167, 139, 250, 0.24);
+  border-color: rgba(167, 139, 250, 0.42);
+}
+
+.export-modal #ex-f-att-tip.btn-tip:active {
+  transform: translateY(-0.5px) scale(0.96);
+}
+
+.export-modal #ex-f-att-tip.btn-tip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.25);
+}
+
+.export-modal #ex-f-att-tip.btn-tip.is-disabled,
+.export-modal #ex-f-att-tip.btn-tip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: rgba(167, 139, 250, 0.08);
+}
+
+.export-modal #ex-f-att-tip.btn-tip[data-tooltip] {
+  position: relative;
+}
+
+.export-modal #ex-f-att-tip.btn-tip[data-tooltip]:hover::after,
+.export-modal #ex-f-att-tip.btn-tip[data-tooltip]:focus-visible::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: #eee9ff;
+  background: #1a0f34;
+  border: 1px solid rgba(167, 139, 250, 0.28);
+  border-radius: 6px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.35);
+  z-index: 10002;
+}
+
+.export-modal #ex-f-att-tip.btn-tip[data-tooltip]:hover::before,
+.export-modal #ex-f-att-tip.btn-tip[data-tooltip]:focus-visible::before {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-top-color: rgba(167, 139, 250, 0.28);
+}
+
+.export-modal #ex-f-att-tip.btn-tip[data-tooltip]:hover::after {
+  margin-top: 2px;
+}
+
+.export-modal .check {
+  align-items: baseline;
+  gap: 6px;
+}
+
+.export-modal #ex-f-att-tip.btn-tip {
+  --tip-size: 14px;
+  width: var(--tip-size);
+  height: var(--tip-size);
+
+  margin-inline-start: 4px;
+
+  display: grid;
+  place-items: center;
+  padding: 0;
+
+  font: 700 11px/1 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  letter-spacing: 0;
+  transform: translateY(-0.5px);
+
+  color: var(--accent, #a78bfa);
+  border-radius: 50%;
+  background: rgba(167, 139, 250, 0.14);
+  border: 1px solid rgba(167, 139, 250, 0.28);
+
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    transform 0.08s ease;
+}
+
+.export-modal #ex-f-att-tip.btn-tip:hover {
+  background: rgba(167, 139, 250, 0.24);
+  border-color: rgba(167, 139, 250, 0.42);
+}
+
+.export-modal #ex-f-att-tip.btn-tip:active {
+  transform: translateY(-0.5px) scale(0.96);
+}
+
+.export-modal #ex-f-att-tip.btn-tip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.25);
+}
+
+.export-modal #ex-f-att-tip.btn-tip.is-disabled,
+.export-modal #ex-f-att-tip.btn-tip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  background: rgba(167, 139, 250, 0.08);
+}
+
+.export-modal #ex-f-att-tip.btn-tip[data-tooltip] {
+  position: relative;
+}
+.export-modal #ex-f-att-tip.btn-tip[data-tooltip]::before,
+.export-modal #ex-f-att-tip.btn-tip[data-tooltip]::after {
+  content: none !important;
+  display: none !important;
+}
+
+.export-modal .scraper-close {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid var(--border, #2c1d4a);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--accent, #a78bfa);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.1s ease;
+}
+.export-modal .scraper-close:hover {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: var(--shadow, 0 10px 30px rgba(139, 92, 246, 0.25));
+}
+.export-modal .scraper-close:active {
+  transform: translateY(0.5px);
+}
+
+.export-modal .export-advanced {
+  border: 1px solid rgba(167, 139, 250, 0.18);
+  border-radius: 10px;
+  background: linear-gradient(
+    180deg,
+    rgba(167, 139, 250, 0.06),
+    rgba(167, 139, 250, 0.03)
+  );
+}
+
+.export-modal .export-advanced > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 8px;
+  font-weight: 600;
+  color: var(--text, #f6f2ff);
+  cursor: pointer;
+  user-select: none;
+}
+.export-modal .export-advanced > summary::marker {
+  display: none;
+}
+.export-modal .export-advanced > summary::before {
+  content: '▸';
+  opacity: 0.9;
+  transform: translateY(1px);
+  transition: transform 0.18s ease, color 0.18s ease;
+  color: var(--accent, #a78bfa);
+}
+.export-modal .export-advanced[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.export-modal .export-advanced .mt-2 {
+  margin-top: 8px;
+}
+
+.export-modal .check {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.export-modal #ex-f-att-tip.btn-tip {
+  --tip-size: 14px;
+  width: var(--tip-size);
+  height: var(--tip-size);
+  margin-inline-start: 4px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+
+  transform: translateY(-0.5px);
+
+  font: 700 11px/1 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: var(--accent, #a78bfa);
+  border-radius: 50%;
+  background: rgba(167, 139, 250, 0.14);
+  border: 1px solid rgba(167, 139, 250, 0.28);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    transform 0.08s ease;
+}
+.export-modal #ex-f-att-tip.btn-tip:hover {
+  background: rgba(167, 139, 250, 0.24);
+  border-color: rgba(167, 139, 250, 0.42);
+}
+.export-modal #ex-f-att-tip.btn-tip:active {
+  transform: translateY(-0.5px) scale(0.96);
+}
+.export-modal #ex-f-att-tip.btn-tip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.25);
+}
+
+.export-modal #ex-f-att-tip.btn-tip[data-tooltip] {
+  position: relative;
+}
+.export-modal #ex-f-att-tip.btn-tip[data-tooltip]::before,
+.export-modal #ex-f-att-tip.btn-tip[data-tooltip]::after {
+  content: none !important;
+  display: none !important;
+}
+
+.export-modal .att-types-modal .att-backdrop {
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.export-modal .att-types-modal .att-panel {
+  background: var(--panel, #0f1115);
+  color: var(--fg, #e7eaf0);
+  border: 1px solid var(--hairline, rgba(255, 255, 255, 0.08));
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+}
+
+.export-modal .att-types-modal .att-head {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--hairline, rgba(255, 255, 255, 0.08));
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.02),
+    rgba(255, 255, 255, 0)
+  );
+  display: flex;
+  align-items: center;
+}
+.export-modal .att-types-modal .att-title {
+  margin: 0;
+  font: 600 16px/1.2 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: var(--fg, #e7eaf0);
+}
+.export-modal .att-types-modal .att-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--hairline, rgba(255, 255, 255, 0.08));
+  background: linear-gradient(
+    0deg,
+    rgba(255, 255, 255, 0.02),
+    rgba(255, 255, 255, 0)
+  );
+}
+
+.export-modal .att-types-modal .att-x {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 10px;
+  border: 1px solid var(--hairline, rgba(255, 255, 255, 0.08));
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg, #e7eaf0);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.18s ease, box-shadow 0.18s ease, transform 0.1s ease;
+}
+.export-modal .att-types-modal .att-x:hover {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+.export-modal .att-types-modal .att-x:active {
+  transform: translateY(0.5px);
+}
+
+.export-modal .att-types-modal .att-body {
+  padding: 14px;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 14px;
+}
+@media (min-width: 720px) {
+  .export-modal .att-types-modal .att-body {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.export-modal .att-types-modal .check input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--hairline, rgba(255, 255, 255, 0.08));
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.export-modal .att-types-modal .check input[type='checkbox']:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+.export-modal .att-types-modal .check input[type='checkbox']:focus-visible {
+  box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.18);
+}
+
+.export-modal .att-types-modal .check input[type='checkbox']:checked {
+  background: var(--primary, #8b5cf6);
+  border-color: var(--primary-600, #7c3aed);
+}
+
+.export-modal .check {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.export-modal #ex-f-att-tip.btn-tip {
+  --tip-size: 14px;
+  width: var(--tip-size);
+  height: var(--tip-size);
+  margin-inline-start: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline, rgba(255, 255, 255, 0.08));
+  color: var(--fg, #e7eaf0);
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease,
+    box-shadow 0.15s ease, transform 0.08s ease;
+
+  transform: translateY(-0.5px);
+}
+.export-modal #ex-f-att-tip.btn-tip:hover {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.14);
+  color: var(--accent, #a78bfa);
+}
+.export-modal #ex-f-att-tip.btn-tip:active {
+  transform: translateY(-0.5px) scale(0.96);
+}
+.export-modal #ex-f-att-tip.btn-tip:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.18);
+}
+
+.export-modal #ex-f-att-tip.btn-tip.is-disabled,
+.export-modal #ex-f-att-tip.btn-tip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--hairline, rgba(255, 255, 255, 0.08));
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.export-modal #ex-f-att-tip.btn-tip[data-tooltip] {
+  position: relative;
+}
+.export-modal #ex-f-att-tip.btn-tip[data-tooltip]::before,
+.export-modal #ex-f-att-tip.btn-tip[data-tooltip]::after {
+  content: none !important;
+  display: none !important;
+}
+
+.export-modal .check input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  transform: none;
+}
+
+.export-modal label.check input#ex-f-mentions[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+}
+
+.export-modal #ex-filters .ex-metrics {
+  margin-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline, rgba(255, 255, 255, 0.08));
+  transform: translateY(-2px);
+}
+
+.export-modal .form-field .input[type='number'] {
+  height: 36px;
+  line-height: 36px;
+  padding-right: 28px;
+  -moz-appearance: number-input;
+}
+
+.export-modal .form-field .input[type='number']::-webkit-outer-spin-button,
+.export-modal .form-field .input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: inner-spin-button !important;
+  opacity: 1;
+  margin: 0 2px 0 0;
+  filter: invert(75%) contrast(120%);
+  height: 28px;
+}
+
+.export-modal input[type='number'] {
+  appearance: auto;
+}
+
+.export-modal #ex-f-minlen,
+.export-modal #ex-f-minreacts {
+  height: 28px !important;
+  line-height: 28px !important;
+  padding: 0 8px !important;
+  font-size: 13px;
+  border-radius: 8px;
+  width: 120px !important;
+  max-width: 120px !important;
+}
+
+.export-modal #ex-f-minlen[type='number'],
+.export-modal #ex-f-minreacts[type='number'] {
+  appearance: textfield;
+  -webkit-appearance: none;
+  -moz-appearance: textfield;
+}
+
+.export-modal #ex-f-minlen::-webkit-outer-spin-button,
+.export-modal #ex-f-minlen::-webkit-inner-spin-button,
+.export-modal #ex-f-minreacts::-webkit-outer-spin-button,
+.export-modal #ex-f-minreacts::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  display: none;
+  margin: 0;
+}
+
+.export-modal label.label.small[for='ex-f-minlen'],
+.export-modal label.label.small[for='ex-f-minreacts'] {
+  margin-bottom: 4px;
+}
+
+.export-modal .ex-metrics.two-col,
+.export-modal .two-col.metrics-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  align-items: start;
+  transform: translateY(-2px);
+}
+
+.export-modal #ex-f-word {
+  height: 28px !important;
+  line-height: 28px !important;
+  padding: 0 8px !important;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+.export-modal #ex-f-word.is-disabled,
+.export-modal #ex-f-word:disabled {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.65);
+  cursor: not-allowed;
+}
+
+.export-modal .ex-word-row {
+  gap: 12px;
+  align-items: start;
+  transform: translateY(-2px);
+}
+
+.export-modal #ex-range > summary.label {
+  font-weight: 600;
+  color: var(--text, #f6f2ff);
+}
+
+.export-modal .ex-range-grid {
+  gap: 12px;
+}
+.export-modal .ex-range-hint {
+  margin-top: 6px;
+}
+
+.export-modal .form-field .input[type='datetime-local'] {
+  width: 100%;
+  height: 36px;
+  line-height: 36px;
+  padding: 0 10px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  outline: none;
+  color-scheme: dark;
+  padding-right: 36px;
+}
+
+.export-modal .form-field .input[type='datetime-local']:focus {
+  border-color: var(--accent, #a78bfa);
+  box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.18);
+}
+
+.export-modal
+  .form-field
+  .input[type='datetime-local']::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.9;
+  margin-right: -4px;
+  filter: invert(80%) sepia(8%) saturate(120%);
+}
+
+@supports (color-scheme: dark) {
+  .export-modal .form-field .input[type='datetime-local'] {
+    color-scheme: dark;
+  }
+}

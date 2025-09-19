@@ -810,6 +810,27 @@ class WebhookDMExporter:
             wh = discord.Webhook.from_url(url, session=self.session)
             self._wh_cache[url] = wh
         return wh
+    
+    async def handle_ws_export_message(self, data: Dict[str, Any]) -> None:
+        """
+        Expects: {"webhook_url": str, "message": {...}, "guild_id": int?, "channel_id": int?}
+        """
+        webhook_url = data.get("webhook_url")
+        msg = data.get("message") or {}
+        if not webhook_url or not msg:
+            return
+        try:
+            await self.forward_to_webhook(msg, webhook_url)
+        except Exception:
+            self.logger.exception("forward_to_webhook failed (channel export)")
+
+    async def handle_ws_export_messages_done(self, data: Dict[str, Any]) -> None:
+        gid = data.get("guild_id")
+        fwd = data.get("forwarded", 0)
+        scanned = data.get("scanned", 0)
+        jpath = data.get("json_path")
+        extra = f" JSON: {jpath}" if jpath else ""
+        self.logger.info(f"[📦] Export complete for guild {gid}: forwarded {fwd}/{scanned}.{extra}")
 
     async def forward_to_webhook(self, msg_data: dict, webhook_url: str) -> None:
         """
@@ -888,10 +909,13 @@ class WebhookDMExporter:
                 em.colour = discord.Colour(e["color"])
             if "footer" in e:
                 f = e["footer"]
-                em.set_footer(
-                    text=f.get("text") or discord.Embed.Empty,
-                    icon_url=f.get("icon_url") or discord.Embed.Empty,
-                )
+                fkw = {}
+                if f.get("text"):
+                    fkw["text"] = f["text"]
+                if f.get("icon_url"):
+                    fkw["icon_url"] = f["icon_url"]
+                if fkw:
+                    em.set_footer(**fkw)
             if "image" in e:
                 im = e["image"]
                 if im.get("url"):
@@ -902,11 +926,15 @@ class WebhookDMExporter:
                     em.set_thumbnail(url=th["url"])
             if "author" in e:
                 a = e["author"]
-                em.set_author(
-                    name=a.get("name") or discord.Embed.Empty,
-                    url=a.get("url") or discord.Embed.Empty,
-                    icon_url=a.get("icon_url") or discord.Embed.Empty,
-                )
+                akw = {}
+                if a.get("name"):
+                    akw["name"] = a["name"]
+                if a.get("url"):
+                    akw["url"] = a["url"]
+                if a.get("icon_url"):
+                    akw["icon_url"] = a["icon_url"]
+                if akw:
+                    em.set_author(**akw)
             for fld in e.get("fields", []):
                 em.add_field(
                     name=fld["name"],
@@ -935,7 +963,7 @@ class WebhookDMExporter:
             author_name = author.get("name") or "Unknown"
             author_id = author.get("id") or "?"
             self.logger.info(
-                f"[📥] Sent DM Export message via Webhook from {author_name} ({author_id})"
+                f"[📥] Sent Export message via Webhook from {author_name} ({author_id})"
             )
         except discord.HTTPException as e:
             self.logger.warning(
