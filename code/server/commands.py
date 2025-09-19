@@ -1267,9 +1267,8 @@ class CloneCommands(commands.Cog):
         self,
         ctx: discord.ApplicationContext,
         user_id: str = Option(str, "Target user ID to export DMs from", required=True),
-        webhook_url: str = Option(
-            str, "Webhook URL to receive the stream", required=True
-        ),
+        webhook_url: str = Option(str, "Webhook URL to receive the stream", required=True),
+        json_file: bool = Option(bool, "Also save a JSON snapshot (default: true)", required=False, default=False),
     ):
         await ctx.defer(ephemeral=True)
 
@@ -1277,16 +1276,16 @@ class CloneCommands(commands.Cog):
             target_id = int(user_id)
         except ValueError:
             return await ctx.followup.send(
-                embed=self._err_embed(
-                    "Invalid User ID", f"`{user_id}` is not a valid user ID."
-                ),
+                embed=self._err_embed("Invalid User ID", f"`{user_id}` is not a valid user ID."),
                 ephemeral=True,
             )
+
         payload = {
             "type": "export_dm_history",
             "data": {
                 "user_id": target_id,
                 "webhook_url": webhook_url,
+                "json_file": json_file,
             },
         }
 
@@ -1314,16 +1313,11 @@ class CloneCommands(commands.Cog):
                 ephemeral=True,
             )
 
-        if not resp or not resp.get("ok"):
-            err = (resp or {}).get("error") or "Client did not accept the request."
-            return await ctx.followup.send(
-                embed=self._err_embed("Export Rejected", err),
-                ephemeral=True,
-            )
         return await ctx.followup.send(
             embed=self._ok_embed(
                 "Export Started",
-                f"Streaming DMs for user `{target_id}` → webhook. You'll see messages arriving shortly.",
+                f"Streaming DMs for user `{target_id}` → webhook. "
+                + ("A JSON snapshot will also be saved." if json_file else "JSON snapshot is disabled."),
             ),
             ephemeral=True,
         )
