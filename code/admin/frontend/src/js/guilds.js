@@ -270,6 +270,9 @@
       case "scrape":
         openScraperDialog(g);
         break;
+      case "export":
+        openExportDialog(g);
+        break;
       case "cancel":
         cancelScrape(g);
         break;
@@ -310,6 +313,7 @@
           <div class="action-menu" role="menu" hidden>
             <button role="menuitem" data-act="view">View details</button>
             <button role="menuitem" data-act="scrape">Scrape members</button>
+            <button role="menuitem" data-act="export">Export messages</button>
             <button role="menuitem" data-act="cancel" hidden>Cancel scrape</button>
           </div>
         </div>
@@ -465,6 +469,490 @@
     return wrap;
   }
 
+  function ensureExportModal() {
+    console.debug("[Export] ensureExportModal()");
+
+    document.querySelectorAll(".export-modal").forEach((el) => el.remove());
+
+    const wrap = document.createElement("div");
+    wrap.className = "modal export-modal show";
+
+    const prevDocOverflow = document.documentElement.style.overflow;
+    document.documentElement.style.overflow = "hidden";
+
+    wrap.innerHTML = `
+      <div class="modal-backdrop" aria-hidden="true"></div>
+      <div class="modal-content scraper-card" role="dialog" aria-modal="true" aria-label="Export messages">
+        <header class="scraper-head export-head">
+          <div class="scraper-title-wrap">
+            <h3 class="scraper-title">Export messages</h3>
+            <p class="muted small">Export messages to a JSON file and optionally forward via webhook.</p>
+          </div>
+          <button type="button" class="scraper-close js-x" aria-label="Close">
+            <span aria-hidden="true">✕</span>
+          </button>
+        </header>
+  
+        <div class="scraper-body">
+          <div class="export-body-wrap">
+            <div class="two-col">
+              <label class="form-field">
+                <span class="label">Channel ID (optional)</span>
+                <input class="input" type="text" inputmode="numeric" placeholder="e.g. 123456789012345678" id="ex-channel">
+              </label>
+  
+              <label class="form-field">
+                <span class="label">Filter by User ID (optional)</span>
+                <input class="input" type="text" inputmode="numeric" placeholder="e.g. 123456789012345678" id="ex-user">
+              </label>
+            </div>
+  
+            <!-- Filters -->
+            <details class="export-advanced" id="ex-filters">
+              <summary class="label">Filters</summary>
+              <div class="mt-2 grid gap-2">
+                <label class="check">
+                  <input type="checkbox" id="ex-f-embeds" checked>
+                  <span>Include embeds</span>
+                </label>
+  
+                <div class="check">
+                  <input type="checkbox" id="ex-f-attachments" checked>
+                  <span>Include attachments</span>
+                  <button
+                    type="button"
+                    class="btn-tip"
+                    id="ex-f-att-tip"
+                    aria-label="Attachment types"
+                    data-tooltip="Choose attachment types (images, videos, audio, other)">
+                    i
+                  </button>
+                  <span class="muted small" id="ex-f-att-summary" aria-live="polite"></span>
+                </div>
+  
+                <!-- Hidden mirrors keep the same IDs used in payload -->
+                <div class="visually-hidden" aria-hidden="true">
+                  <input type="checkbox" id="ex-f-att-images" checked>
+                  <input type="checkbox" id="ex-f-att-videos" checked>
+                  <input type="checkbox" id="ex-f-att-audio" checked>
+                  <input type="checkbox" id="ex-f-att-other" checked>
+                </div>
+  
+                <label class="check">
+                  <input type="checkbox" id="ex-f-links" checked>
+                  <span>Include links</span>
+                </label>
+  
+                <label class="check">
+                  <input type="checkbox" id="ex-f-emojis" checked>
+                  <span>Include emojis</span>
+                </label>
+  
+                <div class="two-col items-center ex-word-row">
+                  <label class="check" for="ex-f-word">
+                    <input type="checkbox" id="ex-f-word-on">
+                    <span>Include word</span>
+                  </label>
+                  <input class="input" id="ex-f-word" type="text" placeholder="message has this word..." value="" disabled>
+                </div>
+  
+                <!-- Useful extras, all ON by default -->
+                <label class="check">
+                  <input type="checkbox" id="ex-f-replies" checked>
+                  <span>Include replies (has a referenced message)</span>
+                </label>
+                <label class="check">
+                  <input type="checkbox" id="ex-f-bots" checked>
+                  <span>Include bot messages</span>
+                </label>
+                <label class="check">
+                  <input type="checkbox" id="ex-f-system" checked>
+                  <span>Include system messages</span>
+                </label>
+                <label class="check">
+                  <input type="checkbox" id="ex-f-pinned" checked>
+                  <span>Include pinned messages</span>
+                </label>
+                <label class="check">
+                  <input type="checkbox" id="ex-f-stickers" checked>
+                  <span>Include stickers</span>
+                </label>
+                <label class="check">
+                  <input type="checkbox" id="ex-f-mentions" checked>
+                  <span>Include messages with mentions (@user/@role/#channel)</span>
+                </label>
+  
+                <!-- metrics: separated row at the bottom -->
+                <div class="ex-metrics two-col">
+                  <label class="form-field">
+                    <span class="label small">Min message length</span>
+                    <input class="input" id="ex-f-minlen" type="number" min="0" step="1" value="0">
+                  </label>
+                  <label class="form-field">
+                    <span class="label small">Min total reactions</span>
+                    <input class="input" id="ex-f-minreacts" type="number" min="0" step="1" value="0">
+                  </label>
+                </div>
+              </div>
+            </details>
+  
+            <!-- Webhook is optional & collapsible -->
+            <details class="export-advanced" id="ex-whwrap">
+              <summary class="label">Forward to a webhook (optional)</summary>
+              <div class="mt-2">
+                <label class="form-field">
+                  <span class="label">Webhook URL</span>
+                  <input class="input" type="url" placeholder="https://discord.com/api/webhooks/..." id="ex-webhook">
+                  <span class="hint">Messages will be forwarded to this Discord webhook.</span>
+                </label>
+              </div>
+            </details>
+  
+            <details class="export-advanced" id="ex-range">
+              <summary class="label">Date Range (optional)</summary>
+  
+              <div class="two-col mt-2 ex-range-grid">
+                <label class="form-field">
+                  <span class="label">After</span>
+                  <input class="input" id="ex-after" type="datetime-local" step="1">
+                </label>
+  
+                <label class="form-field">
+                  <span class="label">Before</span>
+                  <input class="input" id="ex-before" type="datetime-local" step="1">
+                </label>
+              </div>
+  
+              <p class="hint small ex-range-hint">
+                Times use your local timezone; they’re converted to UTC.
+              </p>
+            </details>
+          </div>
+        </div>
+  
+        <footer class="scraper-actions">
+          <button type="button" class="btn btn-ghost js-x">Cancel</button>
+          <button type="button" class="btn btn-primary" id="ex-go">Start export</button>
+        </footer>
+      </div>
+    `;
+
+    document.body.appendChild(wrap);
+    console.debug("[Export] modal appended to DOM");
+
+    wrap.querySelector("#ex-filters")?.removeAttribute("open");
+
+    const close = () => {
+      console.debug("[Export] closing modal");
+      wrap.remove();
+      document.documentElement.style.overflow = prevDocOverflow || "";
+    };
+    wrap
+      .querySelectorAll(".js-x")
+      .forEach((b) => b.addEventListener("click", close));
+    wrap.querySelector(".modal-backdrop")?.addEventListener("click", close);
+    document.addEventListener(
+      "keydown",
+      function escOnce(e) {
+        if (e.key === "Escape") {
+          console.debug("[Export] ESC pressed, closing modal");
+          close();
+          document.removeEventListener("keydown", escOnce, true);
+        }
+      },
+      true
+    );
+
+    const wordToggle = wrap.querySelector("#ex-f-word-on");
+    const wordInput = wrap.querySelector("#ex-f-word");
+    function syncWordFilter() {
+      const on = !!wordToggle?.checked;
+      if (wordInput) {
+        wordInput.disabled = !on;
+        wordInput.classList.toggle("is-disabled", !on);
+      }
+      console.debug("[Export] word filter toggle:", {
+        enabled: on,
+        value: wordInput?.value ?? "",
+      });
+    }
+    syncWordFilter();
+    wordToggle?.addEventListener("change", syncWordFilter);
+
+    const whWrap = wrap.querySelector("#ex-whwrap");
+    whWrap?.addEventListener("toggle", () => {
+      console.debug("[Export] webhook details toggled:", { open: whWrap.open });
+      if (whWrap.open) {
+        const urlInput = wrap.querySelector("#ex-webhook");
+        setTimeout(() => urlInput?.focus(), 0);
+      }
+    });
+
+    function ensureAttachmentTypesModal(parentModal) {
+      console.debug("[Export] open Attachment Types sub-modal");
+      parentModal
+        .querySelectorAll(".att-types-modal")
+        .forEach((el) => el.remove());
+
+      const sub = document.createElement("div");
+      sub.className = "att-types-modal";
+      sub.setAttribute("role", "dialog");
+      sub.setAttribute("aria-modal", "true");
+      sub.setAttribute("id", "att-types-modal");
+
+      sub.innerHTML = `
+        <div class="att-backdrop" tabindex="-1" aria-hidden="true"></div>
+        <div class="att-panel" role="document" aria-label="Attachment types">
+          <header class="att-head">
+            <h4 class="att-title">Attachment types</h4>
+            <button type="button" class="att-x" aria-label="Close">✕</button>
+          </header>
+  
+          <div class="att-body">
+            <label class="check"><input type="checkbox" id="att-ui-images"><span>Images</span></label>
+            <label class="check"><input type="checkbox" id="att-ui-videos"><span>Videos</span></label>
+            <label class="check"><input type="checkbox" id="att-ui-audio"><span>Audio</span></label>
+            <label class="check"><input type="checkbox" id="att-ui-other"><span>Other files</span></label>
+          </div>
+  
+          <footer class="att-actions">
+            <button type="button" class="btn btn-ghost" id="att-cancel">Cancel</button>
+            <button type="button" class="btn btn-primary" id="att-apply">Apply</button>
+          </footer>
+        </div>
+      `;
+
+      parentModal.appendChild(sub);
+
+      const mirror = (sel) => parentModal.querySelector(sel);
+      const ui = (sel) => sub.querySelector(sel);
+
+      ui("#att-ui-images").checked = !!mirror("#ex-f-att-images")?.checked;
+      ui("#att-ui-videos").checked = !!mirror("#ex-f-att-videos")?.checked;
+      ui("#att-ui-audio").checked = !!mirror("#ex-f-att-audio")?.checked;
+      ui("#att-ui-other").checked = !!mirror("#ex-f-att-other")?.checked;
+      console.debug("[Export] att types state", {
+        images: ui("#att-ui-images").checked,
+        videos: ui("#att-ui-videos").checked,
+        audio: ui("#att-ui-audio").checked,
+        other: ui("#att-ui-other").checked,
+      });
+
+      const kill = () => {
+        sub.remove();
+      };
+      sub.querySelector(".att-backdrop")?.addEventListener("click", () => {
+        console.debug("[Export] sub-modal backdrop click");
+        kill();
+      });
+      sub.querySelector(".att-x")?.addEventListener("click", () => {
+        console.debug("[Export] sub-modal X click");
+        kill();
+      });
+      sub.querySelector("#att-cancel")?.addEventListener("click", () => {
+        console.debug("[Export] sub-modal Cancel");
+        kill();
+      });
+
+      document.addEventListener(
+        "keydown",
+        function escOnce(e) {
+          if (e.key === "Escape") {
+            console.debug("[Export] sub-modal ESC close");
+            kill();
+            document.removeEventListener("keydown", escOnce, true);
+          }
+        },
+        true
+      );
+
+      sub.querySelector("#att-apply")?.addEventListener("click", () => {
+        const imgs = !!ui("#att-ui-images")?.checked;
+        const vids = !!ui("#att-ui-videos")?.checked;
+        const aud = !!ui("#att-ui-audio")?.checked;
+        const oth = !!ui("#att-ui-other")?.checked;
+
+        const mImgs = mirror("#ex-f-att-images");
+        const mVids = mirror("#ex-f-att-videos");
+        const mAud = mirror("#ex-f-att-audio");
+        const mOth = mirror("#ex-f-att-other");
+        if (mImgs) mImgs.checked = imgs;
+        if (mVids) mVids.checked = vids;
+        if (mAud) mAud.checked = aud;
+        if (mOth) mOth.checked = oth;
+
+        console.debug("[Export] att types applied", {
+          images: imgs,
+          videos: vids,
+          audio: aud,
+          other: oth,
+        });
+        updateAttachmentSummary();
+        kill();
+      });
+
+      setTimeout(() => ui("#att-ui-images")?.focus(), 0);
+    }
+
+    // Keep summary span empty so it doesn't push the tip button
+    function updateAttachmentSummary() {
+      const s = wrap.querySelector("#ex-f-att-summary");
+      if (s) s.textContent = "";
+    }
+    updateAttachmentSummary();
+
+    const tipBtn = wrap.querySelector("#ex-f-att-tip");
+    const attToggle = wrap.querySelector("#ex-f-attachments");
+
+    function syncAttTipState() {
+      const disabled = !attToggle?.checked;
+      if (tipBtn) {
+        tipBtn.disabled = !!disabled;
+        tipBtn.classList.toggle("is-disabled", !!disabled);
+      }
+      console.debug("[Export] attachments toggle:", {
+        includeAttachments: !disabled,
+      });
+    }
+
+    syncAttTipState();
+    attToggle?.addEventListener("change", syncAttTipState);
+    tipBtn?.addEventListener("click", (e) => {
+      e.preventDefault();
+      if (!tipBtn.disabled) ensureAttachmentTypesModal(wrap);
+    });
+
+    return wrap;
+  }
+
+  function openExportDialog(guild) {
+    const modal = ensureExportModal();
+    const $ = (sel) => modal.querySelector(sel);
+
+    function readLocalDT(sel) {
+      const el = $(sel);
+      if (!el) return null;
+      const v = (el.value || "").trim();
+      if (!v) return null;
+      const d = new Date(v);
+      return isNaN(d.getTime()) ? null : d.toISOString();
+    }
+
+    const POST_LABEL = "[Export] POST /api/export/messages";
+    function redact(val) {
+      if (!val) return val;
+      try {
+        const u = new URL(val);
+        const tail = (u.pathname + u.search).replace(
+          /.{8}.*$/,
+          (m) => m.slice(0, 8) + "…"
+        );
+        return `${u.origin}${tail}`;
+      } catch {
+        return val.slice(0, 8) + "…";
+      }
+    }
+    function payloadPreview(p) {
+      return {
+        ...p,
+        webhook_url: p.webhook_url ? redact(p.webhook_url) : null,
+      };
+    }
+
+    $("#ex-go").addEventListener("click", async () => {
+      const filters = {
+        embeds: $("#ex-f-embeds")?.checked ?? true,
+        attachments: $("#ex-f-attachments")?.checked ?? true,
+        att_types: {
+          images: $("#ex-f-att-images")?.checked ?? true,
+          videos: $("#ex-f-att-videos")?.checked ?? true,
+          audio: $("#ex-f-att-audio")?.checked ?? true,
+          other: $("#ex-f-att-other")?.checked ?? true,
+        },
+        links: $("#ex-f-links")?.checked ?? true,
+        emojis: $("#ex-f-emojis")?.checked ?? true,
+
+        word_on: $("#ex-f-word-on")?.checked ?? false,
+        word: ($("#ex-f-word")?.value || "").trim(),
+        replies: $("#ex-f-replies")?.checked ?? true,
+        bots: $("#ex-f-bots")?.checked ?? true,
+        system: $("#ex-f-system")?.checked ?? true,
+        min_length: Math.max(0, parseInt($("#ex-f-minlen")?.value || "0", 10)),
+        min_reactions: Math.max(
+          0,
+          parseInt($("#ex-f-minreacts")?.value || "0", 10)
+        ),
+        pinned: $("#ex-f-pinned")?.checked ?? true,
+        stickers: $("#ex-f-stickers")?.checked ?? true,
+        mentions: $("#ex-f-mentions")?.checked ?? true,
+      };
+
+      const afterISO = readLocalDT("#ex-after");
+      const beforeISO = readLocalDT("#ex-before");
+
+      console.debug("[Export] guild:", { passedGuildId: guild?.id ?? null });
+      console.debug("[Export] filters:", filters);
+      console.debug("[Export] range (ISO UTC):", { afterISO, beforeISO });
+
+      const payload = {
+        guild_id: String(guild?.id || ""),
+        channel_id: ($("#ex-channel")?.value || "").trim() || null,
+        user_id: ($("#ex-user")?.value || "").trim() || null,
+        webhook_url: ($("#ex-webhook")?.value || "").trim() || null,
+        has_attachments: $("#ex-hasatt")?.checked || false,
+        after_iso: afterISO,
+        before_iso: beforeISO,
+        filters,
+      };
+
+      console.log(`${POST_LABEL} payload:`, payloadPreview(payload));
+
+      try {
+        const body = JSON.stringify(payload);
+        console.debug("[Export] fetch options:", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          bodyBytes: body.length,
+        });
+
+        const res = await fetch("/api/export/messages", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body,
+        });
+
+        console.debug("[Export] response status:", res.status, res.statusText);
+        let j = null;
+        try {
+          j = await res.json();
+        } catch (parseErr) {
+          console.debug("[Export] response JSON parse failed:", parseErr);
+        }
+        console.debug("[Export] response JSON:", j);
+
+        if (!res.ok || j?.ok === false) {
+          const errMsg = j?.error || `HTTP ${res.status}`;
+
+          console.error("[Export] request failed:", {
+            errMsg,
+            status: res.status,
+            json: j,
+          });
+          throw new Error(errMsg);
+        }
+
+        window.showToast("Export started. You’ll see progress in logs.", {
+          type: "success",
+        });
+        console.info("[Export] started successfully");
+        modal.querySelector(".js-x")?.click();
+      } catch (e) {
+        console.error("[Export] request error:", e);
+        window.showToast(String(e?.message || e), { type: "error" });
+      }
+    });
+  }
+
   function setEllipsisTitleNow(el, fullText) {
     if (!el) return;
     if (fullText != null) el.textContent = fullText;
@@ -506,7 +994,7 @@
     descEl.textContent = "";
 
     setEllipsisTitle(titleEl, "Guild details");
-    setEllipsisTitle(nameEl, name);
+    setEllipsisTitle(nameEl, guild?.name ?? "Loading…");
 
     try {
       const res = await fetch(`/api/guilds/${encodeURIComponent(guild.id)}`, {
