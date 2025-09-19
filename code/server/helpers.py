@@ -19,7 +19,6 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 import uuid
 import discord
-from aiohttp import ClientSession, ClientResponse
 
 
 class OnJoinService:
@@ -42,7 +41,7 @@ class OnJoinService:
         logger: Optional[logging.Logger] = None,
         *,
         colors: Optional[Iterable[discord.Color]] = None,
-        color_strategy: str = "random",  # "random" | "seed_guild" | "seed_user"
+        color_strategy: str = "random",
     ) -> None:
         self.bot = bot
         self.db = db
@@ -51,8 +50,6 @@ class OnJoinService:
         )
         self._palette = list(colors) if colors else list(self.DEFAULT_COLORS)
         self._color_strategy = color_strategy
-
-    # ----------------------------- public entrypoint -----------------------------
 
     async def handle_member_joined(self, data: dict) -> None:
         try:
@@ -87,8 +84,6 @@ class OnJoinService:
         except Exception:
             self.log.exception("handle_member_joined failed")
 
-    # --------------------------------- helpers ----------------------------------
-
     async def _fanout_dm(
         self, user_ids: Iterable[int], embed: discord.Embed, guild_id: int
     ) -> None:
@@ -101,8 +96,6 @@ class OnJoinService:
                 self.log.warning(
                     "[⚠️] Failed DM to %s for guild %s: %s", uid, guild_id, ex
                 )
-
-    # ------------------------------ embed building ------------------------------
 
     def build_embed(
         self,
@@ -168,14 +161,14 @@ class VerifyController:
     def __init__(
         self,
         *,
-        bus,  # AdminBus
-        admin_base_url: str,  # e.g. ws://host:8000
-        bot,  # discord.Client | discord.AutoShardedClient | commands.Bot
+        bus,
+        admin_base_url: str,
+        bot,
         guild_id: int,
-        db,  # your DBManager
-        ratelimit,  # rate limiter with acquire(ActionType.DELETE_CHANNEL)
+        db,
+        ratelimit,
         get_protected_channel_ids: Callable[[discord.Guild], Iterable[int]],
-        action_type_delete_channel,  # pass in ActionType.DELETE_CHANNEL
+        action_type_delete_channel,
         logger: Optional[logging.Logger] = None,
     ):
         self.bus = bus
@@ -190,7 +183,6 @@ class VerifyController:
         self._task: Optional[asyncio.Task] = None
         self._stopping = False
 
-    # -------- lifecycle --------
     def start(self) -> None:
         if self._task and not self._task.done():
             self.log.debug(
@@ -219,19 +211,17 @@ class VerifyController:
         self._task = None
         self.log.debug("VerifyController stopped")
 
-    # -------- internals --------
     @staticmethod
     def _ms_since(t0: float) -> float:
         return (time.perf_counter() - t0) * 1000.0
 
     def _new_req_id(self) -> str:
-        # short request id to correlate logs
+
         return uuid.uuid4().hex[:8]
 
-    # -------- bus I/O --------
     async def _listen_loop(self):
         async def _handler(ev: dict):
-            # Only handle verify requests coming from UI
+
             if ev.get("kind") != "verify" or ev.get("role") != "ui":
                 return
             payload = ev.get("payload") or {}
@@ -250,12 +240,11 @@ class VerifyController:
                     e,
                     _safe_preview(payload),
                 )
-                # surface error to UI (non-fatal)
+
                 await self._publish(
                     {"type": "error", "req_id": req_id, "message": str(e)}
                 )
 
-        # Reconnect-with-backoff handled by AdminBus.subscribe()
         try:
             self.log.debug(
                 "Subscribing to admin bus | url=%s path=/bus", self.admin_base_url
@@ -266,11 +255,11 @@ class VerifyController:
             raise
         except Exception as e:
             self.log.exception("Fatal error in _listen_loop subscribe | err=%s", e)
-            # graceful stop; outer supervisor may restart us
+
             await asyncio.sleep(0.5)
 
     async def _publish(self, payload: dict):
-        # attach a default req_id if missing so UI can correlate
+
         payload = dict(payload or {})
         payload.setdefault("req_id", self._new_req_id())
         t0 = time.perf_counter()
@@ -293,7 +282,6 @@ class VerifyController:
                 _safe_preview(payload),
             )
 
-    # -------- actions --------
     async def _handle(self, payload: dict, *, req_id: str):
         act = (payload.get("action") or "").lower()
         t0 = time.perf_counter()
@@ -350,7 +338,7 @@ class VerifyController:
                     "type": "deleted",
                     "req_id": req_id,
                     "ok": True,
-                    "results": results,  # << includes name + reason
+                    "results": results,
                 }
             )
             self.log.debug(
@@ -379,7 +367,7 @@ class VerifyController:
                     "type": "deleted",
                     "req_id": req_id,
                     "ok": True,
-                    "results": results,  # << includes name + reason
+                    "results": results,
                 }
             )
             self.log.debug(
@@ -392,7 +380,6 @@ class VerifyController:
             )
             return
 
-        # unknown action
         self.log.warning(
             "Unknown verify action | req_id=%s action=%r payload=%s",
             req_id,
@@ -400,18 +387,14 @@ class VerifyController:
             _safe_preview(payload),
         )
 
-    # -------- helpers --------
     async def _resolve_channel_like(self, _id: int, guild: discord.Guild):
-        # Prefer cached object first
+
         obj = getattr(guild, "get_channel_or_thread", guild.get_channel)(int(_id))
         if obj is not None:
             return obj
 
-        # Fallback to REST (works for channels and threads)
         try:
-            return await self.bot.fetch_channel(
-                int(_id)
-            )  # may return TextChannel/VoiceChannel/Thread
+            return await self.bot.fetch_channel(int(_id))
         except discord.NotFound:
             self.log.info("Target not found (404) | id=%s", _id)
         except discord.Forbidden:
@@ -423,7 +406,7 @@ class VerifyController:
         return None
 
     def _compute_orphans(self, guild: discord.Guild) -> tuple[list[dict], list[dict]]:
-        # timings per phase (DB scan vs guild snapshot)
+
         t0 = time.perf_counter()
         mapped_cats = {
             int(r["cloned_category_id"])
@@ -451,17 +434,15 @@ class VerifyController:
             if int(ch.id) in mapped_chs:
                 continue
 
-            cat_id = self._category_id_of(ch)  # int or None
-            cat_name = self._category_name_of(ch)  # str or None
+            cat_id = self._category_id_of(ch)
+            cat_name = self._category_name_of(ch)
 
             orphan_channels.append(
                 {
                     "id": str(int(ch.id)),
                     "name": getattr(ch, "name", f"#{ch.id}"),
-                    # provide BOTH id & name so UI can group correctly
                     "category_id": str(int(cat_id)) if cat_id is not None else None,
                     "category_name": cat_name,
-                    # optional: pass a channel "type" if you want nicer labels on UI
                     "type": (
                         getattr(ch, "type", None).value
                         if getattr(getattr(ch, "type", None), "value", None) is not None
@@ -487,7 +468,7 @@ class VerifyController:
     ):
         """
         Returns a list of dicts:
-        { id:int, kind:str, name:str, deleted:bool, reason:str }  # reason when deleted == False
+        { id:int, kind:str, name:str, deleted:bool, reason:str }
             reason ∈ {"protected","not_found","not_category","not_channel","error"}
         """
         results: list[dict] = []
@@ -501,7 +482,7 @@ class VerifyController:
 
         for _id, kind in targets:
             try:
-                ch = guild.get_channel(int(_id))  # category OR channel OR None
+                ch = guild.get_channel(int(_id))
                 if not ch:
                     results.append(
                         {
@@ -515,7 +496,6 @@ class VerifyController:
                     self.log.debug("Skip (not found) | req_id=%s id=%s", req_id, _id)
                     continue
 
-                # Typed branches
                 if kind == "category":
                     if not isinstance(ch, discord.CategoryChannel):
                         results.append(
@@ -555,7 +535,7 @@ class VerifyController:
                     )
 
                 else:
-                    # treat everything else as “channel”
+
                     if isinstance(ch, discord.CategoryChannel):
                         results.append(
                             {
@@ -634,7 +614,6 @@ class VerifyController:
                     }
                 )
 
-        # Final tally
         deleted_count = sum(1 for r in results if r["deleted"])
         self.log.debug(
             "Delete finished | req_id=%s requested=%d deleted=%d",
@@ -650,7 +629,7 @@ class VerifyController:
         - Text/Voice/Forum/Stage: ch.category_id
         - Threads: ch.parent.category_id
         """
-        # direct attribute for most channels
+
         cid = getattr(ch, "category_id", None)
         if cid is not None:
             try:
@@ -759,50 +738,145 @@ class WebhookDMExporter:
         "total_chars_per_embed": 6000,
     }
 
-    def __init__(self, session, logger):
-        """
-        session: aiohttp.ClientSession already managed by your server (used by discord.Webhook)
-        logger : your structured logger
-        """
+    def __init__(self, session, logger, fixed_delay: float = 2.0, max_queue: int = 500):
+
         self.session = session
         self.logger = logger
         self._wh_cache: Dict[str, discord.Webhook] = {}
         self._stopped: bool = False
-        
+
+        self.fixed_delay = float(fixed_delay)
+        self._q: asyncio.Queue[Dict[str, dict]] = asyncio.Queue(maxsize=int(max_queue))
+        self._worker: Optional[asyncio.Task] = None
+
     @property
     def is_stopped(self) -> bool:
         return self._stopped
 
+    async def start(self) -> None:
+        """Start the background worker if not already started."""
+        if self._worker is None or self._worker.done():
+            self._worker = asyncio.create_task(
+                self._drain_queue(), name="webhook_exporter_worker"
+            )
+            self.logger.info("[Startup] WebhookDMExporter worker started.")
+
     async def stop(self) -> None:
-        """Prevent any future webhook sends. Safe to call multiple times."""
+        """Prevent future sends and stop the worker. Safe to call multiple times."""
         if self._stopped:
             return
         self._stopped = True
-        # Clear webhook cache to avoid reusing handles after stop.
+
         self._wh_cache.clear()
-        self.logger.info("[Shutdown] WebhookDMExporter stopped; dropping further sends.")
+
+        if self._worker:
+            self._worker.cancel()
+            try:
+                await self._worker
+            except asyncio.CancelledError:
+                pass
+            self._worker = None
+
+        dropped = 0
+        while not self._q.empty():
+            try:
+                self._q.get_nowait()
+                self._q.task_done()
+                dropped += 1
+            except asyncio.QueueEmpty:
+                break
+
+        self.logger.info(
+            f"[Shutdown] WebhookDMExporter stopped; dropped {dropped} queued message(s)."
+        )
+
+    async def _ensure_started(self) -> None:
+        if self._worker is None or self._worker.done():
+            await self.start()
 
     async def handle_ws_export_dm_message(self, data: Dict[str, Any]) -> None:
         """
-        Expects: data = {"webhook_url": str, "message": {...}, "user_id": int?}
+        Expects: {"webhook_url": str, "message": {...}, "user_id": int?}
+        Enqueue and return immediately.
         """
+        if self._stopped:
+            return
         webhook_url = data.get("webhook_url")
         msg = data.get("message") or {}
         if not webhook_url or not msg:
             return
+        await self._ensure_started()
         try:
-            await self.forward_to_webhook(msg, webhook_url)
-        except Exception:
-            self.logger.exception("forward_to_webhook failed")
+            self._q.put_nowait({"webhook_url": webhook_url, "message": msg})
+        except asyncio.QueueFull:
+            self.logger.warning("[Webhook] Queue full; dropping DM message.")
 
     async def handle_ws_export_dm_done(self, data: Dict[str, Any]) -> None:
         uid = data.get("user_id")
         uname = data.get("username") or "Unknown"
         err = data.get("error")
         if err:
-            self.logger.warning(f"[📥] DM Export finished with error for {uname} ({uid}): {err}")
+            self.logger.warning(
+                f"[📥] DM Export finished with error for {uname} ({uid}): {err}"
+            )
         else:
             self.logger.info(f"[📥] Exported all DMs from {uname}'s ({uid}) inbox.")
+
+    async def handle_ws_export_message(self, data: Dict[str, Any]) -> None:
+        """
+        Expects: {"webhook_url": str, "message": {...}, "guild_id": int?, "channel_id": int?}
+        Enqueue and return immediately.
+        """
+        if self._stopped:
+            return
+        url = data.get("webhook_url")
+        msg = data.get("message") or {}
+        if not url or not msg:
+            return
+        await self._ensure_started()
+        try:
+            self._q.put_nowait({"webhook_url": url, "message": msg})
+        except asyncio.QueueFull:
+            self.logger.warning("[Webhook] Queue full; dropping channel message.")
+
+    async def handle_ws_export_messages_done(self, data: Dict[str, Any]) -> None:
+        gid = data.get("guild_id")
+        fwd = data.get("forwarded", 0)
+        scanned = data.get("scanned", 0)
+        jpath = data.get("json_path")
+        extra = f" JSON: {jpath}" if jpath else ""
+        self.logger.info(
+            f"[📦] Export complete for guild {gid}: forwarded {fwd}/{scanned}.{extra}"
+        )
+
+    async def _drain_queue(self) -> None:
+        """
+        Single worker draining the queue at a fixed cadence:
+        sleep(max(0, fixed_delay - send_time)) to keep ~constant spacing.
+        """
+        try:
+            while not self._stopped:
+                item = await self._q.get()
+                t0 = time.perf_counter()
+                try:
+                    await self.forward_to_webhook(item["message"], item["webhook_url"])
+                except Exception:
+                    self.logger.exception("[Worker] forward_to_webhook failed")
+                finally:
+                    self._q.task_done()
+
+                elapsed = time.perf_counter() - t0
+
+                sleep_for = max(0.0, self.fixed_delay - elapsed)
+                if sleep_for > 0:
+                    await asyncio.sleep(sleep_for)
+
+                self.logger.debug(
+                    f"[Worker] send_ms={(elapsed*1000):.1f} next_sleep={sleep_for:.3f}s qsize={self._q.qsize()}"
+                )
+        except asyncio.CancelledError:
+
+            pass
 
     async def _get_webhook(self, url: str) -> discord.Webhook:
         wh = self._wh_cache.get(url)
@@ -821,9 +895,11 @@ class WebhookDMExporter:
         """
         if self._stopped:
             mid = msg_data.get("id")
-            self.logger.debug(f"[Shutdown] Dropping send for msg_id={mid} (exporter stopped)")
+            self.logger.debug(
+                f"[Shutdown] Dropping send for msg_id={mid} (exporter stopped)"
+            )
             return
-        
+
         author = msg_data.get("author") or {}
         raw_content = (msg_data.get("content") or "").strip()
         embeds_in: List[dict] = msg_data.get("embeds") or []
@@ -871,6 +947,7 @@ class WebhookDMExporter:
             mid = msg_data.get("id")
             self.logger.debug(f"[Webhook] Skip empty payload for msg_id={mid}")
             return
+
         embed_objs: List[discord.Embed] = []
         for e in embeds_dict:
             em = discord.Embed()
@@ -888,10 +965,13 @@ class WebhookDMExporter:
                 em.colour = discord.Colour(e["color"])
             if "footer" in e:
                 f = e["footer"]
-                em.set_footer(
-                    text=f.get("text") or discord.Embed.Empty,
-                    icon_url=f.get("icon_url") or discord.Embed.Empty,
-                )
+                fkw = {}
+                if f.get("text"):
+                    fkw["text"] = f["text"]
+                if f.get("icon_url"):
+                    fkw["icon_url"] = f["icon_url"]
+                if fkw:
+                    em.set_footer(**fkw)
             if "image" in e:
                 im = e["image"]
                 if im.get("url"):
@@ -902,45 +982,48 @@ class WebhookDMExporter:
                     em.set_thumbnail(url=th["url"])
             if "author" in e:
                 a = e["author"]
-                em.set_author(
-                    name=a.get("name") or discord.Embed.Empty,
-                    url=a.get("url") or discord.Embed.Empty,
-                    icon_url=a.get("icon_url") or discord.Embed.Empty,
-                )
+                akw = {}
+                if a.get("name"):
+                    akw["name"] = a["name"]
+                if a.get("url"):
+                    akw["url"] = a["url"]
+                if a.get("icon_url"):
+                    akw["icon_url"] = a["icon_url"]
+                if akw:
+                    em.set_author(**akw)
             for fld in e.get("fields", []):
                 em.add_field(
-                    name=fld["name"],
-                    value=fld["value"],
-                    inline=bool(fld.get("inline")),
+                    name=fld["name"], value=fld["value"], inline=bool(fld.get("inline"))
                 )
             embed_objs.append(em)
 
         mid = msg_data.get("id")
-
         username = author.get("name") or "DM Export"
         avatar_url = author.get("avatar_url") or None
-
         embeds_param = embed_objs if embed_objs else discord.utils.MISSING
 
         try:
             webhook = await self._get_webhook(webhook_url)
+            t0 = time.perf_counter()
             await webhook.send(
                 content=content or None,
                 username=username,
                 avatar_url=avatar_url,
                 embeds=embeds_param,
                 allowed_mentions=discord.AllowedMentions.none(),
-                wait=True,
+                wait=False,  # non-blocking: do not await Discord's response body
             )
+            elapsed = (time.perf_counter() - t0) * 1000.0
             author_name = author.get("name") or "Unknown"
             author_id = author.get("id") or "?"
             self.logger.info(
-                f"[📥] Sent DM Export message via Webhook from {author_name} ({author_id})"
+                f"[📥] Sent Export message via Webhook from {author_name} ({author_id})"
             )
+            self.logger.debug(f"[Webhook] send_call_ms={elapsed:.1f} msg_id={mid}")
         except discord.HTTPException as e:
+
             self.logger.warning(
-                f"[Webhook] HTTPException status={e.status} code={getattr(e, 'code', '?')} "
-                f"msg_id={mid}: {e}"
+                f"[Webhook] HTTPException status={e.status} code={getattr(e, 'code', '?')} msg_id={mid}: {e}"
             )
         except Exception as e:
             self.logger.exception(f"[Webhook] Unexpected error for msg_id={mid}: {e}")
@@ -1051,7 +1134,6 @@ class WebhookDMExporter:
         return out or None
 
 
-# -------- standalone helpers --------
 def _safe_preview(obj) -> str:
     """Shorten & sanitize dicts for logs."""
     try:
@@ -1062,6 +1144,4 @@ def _safe_preview(obj) -> str:
         )
     except Exception:
         s = str(obj)
-    if len(s) > 500:
-        return s[:500] + "…"
-    return s
+    return s if len(s) <= 500 else (s[:500] + "…")

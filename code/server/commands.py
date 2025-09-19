@@ -560,7 +560,9 @@ class CloneCommands(commands.Cog):
     ):
         rows = self.db.get_all_announcement_subscriptions_flat()
         if not rows:
-            return await ctx.respond("No announcement subscriptions found.", ephemeral=True)
+            return await ctx.respond(
+                "No announcement subscriptions found.", ephemeral=True
+            )
 
         # Delete by flat index
         if delete is not None:
@@ -580,15 +582,19 @@ class CloneCommands(commands.Cog):
             if removed:
                 who = f"<@{uid}> ({uid})"
                 scope = f"[Guild: `{gid}`] **{kw}**"
-                return await ctx.respond(f"🗑️ Deleted subscription: {scope} — {who}", ephemeral=True)
+                return await ctx.respond(
+                    f"🗑️ Deleted subscription: {scope} — {who}", ephemeral=True
+                )
             else:
-                return await ctx.respond("Nothing was deleted (row no longer exists).", ephemeral=True)
+                return await ctx.respond(
+                    "Nothing was deleted (row no longer exists).", ephemeral=True
+                )
 
         # Build the list (chunked to fit embed field limits)
         lines: list[str] = []
         for i, r in enumerate(rows, start=1):
             gid = int(r["guild_id"])
-            kw  = r["keyword"]
+            kw = r["keyword"]
             uid = int(r["user_id"])
             lines.append(f"{i}. [Guild: `{gid}`] **{kw}** — <@{uid}> ({uid})")
 
@@ -629,7 +635,7 @@ class CloneCommands(commands.Cog):
     async def announce_help(self, ctx: discord.ApplicationContext):
         def spacer():
             # Zero-width space section divider
-            embed.add_field(name="\u200B", value="\u200B", inline=False)
+            embed.add_field(name="\u200b", value="\u200b", inline=False)
 
         embed = discord.Embed(
             title="🧭 Announcements — Help",
@@ -726,7 +732,6 @@ class CloneCommands(commands.Cog):
         )
 
         await ctx.respond(embed=embed, ephemeral=True)
-
 
     @commands.slash_command(
         name="onjoin_dm",
@@ -1270,6 +1275,12 @@ class CloneCommands(commands.Cog):
         webhook_url: str = Option(
             str, "Webhook URL to receive the stream", required=True
         ),
+        json_file: bool = Option(
+            bool,
+            "Also save a JSON snapshot (default: true)",
+            required=False,
+            default=False,
+        ),
     ):
         await ctx.defer(ephemeral=True)
 
@@ -1282,11 +1293,13 @@ class CloneCommands(commands.Cog):
                 ),
                 ephemeral=True,
             )
+
         payload = {
             "type": "export_dm_history",
             "data": {
                 "user_id": target_id,
                 "webhook_url": webhook_url,
+                "json_file": json_file,
             },
         }
 
@@ -1314,16 +1327,15 @@ class CloneCommands(commands.Cog):
                 ephemeral=True,
             )
 
-        if not resp or not resp.get("ok"):
-            err = (resp or {}).get("error") or "Client did not accept the request."
-            return await ctx.followup.send(
-                embed=self._err_embed("Export Rejected", err),
-                ephemeral=True,
-            )
         return await ctx.followup.send(
             embed=self._ok_embed(
                 "Export Started",
-                f"Streaming DMs for user `{target_id}` → webhook. You'll see messages arriving shortly.",
+                f"Streaming DMs for user `{target_id}` → webhook. "
+                + (
+                    "A JSON snapshot will also be saved."
+                    if json_file
+                    else "JSON snapshot is disabled."
+                ),
             ),
             ephemeral=True,
         )
