@@ -841,7 +841,7 @@
   function openExportDialog(guild) {
     const modal = ensureExportModal();
     const $ = (sel) => modal.querySelector(sel);
-  
+
     function readLocalDT(sel) {
       const el = $(sel);
       if (!el) return null;
@@ -850,13 +850,16 @@
       const d = new Date(v);
       return isNaN(d.getTime()) ? null : d.toISOString();
     }
-  
+
     const POST_LABEL = "[Export] POST /api/export/messages";
     function redact(val) {
       if (!val) return val;
       try {
         const u = new URL(val);
-        const tail = (u.pathname + u.search).replace(/.{8}.*$/, (m) => m.slice(0, 8) + "…");
+        const tail = (u.pathname + u.search).replace(
+          /.{8}.*$/,
+          (m) => m.slice(0, 8) + "…"
+        );
         return `${u.origin}${tail}`;
       } catch {
         return val.slice(0, 8) + "…";
@@ -868,74 +871,72 @@
         webhook_url: p.webhook_url ? redact(p.webhook_url) : null,
       };
     }
-  
+
     $("#ex-go").addEventListener("click", async () => {
-      // -- Guarantee att_types are false when "Include attachments" is OFF
       const includeAttachments = $("#ex-f-attachments")?.checked ?? true;
       const attTypes = includeAttachments
         ? {
             images: $("#ex-f-att-images")?.checked ?? true,
             videos: $("#ex-f-att-videos")?.checked ?? true,
-            audio:  $("#ex-f-att-audio")?.checked  ?? true,
-            other:  $("#ex-f-att-other")?.checked  ?? true,
+            audio: $("#ex-f-att-audio")?.checked ?? true,
+            other: $("#ex-f-att-other")?.checked ?? true,
           }
         : { images: false, videos: false, audio: false, other: false };
 
-        const downloadMedia = {
-          images: $("#ex-dl-images")?.checked ?? false,
-          videos: $("#ex-dl-videos")?.checked ?? false,
-          audio:  $("#ex-dl-audio")?.checked  ?? false,
-          other:  $("#ex-dl-other")?.checked  ?? false,
-        };
-  
+      const downloadMedia = {
+        images: $("#ex-dl-images")?.checked ?? false,
+        videos: $("#ex-dl-videos")?.checked ?? false,
+        audio: $("#ex-dl-audio")?.checked ?? false,
+        other: $("#ex-dl-other")?.checked ?? false,
+      };
+
       const filters = {
-        // Include-style flags (default true)
         has_content: $("#ex-f-hascontent")?.checked ?? true,
         embeds: $("#ex-f-embeds")?.checked ?? true,
-  
-        // Attachments + enforced subtypes
+
         attachments: includeAttachments,
         att_types: attTypes,
-  
+
         links: $("#ex-f-links")?.checked ?? true,
         emojis: $("#ex-f-emojis")?.checked ?? true,
-  
-        // Word filter
+
         word_on: $("#ex-f-word-on")?.checked ?? false,
         word: ($("#ex-f-word")?.value || "").trim(),
-  
-        // Other toggles
+
         replies: $("#ex-f-replies")?.checked ?? true,
         bots: $("#ex-f-bots")?.checked ?? true,
-        system: $("#ex-f-system")?.checked ??  false,
+        system: $("#ex-f-system")?.checked ?? false,
         min_length: Math.max(0, parseInt($("#ex-f-minlen")?.value || "0", 10)),
-        min_reactions: Math.max(0, parseInt($("#ex-f-minreacts")?.value || "0", 10)),
+        min_reactions: Math.max(
+          0,
+          parseInt($("#ex-f-minreacts")?.value || "0", 10)
+        ),
         pinned: $("#ex-f-pinned")?.checked ?? true,
         stickers: $("#ex-f-stickers")?.checked ?? true,
         mentions: $("#ex-f-mentions")?.checked ?? true,
         download_media: downloadMedia,
       };
-  
+
       const afterISO = readLocalDT("#ex-after");
       const beforeISO = readLocalDT("#ex-before");
-  
+
       console.debug("[Export] guild:", { passedGuildId: guild?.id ?? null });
       console.debug("[Export] filters:", filters);
       console.debug("[Export] range (ISO UTC):", { afterISO, beforeISO });
-  
+
       const payload = {
         guild_id: String(guild?.id || ""),
         channel_id: ($("#ex-channel")?.value || "").trim() || null,
         user_id: ($("#ex-user")?.value || "").trim() || null,
         webhook_url: ($("#ex-webhook")?.value || "").trim() || null,
-        has_attachments: $("#ex-hasatt")?.checked || false, // legacy
+        has_attachments: $("#ex-hasatt")?.checked || false,
         after_iso: afterISO,
         before_iso: beforeISO,
         filters,
       };
-  
+
       console.log(`${POST_LABEL} payload:`, payloadPreview(payload));
-  
+
       try {
         const body = JSON.stringify(payload);
         console.debug("[Export] fetch options:", {
@@ -943,13 +944,13 @@
           headers: { "content-type": "application/json" },
           bodyBytes: body.length,
         });
-  
+
         const res = await fetch("/api/export/messages", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body,
         });
-  
+
         console.debug("[Export] response status:", res.status, res.statusText);
         let j = null;
         try {
@@ -958,14 +959,20 @@
           console.debug("[Export] response JSON parse failed:", parseErr);
         }
         console.debug("[Export] response JSON:", j);
-  
+
         if (!res.ok || j?.ok === false) {
           const errMsg = j?.error || `HTTP ${res.status}`;
-          console.error("[Export] request failed:", { errMsg, status: res.status, json: j });
+          console.error("[Export] request failed:", {
+            errMsg,
+            status: res.status,
+            json: j,
+          });
           throw new Error(errMsg);
         }
-  
-        window.showToast("Export started. You’ll see progress in logs.", { type: "success" });
+
+        window.showToast("Export started. You’ll see progress in logs.", {
+          type: "success",
+        });
         console.info("[Export] started successfully");
         modal.querySelector(".js-x")?.click();
       } catch (e) {
@@ -974,7 +981,6 @@
       }
     });
   }
-  
 
   function setEllipsisTitleNow(el, fullText) {
     if (!el) return;
