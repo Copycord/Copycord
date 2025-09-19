@@ -29,6 +29,7 @@ from client.message_utils import MessageUtils
 from common.websockets import WebsocketManager, AdminBus
 from client.scraper import MemberScraper
 from client.helpers import ClientUiController
+from client.export_runners import ExportMessagesRunner, DmHistoryExporter
 
 
 LOG_DIR = "/data"
@@ -131,6 +132,7 @@ class ClientListener:
             listener=self,
             logger=logging.getLogger("client.ui"),
         )
+        self.runner = ExportMessagesRunner(bot=self.bot, ws=self.ws, msg_serializer=self.msg.serialize, logger=logger)
 
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -498,89 +500,33 @@ class ClientListener:
             uid = int(data["user_id"])
             webhook_url = data.get("webhook_url")
 
+            # json_file toggle: default True, accept bools or strings like "true"/"false"
+            def _as_bool(v, default=True):
+                if v is None:
+                    return default
+                if isinstance(v, bool):
+                    return v
+                return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+            save_json = _as_bool(data.get("json_file"), default=True)
+
             async with self._dm_export_lock:
                 if getattr(self, "_dm_export_running", False) and self._dm_export_task and not self._dm_export_task.done():
                     return {"ok": False, "error": "dm-export-in-progress"}
 
                 async def _export():
                     try:
-                        user = self.bot.get_user(uid)
-                        dm = None
-                        if user and user.dm_channel:
-                            dm = user.dm_channel
-                        if dm is None:
-                            for ch in self.bot.private_channels:
-                                if isinstance(ch, discord.DMChannel) and ch.recipient and ch.recipient.id == uid:
-                                    dm = ch
-                                    user = ch.recipient
-                                    break
-
-                        if dm is None:
-                            logger.warning(f"[📥] DM export aborted: DM not in cache for user_id={uid}")
-                            await self.ws.send({
-                                "type": "export_dm_done",
-                                "data": {
-                                    "user_id": uid,
-                                    "username": None,
-                                    "webhook_url": webhook_url,
-                                    "error": "dm-not-in-cache",
-                                },
-                            })
-                            return
-
-                        uname = getattr(user, "global_name", None) or getattr(user, "display_name", None) or user.name
-
-                        found = 0
-                        async for _ in dm.history(limit=None, oldest_first=True):
-                            found += 1
-
-                        logger.info(f"[📥] Starting DM export for {uname} ({uid}) — messages found: {found}")
-
-                        if found == 0:
-                            await self.ws.send({
-                                "type": "export_dm_done",
-                                "data": {"user_id": uid, "username": uname, "webhook_url": webhook_url},
-                            })
-                            return
-
-                        sent = 0
-                        async for msg in dm.history(limit=None, oldest_first=True):
-                            serialized = self.msg.serialize(msg)
-                            payload = {
-                                "type": "export_dm_message",
-                                "data": {
-                                    "user_id": uid,
-                                    "webhook_url": webhook_url,
-                                    "message": serialized,
-                                },
-                            }
-
-                            try:
-                                await self.ws.send(payload)
-                                sent += 1
-                                author_tag = f"{getattr(msg.author, 'global_name', None) or msg.author.name}"
-                                logger.info(f"[📥] DM Export: sent msg_id={msg.id} author={author_tag}")
-                            except Exception as send_err:
-                                logger.warning(
-                                    f"[📥] DM Export: websocket send failed (likely closed) for msg_id={getattr(msg, 'id', 'unknown')}: {send_err}"
-                                )
-                                break
-
-                            await asyncio.sleep(2)  # throttle
-
-                        logger.info(f"[📥] DM export finished for {uname} ({uid}) — total sent: {sent}/{found}")
-
-                        await self.ws.send({
-                            "type": "export_dm_done",
-                            "data": {"user_id": uid, "username": uname, "webhook_url": webhook_url},
-                        })
-
-                    except Exception as e:
-                        logger.exception(f"[📥] DM export error for user_id={uid}: {e}")
-                        await self.ws.send({
-                            "type": "export_dm_done",
-                            "data": {"user_id": uid, "username": None, "webhook_url": webhook_url, "error": str(e)},
-                        })
+                        exporter = DmHistoryExporter(
+                            bot=self.bot,
+                            ws=self.ws,
+                            msg_serializer=self.msg.serialize,
+                            logger=logger.getChild("dm_export"),
+                            send_sleep=2.0,
+                            do_precache_count=True,
+                            out_root="/data/exports",
+                            save_json=save_json,
+                        )
+                        await exporter.run(user_id=uid, webhook_url=webhook_url)
                     finally:
                         self._dm_export_running = False
                         self._dm_export_task = None
@@ -589,7 +535,6 @@ class ClientListener:
                 self._dm_export_task = asyncio.create_task(_export())
 
             return {"ok": True}
-
 
         elif typ == "export_messages":
             d = data or {}
@@ -606,9 +551,8 @@ class ClientListener:
             if guild is None:
                 return {"ok": False, "error": "no-guild"}
 
-            asyncio.create_task(self._run_export_messages_task(d, guild))
+            asyncio.create_task(self.runner.run(d, guild))
             return {"ok": True, "accepted": True}
-
 
         return None
 
@@ -1624,8 +1568,22 @@ class ClientListener:
             logger.exception("[guilds] snapshot failed (outer)")
             
     async def _run_export_messages_task(self, d, guild):
-        import asyncio, os, json, time, re
+        import asyncio, os, json, time, re, uuid
         from datetime import datetime, timezone
+
+        # Optional dependency for downloading media
+        try:
+            import aiohttp
+        except Exception:
+            aiohttp = None  # we'll guard usage later
+
+        logger = getattr(self, "log", None) or getattr(self, "logger", None) or __import__("logging").getLogger("export")
+
+        def _safe(s: str, n: int = 64) -> str:
+            try:
+                return s if len(s) <= n else (s[:n] + "…")
+            except Exception:
+                return "<str>"
 
         def _parse_iso(s):
             try:
@@ -1651,22 +1609,20 @@ class ClientListener:
         wh_tail = webhook_url[-6:] if webhook_url else "None"
         do_forward = bool(webhook_url)
 
-        # ---- UI filters (all default to "include"/True)
+        # ---- UI filters (include-style with sensible defaults)
         filters = d.get("filters") or {}
         F = {
             "embeds":        filters.get("embeds", True),
             "attachments":   filters.get("attachments", True),
-
-            # Normalize att_types
             "att_types":     (filters.get("att_types") or {"images": True, "videos": True, "audio": True, "other": True}),
-
             "links":         filters.get("links", True),
             "emojis":        filters.get("emojis", True),
 
-            # Was True; make it False to mirror UI default
+            # Include text content if True; if False, exclude messages that have content
+            "has_content":   bool(filters.get("has_content", True)),
+
             "word_on":       filters.get("word_on", False),
             "word":          (filters.get("word") or "").strip(),
-
             "replies":       filters.get("replies", True),
             "bots":          filters.get("bots", True),
             "system":        filters.get("system", True),
@@ -1675,16 +1631,22 @@ class ClientListener:
             "pinned":        filters.get("pinned", True),
             "stickers":      filters.get("stickers", True),
             "mentions":      filters.get("mentions", True),
+
+            # NEW: media download selection (all default False)
+            "download_media": (filters.get("download_media") or {"images": False, "videos": False, "audio": False, "other": False}),
         }
-        
-        if F["attachments"]:
-            # If attachments are enabled but no kinds are selected, treat as attachments disabled
+
+        # Normalize attachment flags
+        if not F["attachments"]:
+            F["att_types"] = {"images": False, "videos": False, "audio": False, "other": False}
+        else:
             kinds = F["att_types"]
             if not any(bool(kinds.get(k)) for k in ("images", "videos", "audio", "other")):
+                # Attachments ON but no subtypes selected → treat as OFF
                 F["attachments"] = False
-                
+
         if after_dt and before_dt and after_dt > before_dt:
-            # If the user picks an after that’s later than before, silently swap to avoid a no-results scan:
+            # Swap silently to avoid no-results range
             after_dt, before_dt = before_dt, after_dt
 
         _link_re  = re.compile(r'https?://\S+', re.I)
@@ -1693,8 +1655,13 @@ class ClientListener:
         word_re   = re.compile(re.escape(F["word"]), re.I) if (F["word_on"] and F["word"]) else None
 
         def _att_kind(att):
-            ct = (getattr(att, "content_type", "") or "").lower()
-            name = (getattr(att, "filename", "") or "").lower()
+            # att can be discord.Attachment or a dict from serialized message
+            if hasattr(att, "content_type"):
+                ct = (getattr(att, "content_type", "") or "").lower()
+                name = (getattr(att, "filename", "") or "").lower()
+            else:
+                ct = (att.get("content_type") or "").lower()
+                name = (att.get("filename") or "").lower()
 
             def has_any(kw):
                 return any(k in ct or name.endswith(k) for k in kw)
@@ -1708,7 +1675,9 @@ class ClientListener:
             return "other"
 
         def _has_any_attachment_type(msg):
-            atts = getattr(msg, "attachments", []) or []
+            atts = getattr(msg, "attachments", None)
+            if atts is None and isinstance(msg, dict):
+                atts = (msg.get("attachments") or [])
             if not atts:
                 return False
             for a in atts:
@@ -1719,7 +1688,10 @@ class ClientListener:
 
         def _passes_filters(msg):
             # Bots/system
-            is_bot = bool(getattr(getattr(msg, "author", None), "bot", False))
+            if isinstance(msg, dict):
+                is_bot = bool(((msg.get("author") or {}).get("bot")) or False)
+            else:
+                is_bot = bool(getattr(getattr(msg, "author", None), "bot", False))
             if not F["bots"] and is_bot:
                 return False
 
@@ -1728,55 +1700,76 @@ class ClientListener:
                 if mtype and getattr(mtype, "name", "").lower() != "default":
                     return False
 
-            # Length
-            content = getattr(msg, "content", "") or ""
+            # Length & text
+            content = (msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", "")) or ""
+            if not F["has_content"] and content.strip():
+                # If include-content is False, exclude messages that have content
+                return False
             if F["min_length"] > 0 and len(content) < F["min_length"]:
                 return False
 
             # Reactions
-            reacts = getattr(msg, "reactions", []) or []
+            reacts = (msg.get("reactions") if isinstance(msg, dict) else getattr(msg, "reactions", [])) or []
             if F["min_reactions"] > 0:
-                total_reacts = sum(int(getattr(r, "count", 0) or 0) for r in reacts)
+                def _rcount(r):
+                    return int((r.get("count") if isinstance(r, dict) else getattr(r, "count", 0)) or 0)
+                total_reacts = sum(_rcount(r) for r in reacts)
                 if total_reacts < F["min_reactions"]:
                     return False
 
             # Pinned
-            if not F["pinned"] and getattr(msg, "pinned", False):
+            pinned = bool((msg.get("pinned") if isinstance(msg, dict) else getattr(msg, "pinned", False)) or False)
+            if not F["pinned"] and pinned:
                 return False
 
             # Stickers
-            if not F["stickers"] and (getattr(msg, "stickers", []) or []):
+            stickers = (msg.get("stickers") if isinstance(msg, dict) else getattr(msg, "stickers", [])) or []
+            if not F["stickers"] and stickers:
                 return False
 
-            # Mentions (users, roles, channels)
+            # Mentions
             if not F["mentions"]:
-                if (getattr(msg, "mentions", []) or []) or (getattr(msg, "role_mentions", []) or []) or (getattr(msg, "channel_mentions", []) or []):
-                    return False
+                if isinstance(msg, dict):
+                    if (msg.get("mentions") or []) or (msg.get("role_mentions") or []) or (msg.get("channel_mentions") or []):
+                        return False
+                else:
+                    if (getattr(msg, "mentions", []) or []) or (getattr(msg, "role_mentions", []) or []) or (getattr(msg, "channel_mentions", []) or []):
+                        return False
 
-            # Replies (has a resolved reference)
-            has_ref = bool(getattr(msg, "reference", None) and getattr(getattr(msg, "reference", None), "resolved", None))
+            # Replies (has resolved reference)
+            if isinstance(msg, dict):
+                ref = msg.get("reference")
+                has_ref = bool(ref and ref.get("resolved"))
+            else:
+                ref = getattr(msg, "reference", None)
+                has_ref = bool(ref and getattr(ref, "resolved", None))
             if not F["replies"] and has_ref:
                 return False
 
             # Embeds
-            if not F["embeds"] and (getattr(msg, "embeds", []) or []):
+            embeds = (msg.get("embeds") if isinstance(msg, dict) else getattr(msg, "embeds", [])) or []
+            if not F["embeds"] and embeds:
                 return False
 
             # Attachments (+ enforce selected kinds)
+            atts = (msg.get("attachments") if isinstance(msg, dict) else getattr(msg, "attachments", [])) or []
             if not F["attachments"]:
-                if (getattr(msg, "attachments", []) or []):
+                if atts:
                     return False
             else:
-                atts = getattr(msg, "attachments", []) or []
                 if atts and not _has_any_attachment_type(msg):
                     return False
 
-            # Links (content or common embed fields)
+            # Links
             if not F["links"]:
                 if _link_re.search(content):
                     return False
-                for e in getattr(msg, "embeds", []) or []:
-                    if any(_link_re.search(str(v)) for v in (getattr(e, "url", None), getattr(e, "title", None), getattr(e, "description", None)) if v):
+                for e in embeds:
+                    if isinstance(e, dict):
+                        vals = (e.get("url"), e.get("title"), e.get("description"))
+                    else:
+                        vals = (getattr(e, "url", None), getattr(e, "title", None), getattr(e, "description", None))
+                    if any(v and _link_re.search(str(v)) for v in vals):
                         return False
 
             # Emojis
@@ -1901,6 +1894,7 @@ class ClientListener:
 
         # ---- Save JSON snapshot first — /data/exports/<guild>/<YYYYMMDD-HHMMSS>/messages.json
         json_file = None
+        media_root = None
         try:
             out_root = "/data/exports"
             ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
@@ -1922,9 +1916,91 @@ class ClientListener:
                     indent=2,
                 )
             logger.info(f"[export] JSON saved: {json_file}")
+
+            # Prepare media dirs now; used only if downloads are requested
+            media_root = os.path.join(subdir, "media")
+            for k in ("images", "videos", "audio", "other"):
+                os.makedirs(os.path.join(media_root, k), exist_ok=True)
         except Exception as e:
             logger.warning(f"[export] Failed to write JSON: {e}")
             json_file = None
+
+        # ---- NEW: Download attachments if requested
+        dl_cfg = F["download_media"] or {}
+        want_any_download = any(dl_cfg.get(k, False) for k in ("images", "videos", "audio", "other"))
+        media_report = {"images": 0, "videos": 0, "audio": 0, "other": 0, "errors": 0}
+
+        def _iter_attachment_links(msg_obj):
+            """Yield (kind, url, filename) from a serialized message object (dict)."""
+            m = msg_obj if isinstance(msg_obj, dict) else {}
+            atts = m.get("attachments") or []
+            for a in atts:
+                url = a.get("url") or a.get("proxy_url")
+                if not url or not isinstance(url, str) or not url.lower().startswith(("http://", "https://")):
+                    continue
+                kind = _att_kind(a)
+                filename = a.get("filename") or os.path.basename(url.split("?", 1)[0]) or f"{kind}-{uuid.uuid4().hex}"
+                yield (kind, url, filename)
+
+        async def _download_one(session, sem, kind, url, filename, dest_dir):
+            safe_name = filename
+            # ensure unique path
+            base, ext = os.path.splitext(safe_name)
+            if not base:
+                base = kind
+            out_path = os.path.join(dest_dir, f"{base}{ext}")
+            i = 0
+            while os.path.exists(out_path):
+                i += 1
+                out_path = os.path.join(dest_dir, f"{base}-{i}{ext}")
+
+            try:
+                async with sem:
+                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=180)) as resp:
+                        if resp.status != 200:
+                            raise RuntimeError(f"HTTP {resp.status}")
+                        with open(out_path, "wb") as f:
+                            async for chunk in resp.content.iter_chunked(1 << 14):
+                                if chunk:
+                                    f.write(chunk)
+                return True, out_path, None
+            except Exception as e:
+                return False, out_path, str(e)
+
+        if want_any_download and aiohttp is None:
+            logger.warning("[export] Download requested but aiohttp not available. Skipping downloads.")
+        elif want_any_download:
+            logger.info(f"[export] Downloading media per selection: {dl_cfg}")
+            sem = asyncio.Semaphore(4)  # tune concurrency
+            tasks = []
+
+            # Collect all candidate links from matched/serialized messages
+            for row in buffer_rows:
+                msg_obj = row.get("message") or {}
+                for kind, url, fname in _iter_attachment_links(msg_obj):
+                    if not dl_cfg.get(kind, False):
+                        continue
+                    dest = os.path.join(media_root, kind)
+                    tasks.append((kind, url, fname, dest))
+
+            if not tasks:
+                logger.info("[export] No media matches selection; skipping download step.")
+            else:
+                async with aiohttp.ClientSession() as session:
+                    results = await asyncio.gather(
+                        *[_download_one(session, sem, kind, url, fname, dest) for (kind, url, fname, dest) in tasks],
+                        return_exceptions=False
+                    )
+                # Tally results
+                for (kind, url, *_), res in zip(tasks, results):
+                    ok, path, err = res
+                    if ok:
+                        media_report[kind] += 1
+                    else:
+                        media_report["errors"] += 1
+                        logger.warning(f"[export] Download failed kind={kind} url={_safe(url)} err={err}")
+
+                logger.info(f"[export] Media download complete: {media_report}")
 
         # ---- Forward buffered messages if a webhook URL was provided
         if do_forward and buffer_rows:
@@ -1956,27 +2032,25 @@ class ClientListener:
 
         dur = time.perf_counter() - t0
         logger.info(
-            f"[export] Complete guild={gid_log} ({gname}) scanned={total_scanned}, matched={total_matched}, "
-            f"forwarded={forwarded}, json={'saved '+json_file if json_file else 'none'}, elapsed={dur:.1f}s"
+        f"[export] Complete guild={gid_log} ({gname}) scanned={total_scanned}, matched={total_matched}, "
+        f"forwarded={forwarded}, json={'saved '+json_file if json_file else 'none'}, "
+        f"media_dl={media_report if want_any_download else 'skipped'}, elapsed={dur:.1f}s"
         )
 
-        # ---- Done – notify server
+        # ---- Done – notify server (include media report if present)
         try:
-            await self.ws.send(
-                {
-                    "type": "export_messages_done",
-                    "data": {
-                        "guild_id": getattr(guild, "id", None),
-                        "forwarded": forwarded,
-                        "scanned": total_scanned,
-                        "matched": total_matched,
-                        **({"json_path": json_file} if json_file else {}),
-                    },
-                }
-            )
+            done_payload = {
+                "guild_id": getattr(guild, "id", None),
+                "forwarded": forwarded,
+                "scanned": total_scanned,
+                "matched": total_matched,
+                **({"json_path": json_file} if json_file else {}),
+            }
+            if want_any_download:
+                done_payload["media_download"] = media_report
+            await self.ws.send({"type": "export_messages_done", "data": done_payload})
         except Exception as e:
             logger.debug(f"[export] emit export_messages_done failed: {e}")
-
 
 
 
