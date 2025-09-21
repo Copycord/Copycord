@@ -471,14 +471,10 @@ class CloneCommands(commands.Cog):
             return await ctx.respond("No announcement triggers found.", ephemeral=True)
 
         if delete is not None:
-            idx = delete - 1
-            if idx < 0 or idx >= len(rows):
-                return await ctx.respond(
-                    f"⚠️ Invalid index `{delete}`; pick 1–{len(rows)}.",
-                    ephemeral=True,
-                )
+            if delete < 1 or delete > len(rows):
+                return await ctx.respond("Invalid index.", ephemeral=True)
 
-            r = rows[idx]
+            r = rows[delete - 1]
             gid = int(r["guild_id"])
             kw = r["keyword"]
             fuid = int(r["filter_user_id"])
@@ -505,9 +501,16 @@ class CloneCommands(commands.Cog):
                     ephemeral=True,
                 )
             else:
-                return await ctx.respond(
-                    "Nothing was deleted (row no longer exists).", ephemeral=True
-                )
+                return await ctx.respond("Nothing was deleted (row no longer exists).", ephemeral=True)
+
+        subs_cache: dict[tuple[int, str], int] = {}
+
+        def _subs_for(gid: int, kw: str) -> int:
+            key = (gid, kw)
+            if key not in subs_cache:
+                user_ids = self.db.get_announcement_users(gid, kw)
+                subs_cache[key] = len(set(int(u) for u in user_ids))
+            return subs_cache[key]
 
         lines: list[str] = []
         for i, r in enumerate(rows, start=1):
@@ -515,9 +518,13 @@ class CloneCommands(commands.Cog):
             kw = r["keyword"]
             fuid = int(r["filter_user_id"])
             cid = int(r["channel_id"])
+
             who = "any user" if fuid == 0 else f"user `{fuid}`"
             where = "any channel" if cid == 0 else f"`#{cid}`"
-            lines.append(f"{i}. [Guild: `{gid}`] **{kw}** — {who}, {where}")
+
+            subs = _subs_for(gid, kw)
+            suffix = f" ({subs} subscriber{'s' if subs != 1 else ''})"
+            lines.append(f"{i}. [Guild: `{gid}`] **{kw}** — {who}, {where}{suffix}")
 
         def _chunk_lines(xs: list[str], limit: int = 1024) -> list[str]:
             chunks, cur = [], ""
