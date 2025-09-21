@@ -500,41 +500,39 @@ class ClientListener:
             uid = int(data["user_id"])
             webhook_url = data.get("webhook_url")
 
-            # json_file toggle: default True, accept bools or strings like "true"/"false"
             def _as_bool(v, default=True):
-                if v is None:
-                    return default
-                if isinstance(v, bool):
-                    return v
+                if v is None: return default
+                if isinstance(v, bool): return v
                 return str(v).strip().lower() in ("1", "true", "yes", "on")
 
             save_json = _as_bool(data.get("json_file"), default=True)
 
-            async with self._dm_export_lock:
-                if getattr(self, "_dm_export_running", False) and self._dm_export_task and not self._dm_export_task.done():
-                    return {"ok": False, "error": "dm-export-in-progress"}
+            # acquire per-user slot here
+            acquired = await self._dm_try_begin(uid)
+            if not acquired:
+                return {"ok": False, "error": "dm-export-in-progress", "user_id": uid}
 
-                async def _export():
-                    try:
-                        exporter = DmHistoryExporter(
-                            bot=self.bot,
-                            ws=self.ws,
-                            msg_serializer=self.msg.serialize,
-                            logger=logger.getChild("dm_export"),
-                            send_sleep=2.0,
-                            do_precache_count=True,
-                            out_root="/data/exports",
-                            save_json=save_json,
-                        )
-                        await exporter.run(user_id=uid, webhook_url=webhook_url)
-                    finally:
-                        self._dm_export_running = False
-                        self._dm_export_task = None
+            async def _export():
+                try:
+                    exporter = DmHistoryExporter(
+                        bot=self.bot,
+                        ws=self.ws,
+                        msg_serializer=self.msg.serialize,
+                        logger=logger.getChild("dm_export"),
+                        send_sleep=2.0,
+                        do_precache_count=True,
+                        out_root="/data/exports",
+                        save_json=save_json,
+                    )
+                    await exporter.run(user_id=uid, webhook_url=webhook_url)
+                finally:
+                    await self._dm_end(uid)
 
-                self._dm_export_running = True
-                self._dm_export_task = asyncio.create_task(_export())
+            task = asyncio.create_task(_export())
+            async with self._dm_lock:
+                self._dm_tasks[uid] = task
 
-            return {"ok": True}
+            return {"ok": True, "user_id": uid}
 
         elif typ == "export_messages":
             d = data or {}
@@ -549,9 +547,17 @@ class ClientListener:
             if guild is None and self.bot.guilds:
                 guild = self.bot.guilds[0]
             if guild is None:
-                return {"ok": False, "error": "no-guild"}
+                return {"ok": False, "error": "Guild not found"}
 
-            asyncio.create_task(self.runner.run(d, guild))
+            g_id = getattr(guild, "id", None)
+            if g_id is None:
+                return {"ok": False, "error": "Guild ID not found"}
+
+            acquired = await self.runner.try_begin(g_id)
+            if not acquired:
+                return {"ok": False, "error": "Export already running for this guild"} 
+            
+            asyncio.create_task(self.runner.run(d, guild, acquired=True))
             return {"ok": True, "accepted": True}
 
         return None

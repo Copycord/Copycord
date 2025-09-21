@@ -47,418 +47,431 @@ class ExportMessagesRunner:
 
         self._link_re = re.compile(r"https?://\S+", re.I)
         self._emoji_re = re.compile(r"(<a?:\w+:\d+>)|([\U0001F300-\U0001FAFF])")
+        self._active_guilds: set[int] = set()
+        self._active_lock = asyncio.Lock()
+        
+    async def try_begin(self, guild_id: int) -> bool:
+        """
+        Attempt to mark a guild as 'running'. Returns False if already running.
+        """
+        async with self._active_lock:
+            if guild_id in self._active_guilds:
+                return False
+            self._active_guilds.add(guild_id)
+            return True
 
-    async def run(self, d: DictLike, guild: Any) -> None:
+    async def _end(self, guild_id: int) -> None:
+        async with self._active_lock:
+            self._active_guilds.discard(guild_id)
+
+    async def run(self, d: DictLike, guild: Any, acquired: bool = False) -> None:
         """
         Execute the export with the provided `data` and resolved `guild`.
         Emits progress logs and a final 'export_messages_done' ws event.
         """
-
-        chan_id_raw = (d.get("channel_id") or "").strip() or None
-        user_id_raw = (d.get("user_id") or "").strip() or None
-        webhook_url = (d.get("webhook_url") or "").strip() or None
-        only_with_attachments = bool(d.get("has_attachments", False))
-        after_dt = self._parse_iso(d.get("after_iso") or None)
-        before_dt = self._parse_iso(d.get("before_iso") or None)
-        user_id = int(user_id_raw) if (user_id_raw and user_id_raw.isdigit()) else None
-
         gid_log = getattr(guild, "id", None)
         gname = getattr(guild, "name", "") or "Unknown"
-        wh_tail = webhook_url[-6:] if webhook_url else "None"
-        do_forward = bool(webhook_url)
 
-        filters = d.get("filters") or {}
-        F: DictLike = {
-            "embeds": filters.get("embeds", True),
-            "attachments": filters.get("attachments", True),
-            "att_types": (
-                filters.get("att_types")
-                or {"images": True, "videos": True, "audio": True, "other": True}
-            ),
-            "links": filters.get("links", True),
-            "emojis": filters.get("emojis", True),
-            "has_content": bool(filters.get("has_content", True)),
-            "word_on": filters.get("word_on", False),
-            "word": (filters.get("word") or "").strip(),
-            "replies": filters.get("replies", True),
-            "bots": filters.get("bots", True),
-            "system": filters.get("system", True),
-            "min_length": int(filters.get("min_length", 0) or 0),
-            "min_reactions": int(filters.get("min_reactions", 0) or 0),
-            "pinned": filters.get("pinned", True),
-            "stickers": filters.get("stickers", True),
-            "mentions": filters.get("mentions", True),
-            "download_media": (
-                filters.get("download_media")
-                or {"images": False, "videos": False, "audio": False, "other": False}
-            ),
-        }
+        # Concurrency guard
+        if not acquired:
+            ok = await self.try_begin(gid_log)
+            if not ok:
+                self.log.warning(f"[export] Another export is already running for guild={gid_log}. Aborting run().")
+                try:
+                    await self._ws_send({
+                        "type": "export_messages_done",
+                        "data": {"guild_id": gid_log, "error": "export-already-running"},
+                    })
+                except Exception:
+                    pass
+                return
 
-        if not F["attachments"]:
-            F["att_types"] = {
-                "images": False,
-                "videos": False,
-                "audio": False,
-                "other": False,
-            }
-        else:
-            kinds = F["att_types"]
-            if not any(
-                bool(kinds.get(k)) for k in ("images", "videos", "audio", "other")
-            ):
-                F["attachments"] = False
-
-        if after_dt and before_dt and after_dt > before_dt:
-            after_dt, before_dt = before_dt, after_dt
-
-        me = None
         try:
-            me = guild.get_member(getattr(self.bot.user, "id", None))
-        except Exception:
-            me = getattr(guild, "me", None)
+            chan_id_raw = (d.get("channel_id") or "").strip() or None
+            user_id_raw = (d.get("user_id") or "").strip() or None
+            webhook_url = (d.get("webhook_url") or "").strip() or None
+            only_with_attachments = bool(d.get("has_attachments", False))
+            after_dt = self._parse_iso(d.get("after_iso") or None)
+            before_dt = self._parse_iso(d.get("before_iso") or None)
+            user_id = int(user_id_raw) if (user_id_raw and user_id_raw.isdigit()) else None
 
-        channels: List[Any] = []
-        if chan_id_raw:
-            ch = None
-            try:
-                ch = await self.bot.fetch_channel(int(chan_id_raw))
-            except Exception as e:
-                self.log.debug(
-                    f"[export] fetch_channel({chan_id_raw}) failed: {e}; falling back to cache"
-                )
-                if chan_id_raw.isdigit():
-                    ch = self.bot.get_channel(int(chan_id_raw))
-            if ch:
-                channels = [ch]
+            wh_tail = webhook_url[-6:] if webhook_url else "None"
+            do_forward = bool(webhook_url)
 
-        if not channels:
-            if me:
-                channels = [
-                    c
-                    for c in getattr(guild, "text_channels", [])
-                    if c.permissions_for(me).read_message_history
-                ]
+            filters = d.get("filters") or {}
+            F: DictLike = {
+                "embeds": filters.get("embeds", True),
+                "attachments": filters.get("attachments", True),
+                "att_types": (
+                    filters.get("att_types")
+                    or {"images": True, "videos": True, "audio": True, "other": True}
+                ),
+                "links": filters.get("links", True),
+                "emojis": filters.get("emojis", True),
+                "has_content": bool(filters.get("has_content", True)),
+                "word_on": filters.get("word_on", False),
+                "word": (filters.get("word") or "").strip(),
+                "replies": filters.get("replies", True),
+                "bots": filters.get("bots", True),
+                "system": filters.get("system", True),
+                "min_length": int(filters.get("min_length", 0) or 0),
+                "min_reactions": int(filters.get("min_reactions", 0) or 0),
+                "pinned": filters.get("pinned", True),
+                "stickers": filters.get("stickers", True),
+                "mentions": filters.get("mentions", True),
+                "download_media": (
+                    filters.get("download_media")
+                    or {"images": False, "videos": False, "audio": False, "other": False}
+                ),
+            }
+
+            if not F["attachments"]:
+                F["att_types"] = {
+                    "images": False,
+                    "videos": False,
+                    "audio": False,
+                    "other": False,
+                }
             else:
-                channels = list(getattr(guild, "text_channels", []))
+                kinds = F["att_types"]
+                if not any(bool(kinds.get(k)) for k in ("images", "videos", "audio", "other")):
+                    F["attachments"] = False
 
-        t0 = time.perf_counter()
-        self.log.info(
-            f"[export] Start task guild={gid_log} ({gname}) "
-            f"filters: chan={chan_id_raw or 'ALL'}, user={user_id or 'ANY'}, "
-            f"attachments_only={only_with_attachments}, after={after_dt}, before={before_dt}, "
-            f"forward_webhook={do_forward}({('…'+wh_tail) if do_forward else '—'}), "
-            f"scan_sleep={self.scan_sleep}, send_sleep={self.send_sleep}, ui_filters={filters}"
-        )
+            if after_dt and before_dt and after_dt > before_dt:
+                after_dt, before_dt = before_dt, after_dt
 
-        if not channels:
-            self.log.warning(
-                f"[export] No readable text channels in guild {gid_log}. Aborting."
+            me = None
+            try:
+                me = guild.get_member(getattr(self.bot.user, "id", None))
+            except Exception:
+                me = getattr(guild, "me", None)
+
+            channels: List[Any] = []
+            if chan_id_raw:
+                ch = None
+                try:
+                    ch = await self.bot.fetch_channel(int(chan_id_raw))
+                except Exception as e:
+                    self.log.debug(
+                        f"[export] fetch_channel({chan_id_raw}) failed: {e}; falling back to cache"
+                    )
+                    if chan_id_raw.isdigit():
+                        ch = self.bot.get_channel(int(chan_id_raw))
+                if ch:
+                    channels = [ch]
+
+            if not channels:
+                if me:
+                    channels = [
+                        c
+                        for c in getattr(guild, "text_channels", [])
+                        if c.permissions_for(me).read_message_history
+                    ]
+                else:
+                    channels = list(getattr(guild, "text_channels", []))
+
+            t0 = time.perf_counter()
+            self.log.info(
+                f"[export] Start task guild={gid_log} ({gname}) "
+                f"filters: chan={chan_id_raw or 'ALL'}, user={user_id or 'ANY'}, "
+                f"attachments_only={only_with_attachments}, after={after_dt}, before={before_dt}, "
+                f"forward_webhook={do_forward}({('…'+wh_tail) if do_forward else '—'}), "
+                f"scan_sleep={self.scan_sleep}, send_sleep={self.send_sleep}, ui_filters={filters}"
             )
-            await self._ws_send(
-                {
+
+            if not channels:
+                self.log.warning(f"[export] No readable text channels in guild {gid_log}. Aborting.")
+                await self._ws_send({
                     "type": "export_messages_done",
                     "data": {"guild_id": gid_log, "forwarded": 0, "scanned": 0},
+                })
+                return
+
+            ch_ids_preview = [getattr(c, "id", None) for c in channels[:8]]
+            more_note = "" if len(channels) <= 8 else f" (+{len(channels)-8} more)"
+            self.log.info(f"[export] Channels to scan: {len(channels)} -> {ch_ids_preview}{more_note}")
+
+            total_scanned = 0
+            total_matched = 0
+            forwarded = 0
+            buffer_rows: List[DictLike] = []
+
+            for ch in channels:
+                cid = getattr(ch, "id", None)
+                cname = getattr(ch, "name", "") or "unknown"
+                self.log.info(f"[export] Scanning channel #{cname} ({cid}) …")
+                ch_scanned = 0
+                ch_matched = 0
+
+                try:
+                    kwargs: DictLike = {"limit": None, "oldest_first": True}
+                    if after_dt:
+                        kwargs["after"] = after_dt
+                    if before_dt:
+                        kwargs["before"] = before_dt
+
+                    async for msg in ch.history(**kwargs):
+                        ch_scanned += 1
+                        total_scanned += 1
+
+                        if user_id and getattr(msg.author, "id", None) != user_id:
+                            if self.scan_sleep:
+                                await asyncio.sleep(self.scan_sleep)
+                            continue
+
+                        if only_with_attachments and not getattr(msg, "attachments", []):
+                            if self.scan_sleep:
+                                await asyncio.sleep(self.scan_sleep)
+                            continue
+
+                        if not self._passes_filters(msg, F):
+                            if self.scan_sleep:
+                                await asyncio.sleep(self.scan_sleep)
+                            continue
+
+                        ch_matched += 1
+                        total_matched += 1
+
+                        serialized = self.serialize(msg)
+
+                        buffer_rows.append(
+                            {
+                                "guild_id": getattr(guild, "id", None),
+                                "channel_id": getattr(ch, "id", None),
+                                "message": serialized,
+                            }
+                        )
+
+                        if ch_scanned % 200 == 0:
+                            self.log.info(
+                                f"[export] Progress ch={cid}: scanned={ch_scanned}, matched={ch_matched}, "
+                                f"total_scanned={total_scanned}, total_matched={total_matched}, buffered={len(buffer_rows)}"
+                            )
+
+                        if self.scan_sleep:
+                            await asyncio.sleep(self.scan_sleep)
+                except Exception as e:
+                    self.log.warning(f"[export] Channel {cid} failed: {e}")
+                    continue
+
+                self.log.info(
+                    f"[export] Done channel #{cname} ({cid}): scanned={ch_scanned}, matched={ch_matched}"
+                )
+
+            json_file: Optional[str] = None
+            try:
+                ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+                gid_str = str(getattr(guild, "id", "unknown"))
+                subdir = os.path.join(self.out_root, gid_str, ts)
+                os.makedirs(subdir, exist_ok=True)
+
+                json_file = os.path.join(subdir, "messages.json")
+                self.log.info(f"[export] Writing JSON snapshot ({len(buffer_rows)} messages) → {json_file}")
+                with open(json_file, "w", encoding="utf-8") as f:
+                    json.dump(
+                        {
+                            "guild_id": gid_str,
+                            "exported_at": ts + "Z",
+                            "count": len(buffer_rows),
+                            "messages": [row["message"] for row in buffer_rows],
+                        },
+                        f,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                self.log.info(f"[export] JSON saved: {json_file}")
+
+            except Exception as e:
+                self.log.warning(f"[export] Failed to write JSON: {e}")
+                json_file = None
+
+            dl_cfg = F.get("download_media") or {}
+            want_any_download = any(dl_cfg.get(k, False) for k in ("images", "videos", "audio", "other"))
+            media_report = {"images": 0, "videos": 0, "audio": 0, "other": 0, "errors": 0}
+
+            if want_any_download and aiohttp is None:
+                self.log.warning("[export] Download requested but aiohttp not available. Skipping downloads.")
+            elif want_any_download:
+                from urllib.parse import urlparse
+
+                def _ext_from(att: DictLike, url: str) -> str:
+                    name = (att.get("filename") or "").strip()
+                    ext = os.path.splitext(name)[1]
+                    if not ext:
+                        path = urlparse(url).path
+                        ext = os.path.splitext(path)[1]
+                    if not ext:
+                        ct = (att.get("content_type") or "").lower()
+                        if "png" in ct:
+                            ext = ".png"
+                        elif "jpeg" in ct or "jpg" in ct:
+                            ext = ".jpg"
+                        elif "gif" in ct:
+                            ext = ".gif"
+                        elif "webp" in ct:
+                            ext = ".webp"
+                        elif "mp4" in ct:
+                            ext = ".mp4"
+                        elif "webm" in ct:
+                            ext = ".webm"
+                        elif "mp3" in ct:
+                            ext = ".mp3"
+                        elif "wav" in ct:
+                            ext = ".wav"
+                    return ext or ".bin"
+
+                candidates_by_kind: Dict[str, List[Tuple[str, str, str, str]]] = {
+                    "images": [],
+                    "videos": [],
+                    "audio": [],
+                    "other": [],
                 }
+
+                for row in buffer_rows:
+                    msg_obj = row.get("message") or {}
+                    msg_id = str(msg_obj.get("id") or "")
+                    if not msg_id:
+                        continue
+
+                    per_msg_items: List[Tuple[str, DictLike]] = []
+                    for att in msg_obj.get("attachments") or []:
+                        url = att.get("url") or att.get("proxy_url")
+                        if (
+                            not url
+                            or not isinstance(url, str)
+                            or not url.lower().startswith(("http://", "https://"))
+                        ):
+                            continue
+                        kind = self._att_kind(att)
+                        if not dl_cfg.get(kind, False):
+                            continue
+                        per_msg_items.append((kind, att))
+
+                    if not per_msg_items:
+                        continue
+
+                    total_count = 0
+                    for kind, att in per_msg_items:
+                        url = att.get("url") or att.get("proxy_url")
+                        ext = _ext_from(att, url)
+
+                        total_count += 1
+                        if total_count == 1:
+                            fname = f"{msg_id}{ext}"
+                        else:
+                            fname = f"{msg_id}-{total_count}{ext}"
+
+                        candidates_by_kind[kind].append((url, fname, "", msg_id))
+
+                used_kinds = [k for k, items in candidates_by_kind.items() if items]
+                if not used_kinds:
+                    self.log.info("[export] No media matches selection; skipping download step.")
+                else:
+                    media_root = os.path.join(os.path.dirname(json_file or ""), "media")
+                    os.makedirs(media_root, exist_ok=True)
+                    kind_dirs: Dict[str, str] = {k: os.path.join(media_root, k) for k in used_kinds}
+                    for d in kind_dirs.values():
+                        os.makedirs(d, exist_ok=True)
+
+                    def _ensure_unique(dest_dir: str, filename: str) -> str:
+                        base, ext = os.path.splitext(filename)
+                        i = 0
+                        candidate = filename
+                        while os.path.exists(os.path.join(dest_dir, candidate)):
+                            i += 1
+                            candidate = f"{base}-dup{i}{ext}"
+                        return candidate
+
+                    sem = asyncio.Semaphore(self.download_concurrency)
+                    tasks: List[Tuple[str, str, str, str]] = []
+                    for kind in used_kinds:
+                        dest_dir = kind_dirs[kind]
+                        for url, fname, _unused, _msgid in candidates_by_kind[kind]:
+                            final_name = _ensure_unique(dest_dir, fname)
+                            tasks.append((kind, url, final_name, dest_dir))
+
+                    self.log.info(
+                        f"[export] Downloading media per selection: "
+                        f"{ {k: dl_cfg.get(k, False) for k in ('images','videos','audio','other')} } "
+                        f"→ kinds_used={used_kinds} count={len(tasks)}"
+                    )
+
+                    async with aiohttp.ClientSession() as session:
+                        results = await asyncio.gather(
+                            *[
+                                self._download_one(session, sem, kind, url, fname, dest)
+                                for (kind, url, fname, dest) in tasks
+                            ],
+                            return_exceptions=False,
+                        )
+
+                    for (kind, url, *_), res in zip(tasks, results):
+                        ok, path, err = res
+                        if ok:
+                            media_report[kind] += 1
+                        else:
+                            media_report["errors"] += 1
+                            self.log.warning(
+                                f"[export] Download failed kind={kind} url={self._safe(url)} err={err}"
+                            )
+
+                    self.log.info(f"[export] Media download complete: {media_report}")
+
+            if do_forward and buffer_rows:
+                self.log.info(
+                    f"[export] Forwarding buffered messages: {len(buffer_rows)} → webhook(…{wh_tail})"
+                )
+                for idx, row in enumerate(buffer_rows, 1):
+                    try:
+                        await self._ws_send(
+                            {
+                                "type": "export_message",
+                                "data": {
+                                    "guild_id": row.get("guild_id"),
+                                    "channel_id": row.get("channel_id"),
+                                    "webhook_url": webhook_url,
+                                    "message": row.get("message"),
+                                },
+                            }
+                        )
+                        forwarded += 1
+                        if self.send_sleep:
+                            await asyncio.sleep(self.send_sleep)
+                    except Exception as e:
+                        self.log.warning(f"[📤] export_message send failed (post-JSON) idx={idx}: {e}")
+                        break
+
+                    if idx % 200 == 0:
+                        self.log.info(
+                            f"[export] Forwarded {idx}/{len(buffer_rows)} (total_forwarded={forwarded})"
+                        )
+            else:
+                self.log.info("[export] No webhook URL provided — skipping forwarding step.")
+
+            dur = time.perf_counter() - t0
+            self.log.info(
+                f"[export] Complete guild={gid_log} ({gname}) scanned={total_scanned}, matched={total_matched}, "
+                f"forwarded={forwarded}, json={'saved '+json_file if json_file else 'none'}, "
+                f"media_dl={media_report if want_any_download else 'skipped'}, elapsed={dur:.1f}s"
             )
-            return
-
-        ch_ids_preview = [getattr(c, "id", None) for c in channels[:8]]
-        more_note = "" if len(channels) <= 8 else f" (+{len(channels)-8} more)"
-        self.log.info(
-            f"[export] Channels to scan: {len(channels)} -> {ch_ids_preview}{more_note}"
-        )
-
-        total_scanned = 0
-        total_matched = 0
-        forwarded = 0
-        buffer_rows: List[DictLike] = []
-
-        for ch in channels:
-            cid = getattr(ch, "id", None)
-            cname = getattr(ch, "name", "") or "unknown"
-            self.log.info(f"[export] Scanning channel #{cname} ({cid}) …")
-            ch_scanned = 0
-            ch_matched = 0
 
             try:
-                kwargs: DictLike = {"limit": None, "oldest_first": True}
-                if after_dt:
-                    kwargs["after"] = after_dt
-                if before_dt:
-                    kwargs["before"] = before_dt
-
-                async for msg in ch.history(**kwargs):
-                    ch_scanned += 1
-                    total_scanned += 1
-
-                    if user_id and getattr(msg.author, "id", None) != user_id:
-                        if self.scan_sleep:
-                            await asyncio.sleep(self.scan_sleep)
-                        continue
-
-                    if only_with_attachments and not getattr(msg, "attachments", []):
-                        if self.scan_sleep:
-                            await asyncio.sleep(self.scan_sleep)
-                        continue
-
-                    if not self._passes_filters(msg, F):
-                        if self.scan_sleep:
-                            await asyncio.sleep(self.scan_sleep)
-                        continue
-
-                    ch_matched += 1
-                    total_matched += 1
-
-                    serialized = self.serialize(msg)
-
-                    buffer_rows.append(
-                        {
-                            "guild_id": getattr(guild, "id", None),
-                            "channel_id": getattr(ch, "id", None),
-                            "message": serialized,
-                        }
-                    )
-
-                    if ch_scanned % 200 == 0:
-                        self.log.info(
-                            f"[export] Progress ch={cid}: scanned={ch_scanned}, matched={ch_matched}, "
-                            f"total_scanned={total_scanned}, total_matched={total_matched}, buffered={len(buffer_rows)}"
-                        )
-
-                    if self.scan_sleep:
-                        await asyncio.sleep(self.scan_sleep)
-            except Exception as e:
-                self.log.warning(f"[export] Channel {cid} failed: {e}")
-                continue
-
-            self.log.info(
-                f"[export] Done channel #{cname} ({cid}): scanned={ch_scanned}, matched={ch_matched}"
-            )
-
-        json_file: Optional[str] = None
-        try:
-            ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-            gid_str = str(getattr(guild, "id", "unknown"))
-            subdir = os.path.join(self.out_root, gid_str, ts)
-            os.makedirs(subdir, exist_ok=True)
-
-            json_file = os.path.join(subdir, "messages.json")
-            self.log.info(
-                f"[export] Writing JSON snapshot ({len(buffer_rows)} messages) → {json_file}"
-            )
-            with open(json_file, "w", encoding="utf-8") as f:
-                json.dump(
-                    {
-                        "guild_id": gid_str,
-                        "exported_at": ts + "Z",
-                        "count": len(buffer_rows),
-                        "messages": [row["message"] for row in buffer_rows],
-                    },
-                    f,
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            self.log.info(f"[export] JSON saved: {json_file}")
-
-        except Exception as e:
-            self.log.warning(f"[export] Failed to write JSON: {e}")
-            json_file = None
-
-        dl_cfg = F.get("download_media") or {}
-        want_any_download = any(
-            dl_cfg.get(k, False) for k in ("images", "videos", "audio", "other")
-        )
-        media_report = {"images": 0, "videos": 0, "audio": 0, "other": 0, "errors": 0}
-
-        if want_any_download and aiohttp is None:
-            self.log.warning(
-                "[export] Download requested but aiohttp not available. Skipping downloads."
-            )
-        elif want_any_download:
-            from urllib.parse import urlparse
-
-            def _ext_from(att: DictLike, url: str) -> str:
-                name = (att.get("filename") or "").strip()
-                ext = os.path.splitext(name)[1]
-                if not ext:
-                    path = urlparse(url).path
-                    ext = os.path.splitext(path)[1]
-                if not ext:
-                    ct = (att.get("content_type") or "").lower()
-                    if "png" in ct:
-                        ext = ".png"
-                    elif "jpeg" in ct or "jpg" in ct:
-                        ext = ".jpg"
-                    elif "gif" in ct:
-                        ext = ".gif"
-                    elif "webp" in ct:
-                        ext = ".webp"
-                    elif "mp4" in ct:
-                        ext = ".mp4"
-                    elif "webm" in ct:
-                        ext = ".webm"
-                    elif "mp3" in ct:
-                        ext = ".mp3"
-                    elif "wav" in ct:
-                        ext = ".wav"
-                return ext or ".bin"
-
-            candidates_by_kind: Dict[str, List[Tuple[str, str, str, str]]] = {
-                "images": [],
-                "videos": [],
-                "audio": [],
-                "other": [],
-            }
-
-            for row in buffer_rows:
-                msg_obj = row.get("message") or {}
-                msg_id = str(msg_obj.get("id") or "")
-                if not msg_id:
-                    continue
-
-                per_msg_items: List[Tuple[str, DictLike]] = []
-                for att in msg_obj.get("attachments") or []:
-                    url = att.get("url") or att.get("proxy_url")
-                    if (
-                        not url
-                        or not isinstance(url, str)
-                        or not url.lower().startswith(("http://", "https://"))
-                    ):
-                        continue
-                    kind = self._att_kind(att)
-                    if not dl_cfg.get(kind, False):
-                        continue
-                    per_msg_items.append((kind, att))
-
-                if not per_msg_items:
-                    continue
-
-                total_count = 0
-                for kind, att in per_msg_items:
-                    url = att.get("url") or att.get("proxy_url")
-                    ext = _ext_from(att, url)
-
-                    total_count += 1
-                    if total_count == 1:
-                        fname = f"{msg_id}{ext}"
-                    else:
-                        fname = f"{msg_id}-{total_count}{ext}"
-
-                    candidates_by_kind[kind].append((url, fname, "", msg_id))
-
-            used_kinds = [k for k, items in candidates_by_kind.items() if items]
-            if not used_kinds:
-                self.log.info(
-                    "[export] No media matches selection; skipping download step."
-                )
-            else:
-                media_root = os.path.join(os.path.dirname(json_file or ""), "media")
-                os.makedirs(media_root, exist_ok=True)
-                kind_dirs: Dict[str, str] = {
-                    k: os.path.join(media_root, k) for k in used_kinds
+                done_payload: DictLike = {
+                    "guild_id": getattr(guild, "id", None),
+                    "forwarded": forwarded,
+                    "scanned": total_scanned,
+                    "matched": total_matched,
+                    **({"json_path": json_file} if json_file else {}),
                 }
-                for d in kind_dirs.values():
-                    os.makedirs(d, exist_ok=True)
+                if want_any_download:
+                    done_payload["media_download"] = media_report
+                await self._ws_send({"type": "export_messages_done", "data": done_payload})
+            except Exception as e:
+                self.log.debug(f"[export] emit export_messages_done failed: {e}")
 
-                def _ensure_unique(dest_dir: str, filename: str) -> str:
-                    base, ext = os.path.splitext(filename)
-                    i = 0
-                    candidate = filename
-                    while os.path.exists(os.path.join(dest_dir, candidate)):
-                        i += 1
-                        candidate = f"{base}-dup{i}{ext}"
-                    return candidate
+        finally:
+            await self._end(gid_log)
 
-                sem = asyncio.Semaphore(self.download_concurrency)
-                tasks: List[Tuple[str, str, str, str]] = []
-                for kind in used_kinds:
-                    dest_dir = kind_dirs[kind]
-                    for url, fname, _unused, _msgid in candidates_by_kind[kind]:
-                        final_name = _ensure_unique(dest_dir, fname)
-                        tasks.append((kind, url, final_name, dest_dir))
-
-                self.log.info(
-                    f"[export] Downloading media per selection: "
-                    f"{ {k: dl_cfg.get(k, False) for k in ('images','videos','audio','other')} } "
-                    f"→ kinds_used={used_kinds} count={len(tasks)}"
-                )
-
-                async with aiohttp.ClientSession() as session:
-                    results = await asyncio.gather(
-                        *[
-                            self._download_one(session, sem, kind, url, fname, dest)
-                            for (kind, url, fname, dest) in tasks
-                        ],
-                        return_exceptions=False,
-                    )
-
-                for (kind, url, *_), res in zip(tasks, results):
-                    ok, path, err = res
-                    if ok:
-                        media_report[kind] += 1
-                    else:
-                        media_report["errors"] += 1
-                        self.log.warning(
-                            f"[export] Download failed kind={kind} url={self._safe(url)} err={err}"
-                        )
-
-                self.log.info(f"[export] Media download complete: {media_report}")
-
-        if do_forward and buffer_rows:
-            self.log.info(
-                f"[export] Forwarding buffered messages: {len(buffer_rows)} → webhook(…{wh_tail})"
-            )
-            for idx, row in enumerate(buffer_rows, 1):
-                try:
-                    await self._ws_send(
-                        {
-                            "type": "export_message",
-                            "data": {
-                                "guild_id": row.get("guild_id"),
-                                "channel_id": row.get("channel_id"),
-                                "webhook_url": webhook_url,
-                                "message": row.get("message"),
-                            },
-                        }
-                    )
-                    forwarded += 1
-                    if self.send_sleep:
-                        await asyncio.sleep(self.send_sleep)
-                except Exception as e:
-                    self.log.warning(
-                        f"[📤] export_message send failed (post-JSON) idx={idx}: {e}"
-                    )
-                    break
-
-                if idx % 200 == 0:
-                    self.log.info(
-                        f"[export] Forwarded {idx}/{len(buffer_rows)} (total_forwarded={forwarded})"
-                    )
-        else:
-            self.log.info(
-                "[export] No webhook URL provided — skipping forwarding step."
-            )
-
-        dur = time.perf_counter() - t0
-        self.log.info(
-            f"[export] Complete guild={gid_log} ({gname}) scanned={total_scanned}, matched={total_matched}, "
-            f"forwarded={forwarded}, json={'saved '+json_file if json_file else 'none'}, "
-            f"media_dl={media_report if want_any_download else 'skipped'}, elapsed={dur:.1f}s"
-        )
-
-        try:
-            done_payload: DictLike = {
-                "guild_id": getattr(guild, "id", None),
-                "forwarded": forwarded,
-                "scanned": total_scanned,
-                "matched": total_matched,
-                **({"json_path": json_file} if json_file else {}),
-            }
-            if want_any_download:
-                done_payload["media_download"] = media_report
-            await self._ws_send({"type": "export_messages_done", "data": done_payload})
-        except Exception as e:
-            self.log.debug(f"[export] emit export_messages_done failed: {e}")
 
     async def _ws_send(self, payload: DictLike) -> None:
         await self.ws.send(payload)
@@ -726,6 +739,21 @@ class DmHistoryExporter:
         self.do_precache_count = bool(do_precache_count)
         self.out_root = out_root
         self.save_json = bool(save_json)
+        self._dm_lock = asyncio.Lock()
+        self._dm_active_users: set[int] = set()
+        self._dm_tasks: dict[int, asyncio.Task] = {}
+        
+    async def _dm_try_begin(self, user_id: int) -> bool:
+        async with self._dm_lock:
+            if user_id in self._dm_active_users:
+                return False
+            self._dm_active_users.add(user_id)
+            return True
+
+    async def _dm_end(self, user_id: int) -> None:
+        async with self._dm_lock:
+            self._dm_active_users.discard(user_id)
+            self._dm_tasks.pop(user_id, None)
 
     async def run(self, user_id: int, webhook_url: Optional[str]) -> None:
         """
