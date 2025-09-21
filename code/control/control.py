@@ -1,4 +1,12 @@
-#!/usr/bin/env python3
+# =============================================================================
+#  Copycord
+#  Copyright (C) 2025 github.com/Copycord
+#
+#  This source code is released under the GNU Affero General Public License
+#  version 3.0. A copy of the license is available at:
+#  https://www.gnu.org/licenses/agpl-3.0.en.html
+# =============================================================================
+
 from __future__ import annotations
 
 import asyncio
@@ -27,7 +35,7 @@ PYTHONPATH = "/app"
 MODULE = "server.server" if ROLE == "server" else "client.client"
 
 PIDFILE = DATA / f"{ROLE}.pid"
-LOG_OUT = DATA / f"{ROLE}.out"  # tee'd stdout/stderr of the child
+LOG_OUT = DATA / f"{ROLE}.out"
 
 
 class ControlService:
