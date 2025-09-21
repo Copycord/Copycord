@@ -1272,7 +1272,7 @@ class CloneCommands(commands.Cog):
 
     @commands.slash_command(
         name="export_dms",
-        description="Export DM history for a given user and stream to a webhook (server forwards).",
+        description="Export a user's DM history to a JSON file, with optional webhook forwarding.",
         guild_ids=[GUILD_ID],
     )
     async def export_dm_history_cmd(
@@ -1280,13 +1280,16 @@ class CloneCommands(commands.Cog):
         ctx: discord.ApplicationContext,
         user_id: str = Option(str, "Target user ID to export DMs from", required=True),
         webhook_url: str = Option(
-            str, "Webhook URL to receive the stream", required=True
+            str,
+            "Optional: Webhook URL to forward messages",
+            required=False,
+            default="",   # <-- optional now
         ),
         json_file: bool = Option(
             bool,
-            "Also save a JSON snapshot (default: true)",
+            "Save a JSON snapshot (default: true)",
             required=False,
-            default=False,
+            default=True,  # <-- default ON now
         ),
     ):
         await ctx.defer(ephemeral=True)
@@ -1305,21 +1308,20 @@ class CloneCommands(commands.Cog):
             "type": "export_dm_history",
             "data": {
                 "user_id": target_id,
-                "webhook_url": webhook_url,
+                "webhook_url": (webhook_url or "").strip() or None,  # normalize
                 "json_file": json_file,
             },
         }
 
         try:
             resp = await self.bot.ws_manager.request(payload)
-
             if not resp or not resp.get("ok"):
                 err = (resp or {}).get("error") or "Client did not accept the request."
                 if err == "dm-export-in-progress":
                     return await ctx.followup.send(
                         embed=self._err_embed(
                             "Export Already Running",
-                            "A DM export is currently in progress. Please wait until it finishes before starting another.",
+                            "A DM export for this user is currently in progress. Please wait until it finishes.",
                         ),
                         ephemeral=True,
                     )
@@ -1327,26 +1329,22 @@ class CloneCommands(commands.Cog):
                     embed=self._err_embed("Export Rejected", err),
                     ephemeral=True,
                 )
-
         except Exception as e:
             return await ctx.followup.send(
                 embed=self._err_embed("Export Failed", f"WebSocket request error: {e}"),
                 ephemeral=True,
             )
 
+        # friendly confirmation text
+        fw = "enabled" if webhook_url.strip() else "disabled"
+        jf = "enabled" if json_file else "disabled"
         return await ctx.followup.send(
             embed=self._ok_embed(
-                "Export Started",
-                f"Streaming DMs for user `{target_id}` → webhook. "
-                + (
-                    "A JSON snapshot will also be saved."
-                    if json_file
-                    else "JSON snapshot is disabled."
-                ),
+                "DM Export Started",
+                f"User `{target_id}`\n• JSON snapshot: **{jf}**\n• Webhook forwarding: **{fw}**",
             ),
             ephemeral=True,
         )
-
 
 def setup(bot: commands.Bot):
     bot.add_cog(CloneCommands(bot))

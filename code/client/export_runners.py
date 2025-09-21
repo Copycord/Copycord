@@ -718,7 +718,47 @@ class ExportMessagesRunner:
 class DmHistoryExporter:
     """
     Export a user's DM history.
+    Enforces: only 1 export per user_id at a time (class-level registry).
     """
+
+    # ---------- class-level registry ----------
+    _lock: asyncio.Lock = asyncio.Lock()
+    _active_users: set[int] = set()
+    _tasks: dict[int, asyncio.Task] = {}
+    # -----------------------------------------
+
+    @classmethod
+    async def try_begin(cls, user_id: int) -> bool:
+        async with cls._lock:
+            if user_id in cls._active_users:
+                return False
+            cls._active_users.add(user_id)
+            return True
+
+    @classmethod
+    async def end(cls, user_id: int) -> None:
+        async with cls._lock:
+            cls._active_users.discard(user_id)
+            cls._tasks.pop(user_id, None)
+
+    @classmethod
+    async def register_task(cls, user_id: int, task: asyncio.Task) -> None:
+        async with cls._lock:
+            cls._tasks[user_id] = task
+
+    @classmethod
+    async def cancel(cls, user_id: int) -> bool:
+        async with cls._lock:
+            t = cls._tasks.get(user_id)
+        if t and not t.done():
+            t.cancel()
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
+            await cls.end(user_id)
+            return True
+        return False
 
     def __init__(
         self,
@@ -739,30 +779,10 @@ class DmHistoryExporter:
         self.do_precache_count = bool(do_precache_count)
         self.out_root = out_root
         self.save_json = bool(save_json)
-        self._dm_lock = asyncio.Lock()
-        self._dm_active_users: set[int] = set()
-        self._dm_tasks: dict[int, asyncio.Task] = {}
-        
-    async def _dm_try_begin(self, user_id: int) -> bool:
-        async with self._dm_lock:
-            if user_id in self._dm_active_users:
-                return False
-            self._dm_active_users.add(user_id)
-            return True
-
-    async def _dm_end(self, user_id: int) -> None:
-        async with self._dm_lock:
-            self._dm_active_users.discard(user_id)
-            self._dm_tasks.pop(user_id, None)
 
     async def run(self, user_id: int, webhook_url: Optional[str]) -> None:
-        """
-        Export DM history for `user_id`:
-          - JSON snapshot is created/saved BEFORE any per-message sends (if enabled).
-        """
         json_path: Optional[str] = None
         buffered: List[DictLike] = []
-
         try:
             dm, user = await self._find_dm_channel(user_id)
             if dm is None or user is None:
@@ -806,7 +826,6 @@ class DmHistoryExporter:
                     subdir = os.path.join(self.out_root, "dm", str(user_id), ts)
                     os.makedirs(subdir, exist_ok=True)
                     json_path = os.path.join(subdir, "messages.json")
-
                     with open(json_path, "w", encoding="utf-8") as f:
                         json.dump(
                             {
@@ -826,27 +845,29 @@ class DmHistoryExporter:
                     json_path = None
 
             sent = 0
-            for serialized in buffered:
-                payload: DictLike = {
-                    "type": "export_dm_message",
-                    "data": {
-                        "user_id": user_id,
-                        "username": uname,
-                        "webhook_url": webhook_url,
-                        "message": serialized,
-                    },
-                }
-                try:
-                    await self._ws_send(payload)
-                    sent += 1
-                except Exception as send_err:
-                    self.log.warning(
-                        f"[📥] DM Export: websocket send failed (likely closed) after {sent} messages: {send_err}"
-                    )
-                    break
-
-                if self.send_sleep:
-                    await asyncio.sleep(self.send_sleep)
+            if webhook_url:
+                for serialized in buffered:
+                    payload: DictLike = {
+                        "type": "export_dm_message",
+                        "data": {
+                            "user_id": user_id,
+                            "username": uname,
+                            "webhook_url": webhook_url,
+                            "message": serialized,
+                        },
+                    }
+                    try:
+                        await self._ws_send(payload)
+                        sent += 1
+                    except Exception as send_err:
+                        self.log.warning(
+                            f"[📥] DM Export: websocket send failed (likely closed) after {sent} messages: {send_err}"
+                        )
+                        break
+                    if self.send_sleep:
+                        await asyncio.sleep(self.send_sleep)
+            else:
+                self.log.info("[📥] No webhook provided — skipping forwarding step.")
 
             if self.do_precache_count:
                 self.log.info(
@@ -890,10 +911,6 @@ class DmHistoryExporter:
     async def _find_dm_channel(
         self, user_id: int
     ) -> Tuple[Optional[Any], Optional[Any]]:
-        """
-        Try common places Discord.py may expose the DM channel.
-        Returns (dm_channel, user) or (None, None).
-        """
         user = self.bot.get_user(user_id)
         dm = None
 

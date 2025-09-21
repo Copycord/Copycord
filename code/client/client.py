@@ -498,7 +498,7 @@ class ClientListener:
 
         elif typ == "export_dm_history":
             uid = int(data["user_id"])
-            webhook_url = data.get("webhook_url")
+            webhook_url = (data.get("webhook_url") or "").strip() or None
 
             def _as_bool(v, default=True):
                 if v is None: return default
@@ -507,8 +507,7 @@ class ClientListener:
 
             save_json = _as_bool(data.get("json_file"), default=True)
 
-            # acquire per-user slot here
-            acquired = await self._dm_try_begin(uid)
+            acquired = await DmHistoryExporter.try_begin(uid)
             if not acquired:
                 return {"ok": False, "error": "dm-export-in-progress", "user_id": uid}
 
@@ -526,11 +525,10 @@ class ClientListener:
                     )
                     await exporter.run(user_id=uid, webhook_url=webhook_url)
                 finally:
-                    await self._dm_end(uid)
+                    await DmHistoryExporter.end(uid)
 
             task = asyncio.create_task(_export())
-            async with self._dm_lock:
-                self._dm_tasks[uid] = task
+            await DmHistoryExporter.register_task(uid, task)
 
             return {"ok": True, "user_id": uid}
 
