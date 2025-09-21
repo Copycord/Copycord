@@ -666,7 +666,7 @@ class CloneCommands(commands.Cog):
                 "Register: `guild_id + keyword + user_id [+ channel_id]`\n\n"
                 "**Examples**\n"
                 "```\n"
-                "/announcement_trigger_add guild_id:0 keyword:long user_id:0\n"
+                "/announcement_trigger_add guild_id:0 keyword:long user_id:123456787654321\n"
                 "/announcement_trigger_add guild_id:123456789012345678 keyword:short user_id:123456789 channel_id:987654321098765432\n"
                 "```\n"
             ),
