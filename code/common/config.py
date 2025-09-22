@@ -11,6 +11,7 @@ import asyncio
 import os
 import logging
 from typing import Optional
+
 from common.db import DBManager
 
 logger = logging.getLogger(__name__)
@@ -18,88 +19,97 @@ CURRENT_VERSION = "v2.3.0"
 
 
 class Config:
-    def __init__(
-        self,
-        logger: Optional[logging.Logger] = None,
-    ):
-        self.RELEASE_CHECK_INTERVAL_SECONDS  = 1810
-        self.DEFAULT_WEBHOOK_AVATAR_URL = "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/logo/logo.png"
-        self.SERVER_TOKEN = os.getenv("SERVER_TOKEN")
-        self.CLONE_GUILD_ID = os.getenv("CLONE_GUILD_ID", "0")
+    def __init__(self, logger: Optional[logging.Logger] = None):
         self.DB_PATH = os.getenv("DB_PATH", "/data/data.db")
-        self.SERVER_WS_HOST = os.getenv("SERVER_WS_HOST", "server")
-        self.SERVER_WS_PORT = int(os.getenv("SERVER_WS_PORT", "8765"))
-        self.SERVER_WS_URL = os.getenv(
-            "WS_SERVER_URL", f"ws://{self.SERVER_WS_HOST}:{self.SERVER_WS_PORT}"
-        )
-        self.ADMIN_WS_URL = (
-            os.getenv("ADMIN_WS_URL")
-            or f"ws://{os.getenv('ADMIN_HOST', 'admin')}:{os.getenv('ADMIN_PORT', '8080')}/bus"
+        self.db = DBManager(self.DB_PATH)
+
+        # --- prefer DB value if set, else environment ---
+        def _get_from_db(key: str):
+            try:
+                return self.db.get_config(key)
+            except Exception:
+                return None
+
+        def _str(key: str, env_default: Optional[str] = None) -> Optional[str]:
+            v = _get_from_db(key)
+            if v is None or (isinstance(v, str) and v.strip() == ""):
+                v = os.getenv(key, env_default)
+            return v
+
+        def _int(key: str, env_default: str = "0") -> int:
+            raw = _str(key, env_default)
+            try:
+                return int(str(raw).strip())
+            except Exception:
+                try:
+                    return int(env_default)
+                except Exception:
+                    return 0
+
+        def _bool(key: str, env_default: str = "false") -> bool:
+            raw = (_str(key, env_default) or "").strip().lower()
+            return raw in ("1", "true", "yes", "y", "on")
+
+        # --- Constants / misc ---
+        self.RELEASE_CHECK_INTERVAL_SECONDS = 1810
+        self.DEFAULT_WEBHOOK_AVATAR_URL = (
+            "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/logo/logo.png"
         )
 
-        self.ENABLE_CLONING = os.getenv("ENABLE_CLONING", "true").lower() in (
-            "1",
-            "true",
-            "yes",
+        # --- Tokens / IDs / URLs  ---
+        self.SERVER_TOKEN = _str("SERVER_TOKEN")
+        self.CLIENT_TOKEN = _str("CLIENT_TOKEN")
+
+        self.CLONE_GUILD_ID = _str("CLONE_GUILD_ID", "0") or "0"
+        self.HOST_GUILD_ID = _str("HOST_GUILD_ID", "0") or "0"
+
+        # Websocket endpoints
+        self.SERVER_WS_HOST = _str("SERVER_WS_HOST", "server") or "server"
+        self.SERVER_WS_PORT = _int("SERVER_WS_PORT", "8765")
+        # Back-compat: accept WS_SERVER_URL; else synthesize
+        self.SERVER_WS_URL = _str("WS_SERVER_URL", f"ws://{self.SERVER_WS_HOST}:{self.SERVER_WS_PORT}")
+
+        self.ADMIN_WS_URL = _str(
+            "ADMIN_WS_URL",
+            f"ws://{os.getenv('ADMIN_HOST', 'admin')}:{os.getenv('ADMIN_PORT', '8080')}/bus",
         )
 
-        self.DELETE_CHANNELS = os.getenv("DELETE_CHANNELS", "false").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-        self.DELETE_THREADS = os.getenv("DELETE_THREADS", "false").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-        self.CLONE_EMOJI = os.getenv("CLONE_EMOJI", "true").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
+        self.CLIENT_WS_HOST = _str("CLIENT_WS_HOST", "client") or "client"
+        self.CLIENT_WS_PORT = _int("CLIENT_WS_PORT", "8766")
+        self.CLIENT_WS_URL = _str("WS_CLIENT_URL", f"ws://{self.CLIENT_WS_HOST}:{self.CLIENT_WS_PORT}")
 
-        self.CLONE_STICKER = os.getenv("CLONE_STICKER", "true").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
+        self.SYNC_INTERVAL_SECONDS = _int("SYNC_INTERVAL_SECONDS", "3600")
 
-        self.CLONE_ROLES = os.getenv("CLONE_ROLES", "true").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
+        # --- Feature flags  ---
+        self.ENABLE_CLONING = _bool("ENABLE_CLONING", "true")
+        self.DELETE_CHANNELS = _bool("DELETE_CHANNELS", "false")
+        self.EDIT_MESSAGES = _bool("EDIT_MESSAGES", "true")
+        self.DELETE_MESSAGES = _bool("DELETE_MESSAGES", "true")
+        self.DELETE_THREADS = _bool("DELETE_THREADS", "false")
+        self.CLONE_EMOJI = _bool("CLONE_EMOJI", "true")
+        self.CLONE_STICKER = _bool("CLONE_STICKER", "true")
+        self.CLONE_ROLES = _bool("CLONE_ROLES", "true")
+        self.MIRROR_ROLE_PERMISSIONS = _bool("MIRROR_ROLE_PERMISSIONS", "true")
+        self.DELETE_ROLES = _bool("DELETE_ROLES", "true")
 
-        self.MIRROR_ROLE_PERMISSIONS = os.getenv(
-            "MIRROR_ROLE_PERMISSIONS", "true"
-        ).lower() in ("1", "true", "yes", "y", "on")
+        # --- Users allowed to run admin commands ---
+        cmd_users_raw = _str("COMMAND_USERS", os.getenv("COMMAND_USERS", "")) or ""
+        self.COMMAND_USERS = []
+        for tok in str(cmd_users_raw).split(","):
+            tok = tok.strip()
+            if tok:
+                try:
+                    self.COMMAND_USERS.append(int(tok))
+                except ValueError:
+                    pass
 
-        self.DELETE_ROLES = os.getenv("DELETE_ROLES", "true").lower() in (
-            "1",
-            "true",
-            "yes",
-        )
-
-        self.logger = (logger or logging.getLogger(__name__)).getChild(
-            self.__class__.__name__
-        )
+        # --- Logging / misc ---
+        self.logger = (logger or logging.getLogger(__name__)).getChild(self.__class__.__name__)
         self.excluded_category_ids: set[int] = set()
         self.excluded_channel_ids: set[int] = set()
 
-        self.db = DBManager(self.DB_PATH)
+        # --- Load include/exclude filters from DB ---
         self._load_filters_from_db()
-        raw = os.getenv("COMMAND_USERS", "")
-        self.COMMAND_USERS = [int(u) for u in raw.split(",") if u.strip()]
-
-        self.CLIENT_TOKEN = os.getenv("CLIENT_TOKEN")
-        self.HOST_GUILD_ID = os.getenv("HOST_GUILD_ID", "0")
-        self.CLIENT_WS_HOST = os.getenv("CLIENT_WS_HOST", "client")
-        self.CLIENT_WS_PORT = int(os.getenv("CLIENT_WS_PORT", "8766"))
-        self.CLIENT_WS_URL = os.getenv(
-            "WS_CLIENT_URL", f"ws://{self.CLIENT_WS_HOST}:{self.CLIENT_WS_PORT}"
-        )
-        self.SYNC_INTERVAL_SECONDS = int(os.getenv("SYNC_INTERVAL_SECONDS", "3600"))
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):
         await receiver.bot.wait_until_ready()
@@ -211,7 +221,6 @@ class Config:
         try:
             f = self.db.get_filters()
         except Exception:
-
             f = {
                 "whitelist": {"category": set(), "channel": set()},
                 "exclude": {"category": set(), "channel": set()},
@@ -221,7 +230,4 @@ class Config:
         self.include_channel_ids = {int(x) for x in f["whitelist"]["channel"]}
         self.excluded_category_ids = {int(x) for x in f["exclude"]["category"]}
         self.excluded_channel_ids = {int(x) for x in f["exclude"]["channel"]}
-        self.whitelist_enabled = bool(
-            self.include_category_ids or self.include_channel_ids
-        )
-
+        self.whitelist_enabled = bool(self.include_category_ids or self.include_channel_ids)
