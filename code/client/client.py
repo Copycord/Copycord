@@ -136,7 +136,9 @@ class ClientListener:
             listener=self,
             logger=logging.getLogger("client.ui"),
         )
-        self.runner = ExportMessagesRunner(bot=self.bot, ws=self.ws, msg_serializer=self.msg.serialize, logger=logger)
+        self.runner = ExportMessagesRunner(
+            bot=self.bot, ws=self.ws, msg_serializer=self.msg.serialize, logger=logger
+        )
 
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -177,8 +179,14 @@ class ClientListener:
             }
         elif typ == "filters_reload":
             if not self.host_guild_id or not self.config.ENABLE_CLONING:
-                logger.debug("[⚙️] Ignoring filters_reload: no host guild or cloning disabled")
-                return {"ok": False, "skipped": True, "reason": "no-host-or-cloning-disabled"}
+                logger.debug(
+                    "[⚙️] Ignoring filters_reload: no host guild or cloning disabled"
+                )
+                return {
+                    "ok": False,
+                    "skipped": True,
+                    "reason": "no-host-or-cloning-disabled",
+                }
 
             self.config._load_filters_from_db()
             logger.info("[⚙️] Filters reloaded from DB")
@@ -234,8 +242,14 @@ class ClientListener:
                 return {"ok": False, "error": "No host guild configured"}
 
             if not self.bot.get_guild(int(self.host_guild_id)):
-                logger.warning("[🌐] sitemap_request ignored: not a member of host guild %s", self.host_guild_id)
-                return {"ok": False, "error": f"Not a member of host guild {self.host_guild_id}"}
+                logger.warning(
+                    "[🌐] sitemap_request ignored: not a member of host guild %s",
+                    self.host_guild_id,
+                )
+                return {
+                    "ok": False,
+                    "error": f"Not a member of host guild {self.host_guild_id}",
+                }
 
             self.schedule_sync()
             logger.info("[🌐] Received sitemap request")
@@ -505,8 +519,10 @@ class ClientListener:
             webhook_url = (data.get("webhook_url") or "").strip() or None
 
             def _as_bool(v, default=True):
-                if v is None: return default
-                if isinstance(v, bool): return v
+                if v is None:
+                    return default
+                if isinstance(v, bool):
+                    return v
                 return str(v).strip().lower() in ("1", "true", "yes", "on")
 
             save_json = _as_bool(data.get("json_file"), default=True)
@@ -557,8 +573,8 @@ class ClientListener:
 
             acquired = await self.runner.try_begin(g_id)
             if not acquired:
-                return {"ok": False, "error": "Export already running for this guild"} 
-            
+                return {"ok": False, "error": "Export already running for this guild"}
+
             asyncio.create_task(self.runner.run(d, guild, acquired=True))
             return {"ok": True, "accepted": True}
 
@@ -645,14 +661,14 @@ class ClientListener:
 
     def schedule_sync(self):
         self.sitemap.schedule_sync()
-        
+
     def _is_host_guild(self, g: "discord.Guild | None") -> bool:
         if not self.config.ENABLE_CLONING:
             return False
         if self.host_guild_id is None:
             return False
         return bool(g and g.id == self.host_guild_id)
-    
+
     async def _disable_cloning(self, reason: str = ""):
         logger.info("[🔕] Disabling server cloning: %s", reason or "(no reason)")
         self.config.ENABLE_CLONING = False
@@ -664,10 +680,14 @@ class ClientListener:
             self._sync_task = None
 
     async def on_ready(self):
-        host_guild = self.bot.get_guild(self.host_guild_id) if self.host_guild_id else None
+        host_guild = (
+            self.bot.get_guild(self.host_guild_id) if self.host_guild_id else None
+        )
 
         if host_guild is None and self.config.ENABLE_CLONING:
-            await self._disable_cloning("No host guild configured or not a member of host guild.")
+            await self._disable_cloning(
+                "No host guild configured or not a member of host guild."
+            )
             host_name = "(no host guild)"
         else:
             host_name = host_guild.name if host_guild else "(no host guild)"
@@ -776,7 +796,11 @@ class ClientListener:
                 matched = True
 
             # 2) custom/standard emoji like <:key:123> or <a:key:123>
-            if not matched and re.match(r"^[A-Za-z0-9_]+$", key) and re.search(rf"<a?:{re.escape(key)}:\d+>", content):
+            if (
+                not matched
+                and re.match(r"^[A-Za-z0-9_]+$", key)
+                and re.search(rf"<a?:{re.escape(key)}:\d+>", content)
+            ):
                 matched = True
 
             # 3) simple substring fallback
@@ -789,7 +813,9 @@ class ClientListener:
             # Filter by author/channel. Note: channel_id filters with guild_id=0 still work
             # because Discord channel IDs are globally unique.
             for filter_id, allowed_chan in entries:
-                if (filter_id == 0 or author.id == filter_id) and (allowed_chan == 0 or chan_id == allowed_chan):
+                if (filter_id == 0 or author.id == filter_id) and (
+                    allowed_chan == 0 or chan_id == allowed_chan
+                ):
                     payload = {
                         "type": "announce",
                         "data": {
@@ -798,12 +824,16 @@ class ClientListener:
                             "content": content,
                             "author": author.name,
                             "channel_id": chan_id,
-                            "channel_name": getattr(message.channel, "name", str(chan_id)),
+                            "channel_name": getattr(
+                                message.channel, "name", str(chan_id)
+                            ),
                             "timestamp": str(message.created_at),
                         },
                     }
                     await self.ws.send(payload)
-                    logger.info(f"[📢] Announcement `{kw}` by {author} in g={guild_id}.")
+                    logger.info(
+                        f"[📢] Announcement `{kw}` by {author} in g={guild_id}."
+                    )
                     return True
 
         return False
@@ -820,7 +850,7 @@ class ClientListener:
 
         if not self._is_host_guild(message.guild):
             return
-        
+
         if self.should_ignore(message):
             return
 
@@ -845,8 +875,7 @@ class ClientListener:
         raw_embeds = [e.to_dict() for e in message.embeds]
         mention_map = await self.msg.build_mention_map(message, raw_embeds)
         embeds = [
-            self.msg.sanitize_embed_dict(e, message, mention_map)
-            for e in raw_embeds
+            self.msg.sanitize_embed_dict(e, message, mention_map) for e in raw_embeds
         ]
         content = self.msg.sanitize_inline(content, message, mention_map)
 
@@ -877,9 +906,7 @@ class ClientListener:
             ChannelType.private_thread,
         )
 
-        stickers_payload = self.msg.stickers_payload(
-            getattr(message, "stickers", [])
-        )
+        stickers_payload = self.msg.stickers_payload(getattr(message, "stickers", []))
 
         payload = {
             "type": "thread_message" if is_thread else "message",
@@ -950,7 +977,9 @@ class ClientListener:
 
         raw_embeds = [e.to_dict() for e in after.embeds]
         mention_map = await self.msg.build_mention_map(after, raw_embeds)
-        embeds = [self.msg.sanitize_embed_dict(e, after, mention_map) for e in raw_embeds]
+        embeds = [
+            self.msg.sanitize_embed_dict(e, after, mention_map) for e in raw_embeds
+        ]
         content = self.msg.sanitize_inline(content, after, mention_map)
 
         components: list[dict] = []
@@ -998,7 +1027,7 @@ class ClientListener:
                 ),
                 "content": content,
                 "timestamp": str(after.edited_at or after.created_at),
-                "attachments": attachments,          # kept for completeness
+                "attachments": attachments,  # kept for completeness
                 "components": components,
                 "stickers": stickers_payload,
                 "embeds": embeds,
@@ -1015,11 +1044,16 @@ class ClientListener:
             },
         }
         await self.ws.send(payload)
-        logger.info("[✏️] Message edit detected in #%s by %s → sent to server",
-                    payload["data"]["channel_name"], author)
-      
+        logger.info(
+            "[✏️] Message edit detected in #%s by %s → sent to server",
+            payload["data"]["channel_name"],
+            author,
+        )
 
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):
+        if payload.cached_message is not None:
+            return
+
         if not self.config.ENABLE_CLONING or not self.config.EDIT_MESSAGES:
             return
 
@@ -1039,18 +1073,22 @@ class ClientListener:
         if msg:
             raw_embeds = [e.to_dict() for e in msg.embeds]
             mention_map = await self.msg.build_mention_map(msg, raw_embeds)
-            embeds = [self.msg.sanitize_embed_dict(e, msg, mention_map) for e in raw_embeds]
+            embeds = [
+                self.msg.sanitize_embed_dict(e, msg, mention_map) for e in raw_embeds
+            ]
             content = self.msg.sanitize_inline(msg.content or "", msg, mention_map)
             author = getattr(msg.author, "name", None)
             timestamp = str(msg.edited_at or msg.created_at)
         else:
             content = data.get("content")
-            embeds = data.get("embeds")    
-            author = None   
+            embeds = data.get("embeds")
+            author = None
             timestamp = data.get("edited_timestamp") or data.get("timestamp")
 
-        is_thread = getattr(channel, "type", None) in (discord.ChannelType.public_thread,
-                                                    discord.ChannelType.private_thread)
+        is_thread = getattr(channel, "type", None) in (
+            discord.ChannelType.public_thread,
+            discord.ChannelType.private_thread,
+        )
 
         out = {
             "type": "thread_message_edit" if is_thread else "message_edit",
@@ -1059,10 +1097,20 @@ class ClientListener:
                 "message_id": payload.message_id,
                 "channel_id": payload.channel_id,
                 "channel_name": getattr(channel, "name", str(payload.channel_id)),
-                "channel_type": getattr(channel, "type", None).value if getattr(channel, "type", None) else None,
+                "channel_type": (
+                    getattr(channel, "type", None).value
+                    if getattr(channel, "type", None)
+                    else None
+                ),
                 "author": author,  # may be None for raw
-                "author_id": getattr(getattr(msg, "author", None), "id", None) if msg else None,
-                "avatar_url": (str(msg.author.display_avatar.url) if msg and msg.author.display_avatar else None),
+                "author_id": (
+                    getattr(getattr(msg, "author", None), "id", None) if msg else None
+                ),
+                "avatar_url": (
+                    str(msg.author.display_avatar.url)
+                    if msg and msg.author.display_avatar
+                    else None
+                ),
                 "content": content,
                 "timestamp": timestamp,
                 "embeds": embeds,
@@ -1072,15 +1120,19 @@ class ClientListener:
                         "thread_parent_name": channel.parent.name,
                         "thread_id": channel.id,
                         "thread_name": channel.name,
-                    } if is_thread else {}
+                    }
+                    if is_thread
+                    else {}
                 ),
             },
         }
 
         await self.ws.send(out)
-        logger.info("[✏️] Message edit detected in #%s → sent to server", out["data"]["channel_name"])
-     
-        
+        logger.info(
+            "[✏️] Message edit detected in #%s → sent to server",
+            out["data"]["channel_name"],
+        )
+
     async def on_message_delete(self, message: discord.Message):
         """
         When an upstream message is deleted, tell the server to delete the cloned webhook message.
@@ -1089,19 +1141,26 @@ class ClientListener:
             return
         if not self.config.DELETE_MESSAGES:
             return
-        if not getattr(message, "guild", None) or not self._is_host_guild(message.guild):
+        if not getattr(message, "guild", None) or not self._is_host_guild(
+            message.guild
+        ):
             return
         if self.should_ignore(message):
             return
 
-        is_thread = message.channel.type in (ChannelType.public_thread, ChannelType.private_thread)
+        is_thread = message.channel.type in (
+            ChannelType.public_thread,
+            ChannelType.private_thread,
+        )
         payload = {
             "type": "thread_message_delete" if is_thread else "message_delete",
             "data": {
                 "guild_id": getattr(message.guild, "id", None),
                 "message_id": getattr(message, "id", None),
                 "channel_id": message.channel.id,
-                "channel_name": getattr(message.channel, "name", str(message.channel.id)),
+                "channel_name": getattr(
+                    message.channel, "name", str(message.channel.id)
+                ),
                 "channel_type": message.channel.type.value,
                 **(
                     {
@@ -1110,13 +1169,16 @@ class ClientListener:
                         "thread_id": message.channel.id,
                         "thread_name": message.channel.name,
                     }
-                    if is_thread else {}
+                    if is_thread
+                    else {}
                 ),
             },
         }
         await self.ws.send(payload)
-        logger.info("[🗑️] Message delete detected in #%s → sent to server", payload["data"]["channel_name"])
-
+        logger.info(
+            "[🗑️] Message delete detected in #%s → sent to server",
+            payload["data"]["channel_name"],
+        )
 
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
         """
@@ -1124,7 +1186,7 @@ class ClientListener:
         """
         if payload.cached_message is not None:
             return
-    
+
         if not self.config.ENABLE_CLONING or not self.config.DELETE_MESSAGES:
             return
 
@@ -1134,7 +1196,10 @@ class ClientListener:
             return
 
         # Uncached message: send minimal info
-        is_thread = getattr(channel, "type", None) in (ChannelType.public_thread, ChannelType.private_thread)
+        is_thread = getattr(channel, "type", None) in (
+            ChannelType.public_thread,
+            ChannelType.private_thread,
+        )
         payload_out = {
             "type": "thread_message_delete" if is_thread else "message_delete",
             "data": {
@@ -1142,7 +1207,11 @@ class ClientListener:
                 "message_id": int(payload.message_id),
                 "channel_id": int(payload.channel_id),
                 "channel_name": getattr(channel, "name", str(payload.channel_id)),
-                "channel_type": getattr(channel, "type", None).value if getattr(channel, "type", None) else None,
+                "channel_type": (
+                    getattr(channel, "type", None).value
+                    if getattr(channel, "type", None)
+                    else None
+                ),
                 **(
                     {
                         "thread_parent_id": channel.parent.id,
@@ -1150,14 +1219,16 @@ class ClientListener:
                         "thread_id": channel.id,
                         "thread_name": channel.name,
                     }
-                    if is_thread else {}
+                    if is_thread
+                    else {}
                 ),
             },
         }
         await self.ws.send(payload_out)
-        logger.info("[🗑️] Message delete detected in #%s → sent to server", payload_out["data"]["channel_name"])
-
-
+        logger.info(
+            "[🗑️] Message delete detected in #%s → sent to server",
+            payload_out["data"]["channel_name"],
+        )
 
     async def on_thread_delete(self, thread: discord.Thread):
         """
@@ -1467,7 +1538,9 @@ class ClientListener:
         if not guild:
             ch_probe = None
             try:
-                ch_probe = self.bot.get_channel(original_channel_id) or await self.bot.fetch_channel(original_channel_id)
+                ch_probe = self.bot.get_channel(
+                    original_channel_id
+                ) or await self.bot.fetch_channel(original_channel_id)
             except Exception:
                 ch_probe = None
             if ch_probe and getattr(ch_probe, "guild", None):
@@ -1477,7 +1550,10 @@ class ClientListener:
             guild = self.bot.guilds[0]
 
         if not guild:
-            logger.error("[backfill] ⛔ no accessible guild found for channel=%s", original_channel_id)
+            logger.error(
+                "[backfill] ⛔ no accessible guild found for channel=%s",
+                original_channel_id,
+            )
             try:
                 await self.ws.send(
                     {
@@ -1499,7 +1575,6 @@ class ClientListener:
             getattr(guild, "id", None),
             getattr(guild, "name", None),
         )
-
 
         ch = guild.get_channel(original_channel_id)
         if not ch:
@@ -1540,7 +1615,10 @@ class ClientListener:
                 getattr(getattr(ch, "type", None), "value", None),
             )
 
-        if self.host_guild_id and getattr(getattr(ch, "guild", None), "id", None) != self.host_guild_id:
+        if (
+            self.host_guild_id
+            and getattr(getattr(ch, "guild", None), "id", None) != self.host_guild_id
+        ):
             logger.warning(
                 "[backfill] channel is not in host guild | got_guild=%s expected=%s (was a clone id passed?)",
                 getattr(getattr(ch, "guild", None), "id", None),
@@ -1816,7 +1894,7 @@ class ClientListener:
                 self.db.delete_guild(gid)
         except Exception:
             logger.exception("[guilds] snapshot failed (outer)")
-            
+
     async def _run_export_messages_task(self, d, guild):
         import asyncio, os, json, time, re, uuid
         from datetime import datetime, timezone
@@ -1827,7 +1905,11 @@ class ClientListener:
         except Exception:
             aiohttp = None  # we'll guard usage later
 
-        logger = getattr(self, "log", None) or getattr(self, "logger", None) or __import__("logging").getLogger("export")
+        logger = (
+            getattr(self, "log", None)
+            or getattr(self, "logger", None)
+            or __import__("logging").getLogger("export")
+        )
 
         def _safe(s: str, n: int = 64) -> str:
             try:
@@ -1837,7 +1919,9 @@ class ClientListener:
 
         def _parse_iso(s):
             try:
-                return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(timezone.utc)
+                return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(
+                    timezone.utc
+                )
             except Exception:
                 return None
 
@@ -1845,14 +1929,16 @@ class ClientListener:
         chan_id_raw = (d.get("channel_id") or "").strip() or None
         user_id_raw = (d.get("user_id") or "").strip() or None
         webhook_url = (d.get("webhook_url") or "").strip() or None
-        only_with_attachments = bool(d.get("has_attachments", False))  # legacy toggle (kept)
+        only_with_attachments = bool(
+            d.get("has_attachments", False)
+        )  # legacy toggle (kept)
         after_dt = _parse_iso(d.get("after_iso") or None)
         before_dt = _parse_iso(d.get("before_iso") or None)
         user_id = int(user_id_raw) if (user_id_raw and user_id_raw.isdigit()) else None
 
         # Throttles
-        scan_sleep = 0.0    # scanning
-        send_sleep = 2.0    # 2s between WS sends
+        scan_sleep = 0.0  # scanning
+        send_sleep = 2.0  # 2s between WS sends
 
         gid_log = getattr(guild, "id", None)
         gname = getattr(guild, "name", "") or "Unknown"
@@ -1862,36 +1948,46 @@ class ClientListener:
         # ---- UI filters (include-style with sensible defaults)
         filters = d.get("filters") or {}
         F = {
-            "embeds":        filters.get("embeds", True),
-            "attachments":   filters.get("attachments", True),
-            "att_types":     (filters.get("att_types") or {"images": True, "videos": True, "audio": True, "other": True}),
-            "links":         filters.get("links", True),
-            "emojis":        filters.get("emojis", True),
-
+            "embeds": filters.get("embeds", True),
+            "attachments": filters.get("attachments", True),
+            "att_types": (
+                filters.get("att_types")
+                or {"images": True, "videos": True, "audio": True, "other": True}
+            ),
+            "links": filters.get("links", True),
+            "emojis": filters.get("emojis", True),
             # Include text content if True; if False, exclude messages that have content
-            "has_content":   bool(filters.get("has_content", True)),
-
-            "word_on":       filters.get("word_on", False),
-            "word":          (filters.get("word") or "").strip(),
-            "replies":       filters.get("replies", True),
-            "bots":          filters.get("bots", True),
-            "system":        filters.get("system", True),
-            "min_length":    int(filters.get("min_length", 0) or 0),
+            "has_content": bool(filters.get("has_content", True)),
+            "word_on": filters.get("word_on", False),
+            "word": (filters.get("word") or "").strip(),
+            "replies": filters.get("replies", True),
+            "bots": filters.get("bots", True),
+            "system": filters.get("system", True),
+            "min_length": int(filters.get("min_length", 0) or 0),
             "min_reactions": int(filters.get("min_reactions", 0) or 0),
-            "pinned":        filters.get("pinned", True),
-            "stickers":      filters.get("stickers", True),
-            "mentions":      filters.get("mentions", True),
-
+            "pinned": filters.get("pinned", True),
+            "stickers": filters.get("stickers", True),
+            "mentions": filters.get("mentions", True),
             # NEW: media download selection (all default False)
-            "download_media": (filters.get("download_media") or {"images": False, "videos": False, "audio": False, "other": False}),
+            "download_media": (
+                filters.get("download_media")
+                or {"images": False, "videos": False, "audio": False, "other": False}
+            ),
         }
 
         # Normalize attachment flags
         if not F["attachments"]:
-            F["att_types"] = {"images": False, "videos": False, "audio": False, "other": False}
+            F["att_types"] = {
+                "images": False,
+                "videos": False,
+                "audio": False,
+                "other": False,
+            }
         else:
             kinds = F["att_types"]
-            if not any(bool(kinds.get(k)) for k in ("images", "videos", "audio", "other")):
+            if not any(
+                bool(kinds.get(k)) for k in ("images", "videos", "audio", "other")
+            ):
                 # Attachments ON but no subtypes selected → treat as OFF
                 F["attachments"] = False
 
@@ -1899,10 +1995,14 @@ class ClientListener:
             # Swap silently to avoid no-results range
             after_dt, before_dt = before_dt, after_dt
 
-        _link_re  = re.compile(r'https?://\S+', re.I)
+        _link_re = re.compile(r"https?://\S+", re.I)
         # Matches custom <:name:id> and a broad range of Unicode emoji
-        _emoji_re = re.compile(r'(<a?:\w+:\d+>)|([\U0001F300-\U0001FAFF])')
-        word_re   = re.compile(re.escape(F["word"]), re.I) if (F["word_on"] and F["word"]) else None
+        _emoji_re = re.compile(r"(<a?:\w+:\d+>)|([\U0001F300-\U0001FAFF])")
+        word_re = (
+            re.compile(re.escape(F["word"]), re.I)
+            if (F["word_on"] and F["word"])
+            else None
+        )
 
         def _att_kind(att):
             # att can be discord.Attachment or a dict from serialized message
@@ -1916,7 +2016,9 @@ class ClientListener:
             def has_any(kw):
                 return any(k in ct or name.endswith(k) for k in kw)
 
-            if has_any(("image/", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff")):
+            if has_any(
+                ("image/", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff")
+            ):
                 return "images"
             if has_any(("video/", ".mp4", ".mov", ".webm", ".mkv", ".avi")):
                 return "videos"
@@ -1927,7 +2029,7 @@ class ClientListener:
         def _has_any_attachment_type(msg):
             atts = getattr(msg, "attachments", None)
             if atts is None and isinstance(msg, dict):
-                atts = (msg.get("attachments") or [])
+                atts = msg.get("attachments") or []
             if not atts:
                 return False
             for a in atts:
@@ -1951,7 +2053,11 @@ class ClientListener:
                     return False
 
             # Length & text
-            content = (msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", "")) or ""
+            content = (
+                msg.get("content")
+                if isinstance(msg, dict)
+                else getattr(msg, "content", "")
+            ) or ""
             if not F["has_content"] and content.strip():
                 # If include-content is False, exclude messages that have content
                 return False
@@ -1959,31 +2065,63 @@ class ClientListener:
                 return False
 
             # Reactions
-            reacts = (msg.get("reactions") if isinstance(msg, dict) else getattr(msg, "reactions", [])) or []
+            reacts = (
+                msg.get("reactions")
+                if isinstance(msg, dict)
+                else getattr(msg, "reactions", [])
+            ) or []
             if F["min_reactions"] > 0:
+
                 def _rcount(r):
-                    return int((r.get("count") if isinstance(r, dict) else getattr(r, "count", 0)) or 0)
+                    return int(
+                        (
+                            r.get("count")
+                            if isinstance(r, dict)
+                            else getattr(r, "count", 0)
+                        )
+                        or 0
+                    )
+
                 total_reacts = sum(_rcount(r) for r in reacts)
                 if total_reacts < F["min_reactions"]:
                     return False
 
             # Pinned
-            pinned = bool((msg.get("pinned") if isinstance(msg, dict) else getattr(msg, "pinned", False)) or False)
+            pinned = bool(
+                (
+                    msg.get("pinned")
+                    if isinstance(msg, dict)
+                    else getattr(msg, "pinned", False)
+                )
+                or False
+            )
             if not F["pinned"] and pinned:
                 return False
 
             # Stickers
-            stickers = (msg.get("stickers") if isinstance(msg, dict) else getattr(msg, "stickers", [])) or []
+            stickers = (
+                msg.get("stickers")
+                if isinstance(msg, dict)
+                else getattr(msg, "stickers", [])
+            ) or []
             if not F["stickers"] and stickers:
                 return False
 
             # Mentions
             if not F["mentions"]:
                 if isinstance(msg, dict):
-                    if (msg.get("mentions") or []) or (msg.get("role_mentions") or []) or (msg.get("channel_mentions") or []):
+                    if (
+                        (msg.get("mentions") or [])
+                        or (msg.get("role_mentions") or [])
+                        or (msg.get("channel_mentions") or [])
+                    ):
                         return False
                 else:
-                    if (getattr(msg, "mentions", []) or []) or (getattr(msg, "role_mentions", []) or []) or (getattr(msg, "channel_mentions", []) or []):
+                    if (
+                        (getattr(msg, "mentions", []) or [])
+                        or (getattr(msg, "role_mentions", []) or [])
+                        or (getattr(msg, "channel_mentions", []) or [])
+                    ):
                         return False
 
             # Replies (has resolved reference)
@@ -1997,12 +2135,20 @@ class ClientListener:
                 return False
 
             # Embeds
-            embeds = (msg.get("embeds") if isinstance(msg, dict) else getattr(msg, "embeds", [])) or []
+            embeds = (
+                msg.get("embeds")
+                if isinstance(msg, dict)
+                else getattr(msg, "embeds", [])
+            ) or []
             if not F["embeds"] and embeds:
                 return False
 
             # Attachments (+ enforce selected kinds)
-            atts = (msg.get("attachments") if isinstance(msg, dict) else getattr(msg, "attachments", [])) or []
+            atts = (
+                msg.get("attachments")
+                if isinstance(msg, dict)
+                else getattr(msg, "attachments", [])
+            ) or []
             if not F["attachments"]:
                 if atts:
                     return False
@@ -2018,7 +2164,11 @@ class ClientListener:
                     if isinstance(e, dict):
                         vals = (e.get("url"), e.get("title"), e.get("description"))
                     else:
-                        vals = (getattr(e, "url", None), getattr(e, "title", None), getattr(e, "description", None))
+                        vals = (
+                            getattr(e, "url", None),
+                            getattr(e, "title", None),
+                            getattr(e, "description", None),
+                        )
                     if any(v and _link_re.search(str(v)) for v in vals):
                         return False
 
@@ -2045,7 +2195,9 @@ class ClientListener:
             try:
                 ch = await self.bot.fetch_channel(int(chan_id_raw))
             except Exception as e:
-                logger.debug(f"[export] fetch_channel({chan_id_raw}) failed: {e}; falling back to cache")
+                logger.debug(
+                    f"[export] fetch_channel({chan_id_raw}) failed: {e}; falling back to cache"
+                )
                 if chan_id_raw.isdigit():
                     ch = self.bot.get_channel(int(chan_id_raw))
             if ch:
@@ -2053,7 +2205,11 @@ class ClientListener:
 
         if not channels:
             if me:
-                channels = [c for c in getattr(guild, "text_channels", []) if c.permissions_for(me).read_message_history]
+                channels = [
+                    c
+                    for c in getattr(guild, "text_channels", [])
+                    if c.permissions_for(me).read_message_history
+                ]
             else:
                 channels = list(getattr(guild, "text_channels", []))
 
@@ -2067,18 +2223,29 @@ class ClientListener:
         )
 
         if not channels:
-            logger.warning(f"[export] No readable text channels in guild {gid_log}. Aborting.")
-            await self.ws.send({"type": "export_messages_done", "data": {"guild_id": gid_log, "forwarded": 0, "scanned": 0}})
+            logger.warning(
+                f"[export] No readable text channels in guild {gid_log}. Aborting."
+            )
+            await self.ws.send(
+                {
+                    "type": "export_messages_done",
+                    "data": {"guild_id": gid_log, "forwarded": 0, "scanned": 0},
+                }
+            )
             return
 
         ch_ids_preview = [getattr(c, "id", None) for c in channels[:8]]
         more_note = "" if len(channels) <= 8 else f" (+{len(channels)-8} more)"
-        logger.info(f"[export] Channels to scan: {len(channels)} -> {ch_ids_preview}{more_note}")
+        logger.info(
+            f"[export] Channels to scan: {len(channels)} -> {ch_ids_preview}{more_note}"
+        )
 
         total_scanned = 0
         total_matched = 0
         forwarded = 0
-        buffer_rows = []  # Always buffer first so we can save JSON before any forwarding
+        buffer_rows = (
+            []
+        )  # Always buffer first so we can save JSON before any forwarding
 
         # ---- Scan
         for ch in channels:
@@ -2140,7 +2307,9 @@ class ClientListener:
                 logger.warning(f"[export] Channel {cid} failed: {e}")
                 continue
 
-            logger.info(f"[export] Done channel #{cname} ({cid}): scanned={ch_scanned}, matched={ch_matched}")
+            logger.info(
+                f"[export] Done channel #{cname} ({cid}): scanned={ch_scanned}, matched={ch_matched}"
+            )
 
         # ---- Save JSON snapshot first — /data/exports/<guild>/<YYYYMMDD-HHMMSS>/messages.json
         json_file = None
@@ -2152,7 +2321,9 @@ class ClientListener:
             subdir = os.path.join(out_root, gid_str, ts)
             os.makedirs(subdir, exist_ok=True)
             json_file = os.path.join(subdir, "messages.json")
-            logger.info(f"[export] Writing JSON snapshot ({len(buffer_rows)} messages) → {json_file}")
+            logger.info(
+                f"[export] Writing JSON snapshot ({len(buffer_rows)} messages) → {json_file}"
+            )
             with open(json_file, "w", encoding="utf-8") as f:
                 json.dump(
                     {
@@ -2177,7 +2348,9 @@ class ClientListener:
 
         # ---- NEW: Download attachments if requested
         dl_cfg = F["download_media"] or {}
-        want_any_download = any(dl_cfg.get(k, False) for k in ("images", "videos", "audio", "other"))
+        want_any_download = any(
+            dl_cfg.get(k, False) for k in ("images", "videos", "audio", "other")
+        )
         media_report = {"images": 0, "videos": 0, "audio": 0, "other": 0, "errors": 0}
 
         def _iter_attachment_links(msg_obj):
@@ -2186,10 +2359,18 @@ class ClientListener:
             atts = m.get("attachments") or []
             for a in atts:
                 url = a.get("url") or a.get("proxy_url")
-                if not url or not isinstance(url, str) or not url.lower().startswith(("http://", "https://")):
+                if (
+                    not url
+                    or not isinstance(url, str)
+                    or not url.lower().startswith(("http://", "https://"))
+                ):
                     continue
                 kind = _att_kind(a)
-                filename = a.get("filename") or os.path.basename(url.split("?", 1)[0]) or f"{kind}-{uuid.uuid4().hex}"
+                filename = (
+                    a.get("filename")
+                    or os.path.basename(url.split("?", 1)[0])
+                    or f"{kind}-{uuid.uuid4().hex}"
+                )
                 yield (kind, url, filename)
 
         async def _download_one(session, sem, kind, url, filename, dest_dir):
@@ -2206,7 +2387,9 @@ class ClientListener:
 
             try:
                 async with sem:
-                    async with session.get(url, timeout=aiohttp.ClientTimeout(total=180)) as resp:
+                    async with session.get(
+                        url, timeout=aiohttp.ClientTimeout(total=180)
+                    ) as resp:
                         if resp.status != 200:
                             raise RuntimeError(f"HTTP {resp.status}")
                         with open(out_path, "wb") as f:
@@ -2218,7 +2401,9 @@ class ClientListener:
                 return False, out_path, str(e)
 
         if want_any_download and aiohttp is None:
-            logger.warning("[export] Download requested but aiohttp not available. Skipping downloads.")
+            logger.warning(
+                "[export] Download requested but aiohttp not available. Skipping downloads."
+            )
         elif want_any_download:
             logger.info(f"[export] Downloading media per selection: {dl_cfg}")
             sem = asyncio.Semaphore(4)  # tune concurrency
@@ -2234,12 +2419,17 @@ class ClientListener:
                     tasks.append((kind, url, fname, dest))
 
             if not tasks:
-                logger.info("[export] No media matches selection; skipping download step.")
+                logger.info(
+                    "[export] No media matches selection; skipping download step."
+                )
             else:
                 async with aiohttp.ClientSession() as session:
                     results = await asyncio.gather(
-                        *[_download_one(session, sem, kind, url, fname, dest) for (kind, url, fname, dest) in tasks],
-                        return_exceptions=False
+                        *[
+                            _download_one(session, sem, kind, url, fname, dest)
+                            for (kind, url, fname, dest) in tasks
+                        ],
+                        return_exceptions=False,
                     )
                 # Tally results
                 for (kind, url, *_), res in zip(tasks, results):
@@ -2248,13 +2438,17 @@ class ClientListener:
                         media_report[kind] += 1
                     else:
                         media_report["errors"] += 1
-                        logger.warning(f"[export] Download failed kind={kind} url={_safe(url)} err={err}")
+                        logger.warning(
+                            f"[export] Download failed kind={kind} url={_safe(url)} err={err}"
+                        )
 
                 logger.info(f"[export] Media download complete: {media_report}")
 
         # ---- Forward buffered messages if a webhook URL was provided
         if do_forward and buffer_rows:
-            logger.info(f"[export] Forwarding buffered messages: {len(buffer_rows)} → webhook(…{wh_tail})")
+            logger.info(
+                f"[export] Forwarding buffered messages: {len(buffer_rows)} → webhook(…{wh_tail})"
+            )
             for idx, row in enumerate(buffer_rows, 1):
                 try:
                     await self.ws.send(
@@ -2272,19 +2466,23 @@ class ClientListener:
                     if send_sleep:
                         await asyncio.sleep(send_sleep)  # 2s between WS sends
                 except Exception as e:
-                    logger.warning(f"[📤] export_message send failed (post-JSON) idx={idx}: {e}")
+                    logger.warning(
+                        f"[📤] export_message send failed (post-JSON) idx={idx}: {e}"
+                    )
                     break
 
                 if idx % 200 == 0:
-                    logger.info(f"[export] Forwarded {idx}/{len(buffer_rows)} (total_forwarded={forwarded})")
+                    logger.info(
+                        f"[export] Forwarded {idx}/{len(buffer_rows)} (total_forwarded={forwarded})"
+                    )
         else:
             logger.info("[export] No webhook URL provided — skipping forwarding step.")
 
         dur = time.perf_counter() - t0
         logger.info(
-        f"[export] Complete guild={gid_log} ({gname}) scanned={total_scanned}, matched={total_matched}, "
-        f"forwarded={forwarded}, json={'saved '+json_file if json_file else 'none'}, "
-        f"media_dl={media_report if want_any_download else 'skipped'}, elapsed={dur:.1f}s"
+            f"[export] Complete guild={gid_log} ({gname}) scanned={total_scanned}, matched={total_matched}, "
+            f"forwarded={forwarded}, json={'saved '+json_file if json_file else 'none'}, "
+            f"media_dl={media_report if want_any_download else 'skipped'}, elapsed={dur:.1f}s"
         )
 
         # ---- Done – notify server (include media report if present)
@@ -2301,9 +2499,6 @@ class ClientListener:
             await self.ws.send({"type": "export_messages_done", "data": done_payload})
         except Exception as e:
             logger.debug(f"[export] emit export_messages_done failed: {e}")
-
-
-
 
     async def _shutdown(self):
         """

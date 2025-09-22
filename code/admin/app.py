@@ -21,7 +21,15 @@ import re
 import time
 import logging
 from typing import Dict, List, Set, Literal
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect, Body, status, HTTPException
+from fastapi import (
+    FastAPI,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    Body,
+    status,
+    HTTPException,
+)
 from fastapi.responses import (
     RedirectResponse,
     PlainTextResponse,
@@ -1132,7 +1140,8 @@ async def _apply_db_log_level_and_banner():
 @app.on_event("startup")
 async def _start_bg_tasks():
     asyncio.create_task(_lock_listener())
-    
+
+
 @app.on_event("startup")
 async def _start_release_watcher():
     asyncio.create_task(_release_watch_loop())
@@ -1433,6 +1442,7 @@ async def save_filters(request: Request):
     )
     return RedirectResponse("/", status_code=303)
 
+
 @app.post("/api/filters/blacklist", response_class=JSONResponse)
 async def api_blacklist_add(payload: dict = Body(...)):
     try:
@@ -1516,7 +1526,6 @@ def _validate(values: Dict[str, str]) -> List[str]:
     return errs
 
 
-
 def _norm_bool_str(v: str) -> str:
     return "True" if str(v).strip().lower() in ("true", "1", "yes", "on") else "False"
 
@@ -1534,6 +1543,7 @@ async def channels_page(request: Request):
         },
     )
 
+
 @app.get("/api/channels", response_class=JSONResponse)
 async def channels_api():
     chans = [dict(r) for r in db.get_all_channel_mappings()]
@@ -1549,8 +1559,8 @@ async def channels_api():
 
         cat_info = cats_by_id.get(pid_int, {})
         original_cat_name = cat_info.get("original_category_name")
-        cloned_cat_name   = cat_info.get("cloned_category_name") or None
-        cloned_cat_id     = (
+        cloned_cat_name = cat_info.get("cloned_category_name") or None
+        cloned_cat_id = (
             str(cat_info.get("cloned_category_id"))
             if cat_info.get("cloned_category_id") not in (None, "", 0)
             else None
@@ -1558,25 +1568,30 @@ async def channels_api():
 
         out.append(
             {
-                "original_channel_id": str(ch["original_channel_id"]) if ch.get("original_channel_id") else "",
+                "original_channel_id": (
+                    str(ch["original_channel_id"])
+                    if ch.get("original_channel_id")
+                    else ""
+                ),
                 "original_channel_name": ch.get("original_channel_name") or "",
-                "cloned_channel_id": str(ch["cloned_channel_id"]) if ch.get("cloned_channel_id") else None,
+                "cloned_channel_id": (
+                    str(ch["cloned_channel_id"])
+                    if ch.get("cloned_channel_id")
+                    else None
+                ),
                 "channel_type": int(ch.get("channel_type", 0)),
-
                 # category info
                 "category_name": original_cat_name,
                 "original_category_name": original_cat_name,
                 "cloned_category_name": cloned_cat_name,
                 "original_parent_category_id": str(pid_int) if pid_int else None,
-                "cloned_category_id": cloned_cat_id,   # <-- NEW FIELD
-
+                "cloned_category_id": cloned_cat_id,  # <-- NEW FIELD
                 "channel_webhook_url": ch.get("channel_webhook_url"),
                 "clone_channel_name": ch.get("clone_channel_name") or None,
             }
         )
 
     return {"items": out}
-
 
 
 @app.post("/api/backfill/start", response_class=JSONResponse)
@@ -1976,6 +1991,7 @@ async def api_channels_customize(payload: dict = Body(...)):
         }
     )
 
+
 @app.post("/api/categories/customize", response_class=JSONResponse)
 async def api_categories_customize(payload: dict = Body(...)):
     """
@@ -1995,15 +2011,22 @@ async def api_categories_customize(payload: dict = Body(...)):
         try:
             ocid = int(payload.get("original_category_id"))
         except Exception:
-            return JSONResponse({"ok": False, "error": "invalid-original_category_id"}, status_code=400)
+            return JSONResponse(
+                {"ok": False, "error": "invalid-original_category_id"}, status_code=400
+            )
     else:
         name = _norm_display(payload.get("category_name"))
         ocid = db.resolve_original_category_id_by_name(name) if name else None
         if not ocid:
-            return JSONResponse({"ok": False, "error": "missing-or-unresolvable-category"}, status_code=400)
+            return JSONResponse(
+                {"ok": False, "error": "missing-or-unresolvable-category"},
+                status_code=400,
+            )
 
     # Desired custom/pinned name (no slugging)
-    desired = _norm_display(payload.get("custom_category_name", payload.get("clone_category_name")))
+    desired = _norm_display(
+        payload.get("custom_category_name", payload.get("clone_category_name"))
+    )
 
     try:
         orig = db.get_original_category_name(ocid)
@@ -2023,15 +2046,22 @@ async def api_categories_customize(payload: dict = Body(...)):
     # Only update if different (compare on display-normalized text)
     needs_update = _norm_display(current_raw) != _norm_display(desired)
     if not needs_update:
-        LOGGER.info("Customize category | original_id=%s no change (kept=%r)", ocid, current_raw)
-        return JSONResponse({"ok": True, "changed": False, "normalized": desired is not None})
+        LOGGER.info(
+            "Customize category | original_id=%s no change (kept=%r)", ocid, current_raw
+        )
+        return JSONResponse(
+            {"ok": True, "changed": False, "normalized": desired is not None}
+        )
 
     # Persist (store the exact user-facing text, or NULL to clear)
     try:
         db.set_category_clone_name(ocid, desired)
         LOGGER.info(
             "Customize category | original_id=%s updated to %r (orig=%r, was=%r)",
-            ocid, desired, orig, current_raw
+            ocid,
+            desired,
+            orig,
+            current_raw,
         )
     except Exception as e:
         LOGGER.exception("Failed to set cloned_category_name: %s", e)
@@ -2040,16 +2070,21 @@ async def api_categories_customize(payload: dict = Body(...)):
     should_nudge = not (desired is None and same_as_original)
     if should_nudge:
         try:
-            asyncio.create_task(_ws_cmd(CLIENT_AGENT_URL, {"type": "sitemap_request"}, timeout=1.0))
+            asyncio.create_task(
+                _ws_cmd(CLIENT_AGENT_URL, {"type": "sitemap_request"}, timeout=1.0)
+            )
         except Exception:
             LOGGER.debug("WS sitemap_request dispatch failed", exc_info=True)
 
-    return JSONResponse({
-        "ok": True,
-        "changed": True,
-        "nudged": should_nudge,
-        "normalized_name": desired, 
-    })
+    return JSONResponse(
+        {
+            "ok": True,
+            "changed": True,
+            "nudged": should_nudge,
+            "normalized_name": desired,
+        }
+    )
+
 
 @app.get("/version")
 def get_version():
@@ -2079,6 +2114,7 @@ def get_version():
         or f"https://github.com/Copycord/Copycord/releases/tag/{latest or current}",
         "update_available": bool(latest) and (lb > ca),
     }
+
 
 async def _fetch_latest_release(session: aiohttp.ClientSession) -> dict | None:
     headers = {
@@ -2122,7 +2158,7 @@ async def _release_watch_loop():
                     recorded_ver = db.get_config("current_version", "")
                     if recorded_ver != CURRENT_VERSION:
                         db.set_config("current_version", CURRENT_VERSION)
-                        
+
                 rel = await _fetch_latest_release(session)
                 if rel:
                     prev = db.get_config("latest_tag", "")
@@ -2137,9 +2173,12 @@ async def _release_watch_loop():
                 LOGGER.exception("release watcher error")
 
             try:
-                await asyncio.wait_for(shutdown_event.wait(), timeout=RELEASE_POLL_SECONDS)
+                await asyncio.wait_for(
+                    shutdown_event.wait(), timeout=RELEASE_POLL_SECONDS
+                )
             except asyncio.TimeoutError:
                 pass
+
 
 @app.post("/api/export/messages", response_class=JSONResponse)
 async def api_export_messages(request: Request):
@@ -2168,14 +2207,24 @@ async def api_export_messages(request: Request):
             timeout=CLIENT_AGENT_TIMEOUT,
         )
     except asyncio.TimeoutError:
-        return JSONResponse({"ok": False, "error": "client-agent-timeout"}, status_code=504)
+        return JSONResponse(
+            {"ok": False, "error": "client-agent-timeout"}, status_code=504
+        )
     except ConnectionRefusedError:
-        return JSONResponse({"ok": False, "error": "client-agent-unreachable"}, status_code=502)
+        return JSONResponse(
+            {"ok": False, "error": "client-agent-unreachable"}, status_code=502
+        )
     except Exception as e:
-        return JSONResponse({"ok": False, "error": f"client-agent-error: {type(e).__name__}: {e}"}, status_code=502)
+        return JSONResponse(
+            {"ok": False, "error": f"client-agent-error: {type(e).__name__}: {e}"},
+            status_code=502,
+        )
 
     if not res.get("ok", True):
-        return JSONResponse({"ok": False, "error": res.get("error") or "client-agent-failed"}, status_code=502)
+        return JSONResponse(
+            {"ok": False, "error": res.get("error") or "client-agent-failed"},
+            status_code=502,
+        )
     return JSONResponse({"ok": True, "accepted": True})
 
 

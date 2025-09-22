@@ -52,9 +52,7 @@ class Config:
 
         # --- Constants / misc ---
         self.RELEASE_CHECK_INTERVAL_SECONDS = 1810
-        self.DEFAULT_WEBHOOK_AVATAR_URL = (
-            "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/logo/logo.png"
-        )
+        self.DEFAULT_WEBHOOK_AVATAR_URL = "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/logo/logo.png"
 
         # --- Tokens / IDs / URLs  ---
         self.SERVER_TOKEN = _str("SERVER_TOKEN")
@@ -67,7 +65,9 @@ class Config:
         self.SERVER_WS_HOST = _str("SERVER_WS_HOST", "server") or "server"
         self.SERVER_WS_PORT = _int("SERVER_WS_PORT", "8765")
         # Back-compat: accept WS_SERVER_URL; else synthesize
-        self.SERVER_WS_URL = _str("WS_SERVER_URL", f"ws://{self.SERVER_WS_HOST}:{self.SERVER_WS_PORT}")
+        self.SERVER_WS_URL = _str(
+            "WS_SERVER_URL", f"ws://{self.SERVER_WS_HOST}:{self.SERVER_WS_PORT}"
+        )
 
         self.ADMIN_WS_URL = _str(
             "ADMIN_WS_URL",
@@ -76,7 +76,9 @@ class Config:
 
         self.CLIENT_WS_HOST = _str("CLIENT_WS_HOST", "client") or "client"
         self.CLIENT_WS_PORT = _int("CLIENT_WS_PORT", "8766")
-        self.CLIENT_WS_URL = _str("WS_CLIENT_URL", f"ws://{self.CLIENT_WS_HOST}:{self.CLIENT_WS_PORT}")
+        self.CLIENT_WS_URL = _str(
+            "WS_CLIENT_URL", f"ws://{self.CLIENT_WS_HOST}:{self.CLIENT_WS_PORT}"
+        )
 
         self.SYNC_INTERVAL_SECONDS = _int("SYNC_INTERVAL_SECONDS", "3600")
 
@@ -104,7 +106,9 @@ class Config:
                     pass
 
         # --- Logging / misc ---
-        self.logger = (logger or logging.getLogger(__name__)).getChild(self.__class__.__name__)
+        self.logger = (logger or logging.getLogger(__name__)).getChild(
+            self.__class__.__name__
+        )
         self.excluded_category_ids: set[int] = set()
         self.excluded_channel_ids: set[int] = set()
 
@@ -146,7 +150,9 @@ class Config:
                 except Exception:
                     self.logger.debug("update_status failed", exc_info=True)
             else:
-                self.logger.debug("Skipping status update (receiver has no update_status)")
+                self.logger.debug(
+                    "Skipping status update (receiver has no update_status)"
+                )
 
         while not receiver.bot.is_closed():
             try:
@@ -168,7 +174,9 @@ class Config:
                 latest_url = db.get_config("latest_url") or ""
 
                 if not latest_tag:
-                    self.logger.debug("No latest_tag in db_config yet; skipping this cycle")
+                    self.logger.debug(
+                        "No latest_tag in db_config yet; skipping this cycle"
+                    )
                     await _maybe_update_status(f"{running_ver}")
                     await asyncio.sleep(self.RELEASE_CHECK_INTERVAL_SECONDS)
                     continue
@@ -177,28 +185,46 @@ class Config:
                 last_seen = db.get_notified_version() or ""
 
                 if _norm_version(latest_tag) != _norm_version(last_seen):
-                    self.logger.debug("[📢] latest_tag observed from DB: %s (%s)", latest_tag, latest_url)
+                    self.logger.debug(
+                        "[📢] latest_tag observed from DB: %s (%s)",
+                        latest_tag,
+                        latest_url,
+                    )
 
                 if cmp_remote_local > 0:
-                    self.logger.info("[⬆️] Update available: %s %s", latest_tag, latest_url)
+                    self.logger.info(
+                        "[⬆️] Update available: %s %s", latest_tag, latest_url
+                    )
                     await _maybe_update_status("New update available!")
 
-                    if should_dm and guild_id and _norm_version(latest_tag) != _norm_version(last_seen):
+                    if (
+                        should_dm
+                        and guild_id
+                        and _norm_version(latest_tag) != _norm_version(last_seen)
+                    ):
                         guild = receiver.bot.get_guild(guild_id)
                         if guild:
                             try:
-                                owner = guild.owner or await guild.fetch_member(guild.owner_id)
+                                owner = guild.owner or await guild.fetch_member(
+                                    guild.owner_id
+                                )
                                 await owner.send(
                                     f"A new Copycord release is available: **{latest_tag}**\n{latest_url}"
                                 )
-                                self.logger.debug("Sent release DM to guild owner %s", owner)
+                                self.logger.debug(
+                                    "Sent release DM to guild owner %s", owner
+                                )
                                 db.set_notified_version(latest_tag)
                             except Exception as e:
-                                self.logger.warning("[⚠️] Failed to send new version DM: %s", e)
+                                self.logger.warning(
+                                    "[⚠️] Failed to send new version DM: %s", e
+                                )
                 else:
                     await _maybe_update_status(f"{running_ver}")
 
-                    if cmp_remote_local == 0 and _norm_version(latest_tag) != _norm_version(last_seen):
+                    if cmp_remote_local == 0 and _norm_version(
+                        latest_tag
+                    ) != _norm_version(last_seen):
                         db.set_notified_version(latest_tag)
 
                 try:
@@ -230,4 +256,6 @@ class Config:
         self.include_channel_ids = {int(x) for x in f["whitelist"]["channel"]}
         self.excluded_category_ids = {int(x) for x in f["exclude"]["category"]}
         self.excluded_channel_ids = {int(x) for x in f["exclude"]["channel"]}
-        self.whitelist_enabled = bool(self.include_category_ids or self.include_channel_ids)
+        self.whitelist_enabled = bool(
+            self.include_category_ids or self.include_channel_ids
+        )

@@ -195,66 +195,75 @@
           </div>
 
           {% for k in bool_keys %}
-            {% if k not in ['EDIT_MESSAGES', 'DELETE_MESSAGES'] %}
-              <div class="field">
-                <label for="{{ k }}" class="has-tip">
-                  <span class="label-text">{{ k }}</span>
-                  {% if FIELD_TIPS.get(k) %}
-                  <button type="button" class="info-dot" aria-label="What is {{ k }}?" aria-describedby="tip-{{ k }}"></button>
-                  <span id="tip-{{ k }}" role="tooltip" class="tip-bubble">
-                    {{ FIELD_TIPS[k] }}
-                  </span>
-                  {% endif %}
-                </label>
-                <div class="select">
-                  {% set val = env.get(k, 'True' if k!='MIRROR_ROLE_PERMISSIONS' else 'False') %}
-                  <select id="{{ k }}" name="{{ k }}">
-                    <option value="True" {{ 'selected' if val|string|lower in ['true','1','yes','on'] else '' }}>True</option>
-                    <option value="False" {{ 'selected' if val|string|lower in ['false','0','no','off'] else '' }}>False</option>
-                  </select>
-                </div>
-              </div>
-
-              {% if k == 'DELETE_CHANNELS' %}
-                <div class="field">
-                  <label for="EDIT_MESSAGES" class="has-tip">
-                    <span class="label-text">EDIT_MESSAGES</span>
-                    {% if FIELD_TIPS.get('EDIT_MESSAGES') %}
-                    <button type="button" class="info-dot" aria-label="What is EDIT_MESSAGES?" aria-describedby="tip-EDIT_MESSAGES"></button>
-                    <span id="tip-EDIT_MESSAGES" role="tooltip" class="tip-bubble">
-                      {{ FIELD_TIPS['EDIT_MESSAGES'] }}
-                    </span>
-                    {% endif %}
-                  </label>
-                  <div class="select">
-                    {% set val_edit = env.get('EDIT_MESSAGES', 'True') %}
-                    <select id="EDIT_MESSAGES" name="EDIT_MESSAGES">
-                      <option value="True" {{ 'selected' if val_edit|string|lower in ['true','1','yes','on'] else '' }}>True</option>
-                      <option value="False" {{ 'selected' if val_edit|string|lower in ['false','0','no','off'] else '' }}>False</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div class="field">
-                  <label for="DELETE_MESSAGES" class="has-tip">
-                    <span class="label-text">DELETE_MESSAGES</span>
-                    {% if FIELD_TIPS.get('DELETE_MESSAGES') %}
-                    <button type="button" class="info-dot" aria-label="What is DELETE_MESSAGES?" aria-describedby="tip-DELETE_MESSAGES"></button>
-                    <span id="tip-DELETE_MESSAGES" role="tooltip" class="tip-bubble">
-                      {{ FIELD_TIPS['DELETE_MESSAGES'] }}
-                    </span>
-                    {% endif %}
-                  </label>
-                  <div class="select">
-                    {% set val_del = env.get('DELETE_MESSAGES', 'True') %}
-                    <select id="DELETE_MESSAGES" name="DELETE_MESSAGES">
-                      <option value="True" {{ 'selected' if val_del|string|lower in ['true','1','yes','on'] else '' }}>True</option>
-                      <option value="False" {{ 'selected' if val_del|string|lower in ['false','0','no','off'] else '' }}>False</option>
-                    </select>
-                  </div>
-                </div>
+          {% if k not in ['EDIT_MESSAGES', 'DELETE_MESSAGES'] %}
+          <div class="field">
+            <label for="{{ k }}" class="has-tip">
+              <span class="label-text">{{ k }}</span>
+              {% if FIELD_TIPS.get(k) %}
+              <button type="button" class="info-dot" aria-label="What is {{ k }}?"
+                aria-describedby="tip-{{ k }}"></button>
+              <span id="tip-{{ k }}" role="tooltip" class="tip-bubble">
+                {{ FIELD_TIPS[k] }}
+              </span>
               {% endif %}
-            {% endif %}
+            </label>
+            <div class="select">
+              {% set val = env.get(k, 'True' if k!='MIRROR_ROLE_PERMISSIONS' else 'False') %}
+              <select id="{{ k }}" name="{{ k }}">
+                <option value="True" {{ 'selected' if val|string|lower in ['true','1','yes','on'] else '' }}>True
+                </option>
+                <option value="False" {{ 'selected' if val|string|lower in ['false','0','no','off'] else '' }}>False
+                </option>
+              </select>
+            </div>
+          </div>
+
+          {% if k == 'DELETE_CHANNELS' %}
+          <div class="field">
+            <label for="EDIT_MESSAGES" class="has-tip">
+              <span class="label-text">EDIT_MESSAGES</span>
+              {% if FIELD_TIPS.get('EDIT_MESSAGES') %}
+              <button type="button" class="info-dot" aria-label="What is EDIT_MESSAGES?"
+                aria-describedby="tip-EDIT_MESSAGES"></button>
+              <span id="tip-EDIT_MESSAGES" role="tooltip" class="tip-bubble">
+                {{ FIELD_TIPS['EDIT_MESSAGES'] }}
+              </span>
+              {% endif %}
+            </label>
+            <div class="select">
+              {% set val_edit = env.get('EDIT_MESSAGES', 'True') %}
+              <select id="EDIT_MESSAGES" name="EDIT_MESSAGES">
+                <option value="True" {{ 'selected' if val_edit|string|lower in ['true','1','yes','on'] else '' }}>True
+                </option>
+                <option value="False" {{ 'selected' if val_edit|string|lower in ['false','0','no','off'] else '' }}>
+                  False</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="DELETE_MESSAGES" class="has-tip">
+              <span class="label-text">DELETE_MESSAGES</span>
+              {% if FIELD_TIPS.get('DELETE_MESSAGES') %}
+              <button type="button" class="info-dot" aria-label="What is DELETE_MESSAGES?"
+                aria-describedby="tip-DELETE_MESSAGES"></button>
+              <span id="tip-DELETE_MESSAGES" role="tooltip" class="tip-bubble">
+                {{ FIELD_TIPS['DELETE_MESSAGES'] }}
+              </span>
+              {% endif %}
+            </label>
+            <div class="select">
+              {% set val_del = env.get('DELETE_MESSAGES', 'True') %}
+              <select id="DELETE_MESSAGES" name="DELETE_MESSAGES">
+                <option value="True" {{ 'selected' if val_del|string|lower in ['true','1','yes','on'] else '' }}>True
+                </option>
+                <option value="False" {{ 'selected' if val_del|string|lower in ['false','0','no','off'] else '' }}>False
+                </option>
+              </select>
+            </div>
+          </div>
+          {% endif %}
+          {% endif %}
           {% endfor %}
 
           <div class="field">

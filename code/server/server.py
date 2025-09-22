@@ -223,7 +223,7 @@ class ServerReceiver:
 
         asyncio.create_task(self.config.setup_release_watcher(self))
         self.session = aiohttp.ClientSession()
-        self.webhook_exporter = WebhookDMExporter(self.session, logger) # DM Exporter
+        self.webhook_exporter = WebhookDMExporter(self.session, logger)  # DM Exporter
         # Ensure we're in the clone guild
         clone_guild = self.bot.get_guild(self.clone_guild_id)
         if clone_guild is None:
@@ -480,7 +480,7 @@ class ServerReceiver:
 
         elif typ == "thread_message_edit":
             self._track(self.handle_message_edit(data), name="edit-thread-msg")
-            
+
         elif typ == "message_delete":
             self._track(self.handle_message_delete(data), name="del-msg")
 
@@ -599,23 +599,28 @@ class ServerReceiver:
 
         elif typ == "member_joined":
             asyncio.create_task(self.onjoin.handle_member_joined(data))
-            
+
         elif typ == "export_dm_message":
-            if getattr(self, "shutting_down", False) or self.webhook_exporter.is_stopped:
+            if (
+                getattr(self, "shutting_down", False)
+                or self.webhook_exporter.is_stopped
+            ):
                 return
             await self.webhook_exporter.handle_ws_export_dm_message(data)
 
         elif typ == "export_dm_done":
             await self.webhook_exporter.handle_ws_export_dm_done(data)
-            
+
         elif typ == "export_message":
-            if getattr(self, "shutting_down", False) or self.webhook_exporter.is_stopped:
+            if (
+                getattr(self, "shutting_down", False)
+                or self.webhook_exporter.is_stopped
+            ):
                 return
             await self.webhook_exporter.handle_ws_export_message(data)
 
         elif typ == "export_messages_done":
             await self.webhook_exporter.handle_ws_export_messages_done(data)
-            
 
     async def process_sitemap_queue(self):
         """Continuously process only the newest sitemap, discarding any others."""
@@ -740,8 +745,10 @@ class ServerReceiver:
 
             all_sub_keys = self.db.get_announcement_keywords(guild_id)
             matching_keys = [
-                sub_kw for sub_kw in all_sub_keys
-                if sub_kw == "*" or re.search(rf"\b{re.escape(sub_kw)}\b", content, re.IGNORECASE)
+                sub_kw
+                for sub_kw in all_sub_keys
+                if sub_kw == "*"
+                or re.search(rf"\b{re.escape(sub_kw)}\b", content, re.IGNORECASE)
             ]
 
             user_ids = set()
@@ -774,9 +781,13 @@ class ServerReceiver:
                 try:
                     user = self.bot.get_user(uid) or await self.bot.fetch_user(uid)
                     await user.send(embed=embed)
-                    logger.info(f"[🔔] DM’d {user} for keys={matching_keys} in g={guild_id}")
+                    logger.info(
+                        f"[🔔] DM’d {user} for keys={matching_keys} in g={guild_id}"
+                    )
                 except Exception as e:
-                    logger.warning(f"[⚠️] Failed DM uid={uid} keys={matching_keys} g={guild_id}: {e}")
+                    logger.warning(
+                        f"[⚠️] Failed DM uid={uid} keys={matching_keys} g={guild_id}: {e}"
+                    )
 
         except Exception as e:
             logger.exception("Unexpected error in handle_announce: %s", e)
@@ -2751,9 +2762,8 @@ class ServerReceiver:
                     orig_cid = int(msg.get("channel_id") or 0)
                     orig_mid = int(msg.get("message_id") or 0)
 
-
                     cloned_cid = int(mapping["cloned_channel_id"])
-                    
+
                     cloned_mid = int(getattr(sent_msg, "id", 0)) if sent_msg else None
 
                     used_url = getattr(webhook, "url", None)
@@ -2768,7 +2778,7 @@ class ServerReceiver:
                     )
                 except Exception:
                     logger.exception("upsert_message_mapping failed (normal channel)")
-    
+
                 if is_backfill:
                     self.backfill.note_sent(source_id)
                     delivered, total = self.backfill.get_progress(source_id)
@@ -3049,7 +3059,7 @@ class ServerReceiver:
         # Ensure embeds are discord.Embed
         def _coerce_embeds(lst):
             result = []
-            for e in (lst or []):
+            for e in lst or []:
                 if isinstance(e, discord.Embed):
                     result.append(e)
                 elif isinstance(e, dict):
@@ -3087,7 +3097,9 @@ class ServerReceiver:
                     )
                     logger.info(
                         "[✏️] Edited cloned msg %s (orig %s) in #%s",
-                        cloned_mid, orig_mid, data.get("channel_name"),
+                        cloned_mid,
+                        orig_mid,
+                        data.get("channel_name"),
                     )
                     return
                 except Exception as e:
@@ -3104,14 +3116,15 @@ class ServerReceiver:
                 "[❌] Fallback resend failed for edited message (orig %s)", orig_mid
             )
 
-
-
     async def forward_to_webhook(self, msg_data: dict, webhook_url: str):
-        async with self.session.post(webhook_url, json={
-            "username": msg_data["author"]["name"],
-            "avatar_url": msg_data["author"].get("avatar_url"),
-            "content": msg_data["content"],
-        }) as resp:
+        async with self.session.post(
+            webhook_url,
+            json={
+                "username": msg_data["author"]["name"],
+                "avatar_url": msg_data["author"].get("avatar_url"),
+                "content": msg_data["content"],
+            },
+        ) as resp:
             if resp.status != 200 and resp.status != 204:
                 logger.warning(f"Webhook send failed: {resp.status}")
 
@@ -3770,8 +3783,10 @@ class ServerReceiver:
         forced = dict(data)
         forced["__force_webhook_url__"] = url
         await self.forward_message(forced)
-        
-    def _prune_old_messages_loop(self, retention_seconds: int | None = None) -> asyncio.Task:
+
+    def _prune_old_messages_loop(
+        self, retention_seconds: int | None = None
+    ) -> asyncio.Task:
         """
         Start hourly task that deletes old rows from the `messages` table.
         """
@@ -3802,7 +3817,8 @@ class ServerReceiver:
         async def _runner():
             logger.debug(
                 "[prune] starting hourly pruner (retention=%d seconds ~= %.2f days)",
-                retention_seconds, retention_seconds / 86400.0
+                retention_seconds,
+                retention_seconds / 86400.0,
             )
             try:
                 while True:
@@ -3811,7 +3827,7 @@ class ServerReceiver:
                         if deleted:
                             logger.info(
                                 "[prune] deleted %d old message mappings from db.",
-                                deleted
+                                deleted,
                             )
 
                     except Exception:
@@ -3825,7 +3841,7 @@ class ServerReceiver:
         # Spawn the task
         self._prune_task = asyncio.create_task(_runner(), name="prune-old-messages")
         return self._prune_task
-    
+
     async def handle_message_delete(self, data: dict):
         """
         Delete the cloned webhook message that corresponds to the original one.
@@ -3852,11 +3868,16 @@ class ServerReceiver:
             cloned_mid = int(row["cloned_message_id"])
             webhook_url = row["webhook_url"]
         except Exception:
-            logger.debug("[🗑️] Mapping incomplete for orig %s; nothing to delete", orig_mid)
+            logger.debug(
+                "[🗑️] Mapping incomplete for orig %s; nothing to delete", orig_mid
+            )
             return
 
         if not (cloned_mid and webhook_url):
-            logger.debug("[🗑️] Missing cloned_mid/webhook for orig %s; nothing to delete", orig_mid)
+            logger.debug(
+                "[🗑️] Missing cloned_mid/webhook for orig %s; nothing to delete",
+                orig_mid,
+            )
             return
 
         try:
@@ -3864,15 +3885,22 @@ class ServerReceiver:
                 self.session = aiohttp.ClientSession()
             wh = Webhook.from_url(webhook_url, session=self.session)
             await wh.delete_message(cloned_mid)
-            logger.info("[🗑️] Deleted cloned msg %s (orig %s) in #%s",
-                        cloned_mid, orig_mid, data.get("channel_name"))
+            logger.info(
+                "[🗑️] Deleted cloned msg %s (orig %s) in #%s",
+                cloned_mid,
+                orig_mid,
+                data.get("channel_name"),
+            )
             try:
                 self.db.delete_mapping_by_original(orig_mid)
             except Exception:
-                logger.debug("Could not delete mapping row for orig %s", orig_mid, exc_info=True)
+                logger.debug(
+                    "Could not delete mapping row for orig %s", orig_mid, exc_info=True
+                )
         except Exception as e:
-            logger.warning("[⚠️] Failed to delete cloned msg for orig %s: %s", orig_mid, e)
-
+            logger.warning(
+                "[⚠️] Failed to delete cloned msg for orig %s: %s", orig_mid, e
+            )
 
     async def _shutdown(self):
         """
