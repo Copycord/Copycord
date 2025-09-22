@@ -43,6 +43,7 @@ from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import BaseHTTPMiddleware
 from common.config import CURRENT_VERSION
 from common.db import DBManager
+from common.backup_scheduler import BackupConfig, DailySQLiteBackupScheduler
 from contextlib import suppress
 from time import perf_counter
 import sys as _sys, json as _json, contextvars
@@ -309,6 +310,21 @@ DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = os.getenv("DB_PATH", "/data/data.db")
 db = DBManager(DB_PATH)
+
+BACKUP_DIR = Path(os.getenv("BACKUP_DIR", str(DATA_DIR / "backups")))
+BACKUP_RETAIN = int(os.getenv("BACKUP_RETAIN", "14"))
+BACKUP_AT = os.getenv("BACKUP_AT", "03:17")
+BACKUP_TZ = os.getenv("TZ", "UTC")
+
+_backup_cfg = BackupConfig(
+    db_path=DB_PATH,
+    backup_dir=BACKUP_DIR,
+    retain=BACKUP_RETAIN,
+    run_at=BACKUP_AT,
+    timezone=BACKUP_TZ,
+)
+
+backup_scheduler = DailySQLiteBackupScheduler(cfg=_backup_cfg, logger=LOGGER)
 
 
 SERVER_CTRL_URL = os.getenv("WS_SERVER_CTRL_URL", "ws://server:9101")
@@ -1145,6 +1161,22 @@ async def _start_bg_tasks():
 @app.on_event("startup")
 async def _start_release_watcher():
     asyncio.create_task(_release_watch_loop())
+
+
+@app.on_event("startup")
+async def _start_backup_scheduler():
+    backup_scheduler.start()
+
+
+@app.on_event("shutdown")
+async def _stop_backup_scheduler():
+    await backup_scheduler.stop()
+
+
+@app.api_route("/admin/backup-now", methods=["GET", "POST"])
+async def backup_now():
+    out_path = await backup_scheduler.run_now()
+    return {"ok": True, "file": out_path.name}
 
 
 @app.get("/logs/stream/{which}")
