@@ -475,6 +475,18 @@ class ServerReceiver:
 
                 self._track(self.forward_message(data), name="live-forward")
 
+        elif typ == "message_edit":
+            self._track(self.handle_message_edit(data), name="edit-msg")
+
+        elif typ == "thread_message_edit":
+            self._track(self.handle_message_edit(data), name="edit-thread-msg")
+            
+        elif typ == "message_delete":
+            self._track(self.handle_message_delete(data), name="del-msg")
+
+        elif typ == "thread_message_delete":
+            self._track(self.handle_message_delete(data), name="del-thread-msg")
+
         elif typ == "thread_message":
             self._track(self.handle_thread_message(data), name="thread-msg")
 
@@ -3016,6 +3028,84 @@ class ServerReceiver:
             override_identity=None,
         )
 
+    async def handle_message_edit(self, data: dict):
+        """
+        Try to edit the cloned webhook message that corresponds to the original one.
+        Fallback: if there's no mapping (or edit fails), forward as a new message.
+        """
+        try:
+            orig_mid = int(data.get("message_id") or 0)
+            orig_cid = int(data.get("channel_id") or 0)
+        except Exception:
+            return
+
+        # Look up mapping by original msg id
+        row = None
+        try:
+            row = self.db.get_mapping_by_original(orig_mid)  # returns sqlite3.Row
+        except Exception:
+            row = None
+
+        # Ensure embeds are discord.Embed
+        def _coerce_embeds(lst):
+            result = []
+            for e in (lst or []):
+                if isinstance(e, discord.Embed):
+                    result.append(e)
+                elif isinstance(e, dict):
+                    emb = discord.Embed(
+                        title=e.get("title"),
+                        description=e.get("description"),
+                    )
+                    img = e.get("image") or {}
+                    if isinstance(img, dict) and img.get("url"):
+                        emb.set_image(url=img["url"])
+                    thumb = e.get("thumbnail") or {}
+                    if isinstance(thumb, dict) and thumb.get("url"):
+                        emb.set_thumbnail(url=thumb["url"])
+                    result.append(emb)
+            return result
+
+        # If we have a mapping, attempt edit
+        if row is not None:
+            try:
+                cloned_mid = row["cloned_message_id"]
+                webhook_url = row["webhook_url"]
+            except Exception:
+                cloned_mid = None
+                webhook_url = None
+            if cloned_mid and webhook_url:
+                try:
+                    if self.session is None or self.session.closed:
+                        self.session = aiohttp.ClientSession()
+                    wh = Webhook.from_url(webhook_url, session=self.session)
+                    await wh.edit_message(
+                        int(cloned_mid),
+                        content=(data.get("content") or None),
+                        embeds=_coerce_embeds(data.get("embeds")),
+                        allowed_mentions=None,
+                    )
+                    logger.info(
+                        "[✏️] Edited cloned msg %s (orig %s) in #%s",
+                        cloned_mid, orig_mid, data.get("channel_name"),
+                    )
+                    return
+                except Exception as e:
+                    logger.warning(
+                        "[⚠️] Edit failed for orig %s (will resend): %s", orig_mid, e
+                    )
+
+        # Fallback — resend as new message and refresh mapping
+        try:
+            await self.forward_message(data)
+            logger.info("[♻️] Resent edited message as new (orig %s)", orig_mid)
+        except Exception:
+            logger.exception(
+                "[❌] Fallback resend failed for edited message (orig %s)", orig_mid
+            )
+
+
+
     async def forward_to_webhook(self, msg_data: dict, webhook_url: str):
         async with self.session.post(webhook_url, json={
             "username": msg_data["author"]["name"],
@@ -3735,6 +3825,54 @@ class ServerReceiver:
         # Spawn the task
         self._prune_task = asyncio.create_task(_runner(), name="prune-old-messages")
         return self._prune_task
+    
+    async def handle_message_delete(self, data: dict):
+        """
+        Delete the cloned webhook message that corresponds to the original one.
+        No-op if no mapping is found.
+        """
+        try:
+            orig_mid = int(data.get("message_id") or 0)
+        except Exception:
+            return
+        if not orig_mid:
+            return
+
+        row = None
+        try:
+            row = self.db.get_mapping_by_original(orig_mid)
+        except Exception:
+            row = None
+
+        if not row:
+            logger.debug("[🗑️] No mapping for orig %s; nothing to delete", orig_mid)
+            return
+
+        try:
+            cloned_mid = int(row["cloned_message_id"])
+            webhook_url = row["webhook_url"]
+        except Exception:
+            logger.debug("[🗑️] Mapping incomplete for orig %s; nothing to delete", orig_mid)
+            return
+
+        if not (cloned_mid and webhook_url):
+            logger.debug("[🗑️] Missing cloned_mid/webhook for orig %s; nothing to delete", orig_mid)
+            return
+
+        try:
+            if self.session is None or self.session.closed:
+                self.session = aiohttp.ClientSession()
+            wh = Webhook.from_url(webhook_url, session=self.session)
+            await wh.delete_message(cloned_mid)
+            logger.info("[🗑️] Deleted cloned msg %s (orig %s) in #%s",
+                        cloned_mid, orig_mid, data.get("channel_name"))
+            try:
+                self.db.delete_mapping_by_original(orig_mid)
+            except Exception:
+                logger.debug("Could not delete mapping row for orig %s", orig_mid, exc_info=True)
+        except Exception as e:
+            logger.warning("[⚠️] Failed to delete cloned msg for orig %s: %s", orig_mid, e)
+
 
     async def _shutdown(self):
         """
