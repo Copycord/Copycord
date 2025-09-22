@@ -182,3 +182,21 @@ If enabled, you’ll receive a direct message with the new member’s details wh
 ```
 /role_block_clear
 ```
+
+---
+
+### `/export_dms <user_id> [webhook_url] [json_file]`
+**Description:** Export a user’s DM history to a JSON file. Optionally forwards each message to a specified webhook.
+
+**Options:**
+- `user_id` *(required, string)* — The target user’s Discord ID to export DMs from.
+- `webhook_url` *(optional, string, default: empty)* — If provided, messages are forwarded in real time to this webhook. If omitted or empty, forwarding is disabled.
+- `json_file` *(optional, boolean, default: true)* — Whether to save a JSON snapshot of the DM export.
+
+**Usage Example:**
+```
+/export_dms 123456789012345678 https://discord.com/api/webhooks/123/abc true
+```
+
+**Notes:**
+- Only one DM export per user can run at a time.
