@@ -270,6 +270,22 @@ class DBManager:
         """
         )
         self.conn.commit()
+        
+        self.conn.execute("""
+        CREATE TABLE IF NOT EXISTS messages (
+            original_guild_id    INTEGER NOT NULL,
+            original_channel_id  INTEGER NOT NULL,
+            original_message_id  INTEGER PRIMARY KEY,
+            cloned_channel_id    INTEGER,
+            cloned_message_id    INTEGER,           
+            webhook_url          TEXT,     
+            created_at           INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+            updated_at           INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+        );
+        """)
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_orig_chan ON messages(original_channel_id);")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_clone_msg ON messages(cloned_message_id);")
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);")
 
     def _table_exists(self, name: str) -> bool:
         row = self.conn.execute(
@@ -1277,3 +1293,72 @@ class DBManager:
             count = int(cnt_row[0] if cnt_row else 0)
             self.conn.execute("DELETE FROM role_blocks")
             return count
+
+    def upsert_message_mapping(
+        self,
+        original_guild_id: int,
+        original_channel_id: int,
+        original_message_id: int,
+        cloned_channel_id: int | None,
+        cloned_message_id: int | None,
+        webhook_url: str | None = None,
+    ) -> None:
+        with self.lock, self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO messages (
+                    original_guild_id, original_channel_id, original_message_id,
+                    cloned_channel_id, cloned_message_id, webhook_url, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+                ON CONFLICT(original_message_id) DO UPDATE SET
+                    original_guild_id   = excluded.original_guild_id,
+                    original_channel_id = excluded.original_channel_id,
+                    cloned_channel_id   = excluded.cloned_channel_id,
+                    cloned_message_id   = excluded.cloned_message_id,
+                    webhook_url         = COALESCE(excluded.webhook_url, webhook_url),
+                    updated_at          = strftime('%s','now')
+                """,
+                (
+                    int(original_guild_id),
+                    int(original_channel_id),
+                    int(original_message_id),
+                    int(cloned_channel_id) if cloned_channel_id is not None else None,
+                    int(cloned_message_id) if cloned_message_id is not None else None,
+                    str(webhook_url) if webhook_url else None,
+                ),
+            )
+
+    def get_mapping_by_original(self, original_message_id: int):
+        return self.conn.execute(
+            "SELECT * FROM messages WHERE original_message_id = ?",
+            (int(original_message_id),),
+        ).fetchone()
+
+    def get_mapping_by_cloned(self, cloned_message_id: int):
+        return self.conn.execute(
+            "SELECT * FROM messages WHERE cloned_message_id = ?",
+            (int(cloned_message_id),),
+        ).fetchone()
+
+    def delete_message_mapping(self, original_message_id: int) -> None:
+        with self.lock, self.conn:
+            self.conn.execute(
+                "DELETE FROM messages WHERE original_message_id = ?",
+                (int(original_message_id),),
+            )
+            
+    def delete_old_messages(self, older_than_seconds: int = 7 * 24 * 3600) -> int:
+        """
+        Delete rows from messages where created_at is older than now - older_than_seconds.
+        Returns the number of rows deleted.
+        """
+        with self.lock, self.conn:
+            before = self.conn.total_changes
+            self.conn.execute(
+                """
+                DELETE FROM messages
+                WHERE created_at < (CAST(strftime('%s','now') AS INTEGER) - ?)
+                """,
+                (int(older_than_seconds),),
+            )
+            return self.conn.total_changes - before

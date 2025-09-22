@@ -880,6 +880,8 @@ class ClientListener:
         payload = {
             "type": "thread_message" if is_thread else "message",
             "data": {
+                "guild_id": getattr(message.guild, "id", None),
+                "message_id": getattr(message, "id", None),
                 "channel_id": message.channel.id,
                 "channel_name": message.channel.name,
                 "channel_type": message.channel.type.value,
@@ -1374,6 +1376,8 @@ class ClientListener:
                     {
                         "type": "message",
                         "data": {
+                            "guild_id": getattr(m.guild, "id", None),
+                            "message_id": getattr(m, "id", None),
                             "channel_id": m.channel.id,
                             "channel_name": getattr(m.channel, "name", None),
                             "channel_type": (

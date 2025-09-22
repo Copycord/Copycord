@@ -259,6 +259,7 @@ class ServerReceiver:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
             self._sitemap_task = asyncio.create_task(self.process_sitemap_queue())
             self._processor_started = True
+            self._prune_old_messages_loop()
 
     def _canonical_webhook_name(self) -> str:
 
@@ -2725,13 +2726,37 @@ class ServerReceiver:
             )
 
             try:
-                await webhook.send(
+                sent_msg = await webhook.send(
                     content=payload.get("content"),
                     embeds=payload.get("embeds"),
                     username=kw_username,
                     avatar_url=kw_avatar,
                     wait=True,
                 )
+
+                try:
+                    orig_gid = int(msg.get("guild_id") or 0)
+                    orig_cid = int(msg.get("channel_id") or 0)
+                    orig_mid = int(msg.get("message_id") or 0)
+
+
+                    cloned_cid = int(mapping["cloned_channel_id"])
+                    
+                    cloned_mid = int(getattr(sent_msg, "id", 0)) if sent_msg else None
+
+                    used_url = getattr(webhook, "url", None)
+
+                    self.db.upsert_message_mapping(
+                        original_guild_id=orig_gid,
+                        original_channel_id=orig_cid,
+                        original_message_id=orig_mid,
+                        cloned_channel_id=cloned_cid,
+                        cloned_message_id=cloned_mid,
+                        webhook_url=used_url,
+                    )
+                except Exception:
+                    logger.exception("upsert_message_mapping failed (normal channel)")
+    
                 if is_backfill:
                     self.backfill.note_sent(source_id)
                     delivered, total = self.backfill.get_progress(source_id)
@@ -3168,7 +3193,28 @@ class ServerReceiver:
                 if p.get("avatar_url"):
                     kw["avatar_url"] = p.get("avatar_url")
             await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=webhook_url)
-            await thread_webhook.send(**kw)
+            sent_msg = await thread_webhook.send(**kw)
+
+            try:
+                orig_gid = int(data.get("guild_id") or 0)
+                orig_cid = int(data.get("thread_id") or data.get("channel_id") or 0)
+                orig_mid = int(data.get("message_id") or 0)
+
+                cloned_cid = int(getattr(thread_obj, "id", 0)) if thread_obj else 0
+                cloned_mid = int(getattr(sent_msg, "id", 0)) if sent_msg else None
+
+                used_url = getattr(thread_webhook, "url", None)
+
+                self.db.upsert_message_mapping(
+                    original_guild_id=orig_gid,
+                    original_channel_id=orig_cid,
+                    original_message_id=orig_mid,
+                    cloned_channel_id=cloned_cid,
+                    cloned_message_id=cloned_mid,
+                    webhook_url=used_url,
+                )
+            except Exception:
+                logger.exception("upsert_message_mapping failed (thread)")
 
         try:
             async with lock:
@@ -3634,6 +3680,61 @@ class ServerReceiver:
         forced = dict(data)
         forced["__force_webhook_url__"] = url
         await self.forward_message(forced)
+        
+    def _prune_old_messages_loop(self, retention_seconds: int | None = None) -> asyncio.Task:
+        """
+        Start hourly task that deletes old rows from the `messages` table.
+        """
+        # If already running, return the existing task
+        if getattr(self, "_prune_task", None) and not self._prune_task.done():
+            return self._prune_task
+
+        # Resolve retention config
+        if retention_seconds is None:
+            env_sec = os.getenv("MESSAGE_RETENTION_SECONDS")
+            env_days = os.getenv("MESSAGE_RETENTION_DAYS")
+            if env_sec and env_sec.isdigit():
+                retention_seconds = int(env_sec)
+            elif env_days and env_days.isdigit():
+                retention_seconds = int(env_days) * 24 * 3600
+            else:
+                retention_seconds = 7 * 24 * 3600  # default: 1 week
+
+        # Ensure index exists
+        try:
+            with self.db.lock, self.db.conn:
+                self.db.conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);"
+                )
+        except Exception:
+            logger.exception("[prune] failed to ensure idx_messages_created_at")
+
+        async def _runner():
+            logger.debug(
+                "[prune] starting hourly pruner (retention=%d seconds ~= %.2f days)",
+                retention_seconds, retention_seconds / 86400.0
+            )
+            try:
+                while True:
+                    try:
+                        deleted = self.db.delete_old_messages(retention_seconds)
+                        if deleted:
+                            logger.info(
+                                "[prune] deleted %d old message mappings from db.",
+                                deleted
+                            )
+
+                    except Exception:
+                        logger.exception("[prune] delete_old_messages failed")
+
+                    await asyncio.sleep(60 * 60)
+            except asyncio.CancelledError:
+                logger.info("[prune] pruner task cancelled; exiting gracefully")
+                raise
+
+        # Spawn the task
+        self._prune_task = asyncio.create_task(_runner(), name="prune-old-messages")
+        return self._prune_task
 
     async def _shutdown(self):
         """
@@ -3706,6 +3807,7 @@ class ServerReceiver:
         await _cancel_and_wait(getattr(self, "_flush_bg_task", None), "flush")
         await _cancel_and_wait(getattr(self, "_sitemap_task", None), "sitemap")
         await _cancel_and_wait(getattr(self, "_ws_task", None), "ws")
+        await _cancel_and_wait(getattr(self, "_prune_task", None), "prune-old-messages")
 
         setattr(self, "_suppress_backfill_dm", True)
         try:
