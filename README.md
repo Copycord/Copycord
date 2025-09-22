@@ -136,6 +136,8 @@ This will pull the latest images and start the web ui: http://localhost:8080
 | `HOST_GUILD_ID`          | none    | The ID of the target server you want to clone                               |
 | `CLONE_GUILD_ID`         | none    | The ID of the clone guild you created                                       |
 | `COMMAND_USERS`          | none    | User IDs allowed to execute slash commands in the clone server              |
+| `EDIT_MESSAGES`          | true    | Edit cloned messages after they are edited in the host server.              |
+| `DELETE_MESSAGES`        | true    | Delete cloned messages after they are deleted in the host server.           |
 | `DELETE_CHANNELS`        | true    | Delete categories + channels when deleted in the target server              |
 | `DELETE_THREADS`         | true    | Delete threads when deleted in the target server                            |
 | `DELETE_ROLES`           | true    | Delete roles when deleted in the target server                              |
