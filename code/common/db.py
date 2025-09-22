@@ -270,8 +270,9 @@ class DBManager:
         """
         )
         self.conn.commit()
-        
-        self.conn.execute("""
+
+        self.conn.execute(
+            """
         CREATE TABLE IF NOT EXISTS messages (
             original_guild_id    INTEGER NOT NULL,
             original_channel_id  INTEGER NOT NULL,
@@ -282,10 +283,17 @@ class DBManager:
             created_at           INTEGER NOT NULL DEFAULT (strftime('%s','now')),
             updated_at           INTEGER NOT NULL DEFAULT (strftime('%s','now'))
         );
-        """)
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_orig_chan ON messages(original_channel_id);")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_clone_msg ON messages(cloned_message_id);")
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);")
+        """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_orig_chan ON messages(original_channel_id);"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_clone_msg ON messages(cloned_message_id);"
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);"
+        )
 
     def _table_exists(self, name: str) -> bool:
         row = self.conn.execute(
@@ -923,7 +931,7 @@ class DBManager:
             ORDER BY guild_id ASC, LOWER(keyword) ASC, filter_user_id ASC, channel_id ASC
             """
         ).fetchall()
-        
+
     def get_all_announcement_subscriptions_flat(self) -> list[sqlite3.Row]:
         """
         Returns every row in announcement_subscriptions with no grouping.
@@ -937,7 +945,9 @@ class DBManager:
             """
         ).fetchall()
 
-    def get_effective_announcement_triggers(self, guild_id: int) -> dict[str, list[tuple[int, int]]]:
+    def get_effective_announcement_triggers(
+        self, guild_id: int
+    ) -> dict[str, list[tuple[int, int]]]:
         """
         Triggers that apply to this guild: rows where guild_id IN (guild_id, 0).
         Returns {keyword: [(filter_user_id, channel_id), ...]} with duplicates removed.
@@ -953,9 +963,10 @@ class DBManager:
 
         out: dict[str, set[tuple[int, int]]] = {}
         for r in rows:
-            out.setdefault(r["keyword"], set()).add((int(r["filter_user_id"]), int(r["channel_id"])))
+            out.setdefault(r["keyword"], set()).add(
+                (int(r["filter_user_id"]), int(r["channel_id"]))
+            )
         return {k: list(v) for k, v in out.items()}
-
 
     def add_onjoin_subscription(self, guild_id: int, user_id: int) -> bool:
         cur = self.conn.execute(
@@ -1340,13 +1351,6 @@ class DBManager:
             (int(cloned_message_id),),
         ).fetchone()
 
-    def delete_message_mapping(self, original_message_id: int) -> None:
-        with self.lock, self.conn:
-            self.conn.execute(
-                "DELETE FROM messages WHERE original_message_id = ?",
-                (int(original_message_id),),
-            )
-            
     def delete_old_messages(self, older_than_seconds: int = 7 * 24 * 3600) -> int:
         """
         Delete rows from messages where created_at is older than now - older_than_seconds.
@@ -1362,3 +1366,19 @@ class DBManager:
                 (int(older_than_seconds),),
             )
             return self.conn.total_changes - before
+
+    def delete_message_mapping(self, original_message_id: int) -> int:
+        """
+        Delete a single mapping row by original message id.
+        Returns the number of rows deleted (0 or 1).
+        """
+        try:
+            cur = self._conn.cursor()
+            cur.execute(
+                "DELETE FROM messages WHERE original_message_id = ?",
+                (int(original_message_id),),
+            )
+            self._conn.commit()
+            return cur.rowcount or 0
+        except Exception:
+            return 0
