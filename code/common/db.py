@@ -1373,12 +1373,12 @@ class DBManager:
         Returns the number of rows deleted (0 or 1).
         """
         try:
-            cur = self._conn.cursor()
+            cur = self.conn.cursor()
             cur.execute(
                 "DELETE FROM messages WHERE original_message_id = ?",
                 (int(original_message_id),),
             )
-            self._conn.commit()
+            self.conn.commit()
             return cur.rowcount or 0
         except Exception:
             return 0
