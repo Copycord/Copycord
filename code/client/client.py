@@ -95,6 +95,10 @@ class ClientListener:
         self._dm_export_running: bool = False
         self.bot.event(self.on_ready)
         self.bot.event(self.on_message)
+        self.bot.event(self.on_message_edit)
+        self.bot.event(self.on_raw_message_edit)
+        self.bot.event(self.on_message_delete)
+        self.bot.event(self.on_raw_message_delete)
         self.bot.event(self.on_guild_channel_create)
         self.bot.event(self.on_guild_channel_delete)
         self.bot.event(self.on_guild_channel_update)
@@ -916,6 +920,244 @@ class ClientListener:
             message.channel.name,
             message.author.name,
         )
+
+    async def on_message_edit(self, before: discord.Message, after: discord.Message):
+        """
+        When an upstream message is edited, forward the new content/embeds/components.
+        """
+        if not self.config.ENABLE_CLONING:
+            return
+        if not self.config.EDIT_MESSAGES:
+            return
+        if not self._is_host_guild(after.guild):
+            return
+        if self.should_ignore(after):
+            return
+
+        raw = after.content or ""
+        system = getattr(after, "system_content", "") or ""
+        if not raw and system:
+            content = system
+            author = "System"
+        else:
+            content = raw
+            author = after.author.name
+
+        attachments = [
+            {"url": att.url, "filename": att.filename, "size": att.size}
+            for att in after.attachments
+        ]
+
+        raw_embeds = [e.to_dict() for e in after.embeds]
+        mention_map = await self.msg.build_mention_map(after, raw_embeds)
+        embeds = [self.msg.sanitize_embed_dict(e, after, mention_map) for e in raw_embeds]
+        content = self.msg.sanitize_inline(content, after, mention_map)
+
+        components: list[dict] = []
+        for comp in after.components:
+            try:
+                components.append(comp.to_dict())
+            except NotImplementedError:
+                row: dict = {"type": getattr(comp, "type", None), "components": []}
+                for child in getattr(comp, "children", []):
+                    child_data: dict = {}
+                    for attr in ("custom_id", "label", "style", "url", "disabled"):
+                        if hasattr(child, attr):
+                            child_data[attr] = getattr(child, attr)
+                    if hasattr(child, "emoji") and child.emoji:
+                        emoji = child.emoji
+                        emoji_data: dict = {}
+                        if hasattr(emoji, "name"):
+                            emoji_data["name"] = emoji.name
+                        if getattr(emoji, "id", None):
+                            emoji_data["id"] = emoji.id
+                        child_data["emoji"] = emoji_data
+                    row["components"].append(child_data)
+                components.append(row)
+
+        is_thread = after.channel.type in (
+            ChannelType.public_thread,
+            ChannelType.private_thread,
+        )
+        stickers_payload = self.msg.stickers_payload(getattr(after, "stickers", []))
+
+        payload = {
+            "type": "thread_message_edit" if is_thread else "message_edit",
+            "data": {
+                "guild_id": getattr(after.guild, "id", None),
+                "message_id": getattr(after, "id", None),
+                "channel_id": after.channel.id,
+                "channel_name": getattr(after.channel, "name", str(after.channel.id)),
+                "channel_type": after.channel.type.value,
+                "author": author,
+                "author_id": after.author.id,
+                "avatar_url": (
+                    str(after.author.display_avatar.url)
+                    if after.author.display_avatar
+                    else None
+                ),
+                "content": content,
+                "timestamp": str(after.edited_at or after.created_at),
+                "attachments": attachments,          # kept for completeness
+                "components": components,
+                "stickers": stickers_payload,
+                "embeds": embeds,
+                **(
+                    {
+                        "thread_parent_id": after.channel.parent.id,
+                        "thread_parent_name": after.channel.parent.name,
+                        "thread_id": after.channel.id,
+                        "thread_name": after.channel.name,
+                    }
+                    if is_thread
+                    else {}
+                ),
+            },
+        }
+        await self.ws.send(payload)
+        logger.info("[✏️] Message edit detected in #%s by %s → sent to server",
+                    payload["data"]["channel_name"], author)
+      
+
+    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):
+        if not self.config.ENABLE_CLONING or not self.config.EDIT_MESSAGES:
+            return
+
+        channel = self.bot.get_channel(payload.channel_id)
+        guild = getattr(channel, "guild", None)
+        if not guild or not self._is_host_guild(guild):
+            return
+
+        msg = payload.cached_message
+        data = payload.data or {}
+
+        content = None
+        embeds = None
+        author = None
+        timestamp = None
+
+        if msg:
+            raw_embeds = [e.to_dict() for e in msg.embeds]
+            mention_map = await self.msg.build_mention_map(msg, raw_embeds)
+            embeds = [self.msg.sanitize_embed_dict(e, msg, mention_map) for e in raw_embeds]
+            content = self.msg.sanitize_inline(msg.content or "", msg, mention_map)
+            author = getattr(msg.author, "name", None)
+            timestamp = str(msg.edited_at or msg.created_at)
+        else:
+            content = data.get("content")
+            embeds = data.get("embeds")    
+            author = None   
+            timestamp = data.get("edited_timestamp") or data.get("timestamp")
+
+        is_thread = getattr(channel, "type", None) in (discord.ChannelType.public_thread,
+                                                    discord.ChannelType.private_thread)
+
+        out = {
+            "type": "thread_message_edit" if is_thread else "message_edit",
+            "data": {
+                "guild_id": payload.guild_id,
+                "message_id": payload.message_id,
+                "channel_id": payload.channel_id,
+                "channel_name": getattr(channel, "name", str(payload.channel_id)),
+                "channel_type": getattr(channel, "type", None).value if getattr(channel, "type", None) else None,
+                "author": author,  # may be None for raw
+                "author_id": getattr(getattr(msg, "author", None), "id", None) if msg else None,
+                "avatar_url": (str(msg.author.display_avatar.url) if msg and msg.author.display_avatar else None),
+                "content": content,
+                "timestamp": timestamp,
+                "embeds": embeds,
+                **(
+                    {
+                        "thread_parent_id": channel.parent.id,
+                        "thread_parent_name": channel.parent.name,
+                        "thread_id": channel.id,
+                        "thread_name": channel.name,
+                    } if is_thread else {}
+                ),
+            },
+        }
+
+        await self.ws.send(out)
+        logger.info("[✏️] Message edit detected in #%s → sent to server", out["data"]["channel_name"])
+     
+        
+    async def on_message_delete(self, message: discord.Message):
+        """
+        When an upstream message is deleted, tell the server to delete the cloned webhook message.
+        """
+        if not self.config.ENABLE_CLONING:
+            return
+        if not self.config.DELETE_MESSAGES:
+            return
+        if not getattr(message, "guild", None) or not self._is_host_guild(message.guild):
+            return
+        if self.should_ignore(message):
+            return
+
+        is_thread = message.channel.type in (ChannelType.public_thread, ChannelType.private_thread)
+        payload = {
+            "type": "thread_message_delete" if is_thread else "message_delete",
+            "data": {
+                "guild_id": getattr(message.guild, "id", None),
+                "message_id": getattr(message, "id", None),
+                "channel_id": message.channel.id,
+                "channel_name": getattr(message.channel, "name", str(message.channel.id)),
+                "channel_type": message.channel.type.value,
+                **(
+                    {
+                        "thread_parent_id": message.channel.parent.id,
+                        "thread_parent_name": message.channel.parent.name,
+                        "thread_id": message.channel.id,
+                        "thread_name": message.channel.name,
+                    }
+                    if is_thread else {}
+                ),
+            },
+        }
+        await self.ws.send(payload)
+        logger.info("[🗑️] Message delete detected in #%s → sent to server", payload["data"]["channel_name"])
+
+
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
+        """
+        Same as above but for uncached messages.
+        """
+        if payload.cached_message is not None:
+            return
+    
+        if not self.config.ENABLE_CLONING or not self.config.DELETE_MESSAGES:
+            return
+
+        channel = self.bot.get_channel(payload.channel_id)
+        guild = getattr(channel, "guild", None)
+        if not guild or not self._is_host_guild(guild):
+            return
+
+        # Uncached message: send minimal info
+        is_thread = getattr(channel, "type", None) in (ChannelType.public_thread, ChannelType.private_thread)
+        payload_out = {
+            "type": "thread_message_delete" if is_thread else "message_delete",
+            "data": {
+                "guild_id": getattr(guild, "id", None),
+                "message_id": int(payload.message_id),
+                "channel_id": int(payload.channel_id),
+                "channel_name": getattr(channel, "name", str(payload.channel_id)),
+                "channel_type": getattr(channel, "type", None).value if getattr(channel, "type", None) else None,
+                **(
+                    {
+                        "thread_parent_id": channel.parent.id,
+                        "thread_parent_name": channel.parent.name,
+                        "thread_id": channel.id,
+                        "thread_name": channel.name,
+                    }
+                    if is_thread else {}
+                ),
+            },
+        }
+        await self.ws.send(payload_out)
+        logger.info("[🗑️] Message delete detected in #%s → sent to server", payload_out["data"]["channel_name"])
+
+
 
     async def on_thread_delete(self, thread: discord.Thread):
         """
