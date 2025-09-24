@@ -3,6 +3,7 @@ from typing import Tuple, List
 from time import perf_counter
 from threading import Thread
 import aiohttp
+from discord.http import Route
 
 
 class HyperCheck:
@@ -10,7 +11,6 @@ class HyperCheck:
         self.bot = bot
         self.config = config
         self.logger = logger
-        self.session: aiohttp.ClientSession | None = None
 
         self._bot_blacklist = ("722196398635745312",)
 
@@ -89,11 +89,6 @@ class HyperCheck:
             "logs",
             "vc",
         )
-
-    async def _get_session(self) -> aiohttp.ClientSession:
-        if self.session is None or self.session.closed:
-            self.session = aiohttp.ClientSession()
-        return self.session
 
     def _parse_properties(self, properties) -> Tuple[bool, bool]:
         membergate = False
@@ -174,44 +169,29 @@ class HyperCheck:
 
     async def _accept_membergate(self, guild_id: int) -> bool:
         try:
-            session = await self._get_session()
-            token = self.config.CLIENT_TOKEN.strip()
-
-            headers = {
-                "Authorization": token
-            }
-
-            async with session.get(
-                f"https://discord.com/api/v9/guilds/{guild_id}/member-verification?with_guild=false",
-                headers=headers,
-            ) as resp:
-                if resp.status != 200:
-                    self.logger.error(f"Could not fetch membergate data: {resp.status}")
-                    return False
-                membergate_data = await resp.json()
-
-            if "form_fields" not in membergate_data:
+            # GET the form
+            route = Route(
+                "GET",
+                "/guilds/{guild_id}/member-verification",
+                guild_id=guild_id
+            )
+            data = await self.bot.http.request(route, params={"with_guild": "false"})
+            if "form_fields" not in data:
                 self.logger.error("No form fields in membergate data")
                 return False
 
-            for field in membergate_data["form_fields"]:
+            for field in data["form_fields"]:
                 field["response"] = True
 
-            async with session.put(
-                f"https://discord.com/api/v9/guilds/{guild_id}/requests/@me",
-                headers=headers,
-                json=membergate_data,
-            ) as resp:
-                if resp.status == 201:
-                    return True
-                elif resp.status == 429:
-                    retry_after = (await resp.json()).get("retry_after", 5)
-                    self.logger.warning(f"Rate limited, retrying after {retry_after}s")
-                    await asyncio.sleep(retry_after)
-                    return False
-                else:
-                    self.logger.error(f"Failed to accept membergate: {resp.status}")
-                    return False
+            # PUT back the response
+            route = Route(
+                "PUT",
+                "/guilds/{guild_id}/requests/@me",
+                guild_id=guild_id
+            )
+            resp = await self.bot.http.request(route, json=data)
+
+            return True if resp else False
 
         except Exception as e:
             self.logger.error(f"Error in membergate acceptance: {e}")
@@ -219,32 +199,20 @@ class HyperCheck:
 
     async def _accept_onboarding(self, guild_id: int) -> bool:
         try:
-            session = await self._get_session()
-            token = self.config.CLIENT_TOKEN.strip()
-
-            headers = {
-                "Authorization": token
-            }
-
-            async with session.get(
-                f"https://discord.com/api/v9/guilds/{guild_id}/onboarding",
-                headers=headers,
-            ) as resp:
-                if resp.status != 200:
-                    self.logger.error(f"Could not fetch onboarding data: {resp.status}")
-                    return False
-                onboarding_data = await resp.json()
-
-            if "prompts" not in onboarding_data:
+            # GET onboarding info
+            route = Route("GET", "/guilds/{guild_id}/onboarding", guild_id=guild_id)
+            data = await self.bot.http.request(route)
+            if "prompts" not in data:
                 self.logger.error("No prompts in onboarding data")
                 return False
 
+            # build payload
             timestamp = int(perf_counter() * 1000)
             onboarding_responses = []
             onboarding_prompts_seen = {}
             onboarding_responses_seen = {}
 
-            for prompt in onboarding_data["prompts"]:
+            for prompt in data["prompts"]:
                 onboarding_prompts_seen[str(prompt["id"])] = timestamp
                 if prompt["options"]:
                     onboarding_responses.append(prompt["options"][0]["id"])
@@ -257,12 +225,15 @@ class HyperCheck:
                 "onboarding_responses_seen": onboarding_responses_seen,
             }
 
-            async with session.post(
-                f"https://discord.com/api/v9/guilds/{guild_id}/onboarding-responses",
-                headers=headers,
-                json=payload,
-            ) as resp:
-                return resp.status == 200
+            # POST the responses
+            route = Route(
+                "POST",
+                "/guilds/{guild_id}/onboarding-responses",
+                guild_id=guild_id
+            )
+            await self.bot.http.request(route, json=payload)
+
+            return True
 
         except Exception as e:
             self.logger.error(f"Error in onboarding acceptance: {e}")
