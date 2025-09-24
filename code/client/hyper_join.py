@@ -12,7 +12,56 @@ class HyperCheck:
         self.config = config
         self.logger = logger
 
-        self._bot_blacklist = ("722196398635745312",)
+        self._bot_blacklist = (
+            "722196398635745312",
+            "553610702439579669",
+            "1003836018237120512",
+            "641385620530266125",
+            "642660768755613706",
+            "876527983698001991",
+            "880454049370083329",
+            "718493970652594217",
+            "725801889874313358",
+            "880082829566967848",
+            "947546187878236233",
+            "843107317129019412",
+            "557628352828014614",
+            "508391840525975553",
+            "576395920787111936",
+            "1012079902310277222",
+            "851885408328482896",
+            "980269252663713822",
+            "663515546557480990",
+            "955466249482150018",
+            "735147814878969968",
+            "991459501242847373",
+            "603541055530598400",
+            "294882584201003009",
+            "961746288628600922",
+            "718501137484873748",
+            "270904126974590976",
+            "368521195940741122",
+            "530082442967646230",
+            "675996677366218774",
+            "474841349968101386",
+            "490039330388180992",
+            "512227974893010954",
+            "717716451699589143",
+            "696870234262339614",
+            "789822495141658674",
+            "574652751745777665",
+            "534589798267224065",
+            "623545336484462593",
+            "620191140473470976",
+            "566009524574617600",
+            "704810036547026954",
+            "318312854816161792",
+            "957635842631950379",
+            "426537812993638400",
+            "700070794444669039",
+            "825617171589759006",
+            "710034409214181396",
+        )
 
         self._verify_list_high = (
             "rule",
@@ -171,9 +220,7 @@ class HyperCheck:
         try:
             # GET the form
             route = Route(
-                "GET",
-                "/guilds/{guild_id}/member-verification",
-                guild_id=guild_id
+                "GET", "/guilds/{guild_id}/member-verification", guild_id=guild_id
             )
             data = await self.bot.http.request(route, params={"with_guild": "false"})
             if "form_fields" not in data:
@@ -184,11 +231,7 @@ class HyperCheck:
                 field["response"] = True
 
             # PUT back the response
-            route = Route(
-                "PUT",
-                "/guilds/{guild_id}/requests/@me",
-                guild_id=guild_id
-            )
+            route = Route("PUT", "/guilds/{guild_id}/requests/@me", guild_id=guild_id)
             resp = await self.bot.http.request(route, json=data)
 
             return True if resp else False
@@ -227,9 +270,7 @@ class HyperCheck:
 
             # POST the responses
             route = Route(
-                "POST",
-                "/guilds/{guild_id}/onboarding-responses",
-                guild_id=guild_id
+                "POST", "/guilds/{guild_id}/onboarding-responses", guild_id=guild_id
             )
             await self.bot.http.request(route, json=payload)
 
