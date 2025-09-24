@@ -74,37 +74,51 @@ class DBManager:
         """
         )
 
-        c.execute(
-            """
-        CREATE TABLE IF NOT EXISTS channel_mappings (
-        original_channel_id           INTEGER PRIMARY KEY,
-        original_channel_name         TEXT    NOT NULL,
-        cloned_channel_id             INTEGER UNIQUE,
-        clone_channel_name            TEXT,
-        channel_webhook_url           TEXT,
-        original_parent_category_id   INTEGER,
-        cloned_parent_category_id     INTEGER,
-        channel_type                  INTEGER NOT NULL DEFAULT 0,
-        last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(original_parent_category_id)
-            REFERENCES category_mappings(original_category_id) ON DELETE SET NULL,
-        FOREIGN KEY(cloned_parent_category_id)
-            REFERENCES category_mappings(cloned_category_id)   ON DELETE SET NULL
-        );
-        """
-        )
-
-        c.execute(
-            """
-        CREATE INDEX IF NOT EXISTS ix_channel_parent_orig
-        ON channel_mappings(original_parent_category_id);
-        """
-        )
-        c.execute(
-            """
-        CREATE INDEX IF NOT EXISTS ix_channel_parent_clone
-        ON channel_mappings(cloned_parent_category_id);
-        """
+        self._ensure_table(
+            name="channel_mappings",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    original_channel_id           INTEGER PRIMARY KEY,
+                    original_channel_name         TEXT    NOT NULL,
+                    cloned_channel_id             INTEGER UNIQUE,
+                    cloned_channel_name           TEXT,
+                    channel_webhook_url           TEXT,
+                    original_parent_category_id   INTEGER,
+                    cloned_parent_category_id     INTEGER,
+                    channel_type                  INTEGER NOT NULL DEFAULT 0,
+                    last_updated                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(original_parent_category_id)
+                        REFERENCES category_mappings(original_category_id) ON DELETE SET NULL,
+                    FOREIGN KEY(cloned_parent_category_id)
+                        REFERENCES category_mappings(cloned_category_id)   ON DELETE SET NULL
+                );
+            """,
+            required_columns={
+                "original_channel_id",
+                "original_channel_name",
+                "cloned_channel_id",
+                "cloned_channel_name",
+                "channel_webhook_url",
+                "original_parent_category_id",
+                "cloned_parent_category_id",
+                "channel_type",
+                "last_updated",
+            },
+            copy_map={
+                "original_channel_id": "original_channel_id",
+                "original_channel_name": "original_channel_name",
+                "cloned_channel_id": "cloned_channel_id",
+                "cloned_channel_name": "clone_channel_name",
+                "channel_webhook_url": "channel_webhook_url",
+                "original_parent_category_id": "original_parent_category_id",
+                "cloned_parent_category_id": "cloned_parent_category_id",
+                "channel_type": "channel_type",
+                "last_updated": "last_updated",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS ix_channel_parent_orig  ON channel_mappings(original_parent_category_id);",
+                "CREATE INDEX IF NOT EXISTS ix_channel_parent_clone ON channel_mappings(cloned_parent_category_id);",
+            ],
         )
 
         c.execute(
