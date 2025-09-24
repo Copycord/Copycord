@@ -2,6 +2,7 @@ import asyncio
 from typing import Tuple, List
 from time import perf_counter
 from discord.http import Route
+import re
 
 
 class HyperCheck:
@@ -363,30 +364,39 @@ class HyperCheck:
         return clicked_emojis
 
     async def verify_in_server(
-        self, guild_id: int, properties: dict
+        self, guild_id: int | None, properties: dict, invite_code: str | None = None
     ) -> Tuple[int, int]:
-        """Main verification method adapted for discord.py"""
+        """Join (if invite given) and verify in a guild."""
         verifications = []
         verify_time = perf_counter()
 
+        # Join if not already in guild
+        if invite_code:
+            joined_id = await self._join_guild(invite_code)
+            if not joined_id:
+                self.logger.error(f"[Verify] Could not join guild with invite {invite_code}")
+                return (0, 0)
+            guild_id = joined_id
+
+        if guild_id is None:
+            self.logger.error("[Verify] No guild_id provided.")
+            return (0, 0)
+
+        # Run onboarding / membergate
         membergate, onboarding = self._parse_properties(properties)
 
         if onboarding:
-            onboarding_success = await self._accept_onboarding(guild_id)
-            if onboarding_success:
+            if await self._accept_onboarding(guild_id):
                 verifications.append("OnBoarding")
-                self.logger.info(f"Onboarding completed for guild {guild_id}")
 
         if membergate:
-            membergate_success = await self._accept_membergate(guild_id)
-            if membergate_success:
+            if await self._accept_membergate(guild_id):
                 verifications.append("MemberGate")
-                self.logger.info(f"MemberGate completed for guild {guild_id}")
             else:
-                self.logger.warning(f"MemberGate failed for guild {guild_id}")
+                self.logger.warning(f"[Verify] MemberGate failed for guild {guild_id}")
 
+        # Try emoji/button verification
         verification_channels = await self._parse_server_channels(guild_id)
-
         clicked_emoji = 0
         clicked_buttons = 0
 
@@ -402,10 +412,47 @@ class HyperCheck:
         verify_duration = perf_counter() - verify_time
         if verifications:
             self.logger.info(
-                f"Verified in server {guild_id}: {', '.join(verifications)} "
+                f"[Verify] Verified in guild {guild_id}: {', '.join(verifications)} "
                 f"({verify_duration:.2f}s)"
             )
         else:
-            self.logger.info(f"No verifications needed for server {guild_id}")
+            self.logger.info(f"[Verify] No verifications needed for guild {guild_id}")
 
         return clicked_emoji, clicked_buttons
+    
+    def _normalize_invite(self, invite: str) -> str:
+        """
+        Extract the invite code from a full URL or return raw code.
+        """
+        if not invite:
+            return ""
+
+        # Strip protocol & domain if present
+        match = re.search(r"(?:discord\.gg/|discord\.com/invite/)([a-zA-Z0-9-]+)", invite)
+        if match:
+            return match.group(1)
+
+        return invite.strip()
+
+    async def _join_guild(self, invite_code: str) -> int | None:
+        """
+        Join a guild using an invite code. (This doesn't work captcha is required)
+        """
+        try:
+            invite_code = self._normalize_invite(invite_code)
+
+            route = Route("POST", "/invites/{invite_code}", invite_code=invite_code)
+
+            resp = await self.bot.http.request(route, json={})
+
+            if not resp or "guild" not in resp:
+                self.logger.error(f"[Join] Invalid response for invite {invite_code}: {resp}")
+                return None
+
+            guild_id = int(resp["guild"]["id"])
+            self.logger.info(f"[Join] Successfully joined guild {guild_id} via {invite_code}")
+            return guild_id
+
+        except Exception as e:
+            self.logger.error(f"[Join] Failed to join guild via {invite_code}: {e}")
+            return None

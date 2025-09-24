@@ -2511,29 +2511,30 @@ class ClientListener:
         """Handle verification for a single guild"""
         guild_id = data.get("guild_id")
         properties = data.get("properties", {})
-        
-        if not guild_id:
-            return {"ok": False, "error": "No guild ID provided"}
+        invite = data.get("invite")
+
+        if not guild_id and not invite:
+            return {"ok": False, "error": "No guild ID or invite provided"}
         
         try:
-            guild_id_int = int(guild_id)
-            emoji, buttons = await self.hypercheck.verify_in_server(guild_id_int, properties)
+            guild_id_int = int(guild_id) if guild_id else None
+            emoji, buttons = await self.hypercheck.verify_in_server(
+                guild_id_int, properties, invite_code=invite
+            )
             
             return {
                 "ok": True,
                 "type": "verification_result",
                 "data": {
-                    "guild_id": guild_id,
+                    "guild_id": guild_id or "joined_via_invite",
+                    "invite": invite,
                     "emoji_clicks": emoji,
                     "button_clicks": buttons,
-                    "success": True
-                }
+                    "success": True,
+                },
             }
         except Exception as e:
-            return {
-                "ok": False,
-                "error": str(e)
-            }
+            return {"ok": False, "error": str(e)}
 
 
     async def _shutdown(self):

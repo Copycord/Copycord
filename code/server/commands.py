@@ -1349,27 +1349,34 @@ class CloneCommands(commands.Cog):
         
     @commands.slash_command(
         name="verify_guild",
-        description="Join a guild.",
+        description="Join a guild using an ID or invite link/code.",
         guild_ids=[GUILD_ID],
     )
     async def verify_guild(
         self,
         ctx: discord.ApplicationContext,
-        guild_id: str = Option(str, "Target guild ID", required=True),
+        guild_id: str = Option(str, "Target guild ID", required=False),
+        invite: str = Option(str, "Invite link or code", required=False),
         member_verification: bool = Option(bool, "Bypass member verification gate", default=True),
         onboarding: bool = Option(bool, "Complete server onboarding", default=True),
     ):
         await ctx.defer(ephemeral=True)
 
-        try:
-            target_id = int(guild_id)
-        except ValueError:
+        if not guild_id and not invite:
             return await ctx.followup.send(
-                embed=self._err_embed(
-                    "Invalid Guild ID", f"`{guild_id}` is not a valid guild ID."
-                ),
+                embed=self._err_embed("Missing Input", "Provide either a guild ID or an invite link/code."),
                 ephemeral=True,
             )
+
+        target_id = None
+        if guild_id:
+            try:
+                target_id = int(guild_id)
+            except ValueError:
+                return await ctx.followup.send(
+                    embed=self._err_embed("Invalid Guild ID", f"`{guild_id}` is not a valid guild ID."),
+                    ephemeral=True,
+                )
 
         properties = {}
         if member_verification:
@@ -1381,11 +1388,12 @@ class CloneCommands(commands.Cog):
             "type": "verify_guild",
             "data": {
                 "guild_id": target_id,
+                "invite": invite,
                 "properties": properties,
                 "options": {
                     "member_verification": member_verification,
                     "onboarding": onboarding,
-                }
+                },
             },
         }
 
@@ -1396,17 +1404,19 @@ class CloneCommands(commands.Cog):
             options_desc.append("member verification")
         if onboarding:
             options_desc.append("onboarding")
-        
-        if options_desc:
-            description = f"Joining guild with: {', '.join(options_desc)}."
+
+        if invite:
+            desc_prefix = f"Joining via invite `{invite}`"
         else:
-            description = "Joining guild (no verification methods selected)."
+            desc_prefix = f"Joining guild `{guild_id}`"
+
+        if options_desc:
+            description = f"{desc_prefix} with: {', '.join(options_desc)}."
+        else:
+            description = f"{desc_prefix} (no verification methods selected)."
 
         return await ctx.followup.send(
-            embed=self._ok_embed(
-                "Guild Join Started",
-                description,
-            ),
+            embed=self._ok_embed("Guild Join Started", description),
             ephemeral=True,
         )
 
