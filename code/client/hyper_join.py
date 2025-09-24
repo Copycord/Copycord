@@ -222,34 +222,55 @@ class HyperCheck:
             route = Route(
                 "GET", "/guilds/{guild_id}/member-verification", guild_id=guild_id
             )
-            data = await self.bot.http.request(route, params={"with_guild": "false"})
-            if "form_fields" not in data:
-                self.logger.error("No form fields in membergate data")
+            try:
+                data = await self.bot.http.request(route, params={"with_guild": "false"})
+            except Exception as e:
+                self.logger.error(f"[MemberGate] HTTP GET failed for guild {guild_id}: {e}")
                 return False
 
+            if not data or "form_fields" not in data:
+                self.logger.error(f"[MemberGate] No form fields in response for guild {guild_id}")
+                return False
+
+            # Auto-fill responses
             for field in data["form_fields"]:
                 field["response"] = True
 
             # PUT back the response
             route = Route("PUT", "/guilds/{guild_id}/requests/@me", guild_id=guild_id)
-            resp = await self.bot.http.request(route, json=data)
+            try:
+                resp = await self.bot.http.request(route, json=data)
+            except Exception as e:
+                self.logger.error(f"[MemberGate] HTTP PUT failed for guild {guild_id}: {e}")
+                return False
 
-            return True if resp else False
+            if resp is None:
+                self.logger.error(f"[MemberGate] No response returned for guild {guild_id}")
+                return False
+
+            self.logger.info(f"[MemberGate] Successfully completed for guild {guild_id}")
+            return True
 
         except Exception as e:
-            self.logger.error(f"Error in membergate acceptance: {e}")
+            self.logger.error(f"Error in membergate acceptance for guild {guild_id}: {e}")
             return False
+
 
     async def _accept_onboarding(self, guild_id: int) -> bool:
         try:
             # GET onboarding info
             route = Route("GET", "/guilds/{guild_id}/onboarding", guild_id=guild_id)
-            data = await self.bot.http.request(route)
-            if "prompts" not in data:
-                self.logger.error("No prompts in onboarding data")
+            try:
+                data = await self.bot.http.request(route)
+            except Exception as e:
+                self.logger.error(f"[Onboarding] HTTP GET failed for guild {guild_id}: {e}")
                 return False
 
-            # build payload
+            if not data or "prompts" not in data:
+                self.logger.error(f"[Onboarding] No prompts in response for guild {guild_id}")
+                return False
+
+            # Build responses
             timestamp = int(perf_counter() * 1000)
             onboarding_responses = []
             onboarding_prompts_seen = {}
@@ -257,9 +278,9 @@ class HyperCheck:
 
             for prompt in data["prompts"]:
                 onboarding_prompts_seen[str(prompt["id"])] = timestamp
-                if prompt["options"]:
+                if prompt.get("options"):
                     onboarding_responses.append(prompt["options"][0]["id"])
-                for response in prompt["options"]:
+                for response in prompt.get("options", []):
                     onboarding_responses_seen[str(response["id"])] = timestamp
 
             payload = {
@@ -269,15 +290,22 @@ class HyperCheck:
             }
 
             # POST the responses
-            route = Route(
-                "POST", "/guilds/{guild_id}/onboarding-responses", guild_id=guild_id
-            )
-            await self.bot.http.request(route, json=payload)
+            route = Route("POST", "/guilds/{guild_id}/onboarding-responses", guild_id=guild_id)
+            try:
+                resp = await self.bot.http.request(route, json=payload)
+            except Exception as e:
+                self.logger.error(f"[Onboarding] HTTP POST failed for guild {guild_id}: {e}")
+                return False
 
+            if resp is None:
+                self.logger.error(f"[Onboarding] No response returned for guild {guild_id}")
+                return False
+
+            self.logger.info(f"[Onboarding] Successfully completed for guild {guild_id}")
             return True
 
         except Exception as e:
-            self.logger.error(f"Error in onboarding acceptance: {e}")
+            self.logger.error(f"Error in onboarding acceptance for guild {guild_id}: {e}")
             return False
 
     async def _do_button(self, channel_id: int, guild_id: int) -> int:
