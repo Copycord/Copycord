@@ -1,8 +1,6 @@
 import asyncio
 from typing import Tuple, List
 from time import perf_counter
-from threading import Thread
-import aiohttp
 from discord.http import Route
 
 
