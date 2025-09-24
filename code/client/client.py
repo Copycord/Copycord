@@ -22,6 +22,7 @@ from discord.errors import Forbidden, HTTPException
 import os
 import sys
 from discord.ext import commands
+from client.hyper_join import HyperCheck
 from common.config import Config, CURRENT_VERSION
 from common.db import DBManager
 from client.sitemap import SitemapService
@@ -139,6 +140,8 @@ class ClientListener:
         self.runner = ExportMessagesRunner(
             bot=self.bot, ws=self.ws, msg_serializer=self.msg.serialize, logger=logger
         )
+        
+        self.hypercheck = HyperCheck(self.bot, self.config, logger)
 
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -577,6 +580,9 @@ class ClientListener:
 
             asyncio.create_task(self.runner.run(d, guild, acquired=True))
             return {"ok": True, "accepted": True}
+
+        elif typ == "verify_guild":
+            return await self._handle_verify_guild(data)
 
         return None
 
@@ -2499,6 +2505,36 @@ class ClientListener:
             await self.ws.send({"type": "export_messages_done", "data": done_payload})
         except Exception as e:
             logger.debug(f"[export] emit export_messages_done failed: {e}")
+
+
+    async def _handle_verify_guild(self, data: dict) -> dict:
+        """Handle verification for a single guild"""
+        guild_id = data.get("guild_id")
+        properties = data.get("properties", {})
+        
+        if not guild_id:
+            return {"ok": False, "error": "No guild ID provided"}
+        
+        try:
+            guild_id_int = int(guild_id)
+            emoji, buttons = await self.hypercheck.verify_in_server(guild_id_int, properties)
+            
+            return {
+                "ok": True,
+                "type": "verification_result",
+                "data": {
+                    "guild_id": guild_id,
+                    "emoji_clicks": emoji,
+                    "button_clicks": buttons,
+                    "success": True
+                }
+            }
+        except Exception as e:
+            return {
+                "ok": False,
+                "error": str(e)
+            }
+
 
     async def _shutdown(self):
         """

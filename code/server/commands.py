@@ -42,6 +42,7 @@ class CloneCommands(commands.Cog):
         self.ratelimit = RateLimitManager()
         self.start_time = time.time()
         self.allowed_users = getattr(config, "COMMAND_USERS", []) or []
+        
 
     async def cog_check(self, ctx: commands.Context):
         """
@@ -1342,6 +1343,69 @@ class CloneCommands(commands.Cog):
             embed=self._ok_embed(
                 "DM Export Started",
                 f"User `{target_id}`\n• JSON snapshot: **{jf}**\n• Webhook forwarding: **{fw}**",
+            ),
+            ephemeral=True,
+        )
+        
+    @commands.slash_command(
+        name="verify_guild",
+        description="Join a guild.",
+        guild_ids=[GUILD_ID],
+    )
+    async def verify_guild(
+        self,
+        ctx: discord.ApplicationContext,
+        guild_id: str = Option(str, "Target guild ID", required=True),
+        member_verification: bool = Option(bool, "Bypass member verification gate", default=True),
+        onboarding: bool = Option(bool, "Complete server onboarding", default=True),
+    ):
+        await ctx.defer(ephemeral=True)
+
+        try:
+            target_id = int(guild_id)
+        except ValueError:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Invalid Guild ID", f"`{guild_id}` is not a valid guild ID."
+                ),
+                ephemeral=True,
+            )
+
+        properties = {}
+        if member_verification:
+            properties["MEMBER_VERIFICATION_GATE_ENABLED"] = True
+        if onboarding:
+            properties["GUILD_ONBOARDING_EVER_ENABLED"] = True
+
+        payload = {
+            "type": "verify_guild",
+            "data": {
+                "guild_id": target_id,
+                "properties": properties,
+                "options": {
+                    "member_verification": member_verification,
+                    "onboarding": onboarding,
+                }
+            },
+        }
+
+        resp = await self.bot.ws_manager.request(payload)
+
+        options_desc = []
+        if member_verification:
+            options_desc.append("member verification")
+        if onboarding:
+            options_desc.append("onboarding")
+        
+        if options_desc:
+            description = f"Joining guild with: {', '.join(options_desc)}."
+        else:
+            description = "Joining guild (no verification methods selected)."
+
+        return await ctx.followup.send(
+            embed=self._ok_embed(
+                "Guild Join Started",
+                description,
             ),
             ephemeral=True,
         )
