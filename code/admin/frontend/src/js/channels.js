@@ -3043,7 +3043,7 @@
                 state === "running"
                   ? "A clone for this channel is already running."
                   : "A clone launch is already in progress.",
-                { type: "info" },
+                { type: "warning" },
                 15000
               );
               closeBackfillDialog();
