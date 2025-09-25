@@ -1878,7 +1878,7 @@
       if (!ctx || ctx.type !== "channel" || !ctx.id) {
         hideMenu();
         window.showToast("This item is not an orphan channel.", {
-          type: "warn",
+          type: "warning",
         });
         return;
       }
@@ -1901,7 +1901,7 @@
 
       if (!isOrphanChannel) {
         hideMenu();
-        window.showToast("This is not an orphan channel.", { type: "warn" });
+        window.showToast("This is not an orphan channel.", { type: "warning" });
         return;
       }
 
@@ -1930,7 +1930,7 @@
       if (!ctx || ctx.type !== "orphan-cat" || !ctx.id) {
         hideMenu();
         window.showToast("This item is not an orphan category.", {
-          type: "warn",
+          type: "warning",
         });
         return;
       }
@@ -2321,7 +2321,7 @@
                 t === "backfill_busy"
                   ? "A clone for this channel is already running."
                   : "Clone started…",
-                { type: "info" }
+                { type: "warning" }
               );
             }
             closeBackfillDialog();
@@ -2471,7 +2471,7 @@
                 if (isActuallyDeleted(r)) {
                   const k = `ok:${idKey}`;
                   if (!batchToastSeen.has(k)) {
-                    window.showToast(`Deleted "${name}"`, { type: "good" });
+                    window.showToast(`Deleted "${name}"`, { type: "success" });
                     batchToastSeen.add(k);
                   }
                 } else {
@@ -2488,8 +2488,8 @@
                     reason === "protected" ||
                     reason === "not_found" ||
                     String(reason).startsWith("not_")
-                      ? "warn"
-                      : "danger";
+                      ? "warning"
+                      : "error";
                   const k = `reason:${idKey}:${reason}`;
                   if (!batchToastSeen.has(k)) {
                     window.showToast(msgTxt, { type: variant });
@@ -2547,7 +2547,7 @@
 
               if (initiatedAny) {
                 window.showToast(`Deleted ${p.ids.length} item(s).`, {
-                  type: "good",
+                  type: "success",
                 });
               }
 
@@ -2964,7 +2964,7 @@
                 state === "running"
                   ? "A clone for this channel is already running."
                   : "A clone launch is already in progress.",
-                { type: "info" },
+                { type: "warning" },
                 15000
               );
               closeBackfillDialog();
@@ -2980,7 +2980,7 @@
           toastOncePersist(
             `bf:start:${cloneId}`,
             "Clone started…",
-            { type: "info" },
+            { type: "success" },
             15000
           );
           closeBackfillDialog();

@@ -138,7 +138,7 @@
             t === "scrape_busy"
               ? "A scrape is already running."
               : "Scrape started.",
-          type: t === "scrape_busy" ? "warning" : "info",
+          type: t === "scrape_busy" ? "warning" : "success",
         });
       }
 
