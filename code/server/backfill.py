@@ -696,6 +696,7 @@ class BackfillManager:
                 if primary_id and int(wid) == int(primary_id):
                     continue
                 try:
+                    logger.info("[🧹] Deleting msg-sync temp webhook, please wait...")
                     await self.ratelimit.acquire(ActionType.WEBHOOK_CREATE)  # reuse bucket
                     if dry_run:
                         logger.info("[🧹 DRY RUN] Would delete temp webhook %s in #%s", wid, clone_channel_id)
@@ -703,7 +704,7 @@ class BackfillManager:
                         wh = await self.bot.fetch_webhook(int(wid))
                         await wh.delete(reason="Backfill complete: remove temp webhook")
                         stats["deleted"] += 1
-                        logger.debug("[🧹] Deleted temp webhook %s in #%s", wid, clone_channel_id)
+                        logger.info("[🧹] Sync completed, deleted temp webhook %s in #%s", wid, clone_channel_id)
                 except Exception as e:
                     logger.debug("[cleanup] Could not delete webhook %s in #%s: %s", wid, clone_channel_id, e)
 
@@ -843,8 +844,8 @@ class BackfillManager:
                         await self.ratelimit.acquire(ActionType.WEBHOOK_CREATE)
                         await wh.delete(reason="Cleanup: remove non-primary webhook in clone channel")
                         stats["deleted"] += 1
-                        logger.info(
-                            "[🧹] Deleted non-primary webhook %s in #%s (name=%r)",
+                        logger.debug(
+                            "[🧹] Deleted extra webhook %s in #%s (name=%r)",
                             wh.id, clone_id, wh.name
                         )
                     except Exception as e:
