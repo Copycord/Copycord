@@ -1638,14 +1638,27 @@ async def api_backfill_start(payload: dict = Body(...)):
     st = await locks.status(channel_id)
     if st in ("launching", "running"):
         return JSONResponse(
-            {"ok": False, "error": "backfill-already-running"}, status_code=409
+            {
+                "ok": False,
+                "error": "backfill-already-running",
+                "channel_id": channel_id,
+                "state": st
+            },
+            status_code=409,
         )
 
     ok = await locks.try_acquire_launching(channel_id)
     if not ok:
         return JSONResponse(
-            {"ok": False, "error": "backfill-already-running"}, status_code=409
+            {
+                "ok": False,
+                "error": "backfill-already-running",
+                "channel_id": channel_id,
+                "state": "launching"
+            },
+            status_code=409,
         )
+        
     mode = payload.get("mode") or (payload.get("range") or {}).get("mode") or "all"
     after_iso = payload.get("since") or payload.get("after_iso")
     before_iso = (

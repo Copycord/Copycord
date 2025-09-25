@@ -23,6 +23,20 @@
   const cancelledThisSession = new Set();
   document.documentElement.classList.remove("boot");
 
+  const DEBUG_BF = true;
+  const dbg = (...a) => {
+    if (DEBUG_BF) console.debug(...a);
+  };
+  const group = (label, fn) => {
+    if (!DEBUG_BF) return fn();
+    console.groupCollapsed(label);
+    try {
+      fn();
+    } finally {
+      console.groupEnd();
+    }
+  };
+
   function setInert(el, on) {
     if (!el) return;
     try {
@@ -156,6 +170,7 @@
   }
 
   function setCardLoading(channelId, on, text = "Cloning…") {
+    dbg("[UI] setCardLoading", { channelId: String(channelId), on, text });
     const k = String(channelId);
     const card = document.querySelector(`.ch-card[data-cid="${k}"]`);
     if (!card) return;
@@ -237,11 +252,16 @@
     } catch {}
   }
   function rememberTask(taskId, channelId) {
+    dbg("[TASKMAP] remember", {
+      taskId: String(taskId),
+      channelId: String(channelId),
+    });
     if (!taskId || !channelId) return;
     taskMap.set(String(taskId), String(channelId));
     saveTaskMap();
   }
   function forgetTask(taskId) {
+    dbg("[TASKMAP] forget", { taskId: String(taskId) });
     if (!taskId) return;
     taskMap.delete(String(taskId));
     saveTaskMap();
@@ -595,23 +615,8 @@
     })()
   );
 
-  (function resetCloneStateImmediately() {
-    runningClones.clear();
-    launchingClones.clear();
-    try {
-      sessionStorage.setItem("bf:running", "[]");
-      sessionStorage.setItem("bf:launching", "[]");
-    } catch {}
-    requestAnimationFrame(() => {
-      document.querySelectorAll(".ch-card.is-cloning").forEach((card) => {
-        card.classList.remove("is-cloning");
-        card.removeAttribute("aria-busy");
-        card.querySelector(".ch-status")?.remove();
-      });
-    });
-  })();
-
   function setCloneLaunching(id, on) {
+    dbg("[STATE] launching", { id: String(id), on });
     const k = String(id);
     if (on) launchingClones.add(k);
     else launchingClones.delete(k);
@@ -630,6 +635,11 @@
     return runningClones.has(String(id));
   }
   function setCloneRunning(id, on) {
+    dbg("[STATE] running", {
+      id: String(id),
+      on,
+      runningClones: [...runningClones],
+    });
     const k = String(id);
     if (on) runningClones.add(k);
     else runningClones.delete(k);
@@ -639,10 +649,12 @@
     const card = document.querySelector(`.ch-card[data-cid="${k}"]`);
     if (card) {
       card.classList.toggle("is-cloning", on);
-      card.setAttribute("aria-busy", on ? "true" : "false");
+      if (on) card.setAttribute("aria-busy", "true");
+      else card.removeAttribute("aria-busy");
     }
   }
   function unlockBackfill(id) {
+    dbg("[STATE] unlockBackfill", { id: String(id) });
     if (id == null) return;
     setCloneLaunching(id, false);
     setCloneRunning(id, false);
@@ -976,9 +988,13 @@
     const merged = mergeOrphansIntoGroups(groups, q);
 
     document.querySelectorAll(".ch-card.is-cloning").forEach((el) => {
-      el.classList.remove("is-cloning");
-      el.removeAttribute("aria-busy");
-      el.querySelector(".ch-status")?.remove();
+      const id = String(el.dataset.cid || "");
+      const stillActive = launchingClones.has(id) || runningClones.has(id);
+      if (!stillActive) {
+        el.classList.remove("is-cloning");
+        el.removeAttribute("aria-busy");
+        el.querySelector(".ch-status")?.remove();
+      }
     });
 
     let entries = [...merged.entries()];
@@ -1123,15 +1139,13 @@
           }
         </div>
       `;
-        if (cloneIsRunning(ch.original_channel_id)) {
-          card.classList.add("is-cloning");
-          card.setAttribute("aria-busy", "true");
-          upsertStatusPill(card, "Cloning…");
-        }
         grid.appendChild(card);
       }
 
       root.appendChild(section);
+
+      for (const id of launchingClones) setCardLoading(id, true, "Cloning…");
+      for (const id of runningClones) setCardLoading(id, true, "Cloning…");
     }
   }
 
@@ -1955,8 +1969,6 @@
     if (bootedAfterGate) return;
     bootedAfterGate = true;
 
-    clearBackfillBootResidue();
-
     ensureIn();
     ensureOut();
     sendVerify({ action: "list" });
@@ -2143,6 +2155,8 @@
     const json = JSON.stringify(env);
     const sock = wsIn;
 
+    group("WS OUT → /ws/in (client)", () => dbg({ env }));
+
     if (payload?.action === "backfill") {
       const orig = String(
         bfChannelId ||
@@ -2162,7 +2176,7 @@
     }
 
     if (sock?.readyState === WebSocket.OPEN) {
-      console.debug("WS → client", env);
+      dbg("send → /ws/in", { readyState: sock.readyState, bytes: json.length });
       sock.send(json);
       return true;
     } else if (sock) {
@@ -2175,7 +2189,7 @@
       );
       return true;
     } else {
-      console.warn("WS IN not ready, cannot send", env);
+      dbg("WS IN not ready, cannot send", { env });
       window.showToast("Connection is not ready.", { type: "error" });
       return false;
     }
@@ -2191,9 +2205,9 @@
     const url = location.origin.replace(/^http/, "ws") + "/ws/in";
     const sock = new WebSocket(url);
     wsIn = sock;
-    sock.onopen = () => console.debug("WS IN connected");
-    sock.onclose = () => console.debug("WS IN closed");
-    sock.onerror = (e) => console.debug("WS IN error", e);
+    sock.onopen = () => dbg("WS IN connected");
+    sock.onclose = () => dbg("WS IN closed");
+    sock.onerror = (e) => dbg("WS IN error", e);
   }
 
   function ensureOut() {
@@ -2206,13 +2220,13 @@
     const url = location.origin.replace(/^http/, "ws") + "/ws/out";
     const sock = new WebSocket(url);
     wsOut = sock;
-    sock.onopen = () => console.debug("WS OUT connected");
+    sock.onopen = () => dbg("WS OUT connected");
     sock.onclose = () => {
-      console.debug("WS OUT closed");
+      dbg("WS OUT closed");
       resetAllCloningUI("ws_out_closed");
     };
     sock.onerror = (e) => {
-      console.debug("WS OUT error", e);
+      dbg("WS OUT error", e);
       resetAllCloningUI("ws_out_error");
     };
 
@@ -2266,11 +2280,20 @@
 
     wsOut.onmessage = (ev) => {
       try {
+        group("WS IN ← /ws/out", () =>
+          dbg({ raw: ev.data?.slice?.(0, 2048) || ev.data })
+        );
         const raw = JSON.parse(ev.data);
         const p = raw?.payload ?? raw;
         const kind = raw?.kind ?? p?.kind ?? "client";
         if (!p) return;
         const t = p?.type;
+        dbg("[/ws/out] parsed", {
+          kind,
+          type: t,
+          task_id: p?.task_id,
+          data: p?.data,
+        });
 
         if (kind === "client") {
           if (
@@ -2278,9 +2301,15 @@
             t === "backfill_ack" ||
             t === "backfill_busy"
           ) {
-            const cid =
-              backfillIdFrom(p.data) || backfillIdFrom(p) || bfChannelId;
-            if (p.task_id) rememberTask(p.task_id, cid || bfChannelId);
+            const cid = backfillIdFrom(p.data) || backfillIdFrom(p);
+            if (!cid) return;
+            dbg("[bf] started/ack/busy", {
+              t,
+              cid,
+              task_id: p?.task_id,
+              payload: p,
+            });
+            if (p.task_id && cid) rememberTask(p.task_id, cid);
             if (cid) {
               setCloneLaunching(cid, false);
               setCloneRunning(cid, true);
@@ -2303,17 +2332,17 @@
             const d = p.data || {};
             const delivered = d.delivered ?? d.count ?? 0;
             const total = d.total ?? undefined;
-            const cid =
-              backfillIdFrom(p.data) || backfillIdFrom(p) || bfChannelId;
+            const cid = backfillIdFrom(p.data) || backfillIdFrom(p);
+            if (!cid) return;
+            dbg("[bf] progress", { cid, delivered, total, payload: p });
             if (cid) setCardLoading(cid, true, "Cloning…");
-            console.debug("[backfill] progress", { delivered, total });
             return;
           }
 
           if (t === "backfill_done") {
             let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             if (!cid && p.task_id) cid = taskMap.get(String(p.task_id));
-            if (!cid && bfChannelId) cid = String(bfChannelId);
+            dbg("[bf] done", { cid, task_id: p?.task_id, payload: p });
             if (p.task_id) forgetTask(p.task_id);
 
             if (cid) {
@@ -2350,7 +2379,7 @@
           if (t === "backfill_cancelled") {
             let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             if (!cid && p.task_id) cid = taskMap.get(String(p.task_id));
-            if (!cid && bfChannelId) cid = String(bfChannelId);
+            dbg("[bf] cancelled", { cid, task_id: p?.task_id, payload: p });
             if (p.task_id) forgetTask(p.task_id);
 
             if (cid) {
@@ -2397,6 +2426,7 @@
         }
 
         if (kind === "verify") {
+          dbg("[verify] event", { type: p?.type, payload: p });
           if (p.type === "orphans") {
             orph.categories = Array.isArray(p.categories) ? p.categories : [];
             orph.channels = Array.isArray(p.channels) ? p.channels : [];
@@ -2527,7 +2557,7 @@
           }
         }
       } catch (e) {
-        console.debug("WS parse failed", e);
+        dbg("WS parse failed", e);
       }
     };
   }
@@ -2538,22 +2568,24 @@
     const json = JSON.stringify(env);
     const sock = wsIn;
 
+    group("WS OUT → /ws/in (verify)", () => dbg({ env }));
+
     if (sock?.readyState === WebSocket.OPEN) {
-      console.debug("WS → verify", env);
+      dbg("send → /ws/in (verify)", { bytes: json.length });
       sock.send(json);
     } else if (sock) {
       sock.addEventListener(
         "open",
         () => {
           if (sock.readyState === WebSocket.OPEN) {
-            console.debug("WS open, sending → verify", env);
+            dbg("WS open, sending → verify", { bytes: json.length });
             sock.send(json);
           }
         },
         { once: true }
       );
     } else {
-      console.warn("WS IN not ready, cannot send", env);
+      dbg("WS IN not ready, cannot send (verify)", { env });
     }
   }
 
@@ -2850,8 +2882,12 @@
       el?.addEventListener("blur", hideMenuMessage, true)
     );
 
-    form?.addEventListener("submit", (ev) => {
+    function onSubmit(ev) {
       ev.preventDefault();
+
+      if (cloneIsLocked(cloneId)) return;
+
+      if (startBtn) startBtn.disabled = true;
 
       const mode =
         dlg.querySelector('input[name="mode"]:checked')?.value || "all";
@@ -2866,11 +2902,13 @@
       if (mode === "since" && !sinceRaw) {
         setInvalid(sinceEl, true, "Pick a date.");
         sinceEl?.focus();
+        if (startBtn) startBtn.disabled = false;
         return;
       }
       if (mode === "last" && !lastOk) {
         setInvalid(lastEl, true, "Enter a valid number.");
         lastEl?.focus();
+        if (startBtn) startBtn.disabled = false;
         return;
       }
       if (mode === "between") {
@@ -2878,10 +2916,12 @@
           setInvalid(fromEl, !fromRaw, "Pick a date.");
           setInvalid(toEl, !toRaw, "Pick a date.");
           (fromRaw ? toEl : fromEl)?.focus();
+          if (startBtn) startBtn.disabled = false;
           return;
         }
         if (!validateBetween(fromEl, toEl)) {
           fromEl?.focus();
+          if (startBtn) startBtn.disabled = false;
           return;
         }
       }
@@ -2903,6 +2943,7 @@
           : {}),
       };
 
+      dbg("[REST] POST /api/backfill/start →", body);
       fetch("/api/backfill/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2912,13 +2953,17 @@
       })
         .then(async (res) => {
           const json = await res.json().catch(() => ({}));
+          dbg("[REST] /api/backfill/start ←", { status: res.status, json });
+
           if (!res.ok || json?.ok === false) {
             if (res.status === 409) {
+              const { state } = json || {};
               setCloneLaunching(cloneId, false);
-              setCloneRunning(cloneId, true);
               toastOncePersist(
-                `bf:start:${cloneId}`,
-                "Clone started…",
+                `bf:already:${cloneId}`,
+                state === "running"
+                  ? "A clone for this channel is already running."
+                  : "A clone launch is already in progress.",
                 { type: "info" },
                 15000
               );
@@ -2931,6 +2976,7 @@
             });
             return;
           }
+
           toastOncePersist(
             `bf:start:${cloneId}`,
             "Clone started…",
@@ -2942,8 +2988,20 @@
         .catch(() => {
           unlockBackfill(cloneId);
           window.showToast("Network error starting clone.", { type: "error" });
+        })
+        .finally(() => {
+          if (startBtn) startBtn.disabled = false;
         });
-    });
+    }
+
+    if (form) {
+      form.setAttribute("novalidate", "");
+      form.addEventListener("invalid", (e) => e.preventDefault(), true);
+
+      if (form.__bfSubmit) form.removeEventListener("submit", form.__bfSubmit);
+      form.__bfSubmit = onSubmit;
+      form.addEventListener("submit", onSubmit);
+    }
 
     setTimeout(() => dlg.querySelector("#bf-start")?.focus(), 0);
   }
