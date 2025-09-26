@@ -42,7 +42,7 @@ from server.discord_hooks import install_discord_rl_probe
 from server.emojis import EmojiManager
 from server.stickers import StickerManager
 from server.roles import RoleManager
-from server.backfill import BackfillManager, BackfillTask, BackfillTracker
+from server.backfill import BackfillManager, BackfillTracker
 from server.helpers import OnJoinService, VerifyController, WebhookDMExporter
 
 LOG_DIR = "/data"
@@ -135,11 +135,18 @@ class ServerReceiver:
         self._inflight_events: dict[int, asyncio.Event] = {}
         self._latest_edit_payload: dict[int, dict] = {}
         self._pending_deletes: set[int] = set()
+        self._bf_throttle: dict[int, dict] = {} 
+        self._bf_delay = 2.0  # seconds
         orig_on_connect = self.bot.on_connect
         self.bus = AdminBus(
             role="server", logger=logger, admin_ws_url=self.config.ADMIN_WS_URL
         )
-        self.backfills = BackfillTracker(self.bus)
+        self.backfills = BackfillTracker(
+            bus=self.bus,
+            on_done_cb=self.backfill.on_done, 
+            progress_provider=self.backfill.get_progress
+        )
+        self.backfill.tracker = self.backfills
         self.ratelimit = RateLimitManager()
         self.emojis = EmojiManager(
             bot=self.bot,
@@ -574,7 +581,7 @@ class ServerReceiver:
             )
             return
 
-        elif typ in ("backfill_done", "backfill_stream_end"):
+        elif typ == "backfill_stream_end":
             data = msg.get("data") or {}
             cid_raw = data.get("channel_id")
             try:
@@ -584,7 +591,8 @@ class ServerReceiver:
                 return
 
             try:
-                await self.backfill.on_done(orig)
+                await self.backfill.on_done(orig, wait_cleanup=True) # waits for backfill to finish
+
                 delivered, total_est = self.backfill.get_progress(orig)
                 await self.bus.publish(
                     "client",
@@ -625,6 +633,20 @@ class ServerReceiver:
 
         elif typ == "export_messages_done":
             await self.webhook_exporter.handle_ws_export_messages_done(data)
+            
+        elif typ == "backfills_status_query":
+            # Respond to Admin route with current backfill status
+            logger.debug("Backfill status query received")
+            try:
+                items = self.backfill.snapshot_in_progress()
+            except Exception as e:
+                logger.exception("Failed to snapshot backfills: %s", e)
+                items = {}
+
+            return {
+                "type": "backfills_status",
+                "data": {"items": items},
+            }
 
     async def process_sitemap_queue(self):
         """Continuously process only the newest sitemap, discarding any others."""
@@ -2576,6 +2598,26 @@ class ServerReceiver:
         if data.get("__buffered__"):
             parts.append("buffered")
         return f" [{' & '.join(parts)}]" if parts else ""
+    
+    def _bf_state(self, clone_id: int) -> dict:
+        st = self._bf_throttle.get(int(clone_id))
+        if st is None:
+            st = {"lock": asyncio.Lock(), "last": 0.0}
+            self._bf_throttle[int(clone_id)] = st
+        return st
+
+    async def _bf_gate(self, clone_id: int) -> None:
+        """Serialize and space backfill sends per clone channel."""
+        st = self._bf_state(int(clone_id))
+        async with st["lock"]:
+            now = asyncio.get_event_loop().time()
+            wait = max(0.0, (st["last"] + self._bf_delay) - now)
+            if wait:
+                await asyncio.sleep(wait)
+            st["last"] = asyncio.get_event_loop().time()
+
+    def _clear_bf_throttle(self, clone_id: int) -> None:
+        self._bf_throttle.pop(int(clone_id), None)
 
     async def forward_message(self, msg: Dict):
         """
@@ -2932,6 +2974,12 @@ class ServerReceiver:
                 await _get_primary_identity_for_source(source_id)
             )
             primary_customized = await _primary_name_changed_for_source(source_id)
+            
+            if is_backfill:
+                m = self.chan_map.get(source_id) or (self._load_mappings() or self.chan_map.get(source_id))
+                clone_for_gate = (m or {}).get("cloned_channel_id") or (m or {}).get("clone_channel_id")
+                if clone_for_gate:
+                    await self._bf_gate(int(clone_for_gate))
 
             is_primary = bool(primary_url and forced_url == primary_url)
             use_webhook_identity = bool(primary_customized and is_primary)
@@ -3048,6 +3096,8 @@ class ServerReceiver:
                     int(clone_id), url, create_missing=False
                 )
                 rl_key = f"channel:{clone_id}"
+                
+                await self._bf_gate(int(clone_id))
 
                 if primary_customized:
                     is_primary = bool(primary_url and url_to_use == primary_url)
@@ -3905,6 +3955,7 @@ class ServerReceiver:
         forced = dict(data)
         forced["__force_webhook_url__"] = url
         await self.forward_message(forced)
+        
 
     def _prune_old_messages_loop(
         self, retention_seconds: int | None = None
@@ -4074,6 +4125,7 @@ class ServerReceiver:
         # Still no mapping — queue it so that forward_message can honor it if/when the send succeeds
         self._pending_deletes.add(orig_mid)
         logger.debug("[🕒] Delete queued with no mapping/in-flight info for orig %s", orig_mid)
+        
 
     async def _shutdown(self):
         """
