@@ -13,9 +13,7 @@ from dataclasses import dataclass, field
 import logging
 from collections import defaultdict
 from datetime import datetime, timezone
-import re
 import time
-import unicodedata
 import uuid
 from server.rate_limiter import RateLimitManager, ActionType
 
