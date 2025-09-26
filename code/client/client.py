@@ -1725,7 +1725,7 @@ class ClientListener:
                     }
                 )
                 sent += 1
-                await asyncio.sleep(2)
+                await asyncio.sleep(0.02) # slight yield
 
                 now = loop.time()
                 if sent % PROGRESS_EVERY == 0 or (now - last_ping) >= 2.0:
