@@ -1706,6 +1706,14 @@ async def api_backfill_start(payload: dict = Body(...)):
     return JSONResponse({"ok": True})
 
 
+@app.get("/api/backfills/inflight")
+async def api_backfills_inflight():
+    # Ask the server for a snapshot over WS and return it.
+    res = await _ws_cmd(SERVER_AGENT_URL, {"type": "backfills_status_query"})
+    # Expected server shape: {"type":"backfills_status","data":{"items":{...}}}
+    items = (res or {}).get("data", {}).get("items", {})
+    return JSONResponse({"ok": True, "items": items})
+
 @app.get("/guilds")
 async def guilds_page(request: Request):
     env = _read_env()
