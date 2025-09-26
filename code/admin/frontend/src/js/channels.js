@@ -696,6 +696,137 @@
     })()
   );
 
+  const inflightByOrig = new Map();
+
+  function fmtProgress(v) {
+    const d = Number.isFinite(v?.delivered) ? v.delivered : null;
+    const t = Number.isFinite(v?.expected_total) ? v.expected_total : null;
+    if (d != null && t != null) return `Cloning… (${d}/${t})`;
+    if (d != null) return `Cloning… (${d})`;
+    return "Cloning…";
+  }
+
+  function getChannelDisplayName(cid) {
+    const id = String(cid);
+
+    const row = (data || []).find((r) => String(r.original_channel_id) === id);
+    if (row) {
+      const name =
+        (row.clone_channel_name && row.clone_channel_name.trim()) ||
+        row.original_channel_name ||
+        "";
+      return name.replace(/^#\s*/, "").trim();
+    }
+
+    // 2) Fallback to whatever's currently rendered
+    try {
+      const sel = `.ch-card[data-cid="${
+        window.CSS && CSS.escape ? CSS.escape(id) : id.replace(/"/g, '\\"')
+      }"] .ch-display-name`;
+      const el = document.querySelector(sel);
+      if (el) return el.textContent.replace(/^#\s*/, "").trim();
+    } catch {}
+    return null;
+  }
+
+  function announceBackfillDone(cid) {
+    unlockBackfill(cid);
+    setCardLoading(cid, false);
+
+    const wasCancelled =
+      cancelledThisSession.has(String(cid)) ||
+      !!sessionStorage.getItem(`bf:cancelled:${cid}`);
+
+    if (!wasCancelled && shouldAnnounceNow()) {
+      const chName = getChannelDisplayName(cid);
+      const msg = chName
+        ? `Clone completed for #${chName}.`
+        : `Clone completed (channel ${cid}).`;
+
+      toastOncePersist(`bf:done:${cid}`, msg, { type: "success" }, 15000);
+    }
+
+    const card = document.querySelector(`.ch-card[data-cid="${String(cid)}"]`);
+    if (card) {
+      let pill = card.querySelector(".ch-status");
+      if (!pill) {
+        pill = document.createElement("span");
+        pill.className = "ch-status";
+        card.querySelector(".ch-top-right")?.prepend(pill);
+      }
+      pill.textContent = "Synced ✓";
+      setTimeout(() => pill?.remove(), 2000);
+    }
+  }
+
+  function applyInflightUI(itemsObj) {
+    const prev = new Set(inflightByOrig.keys());
+
+    inflightByOrig.clear();
+    for (const [cid, info] of Object.entries(itemsObj || {})) {
+      inflightByOrig.set(String(cid), info || {});
+    }
+
+    document.querySelectorAll(".ch-card.is-cloning").forEach((el) => {
+      const id = String(el.dataset.cid || "");
+      const isClientLocked = launchingClones.has(id) || runningClones.has(id);
+      const isServerInflight = inflightByOrig.has(id);
+      if (!isClientLocked && !isServerInflight) {
+        setCardLoading(id, false);
+      }
+    });
+
+    for (const [cid, info] of inflightByOrig.entries()) {
+      runningClones.add(String(cid));
+      try {
+        localStorage.setItem("bf:running", JSON.stringify([...runningClones]));
+      } catch {}
+      setCardLoading(cid, true, fmtProgress(info));
+      const card = document.querySelector(
+        `.ch-card[data-cid="${String(cid)}"]`
+      );
+      updateProgressBar(
+        card,
+        info?.delivered ?? null,
+        info?.expected_total ?? null
+      );
+    }
+  }
+
+  /** Fetch current in-flight backfills and apply to UI */
+  async function fetchAndApplyInflight() {
+    try {
+      const res = await fetch("/api/backfills/inflight", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json?.ok !== false) {
+        applyInflightUI(json.items || {});
+      }
+    } catch {}
+  }
+
+  let inflightTimer = null;
+  function startInflightPolling() {
+    stopInflightPolling();
+    inflightTimer = setInterval(fetchAndApplyInflight, 10_000);
+  }
+  function stopInflightPolling() {
+    if (inflightTimer) {
+      clearInterval(inflightTimer);
+      inflightTimer = null;
+    }
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopInflightPolling();
+    else {
+      fetchAndApplyInflight();
+      startInflightPolling();
+    }
+  });
+
   function setCloneLaunching(id, on) {
     dbg("[STATE] launching", { id: String(id), on });
     const k = String(id);
@@ -2305,7 +2436,12 @@
     const url = location.origin.replace(/^http/, "ws") + "/ws/out";
     const sock = new WebSocket(url);
     wsOut = sock;
-    sock.onopen = () => dbg("WS OUT connected");
+
+    sock.onopen = () => {
+      dbg("WS OUT connected");
+      fetchAndApplyInflight();
+    };
+
     sock.onclose = () => {
       dbg("WS OUT closed");
       resetAllCloningUI("ws_out_closed");
@@ -2415,14 +2551,55 @@
           }
 
           if (t === "backfill_progress") {
-            const d = p.data || {};
-            const delivered = d.delivered ?? d.count ?? 0;
-            const total = d.total ?? undefined;
+            const d = (p && (p.data ?? p)) || {};
+
+            const delivered = d.delivered ?? d.applied ?? d.count ?? 0;
+            const total = d.expected_total ?? d.total ?? d.expected ?? null;
             const cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             if (!cid) return;
+
             dbg("[bf] progress", { cid, delivered, total, payload: p });
-            if (cid) setCardLoading(cid, true, "Cloning…");
-            return;
+
+            inflightByOrig.set(String(cid), {
+              delivered,
+              expected_total: total,
+            });
+
+            const text =
+              Number.isFinite(delivered) && Number.isFinite(total)
+                ? `Cloning… (${delivered}/${total})`
+                : Number.isFinite(delivered)
+                ? `Cloning… (${delivered})`
+                : "Cloning…";
+
+            setCardLoading(cid, true, text);
+
+            const card = document.querySelector(
+              `.ch-card[data-cid="${String(cid)}"]`
+            );
+            updateProgressBar(card, delivered, total);
+            applyInflightUI(Object.fromEntries(inflightByOrig));
+          }
+
+          if (t === "backfill_cleanup") {
+            const d = p.data || p;
+            const cid = String(d.channel_id || "");
+            if (!cid) return;
+            const card = document.querySelector(`.ch-card[data-cid="${cid}"]`);
+
+            if (d.state === "starting") {
+              setCardLoading(cid, true, "Cleaning up…");
+              setProgressCleanupMode(card, true);
+              return;
+            }
+
+            if (d.state === "finished") {
+              setProgressCleanupMode(card, false);
+              setCloneLaunching(cid, false);
+              setCloneRunning(cid, false);
+              setCardLoading(cid, false);
+              return;
+            }
           }
 
           if (t === "backfill_done") {
@@ -3041,7 +3218,7 @@
               toastOncePersist(
                 `bf:already:${cloneId}`,
                 state === "running"
-                  ? "A clone for this channel is already running."
+                  ? "A clone for this channel is already running or finishing up."
                   : "A clone launch is already in progress.",
                 { type: "warning" },
                 15000
