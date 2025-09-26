@@ -7,6 +7,7 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 import contextlib
 import signal
 import asyncio
@@ -135,16 +136,16 @@ class ServerReceiver:
         self._inflight_events: dict[int, asyncio.Event] = {}
         self._latest_edit_payload: dict[int, dict] = {}
         self._pending_deletes: set[int] = set()
-        self._bf_throttle: dict[int, dict] = {} 
-        self._bf_delay = 2.0  # seconds
+        self._bf_throttle: dict[int, dict] = {}
+        self._bf_delay = 2.0
         orig_on_connect = self.bot.on_connect
         self.bus = AdminBus(
             role="server", logger=logger, admin_ws_url=self.config.ADMIN_WS_URL
         )
         self.backfills = BackfillTracker(
             bus=self.bus,
-            on_done_cb=self.backfill.on_done, 
-            progress_provider=self.backfill.get_progress
+            on_done_cb=self.backfill.on_done,
+            progress_provider=self.backfill.get_progress,
         )
         self.backfill.tracker = self.backfills
         self.ratelimit = RateLimitManager()
@@ -234,7 +235,7 @@ class ServerReceiver:
 
         asyncio.create_task(self.config.setup_release_watcher(self))
         self.session = aiohttp.ClientSession()
-        self.webhook_exporter = WebhookDMExporter(self.session, logger)  # DM Exporter
+        self.webhook_exporter = WebhookDMExporter(self.session, logger)
         # Ensure we're in the clone guild
         clone_guild = self.bot.get_guild(self.clone_guild_id)
         if clone_guild is None:
@@ -499,7 +500,18 @@ class ServerReceiver:
             self._track(self.handle_message_delete(data), name="del-thread-msg")
 
         elif typ == "thread_message":
-            self._track(self.handle_thread_message(data), name="thread-msg")
+            if data.get("__backfill__"):
+                try:
+                    parent = int(data.get("thread_parent_id") or 0)
+                except Exception:
+                    parent = 0
+                t = self._track(
+                    self._handle_backfill_thread_message(data), name="bf-thread"
+                )
+                if parent:
+                    self.backfill.attach_task(parent, t)
+            else:
+                self._track(self.handle_thread_message(data), name="thread-msg")
 
         elif typ == "thread_delete":
             asyncio.create_task(self.handle_thread_delete(data))
@@ -591,7 +603,7 @@ class ServerReceiver:
                 return
 
             try:
-                await self.backfill.on_done(orig, wait_cleanup=True) # waits for backfill to finish
+                await self.backfill.on_done(orig, wait_cleanup=True)
 
                 delivered, total_est = self.backfill.get_progress(orig)
                 await self.bus.publish(
@@ -633,9 +645,9 @@ class ServerReceiver:
 
         elif typ == "export_messages_done":
             await self.webhook_exporter.handle_ws_export_messages_done(data)
-            
+
         elif typ == "backfills_status_query":
-            # Respond to Admin route with current backfill status
+
             logger.debug("Backfill status query received")
             try:
                 items = self.backfill.snapshot_in_progress()
@@ -2591,14 +2603,17 @@ class ServerReceiver:
         return payload
 
     def _log_tag(self, data: dict) -> str:
-        """Return a short tag like ' [sync & buffered]' for backfill/buffered messages."""
+        """
+        Return ' [backfill]' and/or ' [buffered]' when applicable.
+        Live messages get no tag.
+        """
         parts = []
         if data.get("__backfill__"):
-            parts.append("msg-sync")
+            parts.append("backfill")
         if data.get("__buffered__"):
             parts.append("buffered")
         return f" [{' & '.join(parts)}]" if parts else ""
-    
+
     def _bf_state(self, clone_id: int) -> dict:
         st = self._bf_throttle.get(int(clone_id))
         if st is None:
@@ -2607,12 +2622,11 @@ class ServerReceiver:
         return st
 
     async def _bf_gate(self, clone_id: int) -> None:
-        """Serialize and space backfill sends per clone channel."""
         st = self._bf_state(int(clone_id))
         async with st["lock"]:
             now = asyncio.get_event_loop().time()
             wait = max(0.0, (st["last"] + self._bf_delay) - now)
-            if wait:
+            if wait >= 0.001:
                 await asyncio.sleep(wait)
             st["last"] = asyncio.get_event_loop().time()
 
@@ -2636,13 +2650,15 @@ class ServerReceiver:
         tag = self._log_tag(msg)
         source_id = msg["channel_id"]
         is_backfill = bool(msg.get("__backfill__"))
-        
-        # mark send in-flight for this message
+
         try:
             _orig_mid_for_inflight = int((msg.get("message_id") or 0))
         except Exception:
             _orig_mid_for_inflight = 0
-        if _orig_mid_for_inflight and _orig_mid_for_inflight not in self._inflight_events:
+        if (
+            _orig_mid_for_inflight
+            and _orig_mid_for_inflight not in self._inflight_events
+        ):
             self._inflight_events[_orig_mid_for_inflight] = asyncio.Event()
 
         mapping = self.chan_map.get(source_id)
@@ -2666,6 +2682,7 @@ class ServerReceiver:
                 msg=msg,
                 source_id=source_id,
             )
+
             if handled:
                 if is_backfill:
                     self.backfill.note_sent(source_id)
@@ -2830,7 +2847,7 @@ class ServerReceiver:
                         cloned_message_id=cloned_mid,
                         webhook_url=used_url,
                     )
-                    
+
                     ev = self._inflight_events.get(orig_mid)
                     if ev:
                         ev.set()
@@ -2843,7 +2860,9 @@ class ServerReceiver:
                     if orig_mid in self._pending_deletes:
                         try:
                             if row:
-                                ok = await self._delete_with_row(row, orig_mid, msg.get("channel_name"))
+                                ok = await self._delete_with_row(
+                                    row, orig_mid, msg.get("channel_name")
+                                )
                                 if ok:
                                     logger.debug(
                                         "[🧹] Applied queued delete right after initial send for orig %s",
@@ -2868,10 +2887,13 @@ class ServerReceiver:
                                     orig_mid,
                                 )
                             except Exception:
-                                logger.debug("[edit-coalesce] immediate apply failed", exc_info=True)
+                                logger.debug(
+                                    "[edit-coalesce] immediate apply failed",
+                                    exc_info=True,
+                                )
 
                         self._inflight_events.pop(orig_mid, None)
-                        
+
                 except Exception:
                     logger.exception("upsert_message_mapping failed (normal channel)")
 
@@ -2974,10 +2996,14 @@ class ServerReceiver:
                 await _get_primary_identity_for_source(source_id)
             )
             primary_customized = await _primary_name_changed_for_source(source_id)
-            
+
             if is_backfill:
-                m = self.chan_map.get(source_id) or (self._load_mappings() or self.chan_map.get(source_id))
-                clone_for_gate = (m or {}).get("cloned_channel_id") or (m or {}).get("clone_channel_id")
+                m = self.chan_map.get(source_id) or (
+                    self._load_mappings() or self.chan_map.get(source_id)
+                )
+                clone_for_gate = (m or {}).get("cloned_channel_id") or (m or {}).get(
+                    "clone_channel_id"
+                )
                 if clone_for_gate:
                     await self._bf_gate(int(clone_for_gate))
 
@@ -3096,7 +3122,7 @@ class ServerReceiver:
                     int(clone_id), url, create_missing=False
                 )
                 rl_key = f"channel:{clone_id}"
-                
+
                 await self._bf_gate(int(clone_id))
 
                 if primary_customized:
@@ -3180,12 +3206,22 @@ class ServerReceiver:
                 row = None
             if row is not None:
                 if i > 1:
-                    logger.debug("[⏱️] %s found on attempt %d for orig %s", log_prefix, i, orig_mid)
+                    logger.debug(
+                        "[⏱️] %s found on attempt %d for orig %s",
+                        log_prefix,
+                        i,
+                        orig_mid,
+                    )
                 return row
             delay = min(max_delay, base_delay * (2 ** (i - 1)))
             delay += random.uniform(-jitter * delay, jitter * delay)
             await asyncio.sleep(max(0.0, delay))
-        logger.debug("[⌛] %s not found after %d attempts for orig %s", log_prefix, attempts, orig_mid)
+        logger.debug(
+            "[⌛] %s not found after %d attempts for orig %s",
+            log_prefix,
+            attempts,
+            orig_mid,
+        )
         return None
 
     async def _edit_with_row(self, row, data: dict, orig_mid: int) -> bool:
@@ -3209,8 +3245,12 @@ class ServerReceiver:
                 embeds=self._coerce_embeds(data.get("embeds")),
                 allowed_mentions=None,
             )
-            logger.info("[✏️] Edited cloned msg %s (orig %s) in #%s",
-                        cloned_mid, orig_mid, data.get("channel_name"))
+            logger.info(
+                "[✏️] Edited cloned msg %s (orig %s) in #%s",
+                cloned_mid,
+                orig_mid,
+                data.get("channel_name"),
+            )
             return True
         except Exception as e:
             logger.warning("[⚠️] Edit failed for orig %s (will resend): %s", orig_mid, e)
@@ -3221,7 +3261,9 @@ class ServerReceiver:
             await self.forward_message(data)
             logger.info("[♻️] Resent edited message as new (orig %s)", orig_mid)
         except Exception:
-            logger.exception("[❌] Fallback resend failed for edited message (orig %s)", orig_mid)
+            logger.exception(
+                "[❌] Fallback resend failed for edited message (orig %s)", orig_mid
+            )
 
     async def handle_message_edit(self, data: dict):
         """
@@ -3231,7 +3273,7 @@ class ServerReceiver:
         """
         try:
             orig_mid = int(data.get("message_id") or 0)
-            _ = int(data.get("channel_id") or 0)  # for parity/logging
+            _ = int(data.get("channel_id") or 0)
         except Exception:
             return
         if not orig_mid:
@@ -3247,21 +3289,18 @@ class ServerReceiver:
             await self._edit_with_row(row, data, orig_mid)
             return
 
-        # No mapping yet — is the original send in-flight?
         ev = self._inflight_events.get(orig_mid)
         if ev and not ev.is_set():
-            # Coalesce: keep only the latest edit payload for this message
+
             self._latest_edit_payload[orig_mid] = data
 
-            # Wait a short window for mapping to be written after send completes
             try:
                 await asyncio.wait_for(ev.wait(), timeout=5.0)
             except asyncio.TimeoutError:
-                # Mapping never appeared — safe fallback
+
                 await self._fallback_resend_edit(data, orig_mid)
                 return
 
-            # After signal, re-read mapping and apply the most recent coalesced state
             try:
                 row = self.db.get_mapping_by_original(orig_mid)
             except Exception:
@@ -3273,19 +3312,21 @@ class ServerReceiver:
                 self._inflight_events.pop(orig_mid, None)
                 return
 
-            # Still no mapping — fallback
             await self._fallback_resend_edit(payload, orig_mid)
             return
 
-        # Not marked in-flight (or we missed it): short retry burst for late DB write
         row = await self._get_mapping_with_retry(
-            orig_mid, attempts=5, base_delay=0.08, max_delay=0.8, jitter=0.25, log_prefix="edit-wait"
+            orig_mid,
+            attempts=5,
+            base_delay=0.08,
+            max_delay=0.8,
+            jitter=0.25,
+            log_prefix="edit-wait",
         )
         if row is not None:
             await self._edit_with_row(row, data, orig_mid)
             return
 
-        # Final fallback — resend as a new message
         await self._fallback_resend_edit(data, orig_mid)
 
     async def forward_to_webhook(self, msg_data: dict, webhook_url: str):
@@ -3303,22 +3344,18 @@ class ServerReceiver:
     async def handle_thread_message(self, data: dict):
         """
         Handles forwarding of thread messages from the original guild to the cloned guild.
-
-        Rules:
-        - If message has TEXT + STICKERS:
-            • If stickers are CUSTOM (guild) -> build image embeds and send a SINGLE webhook message (content + embeds).
-            Do NOT prepend "From {user}:" in this case.
-            • If stickers are STANDARD (Discord built-in) -> try to send ONE native bot message:
-                "From {user}: <content>" + the native sticker(s).
-            If native fails, fall back to a single webhook send (content + embeds).
-        - If STICKERS-ONLY:
-            • CUSTOM -> embed fallback (no "From {user}:").
-            • STANDARD -> try native; if native fails, fall back to embeds and (optionally) caption.
-        - If TEXT-ONLY -> single webhook send.
-        - Any dict-based embeds are converted to discord.Embed to avoid .to_dict() errors.
+        - Honors backfill rotation via __force_webhook_url__ (set by _handle_backfill_thread_message).
+        - Applies the same identity policy as forward_message() when the primary webhook name is customized.
+        - Uses backfill semaphores + _bf_gate() for pacing during backfill.
+        - Counts progress centrally (note_sent on parent) after each successful send.
         """
         if self._shutting_down:
             return
+
+        import asyncio
+        import aiohttp
+        import discord
+        from discord import ChannelType, ForumChannel, HTTPException, Webhook
 
         guild = self.bot.get_guild(self.clone_guild_id)
         if not guild:
@@ -3326,8 +3363,18 @@ class ServerReceiver:
             return
 
         self._load_mappings()
-        orig_tid = int(data["thread_id"])
-        parent_id = int(data["thread_parent_id"])
+
+        try:
+            orig_tid = int(data["thread_id"])
+            parent_id = int(data["thread_parent_id"])
+        except Exception:
+            logger.warning(
+                "[thread] bad ids in payload: thread_id=%r parent_id=%r",
+                data.get("thread_id"),
+                data.get("thread_parent_id"),
+            )
+            return
+
         tag = self._log_tag(data)
         is_backfill = bool(data.get("__backfill__"))
 
@@ -3363,9 +3410,14 @@ class ServerReceiver:
 
         payload = self._build_webhook_payload(data)
 
-        webhook_url = chan_map.get(
-            "channel_webhook_url"
-        ) or await self._ensure_primary_webhook_url(parent_id)
+        forced_url = data.get("__force_webhook_url__")
+        if forced_url:
+            webhook_url = forced_url
+        else:
+            webhook_url = chan_map.get(
+                "channel_webhook_url"
+            ) or await self._ensure_primary_webhook_url(parent_id)
+
         if not webhook_url:
             logger.warning(
                 "[⚠️] No webhook for parent %s; queueing thread msg", parent_id
@@ -3373,27 +3425,65 @@ class ServerReceiver:
             self._pending_thread_msgs.append(data)
             return
 
-        meta = await self._get_webhook_meta(parent_id, webhook_url)
-        if meta.get("custom"):
+        async def _get_primary_identity_for_source(src_parent_id: int):
+            mapping = self.chan_map.get(src_parent_id) or {}
+            purl = mapping.get("channel_webhook_url") or mapping.get("webhook_url")
+            if not purl:
+                return None, None, None
+            try:
+                wid = int(purl.rstrip("/").split("/")[-2])
+                wh = await self.bot.fetch_webhook(wid)
+                name = (wh.name or "").strip() or None
+                av_url = None
+                try:
+                    av_asset = getattr(wh, "avatar", None)
+                    if av_asset:
+                        av_url = str(getattr(av_asset, "url", None)) or None
+                except Exception:
+                    av_url = None
+                return purl, name, av_url
+            except Exception:
+                return purl, None, None
 
-            payload.pop("username", None)
-            payload.pop("avatar_url", None)
+        async def _primary_name_changed_for_source(src_parent_id: int) -> bool:
+            mapping = self.chan_map.get(src_parent_id) or {}
+            purl = mapping.get("channel_webhook_url") or mapping.get("webhook_url")
+            if not purl:
+                return False
+            try:
+                wid = int(purl.rstrip("/").split("/")[-2])
+                wh = await self.bot.fetch_webhook(wid)
+                canonical = self.backfill._canonical_temp_name()
+                name = (wh.name or "").strip()
+                return bool(name and name != canonical)
+            except Exception:
+                return False
+
+        primary_url, primary_name, primary_avatar_url = (
+            await _get_primary_identity_for_source(parent_id)
+        )
+        primary_customized = await _primary_name_changed_for_source(parent_id)
+
+        use_webhook_identity = False
+        override_identity = None
+        if primary_customized:
+            if forced_url and primary_url and forced_url == primary_url:
+
+                use_webhook_identity = True
+            else:
+
+                override_identity = {
+                    "username": primary_name,
+                    "avatar_url": primary_avatar_url,
+                }
 
         stickers = data.get("stickers") or []
-        has_textish = bool(
-            payload and (payload.get("content") or payload.get("embeds"))
-        )
 
         def _is_custom_sticker(s: dict) -> bool:
-
             try:
                 return int(s.get("type", 0)) == 2
             except Exception:
-                return (
-                    bool(s.get("guild_id"))
-                    or bool(s.get("custom"))
-                    or bool(s.get("is_custom"))
-                )
+                return bool(s.get("guild_id") or s.get("custom") or s.get("is_custom"))
 
         def _has_custom(sts: list[dict]) -> bool:
             return any(_is_custom_sticker(s) for s in (sts or []))
@@ -3404,20 +3494,35 @@ class ServerReceiver:
         has_custom = _has_custom(stickers)
         has_standard = _has_standard(stickers)
 
+        has_textish = bool(
+            payload and (payload.get("content") or payload.get("embeds"))
+        )
         if not has_textish and not stickers:
-            logger.info("[⚠️] Skipping empty payload for '%s'", data.get("thread_name"))
+            logger.info(
+                "[⚠️]%s Skipping empty payload for '%s'", tag, data.get("thread_name")
+            )
             return
 
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession()
+
         thread_webhook = Webhook.from_url(webhook_url, session=self.session)
+
+        if is_backfill and cloned_id:
+            await self.backfill.ensure_temps_ready(int(cloned_id))
+            sem = self.backfill.semaphores.setdefault(
+                int(cloned_id), asyncio.Semaphore(1)
+            )
+            rl_key_backfill = f"channel:{cloned_id}"
+        else:
+            sem = None
+            rl_key_backfill = webhook_url
 
         lock = self._thread_locks.setdefault(orig_tid, asyncio.Lock())
         created = False
         clone_thread: discord.Thread | None = None
 
         def _thread_mapping(thread_id: int) -> dict:
-
             m = dict(chan_map)
             m["cloned_channel_id"] = int(thread_id)
             return m
@@ -3430,10 +3535,9 @@ class ServerReceiver:
             )
 
         def _coerce_embeds_inplace(p: dict) -> None:
-            """Ensure p['embeds'] is a list[discord.Embed], converting dict fallbacks."""
+            """Ensure p['embeds'] is list[discord.Embed], converting dict fallbacks."""
             lst = p.get("embeds")
             if not lst:
-
                 p["embeds"] = []
                 return
             converted = []
@@ -3454,31 +3558,127 @@ class ServerReceiver:
             p["embeds"] = converted
 
         async def _send_webhook_into_thread(p: dict, *, include_text: bool, thread_obj):
-            """Send one webhook message into the thread, with spoofing unless meta['custom']."""
+            """
+            Single send into a thread with proper identity + RL + backfill counting.
+            Uses a local webhook handle (wh) to avoid rebinding the outer thread_webhook and
+            thereby prevents UnboundLocalError when retrying.
+            """
             _coerce_embeds_inplace(p)
+
+            try:
+                thread_id = getattr(thread_obj, "id", None)
+                if thread_id is None and isinstance(thread_obj, int):
+                    thread_id = thread_obj
+            except Exception:
+                thread_id = None
+
             kw = {
                 "content": (p.get("content") if include_text else None),
                 "embeds": p.get("embeds"),
                 "thread": thread_obj,
                 "wait": True,
             }
-            if not meta.get("custom"):
+
+            if override_identity is not None:
+                if override_identity.get("username"):
+                    kw["username"] = override_identity["username"]
+                if override_identity.get("avatar_url"):
+                    kw["avatar_url"] = override_identity["avatar_url"]
+            elif not use_webhook_identity and override_identity is None:
                 if p.get("username"):
                     kw["username"] = p.get("username")
                 if p.get("avatar_url"):
                     kw["avatar_url"] = p.get("avatar_url")
-            await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=webhook_url)
-            sent_msg = await thread_webhook.send(**kw)
+            # else: use webhook's stored identity
+
+            wh = thread_webhook
+
+            if is_backfill:
+
+                try:
+                    st = self._bf_state(int(cloned_id))
+                    now = asyncio.get_event_loop().time()
+                    wait_s = max(0.0, (st["last"] + self._bf_delay) - now)
+                except Exception:
+                    wait_s = 0.0
+                if wait_s > 0:
+                    logger.debug(
+                        "%s [bf-gate] waiting %.3fs before send into thread_id=%s (clone_id=%s)",
+                        tag,
+                        wait_s,
+                        thread_id,
+                        cloned_id,
+                    )
+                await self._bf_gate(int(cloned_id))
+                logger.debug(
+                    "%s [bf-gate] passed for send into thread_id=%s (clone_id=%s)",
+                    tag,
+                    thread_id,
+                    cloned_id,
+                )
+            else:
+                logger.debug(
+                    "%s [rl] acquiring WEBHOOK_MESSAGE for key=%s thread_id=%s",
+                    tag,
+                    rl_key_backfill,
+                    thread_id,
+                )
+                await self.ratelimit.acquire(
+                    ActionType.WEBHOOK_MESSAGE, key=rl_key_backfill
+                )
+                logger.debug(
+                    "%s [rl] acquired WEBHOOK_MESSAGE for key=%s thread_id=%s",
+                    tag,
+                    rl_key_backfill,
+                    thread_id,
+                )
+            try:
+                sent_msg = await wh.send(**kw)
+            except NotFound:
+
+                logger.warning(
+                    "%s [webhook] NotFound on send; rotating webhook and retrying (thread_id=%s, url=%s)",
+                    tag,
+                    thread_id,
+                    getattr(wh, "url", None),
+                )
+                try:
+                    forced_url_local = data.get("__force_webhook_url__")
+                    if forced_url_local:
+                        try:
+                            self.backfill.invalidate_rotation(int(cloned_id))
+                        except Exception:
+                            pass
+                        mapping = self.chan_map.get(parent_id) or {}
+                        primary = mapping.get("channel_webhook_url") or mapping.get(
+                            "webhook_url"
+                        )
+                        url2, _ = await self.backfill.pick_url_for_send(
+                            int(cloned_id), primary_url=primary, create_missing=True
+                        )
+                    else:
+                        url2 = await self._ensure_primary_webhook_url(parent_id)
+
+                    wh = Webhook.from_url(url2, session=self.session)
+                    logger.info(
+                        "%s [webhook] retrying send with new webhook url (thread_id=%s)",
+                        tag,
+                        thread_id,
+                    )
+                    sent_msg = await wh.send(**kw)
+                except Exception:
+                    logger.exception(
+                        "%s [webhook] retry failed (thread_id=%s)", tag, thread_id
+                    )
+                    raise
 
             try:
                 orig_gid = int(data.get("guild_id") or 0)
                 orig_cid = int(data.get("thread_id") or data.get("channel_id") or 0)
                 orig_mid = int(data.get("message_id") or 0)
-
                 cloned_cid = int(getattr(thread_obj, "id", 0)) if thread_obj else 0
                 cloned_mid = int(getattr(sent_msg, "id", 0)) if sent_msg else None
-
-                used_url = getattr(thread_webhook, "url", None)
+                used_url = getattr(wh, "url", None)
 
                 self.db.upsert_message_mapping(
                     original_guild_id=orig_gid,
@@ -3488,8 +3688,19 @@ class ServerReceiver:
                     cloned_message_id=cloned_mid,
                     webhook_url=used_url,
                 )
+                logger.debug(
+                    "[map] upserted thread message map orig_tid=%s→clone_tid=%s orig_mid=%s→clone_mid=%s",
+                    orig_cid,
+                    cloned_cid,
+                    orig_mid,
+                    cloned_mid,
+                )
             except Exception:
                 logger.exception("upsert_message_mapping failed (thread)")
+
+            if is_backfill and hasattr(self, "backfill"):
+
+                self.backfill.note_sent(parent_id)
 
         try:
             async with lock:
@@ -3504,6 +3715,7 @@ class ServerReceiver:
                 )
 
                 if thr_map:
+                    thr_map = dict(thr_map)
                     try:
                         clone_thread = guild.get_channel(
                             int(thr_map["cloned_thread_id"])
@@ -3517,24 +3729,16 @@ class ServerReceiver:
                             clone_thread = None
                         else:
                             logger.warning(
-                                "[⌛] Error fetching thread %s; queueing for next sync",
-                                thr_map["cloned_thread_id"],
+                                "[⌛]%s Error fetching thread %s; queueing for next sync",
+                                tag,
+                                thr_map.get("cloned_thread_id"),
                             )
                             self._pending_thread_msgs.append(data)
                             return
 
                 if thr_map is None:
-                    logger.info(
-                        "[🧵]%s Creating thread '%s' in #%s by %s (%s)",
-                        tag,
-                        data["thread_name"],
-                        getattr(cloned_parent, "name", "<forum>"),
-                        data["author"],
-                        data["author_id"],
-                    )
-                    await self.ratelimit.acquire(ActionType.THREAD)
 
-                    if isinstance(cloned_parent, ForumChannel):
+                    async def _create_forum_thread_and_first_post():
 
                         tmp = {
                             "content": (payload.get("content") or None),
@@ -3545,7 +3749,6 @@ class ServerReceiver:
 
                         if stickers and has_textish:
                             if has_custom:
-
                                 data["__stickers_no_text__"] = True
                                 data["__stickers_prefer_embeds__"] = True
                                 await self.stickers.send_with_fallback(
@@ -3558,13 +3761,10 @@ class ServerReceiver:
                                 )
                                 _merge_embeds_into_payload(tmp, data)
                             elif has_standard:
-
                                 tmp["content"] = "\u200b"
                                 tmp["embeds"] = None
-
                         elif stickers and not has_textish:
                             if has_custom:
-
                                 data["__stickers_no_text__"] = True
                                 data["__stickers_prefer_embeds__"] = True
                                 await self.stickers.send_with_fallback(
@@ -3576,48 +3776,220 @@ class ServerReceiver:
                                     source_id=orig_tid,
                                 )
                                 _merge_embeds_into_payload(tmp, data)
-
                             elif has_standard:
-                                # Standard stickers only -> we'll post natively after creation
                                 tmp["content"] = "\u200b"
                                 tmp["embeds"] = None
 
                         _coerce_embeds_inplace(tmp)
-                        await thread_webhook.send(
-                            content=(tmp.get("content") or None),
-                            embeds=tmp.get("embeds"),
-                            username=(
-                                None if meta.get("custom") else tmp.get("username")
-                            ),
-                            avatar_url=(
-                                None if meta.get("custom") else tmp.get("avatar_url")
-                            ),
-                            thread_name=data["thread_name"],
-                            wait=True,
+
+                        async def _try_resolve_thread_from_message(
+                            msg, tries=6, delay=0.2
+                        ):
+                            t = None
+                            last_err = None
+                            for _ in range(tries):
+                                try:
+
+                                    ch = getattr(msg, "channel", None)
+                                    if isinstance(ch, discord.Thread):
+                                        return ch
+
+                                    ch_id = getattr(msg, "channel_id", None)
+                                    if ch_id:
+                                        t = guild.get_channel(
+                                            int(ch_id)
+                                        ) or await self.bot.fetch_channel(int(ch_id))
+                                        if isinstance(t, discord.Thread):
+                                            return t
+
+                                    j = getattr(msg, "jump_url", "") or ""
+                                    if j:
+                                        parts = j.strip("/").split("/")
+                                        if len(parts) >= 3:
+                                            maybe_cid = parts[-2]
+                                            if maybe_cid.isdigit():
+                                                t = guild.get_channel(
+                                                    int(maybe_cid)
+                                                ) or await self.bot.fetch_channel(
+                                                    int(maybe_cid)
+                                                )
+                                                if isinstance(t, discord.Thread):
+                                                    return t
+
+                                    act = await cloned_parent.fetch_active_threads()
+                                    t = next(
+                                        (
+                                            th
+                                            for th in act.threads
+                                            if th.name == data["thread_name"]
+                                        ),
+                                        None,
+                                    )
+                                    if isinstance(t, discord.Thread):
+                                        return t
+
+                                    try:
+                                        arch = (
+                                            await cloned_parent.fetch_archived_threads(
+                                                limit=50
+                                            )
+                                        )
+                                        t = next(
+                                            (
+                                                th
+                                                for th in arch.threads
+                                                if th.name == data["thread_name"]
+                                            ),
+                                            None,
+                                        )
+                                        if isinstance(t, discord.Thread):
+                                            return t
+                                    except Exception:
+                                        pass
+
+                                except Exception as e:
+                                    last_err = e
+
+                                await asyncio.sleep(delay)
+
+                            if last_err:
+                                logger.debug(
+                                    "[🧵] resolve retries exhausted with last_err=%r",
+                                    last_err,
+                                )
+                            return None
+
+                        if sem:
+                            async with sem:
+                                if is_backfill:
+                                    await self._bf_gate(int(cloned_id))
+                                uname = None
+                                av = None
+                                if override_identity is not None:
+                                    uname = override_identity.get("username")
+                                    av = override_identity.get("avatar_url")
+                                elif not use_webhook_identity:
+                                    uname = tmp.get("username")
+                                    av = tmp.get("avatar_url")
+
+                                sent_msg = await thread_webhook.send(
+                                    content=(tmp.get("content") or None),
+                                    embeds=tmp.get("embeds"),
+                                    username=uname,
+                                    avatar_url=av,
+                                    thread_name=data["thread_name"],
+                                    wait=True,
+                                )
+                        else:
+                            uname = None
+                            av = None
+                            if override_identity is not None:
+                                uname = override_identity.get("username")
+                                av = override_identity.get("avatar_url")
+                            elif not use_webhook_identity:
+                                uname = tmp.get("username")
+                                av = tmp.get("avatar_url")
+                            if is_backfill:
+                                await self._bf_gate(int(cloned_id))
+
+                            sent_msg = await thread_webhook.send(
+                                content=(tmp.get("content") or None),
+                                embeds=tmp.get("embeds"),
+                                username=uname,
+                                avatar_url=av,
+                                thread_name=data["thread_name"],
+                                wait=True,
+                            )
+
+                        t = await _try_resolve_thread_from_message(
+                            sent_msg, tries=6, delay=0.2
                         )
 
-                        clone_thread = (
-                            next(
-                                (
-                                    t
-                                    for t in cloned_parent.threads
-                                    if t.name == data["thread_name"]
-                                ),
-                                None,
+                        if not t:
+                            logger.warning(
+                                "[🧵]%s Created forum thread '%s' but couldn't resolve thread object yet; will retry later.",
+                                tag,
+                                data["thread_name"],
                             )
-                            or (await cloned_parent.fetch_active_threads()).threads[0]
+                            if is_backfill and hasattr(self, "backfill"):
+                                self.backfill.note_sent(parent_id)
+                            return None
+
+                        logger.info(
+                            "[🧵]%s Created forum thread '%s' → cloned_thread_id=%s in #%s",
+                            tag,
+                            data["thread_name"],
+                            t.id,
+                            getattr(cloned_parent, "name", cloned_id),
                         )
+
+                        try:
+                            await t.edit(auto_archive_duration=60)
+                        except Exception:
+                            logger.debug(
+                                "[🧵] could not set auto_archive_duration for thread_id=%s",
+                                t.id,
+                            )
+
+                        if is_backfill and hasattr(self, "backfill"):
+                            self.backfill.note_sent(parent_id)
+
+                        return t
+
+                    async def _create_text_thread():
+
+                        if is_backfill and hasattr(self, "backfill"):
+                            self.backfill.add_expected_total(parent_id, 1)
+
+                        if sem:
+                            async with sem:
+                                if is_backfill:
+                                    await self._bf_gate(int(cloned_id))
+                                new_thread = await cloned_parent.create_thread(
+                                    name=data["thread_name"],
+                                    type=ChannelType.public_thread,
+                                    auto_archive_duration=60,
+                                )
+                        else:
+                            if is_backfill:
+                                await self._bf_gate(int(cloned_id))
+                            new_thread = await cloned_parent.create_thread(
+                                name=data["thread_name"],
+                                type=ChannelType.public_thread,
+                                auto_archive_duration=60,
+                            )
+
+                        logger.info(
+                            "[🧵]%s Created text thread '%s' → cloned_thread_id=%s in #%s",
+                            tag,
+                            data["thread_name"],
+                            new_thread.id,
+                            getattr(cloned_parent, "name", cloned_id),
+                        )
+
+                        if is_backfill and hasattr(self, "backfill"):
+                            self.backfill.note_sent(parent_id)
+
+                        return new_thread
+
+                    meta = await self._get_webhook_meta(parent_id, webhook_url)
+
+                    if not is_backfill:
+                        await self.ratelimit.acquire(ActionType.THREAD)
+
+                    if isinstance(cloned_parent, ForumChannel):
+                        clone_thread = await _create_forum_thread_and_first_post()
+                        if not clone_thread:
+                            return
                         new_id = clone_thread.id
-                        await clone_thread.edit(auto_archive_duration=60)
 
                         if stickers and has_standard:
-
                             sent = await self.stickers.send_with_fallback(
                                 receiver=self,
                                 ch=clone_thread,
                                 stickers=stickers,
                                 mapping=_thread_mapping(new_id),
-                                msg=data,  # should include original text in helper's content formatting
+                                msg=data,
                                 source_id=orig_tid,
                             )
                             if sent:
@@ -3630,32 +4002,49 @@ class ServerReceiver:
                                     forum_orig_id=parent_id,
                                     forum_clone_id=cloned_id,
                                 )
-                                return
+                                created = True
+                            else:
 
-                            payload2 = self._build_webhook_payload(data)
-                            if meta.get("custom"):
-                                payload2.pop("username", None)
-                                payload2.pop("avatar_url", None)
-
-                            if not _has_custom(stickers):
-                                payload2.setdefault("content", payload2.get("content"))
-                            await _send_webhook_into_thread(
-                                payload2, include_text=True, thread_obj=clone_thread
-                            )
+                                payload2 = self._build_webhook_payload(data)
+                                if meta.get("custom") or use_webhook_identity:
+                                    payload2.pop("username", None)
+                                    payload2.pop("avatar_url", None)
+                                if not has_custom:
+                                    payload2.setdefault(
+                                        "content", payload2.get("content")
+                                    )
+                                if sem:
+                                    async with sem:
+                                        await _send_webhook_into_thread(
+                                            payload2,
+                                            include_text=True,
+                                            thread_obj=clone_thread,
+                                        )
+                                else:
+                                    await _send_webhook_into_thread(
+                                        payload2,
+                                        include_text=True,
+                                        thread_obj=clone_thread,
+                                    )
+                                created = True
 
                     else:
+                        clone_thread = await _create_text_thread()
+                        new_id = clone_thread.id
 
-                        new_thread = await cloned_parent.create_thread(
-                            name=data["thread_name"],
-                            type=ChannelType.public_thread,
-                            auto_archive_duration=60,
-                        )
-                        new_id = new_thread.id
-                        clone_thread = new_thread
+                        async def _send_text_thread_followup(p):
+                            if sem:
+                                async with sem:
+                                    await _send_webhook_into_thread(
+                                        p, include_text=True, thread_obj=clone_thread
+                                    )
+                            else:
+                                await _send_webhook_into_thread(
+                                    p, include_text=True, thread_obj=clone_thread
+                                )
 
                         if stickers and has_textish:
                             if has_custom:
-
                                 data["__stickers_no_text__"] = True
                                 data["__stickers_prefer_embeds__"] = True
                                 await self.stickers.send_with_fallback(
@@ -3667,11 +4056,8 @@ class ServerReceiver:
                                     source_id=orig_tid,
                                 )
                                 _merge_embeds_into_payload(payload, data)
-                                await _send_webhook_into_thread(
-                                    payload, include_text=True, thread_obj=clone_thread
-                                )
+                                await _send_text_thread_followup(payload)
                             elif has_standard:
-
                                 data.pop("__stickers_no_text__", None)
                                 data.pop("__stickers_prefer_embeds__", None)
                                 sent = await self.stickers.send_with_fallback(
@@ -3682,22 +4068,12 @@ class ServerReceiver:
                                     msg=data,
                                     source_id=orig_tid,
                                 )
-                                if sent:
-                                    if is_backfill and hasattr(self, "backfill"):
-                                        self.backfill.note_sent(parent_id)
-
-                                else:
-
+                                if not sent:
                                     _merge_embeds_into_payload(payload, data)
-                                    await _send_webhook_into_thread(
-                                        payload,
-                                        include_text=True,
-                                        thread_obj=clone_thread,
-                                    )
+                                    await _send_text_thread_followup(payload)
 
                         elif stickers and not has_textish:
                             if has_custom:
-
                                 data["__stickers_no_text__"] = True
                                 data["__stickers_prefer_embeds__"] = True
                                 await self.stickers.send_with_fallback(
@@ -3709,14 +4085,11 @@ class ServerReceiver:
                                     source_id=orig_tid,
                                 )
                                 payload2 = self._build_webhook_payload(data)
-                                if meta.get("custom"):
+                                if meta.get("custom") or use_webhook_identity:
                                     payload2.pop("username", None)
                                     payload2.pop("avatar_url", None)
-                                await _send_webhook_into_thread(
-                                    payload2, include_text=True, thread_obj=clone_thread
-                                )
+                                await _send_text_thread_followup(payload2)
                             else:
-
                                 sent = await self.stickers.send_with_fallback(
                                     receiver=self,
                                     ch=clone_thread,
@@ -3726,21 +4099,13 @@ class ServerReceiver:
                                     source_id=orig_tid,
                                 )
                                 if not sent:
-
                                     payload2 = self._build_webhook_payload(data)
-                                    if meta.get("custom"):
+                                    if meta.get("custom") or use_webhook_identity:
                                         payload2.pop("username", None)
                                         payload2.pop("avatar_url", None)
-                                    await _send_webhook_into_thread(
-                                        payload2,
-                                        include_text=True,
-                                        thread_obj=clone_thread,
-                                    )
-
+                                    await _send_text_thread_followup(payload2)
                         else:
-                            await _send_webhook_into_thread(
-                                payload, include_text=True, thread_obj=clone_thread
-                            )
+                            await _send_text_thread_followup(payload)
 
                     created = True
 
@@ -3756,10 +4121,8 @@ class ServerReceiver:
 
                     if stickers and not has_textish:
                         if has_custom:
-
                             data["__stickers_no_text__"] = True
                             data["__stickers_prefer_embeds__"] = True
-
                             _ = await self.stickers.send_with_fallback(
                                 receiver=self,
                                 ch=clone_thread,
@@ -3769,15 +4132,22 @@ class ServerReceiver:
                                 source_id=orig_tid,
                             )
                             payload2 = self._build_webhook_payload(data)
-                            if meta.get("custom"):
+                            if meta.get("custom") or use_webhook_identity:
                                 payload2.pop("username", None)
                                 payload2.pop("avatar_url", None)
-                            await _send_webhook_into_thread(
-                                payload2, include_text=True, thread_obj=clone_thread
-                            )
+                            if sem:
+                                async with sem:
+                                    await _send_webhook_into_thread(
+                                        payload2,
+                                        include_text=True,
+                                        thread_obj=clone_thread,
+                                    )
+                            else:
+                                await _send_webhook_into_thread(
+                                    payload2, include_text=True, thread_obj=clone_thread
+                                )
                             return
                         else:
-
                             sent = await self.stickers.send_with_fallback(
                                 receiver=self,
                                 ch=clone_thread,
@@ -3791,17 +4161,24 @@ class ServerReceiver:
                                     self.backfill.note_sent(parent_id)
                                 return
                             payload2 = self._build_webhook_payload(data)
-                            if meta.get("custom"):
+                            if meta.get("custom") or use_webhook_identity:
                                 payload2.pop("username", None)
                                 payload2.pop("avatar_url", None)
-                            await _send_webhook_into_thread(
-                                payload2, include_text=True, thread_obj=clone_thread
-                            )
+                            if sem:
+                                async with sem:
+                                    await _send_webhook_into_thread(
+                                        payload2,
+                                        include_text=True,
+                                        thread_obj=clone_thread,
+                                    )
+                            else:
+                                await _send_webhook_into_thread(
+                                    payload2, include_text=True, thread_obj=clone_thread
+                                )
                             return
 
                     if stickers and has_textish:
                         if has_custom:
-
                             data["__stickers_no_text__"] = True
                             data["__stickers_prefer_embeds__"] = True
                             _ = await self.stickers.send_with_fallback(
@@ -3813,12 +4190,19 @@ class ServerReceiver:
                                 source_id=orig_tid,
                             )
                             _merge_embeds_into_payload(payload, data)
-                            await _send_webhook_into_thread(
-                                payload, include_text=True, thread_obj=clone_thread
-                            )
+                            if sem:
+                                async with sem:
+                                    await _send_webhook_into_thread(
+                                        payload,
+                                        include_text=True,
+                                        thread_obj=clone_thread,
+                                    )
+                            else:
+                                await _send_webhook_into_thread(
+                                    payload, include_text=True, thread_obj=clone_thread
+                                )
                             return
                         elif has_standard:
-
                             data.pop("__stickers_no_text__", None)
                             data.pop("__stickers_prefer_embeds__", None)
                             sent = await self.stickers.send_with_fallback(
@@ -3834,9 +4218,17 @@ class ServerReceiver:
                                     self.backfill.note_sent(parent_id)
                                 return
                             _merge_embeds_into_payload(payload, data)
-                            await _send_webhook_into_thread(
-                                payload, include_text=True, thread_obj=clone_thread
-                            )
+                            if sem:
+                                async with sem:
+                                    await _send_webhook_into_thread(
+                                        payload,
+                                        include_text=True,
+                                        thread_obj=clone_thread,
+                                    )
+                            else:
+                                await _send_webhook_into_thread(
+                                    payload, include_text=True, thread_obj=clone_thread
+                                )
                             return
 
                     if has_textish:
@@ -3848,9 +4240,15 @@ class ServerReceiver:
                             data["author"],
                             data["author_id"],
                         )
-                        await _send_webhook_into_thread(
-                            payload, include_text=True, thread_obj=clone_thread
-                        )
+                        if sem:
+                            async with sem:
+                                await _send_webhook_into_thread(
+                                    payload, include_text=True, thread_obj=clone_thread
+                                )
+                        else:
+                            await _send_webhook_into_thread(
+                                payload, include_text=True, thread_obj=clone_thread
+                            )
 
         finally:
             try:
@@ -3955,7 +4353,108 @@ class ServerReceiver:
         forced = dict(data)
         forced["__force_webhook_url__"] = url
         await self.forward_message(forced)
-        
+
+    async def _handle_backfill_thread_message(self, data: dict) -> None:
+        if self._shutting_down:
+            return
+
+        try:
+            parent_id = int(data["thread_parent_id"])
+        except Exception:
+            logger.warning(
+                "[bf] bad thread_parent_id in payload: %r", data.get("thread_parent_id")
+            )
+            return
+
+        row = None
+        if hasattr(self.db, "get_channel_mapping_by_original_id"):
+            row = self.db.get_channel_mapping_by_original_id(parent_id)
+        if not row and hasattr(self.db, "get_channel_mapping_by_clone_id"):
+            row = self.db.get_channel_mapping_by_clone_id(parent_id)
+            if row:
+                try:
+                    parent_id = int(row["original_channel_id"])
+                except Exception:
+                    pass
+
+        if not row:
+            logger.warning("[bf] no mapping for parent=%s; cannot rotate", parent_id)
+
+            await self.handle_thread_message(data)
+            return
+
+        try:
+            row = dict(row)
+        except Exception:
+            logger.error(
+                "[bf] mapping row not dict-like: type=%r row=%r", type(row), row
+            )
+            await self.handle_thread_message(data)
+            return
+
+        clone_id = None
+        for k in ("cloned_channel_id", "clone_channel_id"):
+            v = row.get(k)
+            if v is not None:
+                try:
+                    clone_id = int(v)
+                    break
+                except Exception:
+                    pass
+
+        primary_url = None
+        for k in ("channel_webhook_url", "webhook_url", "webhook"):
+            v = row.get(k)
+            if v:
+                primary_url = v
+                break
+
+        if not primary_url:
+            logger.warning(
+                "[bf] mapping found but no webhook URL | parent=%s clone=%s row=%s",
+                parent_id,
+                clone_id,
+                row,
+            )
+            await self.handle_thread_message(data)
+            return
+
+        st = self.backfill._progress.get(int(parent_id))
+        if not st:
+            self.backfill.register_sink(
+                parent_id, user_id=None, clone_channel_id=clone_id, msg=None
+            )
+            logger.debug(
+                "[bf] sink registered | parent=%s clone=%s", parent_id, clone_id
+            )
+        else:
+            if clone_id and st.get("clone_channel_id") != clone_id:
+                st["clone_channel_id"] = clone_id
+            if clone_id:
+                self.backfill._by_clone[clone_id] = int(parent_id)
+
+        try:
+            if clone_id:
+                await self.backfill.ensure_temps_ready(clone_id)
+        except Exception as e:
+            logger.debug(
+                "[bf] ensure_temps_ready failed | clone=%s err=%s", clone_id, e
+            )
+
+        try:
+            url, _used_pool = await self.backfill.pick_url_for_send(
+                clone_channel_id=clone_id or 0,
+                primary_url=primary_url,
+                create_missing=True,
+            )
+        except Exception as e:
+            logger.warning("[bf] rotation failed, using primary | err=%s", e)
+            url = primary_url
+
+        forced = dict(data)
+        forced["__force_webhook_url__"] = url
+
+        await self.handle_thread_message(forced)
 
     def _prune_old_messages_loop(
         self, retention_seconds: int | None = None
@@ -3963,11 +4462,10 @@ class ServerReceiver:
         """
         Start hourly task that deletes old rows from the `messages` table.
         """
-        # If already running, return the existing task
+
         if getattr(self, "_prune_task", None) and not self._prune_task.done():
             return self._prune_task
 
-        # Resolve retention config
         if retention_seconds is None:
             env_sec = os.getenv("MESSAGE_RETENTION_SECONDS")
             env_days = os.getenv("MESSAGE_RETENTION_DAYS")
@@ -3976,9 +4474,8 @@ class ServerReceiver:
             elif env_days and env_days.isdigit():
                 retention_seconds = int(env_days) * 24 * 3600
             else:
-                retention_seconds = 7 * 24 * 3600  # default: 1 week
+                retention_seconds = 7 * 24 * 3600
 
-        # Ensure index exists
         try:
             with self.db.lock, self.db.conn:
                 self.db.conn.execute(
@@ -4010,20 +4507,26 @@ class ServerReceiver:
             except asyncio.CancelledError:
                 raise
 
-        # Spawn the task
         self._prune_task = asyncio.create_task(_runner(), name="prune-old-messages")
         return self._prune_task
 
-    async def _delete_with_row(self, row, orig_mid: int, channel_name: str | None = None) -> bool:
+    async def _delete_with_row(
+        self, row, orig_mid: int, channel_name: str | None = None
+    ) -> bool:
         try:
             cloned_mid = int(row["cloned_message_id"])
             webhook_url = row["webhook_url"]
         except Exception:
-            logger.debug("[🗑️] Mapping incomplete for orig %s; nothing to delete", orig_mid)
+            logger.debug(
+                "[🗑️] Mapping incomplete for orig %s; nothing to delete", orig_mid
+            )
             return False
 
         if not (cloned_mid and webhook_url):
-            logger.debug("[🗑️] Missing cloned_mid/webhook for orig %s; nothing to delete", orig_mid)
+            logger.debug(
+                "[🗑️] Missing cloned_mid/webhook for orig %s; nothing to delete",
+                orig_mid,
+            )
             return False
 
         try:
@@ -4038,24 +4541,26 @@ class ServerReceiver:
                 channel_name,
             )
         except NotFound:
-            # Treat "Unknown Message" as already-gone success to avoid noise
+
             logger.info(
                 "[🗑️] Cloned msg already gone (orig %s) in #%s; treating as deleted",
                 orig_mid,
                 channel_name,
             )
         except Exception as e:
-            logger.warning("[⚠️] Failed to delete cloned msg for orig %s: %s", orig_mid, e)
+            logger.warning(
+                "[⚠️] Failed to delete cloned msg for orig %s: %s", orig_mid, e
+            )
             return False
 
-        # Try to remove the mapping
         try:
             self.db.delete_message_mapping(orig_mid)
         except Exception:
-            logger.debug("Could not delete mapping row for orig %s", orig_mid, exc_info=True)
+            logger.debug(
+                "Could not delete mapping row for orig %s", orig_mid, exc_info=True
+            )
         return True
- 
- 
+
     async def handle_message_delete(self, data: dict):
         """
         Delete the cloned webhook message that corresponds to the original one.
@@ -4071,7 +4576,6 @@ class ServerReceiver:
 
         channel_name = data.get("channel_name")
 
-        # Fast path: mapping exists now
         row = None
         try:
             row = self.db.get_mapping_by_original(orig_mid)
@@ -4082,21 +4586,20 @@ class ServerReceiver:
             await self._delete_with_row(row, orig_mid, channel_name)
             return
 
-        # No mapping — is initial send in-flight?
         ev = self._inflight_events.get(orig_mid)
         if ev and not ev.is_set():
-            # Mark this message for deletion once mapping appears
+
             self._pending_deletes.add(orig_mid)
 
-            # Wait a short window for the mapping to be written
             try:
                 await asyncio.wait_for(ev.wait(), timeout=7.0)
             except asyncio.TimeoutError:
-                # Still not ready — keep it queued; forward_message will clean it up if/when it lands
-                logger.debug("[🕒] Delete queued; mapping not ready yet for orig %s", orig_mid)
+
+                logger.debug(
+                    "[🕒] Delete queued; mapping not ready yet for orig %s", orig_mid
+                )
                 return
 
-            # After signal, attempt delete again
             try:
                 row = self.db.get_mapping_by_original(orig_mid)
             except Exception:
@@ -4105,26 +4608,32 @@ class ServerReceiver:
             if row is not None:
                 await self._delete_with_row(row, orig_mid, channel_name)
                 self._pending_deletes.discard(orig_mid)
-                # sender usually pops the event; be defensive:
+
                 self._inflight_events.pop(orig_mid, None)
                 return
 
-            # Mapping still missing (rare). Keep queued for the sender to honor.
-            logger.debug("[🕒] Delete remains queued; mapping still missing for orig %s", orig_mid)
+            logger.debug(
+                "[🕒] Delete remains queued; mapping still missing for orig %s",
+                orig_mid,
+            )
             return
 
-        # Not marked in-flight (or we missed it): brief DB retry, otherwise queue
         row = await self._get_mapping_with_retry(
-            orig_mid, attempts=5, base_delay=0.08, max_delay=0.8, jitter=0.25, log_prefix="delete-wait"
+            orig_mid,
+            attempts=5,
+            base_delay=0.08,
+            max_delay=0.8,
+            jitter=0.25,
+            log_prefix="delete-wait",
         )
         if row is not None:
             await self._delete_with_row(row, orig_mid, channel_name)
             return
 
-        # Still no mapping — queue it so that forward_message can honor it if/when the send succeeds
         self._pending_deletes.add(orig_mid)
-        logger.debug("[🕒] Delete queued with no mapping/in-flight info for orig %s", orig_mid)
-        
+        logger.debug(
+            "[🕒] Delete queued with no mapping/in-flight info for orig %s", orig_mid
+        )
 
     async def _shutdown(self):
         """
