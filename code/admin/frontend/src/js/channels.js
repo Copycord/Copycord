@@ -696,6 +696,20 @@
     })()
   );
 
+  const cleaningClones = new Set(
+    (() => {
+      try { return JSON.parse(localStorage.getItem("bf:cleaning") || "[]"); }
+      catch { return []; }
+    })()
+  );
+  
+  function setCloneCleaning(id, on) {
+    const k = String(id);
+    if (on) cleaningClones.add(k);
+    else cleaningClones.delete(k);
+    try { localStorage.setItem("bf:cleaning", JSON.stringify([...cleaningClones])); } catch {}
+  }
+
   const inflightByOrig = new Map();
 
   function fmtProgress(v) {
@@ -760,37 +774,55 @@
   }
 
   function applyInflightUI(itemsObj) {
-    const prev = new Set(inflightByOrig.keys());
-
-    inflightByOrig.clear();
-    for (const [cid, info] of Object.entries(itemsObj || {})) {
-      inflightByOrig.set(String(cid), info || {});
-    }
-
-    document.querySelectorAll(".ch-card.is-cloning").forEach((el) => {
-      const id = String(el.dataset.cid || "");
-      const isClientLocked = launchingClones.has(id) || runningClones.has(id);
-      const isServerInflight = inflightByOrig.has(id);
-      if (!isClientLocked && !isServerInflight) {
+    const serverIds = new Set(Object.keys(itemsObj || {}).map(String));
+  
+    // 1) Clear stale *running* locks that are neither on the server nor cleaning
+    for (const id of [...runningClones]) {
+      if (!serverIds.has(id) && !cleaningClones.has(id)) {
+        setCloneRunning(id, false);
         setCardLoading(id, false);
       }
-    });
-
-    for (const [cid, info] of inflightByOrig.entries()) {
-      runningClones.add(String(cid));
-      try {
-        localStorage.setItem("bf:running", JSON.stringify([...runningClones]));
-      } catch {}
-      setCardLoading(cid, true, fmtProgress(info));
-      const card = document.querySelector(
-        `.ch-card[data-cid="${String(cid)}"]`
-      );
-      updateProgressBar(
-        card,
-        info?.delivered ?? null,
-        info?.expected_total ?? null
-      );
     }
+    // 2) Clear stale *launching* locks (never progressed) unless cleaning
+    for (const id of [...launchingClones]) {
+      if (!serverIds.has(id) && !cleaningClones.has(id)) {
+        setCloneLaunching(id, false);
+      }
+    }
+  
+    // 3) Rebuild inflight map from server
+    inflightByOrig.clear();
+    for (const [cid, info] of Object.entries(itemsObj || {})) {
+      const k = String(cid);
+      inflightByOrig.set(k, info || {});
+    }
+  
+    // 4) Apply server-truthy running UI
+    for (const [cid, info] of inflightByOrig.entries()) {
+      setCloneRunning(cid, true);
+      const card = document.querySelector(`.ch-card[data-cid="${cid}"]`);
+      const d = Number.isFinite(info?.delivered) ? info.delivered : null;
+      const t = Number.isFinite(info?.expected_total) ? info.expected_total : null;
+      const text = d != null && t != null ? `Cloning… (${d}/${t})`
+                 : d != null                  ? `Cloning… (${d})`
+                                              : `Cloning…`;
+      setCardLoading(cid, true, text);
+      updateProgressBar(card, d, t);
+    }
+  
+    // 5) Re-assert cleaning UI (authoritative while not inflight)
+    for (const id of cleaningClones) {
+      if (!serverIds.has(id)) {
+        const card = document.querySelector(`.ch-card[data-cid="${id}"]`);
+        setCardLoading(id, true, "Cleaning up…");
+        setProgressCleanupMode(card, true);
+      }
+    }
+  
+    // 6) Persist reconciled running set
+    try {
+      localStorage.setItem("bf:running", JSON.stringify([...new Set(inflightByOrig.keys())]));
+    } catch {}
   }
 
   /** Fetch current in-flight backfills and apply to UI */
@@ -2180,12 +2212,14 @@
   async function afterGateReady() {
     if (bootedAfterGate) return;
     bootedAfterGate = true;
-
+  
+    clearBackfillBootResidue();
+  
     ensureIn();
     ensureOut();
     sendVerify({ action: "list" });
     await load();
-    await fetchAndApplyInflight();
+    await fetchAndApplyInflight(); 
     startInflightPolling();
   }
 
@@ -2586,18 +2620,20 @@
             const cid = String(d.channel_id || "");
             if (!cid) return;
             const card = document.querySelector(`.ch-card[data-cid="${cid}"]`);
-
+          
             if (d.state === "starting") {
+              setCloneCleaning(cid, true);
+              // keep the card ON and in indeterminate mode
               setCardLoading(cid, true, "Cleaning up…");
               setProgressCleanupMode(card, true);
               return;
             }
-
+          
             if (d.state === "finished") {
+              // still keep the card ON until `backfill_done`
               setProgressCleanupMode(card, false);
-              setCloneLaunching(cid, false);
-              setCloneRunning(cid, false);
-              setCardLoading(cid, false);
+              setCardLoading(cid, true, "Finalizing…");
+              // do NOT call setCloneRunning(false) here; wait for done.
               return;
             }
           }
@@ -2605,29 +2641,26 @@
           if (t === "backfill_done") {
             let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             if (!cid && p.task_id) cid = taskMap.get(String(p.task_id));
-            dbg("[bf] done", { cid, task_id: p?.task_id, payload: p });
-            if (p.task_id) forgetTask(p.task_id);
+            if (!cid) return;
 
-            if (cid) {
-              unlockBackfill(cid);
-              setCardLoading(cid, false);
-              announceBackfillDone(cid);
-              fetchAndApplyInflight().catch(() => {});
-            } else {
-              console.warn(
-                "[backfill_done] Could not resolve channel id; ...",
-                p
-              );
-            }
+            setCloneCleaning(cid, false);
+            unlockBackfill(cid);           // clears launching/running sets + persist
+            setCardLoading(cid, false);    // remove pill/progress
+            announceBackfillDone(cid);     // toast/pill “Synced ✓”
+            fetchAndApplyInflight().catch(() => {});
+            render();
+            return;
+          }
 
-            const wasCancelled =
-              (cid && cancelledThisSession.has(String(cid))) ||
-              !!sessionStorage.getItem(`bf:cancelled:${cid}`);
-            if (cid)
-              try {
-                sessionStorage.removeItem(`bf:cancelled:${cid}`);
-              } catch {}
+          if (t === "backfill_cancelled") {
+            let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
+            if (!cid && p.task_id) cid = taskMap.get(String(p.task_id));
+            if (!cid) return;
 
+            setCloneCleaning(cid, false);
+            unlockBackfill(cid);
+            setCardLoading(cid, false);
+            // (your existing cancel toast logic)
             render();
             return;
           }
