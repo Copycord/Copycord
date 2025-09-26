@@ -142,8 +142,8 @@
     runningClones.clear();
     launchingClones.clear();
     try {
-      sessionStorage.setItem("bf:running", "[]");
-      sessionStorage.setItem("bf:launching", "[]");
+      localStorage.setItem("bf:running", "[]");
+      localStorage.setItem("bf:launching", "[]");
     } catch {}
 
     try {
@@ -156,7 +156,7 @@
     } catch {}
   }
 
-  function upsertStatusPill(card, text = "Cloning…") {
+  function upsertStatusPill(card, text = "Cloning") {
     if (!card) return;
     const slot = card.querySelector(".ch-top-right");
     if (!slot) return;
@@ -169,20 +169,96 @@
     pill.textContent = text;
   }
 
+  function ensureProgressBar(card) {
+    if (!card) return null;
+    let pr = card.querySelector(".ch-progress");
+    if (!pr) {
+      pr = document.createElement("div");
+      pr.className = "ch-progress";
+      pr.setAttribute("role", "progressbar");
+      pr.setAttribute("aria-valuemin", "0");
+      pr.setAttribute("aria-valuemax", "100");
+      pr.setAttribute("aria-valuenow", "0");
+      pr.setAttribute("aria-label", "Clone progress");
+      const bar = document.createElement("div");
+      bar.className = "bar";
+      pr.appendChild(bar);
+
+      const after = card.querySelector(".ch-meta") || card.firstElementChild;
+      if (after?.nextSibling)
+        after.parentNode.insertBefore(pr, after.nextSibling);
+      else card.appendChild(pr);
+    }
+    return pr;
+  }
+
+  function updateProgressBar(card, delivered = null, total = null) {
+    const pr = ensureProgressBar(card);
+    if (!pr) return;
+
+    const bar = pr.querySelector(".bar");
+    const indeterminate = !(
+      Number.isFinite(delivered) &&
+      Number.isFinite(total) &&
+      total > 0
+    );
+
+    if (indeterminate) {
+      pr.classList.add("indeterminate");
+      pr.setAttribute("aria-busy", "true");
+      pr.setAttribute("aria-valuenow", "0");
+      bar.style.width = "30%";
+    } else {
+      const pct = Math.max(
+        0,
+        Math.min(100, Math.floor((delivered / total) * 100))
+      );
+      pr.classList.remove("indeterminate");
+      pr.removeAttribute("aria-busy");
+      pr.setAttribute("aria-valuenow", String(pct));
+      bar.style.width = pct + "%";
+    }
+  }
+
+  function setProgressCleanupMode(card, on) {
+    const pr = ensureProgressBar(card);
+    if (!pr) return;
+    if (on) {
+      pr.classList.add("indeterminate");
+      pr.setAttribute("aria-busy", "true");
+    } else {
+      pr.classList.remove("indeterminate");
+      pr.removeAttribute("aria-busy");
+    }
+  }
+
+  function removeProgressBar(card) {
+    const pr = card?.querySelector(".ch-progress");
+    if (!pr) return;
+
+    pr.style.opacity = "0";
+    pr.style.transform = "translateY(-2px)";
+    setTimeout(() => pr.remove(), 180);
+  }
+
   function setCardLoading(channelId, on, text = "Cloning…") {
     dbg("[UI] setCardLoading", { channelId: String(channelId), on, text });
     const k = String(channelId);
     const card = document.querySelector(`.ch-card[data-cid="${k}"]`);
     if (!card) return;
+
     if (on) {
       card.classList.add("is-cloning");
       card.setAttribute("aria-busy", "true");
       upsertStatusPill(card, text);
+
+      updateProgressBar(card, null, null);
     } else {
       card.classList.remove("is-cloning");
       card.removeAttribute("aria-busy");
       const pill = card.querySelector(".ch-status");
       if (pill) pill.remove();
+      removeProgressBar(card);
     }
   }
 
@@ -549,6 +625,12 @@
     document.body.appendChild(wrap);
 
     if (!document.getElementById("customize-compact-styles")) {
+      (function injectProgressStyles() {
+        if (document.getElementById("bf-progress-styles")) return;
+        const css = document.createElement("style");
+        css.id = "bf-progress-styles";
+        document.head.appendChild(css);
+      })();
       const css = document.createElement("style");
       css.id = "customize-compact-styles";
       document.head.appendChild(css);
@@ -598,22 +680,152 @@
   const runningClones = new Set(
     (() => {
       try {
-        return JSON.parse(sessionStorage.getItem("bf:running") || "[]");
+        return JSON.parse(localStorage.getItem("bf:running") || "[]");
+      } catch {
+        return [];
+      }
+    })()
+  );
+  const launchingClones = new Set(
+    (() => {
+      try {
+        return JSON.parse(localStorage.getItem("bf:launching") || "[]");
       } catch {
         return [];
       }
     })()
   );
 
-  const launchingClones = new Set(
-    (() => {
-      try {
-        return JSON.parse(sessionStorage.getItem("bf:launching") || "[]");
-      } catch {
-        return [];
+  const inflightByOrig = new Map();
+
+  function fmtProgress(v) {
+    const d = Number.isFinite(v?.delivered) ? v.delivered : null;
+    const t = Number.isFinite(v?.expected_total) ? v.expected_total : null;
+    if (d != null && t != null) return `Cloning… (${d}/${t})`;
+    if (d != null) return `Cloning… (${d})`;
+    return "Cloning…";
+  }
+
+  function getChannelDisplayName(cid) {
+    const id = String(cid);
+
+    const row = (data || []).find((r) => String(r.original_channel_id) === id);
+    if (row) {
+      const name =
+        (row.clone_channel_name && row.clone_channel_name.trim()) ||
+        row.original_channel_name ||
+        "";
+      return name.replace(/^#\s*/, "").trim();
+    }
+
+    // 2) Fallback to whatever's currently rendered
+    try {
+      const sel = `.ch-card[data-cid="${
+        window.CSS && CSS.escape ? CSS.escape(id) : id.replace(/"/g, '\\"')
+      }"] .ch-display-name`;
+      const el = document.querySelector(sel);
+      if (el) return el.textContent.replace(/^#\s*/, "").trim();
+    } catch {}
+    return null;
+  }
+
+  function announceBackfillDone(cid) {
+    unlockBackfill(cid);
+    setCardLoading(cid, false);
+
+    const wasCancelled =
+      cancelledThisSession.has(String(cid)) ||
+      !!sessionStorage.getItem(`bf:cancelled:${cid}`);
+
+    if (!wasCancelled && shouldAnnounceNow()) {
+      const chName = getChannelDisplayName(cid);
+      const msg = chName
+        ? `Clone completed for #${chName}.`
+        : `Clone completed (channel ${cid}).`;
+
+      toastOncePersist(`bf:done:${cid}`, msg, { type: "success" }, 15000);
+    }
+
+    const card = document.querySelector(`.ch-card[data-cid="${String(cid)}"]`);
+    if (card) {
+      let pill = card.querySelector(".ch-status");
+      if (!pill) {
+        pill = document.createElement("span");
+        pill.className = "ch-status";
+        card.querySelector(".ch-top-right")?.prepend(pill);
       }
-    })()
-  );
+      pill.textContent = "Synced ✓";
+      setTimeout(() => pill?.remove(), 2000);
+    }
+  }
+
+  function applyInflightUI(itemsObj) {
+    const prev = new Set(inflightByOrig.keys());
+
+    inflightByOrig.clear();
+    for (const [cid, info] of Object.entries(itemsObj || {})) {
+      inflightByOrig.set(String(cid), info || {});
+    }
+
+    document.querySelectorAll(".ch-card.is-cloning").forEach((el) => {
+      const id = String(el.dataset.cid || "");
+      const isClientLocked = launchingClones.has(id) || runningClones.has(id);
+      const isServerInflight = inflightByOrig.has(id);
+      if (!isClientLocked && !isServerInflight) {
+        setCardLoading(id, false);
+      }
+    });
+
+    for (const [cid, info] of inflightByOrig.entries()) {
+      runningClones.add(String(cid));
+      try {
+        localStorage.setItem("bf:running", JSON.stringify([...runningClones]));
+      } catch {}
+      setCardLoading(cid, true, fmtProgress(info));
+      const card = document.querySelector(
+        `.ch-card[data-cid="${String(cid)}"]`
+      );
+      updateProgressBar(
+        card,
+        info?.delivered ?? null,
+        info?.expected_total ?? null
+      );
+    }
+  }
+
+  /** Fetch current in-flight backfills and apply to UI */
+  async function fetchAndApplyInflight() {
+    try {
+      const res = await fetch("/api/backfills/inflight", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && json?.ok !== false) {
+        applyInflightUI(json.items || {});
+      }
+    } catch {}
+  }
+
+  let inflightTimer = null;
+  function startInflightPolling() {
+    stopInflightPolling();
+    inflightTimer = setInterval(fetchAndApplyInflight, 10_000);
+  }
+  function stopInflightPolling() {
+    if (inflightTimer) {
+      clearInterval(inflightTimer);
+      inflightTimer = null;
+    }
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopInflightPolling();
+    else {
+      fetchAndApplyInflight();
+      startInflightPolling();
+    }
+  });
 
   function setCloneLaunching(id, on) {
     dbg("[STATE] launching", { id: String(id), on });
@@ -621,7 +833,7 @@
     if (on) launchingClones.add(k);
     else launchingClones.delete(k);
     try {
-      sessionStorage.setItem(
+      localStorage.setItem(
         "bf:launching",
         JSON.stringify([...launchingClones])
       );
@@ -644,7 +856,7 @@
     if (on) runningClones.add(k);
     else runningClones.delete(k);
     try {
-      sessionStorage.setItem("bf:running", JSON.stringify([...runningClones]));
+      localStorage.setItem("bf:running", JSON.stringify([...runningClones]));
     } catch {}
     const card = document.querySelector(`.ch-card[data-cid="${k}"]`);
     if (card) {
@@ -694,8 +906,8 @@
     runningClones.clear();
     launchingClones.clear();
     try {
-      sessionStorage.setItem("bf:running", "[]");
-      sessionStorage.setItem("bf:launching", "[]");
+      localStorage.setItem("bf:running", "[]");
+      localStorage.setItem("bf:launching", "[]");
     } catch {}
     try {
       const key = `toast:persist:bf:stopped`;
@@ -1973,6 +2185,8 @@
     ensureOut();
     sendVerify({ action: "list" });
     await load();
+    await fetchAndApplyInflight();
+    startInflightPolling();
   }
 
   document.getElementById("orph-delall")?.addEventListener("click", () => {
@@ -2215,16 +2429,24 @@
       wsOut &&
       (wsOut.readyState === WebSocket.OPEN ||
         wsOut.readyState === WebSocket.CONNECTING)
-    )
+    ) {
       return;
+    }
+
     const url = location.origin.replace(/^http/, "ws") + "/ws/out";
     const sock = new WebSocket(url);
     wsOut = sock;
-    sock.onopen = () => dbg("WS OUT connected");
+
+    sock.onopen = () => {
+      dbg("WS OUT connected");
+      fetchAndApplyInflight();
+    };
+
     sock.onclose = () => {
       dbg("WS OUT closed");
       resetAllCloningUI("ws_out_closed");
     };
+
     sock.onerror = (e) => {
       dbg("WS OUT error", e);
       resetAllCloningUI("ws_out_error");
@@ -2319,7 +2541,7 @@
             if (shouldAnnounceNow() && weLaunchedThis) {
               window.showToast(
                 t === "backfill_busy"
-                  ? "A clone for this channel is already running."
+                  ? "A clone for this channel is already running or finishing up."
                   : "Clone started…",
                 { type: "warning" }
               );
@@ -2329,14 +2551,55 @@
           }
 
           if (t === "backfill_progress") {
-            const d = p.data || {};
-            const delivered = d.delivered ?? d.count ?? 0;
-            const total = d.total ?? undefined;
+            const d = (p && (p.data ?? p)) || {};
+
+            const delivered = d.delivered ?? d.applied ?? d.count ?? 0;
+            const total = d.expected_total ?? d.total ?? d.expected ?? null;
             const cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             if (!cid) return;
+
             dbg("[bf] progress", { cid, delivered, total, payload: p });
-            if (cid) setCardLoading(cid, true, "Cloning…");
-            return;
+
+            inflightByOrig.set(String(cid), {
+              delivered,
+              expected_total: total,
+            });
+
+            const text =
+              Number.isFinite(delivered) && Number.isFinite(total)
+                ? `Cloning… (${delivered}/${total})`
+                : Number.isFinite(delivered)
+                ? `Cloning… (${delivered})`
+                : "Cloning…";
+
+            setCardLoading(cid, true, text);
+
+            const card = document.querySelector(
+              `.ch-card[data-cid="${String(cid)}"]`
+            );
+            updateProgressBar(card, delivered, total);
+            applyInflightUI(Object.fromEntries(inflightByOrig));
+          }
+
+          if (t === "backfill_cleanup") {
+            const d = p.data || p;
+            const cid = String(d.channel_id || "");
+            if (!cid) return;
+            const card = document.querySelector(`.ch-card[data-cid="${cid}"]`);
+
+            if (d.state === "starting") {
+              setCardLoading(cid, true, "Cleaning up…");
+              setProgressCleanupMode(card, true);
+              return;
+            }
+
+            if (d.state === "finished") {
+              setProgressCleanupMode(card, false);
+              setCloneLaunching(cid, false);
+              setCloneRunning(cid, false);
+              setCardLoading(cid, false);
+              return;
+            }
           }
 
           if (t === "backfill_done") {
@@ -2348,9 +2611,11 @@
             if (cid) {
               unlockBackfill(cid);
               setCardLoading(cid, false);
+              announceBackfillDone(cid);
+              fetchAndApplyInflight().catch(() => {});
             } else {
               console.warn(
-                "[backfill_done] Could not resolve channel id; leaving locks as-is.",
+                "[backfill_done] Could not resolve channel id; ...",
                 p
               );
             }
@@ -2362,15 +2627,6 @@
               try {
                 sessionStorage.removeItem(`bf:cancelled:${cid}`);
               } catch {}
-
-            if (!wasCancelled && shouldAnnounceNow()) {
-              toastOncePersist(
-                `bf:done:${cid}`,
-                "Clone completed.",
-                { type: "success" },
-                15000
-              );
-            }
 
             render();
             return;
@@ -2962,7 +3218,7 @@
               toastOncePersist(
                 `bf:already:${cloneId}`,
                 state === "running"
-                  ? "A clone for this channel is already running."
+                  ? "A clone for this channel is already running or finishing up."
                   : "A clone launch is already in progress.",
                 { type: "warning" },
                 15000
