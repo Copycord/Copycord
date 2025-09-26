@@ -4008,7 +4008,6 @@ class ServerReceiver:
 
                     await asyncio.sleep(60 * 60)
             except asyncio.CancelledError:
-                logger.info("[prune] pruner task cancelled; exiting gracefully")
                 raise
 
         # Spawn the task
