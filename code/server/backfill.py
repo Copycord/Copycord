@@ -215,6 +215,15 @@ class BackfillManager:
             prev,
         )
 
+    def add_expected_total(self, channel_id: int, delta: int = 1) -> None:
+        """Increment expected_total by delta (used for synthetic units like text-thread creations)."""
+        cid = int(channel_id)
+        st = self._progress.get(cid)
+        if not st:
+            return
+        curr = int(st.get("expected_total") or 0)
+        st["expected_total"] = curr + int(delta)
+
     def get_progress(self, channel_id: int) -> tuple[int | None, int | None]:
         cid = int(channel_id)
         if cid not in self._progress or cid not in self._flags:

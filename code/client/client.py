@@ -780,9 +780,8 @@ class ClientListener:
         lower = content.lower()
         author = message.author
         chan_id = message.channel.id
-        guild_id = message.guild.id if message.guild else 0  # 0 = DMs / no guild
+        guild_id = message.guild.id if message.guild else 0
 
-        # Load triggers that apply here: this guild + global (guild_id=0)
         triggers = self.db.get_effective_announcement_triggers(guild_id)
         if not triggers:
             return False
@@ -791,11 +790,9 @@ class ClientListener:
             key = kw.lower()
             matched = False
 
-            # 1) bare word (letters/digits/_)
             if re.match(r"^\w+$", key) and re.search(rf"\b{re.escape(key)}\b", lower):
                 matched = True
 
-            # 2) custom/standard emoji like <:key:123> or <a:key:123>
             if (
                 not matched
                 and re.match(r"^[A-Za-z0-9_]+$", key)
@@ -803,15 +800,12 @@ class ClientListener:
             ):
                 matched = True
 
-            # 3) simple substring fallback
             if not matched and key in lower:
                 matched = True
 
             if not matched:
                 continue
 
-            # Filter by author/channel. Note: channel_id filters with guild_id=0 still work
-            # because Discord channel IDs are globally unique.
             for filter_id, allowed_chan in entries:
                 if (filter_id == 0 or author.id == filter_id) and (
                     allowed_chan == 0 or chan_id == allowed_chan
@@ -819,7 +813,7 @@ class ClientListener:
                     payload = {
                         "type": "announce",
                         "data": {
-                            "guild_id": guild_id,  # the guild where it fired
+                            "guild_id": guild_id,
                             "keyword": kw,
                             "content": content,
                             "author": author.name,
@@ -1027,7 +1021,7 @@ class ClientListener:
                 ),
                 "content": content,
                 "timestamp": str(after.edited_at or after.created_at),
-                "attachments": attachments,  # kept for completeness
+                "attachments": attachments,
                 "components": components,
                 "stickers": stickers_payload,
                 "embeds": embeds,
@@ -1102,7 +1096,7 @@ class ClientListener:
                     if getattr(channel, "type", None)
                     else None
                 ),
-                "author": author,  # may be None for raw
+                "author": author,
                 "author_id": (
                     getattr(getattr(msg, "author", None), "id", None) if msg else None
                 ),
@@ -1195,7 +1189,6 @@ class ClientListener:
         if not guild or not self._is_host_guild(guild):
             return
 
-        # Uncached message: send minimal info
         is_thread = getattr(channel, "type", None) in (
             ChannelType.public_thread,
             ChannelType.private_thread,
@@ -1455,6 +1448,7 @@ class ClientListener:
         import asyncio
         import os
         from datetime import datetime, timezone
+        from discord import ChannelType, MessageType
 
         def _coerce_int(x):
             try:
@@ -1667,143 +1661,193 @@ class ClientListener:
                 before_iso,
             )
 
-        try:
+        async def _iter_all_threads(parent):
+            """
+            Yield all threads under a ForumChannel or TextChannel:
+            - active threads from .threads
+            - archived public threads via .archived_threads(limit=None)
+            - archived private threads via .archived_threads(private=True, limit=None) when accessible
+            """
+            seen = set()
+            for th in getattr(parent, "threads", []) or []:
+                if th and th.id not in seen:
+                    seen.add(th.id)
+                    yield th
+            try:
+                async for th in parent.archived_threads(limit=None):
+                    if th and th.id not in seen:
+                        seen.add(th.id)
+                        yield th
+            except Exception:
+                pass
+            try:
+                async for th in parent.archived_threads(private=True, limit=None):
+                    if th and th.id not in seen:
+                        seen.add(th.id)
+                        yield th
+            except Exception:
+                pass
 
-            async def emit_msg(m):
-                nonlocal sent, skipped, last_ping, last_log
-                if not _is_normal(m):
-                    skipped += 1
-                    return
-
-                raw = m.content or ""
-                system = getattr(m, "system_content", "") or ""
-                content = system if (not raw and system) else raw
-                author = (
-                    "System"
-                    if (not raw and system)
-                    else getattr(m.author, "name", "Unknown")
-                )
-
-                raw_embeds = [e.to_dict() for e in m.embeds]
-                mention_map = await self.msg.build_mention_map(m, raw_embeds)
-                embeds = [
-                    self.msg.sanitize_embed_dict(e, m, mention_map) for e in raw_embeds
-                ]
-                content = self.msg.sanitize_inline(content, m, mention_map)
-                stickers_payload = self.msg.stickers_payload(getattr(m, "stickers", []))
-
-                await self.ws.send(
-                    {
-                        "type": "message",
-                        "data": {
-                            "guild_id": getattr(m.guild, "id", None),
-                            "message_id": getattr(m, "id", None),
-                            "channel_id": m.channel.id,
-                            "channel_name": getattr(m.channel, "name", None),
-                            "channel_type": (
-                                getattr(m.channel, "type", None).value
-                                if getattr(m.channel, "type", None)
-                                else None
-                            ),
-                            "author": author,
-                            "author_id": getattr(m, "author", None)
-                            and getattr(m.author, "id", None),
-                            "avatar_url": (
-                                str(m.author.display_avatar.url)
-                                if getattr(m.author, "display_avatar", None)
-                                else None
-                            ),
-                            "content": content,
-                            "embeds": embeds,
-                            "attachments": [
-                                {"url": a.url, "filename": a.filename, "size": a.size}
-                                for a in m.attachments
-                            ],
-                            "stickers": stickers_payload,
-                            "__backfill__": True,
-                        },
-                    }
-                )
-                sent += 1
-                await asyncio.sleep(0.02) # slight yield
-
-                now = loop.time()
-                if sent % PROGRESS_EVERY == 0 or (now - last_ping) >= 2.0:
-                    await self.ws.send(
-                        {
-                            "type": "backfill_progress",
-                            "data": {"channel_id": original_channel_id, "sent": sent},
-                        }
-                    )
-                    last_ping = now
-
-                if (now - last_log) >= LOG_EVERY_SEC:
-                    dt = now - t0
-                    rate = (sent / dt) if dt > 0 else 0.0
-                    logger.debug(
-                        "[backfill] progress | channel=%s sent=%d skipped=%d rate=%.1f msg/s",
-                        original_channel_id,
-                        sent,
-                        skipped,
-                        rate,
-                    )
-                    last_log = now
-
-            n = _coerce_int(last_n)
-
+        async def _count_history(obj, *, n: int | None, after_dt, before_dt) -> int:
             if n and n > 0:
-
-                buf = []
-                logger.debug(
-                    "[backfill] mode=last_n | n=%d %s",
-                    n,
-                    (
-                        f"(after {after_dt.isoformat()})"
-                        if after_dt
-                        else "(no since bound)"
-                    ),
-                )
-                async for m in ch.history(
-                    limit=n, oldest_first=False, after=after_dt, before=before_dt
-                ):
-                    buf.append(m)
-
-                total = sum(1 for m in buf if _is_normal(m))
-                logger.debug(
-                    "[backfill] fetched buffer | size=%d, total_normal=%d",
-                    len(buf),
-                    total,
-                )
-
-                await self.ws.send(
-                    {
-                        "type": "backfill_progress",
-                        "data": {"channel_id": original_channel_id, "total": total},
-                    }
-                )
-
-                for m in reversed(buf):
-                    await emit_msg(m)
-
-            else:
-
-                logger.debug(
-                    "[backfill] mode=%s | streaming oldest→newest%s",
-                    "since" if after_dt else "all",
-                    f" (after {after_dt.isoformat()})" if after_dt else "",
-                )
                 buf = [
                     m
-                    async for m in ch.history(
+                    async for m in obj.history(
+                        limit=n, oldest_first=False, after=after_dt, before=before_dt
+                    )
+                ]
+                return sum(1 for m in buf if _is_normal(m))
+            else:
+                buf = [
+                    m
+                    async for m in obj.history(
                         limit=None, oldest_first=True, after=after_dt, before=before_dt
                     )
                 ]
-                total = sum(1 for m in buf if _is_normal(m))
-                logger.debug(
-                    "[backfill] pre-count complete | fetched=%d total_normal=%d",
-                    len(buf),
-                    total,
+                return sum(1 for m in buf if _is_normal(m))
+
+        async def _emit_msg(m):
+            """Emit either a normal message or a thread message, matching live payloads."""
+            nonlocal sent, skipped, last_ping, last_log
+            if not _is_normal(m):
+                skipped += 1
+                return
+
+            raw = m.content or ""
+            system = getattr(m, "system_content", "") or ""
+            content = system if (not raw and system) else raw
+            author_name = (
+                "System"
+                if (not raw and system)
+                else getattr(m.author, "name", "Unknown")
+            )
+
+            raw_embeds = [e.to_dict() for e in m.embeds]
+            mention_map = await self.msg.build_mention_map(m, raw_embeds)
+            embeds = [
+                self.msg.sanitize_embed_dict(e, m, mention_map) for e in raw_embeds
+            ]
+            content = self.msg.sanitize_inline(content, m, mention_map)
+            stickers_payload = self.msg.stickers_payload(getattr(m, "stickers", []))
+
+            is_thread = getattr(m.channel, "type", None) in (
+                ChannelType.public_thread,
+                ChannelType.private_thread,
+            )
+            payload = {
+                "type": "thread_message" if is_thread else "message",
+                "data": {
+                    "guild_id": getattr(m.guild, "id", None),
+                    "message_id": getattr(m, "id", None),
+                    "channel_id": m.channel.id,
+                    "channel_name": getattr(m.channel, "name", None),
+                    "channel_type": (
+                        getattr(m.channel, "type", None).value
+                        if getattr(m.channel, "type", None)
+                        else None
+                    ),
+                    "author": author_name,
+                    "author_id": getattr(m.author, "id", None),
+                    "avatar_url": (
+                        str(m.author.display_avatar.url)
+                        if getattr(m.author, "display_avatar", None)
+                        else None
+                    ),
+                    "content": content,
+                    "attachments": [
+                        {"url": a.url, "filename": a.filename, "size": a.size}
+                        for a in m.attachments
+                    ],
+                    "stickers": stickers_payload,
+                    "embeds": embeds,
+                    "__backfill__": True,
+                    **(
+                        {
+                            "thread_parent_id": getattr(
+                                getattr(m.channel, "parent", None), "id", None
+                            ),
+                            "thread_parent_name": getattr(
+                                getattr(m.channel, "parent", None), "name", None
+                            ),
+                            "thread_id": getattr(m.channel, "id", None),
+                            "thread_name": getattr(m.channel, "name", None),
+                        }
+                        if is_thread
+                        else {}
+                    ),
+                },
+            }
+
+            await self.ws.send(payload)
+            sent += 1
+            await asyncio.sleep(0.02)
+
+            now = loop.time()
+            if sent % PROGRESS_EVERY == 0 or (now - last_ping) >= 2.0:
+                await self.ws.send(
+                    {
+                        "type": "backfill_progress",
+                        "data": {"channel_id": original_channel_id, "sent": sent},
+                    }
                 )
+                last_ping = now
+
+            if (now - last_log) >= LOG_EVERY_SEC:
+                dt = now - t0
+                rate = (sent / dt) if dt > 0 else 0.0
+                logger.debug(
+                    "[backfill] progress | channel=%s sent=%d skipped=%d rate=%.1f msg/s",
+                    original_channel_id,
+                    sent,
+                    skipped,
+                    rate,
+                )
+                last_log = now
+
+        async def _stream_history(obj, *, n: int | None, after_dt, before_dt):
+            """Oldest→newest unless last_n; funnels through _emit_msg to get thread/normal split."""
+            if n and n > 0:
+                buf = [
+                    m
+                    async for m in obj.history(
+                        limit=n, oldest_first=False, after=after_dt, before=before_dt
+                    )
+                ]
+                for m in reversed(buf):
+                    await _emit_msg(m)
+            else:
+                async for m in obj.history(
+                    limit=None, oldest_first=True, after=after_dt, before=before_dt
+                ):
+                    await _emit_msg(m)
+
+        try:
+            n = _coerce_int(last_n)
+
+            if getattr(ch, "type", None) == ChannelType.forum:
+                logger.debug(
+                    "[backfill] forum detected | id=%s name=%s",
+                    getattr(ch, "id", None),
+                    getattr(ch, "name", None),
+                )
+
+                total = 0
+                async for th in _iter_all_threads(ch):
+                    try:
+                        total += await _count_history(
+                            th, n=n, after_dt=after_dt, before_dt=before_dt
+                        )
+                    except Forbidden:
+                        logger.debug(
+                            "[backfill] thread history forbidden | thread=%s",
+                            getattr(th, "id", None),
+                        )
+                    except HTTPException as e:
+                        logger.warning(
+                            "[backfill] HTTP while counting thread=%s err=%s",
+                            getattr(th, "id", None),
+                            e,
+                        )
 
                 await self.ws.send(
                     {
@@ -1812,8 +1856,167 @@ class ClientListener:
                     }
                 )
 
-                for m in buf:
-                    await emit_msg(m)
+                async for th in _iter_all_threads(ch):
+                    try:
+                        await _stream_history(
+                            th, n=n, after_dt=after_dt, before_dt=before_dt
+                        )
+                    except Forbidden:
+                        logger.debug(
+                            "[backfill] thread history forbidden | thread=%s",
+                            getattr(th, "id", None),
+                        )
+                    except HTTPException as e:
+                        logger.warning(
+                            "[backfill] HTTP while streaming thread=%s err=%s",
+                            getattr(th, "id", None),
+                            e,
+                        )
+
+            else:
+
+                if n and n > 0:
+                    buf = []
+                    logger.debug(
+                        "[backfill] mode=last_n | n=%d %s",
+                        n,
+                        (
+                            f"(after {after_dt.isoformat()})"
+                            if after_dt
+                            else "(no since bound)"
+                        ),
+                    )
+                    async for m in ch.history(
+                        limit=n, oldest_first=False, after=after_dt, before=before_dt
+                    ):
+                        buf.append(m)
+
+                    parent_total = sum(1 for m in buf if _is_normal(m))
+                    logger.debug(
+                        "[backfill] fetched buffer | size=%d, total_normal=%d",
+                        len(buf),
+                        parent_total,
+                    )
+
+                    thread_total = 0
+                    async for th in _iter_all_threads(ch):
+                        try:
+                            thread_total += await _count_history(
+                                th, n=n, after_dt=after_dt, before_dt=before_dt
+                            )
+                        except Forbidden:
+                            logger.debug(
+                                "[backfill] thread history forbidden | thread=%s",
+                                getattr(th, "id", None),
+                            )
+                        except HTTPException as e:
+                            logger.warning(
+                                "[backfill] HTTP while counting thread=%s err=%s",
+                                getattr(th, "id", None),
+                                e,
+                            )
+
+                    combined_total = parent_total + thread_total
+                    await self.ws.send(
+                        {
+                            "type": "backfill_progress",
+                            "data": {
+                                "channel_id": original_channel_id,
+                                "total": combined_total,
+                            },
+                        }
+                    )
+
+                    for m in reversed(buf):
+                        await _emit_msg(m)
+
+                    async for th in _iter_all_threads(ch):
+                        try:
+                            await _stream_history(
+                                th, n=n, after_dt=after_dt, before_dt=before_dt
+                            )
+                        except Forbidden:
+                            logger.debug(
+                                "[backfill] thread history forbidden | thread=%s",
+                                getattr(th, "id", None),
+                            )
+                        except HTTPException as e:
+                            logger.warning(
+                                "[backfill] HTTP while streaming thread=%s err=%s",
+                                getattr(th, "id", None),
+                                e,
+                            )
+
+                else:
+                    logger.debug(
+                        "[backfill] mode=%s | streaming oldest→newest%s",
+                        "since" if after_dt else "all",
+                        f" (after {after_dt.isoformat()})" if after_dt else "",
+                    )
+                    buf = [
+                        m
+                        async for m in ch.history(
+                            limit=None,
+                            oldest_first=True,
+                            after=after_dt,
+                            before=before_dt,
+                        )
+                    ]
+                    parent_total = sum(1 for m in buf if _is_normal(m))
+                    logger.debug(
+                        "[backfill] pre-count complete | fetched=%d total_normal=%d",
+                        len(buf),
+                        parent_total,
+                    )
+
+                    thread_total = 0
+                    async for th in _iter_all_threads(ch):
+                        try:
+                            thread_total += await _count_history(
+                                th, n=n, after_dt=after_dt, before_dt=before_dt
+                            )
+                        except Forbidden:
+                            logger.debug(
+                                "[backfill] thread history forbidden | thread=%s",
+                                getattr(th, "id", None),
+                            )
+                        except HTTPException as e:
+                            logger.warning(
+                                "[backfill] HTTP while counting thread=%s err=%s",
+                                getattr(th, "id", None),
+                                e,
+                            )
+
+                    combined_total = parent_total + thread_total
+                    await self.ws.send(
+                        {
+                            "type": "backfill_progress",
+                            "data": {
+                                "channel_id": original_channel_id,
+                                "total": combined_total,
+                            },
+                        }
+                    )
+
+                    for m in buf:
+                        await _emit_msg(m)
+
+                    async for th in _iter_all_threads(ch):
+                        try:
+                            await _stream_history(
+                                th, n=n, after_dt=after_dt, before_dt=before_dt
+                            )
+                        except Forbidden:
+                            logger.debug(
+                                "[backfill] thread history forbidden | thread=%s",
+                                getattr(th, "id", None),
+                            )
+                        except HTTPException as e:
+                            logger.warning(
+                                "[backfill] HTTP while streaming thread=%s err=%s",
+                                getattr(th, "id", None),
+                                e,
+                            )
 
         except Forbidden as e:
             logger.debug(
@@ -1899,7 +2102,6 @@ class ClientListener:
         import asyncio, os, json, time, re, uuid
         from datetime import datetime, timezone
 
-        # Optional dependency for downloading media
         try:
             import aiohttp
         except Exception:
@@ -1925,27 +2127,22 @@ class ClientListener:
             except Exception:
                 return None
 
-        # ---- Inputs & basics
         chan_id_raw = (d.get("channel_id") or "").strip() or None
         user_id_raw = (d.get("user_id") or "").strip() or None
         webhook_url = (d.get("webhook_url") or "").strip() or None
-        only_with_attachments = bool(
-            d.get("has_attachments", False)
-        )  # legacy toggle (kept)
+        only_with_attachments = bool(d.get("has_attachments", False))
         after_dt = _parse_iso(d.get("after_iso") or None)
         before_dt = _parse_iso(d.get("before_iso") or None)
         user_id = int(user_id_raw) if (user_id_raw and user_id_raw.isdigit()) else None
 
-        # Throttles
-        scan_sleep = 0.0  # scanning
-        send_sleep = 2.0  # 2s between WS sends
+        scan_sleep = 0.0
+        send_sleep = 2.0
 
         gid_log = getattr(guild, "id", None)
         gname = getattr(guild, "name", "") or "Unknown"
         wh_tail = webhook_url[-6:] if webhook_url else "None"
         do_forward = bool(webhook_url)
 
-        # ---- UI filters (include-style with sensible defaults)
         filters = d.get("filters") or {}
         F = {
             "embeds": filters.get("embeds", True),
@@ -1956,7 +2153,6 @@ class ClientListener:
             ),
             "links": filters.get("links", True),
             "emojis": filters.get("emojis", True),
-            # Include text content if True; if False, exclude messages that have content
             "has_content": bool(filters.get("has_content", True)),
             "word_on": filters.get("word_on", False),
             "word": (filters.get("word") or "").strip(),
@@ -1968,14 +2164,12 @@ class ClientListener:
             "pinned": filters.get("pinned", True),
             "stickers": filters.get("stickers", True),
             "mentions": filters.get("mentions", True),
-            # NEW: media download selection (all default False)
             "download_media": (
                 filters.get("download_media")
                 or {"images": False, "videos": False, "audio": False, "other": False}
             ),
         }
 
-        # Normalize attachment flags
         if not F["attachments"]:
             F["att_types"] = {
                 "images": False,
@@ -1988,15 +2182,15 @@ class ClientListener:
             if not any(
                 bool(kinds.get(k)) for k in ("images", "videos", "audio", "other")
             ):
-                # Attachments ON but no subtypes selected → treat as OFF
+
                 F["attachments"] = False
 
         if after_dt and before_dt and after_dt > before_dt:
-            # Swap silently to avoid no-results range
+
             after_dt, before_dt = before_dt, after_dt
 
         _link_re = re.compile(r"https?://\S+", re.I)
-        # Matches custom <:name:id> and a broad range of Unicode emoji
+
         _emoji_re = re.compile(r"(<a?:\w+:\d+>)|([\U0001F300-\U0001FAFF])")
         word_re = (
             re.compile(re.escape(F["word"]), re.I)
@@ -2005,7 +2199,7 @@ class ClientListener:
         )
 
         def _att_kind(att):
-            # att can be discord.Attachment or a dict from serialized message
+
             if hasattr(att, "content_type"):
                 ct = (getattr(att, "content_type", "") or "").lower()
                 name = (getattr(att, "filename", "") or "").lower()
@@ -2039,7 +2233,7 @@ class ClientListener:
             return False
 
         def _passes_filters(msg):
-            # Bots/system
+
             if isinstance(msg, dict):
                 is_bot = bool(((msg.get("author") or {}).get("bot")) or False)
             else:
@@ -2052,19 +2246,17 @@ class ClientListener:
                 if mtype and getattr(mtype, "name", "").lower() != "default":
                     return False
 
-            # Length & text
             content = (
                 msg.get("content")
                 if isinstance(msg, dict)
                 else getattr(msg, "content", "")
             ) or ""
             if not F["has_content"] and content.strip():
-                # If include-content is False, exclude messages that have content
+
                 return False
             if F["min_length"] > 0 and len(content) < F["min_length"]:
                 return False
 
-            # Reactions
             reacts = (
                 msg.get("reactions")
                 if isinstance(msg, dict)
@@ -2086,7 +2278,6 @@ class ClientListener:
                 if total_reacts < F["min_reactions"]:
                     return False
 
-            # Pinned
             pinned = bool(
                 (
                     msg.get("pinned")
@@ -2098,7 +2289,6 @@ class ClientListener:
             if not F["pinned"] and pinned:
                 return False
 
-            # Stickers
             stickers = (
                 msg.get("stickers")
                 if isinstance(msg, dict)
@@ -2107,7 +2297,6 @@ class ClientListener:
             if not F["stickers"] and stickers:
                 return False
 
-            # Mentions
             if not F["mentions"]:
                 if isinstance(msg, dict):
                     if (
@@ -2124,7 +2313,6 @@ class ClientListener:
                     ):
                         return False
 
-            # Replies (has resolved reference)
             if isinstance(msg, dict):
                 ref = msg.get("reference")
                 has_ref = bool(ref and ref.get("resolved"))
@@ -2134,7 +2322,6 @@ class ClientListener:
             if not F["replies"] and has_ref:
                 return False
 
-            # Embeds
             embeds = (
                 msg.get("embeds")
                 if isinstance(msg, dict)
@@ -2143,7 +2330,6 @@ class ClientListener:
             if not F["embeds"] and embeds:
                 return False
 
-            # Attachments (+ enforce selected kinds)
             atts = (
                 msg.get("attachments")
                 if isinstance(msg, dict)
@@ -2156,7 +2342,6 @@ class ClientListener:
                 if atts and not _has_any_attachment_type(msg):
                     return False
 
-            # Links
             if not F["links"]:
                 if _link_re.search(content):
                     return False
@@ -2172,17 +2357,14 @@ class ClientListener:
                     if any(v and _link_re.search(str(v)) for v in vals):
                         return False
 
-            # Emojis
             if not F["emojis"] and _emoji_re.search(content):
                 return False
 
-            # Include word (must appear if enabled & provided)
             if word_re and not word_re.search(content):
                 return False
 
             return True
 
-        # ---- Resolve channels safely
         me = None
         try:
             me = guild.get_member(getattr(self.bot.user, "id", None))
@@ -2243,11 +2425,8 @@ class ClientListener:
         total_scanned = 0
         total_matched = 0
         forwarded = 0
-        buffer_rows = (
-            []
-        )  # Always buffer first so we can save JSON before any forwarding
+        buffer_rows = []
 
-        # ---- Scan
         for ch in channels:
             cid = getattr(ch, "id", None)
             cname = getattr(ch, "name", "") or "unknown"
@@ -2271,13 +2450,11 @@ class ClientListener:
                             await asyncio.sleep(scan_sleep)
                         continue
 
-                    # legacy toggle
                     if only_with_attachments and not getattr(msg, "attachments", []):
                         if scan_sleep:
                             await asyncio.sleep(scan_sleep)
                         continue
 
-                    # comprehensive UI filters
                     if not _passes_filters(msg):
                         if scan_sleep:
                             await asyncio.sleep(scan_sleep)
@@ -2311,7 +2488,6 @@ class ClientListener:
                 f"[export] Done channel #{cname} ({cid}): scanned={ch_scanned}, matched={ch_matched}"
             )
 
-        # ---- Save JSON snapshot first — /data/exports/<guild>/<YYYYMMDD-HHMMSS>/messages.json
         json_file = None
         media_root = None
         try:
@@ -2338,7 +2514,6 @@ class ClientListener:
                 )
             logger.info(f"[export] JSON saved: {json_file}")
 
-            # Prepare media dirs now; used only if downloads are requested
             media_root = os.path.join(subdir, "media")
             for k in ("images", "videos", "audio", "other"):
                 os.makedirs(os.path.join(media_root, k), exist_ok=True)
@@ -2346,7 +2521,6 @@ class ClientListener:
             logger.warning(f"[export] Failed to write JSON: {e}")
             json_file = None
 
-        # ---- NEW: Download attachments if requested
         dl_cfg = F["download_media"] or {}
         want_any_download = any(
             dl_cfg.get(k, False) for k in ("images", "videos", "audio", "other")
@@ -2375,7 +2549,7 @@ class ClientListener:
 
         async def _download_one(session, sem, kind, url, filename, dest_dir):
             safe_name = filename
-            # ensure unique path
+
             base, ext = os.path.splitext(safe_name)
             if not base:
                 base = kind
@@ -2406,10 +2580,9 @@ class ClientListener:
             )
         elif want_any_download:
             logger.info(f"[export] Downloading media per selection: {dl_cfg}")
-            sem = asyncio.Semaphore(4)  # tune concurrency
+            sem = asyncio.Semaphore(4)
             tasks = []
 
-            # Collect all candidate links from matched/serialized messages
             for row in buffer_rows:
                 msg_obj = row.get("message") or {}
                 for kind, url, fname in _iter_attachment_links(msg_obj):
@@ -2431,7 +2604,7 @@ class ClientListener:
                         ],
                         return_exceptions=False,
                     )
-                # Tally results
+
                 for (kind, url, *_), res in zip(tasks, results):
                     ok, path, err = res
                     if ok:
@@ -2444,7 +2617,6 @@ class ClientListener:
 
                 logger.info(f"[export] Media download complete: {media_report}")
 
-        # ---- Forward buffered messages if a webhook URL was provided
         if do_forward and buffer_rows:
             logger.info(
                 f"[export] Forwarding buffered messages: {len(buffer_rows)} → webhook(…{wh_tail})"
@@ -2464,7 +2636,7 @@ class ClientListener:
                     )
                     forwarded += 1
                     if send_sleep:
-                        await asyncio.sleep(send_sleep)  # 2s between WS sends
+                        await asyncio.sleep(send_sleep)
                 except Exception as e:
                     logger.warning(
                         f"[📤] export_message send failed (post-JSON) idx={idx}: {e}"
@@ -2485,7 +2657,6 @@ class ClientListener:
             f"media_dl={media_report if want_any_download else 'skipped'}, elapsed={dur:.1f}s"
         )
 
-        # ---- Done – notify server (include media report if present)
         try:
             done_payload = {
                 "guild_id": getattr(guild, "id", None),
