@@ -5349,3 +5349,78 @@ body {
     color-scheme: dark;
   }
 }
+
+.ch-card .ch-top-right {
+  position: relative;
+}
+
+.ch-card .ch-status {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 6px;
+  z-index: 2;
+}
+
+.ch-card {
+  overflow: visible;
+}
+
+.ch-card .ch-progress {
+  --pr-fill: #22c55e;
+  --pr-bg: rgba(34, 197, 94, 0.22);
+  --pr-h: 4px;
+  position: relative;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: var(--pr-bg);
+  overflow: hidden;
+  height: var(--pr-h);
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+.ch-card.is-cloning .ch-progress {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ch-card .ch-progress > .bar {
+  width: 0%;
+  height: 100%;
+  background: var(--pr-fill);
+  border-radius: inherit;
+  transition: width 180ms ease;
+}
+
+.ch-card .ch-progress.indeterminate > .bar {
+  width: 30%;
+  min-width: 30%;
+  animation: pr-shimmer 1.2s linear infinite;
+
+  background: linear-gradient(
+    90deg,
+    rgba(34, 197, 94, 0.25) 0%,
+    rgba(34, 197, 94, 0.65) 50%,
+    rgba(34, 197, 94, 0.25) 100%
+  );
+  filter: saturate(1);
+}
+@keyframes pr-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(300%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ch-card .ch-progress > .bar {
+    transition: none;
+    animation: none;
+  }
+  .ch-card .ch-progress {
+    transition: none;
+  }
+}
