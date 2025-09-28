@@ -146,6 +146,9 @@
       localStorage.setItem("bf:launching", "[]");
     } catch {}
 
+    try { localStorage.setItem("bf:pulling", "[]"); } catch {}
+    pullingClones.clear();
+
     try {
       const rm = [];
       for (let i = 0; i < sessionStorage.length; i++) {
@@ -241,7 +244,7 @@
     setTimeout(() => pr.remove(), 180);
   }
 
-  function setCardLoading(channelId, on, text = "Cloning…") {
+  function setCardLoading(channelId, on, text = "Cloning") {
     dbg("[UI] setCardLoading", { channelId: String(channelId), on, text });
     const k = String(channelId);
     const card = document.querySelector(`.ch-card[data-cid="${k}"]`);
@@ -706,6 +709,32 @@
     })()
   );
 
+  const pullingClones = new Set(
+    (() => {
+      try {
+        return JSON.parse(localStorage.getItem("bf:pulling") || "[]");
+      } catch {
+        return [];
+      }
+    })()
+  );
+  
+  function setClonePulling(id, on) {
+    const k = String(id);
+    if (on) pullingClones.add(k);
+    else pullingClones.delete(k);
+    try {
+      localStorage.setItem("bf:pulling", JSON.stringify([...pullingClones]));
+    } catch {}
+  
+    const card = document.querySelector(`.ch-card[data-cid="${k}"]`);
+    if (on) {
+      setCardLoading(k, true, "Cloning (pulling)");
+      updateProgressBar(card, null, null); // indeterminate
+    }
+  }
+  
+
   function setCloneCleaning(id, on) {
     const k = String(id);
     if (on) cleaningClones.add(k);
@@ -720,9 +749,9 @@
   function fmtProgress(v) {
     const d = Number.isFinite(v?.delivered) ? v.delivered : null;
     const t = Number.isFinite(v?.expected_total) ? v.expected_total : null;
-    if (d != null && t != null) return `Cloning… (${d}/${t})`;
-    if (d != null) return `Cloning… (${d})`;
-    return "Cloning…";
+    if (d != null && t != null) return `Cloning (${d}/${t})`;
+    if (d != null) return `Cloning (${d})`;
+    return "Cloning";
   }
 
   function getChannelDisplayName(cid) {
@@ -781,6 +810,12 @@
   function applyInflightUI(itemsObj) {
     const serverIds = new Set(Object.keys(itemsObj || {}).map(String));
 
+    const looksLikePulling = !Number.isFinite(d) && !Number.isFinite(t) || (d === 0 && t == null);
+    if (isPulling || looksLikePulling) {
+      setCardLoading(cid, true, "Cloning (Pulling messages)");
+      updateProgressBar(card, null, null);
+    } else
+
     for (const id of [...runningClones]) {
       if (!serverIds.has(id) && !cleaningClones.has(id)) {
         setCloneRunning(id, false);
@@ -803,18 +838,22 @@
     for (const [cid, info] of inflightByOrig.entries()) {
       setCloneRunning(cid, true);
       const card = document.querySelector(`.ch-card[data-cid="${cid}"]`);
+    
       const d = Number.isFinite(info?.delivered) ? info.delivered : null;
-      const t = Number.isFinite(info?.expected_total)
-        ? info.expected_total
-        : null;
-      const text =
-        d != null && t != null
-          ? `Cloning… (${d}/${t})`
-          : d != null
-          ? `Cloning… (${d})`
-          : `Cloning…`;
-      setCardLoading(cid, true, text);
-      updateProgressBar(card, d, t);
+      const t = Number.isFinite(info?.expected_total) ? info.expected_total : null;
+      const isPulling = pullingClones.has(String(cid));
+    
+      if (isPulling && (d == null || t == null)) {
+        setCardLoading(cid, true, "Cloning (Pulling messages)");
+        updateProgressBar(card, null, null); // indeterminate
+      } else {
+        const text =
+          d != null && t != null ? `Cloning (${d}/${t})`
+          : d != null            ? `Cloning (${d})`
+                                 : `Cloning`;
+        setCardLoading(cid, true, text);
+        updateProgressBar(card, d, t);
+      }
     }
 
     for (const id of cleaningClones) {
@@ -956,6 +995,8 @@
         JSON.stringify({ expiresAt: Date.now() + 10_000 })
       );
     } catch {}
+    try { localStorage.setItem("bf:pulling", "[]"); } catch {}
+    pullingClones.clear();
   }
 
   async function load() {
@@ -1396,8 +1437,9 @@
 
       root.appendChild(section);
 
-      for (const id of launchingClones) setCardLoading(id, true, "Cloning…");
-      for (const id of runningClones) setCardLoading(id, true, "Cloning…");
+      for (const id of launchingClones) setCardLoading(id, true, "Cloning");
+      for (const id of runningClones) setCardLoading(id, true, "Cloning");
+      for (const id of pullingClones) setCardLoading(id, true, "Cloning (Pulling messages)");
     }
   }
 
@@ -2567,20 +2609,14 @@
           ) {
             const cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             if (!cid) return;
-            dbg("[bf] started/ack/busy", {
-              t,
-              cid,
-              task_id: p?.task_id,
-              payload: p,
-            });
+          
             if (p.task_id && cid) rememberTask(p.task_id, cid);
-            if (cid) {
-              setCloneLaunching(cid, false);
-              setCloneRunning(cid, true);
-              setCardLoading(cid, true, "Cloning…");
-            }
-            const weLaunchedThis = cid && launchingClones.has(String(cid));
-            if (shouldAnnounceNow() && weLaunchedThis) {
+          
+            setCloneLaunching(cid, false);
+            setCloneRunning(cid, true);
+            setClonePulling(cid, true);   
+            setCardLoading(cid, true, "Cloning (Pulling messages)");
+            if (shouldAnnounceNow() && launchingClones.has(String(cid))) {
               window.showToast(
                 t === "backfill_busy"
                   ? "A clone for this channel is already running or finishing up."
@@ -2600,6 +2636,10 @@
             const cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             if (!cid) return;
 
+            const haveTotal = Number.isFinite(total);
+            const haveDelivered = Number.isFinite(delivered) && delivered > 0;
+            setClonePulling(cid, !(haveTotal || haveDelivered));
+
             dbg("[bf] progress", { cid, delivered, total, payload: p });
 
             inflightByOrig.set(String(cid), {
@@ -2609,10 +2649,10 @@
 
             const text =
               Number.isFinite(delivered) && Number.isFinite(total)
-                ? `Cloning… (${delivered}/${total})`
+                ? `Cloning (${delivered}/${total})`
                 : Number.isFinite(delivered)
-                ? `Cloning… (${delivered})`
-                : "Cloning…";
+                ? `Cloning (${delivered})`
+                : "Cloning";
 
             setCardLoading(cid, true, text);
 
@@ -2650,6 +2690,7 @@
             if (!cid && p.task_id) cid = taskMap.get(String(p.task_id));
             if (!cid) return;
 
+            setClonePulling(cid, false);
             setCloneCleaning(cid, false);
             unlockBackfill(cid);
             setCardLoading(cid, false);
