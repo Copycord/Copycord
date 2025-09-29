@@ -859,7 +859,6 @@ class BackfillManager:
                         continue
 
                     try:
-                        logger.info("[🧹] Creating temp webhook, please wait...")
                         await self.ratelimit.acquire(ActionType.WEBHOOK_CREATE)
                         await wh.delete(
                             reason="Cleanup: remove non-primary webhook in clone channel"
