@@ -584,6 +584,10 @@
                   <input type="checkbox" id="ex-f-mentions" checked>
                   <span>Include mentions</span>
                 </label>
+                <label class="check">
+                  <input type="checkbox" id="ex-f-threads" checked>
+                  <span>Include threads</span>
+                </label>
   
                 <div class="ex-metrics two-col">
                   <label class="form-field">
@@ -914,6 +918,10 @@
         pinned: $("#ex-f-pinned")?.checked ?? true,
         stickers: $("#ex-f-stickers")?.checked ?? true,
         mentions: $("#ex-f-mentions")?.checked ?? true,
+        
+        threads: $("#ex-f-threads")?.checked ?? true,
+        forum_threads: $("#ex-f-threads")?.checked ?? true,
+        private_threads: $("#ex-f-threads")?.checked ?? true,
         download_media: downloadMedia,
       };
 
