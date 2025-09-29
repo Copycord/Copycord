@@ -2755,19 +2755,6 @@
           if (t === "backfill_cancelled") {
             let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             if (!cid && p.task_id) cid = taskMap.get(String(p.task_id));
-            if (!cid) return;
-
-            setCloneCleaning(cid, false);
-            unlockBackfill(cid);
-            setCardLoading(cid, false);
-
-            render();
-            return;
-          }
-
-          if (t === "backfill_cancelled") {
-            let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
-            if (!cid && p.task_id) cid = taskMap.get(String(p.task_id));
             dbg("[bf] cancelled", { cid, task_id: p?.task_id, payload: p });
             if (p.task_id) forgetTask(p.task_id);
 
