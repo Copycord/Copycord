@@ -1954,12 +1954,13 @@ class BackfillEngine:
     ) -> AsyncIterator:
         """
         Yield messages with a cursor that survives transient 5xx errors.
+        Streams all history when n is None (no artificial 100-msg cap).
         """
         remaining = n if (n and n > 0) else None
         last_id = None
 
         while True:
-            limit = min(remaining, 100) if remaining else 100
+            limit = 100 if remaining is None else min(remaining, 100)
             kw = {
                 "limit": limit,
                 "oldest_first": oldest_first,
@@ -1979,15 +1980,15 @@ class BackfillEngine:
                     fetched_any = True
                     last_id = m.id
                     yield m
-                    if remaining:
+                    if remaining is not None:
                         remaining -= 1
                         if remaining <= 0:
                             return
 
-                if not remaining or remaining == 0:
-                    return
                 if not fetched_any:
                     return
+
+                continue
 
             except HTTPException as e:
                 if self._should_retry_http(e):
@@ -2000,6 +2001,7 @@ class BackfillEngine:
                     await asyncio.sleep(delay)
                     continue
                 raise
+
 
     async def _finish_progress_only(self, channel_id: int, sent: int) -> None:
         try:
