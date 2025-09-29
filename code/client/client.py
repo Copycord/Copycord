@@ -1493,6 +1493,11 @@ class ClientListener:
             )
         )
 
+        logger.info(
+            "[backfill] ▶ START requested | channel_id=%s mode=%s after=%r before=%r last_n=%r — large channels can take a while to pull history",
+            original_channel_id, mode, after_iso, before_iso, last_n,
+        )
+
         logger.debug(
             "[backfill] INIT | channel=%s mode=%s after_iso=%r before_iso=%r last_n=%r",
             original_channel_id,
