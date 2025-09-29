@@ -24,6 +24,8 @@
   document.documentElement.classList.remove("boot");
   const PULLING_LABEL = "Cloning (Please wait…)";
   const startedHere = new Set();
+  const NF_INT = new Intl.NumberFormat();
+  const fmtInt = (n) => Number.isFinite(n) ? NF_INT.format(n) : String(n);
 
   const DEBUG_BF = true;
   const dbg = (...a) => {
@@ -104,6 +106,16 @@
   let menuAnchorBtn = null;
   let bfCleanup = null;
 
+  function setCardInteractive(card, on) {
+    if (!card) return;
+    const btn = card.querySelector(".ch-menu-btn");
+    if (btn) {
+      btn.disabled = !on;
+      btn.setAttribute("aria-disabled", (!on).toString());
+      btn.title = on ? "Channel menu" : "Disabled while cloning";
+    }
+  }
+
   function rebuildCategoryPinMaps(rows) {
     catPinByOrig = new Map();
     catOrigByEither = new Map();
@@ -148,21 +160,23 @@
       localStorage.setItem("bf:launching", "[]");
     } catch {}
 
-    try { localStorage.setItem("bf:pulling", "[]"); } catch {}
+    try {
+      localStorage.setItem("bf:pulling", "[]");
+    } catch {}
     pullingClones.clear();
 
     try {
       const rm = [];
       for (let i = 0; i < sessionStorage.length; i++) {
         const k = sessionStorage.key(i);
-         if (
-             k &&
-             k.startsWith("toast:persist:bf:") &&
-             !k.startsWith("toast:persist:bf:done:")
-           ) {
-             rm.push(k);
-           }
-          }
+        if (
+          k &&
+          k.startsWith("toast:persist:bf:") &&
+          !k.startsWith("toast:persist:bf:done:")
+        ) {
+          rm.push(k);
+        }
+      }
       rm.forEach((k) => sessionStorage.removeItem(k));
     } catch {}
   }
@@ -262,14 +276,15 @@
       card.classList.add("is-cloning");
       card.setAttribute("aria-busy", "true");
       upsertStatusPill(card, text);
-
       updateProgressBar(card, null, null);
+      setCardInteractive(card, false);
     } else {
       card.classList.remove("is-cloning");
       card.removeAttribute("aria-busy");
       const pill = card.querySelector(".ch-status");
       if (pill) pill.remove();
       removeProgressBar(card);
+      setCardInteractive(card, true);
     }
   }
 
@@ -726,21 +741,22 @@
       }
     })()
   );
-  
+
   function setClonePulling(id, on) {
     const k = String(id);
     if (on) pullingClones.add(k);
-    else    pullingClones.delete(k);
-  
-    try { localStorage.setItem("bf:pulling", JSON.stringify([...pullingClones])); } catch {}
-  
+    else pullingClones.delete(k);
+
+    try {
+      localStorage.setItem("bf:pulling", JSON.stringify([...pullingClones]));
+    } catch {}
+
     const card = document.querySelector(`.ch-card[data-cid="${k}"]`);
     if (on) {
       setCardLoading(k, true, PULLING_LABEL);
-      updateProgressBar(card, null, null); // indeterminate
+      updateProgressBar(card, null, null);
     }
   }
-  
 
   function setCloneCleaning(id, on) {
     const k = String(id);
@@ -756,8 +772,8 @@
   function fmtProgress(v) {
     const d = Number.isFinite(v?.delivered) ? v.delivered : null;
     const t = Number.isFinite(v?.expected_total) ? v.expected_total : null;
-    if (d != null && t != null) return `Cloning (${d}/${t})`;
-    if (d != null && d > 0)      return `Cloning (${d})`;
+    if (d != null && t != null) return `Cloning (${fmtInt(d)}/${fmtInt(t)})`;
+    if (d != null && d > 0) return `Cloning (${fmtInt(d)})`;
     return PULLING_LABEL;
   }
 
@@ -785,13 +801,11 @@
   }
 
   function announceBackfillDone(cid) {
-
-
     const wasCancelled =
       cancelledThisSession.has(String(cid)) ||
       !!sessionStorage.getItem(`bf:cancelled:${cid}`);
 
-      if (!wasCancelled && shouldAnnounceNow()) {
+    if (!wasCancelled && shouldAnnounceNow()) {
       const chName = getChannelDisplayName(cid);
       const msg = chName
         ? `Clone completed for #${chName}.`
@@ -816,18 +830,18 @@
   function applyInflightUI(itemsObj) {
     const serverIds = new Set(Object.keys(itemsObj || {}).map(String));
 
-    const looksLikePulling = !Number.isFinite(d) && !Number.isFinite(t) || (d === 0 && t == null);
+    const looksLikePulling =
+      (!Number.isFinite(d) && !Number.isFinite(t)) || (d === 0 && t == null);
     if (isPulling || looksLikePulling) {
       setCardLoading(cid, true, "Cloning (Pulling messages)");
       updateProgressBar(card, null, null);
     } else
-
-    for (const id of [...runningClones]) {
-      if (!serverIds.has(id) && !cleaningClones.has(id)) {
-        setCloneRunning(id, false);
-        setCardLoading(id, false);
+      for (const id of [...runningClones]) {
+        if (!serverIds.has(id) && !cleaningClones.has(id)) {
+          setCloneRunning(id, false);
+          setCardLoading(id, false);
+        }
       }
-    }
 
     for (const id of [...launchingClones]) {
       if (!serverIds.has(id) && !cleaningClones.has(id)) {
@@ -844,21 +858,24 @@
     for (const [cid, info] of inflightByOrig.entries()) {
       setCloneRunning(cid, true);
       const card = document.querySelector(`.ch-card[data-cid="${cid}"]`);
-    
+
       const d = Number.isFinite(info?.delivered) ? info.delivered : null;
-      const t = Number.isFinite(info?.expected_total) ? info.expected_total : null;
+      const t = Number.isFinite(info?.expected_total)
+        ? info.expected_total
+        : null;
       const haveDelivered = Number.isFinite(d) && d > 0;
       const haveTotal = Number.isFinite(t) && t > 0;
-      const isPulling = pullingClones.has(String(cid)) || !(haveDelivered || haveTotal);
-    
+      const isPulling =
+        pullingClones.has(String(cid)) || !(haveDelivered || haveTotal);
+
       if (isPulling) {
         setCardLoading(cid, true, PULLING_LABEL);
         updateProgressBar(card, null, null);
       } else if (haveDelivered && haveTotal) {
-        setCardLoading(cid, true, `Cloning (${d}/${t})`);
+        setCardLoading(cid, true, `Cloning (${fmtInt(d)}/${fmtInt(t)})`);
         updateProgressBar(card, d, t);
       } else if (haveDelivered) {
-        setCardLoading(cid, true, `Cloning (${d})`);
+        setCardLoading(cid, true, `Cloning (${fmtInt(d)})`);
         updateProgressBar(card, d, null);
       } else {
         setCardLoading(cid, true, "Cloning");
@@ -1005,7 +1022,9 @@
         JSON.stringify({ expiresAt: Date.now() + 10_000 })
       );
     } catch {}
-    try { localStorage.setItem("bf:pulling", "[]"); } catch {}
+    try {
+      localStorage.setItem("bf:pulling", "[]");
+    } catch {}
     pullingClones.clear();
   }
 
@@ -1443,9 +1462,18 @@
         </div>
       `;
         grid.appendChild(card);
+        if (
+          launchingClones.has(String(ch.original_channel_id)) ||
+          runningClones.has(String(ch.original_channel_id)) ||
+          pullingClones.has(String(ch.original_channel_id))
+        ) {
+          setCardInteractive(card, false);
+        }
       }
 
       root.appendChild(section);
+
+
 
       for (const id of launchingClones) setCardLoading(id, true, "Cloning");
       for (const id of runningClones) setCardLoading(id, true, "Cloning");
@@ -2012,13 +2040,26 @@
   root.addEventListener("click", (e) => {
     const btn = e.target.closest(".ch-menu-btn");
     if (!btn) return;
+    if (btn.disabled) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     const card = btn.closest(".ch-card");
-    const cid = card?.dataset.cid;
+    const cid = card?.dataset?.cid;
+
+    if (cid && cloneIsLocked(cid)) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
     const isOpenForThis =
       !menu.hidden &&
       menuContext &&
       menuContext.type === "channel" &&
       menuContext.id === cid;
+
     if (isOpenForThis) {
       hideMenu({ restoreFocus: false });
     } else {
@@ -2619,13 +2660,13 @@
           ) {
             const cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             if (!cid) return;
-          
+
             if (p.task_id && cid) rememberTask(p.task_id, cid);
-          
+
             setCloneLaunching(cid, false);
             setCloneRunning(cid, true);
-            setClonePulling(cid, true);   
-            startedHere.add(String(cid)); 
+            setClonePulling(cid, true);
+            startedHere.add(String(cid));
             setCardLoading(cid, true, PULLING_LABEL);
             if (shouldAnnounceNow() && launchingClones.has(String(cid))) {
               window.showToast(
@@ -2643,31 +2684,34 @@
             const d = (p && (p.data ?? p)) || {};
 
             const delivered = d.delivered ?? d.applied ?? d.count ?? null;
-            const total     = d.expected_total ?? d.total ?? d.expected ?? null;
-            const cid       = backfillIdFrom(p.data) || backfillIdFrom(p);
+            const total = d.expected_total ?? d.total ?? d.expected ?? null;
+            const cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             if (!cid) return;
-            
+
             const haveDelivered = Number.isFinite(delivered) && delivered > 0;
-            const haveTotal     = Number.isFinite(total)     && total > 0;
-            
+            const haveTotal = Number.isFinite(total) && total > 0;
+
             const pulling = !(haveDelivered || haveTotal);
             setClonePulling(cid, pulling);
-            
-            const card = document.querySelector(`.ch-card[data-cid="${String(cid)}"]`);
-            
+
+            const card = document.querySelector(
+              `.ch-card[data-cid="${String(cid)}"]`
+            );
+
             if (pulling) {
               setCardLoading(cid, true, PULLING_LABEL);
-              updateProgressBar(card, null, null);         
+              updateProgressBar(card, null, null);
             } else if (haveDelivered && haveTotal) {
-              setCardLoading(cid, true, `Cloning (${delivered}/${total})`);
+              setCardLoading(cid, true, `Cloning (${fmtInt(delivered)}/${fmtInt(total)})`);
               updateProgressBar(card, delivered, total);
             } else if (haveDelivered) {
-              setCardLoading(cid, true, `Cloning (${delivered})`);
+              setCardLoading(cid, true, `Cloning (${fmtInt(delivered)})`);
               updateProgressBar(card, delivered, null);
             } else {
-              setCardLoading(cid, true, "Cloning");          
+              setCardLoading(cid, true, "Cloning");
               updateProgressBar(card, null, null);
-            }}
+            }
+          }
 
           if (t === "backfill_cleanup") {
             const d = p.data || p;
@@ -2701,8 +2745,8 @@
             unlockBackfill(cid);
             setCardLoading(cid, false);
             if (startedHere.has(String(cid)) && shouldAnnounceNow()) {
-                 announceBackfillDone(cid);
-             }
+              announceBackfillDone(cid);
+            }
             fetchAndApplyInflight().catch(() => {});
             render();
             return;
