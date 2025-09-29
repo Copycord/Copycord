@@ -63,6 +63,77 @@ class ExportMessagesRunner:
     async def _end(self, guild_id: int) -> None:
         async with self._active_lock:
             self._active_guilds.discard(guild_id)
+            
+            
+    async def _collect_threads_for_channel(
+        self,
+        ch: Any,
+        me: Optional[Any],
+        *,
+        include_forum_threads: bool,
+        include_private_threads: bool,
+    ) -> list[Any]:
+        """
+        Returns a list of Thread objects (active + archived) under the parent channel `ch`,
+        respecting permissions if `me` is provided.
+        Works for TextChannel and ForumChannel. Best-effort if API varies.
+        """
+        threads: list[Any] = []
+
+        # Quick checks & capabilities
+        try:
+            ch_name = getattr(ch, "name", "") or "unknown"
+            ch_id = getattr(ch, "id", None)
+        except Exception:
+            ch_name, ch_id = "unknown", None
+
+        # Only collect forum threads if requested; otherwise skip ForumChannel entirely
+        is_forum = getattr(ch, "__class__", type(ch)).__name__.lower().find("forum") != -1
+        if is_forum and not include_forum_threads:
+            return threads
+
+        # Add ACTIVE threads first (cheap)
+        try:
+            active = list(getattr(ch, "threads", []) or [])
+            for th in active:
+                try:
+                    if me is None or getattr(th, "permissions_for")(me).read_message_history:
+                        threads.append(th)
+                except Exception:
+                    # If permissions_for not available, include optimistically
+                    threads.append(th)
+        except Exception:
+            pass
+
+        # Archived PUBLIC threads
+        try:
+            if hasattr(ch, "archived_threads"):
+                async for th in ch.archived_threads(limit=None, private=False):
+                    try:
+                        if me is None or getattr(th, "permissions_for")(me).read_message_history:
+                            threads.append(th)
+                    except Exception:
+                        threads.append(th)
+        except Exception:
+            # ignore if endpoint not available
+            pass
+
+        # Archived PRIVATE threads (if requested and possible)
+        if include_private_threads:
+            try:
+                if hasattr(ch, "archived_threads"):
+                    async for th in ch.archived_threads(limit=None, private=True):
+                        try:
+                            if me is None or getattr(th, "permissions_for")(me).read_message_history:
+                                threads.append(th)
+                        except Exception:
+                            threads.append(th)
+            except Exception:
+                pass
+
+        self.log.debug(f"[export] Collected {len(threads)} threads from #{ch_name} ({ch_id})")
+        return threads
+
 
     async def run(self, d: DictLike, guild: Any, acquired: bool = False) -> None:
         """
@@ -123,6 +194,10 @@ class ExportMessagesRunner:
                     filters.get("download_media")
                     or {"images": False, "videos": False, "audio": False, "other": False}
                 ),
+                # NEW: toggle thread scanning (defaults ON)
+                "threads": filters.get("threads", True),
+                "forum_threads": filters.get("forum_threads", True),
+                "private_threads": filters.get("private_threads", True),
             }
 
             if not F["attachments"]:
@@ -146,29 +221,118 @@ class ExportMessagesRunner:
             except Exception:
                 me = getattr(guild, "me", None)
 
-            channels: List[Any] = []
+            # ------------- THREAD-AWARE TARGET DISCOVERY -------------
+            def _is_thread(obj: Any) -> bool:
+                cls = getattr(obj, "__class__", type(obj)).__name__.lower()
+                return "thread" in cls
+
+            def _is_forum(obj: Any) -> bool:
+                cls = getattr(obj, "__class__", type(obj)).__name__.lower()
+                # discord.py uses ForumChannel; this heuristic is resilient to forks
+                return "forum" in cls
+
+            async def _collect_threads_for_parent(parent: Any) -> list[Any]:
+                """
+                Collect active + archived threads for a parent channel, respecting toggles and perms.
+                """
+                out: list[Any] = []
+
+                # Skip forum-thread enumeration if forum scanning is off
+                if _is_forum(parent) and not F["forum_threads"]:
+                    return out
+
+                # Active threads (cheap)
+                try:
+                    for th in list(getattr(parent, "threads", []) or []):
+                        try:
+                            if (me is None) or getattr(th, "permissions_for")(me).read_message_history:
+                                out.append(th)
+                        except Exception:
+                            out.append(th)
+                except Exception:
+                    pass
+
+                # Archived public threads
+                try:
+                    if hasattr(parent, "archived_threads"):
+                        async for th in parent.archived_threads(limit=None, private=False):
+                            try:
+                                if (me is None) or getattr(th, "permissions_for")(me).read_message_history:
+                                    out.append(th)
+                            except Exception:
+                                out.append(th)
+                except Exception:
+                    pass
+
+                # Archived private threads if enabled
+                if F["private_threads"]:
+                    try:
+                        if hasattr(parent, "archived_threads"):
+                            async for th in parent.archived_threads(limit=None, private=True):
+                                try:
+                                    if (me is None) or getattr(th, "permissions_for")(me).read_message_history:
+                                        out.append(th)
+                                except Exception:
+                                    out.append(th)
+                    except Exception:
+                        pass
+
+                return out
+
+            scan_targets: List[Any] = []
+
             if chan_id_raw:
                 ch = None
                 try:
                     ch = await self.bot.fetch_channel(int(chan_id_raw))
                 except Exception as e:
-                    self.log.debug(
-                        f"[export] fetch_channel({chan_id_raw}) failed: {e}; falling back to cache"
-                    )
+                    self.log.debug(f"[export] fetch_channel({chan_id_raw}) failed: {e}; falling back to cache")
                     if chan_id_raw.isdigit():
                         ch = self.bot.get_channel(int(chan_id_raw))
                 if ch:
-                    channels = [ch]
+                    if _is_thread(ch):
+                        # Direct thread target
+                        try:
+                            if (me is None) or getattr(ch, "permissions_for")(me).read_message_history:
+                                scan_targets.append(ch)
+                        except Exception:
+                            scan_targets.append(ch)
+                    else:
+                        # Parent channel
+                        try:
+                            if (me is None) or getattr(ch, "permissions_for")(me).read_message_history:
+                                scan_targets.append(ch)
+                        except Exception:
+                            scan_targets.append(ch)
+                        # Its threads (if enabled)
+                        if F["threads"]:
+                            scan_targets.extend(await _collect_threads_for_parent(ch))
 
-            if not channels:
+            # If still empty, enumerate all text + forum channels (and their threads)
+            if not scan_targets:
+                text_chs = list(getattr(guild, "text_channels", []) or [])
+                forum_chs = list((getattr(guild, "forum_channels", None) or getattr(guild, "forums", []) or []))
+                base_chs: List[Any] = []
+
                 if me:
-                    channels = [
-                        c
-                        for c in getattr(guild, "text_channels", [])
-                        if c.permissions_for(me).read_message_history
-                    ]
+                    for c in text_chs + forum_chs:
+                        try:
+                            if c.permissions_for(me).read_message_history:
+                                base_chs.append(c)
+                        except Exception:
+                            base_chs.append(c)
                 else:
-                    channels = list(getattr(guild, "text_channels", []))
+                    base_chs = text_chs + forum_chs
+
+                scan_targets.extend(base_chs)
+
+                if F["threads"]:
+                    total_threads = 0
+                    for parent in base_chs:
+                        ths = await _collect_threads_for_parent(parent)
+                        total_threads += len(ths)
+                        scan_targets.extend(ths)
+                    self.log.info(f"[export] Thread discovery complete: parents={len(base_chs)}, threads={total_threads}")
 
             t0 = time.perf_counter()
             self.log.info(
@@ -179,27 +343,36 @@ class ExportMessagesRunner:
                 f"scan_sleep={self.scan_sleep}, send_sleep={self.send_sleep}, ui_filters={filters}"
             )
 
-            if not channels:
-                self.log.warning(f"[export] No readable text channels in guild {gid_log}. Aborting.")
+            if not scan_targets:
+                self.log.warning(f"[export] No readable channels/threads in guild {gid_log}. Aborting.")
                 await self._ws_send({
                     "type": "export_messages_done",
                     "data": {"guild_id": gid_log, "forwarded": 0, "scanned": 0},
                 })
                 return
 
-            ch_ids_preview = [getattr(c, "id", None) for c in channels[:8]]
-            more_note = "" if len(channels) <= 8 else f" (+{len(channels)-8} more)"
-            self.log.info(f"[export] Channels to scan: {len(channels)} -> {ch_ids_preview}{more_note}")
+            # Preview
+            preview = []
+            for c in scan_targets[:8]:
+                cid = getattr(c, "id", None)
+                tag = "thread" if _is_thread(c) else "chan"
+                preview.append(f"{tag}:{cid}")
+            more_note = "" if len(scan_targets) <= 8 else f" (+{len(scan_targets)-8} more)"
+            self.log.info(f"[export] Scan targets: {len(scan_targets)} -> {preview}{more_note}")
 
             total_scanned = 0
             total_matched = 0
             forwarded = 0
             buffer_rows: List[DictLike] = []
 
-            for ch in channels:
+            # ------------- MAIN SCAN LOOP (channels + threads) -------------
+            for ch in scan_targets:
                 cid = getattr(ch, "id", None)
                 cname = getattr(ch, "name", "") or "unknown"
-                self.log.info(f"[export] Scanning channel #{cname} ({cid}) …")
+                is_thread = _is_thread(ch)
+                label = f"{'#' if not is_thread else ''}{cname}{' [thread]' if is_thread else ''}"
+
+                self.log.info(f"[export] Scanning {label} ({cid}) …")
                 ch_scanned = 0
                 ch_matched = 0
 
@@ -242,20 +415,46 @@ class ExportMessagesRunner:
                             }
                         )
 
+                        serialized = self.serialize(msg)
+
+                        # enrich with thread / channel context
+                        is_thread = _is_thread(ch)
+                        parent = getattr(ch, "parent", None)
+
+                        serialized["_export_ctx"] = {
+                            "channel_id": getattr(ch, "id", None),
+                            "channel_name": getattr(ch, "name", None),
+                            "is_thread": is_thread,
+                            "parent_channel_id": getattr(ch, "parent_id", None),
+                            "parent_channel_name": getattr(parent, "name", None),
+                            "channel_kind": ("thread" if is_thread else ("forum" if _is_forum(ch) else "text")),
+                            "forum_parent_id": getattr(parent, "id", None) if _is_forum(parent or ch) else None,
+                            "forum_parent_name": getattr(parent, "name", None) if _is_forum(parent or ch) else None,
+                        }
+
+                        buffer_rows.append(
+                            {
+                                "guild_id": getattr(guild, "id", None),
+                                "channel_id": getattr(ch, "id", None),
+                                "message": serialized,
+                            }
+                        )
+
                         if ch_scanned % 200 == 0:
                             self.log.info(
-                                f"[export] Progress ch={cid}: scanned={ch_scanned}, matched={ch_matched}, "
+                                f"[export] Progress {('thread' if is_thread else 'ch')}={cid}: "
+                                f"scanned={ch_scanned}, matched={ch_matched}, "
                                 f"total_scanned={total_scanned}, total_matched={total_matched}, buffered={len(buffer_rows)}"
                             )
 
                         if self.scan_sleep:
                             await asyncio.sleep(self.scan_sleep)
                 except Exception as e:
-                    self.log.warning(f"[export] Channel {cid} failed: {e}")
+                    self.log.warning(f"[export] Target {cid} failed: {e}")
                     continue
 
                 self.log.info(
-                    f"[export] Done channel #{cname} ({cid}): scanned={ch_scanned}, matched={ch_matched}"
+                    f"[export] Done {label} ({cid}): scanned={ch_scanned}, matched={ch_matched}"
                 )
 
             json_file: Optional[str] = None
@@ -471,6 +670,7 @@ class ExportMessagesRunner:
 
         finally:
             await self._end(gid_log)
+
 
 
     async def _ws_send(self, payload: DictLike) -> None:
