@@ -22,7 +22,7 @@
   const RECENT_DELETE_WINDOW_MS = 8000;
   const cancelledThisSession = new Set();
   document.documentElement.classList.remove("boot");
-  const PULLING_LABEL = "Cloning (Please wait…)";
+  const PULLING_LABEL = "Pulling all messages";
   const startedHere = new Set();
   const NF_INT = new Intl.NumberFormat();
   const fmtInt = (n) => Number.isFinite(n) ? NF_INT.format(n) : String(n);
@@ -768,6 +768,8 @@
   }
 
   const inflightByOrig = new Map();
+  const inflightMisses = new Map(); 
+  const MAX_MISSES = 3;
 
   function fmtProgress(v) {
     const d = Number.isFinite(v?.delivered) ? v.delivered : null;
@@ -830,19 +832,6 @@
   function applyInflightUI(itemsObj) {
     const serverIds = new Set(Object.keys(itemsObj || {}).map(String));
 
-    const looksLikePulling =
-      (!Number.isFinite(d) && !Number.isFinite(t)) || (d === 0 && t == null);
-    if (isPulling || looksLikePulling) {
-      setCardLoading(cid, true, "Cloning (Pulling messages)");
-      updateProgressBar(card, null, null);
-    } else
-      for (const id of [...runningClones]) {
-        if (!serverIds.has(id) && !cleaningClones.has(id)) {
-          setCloneRunning(id, false);
-          setCardLoading(id, false);
-        }
-      }
-
     for (const id of [...launchingClones]) {
       if (!serverIds.has(id) && !cleaningClones.has(id)) {
         setCloneLaunching(id, false);
@@ -882,6 +871,7 @@
         updateProgressBar(card, null, null);
       }
     }
+    inflightMisses.delete(cid);
 
     for (const id of cleaningClones) {
       if (!serverIds.has(id)) {
@@ -890,6 +880,21 @@
         setProgressCleanupMode(card, true);
       }
     }
+
+      for (const id of [...runningClones]) {
+          const k = String(id);
+          if (serverIds.has(k)) continue;
+          if (cleaningClones.has(k)) continue;
+          if (pullingClones.has(k)) continue;
+          const misses = (inflightMisses.get(k) || 0) + 1;
+          inflightMisses.set(k, misses);
+          if (misses >= MAX_MISSES) {
+            setCloneRunning(k, false);
+            setCardLoading(k, false);
+            inflightMisses.delete(k);
+          }
+        }
+
 
     try {
       localStorage.setItem(
@@ -2579,12 +2584,12 @@
 
     sock.onclose = () => {
       dbg("WS OUT closed");
-      resetAllCloningUI("ws_out_closed");
+      window.showToast("Connection hiccup — restoring status…", { type: "warning" });
     };
 
     sock.onerror = (e) => {
       dbg("WS OUT error", e);
-      resetAllCloningUI("ws_out_error");
+      window.showToast("Connection issue — attempting to recover…", { type: "warning" });
     };
 
     function getResultId(r) {
@@ -2722,14 +2727,14 @@
             if (d.state === "starting") {
               setCloneCleaning(cid, true);
 
-              setCardLoading(cid, true, "Cleaning up…");
+              setCardLoading(cid, true, "Cleaning up");
               setProgressCleanupMode(card, true);
               return;
             }
 
             if (d.state === "finished") {
               setProgressCleanupMode(card, false);
-              setCardLoading(cid, true, "Finalizing…");
+              setCardLoading(cid, true, "Finalizing");
 
               return;
             }
