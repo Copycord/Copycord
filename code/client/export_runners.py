@@ -2002,7 +2002,6 @@ class BackfillEngine:
                     continue
                 raise
 
-
     async def _finish_progress_only(self, channel_id: int, sent: int) -> None:
         try:
             await self._safe_ws_send(
