@@ -25,7 +25,7 @@
   const PULLING_LABEL = "Pulling all messages";
   const startedHere = new Set();
   const NF_INT = new Intl.NumberFormat();
-  const fmtInt = (n) => Number.isFinite(n) ? NF_INT.format(n) : String(n);
+  const fmtInt = (n) => (Number.isFinite(n) ? NF_INT.format(n) : String(n));
 
   const DEBUG_BF = true;
   const dbg = (...a) => {
@@ -116,6 +116,48 @@
     }
   }
 
+  function finalizeBackfillUI(cid, { announce = false } = {}) {
+    const k = String(cid);
+    setClonePulling(k, false);
+    setCloneCleaning(k, false);
+    unlockBackfill(k);
+    inflightByOrig.delete(k);
+
+    setCardLoading(k, false);
+    const card = cardByAnyId(k);
+    card?.querySelector(".ch-status")?.remove();
+    card?.querySelector(".ch-progress")?.remove();
+
+    if (announce && startedHere.has(k) && shouldAnnounceNow()) {
+      announceBackfillDone(k);
+    }
+    fetchAndApplyInflight().catch(() => {});
+    render();
+  }
+
+  function findRowByAnyChannelId(id) {
+    const s = String(id || "");
+    if (!s) return null;
+    return (
+      (data || []).find(
+        (r) =>
+          String(r.original_channel_id) === s ||
+          String(r.cloned_channel_id) === s
+      ) || null
+    );
+  }
+
+  function toOriginalCid(id) {
+    const s = String(id || "");
+    const row = findRowByAnyChannelId(s);
+    return row ? String(row.original_channel_id) : s;
+  }
+
+  function cardByAnyId(id) {
+    const orig = toOriginalCid(id);
+    return document.querySelector(`.ch-card[data-cid="${orig}"]`);
+  }
+
   function rebuildCategoryPinMaps(rows) {
     catPinByOrig = new Map();
     catOrigByEither = new Map();
@@ -164,6 +206,11 @@
       localStorage.setItem("bf:pulling", "[]");
     } catch {}
     pullingClones.clear();
+    for (const id of [...cleaningClones]) setCardLoading(id, false);
+    cleaningClones.clear();
+    try {
+      localStorage.setItem("bf:cleaning", "[]");
+    } catch {}
 
     try {
       const rm = [];
@@ -354,12 +401,13 @@
     } catch {}
   }
   function rememberTask(taskId, channelId) {
+    const orig = toOriginalCid(channelId);
     dbg("[TASKMAP] remember", {
       taskId: String(taskId),
-      channelId: String(channelId),
+      channelId: String(orig),
     });
-    if (!taskId || !channelId) return;
-    taskMap.set(String(taskId), String(channelId));
+    if (!taskId || !orig) return;
+    taskMap.set(String(taskId), String(orig));
     saveTaskMap();
   }
   function forgetTask(taskId) {
@@ -768,7 +816,7 @@
   }
 
   const inflightByOrig = new Map();
-  const inflightMisses = new Map(); 
+  const inflightMisses = new Map();
   const MAX_MISSES = 3;
 
   function fmtProgress(v) {
@@ -832,6 +880,8 @@
   function applyInflightUI(itemsObj) {
     const serverIds = new Set(Object.keys(itemsObj || {}).map(String));
 
+    for (const id of serverIds) inflightMisses.delete(String(id));
+
     for (const id of [...launchingClones]) {
       if (!serverIds.has(id) && !cleaningClones.has(id)) {
         setCloneLaunching(id, false);
@@ -871,7 +921,6 @@
         updateProgressBar(card, null, null);
       }
     }
-    inflightMisses.delete(cid);
 
     for (const id of cleaningClones) {
       if (!serverIds.has(id)) {
@@ -881,20 +930,34 @@
       }
     }
 
-      for (const id of [...runningClones]) {
-          const k = String(id);
-          if (serverIds.has(k)) continue;
-          if (cleaningClones.has(k)) continue;
-          if (pullingClones.has(k)) continue;
-          const misses = (inflightMisses.get(k) || 0) + 1;
-          inflightMisses.set(k, misses);
-          if (misses >= MAX_MISSES) {
-            setCloneRunning(k, false);
-            setCardLoading(k, false);
-            inflightMisses.delete(k);
-          }
-        }
+    for (const id of [...cleaningClones]) {
+      const k = String(id);
+      if (serverIds.has(k)) {
+        inflightMisses.delete(`clean:${k}`);
+        continue;
+      }
+      const misses = (inflightMisses.get(`clean:${k}`) || 0) + 1;
+      inflightMisses.set(`clean:${k}`, misses);
+      if (misses >= MAX_MISSES) {
+        setCloneCleaning(k, false);
+        setCardLoading(k, false);
+        inflightMisses.delete(`clean:${k}`);
+      }
+    }
 
+    for (const id of [...runningClones]) {
+      const k = String(id);
+      if (serverIds.has(k)) continue;
+      if (cleaningClones.has(k)) continue;
+      if (pullingClones.has(k)) continue;
+      const misses = (inflightMisses.get(k) || 0) + 1;
+      inflightMisses.set(k, misses);
+      if (misses >= MAX_MISSES) {
+        setCloneRunning(k, false);
+        setCardLoading(k, false);
+        inflightMisses.delete(k);
+      }
+    }
 
     try {
       localStorage.setItem(
@@ -1477,8 +1540,6 @@
       }
 
       root.appendChild(section);
-
-
 
       for (const id of launchingClones) setCardLoading(id, true, "Cloning");
       for (const id of runningClones) setCardLoading(id, true, "Cloning");
@@ -2584,12 +2645,16 @@
 
     sock.onclose = () => {
       dbg("WS OUT closed");
-      window.showToast("Connection hiccup — restoring status…", { type: "warning" });
+      window.showToast("Connection hiccup — restoring status…", {
+        type: "warning",
+      });
     };
 
     sock.onerror = (e) => {
       dbg("WS OUT error", e);
-      window.showToast("Connection issue — attempting to recover…", { type: "warning" });
+      window.showToast("Connection issue — attempting to recover…", {
+        type: "warning",
+      });
     };
 
     function getResultId(r) {
@@ -2663,7 +2728,8 @@
             t === "backfill_ack" ||
             t === "backfill_busy"
           ) {
-            const cid = backfillIdFrom(p.data) || backfillIdFrom(p);
+            let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
+            cid = toOriginalCid(cid);
             if (!cid) return;
 
             if (p.task_id && cid) rememberTask(p.task_id, cid);
@@ -2690,7 +2756,8 @@
 
             const delivered = d.delivered ?? d.applied ?? d.count ?? null;
             const total = d.expected_total ?? d.total ?? d.expected ?? null;
-            const cid = backfillIdFrom(p.data) || backfillIdFrom(p);
+            let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
+            cid = toOriginalCid(cid);
             if (!cid) return;
 
             const haveDelivered = Number.isFinite(delivered) && delivered > 0;
@@ -2707,7 +2774,11 @@
               setCardLoading(cid, true, PULLING_LABEL);
               updateProgressBar(card, null, null);
             } else if (haveDelivered && haveTotal) {
-              setCardLoading(cid, true, `Cloning (${fmtInt(delivered)}/${fmtInt(total)})`);
+              setCardLoading(
+                cid,
+                true,
+                `Cloning (${fmtInt(delivered)}/${fmtInt(total)})`
+              );
               updateProgressBar(card, delivered, total);
             } else if (haveDelivered) {
               setCardLoading(cid, true, `Cloning (${fmtInt(delivered)})`);
@@ -2720,7 +2791,8 @@
 
           if (t === "backfill_cleanup") {
             const d = p.data || p;
-            const cid = String(d.channel_id || "");
+            let cid = String(d.channel_id || "");
+            cid = toOriginalCid(cid);
             if (!cid) return;
             const card = document.querySelector(`.ch-card[data-cid="${cid}"]`);
 
@@ -2734,7 +2806,7 @@
 
             if (d.state === "finished") {
               setProgressCleanupMode(card, false);
-              setCardLoading(cid, true, "Finalizing");
+              finalizeBackfillUI(cid, { announce: false });
 
               return;
             }
@@ -2743,23 +2815,17 @@
           if (t === "backfill_done") {
             let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             if (!cid && p.task_id) cid = taskMap.get(String(p.task_id));
+            cid = toOriginalCid(cid);
             if (!cid) return;
-
-            setClonePulling(cid, false);
-            setCloneCleaning(cid, false);
-            unlockBackfill(cid);
-            setCardLoading(cid, false);
-            if (startedHere.has(String(cid)) && shouldAnnounceNow()) {
-              announceBackfillDone(cid);
-            }
-            fetchAndApplyInflight().catch(() => {});
-            render();
+            if (p.task_id) forgetTask(p.task_id);
+            finalizeBackfillUI(cid, { announce: true });
             return;
           }
 
           if (t === "backfill_cancelled") {
             let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             if (!cid && p.task_id) cid = taskMap.get(String(p.task_id));
+            cid = toOriginalCid(cid);
             dbg("[bf] cancelled", { cid, task_id: p?.task_id, payload: p });
             if (p.task_id) forgetTask(p.task_id);
 
