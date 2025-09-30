@@ -1890,58 +1890,97 @@ class BackfillEngine:
 
     async def _iter_all_threads(self, parent) -> AsyncIterator:
         """
-        Yield all threads under a Forum/Text channel with retry on archived calls.
-        """
-        seen = set()
+        Yield all threads (active + archived) under a TextChannel or ForumChannel.
 
-        for th in getattr(parent, "threads", []) or []:
-            if th and th.id not in seen:
-                seen.add(th.id)
+        Rules:
+        - ForumChannel: only public archived threads (no `private=`/`joined=`).
+        - TextChannel: public archived, then private archived, then joined private archived.
+        """
+        seen: set[int] = set()
+
+        for th in getattr(parent, "threads", None) or []:
+            tid = getattr(th, "id", None)
+            if th and tid is not None and tid not in seen:
+                seen.add(tid)
                 yield th
 
-        def _archived_public():
+        async def _drain(iter_factory, label: str):
+            """
+            Run an iterator factory once, with a retry on transient HTTP 5xx.
+            iter_factory() must return an async iterator (NOT a coroutine).
+            """
+
+            async def _once():
+                it = iter_factory()
+                async for th in it:
+                    tid = getattr(th, "id", None)
+                    if th and tid is not None and tid not in seen:
+                        seen.add(tid)
+                        yield th
+
+            try:
+                async for th in _once():
+                    yield th
+            except Forbidden:
+                self.logger.debug(
+                    "[backfill] %s threads forbidden | channel=%s",
+                    label,
+                    getattr(parent, "id", None),
+                )
+            except ValueError as e:
+
+                self.logger.debug(
+                    "[backfill] %s unavailable: %s | channel=%s",
+                    label,
+                    e,
+                    getattr(parent, "id", None),
+                )
+            except HTTPException as e:
+                if self._should_retry_http(e):
+                    self.logger.warning(
+                        "[backfill] transient HTTP %s on %s; retrying",
+                        getattr(e, "status", "?"),
+                        label,
+                    )
+                    try:
+                        async for th in _once():
+                            yield th
+                    except Exception:
+                        self.logger.warning(
+                            "[backfill] %s threads failed after retry", label
+                        )
+                else:
+                    raise
+
+        def _public_iter():
             return parent.archived_threads(limit=None)
 
-        def _archived_private():
+        async for th in _drain(_public_iter, "archived public"):
+            yield th
+
+        # If it's a ForumChannel, stop here (no private/joined on forums).
+        if getattr(parent, "type", None) == ChannelType.forum:
+            return
+
+        def _private_iter():
             return parent.archived_threads(private=True, limit=None)
 
         try:
-            async for th in _archived_public():
-                if th and th.id not in seen:
-                    seen.add(th.id)
-                    yield th
-        except Forbidden:
+            async for th in _drain(_private_iter, "archived private"):
+                yield th
+        except TypeError:
+
             pass
-        except HTTPException as e:
-            if self._should_retry_http(e):
-                try:
-                    async for th in _archived_public():
-                        if th and th.id not in seen:
-                            seen.add(th.id)
-                            yield th
-                except Exception:
-                    self.logger.warning(
-                        "[backfill] archived public threads failed after retry"
-                    )
+
+        def _joined_private_iter():
+            return parent.archived_threads(private=True, joined=True, limit=None)
 
         try:
-            async for th in _archived_private():
-                if th and th.id not in seen:
-                    seen.add(th.id)
-                    yield th
-        except Forbidden:
+            async for th in _drain(_joined_private_iter, "archived private (joined)"):
+                yield th
+        except (TypeError, Forbidden):
+
             pass
-        except HTTPException as e:
-            if self._should_retry_http(e):
-                try:
-                    async for th in _archived_private():
-                        if th and th.id not in seen:
-                            seen.add(th.id)
-                            yield th
-                except Exception:
-                    self.logger.warning(
-                        "[backfill] archived private threads failed after retry"
-                    )
 
     async def _iter_history_resumable(
         self,
