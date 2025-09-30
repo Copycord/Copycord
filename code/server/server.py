@@ -235,7 +235,6 @@ class ServerReceiver:
         asyncio.create_task(self.config.setup_release_watcher(self))
         self.session = aiohttp.ClientSession()
         self.webhook_exporter = WebhookDMExporter(self.session, logger)
-        # Ensure we're in the clone guild
         clone_guild = self.bot.get_guild(self.clone_guild_id)
         if clone_guild is None:
             logger.error(
@@ -1339,7 +1338,6 @@ class ServerReceiver:
                 old = ch.name
                 await self.ratelimit.acquire(ActionType.EDIT_CHANNEL)
                 await ch.edit(name=src["name"])
-                # Keep mapping's name in sync
                 self.db.upsert_forum_thread_mapping(
                     orig_thread_id=src_id_int,
                     orig_thread_name=src["name"],
@@ -1437,7 +1435,6 @@ class ServerReceiver:
                 await self.handle_thread_message(data)
             except Exception:
                 logger.exception("[⚠️] Failed forwarding queued thread msg; requeuing")
-                # Optional: requeue so it isn't lost
                 self._pending_thread_msgs.append(data)
 
     def _flush_done_cb(self, task: asyncio.Task) -> None:
@@ -1651,7 +1648,6 @@ class ServerReceiver:
             pinned_name = pinned_name_raw.strip()
             has_pin = bool(pinned_name)
 
-            # Always keep DB's original_channel_name in sync with upstream, preserving pin
             if mapping is not None:
                 try:
                     self.db.upsert_channel_mapping(
@@ -1787,7 +1783,6 @@ class ServerReceiver:
                     "[🗑️] Cloned channel #%d not found; removing mapping", clone_id
                 )
 
-            # Always drop the mapping, even if we couldn't delete the channel.
             self.db.delete_channel_mapping(orig_id)
             self.chan_map.pop(orig_id, None)
             removed += 1
@@ -2450,7 +2445,6 @@ class ServerReceiver:
                 )
             except HTTPException as e:
                 if e.status == 404:
-                    # Thread truly gone — remove its mapping so we won't retry
                     logger.warning(
                         "[⚠️] Thread %s not found; clearing mapping and skipping future attempts",
                         thread.id,
@@ -3599,7 +3593,6 @@ class ServerReceiver:
                     kw["username"] = p.get("username")
                 if p.get("avatar_url"):
                     kw["avatar_url"] = p.get("avatar_url")
-            # else: use webhook's stored identity
 
             wh = thread_webhook
 

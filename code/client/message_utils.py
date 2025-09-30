@@ -52,12 +52,10 @@ class MessageUtils:
         id_to_name: Dict[str, str] = {}
         for sid in ids:
             uid = int(sid)
-            # 1) guild cache
             mem = g.get_member(uid) if g else None
             if mem:
                 id_to_name[sid] = f"@{mem.display_name or mem.name}"
                 continue
-            # 2) guild fetch
             try:
                 if g:
                     mem = await g.fetch_member(uid)
@@ -65,12 +63,10 @@ class MessageUtils:
                     continue
             except Exception:
                 pass
-            # 3) global user
             try:
                 u = await self.bot.fetch_user(uid)
                 id_to_name[sid] = f"@{u.name}"
             except Exception:
-                # leave unresolved; original token will remain
                 pass
         return id_to_name
 
@@ -84,7 +80,6 @@ class MessageUtils:
             return content
 
         id_to_name = dict(id_to_name_override or {})
-        # seed from message.mentions (faster path)
         for m in getattr(message, "mentions", []):
             name = f"@{(m.display_name if isinstance(m, Member) else m.name) or m.name}"
             id_to_name[str(m.id)] = name
@@ -106,7 +101,6 @@ class MessageUtils:
     def sanitize_inline(self, s: Optional[str], message: Optional[discord.Message] = None, id_map=None):
         if not s:
             return s
-        # Replace {mention} with actual mention text
         if message and "{mention}" in s:
             s = s.replace("{mention}", f"@{message.author.display_name}")
         if message:

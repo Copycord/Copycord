@@ -1958,7 +1958,6 @@ class BackfillEngine:
         async for th in _drain(_public_iter, "archived public"):
             yield th
 
-        # If it's a ForumChannel, stop here (no private/joined on forums).
         if getattr(parent, "type", None) == ChannelType.forum:
             return
 
