@@ -65,12 +65,11 @@ class BackfillManager:
         return out
 
     def attach_task(self, original_id: int, task: asyncio.Task) -> None:
-        """
-        Track a task for cancellation and inflight accounting.
-        """
         cid = int(original_id)
-        self._inflight[cid] += 1
+        if task in self._attached[cid]:
+            return
         self._attached[cid].add(task)
+        self._inflight[cid] = self._inflight.get(cid, 0) + 1
 
         def _done_cb(t: asyncio.Task, c=cid):
             self._attached[c].discard(t)
@@ -100,10 +99,16 @@ class BackfillManager:
             self.register_sink(cid, user_id=None, clone_channel_id=None, msg=None)
             st = self._progress[cid]
 
-        if meta is not None:
+        if meta:
             st["meta"] = meta
             if meta.get("clone_channel_id") is not None:
                 st["clone_channel_id"] = int(meta["clone_channel_id"])
+
+        if st.get("clone_channel_id") is None:
+            row = self.r.chan_map.get(cid) or {}
+            clone = row.get("cloned_channel_id") or row.get("clone_channel_id")
+            if clone:
+                st["clone_channel_id"] = int(clone)
 
         loop = asyncio.get_event_loop()
         st["started_at"] = loop.time()
@@ -118,13 +123,18 @@ class BackfillManager:
 
         self._inflight[cid] = 0
         for t in list(self._attached.get(cid, ())):
-
             self._attached[cid].discard(t)
 
         clone_id = st.get("clone_channel_id")
         if clone_id is not None:
             clone_id = int(clone_id)
             self._by_clone[clone_id] = cid
+
+            self.semaphores.setdefault(clone_id, asyncio.Semaphore(1))
+            self._rot_locks.setdefault(clone_id, asyncio.Lock())
+            self._temp_locks.setdefault(clone_id, asyncio.Lock())
+            self._temp_ready.pop(clone_id, None)
+
             self.invalidate_rotation(clone_id)
             await self.ensure_temps_ready(clone_id)
 
@@ -249,9 +259,7 @@ class BackfillManager:
     async def on_done(self, original_id: int, *, wait_cleanup: bool = False) -> None:
         cid = int(original_id)
 
-        await self._wait_drain(
-            cid, timeout=5.0 if getattr(self.r, "_shutting_down", False) else None
-        )
+        await self._wait_drain(cid, no_progress_timeout=120.0)
 
         st = self._progress.get(cid) or {}
         delivered = int(st.get("delivered", 0))
@@ -268,6 +276,22 @@ class BackfillManager:
                 await self.tracker.publish_progress(
                     str(cid), delivered=delivered, total=total
                 )
+        try:
+            await self.r.bus.publish(
+                "client",
+                {
+                    "type": "backfill_done",
+                    "data": {
+                        "channel_id": str(cid),
+                        "sent": delivered,
+                        "total": total,
+                    },
+                },
+            )
+        except Exception:
+            logger.debug(
+                "[bf] failed to publish backfill_done for #%s", cid, exc_info=True
+            )
 
         self._flags.discard(cid)
         await self.r._flush_channel_buffer(cid)
@@ -287,9 +311,7 @@ class BackfillManager:
                 self._by_clone.pop(int(clone_id), None)
             await self.clear_sink(cid)
             await self.end_global_sync(cid)
-            await self._wait_drain(
-                cid, timeout=5.0 if getattr(self.r, "_shutting_down", False) else None
-            )
+            await self._wait_drain(cid, no_progress_timeout=120.0)
             return
 
         async def _cleanup_and_teardown(orig: int, clone: int):
@@ -339,12 +361,13 @@ class BackfillManager:
                 self._rotate_pool.pop(int(clone), None)
                 self._rotate_idx.pop(int(clone), None)
                 self._by_clone.pop(int(clone), None)
+                self.semaphores.pop(int(clone), None)
+                self._rot_locks.pop(int(clone), None)
+                self._temp_locks.pop(int(clone), None)
+                self._temp_ready.pop(int(clone), None)
                 await self.clear_sink(orig)
                 await self.end_global_sync(orig)
-                await self._wait_drain(
-                    orig,
-                    timeout=5.0 if getattr(self.r, "_shutting_down", False) else None,
-                )
+                await self._wait_drain(orig, no_progress_timeout=120.0)
 
         if wait_cleanup:
             await _cleanup_and_teardown(cid, int(clone_id))
@@ -364,23 +387,55 @@ class BackfillManager:
             if self._inflight[cid] == 0:
                 self._inflight.pop(cid, None)
 
-    async def _wait_drain(self, cid: int, timeout: float | None = 30.0) -> None:
+    async def _wait_drain(
+        self, cid: int, no_progress_timeout: float = 120.0, log_every: float = 5.0
+    ) -> None:
         """
-        Waits for the in-flight operations for a given connection ID (cid) to drain
-        (i.e., reach zero) within an optional timeout period.
+        Wait until in-flight == 0. Only cancel if there's been *no* progress
+        (in-flight down or delivered up) for `no_progress_timeout` seconds.
         """
-        start = asyncio.get_event_loop().time()
+        loop = asyncio.get_event_loop()
+        last_change_ts = loop.time()
+        last_inflight = self._inflight.get(cid, 0)
+        last_delivered = (self._progress.get(cid) or {}).get("delivered", 0)
+        last_log_ts = 0.0
+
         while self._inflight.get(cid, 0) > 0:
-            if (
-                timeout is not None
-                and (asyncio.get_event_loop().time() - start) > timeout
-            ):
-                logger.warning(
-                    "[📦] Backfill drain timed out for #%s with %d in-flight",
+            now = loop.time()
+            inflight = self._inflight.get(cid, 0)
+            delivered = (self._progress.get(cid) or {}).get("delivered", 0)
+
+            if inflight < last_inflight or delivered > last_delivered:
+                last_change_ts = now
+                last_inflight = inflight
+                last_delivered = delivered
+
+            if now - last_log_ts >= log_every:
+                logger.debug(
+                    "[📦] draining #%s | inflight=%d delivered=%d",
                     cid,
-                    self._inflight.get(cid, 0),
+                    inflight,
+                    delivered,
                 )
+                last_log_ts = now
+
+            if (now - last_change_ts) >= no_progress_timeout:
+                stuck = list(self._attached.get(cid, ()))
+                logger.warning(
+                    "[📦] Drain stalled for #%s (no progress %ss, inflight=%d); cancelling %d task(s)",
+                    cid,
+                    int(no_progress_timeout),
+                    inflight,
+                    len(stuck),
+                )
+                for t in stuck:
+                    t.cancel()
+                if stuck:
+                    await asyncio.gather(*stuck, return_exceptions=True)
+                self._attached.pop(cid, None)
+                self._inflight.pop(cid, None)
                 break
+
             await asyncio.sleep(0.05)
 
     async def _ensure_temp_webhooks(
@@ -511,7 +566,7 @@ class BackfillManager:
                 return ids, urls
 
             while len(pairs) < N:
-                await self.ratelimit.acquire(ActionType.WEBHOOK_CREATE)
+
                 logger.info(
                     "[🧹] Creating temp webhook for rotation in #%s...",
                     clone_channel_id,
@@ -599,7 +654,9 @@ class BackfillManager:
     async def pick_url_for_send(
         self, clone_channel_id: int, primary_url: str, create_missing: bool
     ):
-        lock = self._rot_locks.setdefault(clone_channel_id, asyncio.Lock())
+        lock = self._rot_locks.get(clone_channel_id)
+        if lock is None:
+            lock = self._rot_locks[clone_channel_id] = asyncio.Lock()
         async with lock:
             pool = self._rotate_pool.get(clone_channel_id)
             if pool is None:
@@ -643,12 +700,16 @@ class BackfillManager:
         return self._temp_prefix_canon
 
     def invalidate_rotation(self, clone_channel_id: int) -> None:
-        """Drop any cached rotation info so the next send rebuilds from live webhooks."""
-        self._rotate_pool.pop(int(clone_channel_id), None)
-        self._rotate_idx.pop(int(clone_channel_id), None)
-        self._temps_cache.pop(int(clone_channel_id), None)
+        cid = int(clone_channel_id)
+        self._rotate_pool.pop(cid, None)
+        self._rotate_idx.pop(cid, None)
+        self._temps_cache.pop(cid, None)
+
         if hasattr(self, "_temp_ready"):
-            self._temp_ready.pop(int(clone_channel_id), None)
+            self._temp_ready.pop(cid, None)
+        self._temp_locks.pop(cid, None)
+        self._rot_locks.pop(cid, None)
+
         logger.debug("[rotate] invalidated pool for #%s", clone_channel_id)
 
     async def delete_created_temps_for(
@@ -690,7 +751,7 @@ class BackfillManager:
                     continue
                 try:
                     logger.info("[🧹] Deleting msg-sync temp webhook, please wait...")
-                    await self.ratelimit.acquire(ActionType.WEBHOOK_CREATE)
+
                     if dry_run:
                         logger.info(
                             "[🧹 DRY RUN] Would delete temp webhook %s in #%s",
@@ -859,7 +920,7 @@ class BackfillManager:
                         continue
 
                     try:
-                        await self.ratelimit.acquire(ActionType.WEBHOOK_CREATE)
+
                         await wh.delete(
                             reason="Cleanup: remove non-primary webhook in clone channel"
                         )
