@@ -572,6 +572,11 @@ class BackfillLocks:
         self._running: set[int] = set()
         self._lock = asyncio.Lock()
 
+    async def clear_all(self):
+        async with self._lock:
+            self._launching.clear()
+            self._running.clear()
+
     async def try_acquire_launching(self, channel_id: int) -> bool:
         now = time.time()
         async with self._lock:
@@ -1064,6 +1069,9 @@ async def stop_all():
     LOGGER.info("POST /stop requested")
     await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "stop"})
     await _ws_cmd(SERVER_CTRL_URL, {"cmd": "stop"})
+
+    await locks.clear_all()  # clear backfill locks on stop
+
     return RedirectResponse("/", status_code=303)
 
 
@@ -1642,7 +1650,7 @@ async def api_backfill_start(payload: dict = Body(...)):
                 "ok": False,
                 "error": "backfill-already-running",
                 "channel_id": channel_id,
-                "state": st
+                "state": st,
             },
             status_code=409,
         )
@@ -1654,11 +1662,11 @@ async def api_backfill_start(payload: dict = Body(...)):
                 "ok": False,
                 "error": "backfill-already-running",
                 "channel_id": channel_id,
-                "state": "launching"
+                "state": "launching",
             },
             status_code=409,
         )
-        
+
     mode = payload.get("mode") or (payload.get("range") or {}).get("mode") or "all"
     after_iso = payload.get("since") or payload.get("after_iso")
     before_iso = (
@@ -1713,6 +1721,7 @@ async def api_backfills_inflight():
     # Expected server shape: {"type":"backfills_status","data":{"items":{...}}}
     items = (res or {}).get("data", {}).get("items", {})
     return JSONResponse({"ok": True, "items": items})
+
 
 @app.get("/guilds")
 async def guilds_page(request: Request):
