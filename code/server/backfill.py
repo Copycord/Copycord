@@ -571,6 +571,7 @@ class BackfillManager:
                     "[🧹] Creating temp webhook for rotation in #%s...",
                     clone_channel_id,
                 )
+                await self.ratelimit.acquire(ActionType.WEBHOOK_CREATE)
                 wh_new = await ch.create_webhook(
                     name=self._canonical_temp_name(),
                     reason="Backfill rotation",
@@ -760,6 +761,7 @@ class BackfillManager:
                         )
                     else:
                         wh = await self.bot.fetch_webhook(int(wid))
+                        await self.ratelimit.acquire(ActionType.WEBHOOK_CREATE)
                         await wh.delete(reason="Backfill complete: remove temp webhook")
                         stats["deleted"] += 1
                         logger.info(
