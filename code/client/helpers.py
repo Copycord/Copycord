@@ -17,14 +17,6 @@ import discord
 from common.config import CURRENT_VERSION
 
 
-def _safe_preview(obj: Any, limit: int = 400) -> str:
-    try:
-        s = str(obj)
-        return s if len(s) <= limit else (s[:limit] + "…")
-    except Exception:
-        return "<unprintable>"
-
-
 class ClientUiController:
     def __init__(
         self,
@@ -340,3 +332,36 @@ class ClientUiController:
             },
         }
         await self._publish(info)
+
+
+def _safe_preview(obj: Any, limit: int = 400) -> str:
+    try:
+        s = str(obj)
+        return s if len(s) <= limit else (s[:limit] + "…")
+    except Exception:
+        return "<unprintable>"
+
+
+async def dm_member_by_id(bot, member_id: int, message: str) -> bool:
+    """
+    DM a member by their ID.
+    """
+    try:
+        # Try cache first
+        member = bot.get_user(member_id)
+        if not member:
+            # Fallback to API fetch if not cached
+            member = await bot.fetch_user(member_id)
+
+        if not member:
+            return False
+
+        await member.send(message) # Send the DM
+        return True
+
+    except discord.Forbidden:
+        return False
+    except discord.NotFound:
+        return False
+    except Exception as e:
+        return False
