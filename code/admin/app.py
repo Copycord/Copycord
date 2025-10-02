@@ -1099,7 +1099,7 @@ async def stop_all():
     await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "stop"})
     await _ws_cmd(SERVER_CTRL_URL, {"cmd": "stop"})
 
-    await locks.clear_all()  # clear backfill locks on stop
+    await locks.clear_all()
 
     return RedirectResponse("/", status_code=303)
 
