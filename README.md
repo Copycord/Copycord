@@ -2,39 +2,31 @@
 [![Downloads](https://img.shields.io/badge/dynamic/json?url=https://ghcr-badge.elias.eu.org/api/Copycord/Copycord/copycord&query=downloadCount&label=Downloads&logo=Github&color=837ED7)](https://github.com/Copycord/Copycord/pkgs/container/copycord)
 [![Discord](https://img.shields.io/discord/1406152440377638952?color=837ED7&label=Discord&logo=discord)](https://discord.gg/ArFdqrJHBj)
 
-
-
-
-
-
-
-
 _⭐️ Love Copycord? Give us a star and join the conversation in our Discord community!_
 
 <p align="left">
   <img src="logo/logo.png" alt="Copycord Logo" width="100"/>
 </p>
 
-
 **Copycord** lets you clone and monitor Discord servers in real-time, with a feature-rich slash command system and a sleek, easy-to-use web dashboard.
 Easily clone servers, scrape member lists, customize channels, and much more just a few clicks.
 
-
 > [!IMPORTANT]  
-> **✨ Copycord Features**  
+> **✨ Copycord Features**
+>
 > - **Full Server Cloning** – Instantly mirror categories, channels, and message history from any target server—with the option to include roles, emojis, and stickers, all fully controlled through the web UI.
-> - **Live Message Forwarding** – Every new message is forwarded in real time to your clone via webhooks, keeping both servers perfectly in sync.  
-> - **Dynamic Structure Sync** – Copycord constantly watches for changes in the source server (new channels, renames, role updates) and applies them to your clone automatically.  
-> - **Advanced Channel Filtering** – Choose exactly which channels to include or exclude for maximum control over your clone’s layout.  
-> - **Custom Branding** – Rename channels, customize webhook names/icons, and make the clone feel like your own personalized community.  
-> - **Smart Message Filtering** – Automatically block or drop unwanted messages based on custom keyword rules.  
+> - **Live Message Forwarding** – Every new message is forwarded in real time to your clone via webhooks, keeping both servers perfectly in sync.
+> - **Dynamic Structure Sync** – Copycord constantly watches for changes in the source server (new channels, renames, role updates) and applies them to your clone automatically.
+> - **Advanced Channel Filtering** – Choose exactly which channels to include or exclude for maximum control over your clone’s layout.
+> - **Custom Branding** – Rename channels, customize webhook names/icons, and make the clone feel like your own personalized community.
+> - **Smart Message Filtering** – Automatically block or drop unwanted messages based on custom keyword rules.
 > - **Member List Scraper** – Use the member scraper to grab User IDs, Usernames, Avatars, and Bios from any server.
 > - **Deep History Import** – Clone an entire channel’s message history, not just the new ones.
 > - **DM History Export** – Export all DM messages from any user's inbox into a JSON file with optional Webhook forwarding.
 > - **Universal Message Export** – Export all messages from any guild into a JSON file with optional Webhook forwarding.
 > - **Real-Time DM Alerts** – Get instant DM notifications for key messages across any guild — and subscribe your members to get notifications too.
-> - **Your Own Bot, Your Rules** – Run a fully independent Discord bot that you control—no restrictions.  
-> - **Sleek Web Dashboard** – Manage everything through a modern, easy-to-use web interface. 
+> - **Your Own Bot, Your Rules** – Run a fully independent Discord bot that you control—no restrictions.
+> - **Sleek Web Dashboard** – Manage everything through a modern, easy-to-use web interface.
 
 ## Getting Started
 
@@ -46,37 +38,39 @@ Easily clone servers, scrape member lists, customize channels, and much more jus
 ### Setup
 
 1. **Prepare the clone server**  
-   Create a new Discord server to receive mirrored content.  
+   Create a new Discord server to receive mirrored content.
 
-2. **Obtain your user token**  
+2. **Obtain your user token**
+
    - Log into Discord in a browser with your account.
    - Open Developer Tools (F12 or Ctrl+Shift+I)
    - Enable device emulation mode (Ctrl+Shift+M), then paste the code below into the console and press Enter:
-      ```js
-      const iframe = document.createElement("iframe");
-      console.log(
-        "Token: %c%s",
-        "font-size:16px;",
-        JSON.parse(
-          document.body.appendChild(iframe).contentWindow.localStorage.token
-        )
-      );
-      iframe.remove();
-      ```
+     ```js
+     const iframe = document.createElement('iframe')
+     console.log(
+       'Token: %c%s',
+       'font-size:16px;',
+       JSON.parse(
+         document.body.appendChild(iframe).contentWindow.localStorage.token
+       )
+     )
+     iframe.remove()
+     ```
    - Copy and store this token securely.
 
-3. **Create and configure the bot**  
+3. **Create and configure the bot**
    - In the [Discord Developer Portal](https://discord.com/developers/applications), create a new bot.
    - Under **Installation**, set the Install Link to `None` and click save.
-   - Under **Bot**, click reset token and store your bot token somewhere secure, disable `Public Bot`, and enable these intents:  
-     - `Presence`  
-     - `Server Members`  
-     - `Message Content`  
+   - Under **Bot**, click reset token and store your bot token somewhere secure, disable `Public Bot`, and enable these intents:
+     - `Presence`
+     - `Server Members`
+     - `Message Content`
    - Under **OAuth2**, generate an invite url with (Scopes: `bot`, Bot Permissions: `Administrator`) and invite the bot to your clone server.
 
 ## Configuration
 
 ### 1. Create a copycord folder and add docker-compose.yml
+
 ```
 copycord/
 ├── docker-compose.yml # docker compose file
@@ -84,6 +78,7 @@ copycord/
 ```
 
 `docker-compose.yml`
+
 ```yaml
 services:
   admin:
@@ -92,7 +87,7 @@ services:
     environment:
       - ROLE=admin
     ports:
-      - "8080:8080"
+      - '8080:8080'
     volumes:
       - ./data:/data
     restart: unless-stopped
@@ -138,29 +133,31 @@ This will pull the latest images and start the web ui: http://localhost:8080
 
 ### Configuration
 
-| Option                   | Default | Description                                                                 |
-|--------------------------|---------|-----------------------------------------------------------------------------|
-| `SERVER_TOKEN`           | none    | Your custom Discord bot token                                               |
-| `CLIENT_TOKEN`           | none    | Your personal Discord account token                                         |
-| `HOST_GUILD_ID`          | none    | The ID of the target server you want to clone                               |
-| `CLONE_GUILD_ID`         | none    | The ID of the clone guild you created                                       |
-| `COMMAND_USERS`          | none    | User IDs allowed to execute slash commands in the clone server              |
-| `EDIT_MESSAGES`          | true    | Edit cloned messages after they are edited in the host server.              |
-| `DELETE_MESSAGES`        | true    | Delete cloned messages after they are deleted in the host server.           |
-| `DELETE_CHANNELS`        | true    | Delete categories + channels when deleted in the target server              |
-| `DELETE_THREADS`         | true    | Delete threads when deleted in the target server                            |
-| `DELETE_ROLES`           | true    | Delete roles when deleted in the target server                              |
-| `CLONE_EMOJI`            | true    | Clone emojis                                                                |
-| `CLONE_STICKER`          | true    | Clone stickers                                                              |
-| `CLONE_ROLES`            | true    | Clone roles                                                                 |
-| `MIRROR_ROLE_PERMISSIONS`| false   | Clone role permission settings (does not apply to channels)                 |
-| `ENABLE_CLONING`         | true    | Turn cloning on/off for the target server (listener mode if disabled)       |
-| `LOG_LEVEL`              | INFO    | Level of logs to show (`INFO` / `DEBUG`)                                    |
-
+| Option                    | Default | Description                                                           |
+| ------------------------- | ------- | --------------------------------------------------------------------- |
+| `SERVER_TOKEN`            | none    | Your custom Discord bot token                                         |
+| `CLIENT_TOKEN`            | none    | Your personal Discord account token                                   |
+| `HOST_GUILD_ID`           | none    | The ID of the target server you want to clone                         |
+| `CLONE_GUILD_ID`          | none    | The ID of the clone guild you created                                 |
+| `COMMAND_USERS`           | none    | User IDs allowed to execute slash commands in the clone server        |
+| `EDIT_MESSAGES`           | true    | Edit cloned messages after they are edited in the host server.        |
+| `DELETE_MESSAGES`         | true    | Delete cloned messages after they are deleted in the host server.     |
+| `DELETE_CHANNELS`         | true    | Delete categories + channels when deleted in the target server        |
+| `DELETE_THREADS`          | true    | Delete threads when deleted in the target server                      |
+| `DELETE_ROLES`            | true    | Delete roles when deleted in the target server                        |
+| `CLONE_EMOJI`             | true    | Clone emojis                                                          |
+| `CLONE_STICKER`           | true    | Clone stickers                                                        |
+| `CLONE_ROLES`             | true    | Clone roles                                                           |
+| `MIRROR_ROLE_PERMISSIONS` | false   | Clone role permission settings (does not apply to channels)           |
+| `ENABLE_CLONING`          | true    | Turn cloning on/off for the target server (listener mode if disabled) |
+| `LOG_LEVEL`               | INFO    | Level of logs to show (`INFO` / `DEBUG`)                              |
 
 ##
+
 ### Slash commands
+
 - [Slash Commands Wiki](docs/slash_commands.md)
+
 ##
 
 > [!IMPORTANT]
@@ -172,14 +169,15 @@ Feel free to [open an issue](https://github.com/Copycord/Copycord/issues) if you
 
 We appreciate all contributions:
 
-1. Fork the repository.  
-2. Create a new branch from `main` with a descriptive name.  
-3. Commit your changes and open a [Pull Request](https://github.com/Copycord/Copycord/pulls), detailing your feature or fix.  
+1. Fork the repository.
+2. Create a new branch from `main` with a descriptive name.
+3. Commit your changes and open a [Pull Request](https://github.com/Copycord/Copycord/pulls), detailing your feature or fix.
 4. See the [Contributing Guide](https://github.com/Copycord/Copycord/tree/main/docs/contribute/CONTRIBUTING.md) for build & testing instructions.
 
 Thank you for helping improve Copycord!
 
 # Buy me a coffee
+
 If you are enjoying Copycord, consider buying me a coffee!
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/A0A41KPDX4)
