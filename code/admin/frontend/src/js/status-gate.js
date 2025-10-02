@@ -80,7 +80,7 @@ window.createStatusGate = function createStatusGate(opts = {}) {
       return { isUp: serverIsReady };
     }
     async function fetchRuntime(){
-      const ENDPOINTS = ["/api/status","/status","/api/runtime","/api/bots/status","/runtime"];
+      const ENDPOINTS = ["/api/status"];
       for (const url of ENDPOINTS){
         try { const r = await fetch(url, { cache:"no-store" }); if (!r.ok) continue; return await r.json(); }
         catch{}
