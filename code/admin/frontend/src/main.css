@@ -5424,3 +5424,181 @@ body {
     transition: none;
   }
 }
+
+.adv-wide {
+  max-width: 1120px;
+}
+@media (min-width: 1280px) {
+  .adv-wide {
+    max-width: 1240px;
+  }
+}
+
+#adv-data-card {
+  display: block !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  flex: 0 0 100% !important;
+  align-self: stretch !important;
+  grid-column: 1 / -1 !important;
+}
+
+#adv-collapse-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 12px 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+#adv-collapse-header .card-titlegroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#adv-last-wrap {
+  opacity: 0.85;
+}
+
+#adv-archives {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 0;
+}
+
+#adv-archives thead,
+#adv-archives th {
+  position: static !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
+#adv-archives th:last-child,
+#adv-archives td:last-child {
+  text-align: right;
+  white-space: nowrap;
+  padding-right: 16px;
+}
+#adv-archives td:last-child .btn + .btn {
+  margin-left: 0.5rem;
+}
+
+#adv-data-card .table-wrap {
+  position: relative;
+  overflow-y: auto;
+  scrollbar-gutter: stable both-edges;
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  background: inherit;
+}
+#adv-data-card .table-wrap::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+.card.is-collapsed [data-collapse-panel],
+.card.is-collapsed [data-collapse-hide] {
+  display: none;
+}
+
+body.is-loading {
+  overflow: hidden;
+}
+
+:root {
+  --header-bottom: 56px;
+}
+
+.app-loader {
+  position: fixed;
+  top: var(--header-bottom);
+  left: 0;
+  right: 0;
+  height: calc(100dvh - var(--header-bottom));
+  z-index: 2147483000;
+
+  display: grid;
+  place-items: center;
+
+  background: transparent;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+
+  transition: opacity 0.24s ease-in-out, backdrop-filter 0.4s ease-in-out,
+    -webkit-backdrop-filter 0.4s ease-in-out;
+
+  will-change: opacity, backdrop-filter;
+  transform: translateZ(0);
+
+  opacity: 1;
+  pointer-events: all;
+}
+
+.app-loader__inner {
+  display: grid;
+  gap: 10px;
+  align-items: center;
+  justify-items: center;
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  color: #fff;
+  text-align: center;
+}
+
+.app-loader__text {
+  font: 600 15px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Helvetica,
+    Arial, sans-serif;
+  letter-spacing: 0.2px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+
+  transition: opacity 0.2s ease-in-out, transform 0.28s ease-in-out;
+}
+
+.app-loader__spinner {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 3px solid currentColor;
+  border-right-color: transparent;
+  animation: app-spin 0.75s linear infinite;
+}
+
+.app-loader.is-hiding {
+  opacity: 0;
+  backdrop-filter: blur(0);
+  -webkit-backdrop-filter: blur(0);
+  pointer-events: none;
+}
+.app-loader.is-hiding .app-loader__text {
+  opacity: 0;
+  transform: translateY(2px);
+}
+
+.app-loader.is-hidden {
+  display: none !important;
+}
+
+@keyframes app-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-loader {
+    transition: none;
+  }
+  .app-loader__text {
+    transition: none;
+  }
+  .app-loader__spinner {
+    animation: none;
+  }
+}

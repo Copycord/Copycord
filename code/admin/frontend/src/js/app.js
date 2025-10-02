@@ -355,7 +355,7 @@
 
   async function fetchAndRenderStatus() {
     try {
-      const res = await fetch("/status", { credentials: "same-origin" });
+      const res = await fetch("/api/status", { credentials: "same-origin" });
       if (!res.ok) return;
       const data = await res.json();
 
@@ -787,35 +787,34 @@
 
   function initCollapsibleCards() {
     const cards = document.querySelectorAll(".card");
-
+  
     cards.forEach((card, idx) => {
       const h = card.querySelector(":scope > h3");
       if (!h) return;
-
+  
       const titleBar = document.createElement("div");
-      titleBar.className = "card-title-bar";
+      titleBar.className = "card-titlebar";
       h.parentNode.insertBefore(titleBar, h);
       titleBar.appendChild(h);
-
+  
       const body =
         card.querySelector(":scope > .card-body") ||
         (() => {
           const b = document.createElement("div");
           b.className = "card-body";
           card.appendChild(b);
-
           while (titleBar.nextSibling && titleBar.nextSibling !== b) {
             b.appendChild(titleBar.nextSibling);
           }
           return b;
         })();
-
+  
       const slug = (h.textContent || `panel-${idx}`)
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/(^-|-$)/g, "");
       body.id = body.id || `card-body-${slug}`;
-
+  
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "btn btn-ghost btn-icon card-toggle";
@@ -824,10 +823,10 @@
       btn.setAttribute("aria-label", "Collapse panel");
       btn.innerHTML = `<span class="chev" aria-hidden="true">▾</span>`;
       titleBar.appendChild(btn);
-
+  
       const key = `cpc.collapsed.${slug}`;
       applyCollapse(card, btn, body, localStorage.getItem(key) === "1");
-
+  
       const toggle = () => {
         const nowCollapsed = !card.classList.contains("collapsed");
         applyCollapse(card, btn, body, nowCollapsed);
@@ -836,19 +835,24 @@
       btn.addEventListener("click", toggle);
       titleBar.addEventListener("dblclick", toggle);
     });
-
+  
     function applyCollapse(card, btn, body, collapsed) {
+      // Keep the card’s layout intact
       card.classList.toggle("collapsed", collapsed);
+      // Hide only the body
+      body.hidden = !!collapsed;
+    
+      // ARIA state
       btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      btn.setAttribute(
-        "aria-label",
-        collapsed ? "Expand panel" : "Collapse panel"
-      );
-
-      const ev = new CustomEvent("card-toggled", {
-        detail: { collapsed },
-        bubbles: true,
-      });
+      btn.setAttribute("aria-label", collapsed ? "Expand panel" : "Collapse panel");
+    
+      // Belt-and-suspenders: ensure full width while collapsed too
+      card.style.width = "100%";
+      card.style.maxWidth = "100%";
+      card.style.minWidth = "100%";
+    
+      // Notify listeners
+      const ev = new CustomEvent("card-toggled", { detail: { collapsed }, bubbles: true });
       card.dispatchEvent(ev);
     }
   }
@@ -1728,5 +1732,5 @@
       ? "Provide SERVER_TOKEN, CLIENT_TOKEN, CLONE_GUILD_ID to start."
       : "";
     btn.disabled = !!toggleLocked || blockStart;
-  }
+  }  
 })();
