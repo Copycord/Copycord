@@ -1,3 +1,12 @@
+# =============================================================================
+#  Copycord
+#  Copyright (C) 2021 github.com/Copycord
+#
+#  This source code is released under the GNU Affero General Public License
+#  version 3.0. A copy of the license is available at:
+#  https://www.gnu.org/licenses/agpl-3.0.en.html
+# =============================================================================
+
 from __future__ import annotations
 
 import asyncio
@@ -7,25 +16,23 @@ import tarfile
 import tempfile
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta, time as dtime
+from datetime import datetime, time as dtime, timedelta
 from pathlib import Path
-from typing import Optional, Iterable
-
-try:
-    from zoneinfo import ZoneInfo
-except Exception:
-    ZoneInfo = None
+from typing import Awaitable, Callable, Iterable, Optional
+from zoneinfo import ZoneInfo
 
 
 @dataclass
 class BackupConfig:
     """
-    Configuration for the daily SQLite backup.
+    Configuration for the SQLite backup scheduler.
+
     - db_path: path to the live SQLite DB (e.g., /data/data.db)
     - backup_dir: directory to store archives (e.g., /data/backups)
-    - retain: number of daily archives (*.tar.gz) to keep
-    - run_at: "HH:MM" 24h clock, local to `timezone`
+    - retain: number of archives (*.tar.gz) to keep (by newest mtime)
+    - run_at: "HH:MM" 24h clock, local to `timezone` (used if interval_minutes is None)
     - timezone: IANA TZ name (e.g., "UTC", "America/New_York")
+    - interval_minutes: if set (e.g. 60), run every N minutes instead of once daily
     """
 
     db_path: Path
@@ -33,25 +40,36 @@ class BackupConfig:
     retain: int = 14
     run_at: str = "03:17"
     timezone: str = "UTC"
+    interval_minutes: Optional[int] = None
 
 
 class DailySQLiteBackupScheduler:
     """
-    Creates a daily SQLite backup archive at:
-        <backup_dir>/<YYYY-MM-DD>.tar.gz
+    Creates compressed SQLite snapshot archives in:
+        <backup_dir>/<YYYY-MM-DD>_<HH-MM-SS>[ -NN ].tar.gz
     (contains a single file named 'data.db')
 
-    Robust to backup_dir being deleted between runs:
-      - Ensures (re)creation before writing
-      - Retries archive creation once if needed
-      - Prunes only if the directory exists
+    Supports:
+      - Daily run at `run_at` (default), OR
+      - Repeating runs every `interval_minutes` (multiple times per day)
+
+    Robust behavior:
+      - (Re)creates backup_dir if missing
+      - Retries archive write once if backup_dir vanished mid-write
+      - Prunes by count (`retain`) using newest mtime first
     """
 
-    def __init__(self, cfg: BackupConfig, logger=None) -> None:
+    def __init__(
+        self,
+        cfg: BackupConfig,
+        logger=None,
+        on_complete: Optional[Callable[[Path], Awaitable[None] | None]] = None,
+    ) -> None:
         self.cfg = cfg
         self.log = logger
         self._task: Optional[asyncio.Task] = None
         self._stop_evt = asyncio.Event()
+        self.on_complete = on_complete
 
         self._dbg("init: cfg=%s", self.cfg)
         self._ensure_backup_dir()
@@ -68,19 +86,28 @@ class DailySQLiteBackupScheduler:
             self._dbg("zoneinfo not available; using naive UTC")
 
     def start(self) -> None:
-        """Start the daily loop as a background asyncio task."""
+        """Start the scheduler as a background asyncio task."""
         if self._task and not self._task.done():
             self._dbg("start: scheduler already running")
             return
         self._stop_evt.clear()
         self._task = asyncio.create_task(self._run_loop(), name="db-backup-scheduler")
-        self._info(
-            "backup scheduler started (run_at=%s %s, retain=%d, dir=%s)",
-            self.cfg.run_at,
-            self.cfg.timezone,
-            self.cfg.retain,
-            self.cfg.backup_dir,
-        )
+        if self.cfg.interval_minutes and self.cfg.interval_minutes > 0:
+            self._info(
+                "backup scheduler started (every=%dm, retain=%d, dir=%s, tz=%s)",
+                self.cfg.interval_minutes,
+                self.cfg.retain,
+                self.cfg.backup_dir,
+                self.cfg.timezone,
+            )
+        else:
+            self._info(
+                "backup scheduler started (run_at=%s %s, retain=%d, dir=%s)",
+                self.cfg.run_at,
+                self.cfg.timezone,
+                self.cfg.retain,
+                self.cfg.backup_dir,
+            )
 
     async def stop(self) -> None:
         """Signal the scheduler to stop and await the task."""
@@ -92,16 +119,32 @@ class DailySQLiteBackupScheduler:
         self._info("backup scheduler stopped")
 
     async def run_now(self) -> Path:
-        """Run a backup immediately (useful for testing/manual trigger)."""
+        """Run a backup immediately (manual trigger)."""
         self._info("manual backup requested")
         out = await self._backup_once()
+        try:
+            if self.on_complete:
+                if asyncio.iscoroutinefunction(self.on_complete):
+                    await self.on_complete(out)
+                else:
+                    self.on_complete(out)
+        except Exception as e:
+            self._exception("on_complete failed after manual backup: %s", e)
         self._info("manual backup finished: %s", out.name)
         return out
 
     async def _run_loop(self) -> None:
+
         try:
-            first_delay = self._seconds_until_next_run()
-            self._dbg("run_loop: sleeping %.2fs until next run", first_delay)
+            if self.cfg.interval_minutes and self.cfg.interval_minutes > 0:
+                first_delay = max(1.0, float(self.cfg.interval_minutes * 60))
+                self._dbg(
+                    "run_loop: sleeping %.2fs until first interval run", first_delay
+                )
+            else:
+                first_delay = self._seconds_until_next_run()
+                self._dbg("run_loop: sleeping %.2fs until next daily run", first_delay)
+
             await asyncio.wait_for(self._stop_evt.wait(), timeout=first_delay)
             self._dbg("run_loop: stop signaled before first run")
             return
@@ -112,19 +155,36 @@ class DailySQLiteBackupScheduler:
             try:
                 out = await self._backup_once()
                 self._info("DB backup complete: %s", out.name)
+
+                if self.on_complete:
+                    try:
+                        if asyncio.iscoroutinefunction(self.on_complete):
+                            await self.on_complete(out)
+                        else:
+                            self.on_complete(out)
+                    except Exception as e:
+                        self._exception(
+                            "on_complete failed after scheduled backup: %s", e
+                        )
+
             except Exception as e:
                 self._exception("DB backup failed: %s", e)
 
             try:
-                self._dbg("run_loop: sleeping 86400s until next daily run")
-                await asyncio.wait_for(self._stop_evt.wait(), timeout=24 * 3600)
-                self._dbg("run_loop: stop signaled during 24h wait")
+                if self.cfg.interval_minutes and self.cfg.interval_minutes > 0:
+                    sleep_s = max(1, int(self.cfg.interval_minutes * 60))
+                else:
+                    sleep_s = 24 * 3600
+                self._dbg("run_loop: sleeping %ds before next run", sleep_s)
+                await asyncio.wait_for(self._stop_evt.wait(), timeout=sleep_s)
+                self._dbg("run_loop: stop signaled during wait")
                 return
             except asyncio.TimeoutError:
-                self._dbg("run_loop: waking for next scheduled run")
+                self._dbg("run_loop: waking for next run")
                 continue
 
     def _seconds_until_next_run(self) -> float:
+        """Compute seconds until the next daily run_at in configured timezone."""
         hh, mm = self.cfg.run_at.split(":")
         hh_i, mm_i = int(hh), int(mm)
 
@@ -169,19 +229,36 @@ class DailySQLiteBackupScheduler:
             self._warn("Unable to create backup_dir %s: %s", self.cfg.backup_dir, e)
             raise
 
+    def _now(self) -> datetime:
+        return datetime.now(self._tz) if self._tz else datetime.utcnow()
+
+    def _unique_archive_path(self, when: datetime) -> Path:
+        """
+        Build a unique archive path like:
+        """
+        stamp = when.strftime("%Y-%m-%d_%H-%M-%S")
+        base = f"{stamp}.tar.gz"
+        candidate = self.cfg.backup_dir / base
+        if not candidate.exists():
+            return candidate
+
+        for i in range(1, 100):
+            candidate = self.cfg.backup_dir / f"{stamp}-{i:02d}.tar.gz"
+            if not candidate.exists():
+                return candidate
+
+        ticks = int(time.monotonic() * 1000)
+        return self.cfg.backup_dir / f"{stamp}-{ticks}.tar.gz"
+
     async def _backup_once(self) -> Path:
         self._ensure_backup_dir()
 
-        if self._tz:
-            date_str = datetime.now(self._tz).strftime("%Y-%m-%d")
-        else:
-            date_str = datetime.utcnow().strftime("%Y-%m-%d")
-
-        final_tgz = self.cfg.backup_dir / f"{date_str}.tar.gz"
-        tmp_tgz = self.cfg.backup_dir / f".{date_str}.tmp.tar.gz"
+        now = self._now()
+        final_tgz = self._unique_archive_path(now)
+        tmp_tgz = self.cfg.backup_dir / f".{final_tgz.stem}.tmp.tar.gz"
 
         t0 = time.monotonic()
-        self._info("backup start: db=%s -> %s", self.cfg.db_path, final_tgz)
+        self._info("backup start: db=%s -> %s", self.cfg.db_path, final_tgz.name)
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tf:
             tmp_db_path = Path(tf.name)
@@ -311,5 +388,4 @@ class DailySQLiteBackupScheduler:
                 return
             except Exception:
                 pass
-
         print("[backup:exception] " + (msg % args))
