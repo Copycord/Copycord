@@ -1213,7 +1213,134 @@ async def _stop_backup_scheduler():
 @app.api_route("/admin/backup-now", methods=["GET", "POST"])
 async def backup_now():
     out_path = await backup_scheduler.run_now()
+
     return {"ok": True, "file": out_path.name}
+
+
+@app.get("/api/backup/info")
+async def backup_info():
+    def _cfg(k, d=""):
+        return db.get_config(k, d)
+
+    last_at = _cfg("DB_LAST_BACKUP_AT", "")
+    last_file = _cfg("DB_LAST_BACKUP_FILE", "")
+    last_size = int(_cfg("DB_LAST_BACKUP_SIZE", "0") or 0)
+    archives = []
+    if BACKUP_DIR.exists():
+        for p in sorted(
+            BACKUP_DIR.glob("*.tar.gz"), key=lambda x: x.stat().st_mtime, reverse=True
+        ):
+            try:
+                st = p.stat()
+                archives.append(
+                    {"name": p.name, "size": st.st_size, "mtime": int(st.st_mtime)}
+                )
+            except Exception:
+                pass
+    return {
+        "ok": True,
+        "last_backup_at": last_at,
+        "last_backup_file": last_file,
+        "last_backup_size": last_size,
+        "dir": str(BACKUP_DIR),
+        "archives": archives,
+    }
+
+
+@app.get("/api/backup/download/{name}")
+async def backup_download(name: str):
+    p = BACKUP_DIR / name
+    if not p.exists() or not p.is_file():
+        return PlainTextResponse("not found", status_code=404)
+    return FileResponse(str(p), filename=name, media_type="application/gzip")
+
+
+@app.post("/api/backup/delete")
+async def backup_delete(name: str = Form(...)):
+    """
+    Permanently delete a backup archive from BACKUP_DIR.
+    """
+    p = BACKUP_DIR / name
+    if not p.exists() or not p.is_file():
+        return PlainTextResponse("not found", status_code=404)
+    try:
+        p.unlink()
+    except Exception as e:
+        return PlainTextResponse(f"delete failed: {e}", status_code=500)
+    return {"ok": True, "deleted": name}
+
+
+@app.post("/api/backup/restore")
+async def backup_restore(
+    source: str = Form("upload"),
+    file: UploadFile | None = File(None),
+    name: str | None = Form(None),
+):
+    """
+    Restore from an uploaded .tar.gz or from an existing archive in BACKUP_DIR.
+    Safeguards:
+      - Stops agents
+      - Atomic replace of live DB
+    """
+    if source not in ("upload", "existing"):
+        return PlainTextResponse("bad source", status_code=400)
+
+    if source == "existing":
+        if not name:
+            return PlainTextResponse("name required", status_code=400)
+        arc = BACKUP_DIR / name
+        if not arc.exists():
+            return PlainTextResponse("archive not found", status_code=404)
+    else:
+        if not file:
+            return PlainTextResponse("file required", status_code=400)
+        BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+        arc = BACKUP_DIR / f"restore-{int(time.time())}.tar.gz"
+        with open(arc, "wb") as f:
+            f.write(await file.read())
+
+    try:
+        await _ws_cmd(SERVER_CTRL_URL, {"cmd": "stop"})
+        await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "stop"})
+    except Exception as e:
+        LOGGER.warning("restore: stop agents failed (continuing): %s", e)
+
+    with tempfile.TemporaryDirectory() as td:
+        tmp_dir = Path(td)
+        with tarfile.open(arc, "r:gz") as tar:
+            members = tar.getmembers()
+            names = [m.name for m in members]
+            if "data.db" not in names:
+                return PlainTextResponse("archive missing data.db", status_code=400)
+            tar.extract("data.db", path=tmp_dir)
+        extracted = tmp_dir / "data.db"
+        if not extracted.exists():
+            return PlainTextResponse("extraction failed", status_code=500)
+
+        live = Path(DB_PATH)
+        bak = live.with_suffix(".bak")
+        try:
+            if live.exists():
+                shutil.copy2(live, bak)
+
+            shutil.copy2(extracted, live)
+        except Exception as e:
+            return PlainTextResponse(f"restore failed: {e}", status_code=500)
+
+    db.set_config("DB_LAST_RESTORE_AT", datetime.utcnow().isoformat() + "Z")
+    return {"ok": True, "restored_from": arc.name}
+
+
+@app.get("/system")
+async def system_page(request: Request):
+    return templates.TemplateResponse(
+        "system.html",
+        {
+            "request": request,
+            "title": f"System · {APP_TITLE}",
+            "version": CURRENT_VERSION,
+        },
+    )
 
 
 @app.get("/logs/stream/{which}")
