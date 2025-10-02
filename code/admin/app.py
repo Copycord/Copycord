@@ -18,6 +18,7 @@ import asyncio
 import websockets
 from pathlib import Path
 import unicodedata
+import tarfile, tempfile, shutil
 import re
 import time
 import logging
@@ -39,12 +40,17 @@ from fastapi import (
     Body,
     status,
     HTTPException,
+    File,
+    UploadFile,
+    Form,
 )
+from anyio import EndOfStream
 from fastapi.responses import (
     RedirectResponse,
     PlainTextResponse,
     StreamingResponse,
     JSONResponse,
+    FileResponse,
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -61,26 +67,8 @@ from datetime import datetime
 import aiohttp
 
 
-REDACT_KEYS = {"SERVER_TOKEN", "CLIENT_TOKEN"}
 GITHUB_REPO = os.getenv("GITHUB_REPO", "Copycord/Copycord")
 RELEASE_POLL_SECONDS = int(os.getenv("RELEASE_POLL_SECONDS", "1800"))
-
-
-req_id_var = contextvars.ContextVar("req_id", default="-")
-route_var = contextvars.ContextVar("route", default="-")
-client_var = contextvars.ContextVar("client", default="-")
-
-
-def _redact_value(val):
-    try:
-        s = str(val)
-        for k in REDACT_KEYS:
-            envv = os.getenv(k)
-            if envv and envv in s:
-                s = s.replace(envv, "***REDACTED***")
-        return s
-    except Exception:
-        return "<unprintable>"
 
 
 def _set_ws_context(route: str, ws: WebSocket):
@@ -93,191 +81,6 @@ def _set_ws_context(route: str, ws: WebSocket):
         client_var.set("-")
 
     req_id_var.set(uuid.uuid4().hex[:8])
-
-
-def _redact_obj(obj):
-    try:
-        if isinstance(obj, dict):
-            out = {}
-            for k, v in obj.items():
-                if str(k) in REDACT_KEYS and v:
-                    out[k] = "***REDACTED***"
-                else:
-                    out[k] = v
-            return out
-        return obj
-    except Exception:
-        return {"_redact_error": True}
-
-
-class RedactFilter(logging.Filter):
-    def filter(self, record: logging.LogRecord) -> bool:
-
-        record.req_id = req_id_var.get()
-        record.scope = route_var.get()
-        record.client = client_var.get()
-
-        try:
-            if isinstance(record.args, dict):
-                new_args = {}
-                for k, v in record.args.items():
-                    if isinstance(v, dict):
-                        new_args[k] = _redact_obj(v)
-                    elif isinstance(v, (int, float, bool, type(None))):
-                        new_args[k] = v
-                    elif isinstance(v, str):
-                        new_args[k] = _redact_value(v)
-                    else:
-                        new_args[k] = v
-                record.args = new_args
-
-            elif isinstance(record.args, (tuple, list)):
-                new_list = []
-                for a in record.args:
-                    if isinstance(a, dict):
-                        new_list.append(_redact_obj(a))
-                    elif isinstance(a, (int, float, bool, type(None))):
-                        new_list.append(a)
-                    elif isinstance(a, str):
-                        new_list.append(_redact_value(a))
-                    else:
-                        new_list.append(a)
-                record.args = (
-                    tuple(new_list) if isinstance(record.args, tuple) else new_list
-                )
-
-            if isinstance(record.msg, str):
-                record.msg = _redact_value(record.msg)
-
-        except Exception:
-            pass
-
-        return True
-
-
-LEVEL_MARK = {
-    logging.DEBUG: "🧩",
-    logging.INFO: "✅",
-    logging.WARNING: "⚠️",
-    logging.ERROR: "❌",
-    logging.CRITICAL: "💥",
-}
-
-
-def _now_iso():
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-
-
-class HumanFormatter(logging.Formatter):
-    def format(self, record: logging.LogRecord) -> str:
-        mark = LEVEL_MARK.get(record.levelno, "•")
-        ts = _now_iso()
-        scope = record.__dict__.get("scope") or "-"
-        rid = record.__dict__.get("req_id") or "-"
-        cli = record.__dict__.get("client") or "-"
-        msg = super().format(record)
-        extras = []
-        for k in (
-            "conn_id",
-            "socket_id",
-            "channel_id",
-            "guild_id",
-            "events_sent",
-            "forwarded",
-            "heartbeats",
-            "took_ms",
-        ):
-            v = getattr(record, k, None)
-            if v not in (None, "", []):
-                extras.append(f"{k}={v}")
-        extras_s = f" | {' '.join(extras)}" if extras else ""
-        return f"{ts} {mark} {record.levelname:<8} [{scope}] (rid={rid} cli={cli}) {msg}{extras_s}"
-
-
-class JSONFormatter(logging.Formatter):
-    def format(self, record: logging.LogRecord) -> str:
-        base = {
-            "time": _now_iso(),
-            "lvl": record.levelname,
-            "msg": super().format(record),
-            "scope": getattr(record, "scope", "-"),
-            "req_id": getattr(record, "req_id", "-"),
-            "client": getattr(record, "client", "-"),
-            "logger": record.name,
-        }
-        for k in (
-            "conn_id",
-            "socket_id",
-            "channel_id",
-            "guild_id",
-            "events_sent",
-            "forwarded",
-            "heartbeats",
-            "took_ms",
-        ):
-            v = getattr(record, k, None)
-            if v not in (None, "", []):
-                base[k] = v
-        return _json.dumps(base, separators=(",", ":"))
-
-
-class ContextAdapter(logging.LoggerAdapter):
-    def process(self, msg, kwargs):
-        extra = kwargs.setdefault("extra", {})
-        for k, v in self.extra.items():
-            extra.setdefault(k, v)
-        return msg, kwargs
-
-
-def get_logger(name="copycord", **ctx):
-    logger = logging.getLogger(name)
-    return ContextAdapter(logger, dict(ctx))
-
-
-def configure_app_logging():
-    """
-    Unified logging config with:
-    - LOG_FORMAT: HUMAN (default) or JSON
-    - LOG_LEVEL: DEBUG/INFO/etc.
-    - redaction + context
-    - preserves your uvicorn handler sinks when present
-    """
-    fmt = os.getenv("LOG_FORMAT", "HUMAN").strip().upper()
-    lvl = os.getenv("LOG_LEVEL", "INFO").strip().upper()
-
-    root = logging.getLogger("copycord")
-    uvicorn_err = logging.getLogger("uvicorn.error")
-
-    def _apply_formatter(handler):
-        if fmt == "JSON":
-            handler.setFormatter(JSONFormatter("%(message)s"))
-        else:
-            handler.setFormatter(HumanFormatter("%(message)s"))
-        handler.addFilter(RedactFilter())
-
-    if uvicorn_err.handlers:
-        root.handlers = uvicorn_err.handlers[:]
-        for h in root.handlers:
-            _apply_formatter(h)
-    else:
-        root.handlers.clear()
-        h = logging.StreamHandler(stream=_sys.stdout)
-        _apply_formatter(h)
-        root.addHandler(h)
-
-    root.propagate = False
-    root.setLevel(getattr(logging, lvl, logging.INFO))
-
-    logging.getLogger("uvicorn").setLevel(logging.WARNING)
-    logging.getLogger("uvicorn.error").setLevel(logging.WARNING)
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-    logging.getLogger("websockets").setLevel(
-        logging.WARNING if root.level > logging.DEBUG else logging.DEBUG
-    )
-    return get_logger("copycord")
-
-
-LOGGER = configure_app_logging()
 
 
 def _redact_dict(d: dict) -> dict:
@@ -334,7 +137,23 @@ _backup_cfg = BackupConfig(
     timezone=BACKUP_TZ,
 )
 
-backup_scheduler = DailySQLiteBackupScheduler(cfg=_backup_cfg, logger=LOGGER)
+
+async def _record_backup_stats(archive_path: Path):
+    try:
+        size = archive_path.stat().st_size if archive_path.exists() else 0
+        now_iso = datetime.utcnow().isoformat() + "Z"
+        db.set_config("DB_LAST_BACKUP_AT", now_iso)
+        db.set_config("DB_LAST_BACKUP_FILE", archive_path.name)
+        db.set_config("DB_LAST_BACKUP_SIZE", str(size))
+    except Exception as e:
+        LOGGER.exception("Failed writing backup stats: %s", e)
+
+
+backup_scheduler = DailySQLiteBackupScheduler(
+    cfg=_backup_cfg,
+    logger=LOGGER,
+    on_complete=_record_backup_stats,
+)
 
 
 SERVER_CTRL_URL = os.getenv("WS_SERVER_CTRL_URL", "ws://server:9101")
@@ -467,6 +286,13 @@ class ConnCloseOnShutdownASGI:
                 "ConnCloseOnShutdownASGI | request cancelled path=%s", scope.get("path")
             )
             return
+        except Exception:
+            LOGGER.exception(
+                "ASGI pipeline error at path=%s method=%s",
+                scope.get("path"),
+                scope.get("method"),
+            )
+            raise
 
 
 class BusHub:
@@ -1554,28 +1380,8 @@ async def _collect_status() -> dict:
     return res
 
 
-@app.get("/status", response_class=JSONResponse)
-async def status_json():
-    return await _collect_status()
-
-
 @app.get("/api/status", response_class=JSONResponse)
 async def api_status_alias():
-    return await _collect_status()
-
-
-@app.get("/api/runtime", response_class=JSONResponse)
-async def api_runtime_alias():
-    return await _collect_status()
-
-
-@app.get("/api/bots/status", response_class=JSONResponse)
-async def api_bots_status_alias():
-    return await _collect_status()
-
-
-@app.get("/runtime", response_class=JSONResponse)
-async def runtime_alias():
     return await _collect_status()
 
 
@@ -1745,7 +1551,6 @@ async def channels_api():
     chans = [dict(r) for r in db.get_all_channel_mappings()]
     cat_rows = [dict(r) for r in db.get_all_category_mappings()]
 
-    # Maps for category lookups
     cats_by_id = {int(r["original_category_id"]): r for r in cat_rows}
 
     out = []
@@ -1776,12 +1581,11 @@ async def channels_api():
                     else None
                 ),
                 "channel_type": int(ch.get("channel_type", 0)),
-                # category info
                 "category_name": original_cat_name,
                 "original_category_name": original_cat_name,
                 "cloned_category_name": cloned_cat_name,
                 "original_parent_category_id": str(pid_int) if pid_int else None,
-                "cloned_category_id": cloned_cat_id,  # <-- NEW FIELD
+                "cloned_category_id": cloned_cat_id,
                 "channel_webhook_url": ch.get("channel_webhook_url"),
                 "clone_channel_name": ch.get("clone_channel_name") or None,
             }
@@ -1872,9 +1676,9 @@ async def api_backfill_start(payload: dict = Body(...)):
 
 @app.get("/api/backfills/inflight")
 async def api_backfills_inflight():
-    # Ask the server for a snapshot over WS and return it.
+
     res = await _ws_cmd(SERVER_AGENT_URL, {"type": "backfills_status_query"})
-    # Expected server shape: {"type":"backfills_status","data":{"items":{...}}}
+
     items = (res or {}).get("data", {}).get("items", {})
     return JSONResponse({"ok": True, "items": items})
 
@@ -2241,7 +2045,6 @@ async def api_categories_customize(payload: dict = Body(...)):
                 status_code=400,
             )
 
-    # Desired custom/pinned name (no slugging)
     desired = _norm_display(
         payload.get("custom_category_name", payload.get("clone_category_name"))
     )
@@ -2261,7 +2064,6 @@ async def api_categories_customize(payload: dict = Body(...)):
     except Exception:
         current_raw = None
 
-    # Only update if different (compare on display-normalized text)
     needs_update = _norm_display(current_raw) != _norm_display(desired)
     if not needs_update:
         LOGGER.info(
@@ -2271,7 +2073,6 @@ async def api_categories_customize(payload: dict = Body(...)):
             {"ok": True, "changed": False, "normalized": desired is not None}
         )
 
-    # Persist (store the exact user-facing text, or NULL to clear)
     try:
         db.set_category_clone_name(ocid, desired)
         LOGGER.info(
@@ -2411,7 +2212,7 @@ async def api_export_messages(request: Request):
         "guild_id": payload.get("guild_id"),
         "channel_id": payload.get("channel_id"),
         "user_id": payload.get("user_id"),
-        "webhook_url": webhook,  # may be None
+        "webhook_url": webhook,
         "has_attachments": bool(payload.get("has_attachments", False)),
         "after_iso": payload.get("after_iso"),
         "before_iso": payload.get("before_iso"),
