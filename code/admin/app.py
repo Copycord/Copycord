@@ -408,15 +408,34 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         token_c = client_var.set(
             f"{getattr(request.client, 'host', '?')}:{getattr(request.client, 'port', '?')}"
         )
+
         response = None
         try:
-            response = await call_next(request)
+            try:
+                response = await call_next(request)
+            except EndOfStream:
+
+                LOGGER.info(
+                    "Client disconnected during request body read",
+                )
+
+                return PlainTextResponse("client disconnected", status_code=499)
+            except asyncio.CancelledError:
+
+                LOGGER.debug("Request task cancelled (client gone)")
+                return PlainTextResponse("client disconnected", status_code=499)
         finally:
+
             if response is not None:
-                response.headers["X-Request-ID"] = rid
+                try:
+                    response.headers["X-Request-ID"] = rid
+                except Exception:
+                    pass
+
             req_id_var.reset(token_r)
             route_var.reset(token_s)
             client_var.reset(token_c)
+
         return response
 
 
