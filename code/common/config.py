@@ -93,6 +93,7 @@ class Config:
         self.CLONE_ROLES = _bool("CLONE_ROLES", "true")
         self.MIRROR_ROLE_PERMISSIONS = _bool("MIRROR_ROLE_PERMISSIONS", "true")
         self.DELETE_ROLES = _bool("DELETE_ROLES", "true")
+        self.CLONE_CHANNEL_PERMISSIONS = _bool("CLONE_CHANNEL_PERMISSIONS", "true")
 
         # --- Users allowed to run admin commands ---
         cmd_users_raw = _str("COMMAND_USERS", os.getenv("COMMAND_USERS", "")) or ""
