@@ -292,7 +292,7 @@ class SitemapService:
                 if t in (0, "role", "ROLE"):
                     rid = int(getattr(ow, "id"))
                     allow_bits = int(getattr(ow, "allow", 0))
-                    deny_bits  = int(getattr(ow, "deny", 0))
+                    deny_bits = int(getattr(ow, "deny", 0))
                     out.append({
                         "type": "role",
                         "id": rid,
