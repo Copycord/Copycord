@@ -154,6 +154,54 @@ If enabled, you’ll receive a direct message with the new member’s details wh
 /onjoin_dm 123456789012345678
 ```
 
+### `/onjoin_role <role>`
+**Description:** Toggle an on-join role for the current server. Run once to add the role; run again with the same role to remove it.
+
+**Options:**
+- `role` *(required, role)* — The role to add or remove from the on-join list.
+
+**Usage Example:**
+```
+/onjoin_role @Member
+```
+
+**Notes:**
+- Multiple on-join roles are supported (run the command once per role).
+- Managed roles or roles above the bot’s top role cannot be assigned.
+- The bot must have **Manage Roles** permission.
+
+---
+
+### `/onjoin_roles [clear]`
+**Description:** List all configured on-join roles for the current server, or clear them all.
+
+**Options:**
+- `clear` *(optional, boolean, default: false)* — If `true`, removes **all** on-join roles for this server.
+
+**Usage Example:**
+```
+/onjoin_roles clear:true
+```
+
+**Notes:**
+- If `clear:false` (default), the command lists current on-join roles.
+- Missing or deleted roles are shown as “missing” in the list.
+
+
+---
+
+### `/onjoin_sync [include_bots] [dry_run]`
+**Description:** Scan all server members and add any **missing** on-join roles.
+
+**Options:**
+- `include_bots` *(optional, boolean, default: false)* — If `true`, bots are included in the sync.
+- `dry_run` *(optional, boolean, default: false)* — If `true`, shows what would change without modifying roles.
+
+**Usage Example:**
+```
+/onjoin_sync include_bots:true dry_run:true
+```
+
 ---
 ### `/purge_assets <type> <confirm>`
 **Description:** Purge all stickers, emojis, or roles.
