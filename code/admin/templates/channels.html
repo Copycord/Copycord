@@ -190,9 +190,9 @@
         <span class="brand-sep" aria-hidden="true"></span>
         <bdi class="brand-version" id="footer-version">
           {% if version %}
-          <a id="footer-version-link" href="https://github.com/Copycord/Copycord/releases/tag/{{ version }}"
+          <a id="footer-version-link" href="{{ links.github }}/releases/tag/{{ version }}"
             target="_blank" rel="noopener" class="footer-link"
-            data-default-href="https://github.com/Copycord/Copycord/releases/tag/{{ version }}">
+            data-default-href="{{ links.github }}/releases/tag/{{ version }}">
             {{ version }}
           </a>
           {% else %}
@@ -202,7 +202,7 @@
       </span>
 
       <div class="footer-links" role="group" aria-label="Links">
-        <a class="footer-link" href="https://github.com/Copycord/Copycord" target="_blank" rel="noopener"
+        <a class="footer-link" href="{{ links.github }}" target="_blank" rel="noopener"
           aria-label="GitHub">
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
             <path
@@ -210,7 +210,7 @@
           </svg>
         </a>
 
-        <a class="footer-link" href="https://discord.gg/ArFdqrJHBj" target="_blank" rel="noopener"
+        <a class="footer-link" href="{{ links.discord }}" target="_blank" rel="noopener"
           aria-label="Join our Discord">
           <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" width="20" height="20">
             <path
@@ -218,7 +218,7 @@
           </svg>
         </a>
 
-        <a class="footer-link" href="https://ko-fi.com/xmacj" target="_blank" rel="noopener"
+        <a class="footer-link" href="{{ links.kofi }}" target="_blank" rel="noopener"
           aria-label="Buy me a coffee">
           <img src="https://storage.ko-fi.com/cdn/brandasset/v2/kofi_symbol.png" alt="" width="18" height="18"
             loading="lazy" />
