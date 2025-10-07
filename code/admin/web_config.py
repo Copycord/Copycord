@@ -24,22 +24,17 @@ from fastapi.responses import JSONResponse
 
 LINKS_REMOTE_URL = os.getenv(
     "LINKS_REMOTE_URL",
-    "https://cdn.jsdelivr.net/gh/Copycord/Copycord@main/config/links.json",
+    "https://cdn.jsdelivr.net/gh/Copycord/Copycord@main/code/common/links.json",
 )
 LINKS_TTL_SECONDS = int(os.getenv("LINKS_TTL_SECONDS", "900"))
-LINKS_LOCAL_FALLBACK = Path(__file__).resolve().parent / "config" / "links.json"
+LINKS_LOCAL_FALLBACK = Path(__file__).resolve().parent.parent / "common" / "links.json"
+
 LINKS_DISK_CACHE = Path(
     os.getenv(
         "LINKS_DISK_CACHE",
         str(Path(__file__).resolve().parent / "data" / "links.cache.json"),
     )
 )
-
-DEFAULT_LINKS: Dict[str, str] = {
-    "github": "https://github.com/Copycord/Copycord",
-    "discord": "https://discord.gg/ArFdqrJHBj",
-    "kofi": "https://ko-fi.com/xmacj",
-}
 
 
 def _unwrap_starlette_app(obj):
@@ -61,6 +56,8 @@ class LinksManager:
     """
     Fetches JSON link config from a remote URL (live repo), caches it in memory (+optional disk),
     and refreshes on a TTL. Supports ETag to minimize bandwidth and latency.
+
+    No built-in defaults: returns only what it can retrieve from remote/disk/local.
     """
 
     def __init__(
@@ -77,7 +74,7 @@ class LinksManager:
 
         self._session: Optional[aiohttp.ClientSession] = None
         self._etag: Optional[str] = None
-        self._cache: Dict[str, str] = dict(DEFAULT_LINKS)
+        self._cache: Dict[str, str] = {}
         self._last_fetch: float = 0.0
         self._lock = asyncio.Lock()
 
@@ -129,7 +126,7 @@ class LinksManager:
                 if resp.status == 200:
                     data = await resp.json()
                     if isinstance(data, dict):
-                        self._cache.update(data)
+                        self._cache = data
                         self._etag = resp.headers.get("ETag")
                         self._save_disk_cache()
                         return True
@@ -142,14 +139,16 @@ class LinksManager:
             now = time.time()
             if not force and (now - self._last_fetch) < self.ttl:
                 return
+
             ok = await self._fetch_remote()
+
             if not ok and self._last_fetch == 0:
 
+                self._cache = {}
                 self._load_disk_cache()
-                self._load_local()
+                if not self._cache:
+                    self._load_local()
 
-            for k, v in DEFAULT_LINKS.items():
-                self._cache.setdefault(k, v)
             self._last_fetch = now
 
     async def get_links(self) -> Dict[str, str]:
@@ -191,7 +190,7 @@ async def startup_links(
         base_app.state.http_session = session
         base_app.state.links_mgr = mgr
     except Exception:
-        # make sure we don't leak the session if something fails
+
         await session.close()
         raise
 
@@ -202,7 +201,6 @@ async def startup_links(
 
 async def shutdown_links(app) -> None:
     base_app = _unwrap_starlette_app(app)
-
     with contextlib.suppress(Exception):
         session = base_app.state.http_session
         await session.close()
