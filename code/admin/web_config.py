@@ -1,4 +1,12 @@
-# web_config.py
+# =============================================================================
+#  Copycord
+#  Copyright (C) 2021 github.com/Copycord
+#
+#  This source code is released under the GNU Affero General Public License
+#  version 3.0. A copy of the license is available at:
+#  https://www.gnu.org/licenses/agpl-3.0.en.html
+# =============================================================================
+
 from __future__ import annotations
 
 import os
@@ -13,13 +21,12 @@ import aiohttp
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
-# ---- Runtime-configurable defaults ----
+
 LINKS_REMOTE_URL = os.getenv(
     "LINKS_REMOTE_URL",
-    # Prefer CDN (fast, tolerant). You can swap to raw.githubusercontent if you want.
     "https://cdn.jsdelivr.net/gh/Copycord/Copycord@main/config/links.json",
 )
-LINKS_TTL_SECONDS = int(os.getenv("LINKS_TTL_SECONDS", "900"))  # 15 min
+LINKS_TTL_SECONDS = int(os.getenv("LINKS_TTL_SECONDS", "900"))
 LINKS_LOCAL_FALLBACK = Path(__file__).resolve().parent / "config" / "links.json"
 LINKS_DISK_CACHE = Path(
     os.getenv(
@@ -33,6 +40,21 @@ DEFAULT_LINKS: Dict[str, str] = {
     "discord": "https://discord.gg/ArFdqrJHBj",
     "kofi": "https://ko-fi.com/xmacj",
 }
+
+
+def _unwrap_starlette_app(obj):
+    """
+    Return the underlying Starlette/FastAPI app that has `.state`.
+    Handles wrappers like custom ASGI adapters that expose `.app`.
+    """
+    cur = obj
+    for _ in range(5):
+        if hasattr(cur, "state"):
+            return cur
+        cur = getattr(cur, "app", None)
+        if cur is None:
+            break
+    raise AttributeError("Could not locate underlying Starlette app with `.state`")
 
 
 class LinksManager:
@@ -85,7 +107,9 @@ class LinksManager:
             return
         try:
             self.disk_cache.parent.mkdir(parents=True, exist_ok=True)
-            self.disk_cache.write_text(json.dumps(self._cache, indent=2), encoding="utf-8")
+            self.disk_cache.write_text(
+                json.dumps(self._cache, indent=2), encoding="utf-8"
+            )
         except Exception:
             pass
 
@@ -97,9 +121,11 @@ class LinksManager:
             headers["If-None-Match"] = self._etag
         timeout = aiohttp.ClientTimeout(total=8)
         try:
-            async with self._session.get(self.url, headers=headers, timeout=timeout) as resp:
+            async with self._session.get(
+                self.url, headers=headers, timeout=timeout
+            ) as resp:
                 if resp.status == 304:
-                    return True  # still fresh
+                    return True
                 if resp.status == 200:
                     data = await resp.json()
                     if isinstance(data, dict):
@@ -118,10 +144,10 @@ class LinksManager:
                 return
             ok = await self._fetch_remote()
             if not ok and self._last_fetch == 0:
-                # First-boot fallbacks if remote unavailable
+
                 self._load_disk_cache()
                 self._load_local()
-            # Ensure keys present
+
             for k, v in DEFAULT_LINKS.items():
                 self._cache.setdefault(k, v)
             self._last_fetch = now
@@ -131,44 +157,52 @@ class LinksManager:
         return dict(self._cache)
 
 
-# ---- Helpers to wire into FastAPI app ----
-
 router = APIRouter()
+
 
 @router.get("/api/links")
 async def api_links(request: Request):
-    mgr: LinksManager = request.app.state.links_mgr  # type: ignore[attr-defined]
+    mgr: LinksManager = request.app.state.links_mgr
     return JSONResponse(await mgr.get_links())
+
 
 @router.post("/admin/links/refresh")
 async def refresh_links(request: Request):
-    mgr: LinksManager = request.app.state.links_mgr  # type: ignore[attr-defined]
+    mgr: LinksManager = request.app.state.links_mgr
     await mgr.refresh(force=True)
     return {"ok": True}
 
 
-async def startup_links(app, templates_env=None, *, set_jinja_global: bool = False) -> None:
+async def startup_links(
+    app, templates_env=None, *, set_jinja_global: bool = False
+) -> None:
     """
-    Call this from app.py @startup.
-    Optionally inject a Jinja global so templates can use {{ links.github }} everywhere.
+    Call from app startup. Optionally inject a Jinja global so templates
+    can use {{ links.github }} everywhere.
     """
+    base_app = _unwrap_starlette_app(app)
+
     session = aiohttp.ClientSession()
     mgr = LinksManager()
-    await mgr.attach_session(session)
-    await mgr.refresh(force=True)
+    try:
+        await mgr.attach_session(session)
+        await mgr.refresh(force=True)
 
-    app.state.http_session = session
-    app.state.links_mgr = mgr
+        base_app.state.http_session = session
+        base_app.state.links_mgr = mgr
+    except Exception:
+        # make sure we don't leak the session if something fails
+        await session.close()
+        raise
 
     if set_jinja_global and templates_env is not None:
-        # Lazy getter so templates can always read the latest cache:
-        templates_env.globals["links"] = mgr._cache  # read-only view for Jinja
+
+        templates_env.globals["links"] = mgr._cache
 
 
 async def shutdown_links(app) -> None:
-    """
-    Call this from app.py @shutdown.
-    """
+    base_app = _unwrap_starlette_app(app)
+
     with contextlib.suppress(Exception):
-        session: aiohttp.ClientSession = app.state.http_session  # type: ignore[attr-defined]
+        session = base_app.state.http_session
         await session.close()
