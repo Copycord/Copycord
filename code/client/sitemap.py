@@ -174,20 +174,41 @@ class SitemapService:
         }
 
         for cat in guild.categories:
-            channels = [
-                {"id": ch.id, "name": ch.name, "type": ch.type.value}
-                for ch in cat.channels
-                if isinstance(ch, discord.TextChannel)
-            ]
-            sitemap["categories"].append(
-                {"id": cat.id, "name": cat.name, "channels": channels}
-            )
+            channels = []
+            for ch in cat.channels:
+                if isinstance(ch, discord.TextChannel):
+                    channels.append({
+                        "id": ch.id,
+                        "name": ch.name,
+                        "type": ch.type.value,
+                        **(
+                            {"overwrites": self._serialize_role_overwrites(ch)}
+                            if getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False)
+                            else {}
+                        ),
+                    })
+            sitemap["categories"].append({
+                "id": cat.id,
+                "name": cat.name,
+                "channels": channels,
+                **(
+                    {"overwrites": self._serialize_role_overwrites(cat)}
+                    if getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False)
+                    else {}
+                ),
+            })
 
-        sitemap["standalone_channels"] = [
-            {"id": ch.id, "name": ch.name, "type": ch.type.value}
-            for ch in guild.text_channels
-            if ch.category is None
-        ]
+        # standalone channels
+        sitemap["standalone_channels"] = [{
+            "id": ch.id,
+            "name": ch.name,
+            "type": ch.type.value,
+            **(
+                {"overwrites": self._serialize_role_overwrites(ch)}
+                if getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False)
+                else {}
+            ),
+        } for ch in guild.text_channels if ch.category is None]
 
         for forum in getattr(guild, "forums", []):
             sitemap["forums"].append(
@@ -256,6 +277,35 @@ class SitemapService:
             return not self._is_filtered_out(getattr(ch, "id", None), cat_id)
         except Exception:
             return True
+        
+    def _serialize_role_overwrites(self, obj: discord.abc.GuildChannel) -> list[dict]:
+        out: list[dict] = []
+
+        raw = (
+            getattr(obj, "permission_overwrites", None)
+            or getattr(obj, "_permission_overwrites", None)
+            or getattr(obj, "_overwrites", None)
+        )
+        try:
+            for ow in raw or []:
+                t = getattr(ow, "type", None)
+                if t in (0, "role", "ROLE"):
+                    rid = int(getattr(ow, "id"))
+                    allow_bits = int(getattr(ow, "allow", 0))
+                    deny_bits  = int(getattr(ow, "deny", 0))
+                    out.append({
+                        "type": "role",
+                        "id": rid,
+                        "allow_bits": allow_bits,
+                        "deny_bits": deny_bits,
+                    })
+            if out:
+                return out
+        except Exception:
+            pass
+
+        return out
+
 
     def in_scope_thread(self, thr: discord.Thread) -> bool:
         """True if thread's parent survives filtering."""
