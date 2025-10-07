@@ -1345,6 +1345,199 @@ class CloneCommands(commands.Cog):
             ),
             ephemeral=True,
         )
+        
+    @commands.slash_command(
+        name="onjoin_role",
+        description="Toggle an on-join role for THIS server (run again to remove).",
+        guild_ids=[GUILD_ID],
+    )
+    async def onjoin_role_toggle(
+        self,
+        ctx: discord.ApplicationContext,
+        role: discord.Role = Option(discord.Role, "Role to add on join", required=True),
+    ):
+        await ctx.defer(ephemeral=True)
+        guild = ctx.guild
+        if not guild:
+            return await ctx.followup.send(
+                embed=discord.Embed(
+                    title="No Guild Context",
+                    description="Run this inside a server.",
+                    color=discord.Color.red(),
+                ),
+                ephemeral=True,
+            )
+
+        if role.managed:
+            return await ctx.followup.send(
+                embed=discord.Embed(
+                    title="Managed Role Not Allowed",
+                    description="That role is managed by an integration and cannot be assigned.",
+                    color=discord.Color.red(),
+                ),
+                ephemeral=True,
+            )
+
+        added = self.db.toggle_onjoin_role(guild.id, role.id, ctx.user.id)
+        if added:
+            title = "On-Join Role Added"
+            desc = f"{role.mention} will be granted automatically to **new members** on join."
+            color = discord.Color.green()
+        else:
+            title = "On-Join Role Removed"
+            desc = f"{role.mention} will **no longer** be granted on join."
+            color = discord.Color.orange()
+
+        await ctx.followup.send(
+            embed=discord.Embed(title=title, description=desc, color=color),
+            ephemeral=True,
+        )
+
+
+    @commands.slash_command(
+        name="onjoin_roles",
+        description="List or clear the on-join roles for THIS server.",
+        guild_ids=[GUILD_ID],
+    )
+    async def onjoin_roles_list(
+        self,
+        ctx: discord.ApplicationContext,
+        clear: bool = Option(bool, "Delete ALL on-join roles for this server", required=False, default=False),
+    ):
+        await ctx.defer(ephemeral=True)
+        guild = ctx.guild
+        if not guild:
+            return await ctx.followup.send("Run this inside a server.", ephemeral=True)
+
+        if clear:
+            removed = self.db.clear_onjoin_roles(guild.id)
+            return await ctx.followup.send(
+                embed=discord.Embed(
+                    title="On-Join Roles Cleared",
+                    description=f"Removed **{removed}** entr{'y' if removed == 1 else 'ies'}.",
+                    color=discord.Color.orange(),
+                ),
+                ephemeral=True,
+            )
+
+        role_ids = self.db.get_onjoin_roles(guild.id)
+        if not role_ids:
+            return await ctx.followup.send(
+                embed=discord.Embed(
+                    title="On-Join Roles",
+                    description="No on-join roles configured yet. Use `/onjoin_role` to add one.",
+                    color=discord.Color.blurple(),
+                ),
+                ephemeral=True,
+            )
+
+        lines = []
+        for rid in role_ids:
+            r = guild.get_role(rid)
+            if r:
+                lines.append(f"• <@&{r.id}> (`{r.id}`)")
+            else:
+                lines.append(f"• (missing role) `{rid}`")
+
+        await ctx.followup.send(
+            embed=discord.Embed(
+                title="On-Join Roles",
+                description="\n".join(lines),
+                color=discord.Color.green(),
+            ),
+            ephemeral=True,
+        )
+
+
+    @commands.slash_command(
+        name="onjoin_sync",
+        description="Go through members and add any missing on-join roles.",
+        guild_ids=[GUILD_ID],
+    )
+    async def onjoin_sync(
+        self,
+        ctx: discord.ApplicationContext,
+        include_bots: bool = Option(bool, "Also give on-join roles to bots", required=False, default=False),
+        dry_run: bool = Option(bool, "Show what would change without modifying roles", required=False, default=False),
+    ):
+        await ctx.defer(ephemeral=True)
+        guild = ctx.guild
+        if not guild:
+            return await ctx.followup.send("Run this inside a server.", ephemeral=True)
+
+        role_ids = self.db.get_onjoin_roles(guild.id)
+        roles = [guild.get_role(rid) for rid in role_ids if guild.get_role(rid)]
+        if not roles:
+            return await ctx.followup.send(
+                embed=discord.Embed(
+                    title="No On-Join Roles",
+                    description="Use `/onjoin_role` to add at least one role before syncing.",
+                    color=discord.Color.orange(),
+                ),
+                ephemeral=True,
+            )
+
+        # Safety: ensure bot has role-assign perms and role positions allow assignment
+        me = guild.me or guild.get_member(self.bot.user.id)
+        if not me or not guild.me.guild_permissions.manage_roles:
+            return await ctx.followup.send(
+                embed=discord.Embed(
+                    title="Missing Permission",
+                    description="I need **Manage Roles** to run this.",
+                    color=discord.Color.red(),
+                ),
+                ephemeral=True,
+            )
+
+        assignable = [r for r in roles if r < me.top_role and not r.managed]
+        skipped_roles = [r for r in roles if r not in assignable]
+
+        changed_users = 0
+        changed_pairs = 0
+        failed = 0
+
+        members = list(guild.members)
+        for m in members:
+            if m.bot and not include_bots:
+                continue
+            # Missing set = assignable roles user doesn't have
+            missing = [r for r in assignable if r not in m.roles]
+            if not missing:
+                continue
+            if dry_run:
+                changed_pairs += len(missing)
+                changed_users += 1
+                continue
+            try:
+                # add_roles allows passing multiple; discord.py handles rate-limiting
+                await m.add_roles(*missing, reason="Copycord onjoin_sync")
+                changed_pairs += len(missing)
+                changed_users += 1
+            except Exception:
+                failed += 1
+
+        summary = (
+            f"Members updated: **{changed_users}**\n"
+            f"Roles granted (total pairs): **{changed_pairs}**\n"
+            f"Failed updates: **{failed}**\n"
+        )
+        if skipped_roles:
+            summary += "\n".join(
+                [
+                    "",
+                    "⚠️ The following roles were **not** assignable (managed or above my top role):",
+                    *[f"• <@&{r.id}> (`{r.id}`)" for r in skipped_roles],
+                ]
+            )
+
+        await ctx.followup.send(
+            embed=discord.Embed(
+                title=("DRY RUN — " if dry_run else "") + "On-Join Role Sync Complete",
+                description=summary,
+                color=discord.Color.green() if not dry_run else discord.Color.blurple(),
+            ),
+            ephemeral=True,
+        )
 
 def setup(bot: commands.Bot):
     bot.add_cog(CloneCommands(bot))
