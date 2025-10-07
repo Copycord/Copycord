@@ -7,7 +7,6 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-
 from __future__ import annotations
 from collections import deque
 import contextlib
@@ -221,6 +220,7 @@ app = FastAPI(title=APP_TITLE)
 BASE_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+templates.env.globals.setdefault("links", {})
 app.include_router(links_router)
 shutdown_event = asyncio.Event()
 
@@ -1000,7 +1000,8 @@ async def logs(which: str, tail: int = 20000):
 
     return PlainTextResponse("No logs yet.", status_code=404)
 
-async def _startup():
+@app.on_event("startup")
+async def _startup_links():
     await startup_links(app, templates_env=templates.env, set_jinja_global=True)
 
 @app.on_event("shutdown")
