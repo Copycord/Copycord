@@ -1133,6 +1133,84 @@ class WebhookDMExporter:
 
         return out or None
 
+class OnCloneJoin:
+    """
+    Assign configured on-join roles when members join a clone guild.
+    Also exposes a 'sync' helper that the slash command can reuse.
+    """
+    def __init__(self, bot: commands.Bot, db: "DBManager"):
+        self.bot = bot
+        self.db = db
+        self.log = logging.getLogger("onclonejoin")
+
+    async def handle_member_join(self, member: discord.Member) -> None:
+        try:
+            guild = member.guild
+            role_ids = self.db.get_onjoin_roles(guild.id)
+            if not role_ids:
+                return
+
+            me = guild.me or guild.get_member(self.bot.user.id)
+            if not me or not me.guild_permissions.manage_roles:
+                self.log.warning("Missing Manage Roles; cannot assign on-join roles.")
+                return
+
+            # Only assign roles we can actually give (not managed, below our top role)
+            assignable = []
+            for rid in role_ids:
+                r = guild.get_role(rid)
+                if r and (not r.managed) and (r < me.top_role) and (r not in member.roles):
+                    assignable.append(r)
+
+            if assignable:
+                await member.add_roles(*assignable, reason="OnCloneJoin: on-member-join")
+        except Exception:
+            self.log.error("Failed to handle on-member-join", exc_info=True)
+
+    async def sync_members(
+        self,
+        guild: discord.Guild,
+        *,
+        include_bots: bool = False,
+        dry_run: bool = False,
+    ) -> tuple[int, int, int, list[discord.Role]]:
+        """
+        Return (changed_users, changed_pairs, failed, skipped_roles)
+        """
+        role_ids = self.db.get_onjoin_roles(guild.id)
+        roles = [guild.get_role(rid) for rid in role_ids if guild.get_role(rid)]
+        if not roles:
+            return (0, 0, 0, [])
+
+        me = guild.me or guild.get_member(self.bot.user.id)
+        if not me or not me.guild_permissions.manage_roles:
+            raise PermissionError("Manage Roles missing")
+
+        assignable = [r for r in roles if (not r.managed) and (r < me.top_role)]
+        skipped_roles = [r for r in roles if r not in assignable]
+
+        changed_users = 0
+        changed_pairs = 0
+        failed = 0
+
+        for m in list(guild.members):
+            if m.bot and not include_bots:
+                continue
+            missing = [r for r in assignable if r not in m.roles]
+            if not missing:
+                continue
+            if dry_run:
+                changed_users += 1
+                changed_pairs += len(missing)
+                continue
+            try:
+                await m.add_roles(*missing, reason="OnCloneJoin: sync")
+                changed_users += 1
+                changed_pairs += len(missing)
+            except Exception:
+                failed += 1
+
+        return (changed_users, changed_pairs, failed, skipped_roles)
 
 def _safe_preview(obj) -> str:
     """Shorten & sanitize dicts for logs."""
