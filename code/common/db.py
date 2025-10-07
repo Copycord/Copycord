@@ -308,6 +308,18 @@ class DBManager:
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);"
         )
+        
+        c.execute(
+            """
+            CREATE TABLE IF NOT EXISTS onjoin_roles (
+                guild_id     INTEGER NOT NULL,
+                role_id      INTEGER NOT NULL,
+                added_by     INTEGER,
+                last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (guild_id, role_id)
+            );
+            """
+        )
 
     def _table_exists(self, name: str) -> bool:
         row = self.conn.execute(
@@ -1396,3 +1408,49 @@ class DBManager:
             return cur.rowcount or 0
         except Exception:
             return 0
+
+
+    def get_onjoin_roles(self, guild_id: int) -> list[int]:
+        rows = self.conn.execute(
+            "SELECT role_id FROM onjoin_roles WHERE guild_id=? ORDER BY role_id ASC",
+            (int(guild_id),),
+        ).fetchall()
+        return [int(r[0]) for r in rows]
+
+    def has_onjoin_role(self, guild_id: int, role_id: int) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM onjoin_roles WHERE guild_id=? AND role_id=?",
+            (int(guild_id), int(role_id)),
+        ).fetchone()
+        return row is not None
+
+    def add_onjoin_role(self, guild_id: int, role_id: int, added_by: int | None = None) -> None:
+        with self.lock, self.conn:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO onjoin_roles(guild_id, role_id, added_by) VALUES (?,?,?)",
+                (int(guild_id), int(role_id), int(added_by) if added_by else None),
+            )
+
+    def remove_onjoin_role(self, guild_id: int, role_id: int) -> bool:
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                "DELETE FROM onjoin_roles WHERE guild_id=? AND role_id=?",
+                (int(guild_id), int(role_id)),
+            )
+            return cur.rowcount > 0
+
+    def toggle_onjoin_role(self, guild_id: int, role_id: int, added_by: int | None = None) -> bool:
+        """Returns True if ADDED, False if REMOVED."""
+        if self.has_onjoin_role(guild_id, role_id):
+            self.remove_onjoin_role(guild_id, role_id)
+            return False
+        self.add_onjoin_role(guild_id, role_id, added_by)
+        return True
+
+    def clear_onjoin_roles(self, guild_id: int) -> int:
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                "DELETE FROM onjoin_roles WHERE guild_id=?",
+                (int(guild_id),),
+            )
+            return cur.rowcount
