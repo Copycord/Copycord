@@ -44,6 +44,7 @@ from server.stickers import StickerManager
 from server.roles import RoleManager
 from server.backfill import BackfillManager, BackfillTracker
 from server.helpers import OnJoinService, VerifyController, WebhookDMExporter
+from server.permission_sync import ChannelPermissionSync
 
 LOG_DIR = "/data"
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -169,6 +170,17 @@ class ServerReceiver:
             clone_guild_id=int(self.config.CLONE_GUILD_ID),
             delete_roles=bool(self.config.DELETE_ROLES),
             mirror_permissions=bool(self.config.MIRROR_ROLE_PERMISSIONS),
+        )
+        self.perms = ChannelPermissionSync(
+            config=self.config,
+            db=self.db,
+            bot=self.bot,
+            clone_guild_id=int(self.config.CLONE_GUILD_ID),
+            cat_map=self.cat_map,    
+            chan_map=self.chan_map,  
+            logger=logger,
+            ratelimit=self.ratelimit,
+            rate_limiter_action=ActionType.EDIT_CHANNEL,
         )
         self.onjoin = OnJoinService(self.bot, self.db, logger.getChild("OnJoin"))
         install_discord_rl_probe(self.ratelimit)
@@ -874,8 +886,12 @@ class ServerReceiver:
             if self.config.CLONE_STICKER:
                 self.stickers.kickoff_sync()
 
+            roles_handle = None
             if self.config.CLONE_ROLES:
-                self.roles.kickoff_sync(sitemap.get("roles", []))
+                try:
+                    roles_handle = self.roles.kickoff_sync(sitemap.get("roles", []))
+                except TypeError:
+                    pass
 
             cat_created, ch_reparented = await self._repair_deleted_categories(
                 guild, sitemap
@@ -900,6 +916,16 @@ class ServerReceiver:
                 parts.append(f"Reparented {moved} channels")
 
             parts += await self._sync_threads(guild, sitemap)
+            
+            self._load_mappings()
+
+            if getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False) and getattr(self.config, "CLONE_ROLES", False):
+                self.perms.schedule_after_role_sync(
+                    roles_manager=self.roles,
+                    roles_handle_or_none=roles_handle,
+                    guild=guild,
+                    sitemap=sitemap,
+                )
 
         self._schedule_flush()
         return "; ".join(parts) if parts else "No changes needed"
