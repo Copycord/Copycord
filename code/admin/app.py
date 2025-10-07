@@ -60,6 +60,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from common.config import CURRENT_VERSION
 from common.db import DBManager
 from common.backup_scheduler import BackupConfig, DailySQLiteBackupScheduler
+from admin.web_config import router as links_router
+from admin.web_config import startup_links, shutdown_links
 from contextlib import suppress
 from time import perf_counter
 import sys as _sys, json as _json, contextvars
@@ -219,6 +221,7 @@ app = FastAPI(title=APP_TITLE)
 BASE_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+app.include_router(links_router)
 shutdown_event = asyncio.Event()
 
 
@@ -997,6 +1000,12 @@ async def logs(which: str, tail: int = 20000):
 
     return PlainTextResponse("No logs yet.", status_code=404)
 
+async def _startup():
+    await startup_links(app, templates_env=templates.env, set_jinja_global=True)
+
+@app.on_event("shutdown")
+async def _shutdown():
+    await shutdown_links(app)
 
 @app.on_event("startup")
 async def _apply_db_log_level_and_banner():
