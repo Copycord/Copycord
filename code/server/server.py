@@ -928,7 +928,7 @@ class ServerReceiver:
                 )
 
         self._schedule_flush()
-        return "; ".join(parts) if parts else "No changes needed"
+        return "; ".join(parts) if parts else "No structure changes needed"
 
     async def _sync_community(self, guild: Guild, sitemap: Dict) -> List[str]:
         """
