@@ -1144,28 +1144,64 @@ class OnCloneJoin:
         self.log = logging.getLogger("onclonejoin")
 
     async def handle_member_join(self, member: discord.Member) -> None:
+        t0 = time.perf_counter()
         try:
             guild = member.guild
             role_ids = self.db.get_onjoin_roles(guild.id)
             if not role_ids:
+                self.log.debug(
+                    "[🎭] Join roles: No on-join roles configured guild_id=%s member_id=%s",
+                    guild.id, member.id
+                )
                 return
 
             me = guild.me or guild.get_member(self.bot.user.id)
             if not me or not me.guild_permissions.manage_roles:
-                self.log.warning("Missing Manage Roles; cannot assign on-join roles.")
+                self.log.warning(
+                    "[🎭] Join roles: Missing Manage Roles; cannot assign on-join roles guild_id=%s",
+                    guild.id
+                )
                 return
 
-            # Only assign roles we can actually give (not managed, below our top role)
+            # Only roles we can give (not managed, below top role, member missing)
             assignable = []
+            skipped = []
             for rid in role_ids:
                 r = guild.get_role(rid)
-                if r and (not r.managed) and (r < me.top_role) and (r not in member.roles):
-                    assignable.append(r)
+                if not r:
+                    skipped.append((rid, "missing"))
+                    continue
+                if r.managed:
+                    skipped.append((rid, "managed"))
+                    continue
+                if not (r < me.top_role):
+                    skipped.append((rid, "above_bot"))
+                    continue
+                if r in member.roles:
+                    skipped.append((rid, "already_has"))
+                    continue
+                assignable.append(r)
 
-            if assignable:
-                await member.add_roles(*assignable, reason="OnCloneJoin: on-member-join")
+            if not assignable:
+                return
+
+            await member.add_roles(*assignable, reason="Copycord onjoin roles")
+            dt = (time.perf_counter() - t0) * 1000
+            self.log.info(
+                "[🎭] Join roles: assigned roles for %s (%s): %s duration_ms=%.1f",
+                member.name, member.id, [f"{r.id}:{r.name}" for r in assignable], dt
+            )
+            if skipped:
+                self.log.debug(
+                    "[🎭] Join roles: Skipped join roles member_id=%s details=%s",
+                    member.id, [(rid, reason) for rid, reason in skipped]
+                )
         except Exception:
-            self.log.error("Failed to handle on-member-join", exc_info=True)
+            self.log.exception(
+                "[🎭] Join roles: failed guild_id=%s member_id=%s",
+                getattr(member.guild, "id", "unknown"),
+                getattr(member, "id", "unknown"),
+            )
 
     async def sync_members(
         self,
@@ -1177,21 +1213,36 @@ class OnCloneJoin:
         """
         Return (changed_users, changed_pairs, failed, skipped_roles)
         """
+        t0 = time.perf_counter()
         role_ids = self.db.get_onjoin_roles(guild.id)
         roles = [guild.get_role(rid) for rid in role_ids if guild.get_role(rid)]
         if not roles:
+            self.log.info("[🎭] Role sync: No on-join roles configured guild_id=%s", guild.id)
             return (0, 0, 0, [])
 
         me = guild.me or guild.get_member(self.bot.user.id)
         if not me or not me.guild_permissions.manage_roles:
+            self.log.warning("[🎭] Role sync: Missing Manage Roles guild_id=%s", guild.id)
             raise PermissionError("Manage Roles missing")
 
         assignable = [r for r in roles if (not r.managed) and (r < me.top_role)]
         skipped_roles = [r for r in roles if r not in assignable]
+        if skipped_roles:
+            self.log.warning(
+                "[🎭] Role sync: Skipped non-assignable roles guild_id=%s role_ids=%s",
+                guild.id, [r.id for r in skipped_roles]
+            )
 
         changed_users = 0
         changed_pairs = 0
         failed = 0
+
+        # Per-member logs can get noisy; keep INFO summary + DEBUG details
+        total = len(guild.members)
+        self.log.info(
+            "[🎭] Role sync starting: guild_id=%s members=%s include_bots=%s dry_run=%s assignable=%s",
+            guild.id, total, include_bots, dry_run, [f"{r.id}:{r.name}" for r in assignable]
+        )
 
         for m in list(guild.members):
             if m.bot and not include_bots:
@@ -1199,16 +1250,36 @@ class OnCloneJoin:
             missing = [r for r in assignable if r not in m.roles]
             if not missing:
                 continue
+
             if dry_run:
                 changed_users += 1
                 changed_pairs += len(missing)
+                self.log.debug(
+                    "[🎭] Role sync: DRY member_id=%s missing_roles=%s",
+                    m.id, [f"{r.id}:{r.name}" for r in missing]
+                )
                 continue
+
             try:
-                await m.add_roles(*missing, reason="OnCloneJoin: sync")
+                await m.add_roles(*missing, reason="Copycord onjoin role sync")
                 changed_users += 1
                 changed_pairs += len(missing)
+                self.log.debug(
+                    "[🎭] Role sync: Added member_id=%s roles=%s",
+                    m.id, [f"{r.id}:{r.name}" for r in missing]
+                )
             except Exception:
                 failed += 1
+                self.log.exception(
+                    "[🎭] Role sync Error: add_roles failed member_id=%s roles=%s",
+                    m.id, [f"{r.id}:{r.name}" for r in missing]
+                )
+
+        dt = (time.perf_counter() - t0) * 1000
+        self.log.info(
+            "[🎭] Role sync finished: changed_users=%s changed_pairs=%s failed=%s duration_ms=%.1f",
+            changed_users, changed_pairs, failed, dt
+        )
 
         return (changed_users, changed_pairs, failed, skipped_roles)
 

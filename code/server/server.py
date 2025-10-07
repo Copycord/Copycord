@@ -286,12 +286,24 @@ class ServerReceiver:
             self._prune_old_messages_loop()
 
     async def on_member_join(self, member: discord.Member):
+        g = getattr(member, "guild", None)
         try:
-            if int(member.guild.id) != int(self.clone_guild_id):
+            if not g:
                 return
+
+            if int(g.id) != int(self.clone_guild_id):
+                return
+
+            logger.info(
+                "[👤] %s (%s) has joined the server!",
+                member.name, member.id
+            )
+            await self.onclonejoin.handle_member_join(member)
         except Exception:
-            return
-        await self.onclonejoin.handle_member_join(member)
+            logger.exception(
+                "[👤] on_member_join: unhandled exception guild_id=%s member_id=%s",
+                getattr(g, "id", "unknown"), getattr(member, "id", "unknown")
+            )
 
     def _canonical_webhook_name(self) -> str:
 
