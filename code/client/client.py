@@ -1319,6 +1319,20 @@ class ClientListener:
             if not self._is_host_guild(before.guild):
                 return
 
+            perms_changed = False
+            try:
+                perms_changed = (getattr(before, "overwrites", None) != getattr(after, "overwrites", None))
+            except Exception:
+                perms_changed = False
+
+            if (
+                getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False)
+                and getattr(self.config, "CLONE_ROLES", False)
+                and perms_changed
+            ):
+                self.schedule_sync()
+                return
+
             if not (
                 self.sitemap.in_scope_channel(before)
                 or self.sitemap.in_scope_channel(after)
