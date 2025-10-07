@@ -238,7 +238,6 @@ class ChannelPermissionSync:
                     d = int(getattr(ow, "deny", 0))
                     out[rid] = (a, d)
         except Exception:
-
             pass
 
         return out
