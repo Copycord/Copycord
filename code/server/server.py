@@ -3291,10 +3291,11 @@ class ServerReceiver:
             if self.session is None or self.session.closed:
                 self.session = aiohttp.ClientSession()
             wh = Webhook.from_url(webhook_url, session=self.session)
+            built = self._build_webhook_payload(data)
             await wh.edit_message(
                 cloned_mid,
-                content=(data.get("content") or None),
-                embeds=self._coerce_embeds(data.get("embeds")),
+                content=built.get("content"),
+                embeds=built.get("embeds"),
                 allowed_mentions=None,
             )
             logger.info(
