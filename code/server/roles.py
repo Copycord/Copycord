@@ -7,6 +7,7 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 from __future__ import annotations
 import asyncio, logging, discord
 from typing import List, Dict, Tuple, Optional
@@ -126,6 +127,7 @@ class RoleManager:
                 cloned.id,
             )
 
+            # it's only false when you just filled the last available slot).
             can_create = len(guild.roles) < self.MAX_ROLES
             return cloned, 1, can_create, create_suppressed_logged
 
@@ -133,7 +135,6 @@ class RoleManager:
             logger.warning(
                 "[⚠️] Failed recreating missing cloned role for %r: %s", want_name, e
             )
-
             return None, 0, can_create, create_suppressed_logged
 
     async def _sync(
@@ -277,8 +278,9 @@ class RoleManager:
                     )
                 )
                 created += add
+                if not cloned:
 
-                continue
+                    continue
 
             if not mapping:
                 if not can_create:
@@ -312,26 +314,11 @@ class RoleManager:
                     logger.info("[🧩] Created role %s", cloned.name)
 
                     can_create = len(guild.roles) < self.MAX_ROLES
-                    if self.mirror_permissions:
-                        logger.debug(
-                            "[🧩] create details: name=%r perms=%d color=#%06X hoist=%s mentionable=%s",
-                            want_name,
-                            want_perms.value,
-                            self._color_int(want_color),
-                            want_hoist,
-                            want_mention,
-                        )
-                    else:
-                        logger.debug(
-                            "[🧩] create details: name=%r perms=(skipped) color=#%06X hoist=%s mentionable=%s",
-                            want_name,
-                            self._color_int(want_color),
-                            want_hoist,
-                            want_mention,
-                        )
+
+                    continue
                 except Exception as e:
                     logger.warning("[⚠️] Failed creating role %s: %s", want_name, e)
-                continue
+                    continue
 
             if (
                 cloned
