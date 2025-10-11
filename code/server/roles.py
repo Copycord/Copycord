@@ -7,9 +7,10 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 from __future__ import annotations
 import asyncio, logging, discord
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 from server.rate_limiter import RateLimitManager, ActionType
 
 logger = logging.getLogger("server.roles")
@@ -74,6 +75,68 @@ class RoleManager:
             finally:
                 self._task = None
 
+    async def _recreate_missing_role(
+        self,
+        *,
+        guild: discord.Guild,
+        orig_id: int,
+        want_name: str,
+        want_perms: discord.Permissions,
+        want_color: discord.Color,
+        want_hoist: bool,
+        want_mention: bool,
+        can_create: bool,
+        create_suppressed_logged: bool,
+        clone_by_id: Dict[int, discord.Role],
+    ) -> Tuple[Optional[discord.Role], int, bool, bool]:
+        """
+        Recreate a missing cloned role when a DB mapping exists but the role was deleted.
+        Returns (cloned_role, created_delta, can_create_updated, create_suppressed_logged).
+        """
+        if not can_create:
+            if not create_suppressed_logged:
+                logger.warning(
+                    "[🧩] Can't recreate role %r — guild at max role count (%d).",
+                    want_name,
+                    self.MAX_ROLES,
+                )
+                create_suppressed_logged = True
+            return None, 0, can_create, create_suppressed_logged
+
+        try:
+            await self.ratelimit.acquire(ActionType.ROLE)
+            kwargs = dict(
+                name=want_name,
+                colour=want_color,
+                hoist=want_hoist,
+                mentionable=want_mention,
+                reason="Copycord role sync (recreate missing clone)",
+            )
+            if self.mirror_permissions:
+                kwargs["permissions"] = want_perms
+
+            cloned = await guild.create_role(**kwargs)
+
+            self.db.upsert_role_mapping(orig_id, want_name, cloned.id, cloned.name)
+            clone_by_id[cloned.id] = cloned
+
+            logger.info(
+                "[🧩] Recreated missing cloned role for upstream %r → %s (%d)",
+                want_name,
+                cloned.name,
+                cloned.id,
+            )
+
+            # it's only false when you just filled the last available slot).
+            can_create = len(guild.roles) < self.MAX_ROLES
+            return cloned, 1, can_create, create_suppressed_logged
+
+        except Exception as e:
+            logger.warning(
+                "[⚠️] Failed recreating missing cloned role for %r: %s", want_name, e
+            )
+            return None, 0, can_create, create_suppressed_logged
+
     async def _sync(
         self, guild: discord.Guild, incoming: List[Dict]
     ) -> Tuple[int, int, int]:
@@ -85,17 +148,16 @@ class RoleManager:
         bot_top = me.top_role.position if me and me.top_role else 0
 
         current = {
-            r["original_role_id"]: dict(r) for r in self.db.get_all_role_mappings()
+            int(r["original_role_id"]): dict(r) for r in self.db.get_all_role_mappings()
         }
         incoming_filtered = {
-            r["id"]: r
+            int(r["id"]): r
             for r in incoming
             if not r.get("managed") and not r.get("everyone")
         }
 
         clone_by_id = {r.id: r for r in guild.roles}
-
-        blocked = set(self.db.get_blocked_role_ids())
+        blocked = {int(x) for x in self.db.get_blocked_role_ids()}
 
         can_create = len(guild.roles) < self.MAX_ROLES
         create_suppressed_logged = False
@@ -105,10 +167,8 @@ class RoleManager:
         for orig_id in list(current.keys()):
             if orig_id not in incoming_filtered:
                 row = current[orig_id]
-                cloned_id = (
-                    row["cloned_role_id"] if "cloned_role_id" in row.keys() else None
-                )
-                cloned = clone_by_id.get(int(cloned_id), None) if cloned_id else None
+                cloned_id = row.get("cloned_role_id")
+                cloned = clone_by_id.get(int(cloned_id)) if cloned_id else None
 
                 if not self.delete_roles:
                     self.db.delete_role_mapping(orig_id)
@@ -130,7 +190,6 @@ class RoleManager:
                     or cloned.managed
                     or cloned.position >= bot_top
                 ):
-
                     self.db.delete_role_mapping(orig_id)
                     if cloned:
                         logger.info(
@@ -158,12 +217,13 @@ class RoleManager:
                     self.db.delete_role_mapping(orig_id)
 
         current = {
-            r["original_role_id"]: dict(r) for r in self.db.get_all_role_mappings()
+            int(r["original_role_id"]): dict(r) for r in self.db.get_all_role_mappings()
         }
         clone_by_id = {r.id: r for r in guild.roles}
 
         for orig_id, info in incoming_filtered.items():
             mapping = current.get(orig_id)
+
             cloned = None
             if mapping:
                 cloned_id = mapping.get("cloned_role_id")
@@ -172,12 +232,6 @@ class RoleManager:
                         cloned = clone_by_id.get(int(cloned_id))
                     except Exception:
                         cloned = None
-
-            want_name = info["name"]
-            want_perms = discord.Permissions(info.get("permissions", 0))
-            want_color = discord.Color(info.get("color", 0))
-            want_hoist = bool(info.get("hoist", False))
-            want_mention = bool(info.get("mentionable", False))
 
             if orig_id in blocked:
                 if (
@@ -201,6 +255,32 @@ class RoleManager:
                 if mapping:
                     self.db.delete_role_mapping(orig_id)
                 continue
+
+            want_name = info["name"]
+            want_perms = discord.Permissions(info.get("permissions", 0))
+            want_color = discord.Color(info.get("color", 0))
+            want_hoist = bool(info.get("hoist", False))
+            want_mention = bool(info.get("mentionable", False))
+
+            if mapping and not cloned:
+                cloned, add, can_create, create_suppressed_logged = (
+                    await self._recreate_missing_role(
+                        guild=guild,
+                        orig_id=orig_id,
+                        want_name=want_name,
+                        want_perms=want_perms,
+                        want_color=want_color,
+                        want_hoist=want_hoist,
+                        want_mention=want_mention,
+                        can_create=can_create,
+                        create_suppressed_logged=create_suppressed_logged,
+                        clone_by_id=clone_by_id,
+                    )
+                )
+                created += add
+                if not cloned:
+
+                    continue
 
             if not mapping:
                 if not can_create:
@@ -234,26 +314,11 @@ class RoleManager:
                     logger.info("[🧩] Created role %s", cloned.name)
 
                     can_create = len(guild.roles) < self.MAX_ROLES
-                    if self.mirror_permissions:
-                        logger.debug(
-                            "[🧩] create details: name=%r perms=%d color=#%06X hoist=%s mentionable=%s",
-                            want_name,
-                            want_perms.value,
-                            self._color_int(want_color),
-                            want_hoist,
-                            want_mention,
-                        )
-                    else:
-                        logger.debug(
-                            "[🧩] create details: name=%r perms=(skipped) color=#%06X hoist=%s mentionable=%s",
-                            want_name,
-                            self._color_int(want_color),
-                            want_hoist,
-                            want_mention,
-                        )
+
+                    continue
                 except Exception as e:
                     logger.warning("[⚠️] Failed creating role %s: %s", want_name, e)
-                continue
+                    continue
 
             if (
                 cloned
