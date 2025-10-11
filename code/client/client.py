@@ -27,7 +27,11 @@ from client.message_utils import MessageUtils
 from common.websockets import WebsocketManager, AdminBus
 from client.scraper import MemberScraper
 from client.helpers import ClientUiController
-from client.export_runners import BackfillEngine, ExportMessagesRunner, DmHistoryExporter
+from client.export_runners import (
+    BackfillEngine,
+    ExportMessagesRunner,
+    DmHistoryExporter,
+)
 
 
 LOG_DIR = "/data"
@@ -214,7 +218,9 @@ class ClientListener:
                 or data.get("until")
             )
 
-            _n = data.get("last_n") or (rng.get("value") if mode in ("last", "last_n") else None)
+            _n = data.get("last_n") or (
+                rng.get("value") if mode in ("last", "last_n") else None
+            )
             try:
                 last_n = int(_n) if _n is not None else None
             except Exception:
@@ -939,6 +945,26 @@ class ClientListener:
             message.author.name,
         )
 
+    def _is_meaningful_edit(
+        self, before: discord.Message, after: discord.Message
+    ) -> bool:
+        if (before.content or "") != (after.content or ""):
+            return True
+        if [(a.url, a.size) for a in before.attachments] != [
+            (a.url, a.size) for a in after.attachments
+        ]:
+            return True
+        if len(before.components) != len(after.components):
+            return True
+        if len(getattr(before, "stickers", [])) != len(getattr(after, "stickers", [])):
+            return True
+        try:
+            if getattr(before, "flags", None) != getattr(after, "flags", None):
+                return False
+        except Exception:
+            pass
+        return False
+
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
         """
         When an upstream message is edited, forward the new content/embeds/components.
@@ -951,6 +977,11 @@ class ClientListener:
             return
         if self.should_ignore(after):
             return
+
+        if getattr(self.config, "IGNORE_EMBED_ONLY_EDITS", True):
+            if not self._is_meaningful_edit(before, after):
+                logger.debug("[edit] Ignoring embed-only/unfurl edit for %s", after.id)
+                return
 
         raw = after.content or ""
         system = getattr(after, "system_content", "") or ""
@@ -1055,6 +1086,21 @@ class ClientListener:
 
         msg = payload.cached_message
         data = payload.data or {}
+
+        if getattr(self.config, "IGNORE_EMBED_ONLY_EDITS", True):
+            changed = set(data.keys()) - {
+                "id",
+                "type",
+                "guild_id",
+                "channel_id",
+                "edited_timestamp",
+                "timestamp",
+            }
+            if changed <= {"embeds"}:
+                logger.debug(
+                    "[edit] Ignoring raw embed-only edit for %s", payload.message_id
+                )
+                return
 
         content = None
         embeds = None
@@ -1321,7 +1367,9 @@ class ClientListener:
 
             perms_changed = False
             try:
-                perms_changed = (getattr(before, "overwrites", None) != getattr(after, "overwrites", None))
+                perms_changed = getattr(before, "overwrites", None) != getattr(
+                    after, "overwrites", None
+                )
             except Exception:
                 perms_changed = False
 
