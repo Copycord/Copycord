@@ -43,7 +43,12 @@ from server.emojis import EmojiManager
 from server.stickers import StickerManager
 from server.roles import RoleManager
 from server.backfill import BackfillManager, BackfillTracker
-from server.helpers import OnJoinService, VerifyController, WebhookDMExporter, OnCloneJoin
+from server.helpers import (
+    OnJoinService,
+    VerifyController,
+    WebhookDMExporter,
+    OnCloneJoin,
+)
 from server.permission_sync import ChannelPermissionSync
 
 LOG_DIR = "/data"
@@ -105,6 +110,10 @@ class ServerReceiver:
         self._thread_locks: dict[int, asyncio.Lock] = {}
         self.max_threads = 950
         self._m_ch = re.compile(r"<#(\d+)>")
+        self._m_msg_link = re.compile(
+            r"(https?://(?:ptb\.|canary\.)?discord(?:app)?\.com/channels/)(\d+|@me)/(\d+)/(\d+)",
+            re.IGNORECASE,
+        )
         self.bot.event(self.on_ready)
         self.bot.event(self.on_webhooks_update)
         self.bot.event(self.on_guild_channel_delete)
@@ -178,8 +187,8 @@ class ServerReceiver:
             db=self.db,
             bot=self.bot,
             clone_guild_id=int(self.config.CLONE_GUILD_ID),
-            cat_map=self.cat_map,    
-            chan_map=self.chan_map,  
+            cat_map=self.cat_map,
+            chan_map=self.chan_map,
             logger=logger,
             ratelimit=self.ratelimit,
             rate_limiter_action=ActionType.EDIT_CHANNEL,
@@ -294,15 +303,13 @@ class ServerReceiver:
             if int(g.id) != int(self.clone_guild_id):
                 return
 
-            logger.info(
-                "[👤] %s (%s) has joined the server!",
-                member.name, member.id
-            )
+            logger.info("[👤] %s (%s) has joined the server!", member.name, member.id)
             await self.onclonejoin.handle_member_join(member)
         except Exception:
             logger.exception(
                 "[👤] on_member_join: unhandled exception guild_id=%s member_id=%s",
-                getattr(g, "id", "unknown"), getattr(member, "id", "unknown")
+                getattr(g, "id", "unknown"),
+                getattr(member, "id", "unknown"),
             )
 
     def _canonical_webhook_name(self) -> str:
@@ -938,10 +945,12 @@ class ServerReceiver:
                 parts.append(f"Reparented {moved} channels")
 
             parts += await self._sync_threads(guild, sitemap)
-            
+
             self._load_mappings()
 
-            if getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False) and getattr(self.config, "CLONE_ROLES", False):
+            if getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False) and getattr(
+                self.config, "CLONE_ROLES", False
+            ):
                 self.perms.schedule_after_role_sync(
                     roles_manager=self.roles,
                     roles_handle_or_none=roles_handle,
@@ -2509,6 +2518,7 @@ class ServerReceiver:
         s = self._replace_emoji_ids(s)
         s = self._remap_channel_mentions(s)
         s = self._remap_role_mentions(s)
+        s = self._rewrite_message_links(s)
         return s
 
     def _replace_emoji_ids(self, content: str) -> str:
@@ -2565,6 +2575,58 @@ class ServerReceiver:
             return match.group(0)
 
         return self._m_role.sub(repl, content)
+
+    def _rewrite_message_links(self, text: str) -> str:
+        """
+        Find Discord message permalinks and rewrite them to the clone guild/channel/message.
+        Leaves links unchanged if a cloned message mapping doesn't exist yet.
+        """
+
+        def _as_dict(r):
+            if r is None:
+                return None
+            if hasattr(r, "keys"):
+                return {k: r[k] for k in r.keys()}
+            return r
+
+        def _sub(m: re.Match) -> str:
+            base, gid, cid, mid = m.groups()
+            try:
+                orig_cid = int(cid)
+                orig_mid = int(mid)
+            except ValueError:
+                return m.group(0)
+
+            row = None
+            try:
+                row = self.db.get_mapping_by_original(orig_mid)
+            except Exception:
+                pass
+            row = _as_dict(row)
+
+            if not row:
+                return m.group(0)
+
+            clone_mid = row.get("cloned_message_id") or 0
+            clone_cid = row.get("cloned_channel_id") or 0
+
+            if not clone_mid:
+                return m.group(0)
+
+            if not clone_cid:
+                ch_row = None
+                try:
+                    ch_row = self.db.get_channel_mapping_by_original_id(orig_cid)
+                except Exception:
+                    pass
+                ch_map = _as_dict(ch_row)
+                clone_cid = (ch_map.get("cloned_channel_id") if ch_map else 0) or 0
+                if not clone_cid:
+                    return m.group(0)
+
+            return f"{base}{self.clone_guild_id}/{int(clone_cid)}/{int(clone_mid)}"
+
+        return self._m_msg_link.sub(_sub, text)
 
     def _build_webhook_payload(self, msg: Dict) -> dict:
         """
