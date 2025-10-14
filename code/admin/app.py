@@ -1607,6 +1607,24 @@ async def channels_api():
     return {"items": out}
 
 
+@app.get("/api/backfills/inflight")
+async def api_backfills_inflight():
+
+    res = await _ws_cmd(SERVER_AGENT_URL, {"type": "backfills_status_query"})
+
+    items = (res or {}).get("data", {}).get("items", {})
+    return JSONResponse({"ok": True, "items": items})
+
+
+@app.get("/api/backfills/resume-info", response_class=JSONResponse)
+async def api_backfills_resume_info(channel_id: int):
+    res = await _ws_cmd(
+        SERVER_AGENT_URL,
+        {"type": "backfill_resume_info_query", "data": {"channel_id": int(channel_id)}},
+    )
+    return JSONResponse({"ok": True, **(res or {})})
+
+
 @app.post("/api/backfill/start", response_class=JSONResponse)
 async def api_backfill_start(payload: dict = Body(...)):
     try:
@@ -1676,7 +1694,12 @@ async def api_backfill_start(payload: dict = Body(...)):
             else (data.get("last_n") if "last_n" in data else None)
         )
         data["range"] = {"mode": mode, "value": rng_val} if mode else None
+        
+    if bool(payload.get("resume")):
+        data["resume"] = True
+
     res = await _ws_cmd(CLIENT_AGENT_URL, {"type": "clone_messages", "data": data})
+    
     if not res.get("ok", True):
         await locks.release(channel_id)
         return JSONResponse(
@@ -1686,14 +1709,6 @@ async def api_backfill_start(payload: dict = Body(...)):
 
     return JSONResponse({"ok": True})
 
-
-@app.get("/api/backfills/inflight")
-async def api_backfills_inflight():
-
-    res = await _ws_cmd(SERVER_AGENT_URL, {"type": "backfills_status_query"})
-
-    items = (res or {}).get("data", {}).get("items", {})
-    return JSONResponse({"ok": True, "items": items})
 
 
 @app.get("/guilds")

@@ -2497,10 +2497,16 @@
   const cClose = document.getElementById("confirm-close");
   const cBackdrop = cModal?.querySelector(".modal-backdrop");
 
-  function openConfirm(
-    { title = "Confirm", body = "Are you sure?", okText = "Delete" },
-    onConfirm
-  ) {
+    function openConfirm(
+        {
+          title = "Confirm",
+          body = "Are you sure?",
+          okText = "Delete",
+          cancelText = "Cancel",
+          onCancel = null,
+        },
+        onConfirm
+      ) {
     if (!cModal) {
       onConfirm?.();
       return;
@@ -2536,6 +2542,9 @@
       onConfirm?.();
       close();
     };
+        const onCancelClick = () => {
+            try { onCancel?.(); } finally { close(); }
+          };
     const onEsc = (e) => {
       if (e.key === "Escape") close();
     };
@@ -2545,14 +2554,17 @@
 
     function teardown() {
       cOk.removeEventListener("click", onOk);
-      cCancel?.removeEventListener("click", close);
+      cCancel?.removeEventListener("click", onCancelClick);
       cClose?.removeEventListener("click", close);
       cBackdrop?.removeEventListener("click", onBackdrop);
       document.removeEventListener("keydown", onEsc);
     }
 
     cOk.addEventListener("click", onOk, { once: true });
-    cCancel?.addEventListener("click", close, { once: true });
+        if (cCancel) {
+            cCancel.textContent = cancelText || "Cancel";
+            cCancel.addEventListener("click", onCancelClick, { once: true });
+          }
     cClose?.addEventListener("click", close, { once: true });
     cBackdrop?.addEventListener("click", onBackdrop);
     document.addEventListener("keydown", onEsc);
@@ -3471,6 +3483,73 @@
     bfChannelId = null;
   }
 
+  async function checkResumeAndPrompt(originalId) {
+    const cid = String(toOriginalCid(originalId));
+    try {
+      const res = await fetch(`/api/backfills/resume-info?channel_id=${encodeURIComponent(cid)}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => ({}));
+  
+      // Support both shapes: { resume: {...} } or { data: {...} }
+      const info = json?.resume ?? json?.data ?? null;
+  
+      const canResume = !!(info?.available ?? info?.resumable);
+      if (!canResume) {
+        // No unfinished backfill → go straight to settings
+        const row = findRowByAnyChannelId(cid);
+        if (row) openBackfillDialog(row.original_channel_id);
+        return;
+      }
+  
+      // Build friendly details
+      const delivered = Number.isFinite(info?.delivered) ? info.delivered : null;
+      const total = Number.isFinite(info?.expected_total) ? info.expected_total : null;
+      const startedAt = info?.started_at || info?.started_dt || info?.startedAt || null;
+      const startedTxt = startedAt ? new Date(startedAt).toLocaleString() : "earlier";
+      const progressTxt =
+        delivered != null && total != null
+          ? `${delivered.toLocaleString()} / ${total.toLocaleString()}`
+          : delivered != null
+          ? `${delivered.toLocaleString()}`
+          : "in progress";
+  
+      openConfirm(
+        {
+          title: "Resume previous backfill?",
+          body:
+            `A previous backfill for this channel started ${startedTxt} ` +
+            `and is ${progressTxt}. Do you want to resume from the last checkpoint ` +
+            `or start a new backfill?`,
+          okText: "Resume",
+          cancelText: "Start new",
+          onCancel: () => {
+            const row = findRowByAnyChannelId(cid);
+            if (row) openBackfillDialog(row.original_channel_id);
+          },
+        },
+        () => {
+          // Resume immediately via WS (same action you use for regular backfill)
+          setCloneLaunching(cid, true);
+          setCardLoading(cid, true, "Resuming…");
+          sendClient({
+            action: "backfill",
+            original_channel_id: cid,
+            resume: true,
+            // These are optional passthroughs if your server uses them:
+            run_id: info?.run_id ?? undefined,
+            checkpoint: info?.checkpoint ?? undefined,
+          });
+        }
+      );
+    } catch {
+      // If anything fails, fall back to normal flow
+      const row = findRowByAnyChannelId(cid);
+      if (row) openBackfillDialog(row.original_channel_id);
+    }
+  }
+
   document.getElementById("ch-menu")?.addEventListener("click", (ev) => {
     const li = ev.target.closest("[data-action]");
     if (!li) return;
@@ -3491,7 +3570,7 @@
         return;
       }
       hideMenu({ restoreFocus: false });
-      openBackfillDialog(id);
+      checkResumeAndPrompt(id);
     }
   });
 

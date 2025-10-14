@@ -466,20 +466,10 @@ class ExportMessagesRunner:
                         ch_matched += 1
                         total_matched += 1
 
-                        serialized = self.serialize(msg)
-
-                        buffer_rows.append(
-                            {
-                                "guild_id": getattr(guild, "id", None),
-                                "channel_id": getattr(ch, "id", None),
-                                "message": serialized,
-                            }
-                        )
-
-                        serialized = self.serialize(msg)
-
                         is_thread = _is_thread(ch)
                         parent = getattr(ch, "parent", None)
+                        
+                        serialized = self.serialize(msg)
 
                         serialized["_export_ctx"] = {
                             "channel_id": getattr(ch, "id", None),

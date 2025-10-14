@@ -55,11 +55,12 @@ class BackfillManager:
             out[str(int(cid_int))] = {
                 "delivered": delivered,
                 "expected_total": (int(total) if total is not None else None),
-                "started_at": (
-                    st.get("started_dt").isoformat() if st.get("started_dt") else None
-                ),
+                "started_at": (st.get("started_dt").isoformat() if st.get("started_dt") else None),
                 "clone_channel_id": st.get("clone_channel_id"),
                 "in_flight": inflight,
+                "run_id": st.get("run_id"),
+                "last_orig_message_id": st.get("last_orig_id"),
+                "last_orig_timestamp": st.get("last_ts"),
             }
 
         return out
@@ -93,11 +94,23 @@ class BackfillManager:
     async def on_started(self, original_id: int, *, meta: dict | None = None) -> None:
         cid = int(original_id)
         self._flags.add(cid)
+        
 
         st = self._progress.get(cid)
         if not st:
             self.register_sink(cid, user_id=None, clone_channel_id=None, msg=None)
             st = self._progress[cid]
+            
+        try:
+            rng = (st.get("meta") or {}).get("range")  # whatever you pass down (mode/params)
+            st["run_id"] = self.r.db.backfill_create_run(
+                int(cid),
+                (rng or {}).get("mode") if isinstance(rng, dict) else None,
+                rng or {},
+            )
+        except Exception:
+            logger.exception("[bf] failed to create backfill run for #%s", cid)
+            
 
         if meta:
             st["meta"] = meta
@@ -126,6 +139,10 @@ class BackfillManager:
             self._attached[cid].discard(t)
 
         clone_id = st.get("clone_channel_id")
+        run_id = st.get("run_id")
+        if run_id and st.get("clone_channel_id") is not None:
+            with contextlib.suppress(Exception):
+                self.r.db.backfill_set_clone(run_id, int(st["clone_channel_id"]))
         if clone_id is not None:
             clone_id = int(clone_id)
             self._by_clone[clone_id] = cid
@@ -166,6 +183,13 @@ class BackfillManager:
             "temp_webhook_ids": [],
             "temp_webhook_urls": [],
         }
+        
+        orig = int(channel_id)
+        st = self._progress.get(orig) or {}
+        run_id = st.get("run_id")
+        if run_id and clone_channel_id:
+            with contextlib.suppress(Exception):
+                self.r.db.backfill_set_clone(run_id, int(clone_channel_id))
         if clone_channel_id:
             self._by_clone[int(clone_channel_id)] = int(channel_id)
 
@@ -202,14 +226,36 @@ class BackfillManager:
                 except Exception:
                     pass
 
-    def note_sent(self, channel_id: int) -> None:
-        """Increment server-side delivered count for a backfill message."""
-        cid = int(channel_id)
-        st = self._progress.get(cid)
+    def note_sent(self, channel_id: int, original_message_id: int | None = None) -> None:
+        st = self._progress.get(int(channel_id))
         if not st:
             return
+        sent_ids = st.setdefault("sent_ids", set())
+        if original_message_id:
+            oid = str(original_message_id)
+            if oid in sent_ids:
+                return
+            sent_ids.add(oid)
+            st["last_orig_id"] = oid
         st["delivered"] = int(st.get("delivered", 0)) + 1
 
+    def note_checkpoint(self, channel_id, original_message_id=None, original_timestamp_iso=None):
+        st = self._progress.get(int(channel_id))
+        if not st:
+            return
+        if original_message_id is not None:
+            st["last_orig_id"] = str(original_message_id)
+        if original_timestamp_iso:
+            st["last_ts"] = str(original_timestamp_iso)
+        if run_id := st.get("run_id"):
+            self.r.db.backfill_update_checkpoint(
+                run_id,
+                delivered=int(st.get("delivered", 0)),
+                expected_total=st.get("expected_total"),
+                last_orig_message_id=st.get("last_orig_id"),
+                last_orig_timestamp=st.get("last_ts"),
+            )
+            
     def update_expected_total(self, channel_id: int, total: int) -> None:
         """Set/raise expected total (from client precount)."""
         cid = int(channel_id)
@@ -218,6 +264,10 @@ class BackfillManager:
             return
         prev = int(st.get("expected_total") or 0)
         st["expected_total"] = max(prev, int(total))
+        run_id = (st or {}).get("run_id")
+        if run_id:
+            with contextlib.suppress(Exception):
+                self.r.db.backfill_update_checkpoint(run_id, expected_total=st["expected_total"])
         logger.debug(
             "[bf] set expected_total | channel=%s total=%s (prev=%s)",
             cid,
@@ -276,6 +326,12 @@ class BackfillManager:
                 await self.tracker.publish_progress(
                     str(cid), delivered=delivered, total=total
                 )
+
+        run_id = (self._progress.get(cid) or {}).get("run_id")
+        if run_id:
+            with contextlib.suppress(Exception):
+                self.r.db.backfill_mark_done(run_id)
+        
         try:
             await self.r.bus.publish(
                 "client",
@@ -381,6 +437,11 @@ class BackfillManager:
             logger.debug("[bf] task for #%s cancelled", cid)
         except Exception as e:
             logger.exception("[bf] task error for #%s: %s", cid, e)
+            st = self._progress.get(int(cid)) or {}
+            run_id = st.get("run_id")
+            if run_id:
+                with contextlib.suppress(Exception):
+                    self.r.db.backfill_mark_failed(run_id, str(e))
         finally:
             n = self._inflight.get(cid, 0)
             self._inflight[cid] = max(0, n - 1)

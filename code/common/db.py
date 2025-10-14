@@ -7,8 +7,11 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+from datetime import datetime
+import json
 import sqlite3, threading
 from typing import List, Optional
+import uuid
 
 
 class DBManager:
@@ -320,6 +323,26 @@ class DBManager:
             );
             """
         )
+        
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS backfill_runs (
+            run_id                TEXT PRIMARY KEY,
+            original_channel_id   INTEGER NOT NULL,
+            clone_channel_id      INTEGER,
+            status                TEXT NOT NULL DEFAULT 'running',  -- running|completed|failed|aborted
+            range_mode            TEXT,                              -- 'all'|'since'|'between'|'last'
+            range_json            TEXT,                              -- serialized dict of params sent to client
+            started_at            TEXT NOT NULL,                     -- ISO
+            updated_at            TEXT NOT NULL,                     -- ISO
+            delivered             INTEGER NOT NULL DEFAULT 0,
+            expected_total        INTEGER,
+            last_orig_message_id  TEXT,                              -- original message id checkpoint
+            last_orig_timestamp   TEXT,                              -- ISO timestamp from client payload
+            error                 TEXT
+        );
+        """)
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_bf_runs_by_orig_status ON backfill_runs(original_channel_id, status)")
+        self.conn.commit()
 
     def _table_exists(self, name: str) -> bool:
         row = self.conn.execute(
@@ -1454,3 +1477,61 @@ class DBManager:
                 (int(guild_id),),
             )
             return cur.rowcount
+        
+    def backfill_create_run(self, original_channel_id: int, range_mode: str|None, range_json: dict|None) -> str:
+        run_id = uuid.uuid4().hex
+        now = datetime.utcnow().isoformat() + "Z"
+        self.conn.execute(
+            "INSERT INTO backfill_runs(run_id, original_channel_id, range_mode, range_json, started_at, updated_at) VALUES(?,?,?,?,?,?)",
+            (run_id, int(original_channel_id), range_mode, json.dumps(range_json or {}), now, now)
+        )
+        self.conn.commit()
+        return run_id
+
+    def backfill_set_clone(self, run_id: str, clone_channel_id: int|None):
+        now = datetime.utcnow().isoformat() + "Z"
+        self.conn.execute("UPDATE backfill_runs SET clone_channel_id=?, updated_at=? WHERE run_id=?",
+                        (int(clone_channel_id) if clone_channel_id else None, now, run_id))
+        self.conn.commit()
+
+    def backfill_update_checkpoint(self, run_id: str, *, delivered: int|None=None, expected_total: int|None=None,
+                                last_orig_message_id: str|None=None, last_orig_timestamp: str|None=None):
+        cols, vals = ["updated_at"], [datetime.utcnow().isoformat() + "Z"]
+        if delivered is not None:          cols += ["delivered"];         vals += [int(delivered)]
+        if expected_total is not None:     cols += ["expected_total"];    vals += [int(expected_total)]
+        if last_orig_message_id is not None: cols += ["last_orig_message_id"]; vals += [str(last_orig_message_id)]
+        if last_orig_timestamp is not None:  cols += ["last_orig_timestamp"];  vals += [last_orig_timestamp]
+        sql = f"UPDATE backfill_runs SET {', '.join(c+'=?' for c in cols)} WHERE run_id=?"
+        self.conn.execute(sql, (*vals, run_id))
+        self.conn.commit()
+
+    def backfill_mark_done(self, run_id: str):
+        now = datetime.utcnow().isoformat() + "Z"
+        self.conn.execute("UPDATE backfill_runs SET status='completed', updated_at=? WHERE run_id=?", (now, run_id))
+        self.conn.commit()
+
+    def backfill_mark_failed(self, run_id: str, error: str|None):
+        now = datetime.utcnow().isoformat() + "Z"
+        self.conn.execute("UPDATE backfill_runs SET status='failed', error=?, updated_at=? WHERE run_id=?", (error, now, run_id))
+        self.conn.commit()
+
+    def backfill_abandon_running_on_boot(self):
+        now = datetime.utcnow().isoformat() + "Z"
+        self.conn.execute("UPDATE backfill_runs SET status='aborted', updated_at=? WHERE status='running'", (now,))
+        self.conn.commit()
+
+    def backfill_get_incomplete_for_channel(self, original_channel_id: int):
+        cur = self.conn.execute("""
+            SELECT run_id, original_channel_id, clone_channel_id, status, range_mode, range_json,
+                started_at, updated_at, delivered, expected_total, last_orig_message_id, last_orig_timestamp, error
+            FROM backfill_runs
+            WHERE original_channel_id=? AND status='running'
+            ORDER BY updated_at DESC
+            LIMIT 1
+        """, (int(original_channel_id),))
+        row = cur.fetchone()
+        if not row:
+            return None
+        # return as dict
+        cols = [c[0] for c in cur.description]
+        return dict(zip(cols, row))
