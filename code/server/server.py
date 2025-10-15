@@ -4063,14 +4063,6 @@ class ServerReceiver:
                             getattr(cloned_parent, "name", cloned_id),
                         )
 
-                        try:
-                            await t.edit(auto_archive_duration=60)
-                        except Exception:
-                            logger.debug(
-                                "[🧵] could not set auto_archive_duration for thread_id=%s",
-                                t.id,
-                            )
-
                         # Now count and log the initial post send, once
                         if (
                             is_backfill
