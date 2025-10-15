@@ -15,6 +15,7 @@ import random
 from typing import List, Optional, Tuple, Dict, Union, Coroutine, Any
 import aiohttp
 import discord
+import json
 import re
 from discord import (
     ForumChannel,
@@ -576,9 +577,18 @@ class ServerReceiver:
                 )
                 return
 
+            is_resume = bool((msg.get("data") or {}).get("resume"))
+
             self._active_backfills.add(orig)
 
-            await self.backfill.on_started(orig, meta={"range": data.get("range")})
+            await self.backfill.on_started(
+                orig,
+                meta={
+                    "range": (msg.get("data") or {}).get("range"),
+                    "resume": is_resume,
+                    "clone_channel_id": (msg.get("data") or {}).get("clone_channel_id"),
+                },
+            )
 
             await self.bus.publish(
                 "client",
@@ -659,71 +669,6 @@ class ServerReceiver:
                 "type": "backfills_status",
                 "data": {"items": items},
             }
-            
-        elif typ == "backfill_resume_info_query":
-            data = msg.get("data") or {}
-            cid_raw = data.get("channel_id")
-            try:
-                cid = int(cid_raw)
-            except (TypeError, ValueError):
-                logger.error("backfill_resume_info_query missing/invalid channel_id: %r", cid_raw)
-                return {"type": "backfill_resume_info", "ok": False,
-                        "error": "invalid channel_id", "data": {"channel_id": cid_raw}}
-
-            # 1) Prefer in-memory snapshot if active
-            st = self.backfill._progress.get(cid) or {}
-            active = cid in getattr(self.backfill, "_flags", set())
-            payload = {
-                "channel_id": str(cid),
-                "active": bool(active),
-                "resumable": False,  # will flip to True if we find anything useful
-                "run_id": st.get("run_id"),
-                "delivered": (int(st.get("delivered", 0)) if st else None),
-                "expected_total": (int(st["expected_total"]) if st.get("expected_total") is not None else None),
-                "checkpoint": {
-                    "last_orig_message_id": st.get("last_orig_id"),
-                    "last_orig_timestamp": st.get("last_ts"),
-                },
-                "clone_channel_id": st.get("clone_channel_id"),
-                "range": (st.get("meta") or {}).get("range"),
-                "started_at": (st.get("started_dt").isoformat() if st.get("started_dt") else None),
-            }
-            if active and (payload["checkpoint"]["last_orig_message_id"] or payload["delivered"]):
-                payload["resumable"] = True
-                return {"type": "backfill_resume_info", "ok": True, "data": payload}
-
-            # 2) Otherwise, try DB for the latest incomplete run for this channel
-            try:
-                if hasattr(self.db, "backfill_get_incomplete_for_channel"):
-                    row = self.db.backfill_get_incomplete_for_channel(cid)
-                elif hasattr(self.db, "backfill_get_resume_info_for_channel"):
-                    # in case you named it differently
-                    row = self.db.backfill_get_resume_info_for_channel(cid)
-                else:
-                    row = None
-
-                if row:
-                    # row is expected to look like:
-                    # { id, channel_id, clone_channel_id, delivered, expected_total,
-                    #   last_orig_message_id, last_orig_timestamp, range_params, started_at }
-                    payload.update({
-                        "resumable": True,
-                        "run_id": row.get("id"),
-                        "delivered": row.get("delivered"),
-                        "expected_total": row.get("expected_total"),
-                        "checkpoint": {
-                            "last_orig_message_id": row.get("last_orig_message_id"),
-                            "last_orig_timestamp": row.get("last_orig_timestamp"),
-                        },
-                        "clone_channel_id": row.get("clone_channel_id"),
-                        "range": row.get("range_params"),
-                        "started_at": row.get("started_at"),
-                    })
-                return {"type": "backfill_resume_info", "ok": True, "data": payload}
-            except Exception as e:
-                logger.exception("resume info query failed: %s", e)
-                return {"type": "backfill_resume_info", "ok": False,
-                        "error": str(e), "data": {"channel_id": str(cid)}}
 
         elif typ == "member_joined":
             asyncio.create_task(self.onjoin.handle_member_joined(data))
@@ -2844,7 +2789,9 @@ class ServerReceiver:
             if handled:
                 if is_backfill:
                     self.backfill.note_sent(source_id, int(msg["message_id"]))
-                    self.backfill.note_checkpoint(source_id, int(msg["message_id"]), msg.get("timestamp"))
+                    self.backfill.note_checkpoint(
+                        source_id, int(msg["message_id"]), msg.get("timestamp")
+                    )
                     d, t = self.backfill.get_progress(source_id)
                     suffix = f" [{d}/{t}]" if t else f" [{d}]"
                 return
@@ -2872,8 +2819,6 @@ class ServerReceiver:
 
         if payload.get("content"):
             try:
-                import json
-
                 json.dumps({"content": payload["content"]})
             except (TypeError, ValueError) as e:
                 logger.error(
@@ -3055,8 +3000,12 @@ class ServerReceiver:
                         )
 
                     if is_backfill:
-                        self.backfill.note_sent(source_id, int(msg.get("message_id") or 0) or None)
-                        self.backfill.note_checkpoint(source_id, int(msg["message_id"]), msg.get("timestamp"))
+                        self.backfill.note_sent(
+                            source_id, int(msg.get("message_id") or 0) or None
+                        )
+                        self.backfill.note_checkpoint(
+                            source_id, int(msg["message_id"]), msg.get("timestamp")
+                        )
                         delivered, total = self.backfill.get_progress(source_id)
                         suffix = (
                             f" [{max(total - delivered, 0)} left]"
@@ -3251,7 +3200,9 @@ class ServerReceiver:
             if handled:
                 if is_backfill:
                     self.backfill.note_sent(source_id, int(msg["message_id"]))
-                    self.backfill.note_checkpoint(source_id, int(msg["message_id"]), msg.get("timestamp"))
+                    self.backfill.note_checkpoint(
+                        source_id, int(msg["message_id"]), msg.get("timestamp")
+                    )
                     d, t = self.backfill.get_progress(source_id)
                     suffix = f" [{d}/{t}]" if t else f" [{d}]"
                     logger.info(
@@ -4063,7 +4014,7 @@ class ServerReceiver:
                                     thread_name=data["thread_name"],
                                     wait=True,
                                 )
-                                
+
                         else:
                             uname = None
                             av = None
@@ -4085,7 +4036,9 @@ class ServerReceiver:
                                 wait=True,
                             )
 
-                        t = await _try_resolve_thread_from_message(sent_msg, tries=6, delay=0.2)
+                        t = await _try_resolve_thread_from_message(
+                            sent_msg, tries=6, delay=0.2
+                        )
 
                         if not t:
                             logger.warning(
@@ -4094,7 +4047,11 @@ class ServerReceiver:
                                 data["thread_name"],
                             )
                             if is_backfill and hasattr(self, "backfill"):
-                                self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                self.backfill.note_checkpoint(
+                                    parent_id,
+                                    int(data["message_id"]),
+                                    data.get("timestamp"),
+                                )
                             return None
 
                         # Log creation first
@@ -4109,12 +4066,23 @@ class ServerReceiver:
                         try:
                             await t.edit(auto_archive_duration=60)
                         except Exception:
-                            logger.debug("[🧵] could not set auto_archive_duration for thread_id=%s", t.id)
+                            logger.debug(
+                                "[🧵] could not set auto_archive_duration for thread_id=%s",
+                                t.id,
+                            )
 
                         # Now count and log the initial post send, once
-                        if is_backfill and hasattr(self, "backfill") and not data.get("__firstpost_counted__"):
+                        if (
+                            is_backfill
+                            and hasattr(self, "backfill")
+                            and not data.get("__firstpost_counted__")
+                        ):
                             self.backfill.note_sent(parent_id, int(data["message_id"]))
-                            self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                            self.backfill.note_checkpoint(
+                                parent_id,
+                                int(data["message_id"]),
+                                data.get("timestamp"),
+                            )
                             data["__firstpost_counted__"] = True
                             logger.info(
                                 "[💬]%s Forwarding message to thread '%s' in #%s from %s (%s)%s",
@@ -4135,7 +4103,11 @@ class ServerReceiver:
                             )
 
                         if is_backfill and hasattr(self, "backfill"):
-                            self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                            self.backfill.note_checkpoint(
+                                parent_id,
+                                int(data["message_id"]),
+                                data.get("timestamp"),
+                            )
 
                         return t
 
@@ -4161,7 +4133,11 @@ class ServerReceiver:
                         if is_backfill and hasattr(self, "backfill"):
                             self.backfill.add_expected_total(parent_id, 1)
                             self.backfill.note_sent(parent_id, None)
-                            self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                            self.backfill.note_checkpoint(
+                                parent_id,
+                                int(data["message_id"]),
+                                data.get("timestamp"),
+                            )
 
                         logger.info(
                             "[🧵]%s Created text thread '%s' → cloned_thread_id=%s in #%s",
@@ -4196,7 +4172,11 @@ class ServerReceiver:
                             )
                             if sent:
                                 if is_backfill and hasattr(self, "backfill"):
-                                    self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                    self.backfill.note_checkpoint(
+                                        parent_id,
+                                        int(data["message_id"]),
+                                        data.get("timestamp"),
+                                    )
                                 self.db.upsert_forum_thread_mapping(
                                     orig_thread_id=orig_tid,
                                     orig_thread_name=data["thread_name"],
@@ -4229,10 +4209,16 @@ class ServerReceiver:
                                         thread_obj=clone_thread,
                                     )
                                 created = True
-                                
+
                                 if is_backfill and hasattr(self, "backfill"):
-                                    self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                    self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                    self.backfill.note_sent(
+                                        parent_id, int(data["message_id"])
+                                    )
+                                    self.backfill.note_checkpoint(
+                                        parent_id,
+                                        int(data["message_id"]),
+                                        data.get("timestamp"),
+                                    )
 
                     else:
                         clone_thread = await _create_text_thread()
@@ -4241,11 +4227,19 @@ class ServerReceiver:
                         async def _send_text_thread_followup(p):
                             if sem:
                                 async with sem:
-                                    await _send_webhook_into_thread(p, include_text=True, thread_obj=clone_thread)
+                                    await _send_webhook_into_thread(
+                                        p, include_text=True, thread_obj=clone_thread
+                                    )
                                     if is_backfill and hasattr(self, "backfill"):
                                         # count it first
-                                        self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                        self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                        self.backfill.note_sent(
+                                            parent_id, int(data["message_id"])
+                                        )
+                                        self.backfill.note_checkpoint(
+                                            parent_id,
+                                            int(data["message_id"]),
+                                            data.get("timestamp"),
+                                        )
                                         # then log with the updated suffix
                                         logger.info(
                                             "[💬]%s Forwarding message to thread '%s' in #%s from %s (%s)%s",
@@ -4257,10 +4251,18 @@ class ServerReceiver:
                                             _bf_suffix(),
                                         )
                             else:
-                                await _send_webhook_into_thread(p, include_text=True, thread_obj=clone_thread)
+                                await _send_webhook_into_thread(
+                                    p, include_text=True, thread_obj=clone_thread
+                                )
                                 if is_backfill and hasattr(self, "backfill"):
-                                    self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                    self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                    self.backfill.note_sent(
+                                        parent_id, int(data["message_id"])
+                                    )
+                                    self.backfill.note_checkpoint(
+                                        parent_id,
+                                        int(data["message_id"]),
+                                        data.get("timestamp"),
+                                    )
                                     logger.info(
                                         "[💬]%s Forwarding message to thread '%s' in #%s from %s (%s)%s",
                                         tag,
@@ -4270,7 +4272,6 @@ class ServerReceiver:
                                         data["author_id"],
                                         _bf_suffix(),
                                     )
-
 
                         if stickers and has_textish:
                             if has_custom:
@@ -4372,15 +4373,27 @@ class ServerReceiver:
                                         thread_obj=clone_thread,
                                     )
                                 if is_backfill and hasattr(self, "backfill"):
-                                    self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                    self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                    self.backfill.note_sent(
+                                        parent_id, int(data["message_id"])
+                                    )
+                                    self.backfill.note_checkpoint(
+                                        parent_id,
+                                        int(data["message_id"]),
+                                        data.get("timestamp"),
+                                    )
                             else:
                                 await _send_webhook_into_thread(
                                     payload2, include_text=True, thread_obj=clone_thread
                                 )
                                 if is_backfill and hasattr(self, "backfill"):
-                                    self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                    self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                    self.backfill.note_sent(
+                                        parent_id, int(data["message_id"])
+                                    )
+                                    self.backfill.note_checkpoint(
+                                        parent_id,
+                                        int(data["message_id"]),
+                                        data.get("timestamp"),
+                                    )
                             return
                         else:
                             sent = await self.stickers.send_with_fallback(
@@ -4393,8 +4406,14 @@ class ServerReceiver:
                             )
                             if sent:
                                 if is_backfill and hasattr(self, "backfill"):
-                                    self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                    self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                    self.backfill.note_sent(
+                                        parent_id, int(data["message_id"])
+                                    )
+                                    self.backfill.note_checkpoint(
+                                        parent_id,
+                                        int(data["message_id"]),
+                                        data.get("timestamp"),
+                                    )
                                 return
                             payload2 = self._build_webhook_payload(data)
                             if meta.get("custom") or use_webhook_identity:
@@ -4408,15 +4427,27 @@ class ServerReceiver:
                                         thread_obj=clone_thread,
                                     )
                                     if is_backfill and hasattr(self, "backfill"):
-                                        self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                        self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                        self.backfill.note_sent(
+                                            parent_id, int(data["message_id"])
+                                        )
+                                        self.backfill.note_checkpoint(
+                                            parent_id,
+                                            int(data["message_id"]),
+                                            data.get("timestamp"),
+                                        )
                             else:
                                 await _send_webhook_into_thread(
                                     payload2, include_text=True, thread_obj=clone_thread
                                 )
                                 if is_backfill and hasattr(self, "backfill"):
-                                    self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                    self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                    self.backfill.note_sent(
+                                        parent_id, int(data["message_id"])
+                                    )
+                                    self.backfill.note_checkpoint(
+                                        parent_id,
+                                        int(data["message_id"]),
+                                        data.get("timestamp"),
+                                    )
                             return
 
                     if stickers and has_textish:
@@ -4440,15 +4471,27 @@ class ServerReceiver:
                                         thread_obj=clone_thread,
                                     )
                                     if is_backfill and hasattr(self, "backfill"):
-                                        self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                        self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                        self.backfill.note_sent(
+                                            parent_id, int(data["message_id"])
+                                        )
+                                        self.backfill.note_checkpoint(
+                                            parent_id,
+                                            int(data["message_id"]),
+                                            data.get("timestamp"),
+                                        )
                             else:
                                 await _send_webhook_into_thread(
                                     payload, include_text=True, thread_obj=clone_thread
                                 )
                                 if is_backfill and hasattr(self, "backfill"):
-                                    self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                    self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                    self.backfill.note_sent(
+                                        parent_id, int(data["message_id"])
+                                    )
+                                    self.backfill.note_checkpoint(
+                                        parent_id,
+                                        int(data["message_id"]),
+                                        data.get("timestamp"),
+                                    )
                             return
                         elif has_standard:
                             data.pop("__stickers_no_text__", None)
@@ -4463,8 +4506,14 @@ class ServerReceiver:
                             )
                             if sent:
                                 if is_backfill and hasattr(self, "backfill"):
-                                    self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                    self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                    self.backfill.note_sent(
+                                        parent_id, int(data["message_id"])
+                                    )
+                                    self.backfill.note_checkpoint(
+                                        parent_id,
+                                        int(data["message_id"]),
+                                        data.get("timestamp"),
+                                    )
                                 return
                             _merge_embeds_into_payload(payload, data)
                             if sem:
@@ -4475,15 +4524,27 @@ class ServerReceiver:
                                         thread_obj=clone_thread,
                                     )
                                 if is_backfill and hasattr(self, "backfill"):
-                                    self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                    self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                    self.backfill.note_sent(
+                                        parent_id, int(data["message_id"])
+                                    )
+                                    self.backfill.note_checkpoint(
+                                        parent_id,
+                                        int(data["message_id"]),
+                                        data.get("timestamp"),
+                                    )
                             else:
                                 await _send_webhook_into_thread(
                                     payload, include_text=True, thread_obj=clone_thread
                                 )
                                 if is_backfill and hasattr(self, "backfill"):
-                                    self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                    self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                    self.backfill.note_sent(
+                                        parent_id, int(data["message_id"])
+                                    )
+                                    self.backfill.note_checkpoint(
+                                        parent_id,
+                                        int(data["message_id"]),
+                                        data.get("timestamp"),
+                                    )
                             return
 
                     if has_textish:
@@ -4500,7 +4561,11 @@ class ServerReceiver:
 
                         if is_backfill and hasattr(self, "backfill"):
                             self.backfill.note_sent(parent_id, int(data["message_id"]))
-                            self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                            self.backfill.note_checkpoint(
+                                parent_id,
+                                int(data["message_id"]),
+                                data.get("timestamp"),
+                            )
 
                         logger.info(
                             "[💬]%s Forwarding message to thread '%s' in #%s from %s (%s)%s",

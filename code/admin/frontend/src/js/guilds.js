@@ -443,7 +443,7 @@
         </div>
   
         <footer class="scraper-actions">
-          <button class="btn btn-primary" id="gd-close-btn">Close</button>
+          <button class="btn btn-ghost" id="gd-close-btn">Close</button>
         </footer>
       </div>
     `;
@@ -648,8 +648,8 @@
         </div>
   
         <footer class="scraper-actions">
-          <button type="button" class="btn btn-ghost js-x">Cancel</button>
-          <button type="button" class="btn btn-primary" id="ex-go">Start export</button>
+          <button type="button" class="btn btn-ghost">Cancel</button>
+          <button type="button" class="btn btn-ghost" ">Start export</button>
         </footer>
       </div>
     `;
@@ -734,7 +734,7 @@
   
           <footer class="att-actions">
             <button type="button" class="btn btn-ghost" id="att-cancel">Cancel</button>
-            <button type="button" class="btn btn-primary" id="att-apply">Apply</button>
+            <button type="button" class="btn btn-ghost" id="att-apply">Apply</button>
           </footer>
         </div>
       `;
@@ -811,7 +811,6 @@
       setTimeout(() => ui("#att-ui-images")?.focus(), 0);
     }
 
-    // Keep summary span empty so it doesn't push the tip button
     function updateAttachmentSummary() {
       const s = wrap.querySelector("#ex-f-att-summary");
       if (s) s.textContent = "";
@@ -918,7 +917,7 @@
         pinned: $("#ex-f-pinned")?.checked ?? true,
         stickers: $("#ex-f-stickers")?.checked ?? true,
         mentions: $("#ex-f-mentions")?.checked ?? true,
-        
+
         threads: $("#ex-f-threads")?.checked ?? true,
         forum_threads: $("#ex-f-threads")?.checked ?? true,
         private_threads: $("#ex-f-threads")?.checked ?? true,
@@ -1006,7 +1005,6 @@
     if (!el) return;
     if (fullText != null) el.textContent = fullText;
 
-    // set a temporary title so users still get something if RAF doesn't run
     el.title = el.textContent;
 
     requestAnimationFrame(() => {
@@ -1153,7 +1151,7 @@
         </div>
 
         <footer class="scraper-actions">
-          <button class="btn btn-primary" data-act="start">Start scrape</button>
+          <button class="btn btn-ghost" data-act="start">Start scrape</button>
         </footer>
       </div>
     `;
@@ -1377,7 +1375,6 @@
 
     if (!gate.lastUpIsFresh()) gate.showGateSoon();
 
-    // Poll status; when ready we'll finish boot in afterGateReady()
     gate.checkAndGate(() => afterGateReady());
   });
 

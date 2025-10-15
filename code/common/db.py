@@ -330,7 +330,6 @@ class DBManager:
             original_channel_id   INTEGER NOT NULL,
             clone_channel_id      INTEGER,
             status                TEXT NOT NULL DEFAULT 'running',  -- running|completed|failed|aborted
-            range_mode            TEXT,                              -- 'all'|'since'|'between'|'last'
             range_json            TEXT,                              -- serialized dict of params sent to client
             started_at            TEXT NOT NULL,                     -- ISO
             updated_at            TEXT NOT NULL,                     -- ISO
@@ -1478,12 +1477,12 @@ class DBManager:
             )
             return cur.rowcount
         
-    def backfill_create_run(self, original_channel_id: int, range_mode: str|None, range_json: dict|None) -> str:
+    def backfill_create_run(self, original_channel_id: int, range_json: dict|None) -> str:
         run_id = uuid.uuid4().hex
         now = datetime.utcnow().isoformat() + "Z"
         self.conn.execute(
-            "INSERT INTO backfill_runs(run_id, original_channel_id, range_mode, range_json, started_at, updated_at) VALUES(?,?,?,?,?,?)",
-            (run_id, int(original_channel_id), range_mode, json.dumps(range_json or {}), now, now)
+            "INSERT INTO backfill_runs(run_id, original_channel_id, range_json, started_at, updated_at) VALUES(?,?,?,?,?)",
+            (run_id, int(original_channel_id), json.dumps(range_json or {}), now, now)
         )
         self.conn.commit()
         return run_id
@@ -1522,7 +1521,7 @@ class DBManager:
 
     def backfill_get_incomplete_for_channel(self, original_channel_id: int):
         cur = self.conn.execute("""
-            SELECT run_id, original_channel_id, clone_channel_id, status, range_mode, range_json,
+            SELECT run_id, original_channel_id, clone_channel_id, status, range_json,
                 started_at, updated_at, delivered, expected_total, last_orig_message_id, last_orig_timestamp, error
             FROM backfill_runs
             WHERE original_channel_id=? AND status='running'
@@ -1535,3 +1534,21 @@ class DBManager:
         # return as dict
         cols = [c[0] for c in cur.description]
         return dict(zip(cols, row))
+    
+    def backfill_mark_aborted(self, run_id: str, reason: str | None = None) -> None:
+        now = datetime.utcnow().isoformat() + "Z"
+        self.conn.execute(
+            "UPDATE backfill_runs SET status='cancelled', error=COALESCE(?, error), updated_at=? WHERE run_id=?",
+            (reason, now, run_id),
+        )
+        self.conn.commit()
+
+    def backfill_abort_running_for_channel(self, original_channel_id: int, reason: str | None = None) -> int:
+        now = datetime.utcnow().isoformat() + "Z"
+        cur = self.conn.execute(
+            "UPDATE backfill_runs SET status='cancelled', error=COALESCE(?, error), updated_at=? "
+            "WHERE original_channel_id=? AND status='running'",
+            (reason, now, int(original_channel_id)),
+        )
+        self.conn.commit()
+        return cur.rowcount

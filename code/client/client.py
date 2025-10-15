@@ -218,13 +218,14 @@ class ClientListener:
                 or data.get("until")
             )
 
-            _n = data.get("last_n") or (
-                rng.get("value") if mode in ("last", "last_n") else None
-            )
+            _n = data.get("last_n") or (rng.get("value") if mode in ("last", "last_n") else None)
             try:
                 last_n = int(_n) if _n is not None else None
             except Exception:
                 last_n = None
+
+            resume = bool(data.get("resume"))
+            after_id = data.get("after_id")
 
             asyncio.create_task(
                 self.backfill.run_channel(
@@ -232,6 +233,8 @@ class ClientListener:
                     after_iso=after_iso,
                     before_iso=before_iso,
                     last_n=last_n,
+                    resume=resume,
+                    after_id=after_id,
                 )
             )
             return {"ok": True}

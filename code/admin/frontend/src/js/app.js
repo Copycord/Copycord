@@ -1307,7 +1307,7 @@
             title: "Clear all logs?",
             body: "This will permanently delete server and client logs. This cannot be undone.",
             confirmText: "Clear logs",
-            confirmClass: "btn-ghost",
+            confirmClass: "btn-ghost-red",
             showCancel: false,
             onConfirm: () => {
               clearForm.dataset.skipConfirm = "1";

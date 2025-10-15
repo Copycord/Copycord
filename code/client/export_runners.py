@@ -35,6 +35,16 @@ from discord.errors import HTTPException, Forbidden
 
 
 DictLike: TypeAlias = Dict[str, Any]
+DISCORD_EPOCH_MS = 1420070400000
+
+
+def _dt_from_snowflake(snow_id: int | str) -> datetime:
+    try:
+        sid = int(snow_id)
+        ts_ms = (sid >> 22) + DISCORD_EPOCH_MS
+        return datetime.fromtimestamp(ts_ms / 1000.0, tz=timezone.utc)
+    except Exception:
+        return None
 
 
 class ExportMessagesRunner:
@@ -468,7 +478,7 @@ class ExportMessagesRunner:
 
                         is_thread = _is_thread(ch)
                         parent = getattr(ch, "parent", None)
-                        
+
                         serialized = self.serialize(msg)
 
                         serialized["_export_ctx"] = {
@@ -1249,6 +1259,8 @@ class BackfillEngine:
         after_iso: Optional[str] = None,
         before_iso: Optional[str] = None,
         last_n: Optional[int] = None,
+        resume: bool = False,
+        after_id: int | str | None = None,
     ) -> None:
         """
         Primary entry point used by client code to backfill a single channel.
@@ -1268,6 +1280,11 @@ class BackfillEngine:
 
         after_dt = self._parse_iso(after_iso)
         before_dt = self._parse_iso(before_iso)
+
+        initial_after_obj_id = None
+        if resume and after_id and not after_dt:
+            initial_after_obj_id = int(after_id)
+            after_dt = _dt_from_snowflake(after_id)
 
         mode = (
             "last_n"
@@ -1303,10 +1320,13 @@ class BackfillEngine:
                 "data": {
                     "channel_id": original_channel_id,
                     "range": {
+                        "mode": mode,
                         "after": after_iso,
                         "before": before_iso,
                         "last_n": last_n,
                     },
+                    "resume": bool(resume),
+                    "checkpoint_after_id": int(after_id) if after_id else None,
                 },
             }
         )
@@ -1453,6 +1473,11 @@ class BackfillEngine:
                     ],
                     "stickers": stickers_payload,
                     "embeds": embeds,
+                    "timestamp": (
+                        getattr(m, "created_at", None) or _dt_from_snowflake(m.id)
+                    )
+                    .astimezone(timezone.utc)
+                    .isoformat(),
                     "__backfill__": True,
                     **(
                         {
@@ -1497,7 +1522,9 @@ class BackfillEngine:
                 )
                 last_log = now
 
-        async def _count_history(obj, *, n: Optional[int], after_dt, before_dt) -> int:
+        async def _count_history(
+            obj, *, n: Optional[int], after_dt, before_dt, after_obj_id: Optional[int]
+        ) -> int:
             total = 0
             oldest_first = not (n and n > 0)
             try:
@@ -1509,6 +1536,7 @@ class BackfillEngine:
                         after_dt=after_dt,
                         before_dt=before_dt,
                         oldest_first=False,
+                        after_obj_id=after_obj_id,
                     ):
                         if _is_normal(m):
                             cnt += 1
@@ -1520,6 +1548,7 @@ class BackfillEngine:
                         after_dt=after_dt,
                         before_dt=before_dt,
                         oldest_first=True,
+                        after_obj_id=initial_after_obj_id,
                     ):
                         if _is_normal(m):
                             total += 1
@@ -1527,12 +1556,18 @@ class BackfillEngine:
                 pass
             return total
 
-        async def _stream_history(obj, *, n: Optional[int], after_dt, before_dt):
-
+        async def _stream_history(
+            obj, *, n: Optional[int], after_dt, before_dt, after_obj_id: Optional[int]
+        ):
             if n and n > 0:
                 tmp = []
                 async for m in self._iter_history_resumable(
-                    obj, n=n, after_dt=after_dt, before_dt=before_dt, oldest_first=False
+                    obj,
+                    n=n,
+                    after_dt=after_dt,
+                    before_dt=before_dt,
+                    oldest_first=False,
+                    after_obj_id=after_obj_id,
                 ):
                     tmp.append(m)
                 for m in reversed(tmp):
@@ -1544,6 +1579,7 @@ class BackfillEngine:
                     after_dt=after_dt,
                     before_dt=before_dt,
                     oldest_first=True,
+                    after_obj_id=after_obj_id,
                 ):
                     await _emit_msg(m)
 
@@ -1561,7 +1597,11 @@ class BackfillEngine:
                 async for th in self._iter_all_threads(ch):
                     try:
                         total += await _count_history(
-                            th, n=n, after_dt=after_dt, before_dt=before_dt
+                            th,
+                            n=n,
+                            after_dt=after_dt,
+                            before_dt=before_dt,
+                            after_obj_id=initial_after_obj_id,
                         )
                     except Forbidden:
                         self.logger.debug(
@@ -1585,7 +1625,11 @@ class BackfillEngine:
                 async for th in self._iter_all_threads(ch):
                     try:
                         await _stream_history(
-                            th, n=n, after_dt=after_dt, before_dt=before_dt
+                            th,
+                            n=n,
+                            after_dt=after_dt,
+                            before_dt=before_dt,
+                            after_obj_id=initial_after_obj_id,
                         )
                     except Forbidden:
                         self.logger.debug(
@@ -1617,6 +1661,7 @@ class BackfillEngine:
                         after_dt=after_dt,
                         before_dt=before_dt,
                         oldest_first=False,
+                        after_obj_id=initial_after_obj_id,
                     ):
                         buf.append(m)
 
@@ -1631,7 +1676,11 @@ class BackfillEngine:
                     async for th in self._iter_all_threads(ch):
                         try:
                             thread_total += await _count_history(
-                                th, n=n, after_dt=after_dt, before_dt=before_dt
+                                th,
+                                n=n,
+                                after_dt=after_dt,
+                                before_dt=before_dt,
+                                after_obj_id=initial_after_obj_id,
                             )
                         except Forbidden:
                             self.logger.debug(
@@ -1662,7 +1711,11 @@ class BackfillEngine:
                     async for th in self._iter_all_threads(ch):
                         try:
                             await _stream_history(
-                                th, n=n, after_dt=after_dt, before_dt=before_dt
+                                th,
+                                n=n,
+                                after_dt=after_dt,
+                                before_dt=before_dt,
+                                after_obj_id=initial_after_obj_id,
                             )
                         except Forbidden:
                             self.logger.debug(
@@ -1690,6 +1743,7 @@ class BackfillEngine:
                         after_dt=after_dt,
                         before_dt=before_dt,
                         oldest_first=True,
+                        after_obj_id=initial_after_obj_id,
                     ):
                         parent_buf.append(m)
                     parent_total = sum(1 for m in parent_buf if _is_normal(m))
@@ -1703,7 +1757,11 @@ class BackfillEngine:
                     async for th in self._iter_all_threads(ch):
                         try:
                             thread_total += await _count_history(
-                                th, n=None, after_dt=after_dt, before_dt=before_dt
+                                th,
+                                n=None,
+                                after_dt=after_dt,
+                                before_dt=before_dt,
+                                after_obj_id=initial_after_obj_id,
                             )
                         except Forbidden:
                             self.logger.debug(
@@ -1734,7 +1792,11 @@ class BackfillEngine:
                     async for th in self._iter_all_threads(ch):
                         try:
                             await _stream_history(
-                                th, n=None, after_dt=after_dt, before_dt=before_dt
+                                th,
+                                n=None,
+                                after_dt=after_dt,
+                                before_dt=before_dt,
+                                after_obj_id=initial_after_obj_id,
                             )
                         except Forbidden:
                             self.logger.debug(
@@ -1979,28 +2041,40 @@ class BackfillEngine:
         after_dt: Optional[datetime],
         before_dt: Optional[datetime],
         oldest_first: bool,
+        after_obj_id: Optional[int] = None,
     ) -> AsyncIterator:
         """
         Yield messages with a cursor that survives transient 5xx errors.
-        Streams all history when n is None (no artificial 100-msg cap).
+        If `after_obj_id` is provided, the FIRST page will start strictly after that message ID.
         """
         remaining = n if (n and n > 0) else None
         last_id = None
+        used_initial_after_obj = False
 
         while True:
             limit = 100 if remaining is None else min(remaining, 100)
-            kw = {
-                "limit": limit,
-                "oldest_first": oldest_first,
-                "after": after_dt,
-                "before": before_dt,
-            }
+            kw = {"limit": limit, "oldest_first": oldest_first}
 
-            if last_id is not None:
+            if oldest_first and not used_initial_after_obj and after_obj_id:
+                kw["after"] = DiscordObject(id=int(after_obj_id))
+                used_initial_after_obj = True
+
+                if before_dt:
+                    kw["before"] = before_dt
+            else:
+
                 if oldest_first:
-                    kw["after"] = DiscordObject(id=last_id)
+                    kw["after"] = after_dt
+                    if last_id is not None:
+                        kw["after"] = DiscordObject(id=last_id)
+                    if before_dt:
+                        kw["before"] = before_dt
                 else:
-                    kw["before"] = DiscordObject(id=last_id)
+                    kw["after"] = after_dt
+                    if before_dt:
+                        kw["before"] = before_dt
+                    if last_id is not None:
+                        kw["before"] = DiscordObject(id=last_id)
 
             try:
                 fetched_any = False
@@ -2015,7 +2089,6 @@ class BackfillEngine:
 
                 if not fetched_any:
                     return
-
                 continue
 
             except HTTPException as e:

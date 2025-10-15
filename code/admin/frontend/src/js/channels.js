@@ -659,7 +659,7 @@
           <input id="customize-cat-name" class="input" type="text" placeholder="Leave empty to use original name" />
         </div>
         <div class="btns">
-          <button id="customize-cat-save" class="btn btn-primary" type="button">Save</button>
+          <button id="customize-cat-save" class="btn btn-ghost" type="button">Save</button>
         </div>
       </div>
     `;
@@ -692,7 +692,7 @@
       <input id="customize-name" class="input" type="text" placeholder="Leave empty to use original name" />
     </div>
     <div class="btns">
-      <button id="customize-save" class="btn primary" type="button">Save</button>
+      <button id="customize-save" class="btn btn-ghost" type="button">Save</button>
     </div>
   </div>
 `;
@@ -839,7 +839,6 @@
       return name.replace(/^#\s*/, "").trim();
     }
 
-    // 2) Fallback to whatever's currently rendered
     try {
       const sel = `.ch-card[data-cid="${
         window.CSS && CSS.escape ? CSS.escape(id) : id.replace(/"/g, '\\"')
@@ -1723,6 +1722,10 @@
               String(originalId)
             )})</span>.`,
             okText: "Add to blacklist",
+            cancelText: "Cancel",
+
+            btnClassOk: "btn btn-ghost-red",
+            btnClassCancel: "btn btn-ghost",
           },
           async () => {
             try {
@@ -1835,6 +1838,8 @@
               String(originalCatId)
             )})</span>.`,
             okText: "Add to blacklist",
+            btnClassOk: "btn btn-ghost-red",
+            btnClassCancel: "btn btn-ghost",
           },
           async () => {
             try {
@@ -2234,6 +2239,7 @@
           catName
         )}</b> <span class="muted">(${escapeHtml(catId)})</span>.`,
         okText: "Delete",
+        btnClassOk: "btn btn-ghost-red",
       },
       () => {
         markPending(catId);
@@ -2294,7 +2300,6 @@
         return;
       }
 
-      // verify it's actually an orphan channel
       const selId = String(ctx.id);
       const card = document.querySelector(
         `.ch-card[data-cid="${
@@ -2325,6 +2330,7 @@
             chName
           )}</b> <span class="muted">(${escapeHtml(selId)})</span>.`,
           okText: "Delete",
+          btnClassOk: "btn btn-ghost-red",
         },
         () => {
           markPending(selId);
@@ -2358,11 +2364,11 @@
             catName
           )}</b> <span class="muted">(${escapeHtml(catId)})</span>.`,
           okText: "Delete",
+          btnClassOk: "btn btn-ghost-red",
         },
         () => {
           markPending(catId);
           sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
-
           sendVerify({ action: "delete_one", kind: "category", id: catId });
         }
       );
@@ -2372,7 +2378,6 @@
 
   if (!gate.lastUpIsFresh()) resetAllCloningUI();
 
-  // Kick off the gate polling; when ready we'll finish boot.
   gate.checkAndGate(() => afterGateReady());
 
   let bootedAfterGate = false;
@@ -2408,6 +2413,7 @@
           chCount === 1 ? "channel" : "channels"
         } that are <em>not part of the original structure</em>.`,
         okText: "Delete all",
+        btnClassOk: "btn btn-ghost-red",
       },
       () => {
         ids.forEach((id) => markPending(id));
@@ -2439,8 +2445,9 @@
           catCount === 1 ? "category" : "categories"
         } and <b>${chCount}</b> orphan ${
           chCount === 1 ? "channel" : "channels"
-        } that are <em>not part of the clone</em>.`,
+        } that are <em>not part of the original structure</em>.`,
         okText: "Delete all",
+        btnClassOk: "btn btn-ghost-red",
       },
       () => {
         ids.forEach((id) => markPending(id));
@@ -2497,27 +2504,85 @@
   const cClose = document.getElementById("confirm-close");
   const cBackdrop = cModal?.querySelector(".modal-backdrop");
 
-    function openConfirm(
-        {
-          title = "Confirm",
-          body = "Are you sure?",
-          okText = "Delete",
-          cancelText = "Cancel",
-          onCancel = null,
-        },
-        onConfirm
-      ) {
+  function sanitizeHtml(html) {
+    const tpl = document.createElement("template");
+    tpl.innerHTML = String(html);
+
+    tpl.content.querySelectorAll("script,style").forEach((n) => n.remove());
+
+    tpl.content.querySelectorAll("*").forEach((el) => {
+      [...el.attributes].forEach((attr) => {
+        const n = attr.name.toLowerCase();
+        if (n.startsWith("on")) el.removeAttribute(attr.name);
+        if ((n === "href" || n === "src") && /^javascript:/i.test(attr.value)) {
+          el.removeAttribute(attr.name);
+        }
+      });
+    });
+
+    return tpl.innerHTML;
+  }
+
+  /**
+   * openConfirm(options, onConfirm)
+   *
+   * New/optional options:
+   * - html: string  → insert as HTML (sanitized by default)
+   * - bodyNode: Node → insert DOM node
+   * - dangerouslyAllowHtml: boolean → skip sanitizeHtml if true
+   * - bodyIsText: boolean → force treat `body` as plain text
+   */
+  function openConfirm(
+    {
+      title = "Confirm",
+      body = "Are you sure?",
+      html = null,
+      bodyNode = null,
+      dangerouslyAllowHtml = false,
+      bodyIsText = false,
+      okText = "Delete",
+      cancelText = "Cancel",
+      onCancel = null,
+
+      btnClassOk = null,
+      btnClassCancel = null,
+    },
+    onConfirm
+  ) {
     if (!cModal) {
       onConfirm?.();
       return;
     }
 
     cTitle.textContent = title;
-    cBody.innerHTML = body;
+
+    if (bodyNode instanceof Node) {
+      cBody.replaceChildren(bodyNode);
+    } else if (typeof html === "string") {
+      cBody.innerHTML = dangerouslyAllowHtml ? html : sanitizeHtml(html);
+    } else if (bodyIsText) {
+      cBody.textContent = String(body ?? "");
+    } else {
+      const s = String(body ?? "");
+      cBody.innerHTML = dangerouslyAllowHtml ? s : sanitizeHtml(s);
+    }
+
     cOk.textContent = okText;
+    if (cCancel) cCancel.textContent = cancelText || "Cancel";
+
+    cOk.className = "btn btn-ghost";
+    if (cCancel) cCancel.className = "btn btn-ghost";
+
+    if (btnClassOk) cOk.className = btnClassOk;
+    if (btnClassCancel && cCancel) cCancel.className = btnClassCancel;
+
+    const isResume = !!cBody.querySelector(".resume-modal");
+    if (isResume && !btnClassOk && !btnClassCancel) {
+      cOk.className = "btn btn-ghost";
+      if (cCancel) cCancel.className = "btn btn-ghost-red";
+    }
 
     lastFocusConfirm = document.activeElement;
-
     setInert(cModal, false);
     cModal.removeAttribute("aria-hidden");
     cModal.classList.add("show");
@@ -2525,11 +2590,9 @@
 
     const close = () => {
       blurIfInside(cModal);
-
       setInert(cModal, true);
       cModal.setAttribute("aria-hidden", "true");
       cModal.classList.remove("show");
-
       if (lastFocusConfirm && typeof lastFocusConfirm.focus === "function") {
         try {
           lastFocusConfirm.focus();
@@ -2539,12 +2602,19 @@
     };
 
     const onOk = () => {
-      onConfirm?.();
-      close();
+      try {
+        onConfirm?.();
+      } finally {
+        close();
+      }
     };
-        const onCancelClick = () => {
-            try { onCancel?.(); } finally { close(); }
-          };
+    const onCancelClick = () => {
+      try {
+        onCancel?.();
+      } finally {
+        close();
+      }
+    };
     const onEsc = (e) => {
       if (e.key === "Escape") close();
     };
@@ -2561,10 +2631,7 @@
     }
 
     cOk.addEventListener("click", onOk, { once: true });
-        if (cCancel) {
-            cCancel.textContent = cancelText || "Cancel";
-            cCancel.addEventListener("click", onCancelClick, { once: true });
-          }
+    cCancel?.addEventListener("click", onCancelClick, { once: true });
     cClose?.addEventListener("click", close, { once: true });
     cBackdrop?.addEventListener("click", onBackdrop);
     document.addEventListener("keydown", onEsc);
@@ -3092,16 +3159,25 @@
       pill.querySelector(".kill").onclick = () => {
         openConfirm(
           {
-            title: "Delete orphan channel?",
-            body: `This will delete <b>${escapeHtml(
-              ch.name
-            )}</b> <span class="muted">(${escapeHtml(ch.id)})</span>.`,
-            okText: "Delete",
+            title: "Delete all orphans?",
+            body: `This will delete <b>${catCount}</b> orphan ${
+              catCount === 1 ? "category" : "categories"
+            } and <b>${chCount}</b> orphan ${
+              chCount === 1 ? "channel" : "channels"
+            } that are <em>not part of the clone</em>.`,
+            okText: "Delete all",
+            btnClassOk: "btn btn-ghost-red",
           },
           () => {
-            markPending(ch.id);
+            ids.forEach((id) => markPending(id));
             sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
-            sendVerify({ action: "delete_one", kind: "channel", id: ch.id });
+            bulkDeleteInFlight = true;
+            showBusyOverlay(
+              `Deleting ${catCount} categor${
+                catCount === 1 ? "y" : "ies"
+              } & ${chCount} channel${chCount === 1 ? "" : "s"}…`
+            );
+            sendVerify({ action: "delete_all", ids });
           }
         );
       };
@@ -3485,66 +3561,128 @@
 
   async function checkResumeAndPrompt(originalId) {
     const cid = String(toOriginalCid(originalId));
+
+    const fmt = (s) => (s ? new Date(s).toLocaleString() : "—");
+    const esc = (s) =>
+      String(s ?? "").replace(
+        /[&<>"']/g,
+        (c) =>
+          ({
+            "&": "&amp;",
+            "<": "&lt;",
+            ">": "&gt;",
+            '"': "&quot;",
+            "'": "&#39;",
+          }[c])
+      );
+
     try {
-      const res = await fetch(`/api/backfills/resume-info?channel_id=${encodeURIComponent(cid)}`, {
-        credentials: "same-origin",
-        cache: "no-store",
-      });
+      const res = await fetch(
+        `/api/backfills/resume-info?channel_id=${encodeURIComponent(cid)}`,
+        { credentials: "same-origin", cache: "no-store" }
+      );
       const json = await res.json().catch(() => ({}));
-  
-      // Support both shapes: { resume: {...} } or { data: {...} }
       const info = json?.resume ?? json?.data ?? null;
-  
+
       const canResume = !!(info?.available ?? info?.resumable);
       if (!canResume) {
-        // No unfinished backfill → go straight to settings
         const row = findRowByAnyChannelId(cid);
         if (row) openBackfillDialog(row.original_channel_id);
         return;
       }
+
+      const runId = info?.run_id || "—";
+      const delivered = Number.isFinite(info?.delivered)
+        ? info.delivered
+        : null;
+      const total = Number.isFinite(info?.expected_total)
+        ? info.expected_total
+        : null;
+      const startedAtISO =
+        info?.started_at || info?.started_dt || info?.startedAt || null;
+      const updatedAtISO =
+        info?.updated_at || info?.checkpoint?.last_orig_timestamp || null;
+
+      const sentTxt = delivered != null ? delivered.toLocaleString() : "—";
+      const totalTxt = total != null ? total.toLocaleString() : "—";
+
+      const bodyHtml = `
+        <div class="resume-modal">
+          <p class="mb">A previous backfill for this channel was not finished.</p>
   
-      // Build friendly details
-      const delivered = Number.isFinite(info?.delivered) ? info.delivered : null;
-      const total = Number.isFinite(info?.expected_total) ? info.expected_total : null;
-      const startedAt = info?.started_at || info?.started_dt || info?.startedAt || null;
-      const startedTxt = startedAt ? new Date(startedAt).toLocaleString() : "earlier";
-      const progressTxt =
-        delivered != null && total != null
-          ? `${delivered.toLocaleString()} / ${total.toLocaleString()}`
-          : delivered != null
-          ? `${delivered.toLocaleString()}`
-          : "in progress";
+          <dl class="kv">
+            <dt>Backfill ID:</dt>
+            <dd><code class="inline-code" title="${esc(runId)}">${esc(
+        runId
+      )}</code></dd>
   
+            <dt>Started At:</dt>
+            <dd><code class="inline-code" title="${esc(
+              fmt(startedAtISO)
+            )}">${esc(fmt(startedAtISO))}</code></dd>
+  
+            <dt>Last Updated:</dt>
+            <dd><code class="inline-code" title="${esc(
+              fmt(updatedAtISO)
+            )}">${esc(fmt(updatedAtISO))}</code></dd>
+  
+            <dt>Messages Sent:</dt>
+            <dd>
+              <code class="inline-code" title="${esc(sentTxt)}">${esc(
+        sentTxt
+      )}</code>
+              /
+              <code class="inline-code" title="${esc(totalTxt)}">${esc(
+        totalTxt
+      )}</code>
+            </dd>
+          </dl>
+        </div>
+      `;
+
       openConfirm(
         {
           title: "Resume previous backfill?",
-          body:
-            `A previous backfill for this channel started ${startedTxt} ` +
-            `and is ${progressTxt}. Do you want to resume from the last checkpoint ` +
-            `or start a new backfill?`,
-          okText: "Resume",
-          cancelText: "Start new",
+          html: bodyHtml,
+          okText: "Continue",
+          cancelText: "Start Over",
+          btnClassOk: "btn btn-ghost",
+          btnClassCancel: "btn btn-ghost-red",
           onCancel: () => {
             const row = findRowByAnyChannelId(cid);
             if (row) openBackfillDialog(row.original_channel_id);
           },
         },
-        () => {
-          // Resume immediately via WS (same action you use for regular backfill)
+        async () => {
           setCloneLaunching(cid, true);
           setCardLoading(cid, true, "Resuming…");
-          sendClient({
-            action: "backfill",
-            original_channel_id: cid,
-            resume: true,
-            // These are optional passthroughs if your server uses them:
-            run_id: info?.run_id ?? undefined,
-            checkpoint: info?.checkpoint ?? undefined,
-          });
+          try {
+            const resp = await fetch("/api/backfill/start", {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                channel_id: cid,
+                resume: true,
+                run_id: info?.run_id ?? undefined,
+                checkpoint: info?.checkpoint ?? null,
+              }),
+            });
+            const j = await resp.json().catch(() => ({}));
+            if (!resp.ok || j?.ok === false) {
+              throw new Error(j?.error || `HTTP ${resp.status}`);
+            }
+          } catch (e) {
+            console.error("Resume backfill failed:", e);
+            setCloneLaunching(cid, false);
+            setCardLoading(cid, false);
+            const row = findRowByAnyChannelId(cid);
+            if (row) openBackfillDialog(row.original_channel_id);
+          }
         }
       );
-    } catch {
-      // If anything fails, fall back to normal flow
+    } catch (e) {
+      console.error("resume-info fetch failed:", e);
       const row = findRowByAnyChannelId(cid);
       if (row) openBackfillDialog(row.original_channel_id);
     }

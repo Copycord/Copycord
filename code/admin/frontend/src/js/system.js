@@ -252,7 +252,14 @@
     return modal;
   }
 
-  function themedConfirm({ title, body, confirmText = "OK" }) {
+  function themedConfirm({
+    title,
+    body,
+    confirmText = "OK",
+    cancelText = "Cancel",
+    btnClassOk = "btn btn-ghost",
+    btnClassCancel = "btn btn-ghost",
+  } = {}) {
     return new Promise((resolve) => {
       const cModal = ensureConfirmModal();
       const cTitle = cModal.querySelector("#confirm-title");
@@ -263,11 +270,37 @@
       const cBack = cModal.querySelector(".modal-backdrop");
       const dialog = cModal.querySelector(".modal-content");
 
+      const norm = (s) => String(s || "").trim();
+      const ensureBtnPrefix = (s) => {
+        const k = norm(s);
+        return k ? (/\bbtn\b/.test(k) ? k : `btn ${k}`) : "btn btn-ghost";
+      };
+      const stripBtnVariants = (el) => {
+        if (!el) return;
+
+        el.classList.remove(
+          "btn-primary",
+          "btn-danger",
+          "btn-outline",
+          "btn-ghost",
+          "btn-ghost-red",
+          "btn-ghost-purple",
+          "btn-ghost-green"
+        );
+      };
+
       if (cTitle) cTitle.textContent = title || "Confirm";
       if (cBody) cBody.textContent = body || "Are you sure?";
+
       if (cOk) {
         cOk.textContent = confirmText;
-        cOk.className = cCa?.className || "btn btn-ghost";
+        stripBtnVariants(cOk);
+        cOk.className = ensureBtnPrefix(btnClassOk);
+      }
+      if (cCa) {
+        cCa.textContent = cancelText;
+        stripBtnVariants(cCa);
+        cCa.className = ensureBtnPrefix(btnClassCancel);
       }
 
       const close = (result) => {
@@ -278,7 +311,7 @@
         cCa?.removeEventListener("click", onNo);
         cX?.removeEventListener("click", onNo);
         cBack?.removeEventListener("click", onNo);
-        document.removeEventListener("keydown", onKey);
+        document.removeEventListener("keydown", onKey, { capture: true });
         setTimeout(blurActive, 0);
         resolve(result);
       };
@@ -399,7 +432,7 @@
               fullName
             )}">Download</a>
             <button class="btn btn-ghost" data-restore="${fullName}">Restore</button>
-            <button class="btn btn-ghost" data-delete="${fullName}">Delete</button>
+            <button class="btn btn-ghost-red" data-delete="${fullName}">Delete</button>
           </td>`;
         tableBody.appendChild(tr);
 
@@ -441,15 +474,20 @@
       title: "Restore database?",
       body: `Restore database from “${name}”? This will stop bots and replace the database.`,
       confirmText: "Restore",
+      cancelText: "Cancel",
+      btnClassOk: "btn btn-ghost-red",
+      btnClassCancel: "btn btn-ghost",
     });
     if (!ok) return;
 
     const fd = new FormData();
     fd.append("source", "existing");
     fd.append("name", name);
+
     const r = await fetch("/api/backup/restore", { method: "POST", body: fd });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.ok) throw new Error("restore failed");
+
     await loadInfo();
     window.showToast?.("Database restored.", { type: "success" });
   }
@@ -459,15 +497,20 @@
       title: "Restore database?",
       body: `Restore database from uploaded file “${file.name}”? This will stop bots and replace the database.`,
       confirmText: "Restore",
+      cancelText: "Cancel",
+      btnClassOk: "btn btn-ghost-red",
+      btnClassCancel: "btn btn-ghost",
     });
     if (!ok) return;
 
     const fd = new FormData();
     fd.append("source", "upload");
     fd.append("file", file);
+
     const r = await fetch("/api/backup/restore", { method: "POST", body: fd });
     const j = await r.json().catch(() => ({}));
     if (!r.ok || !j.ok) throw new Error("restore failed");
+
     await loadInfo();
     window.showToast?.("Database restored from upload.", { type: "success" });
   }
@@ -493,6 +536,9 @@
         title: "Delete backup?",
         body: `Permanently delete “${deleteName}”? This cannot be undone.`,
         confirmText: "Delete",
+        cancelText: "Cancel",
+        btnClassOk: "btn btn-ghost-red",
+        btnClassCancel: "btn btn-ghost",
       })
         .then(async (ok) => {
           if (!ok) return;
