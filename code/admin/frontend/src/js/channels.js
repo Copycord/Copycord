@@ -719,6 +719,7 @@
     <div class="modal-body">
     <label for="customize-name" class="label has-tip">
       Custom channel name
+      <button class="info-dot" aria-describedby="tip-custom-name" type="button"></button>
       <div id="tip-custom-name" class="tip-bubble" aria-hidden="true" role="tooltip">
         Set a custom channel name. Leave empty to use the original.
       </div>
@@ -731,6 +732,39 @@
   </div>
 `;
     document.body.appendChild(wrap);
+
+    (function wireInfoTips() {
+      if (window.__infoTipsWired) return;
+      window.__infoTipsWired = true;
+    
+      function hideAllTips() {
+        document.querySelectorAll('.tip-bubble[aria-hidden="false"]')
+          .forEach(el => el.setAttribute('aria-hidden', 'true'));
+      }
+    
+      document.addEventListener('click', (e) => {
+        const btn = e.target.closest('.info-dot');
+        if (btn) {
+          e.preventDefault();
+          const id = btn.getAttribute('aria-describedby');
+          const tip = id ? document.getElementById(id) : null;
+          if (!tip) return;
+    
+          const isOpen = tip.getAttribute('aria-hidden') === 'false';
+          // Close other open tips first
+          hideAllTips();
+          tip.setAttribute('aria-hidden', isOpen ? 'true' : 'false');
+          return;
+        }
+    
+        // Clicked outside any labeled tip area? Close.
+        if (!e.target.closest('.has-tip')) hideAllTips();
+      });
+    
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') hideAllTips();
+      });
+    })();
 
     if (!document.getElementById("customize-compact-styles")) {
       (function injectProgressStyles() {
