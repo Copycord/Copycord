@@ -1860,9 +1860,34 @@ body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background 0.15s ease, transform 0.12s ease, box-shadow 0.15s ease,
-    border-color 0.15s;
+
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  outline: none;
 }
+
+.verify-close:hover,
+.verify-close:focus-visible {
+  background: #140b26;
+  border-color: #ef4444;
+  color: #ef4444;
+  box-shadow: none;
+}
+
+.verify-close:active {
+  background: #140b26;
+  border-color: #dc2626;
+  color: #dc2626;
+  box-shadow: none;
+}
+
+.verify-close[data-variant='danger']:hover,
+.verify-close[data-variant='danger']:focus-visible {
+  background: #140b26;
+  border-color: #ef4444;
+  color: #ef4444;
+  box-shadow: none;
+}
+
 .orph-section {
   margin-top: 10px;
 }
@@ -4439,7 +4464,8 @@ body {
   gap: 8px;
 }
 
-.export-modal .btn {
+.export-modal
+  .btn:not(.btn-ghost, .btn-ghost-red, .btn-ghost-purple, .btn-ghost-green) {
   border-radius: 10px;
   padding: 8px 12px;
   border: 1px solid rgba(255, 255, 255, 0.08);

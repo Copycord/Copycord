@@ -1329,6 +1329,8 @@ def _enrich_from_bus(ctrl: dict, bus: dict) -> dict:
         out["pid"] = bus["pid"]
     if "running" not in out and "running" in bus:
         out["running"] = bus["running"]
+    if "discord" not in out and isinstance(bus.get("discord"), dict):
+        out["discord"] = bus["discord"]
     out.setdefault("status", "")
     return out
 
@@ -1372,8 +1374,8 @@ async def _collect_status() -> dict:
     client_state = _derive_state(s_client)
     both_running = (server_state == "running") and (client_state == "running")
 
-    server_ready = _is_discord_ready(s_server)
-    client_ready = _is_discord_ready(s_client)
+    server_ready = _is_discord_ready(s_server) or _is_discord_ready(bus_srv)
+    client_ready = _is_discord_ready(s_client) or _is_discord_ready(bus_cli)
     both_ready = server_ready and client_ready
 
     res = {

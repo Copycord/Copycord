@@ -13,6 +13,80 @@
   let scrapeRunning = false;
   let activeScrapeGuildId = null;
 
+  function closeModal(root) {
+    if (!root) return;
+
+    if (root.dataset.restoreOverflow === "1") {
+      document.documentElement.style.overflow = root.dataset.prevOverflow || "";
+    }
+    root.remove();
+  }
+
+  (function bindUniversalCloseOnce() {
+    if (window.__boundUniversalClose) return;
+    window.__boundUniversalClose = true;
+
+    document.addEventListener(
+      "click",
+      (e) => {
+        const btn = e.target.closest(".verify-close,[data-close]");
+        if (!btn) return;
+        e.preventDefault();
+
+        if (btn.dataset.confirm) {
+          const ok = window.themedConfirm
+            ? window.themedConfirm({
+                title: "Close",
+                body: btn.dataset.confirm,
+              })
+            : confirm(btn.dataset.confirm);
+          if (ok?.then)
+            return ok.then((yes) => yes && closeModal(findModalRoot(btn)));
+          if (!ok) return;
+        }
+        closeModal(findModalRoot(btn));
+      },
+      true
+    );
+
+    document.addEventListener(
+      "click",
+      (e) => {
+        if (
+          e.target.classList?.contains("modal-backdrop") ||
+          e.target.classList?.contains("att-backdrop")
+        ) {
+          closeModal(findModalRoot(e.target));
+        }
+      },
+      true
+    );
+
+    document.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.key !== "Escape") return;
+        const all = [
+          ...document.querySelectorAll(
+            ".export-modal, .scraper-modal, .guild-details-modal, .att-types-modal, .modal"
+          ),
+        ].filter((el) => el.offsetParent !== null);
+        const top = all.at(-1);
+        if (top) {
+          e.preventDefault();
+          closeModal(top);
+        }
+      },
+      true
+    );
+
+    function findModalRoot(el) {
+      return el.closest(
+        ".export-modal, .scraper-modal, .guild-details-modal, .att-types-modal, .modal"
+      );
+    }
+  })();
+
   function ensurePopoverLayer() {
     let layer = document.getElementById("popover-layer");
     if (!layer) {
@@ -430,7 +504,7 @@
             <img id="gd-icon" class="scraper-icon" alt="" src="">
             <h3 id="gd-title" class="scraper-title">Guild details</h3>
           </div>
-          <button class="scraper-close" aria-label="Close"><span aria-hidden="true">✕</span></button>
+          <button type="button" class="icon-btn verify-close" aria-label="Close"><span aria-hidden="true">✕</span></button>
         </header>
   
         <div class="scraper-body">
@@ -449,22 +523,9 @@
     `;
     document.body.appendChild(wrap);
 
-    const close = () => wrap.remove();
-    wrap.querySelector(".scraper-close")?.addEventListener("click", close);
-    wrap.querySelector("#gd-close-btn")?.addEventListener("click", close);
-    wrap.addEventListener("click", (e) => {
-      if (e.target.classList.contains("modal-backdrop")) close();
-    });
-    document.addEventListener(
-      "keydown",
-      function escOnce(e) {
-        if (e.key === "Escape") {
-          close();
-          document.removeEventListener("keydown", escOnce);
-        }
-      },
-      { once: true }
-    );
+    wrap
+      .querySelector("#gd-close-btn")
+      ?.addEventListener("click", () => closeModal(wrap));
 
     return wrap;
   }
@@ -476,8 +537,9 @@
 
     const wrap = document.createElement("div");
     wrap.className = "modal export-modal show";
+    wrap.dataset.prevOverflow = document.documentElement.style.overflow || "";
+    wrap.dataset.restoreOverflow = "1";
 
-    const prevDocOverflow = document.documentElement.style.overflow;
     document.documentElement.style.overflow = "hidden";
 
     wrap.innerHTML = `
@@ -488,7 +550,7 @@
             <h3 class="scraper-title">Export messages</h3>
             <p class="muted small">Export messages to a JSON file and optionally forward via webhook.</p>
           </div>
-          <button type="button" class="scraper-close js-x" aria-label="Close">
+          <button type="button" class="icon-btn verify-close" aria-label="Close">
             <span aria-hidden="true">✕</span>
           </button>
         </header>
@@ -648,8 +710,8 @@
         </div>
   
         <footer class="scraper-actions">
-          <button type="button" class="btn btn-ghost">Cancel</button>
-          <button type="button" class="btn btn-ghost" ">Start export</button>
+        <button type="button" class="btn btn-ghost" data-close>Cancel</button>
+        <button type="button" class="btn btn-ghost" data-ex-go>Start export</button>
         </footer>
       </div>
     `;
@@ -658,27 +720,6 @@
     console.debug("[Export] modal appended to DOM");
 
     wrap.querySelector("#ex-filters")?.removeAttribute("open");
-
-    const close = () => {
-      console.debug("[Export] closing modal");
-      wrap.remove();
-      document.documentElement.style.overflow = prevDocOverflow || "";
-    };
-    wrap
-      .querySelectorAll(".js-x")
-      .forEach((b) => b.addEventListener("click", close));
-    wrap.querySelector(".modal-backdrop")?.addEventListener("click", close);
-    document.addEventListener(
-      "keydown",
-      function escOnce(e) {
-        if (e.key === "Escape") {
-          console.debug("[Export] ESC pressed, closing modal");
-          close();
-          document.removeEventListener("keydown", escOnce, true);
-        }
-      },
-      true
-    );
 
     const wordToggle = wrap.querySelector("#ex-f-word-on");
     const wordInput = wrap.querySelector("#ex-f-word");
@@ -722,7 +763,7 @@
         <div class="att-panel" role="document" aria-label="Attachment types">
           <header class="att-head">
             <h4 class="att-title">Attachment types</h4>
-            <button type="button" class="att-x" aria-label="Close">✕</button>
+            <button type="button" class="icon-btn verify-close" aria-label="Close">✕</button>
           </header>
   
           <div class="att-body">
@@ -762,10 +803,7 @@
         console.debug("[Export] sub-modal backdrop click");
         kill();
       });
-      sub.querySelector(".att-x")?.addEventListener("click", () => {
-        console.debug("[Export] sub-modal X click");
-        kill();
-      });
+
       sub.querySelector("#att-cancel")?.addEventListener("click", () => {
         console.debug("[Export] sub-modal Cancel");
         kill();
@@ -875,7 +913,7 @@
       };
     }
 
-    $("#ex-go").addEventListener("click", async () => {
+    modal.querySelector("[data-ex-go]")?.addEventListener("click", async () => {
       const includeAttachments = $("#ex-f-attachments")?.checked ?? true;
       const attTypes = includeAttachments
         ? {
@@ -981,7 +1019,7 @@
           type: "success",
         });
         console.info("[Export] started successfully");
-        modal.querySelector(".js-x")?.click();
+        closeModal(modal);
       } catch (e) {
         console.error("[Export] request error:", e);
         window.showToast(String(e?.message || e), { type: "error" });
@@ -1115,7 +1153,7 @@
             }">
             <h3 class="scraper-title">Scraper — ${escapeHtml(guild.name)}</h3>
           </div>
-          <button class="scraper-close" aria-label="Close"><span aria-hidden="true">✕</span></button>
+          <button type="button" class="icon-btn verify-close" aria-label="Close"><span aria-hidden="true">✕</span></button>
         </header>
 
         <div class="scraper-body">
@@ -1201,25 +1239,12 @@
       });
     })();
 
-    const close = () => {
-      modal.remove();
-      document.removeEventListener("keydown", onEsc);
-    };
-
     const onEsc = (e) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        close();
+        document.removeEventListener("keydown", onEsc);
       }
     };
-
-    modal.querySelector(".scraper-close")?.addEventListener("click", close);
-    modal
-      .querySelector('[data-act="cancel"]')
-      ?.addEventListener("click", close);
-    modal.addEventListener("click", (e) => {
-      if (e.target.classList.contains("modal-backdrop")) close();
-    });
     document.addEventListener("keydown", onEsc);
 
     modal
@@ -1371,6 +1396,7 @@
         "#g-search",
         "#g-sortdir",
       ],
+      require: "both",
     });
 
     if (!gate.lastUpIsFresh()) gate.showGateSoon();

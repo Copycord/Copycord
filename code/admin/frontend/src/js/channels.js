@@ -61,6 +61,7 @@
   let menuContext = null;
   let catPinByOrig = new Map();
   let catOrigByEither = new Map();
+  let inflightReady = false;
 
   (function () {
     if (window.__toastInit) return;
@@ -90,6 +91,32 @@
       "#ch-sortdir",
       "#ch-filter",
     ],
+  
+    require: "both",
+
+    onDown() {
+      try {
+        resetAllCloningUI();
+      } catch {}
+      inflightReady = false;
+      document
+        .querySelectorAll(".ch-card .ch-status, .ch-card .ch-progress")
+        .forEach((el) => el.remove());
+      document
+        .querySelectorAll(".ch-card.is-cloning, .ch-card.is-pending")
+        .forEach((card) => {
+          card.classList.remove("is-cloning", "is-pending");
+          card.removeAttribute("aria-busy");
+        });
+    },
+
+    onUp() {
+      try {
+        fetchAndApplyInflight().finally(() => {
+          inflightReady = true;
+        });
+      } catch {}
+    },
   });
   if (!gate.lastUpIsFresh()) gate.showGateSoon();
 
@@ -105,6 +132,14 @@
   let lastDeleteAt = 0;
   let menuAnchorBtn = null;
   let bfCleanup = null;
+
+  function shouldTrustBackfillPayload(p, cid) {
+    if (p?.task_id && taskMap.has(String(p.task_id))) return true;
+    if (startedHere.has(String(cid))) return true;
+
+    if (inflightReady && inflightByOrig.has(String(cid))) return true;
+    return false;
+  }
 
   function setCardInteractive(card, on) {
     if (!card) return;
@@ -646,7 +681,7 @@
       <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="customize-cat-title" tabindex="-1">
         <div class="modal-header">
           <h3 id="customize-cat-title">Customize category</h3>
-          <button id="customize-cat-close" class="icon-btn verify-close" aria-label="Close">×</button>
+          <button id="customize-cat-close" type="button" class="icon-btn verify-close" aria-label="Close">✕</button>
         </div>
         <div class="modal-body">
           <label for="customize-cat-name" class="label has-tip">
@@ -679,12 +714,11 @@
   <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="customize-title" tabindex="-1">
     <div class="modal-header">
       <h3 id="customize-title">Customize channel</h3>
-      <button id="customize-close" class="icon-btn verify-close" aria-label="Close">×</button>
+      <button id="customize-close" type="button" class="icon-btn verify-close" aria-label="Close">✕</button>
     </div>
     <div class="modal-body">
     <label for="customize-name" class="label has-tip">
       Custom channel name
-      <button class="info-dot" aria-describedby="tip-custom-name" type="button"></button>
       <div id="tip-custom-name" class="tip-bubble" aria-hidden="true" role="tooltip">
         Set a custom channel name. Leave empty to use the original.
       </div>
@@ -995,8 +1029,11 @@
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) stopInflightPolling();
     else {
-      fetchAndApplyInflight();
-      startInflightPolling();
+      inflightReady = false;
+      fetchAndApplyInflight().finally(() => {
+        inflightReady = true;
+        startInflightPolling();
+      });
     }
   });
 
@@ -1744,6 +1781,7 @@
               window.showToast("Channel added to blacklist.", {
                 type: "success",
               });
+              await load();
             } catch {
               window.showToast("Failed to add to blacklist.", {
                 type: "error",
@@ -2379,6 +2417,7 @@
   if (!gate.lastUpIsFresh()) resetAllCloningUI();
 
   gate.checkAndGate(() => afterGateReady());
+  gate.startWatch?.();
 
   let bootedAfterGate = false;
   async function afterGateReady() {
@@ -2719,12 +2758,15 @@
 
     sock.onopen = () => {
       dbg("WS OUT connected");
-      fetchAndApplyInflight();
+      inflightReady = false;
+      fetchAndApplyInflight().finally(() => {
+        inflightReady = true;
+      });
     };
 
     sock.onclose = () => {
       dbg("WS OUT closed");
-      window.showToast("Connection hiccup — restoring status…", {
+      window.showToast("Connection lost…", {
         type: "warning",
       });
     };
@@ -2810,6 +2852,7 @@
             let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             cid = toOriginalCid(cid);
             if (!cid) return;
+            if (!shouldTrustBackfillPayload(p, cid)) return;
 
             if (p.task_id && cid) rememberTask(p.task_id, cid);
 
@@ -2838,6 +2881,7 @@
             let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             cid = toOriginalCid(cid);
             if (!cid) return;
+            if (!shouldTrustBackfillPayload(p, cid)) return;
 
             const haveDelivered = Number.isFinite(delivered) && delivered > 0;
             const haveTotal = Number.isFinite(total) && total > 0;
@@ -2896,6 +2940,7 @@
             if (!cid && p.task_id) cid = taskMap.get(String(p.task_id));
             cid = toOriginalCid(cid);
             if (!cid) return;
+            if (!shouldTrustBackfillPayload(p, cid)) return;
             if (p.task_id) forgetTask(p.task_id);
             finalizeBackfillUI(cid, { announce: true });
             return;
@@ -3668,14 +3713,30 @@
                 checkpoint: info?.checkpoint ?? null,
               }),
             });
+
             const j = await resp.json().catch(() => ({}));
+
             if (!resp.ok || j?.ok === false) {
+              toastOncePersist(
+                `bf:resume:error:${cid}`,
+                j?.error || `Couldn't resume (HTTP ${resp.status}).`,
+                { type: "error" },
+                15000
+              );
               throw new Error(j?.error || `HTTP ${resp.status}`);
             }
           } catch (e) {
             console.error("Resume backfill failed:", e);
             setCloneLaunching(cid, false);
             setCardLoading(cid, false);
+
+            toastOncePersist(
+              `bf:resume:error:${cid}`,
+              "Couldn't resume the clone. You can start a new backfill.",
+              { type: "error" },
+              15000
+            );
+
             const row = findRowByAnyChannelId(cid);
             if (row) openBackfillDialog(row.original_channel_id);
           }
@@ -3683,6 +3744,14 @@
       );
     } catch (e) {
       console.error("resume-info fetch failed:", e);
+
+      toastOncePersist(
+        `bf:resume-info:error:${cid}`,
+        "Couldn’t check resume status. You can start a new backfill.",
+        { type: "warning" },
+        12000
+      );
+
       const row = findRowByAnyChannelId(cid);
       if (row) openBackfillDialog(row.original_channel_id);
     }
