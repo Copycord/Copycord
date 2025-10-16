@@ -26,6 +26,11 @@
   const startedHere = new Set();
   const NF_INT = new Intl.NumberFormat();
   const fmtInt = (n) => (Number.isFinite(n) ? NF_INT.format(n) : String(n));
+  const selected = new Set();
+  document.getElementById("backfill-batch-dialog")?.classList.add("bf-modal");
+  document
+    .querySelector("#backfill-batch-dialog .modal-header")
+    ?.classList.add("bf-head");
 
   const DEBUG_BF = true;
   const dbg = (...a) => {
@@ -55,6 +60,29 @@
       } catch {}
     }
   }
+
+  function dismissTransientUI() {
+    try {
+      document.activeElement?.blur?.();
+    } catch {}
+
+    try {
+      hideMenu({ restoreFocus: false });
+    } catch {}
+
+    if (selected?.size) {
+      selected.clear();
+      render?.();
+      window.updateBatchBar?.();
+    }
+  }
+
+  function hideMenuForModal() {
+    try {
+      hideMenu({ restoreFocus: false });
+    } catch {}
+  }
+
   let lastFocusConfirm = null;
   let lastFocusVerify = null;
   let custChannel = null;
@@ -62,6 +90,60 @@
   let catPinByOrig = new Map();
   let catOrigByEither = new Map();
   let inflightReady = false;
+  let bfBatchCleanup = null;
+
+  function resetBatchBackfillForm(dlg) {
+    const form = dlg.querySelector("#bf-batch-form");
+    if (!form) return;
+
+    form.reset();
+
+    const sinceEl = dlg.querySelector("#bf-batch-since");
+    const lastEl = dlg.querySelector("#bf-batch-lastn");
+    const fromEl = dlg.querySelector("#bf-batch-from");
+    const toEl = dlg.querySelector("#bf-batch-to");
+    const rowBetween = dlg.querySelector(".bf-row-between");
+
+    const setMode = (mode) => {
+      if (sinceEl) sinceEl.disabled = mode !== "since";
+      if (lastEl) lastEl.disabled = mode !== "last";
+      if (fromEl) fromEl.disabled = mode !== "between";
+      if (toEl) toEl.disabled = mode !== "between";
+      rowBetween?.classList.toggle("is-active", mode === "between");
+    };
+
+    setMode("all");
+
+    const radios = form.querySelectorAll('input[name="mode"]');
+    radios.forEach((r) => {
+      r.addEventListener("change", () => setMode(r.value), { once: true });
+    });
+
+    hideAllFieldErrors?.(dlg);
+  }
+
+  function closeBatchBackfillDialog() {
+    const dlg = document.getElementById("backfill-batch-dialog");
+    if (!dlg) return;
+
+    try {
+      bfBatchCleanup?.();
+    } finally {
+      bfBatchCleanup = null;
+    }
+
+    dlg.classList.remove("show");
+    dlg.hidden = true;
+    dlg.setAttribute("aria-hidden", "true");
+    dlg.querySelector('[data-role="backdrop"]')?.setAttribute("hidden", "true");
+    document.body.classList.remove("modal-open");
+
+    selected.clear();
+    render?.();
+    window.updateBatchBar?.();
+
+    resetBatchBackfillForm(dlg);
+  }
 
   (function () {
     if (window.__toastInit) return;
@@ -91,7 +173,7 @@
       "#ch-sortdir",
       "#ch-filter",
     ],
-  
+
     require: "both",
 
     onDown() {
@@ -139,6 +221,12 @@
 
     if (inflightReady && inflightByOrig.has(String(cid))) return true;
     return false;
+  }
+
+  function isSelectableCard(card) {
+    if (!card || card.dataset.orphan === "1") return false;
+    const id = String(card.dataset.cid || "");
+    return !(launchingClones.has(id) || runningClones.has(id));
   }
 
   function setCardInteractive(card, on) {
@@ -453,12 +541,17 @@
   }
 
   function openCustomizeDialog(ch) {
+    hideMenuForModal();
+    dismissTransientUI();
     const modal = document.getElementById("customize-modal");
     const back = modal.querySelector('[data-role="backdrop"]');
     const dlg = modal.querySelector(".modal-content");
     const name = document.getElementById("customize-name");
     const btnSave = document.getElementById("customize-save");
     const btnClose = document.getElementById("customize-close");
+
+    back?.removeAttribute?.("hidden");
+    document.body.classList.add("modal-open");
 
     custChannel = ch;
 
@@ -473,6 +566,8 @@
       setInert(modal, true);
       modal.setAttribute("aria-hidden", "true");
       modal.classList.remove("show");
+      back?.setAttribute?.("hidden", "true");
+      document.body.classList.remove("modal-open");
       custChannel = null;
     }
 
@@ -539,6 +634,8 @@
     categoryName,
     originalCategoryId = null
   ) {
+    hideMenuForModal();
+    dismissTransientUI();
     injectCustomizeCategoryModal();
 
     const modal = document.getElementById("customize-cat-modal");
@@ -548,6 +645,9 @@
     const btnSave = document.getElementById("customize-cat-save");
     const btnClose = document.getElementById("customize-cat-close");
     const titleEl = document.getElementById("customize-cat-title");
+
+    back?.removeAttribute?.("hidden");
+    document.body.classList.add("modal-open");
 
     titleEl.textContent = `Customize`;
     const resolvedOrig =
@@ -561,6 +661,8 @@
       setInert(modal, true);
       modal.setAttribute("aria-hidden", "true");
       modal.classList.remove("show");
+      back?.setAttribute?.("hidden", "true");
+      document.body.classList.remove("modal-open");
     }
 
     btnClose.onclick = (e) => {
@@ -736,33 +838,33 @@
     (function wireInfoTips() {
       if (window.__infoTipsWired) return;
       window.__infoTipsWired = true;
-    
+
       function hideAllTips() {
-        document.querySelectorAll('.tip-bubble[aria-hidden="false"]')
-          .forEach(el => el.setAttribute('aria-hidden', 'true'));
+        document
+          .querySelectorAll('.tip-bubble[aria-hidden="false"]')
+          .forEach((el) => el.setAttribute("aria-hidden", "true"));
       }
-    
-      document.addEventListener('click', (e) => {
-        const btn = e.target.closest('.info-dot');
+
+      document.addEventListener("click", (e) => {
+        const btn = e.target.closest(".info-dot");
         if (btn) {
           e.preventDefault();
-          const id = btn.getAttribute('aria-describedby');
+          const id = btn.getAttribute("aria-describedby");
           const tip = id ? document.getElementById(id) : null;
           if (!tip) return;
-    
-          const isOpen = tip.getAttribute('aria-hidden') === 'false';
-          // Close other open tips first
+
+          const isOpen = tip.getAttribute("aria-hidden") === "false";
+
           hideAllTips();
-          tip.setAttribute('aria-hidden', isOpen ? 'true' : 'false');
+          tip.setAttribute("aria-hidden", isOpen ? "true" : "false");
           return;
         }
-    
-        // Clicked outside any labeled tip area? Close.
-        if (!e.target.closest('.has-tip')) hideAllTips();
+
+        if (!e.target.closest(".has-tip")) hideAllTips();
       });
-    
-      document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape') hideAllTips();
+
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") hideAllTips();
       });
     })();
 
@@ -816,8 +918,205 @@
         `${h.offsetHeight}px`
       );
   }
+
+  function setFooterHeightVar() {
+    const f = document.querySelector(".site-footer, footer");
+    const h = f ? f.offsetHeight : 0;
+    document.documentElement.style.setProperty("--footer-h", `${h}px`);
+  }
+  setFooterHeightVar();
+  window.addEventListener("resize", setFooterHeightVar, { passive: true });
+
   setHeaderHeightVar();
   window.addEventListener("resize", setHeaderHeightVar, { passive: true });
+
+  (function ensureSelectionPopover() {
+    if (document.getElementById("bf-batchbar")) return;
+
+    const bar = document.createElement("div");
+    bar.id = "bf-batchbar";
+    bar.classList.add("popover", "minimal");
+    bar.innerHTML = `
+      <div class="inner">
+        <span id="bf-count">0 selected</span>
+        <div class="spacer"></div>
+        <button id="bf-selectall" class="btn btn-ghost" type="button">Select all in view</button>
+        <button id="bf-clear" class="btn btn-ghost" type="button">Clear</button>
+        <button id="bf-batch" class="btn btn-ghost" type="button" disabled>Clone Messages</button>
+      </div>
+    `;
+    document.body.appendChild(bar);
+
+    const btnAll = bar.querySelector("#bf-selectall");
+    const btnClear = bar.querySelector("#bf-clear");
+    const btnStart = bar.querySelector("#bf-batch");
+
+    function visibleCardEls() {
+      return [...document.querySelectorAll(".ch-card")].filter(
+        (el) => el.offsetParent !== null
+      );
+    }
+
+    btnAll.addEventListener("click", () => {
+      for (const el of visibleCardEls()) {
+        if (isSelectableCard(el)) selected.add(String(el.dataset.cid));
+      }
+      updateBatchBar();
+      render?.();
+    });
+
+    btnClear.addEventListener("click", () => {
+      selected.clear();
+      updateBatchBar();
+      render?.();
+    });
+
+    btnStart.addEventListener("click", () => {
+      if (!selected.size) return;
+      openBatchBackfillDialog([...selected]);
+    });
+
+    function placePopover() {
+      const anchor = document.getElementById("orph-delall");
+      if (!anchor) {
+        // Fallback: pin near right side of toolbar if the button isn't available
+        const wrap = document.querySelector(
+          ".channels-head, .ch-controls, .ch-toolbar"
+        );
+        const r = wrap
+          ? wrap.getBoundingClientRect()
+          : { top: 16, right: window.innerWidth - 16, height: 36 };
+        const bw = bar.offsetWidth || 280;
+        const bh = bar.offsetHeight || 32;
+        const top = r.top + window.scrollY + Math.max(0, (r.height - bh) / 2);
+        const left = r.right + window.scrollX - bw;
+        bar.style.top = `${Math.max(
+          window.scrollY + 8,
+          Math.min(top, window.scrollY + window.innerHeight - bh - 8)
+        )}px`;
+        bar.style.left = `${Math.max(
+          window.scrollX + 8,
+          Math.min(left, window.scrollX + window.innerWidth - bw - 8)
+        )}px`;
+        return;
+      }
+
+      const wasHidden = !bar.classList.contains("show");
+      if (wasHidden) {
+        bar.style.opacity = "0";
+        bar.style.pointerEvents = "none";
+        bar.classList.add("show");
+      }
+
+      const ar = anchor.getBoundingClientRect();
+      const bw = bar.offsetWidth;
+      const bh = bar.offsetHeight;
+
+      let top = ar.top + window.scrollY + Math.max(0, (ar.height - bh) / 2);
+      let left = ar.right + window.scrollX + 8;
+
+      const maxLeft = window.scrollX + window.innerWidth - bw - 8;
+      const maxTop = window.scrollY + window.innerHeight - bh - 8;
+      top = Math.max(window.scrollY + 8, Math.min(top, maxTop));
+      left = Math.min(left, maxLeft);
+
+      bar.style.top = `${Math.round(top)}px`;
+      bar.style.left = `${Math.round(left)}px`;
+
+      if (wasHidden) {
+        bar.classList.remove("show");
+        bar.style.opacity = "";
+        bar.style.pointerEvents = "";
+      }
+    }
+
+    function updateBatchBar() {
+      const n = selected.size || 0;
+      bar.querySelector("#bf-count").textContent = `${n} selected`;
+      btnStart.disabled = n === 0;
+
+      if (n > 0) {
+        placePopover();
+        bar.classList.add("show");
+      } else {
+        bar.classList.remove("show");
+      }
+    }
+
+    window.updateBatchBar = updateBatchBar;
+
+    (function wireOutsideClickToClearSelection() {
+      const OPEN_MODAL_SEL = [
+        ".modal.show",
+        ".bf-modal.show",
+        "#backfill-dialog.show",
+        "#backfill-batch-dialog.show",
+        "#customize-modal.show",
+        "#customize-cat-modal.show",
+        "#confirm-modal.show",
+        "#verify-dialog.show",
+        '[role="dialog"]:not([aria-hidden="true"])',
+        ".modal[open]",
+      ].join(",");
+
+      const MODAL_ZONE_SEL = [
+        ".modal",
+        ".modal-backdrop",
+        ".modal-content",
+        ".modal-card",
+        ".bf-modal",
+        "#backfill-dialog",
+        "#backfill-batch-dialog",
+        "#customize-modal",
+        "#customize-cat-modal",
+        "#confirm-modal",
+        "#verify-dialog",
+        '[role="dialog"]',
+        '[aria-modal="true"]',
+      ].join(",");
+      function maybeClear(e) {
+        if (!selected.size) return;
+
+        const t = e.target;
+
+        const clickInSafeUI =
+          t.closest("#bf-batchbar") ||
+          t.closest("#ch-menu") ||
+          t.closest("#verify-dialog") ||
+          t.closest("#confirm-modal");
+        if (clickInSafeUI) return;
+
+        const insideModalZone = !!t.closest(MODAL_ZONE_SEL);
+
+        const insideChannels = !!(root && root.contains(t));
+
+        if (insideModalZone || !insideChannels) {
+          selected.clear();
+          render?.();
+          window.updateBatchBar?.();
+
+          e.stopPropagation();
+        }
+      }
+
+      document.addEventListener("pointerdown", maybeClear, true);
+      document.addEventListener("click", maybeClear, true);
+
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape" && selected.size) {
+          selected.clear();
+          render?.();
+          window.updateBatchBar?.();
+        }
+      });
+    })();
+
+    const relayout = () => {
+      if (bar.classList.contains("show")) placePopover();
+    };
+    window.addEventListener("scroll", relayout, { passive: true });
+    window.addEventListener("resize", relayout, { passive: true });
+  })();
 
   const runningClones = new Set(
     (() => {
@@ -1114,34 +1413,6 @@
     if (id == null) return;
     setCloneLaunching(id, false);
     setCloneRunning(id, false);
-  }
-
-  function attachPicker(input) {
-    if (!input || input.closest(".bf-input-wrap")) return;
-    const wrap = document.createElement("div");
-    wrap.className = "bf-input-wrap";
-    input.parentNode.insertBefore(wrap, input);
-    wrap.appendChild(input);
-
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "bf-cal-btn";
-    btn.setAttribute("aria-label", "Open calendar");
-    btn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-      <path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1Zm12 8H5v8h14v-8ZM5 8h14V6H5v2Z"/>
-    </svg>`;
-    wrap.appendChild(btn);
-
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      if (typeof input.showPicker === "function") {
-        try {
-          input.showPicker();
-          return;
-        } catch {}
-      }
-      input.focus();
-    });
   }
 
   function resetAllCloningUI() {
@@ -1535,7 +1806,12 @@
         const isOrphanChannel = !!ch.__orphan;
 
         const card = document.createElement("div");
-        card.className = `ch-card${isOrphanChannel ? " orphan" : ""}`;
+        const isSel = selected.has(String(ch.original_channel_id));
+        card.className = `ch-card${isOrphanChannel ? " orphan" : ""}${
+          isSel ? " is-selected" : ""
+        }`;
+        card.setAttribute("role", "checkbox");
+        card.setAttribute("aria-checked", isSel ? "true" : "false");
         card.tabIndex = 0;
         card.dataset.cid = ch.original_channel_id;
 
@@ -1617,7 +1893,100 @@
     }
   }
 
+  (function enableCtrlASelectAllInModals() {
+    function selectAllVisibleCards() {
+      const cards = [...document.querySelectorAll(".ch-card")].filter(
+        (el) => el.offsetParent !== null && isSelectableCard(el)
+      );
+      for (const el of cards) selected.add(String(el.dataset.cid));
+      render?.();
+      window.updateBatchBar?.();
+    }
+
+    document.addEventListener(
+      "keydown",
+      (e) => {
+        const wantsSelectAll =
+          (e.key === "a" || e.key === "A") && (e.ctrlKey || e.metaKey);
+        if (!wantsSelectAll) return;
+
+        const a = document.activeElement;
+        const isEditable =
+          a &&
+          (a.tagName === "INPUT" ||
+            a.tagName === "TEXTAREA" ||
+            a.isContentEditable ||
+            a.getAttribute?.("role") === "textbox");
+        if (isEditable) return;
+
+        const inChannels = !!(root && root.contains(a));
+        if (!inChannels) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        selectAllVisibleCards();
+      },
+      true
+    );
+  })();
+
   function showMenu(btn, ctx) {
+    try {
+      dismissTransientUI();
+    } catch {}
+
+    if (!menu.__portaled) {
+      document.body.appendChild(menu);
+      menu.__portaled = true;
+    }
+
+    menu.classList.add("customize-skin");
+    menu.style.position = "fixed";
+    menu.style.zIndex = "100000";
+    menu.hidden = false;
+
+    menu.style.visibility = "hidden";
+    menu.style.top = "-9999px";
+    menu.style.left = "-9999px";
+
+    requestAnimationFrame(() => {
+      const gap = 6,
+        pad = 12;
+      const vw = window.innerWidth,
+        vh = window.innerHeight;
+
+      const r = btn.getBoundingClientRect();
+      const mw = menu.offsetWidth || 180;
+      const mh = menu.offsetHeight || 0;
+
+      let top = r.bottom + gap;
+      let left = Math.min(r.left, vw - mw - pad);
+
+      // flip up if there isn't enough room below
+      if (vh - r.bottom < mh && r.top > vh - r.bottom) {
+        top = r.top - gap - mh;
+      }
+
+      const headerH =
+        parseInt(
+          getComputedStyle(document.documentElement).getPropertyValue(
+            "--header-h"
+          )
+        ) || 0;
+      const minTop = pad + headerH;
+
+      top = Math.max(minTop, Math.min(top, vh - mh - pad));
+      left = Math.max(pad, Math.min(left, vw - mw - pad));
+
+      menu.style.top = `${Math.round(top)}px`;
+      menu.style.left = `${Math.round(left)}px`;
+      menu.style.visibility = "";
+
+      menu.setAttribute("tabindex", "-1");
+      try {
+        menu.focus({ preventScroll: true });
+      } catch {}
+    });
     const legacyIsChannel = typeof ctx === "string" || typeof ctx === "number";
     if (legacyIsChannel) ctx = { type: "channel", id: String(ctx) };
 
@@ -2039,6 +2408,22 @@
       return { originalCatId, clonedCatId, hasClone: !!clonedCatId };
     }
 
+    function isInteractiveInside(node) {
+      return !!node?.closest?.(
+        'button, a, input, select, textarea, [role="button"], [role="menuitem"], .icon-btn, .ctxmenu-item'
+      );
+    }
+
+    function toggleCardSelection(card) {
+      if (!card || !isSelectableCard(card)) return;
+      const id = String(card.dataset.cid);
+      if (selected.has(id)) selected.delete(id);
+      else selected.add(id);
+      card.classList.toggle("is-selected", selected.has(id));
+      card.setAttribute("aria-checked", selected.has(id) ? "true" : "false");
+      window.updateBatchBar?.();
+    }
+
     let copyCatOrig = menu.querySelector('[data-act="copy-cat-orig-id"]');
     if (!copyCatOrig) {
       copyCatOrig = document.createElement("button");
@@ -2158,7 +2543,14 @@
     if (vh - r.bottom < mh && r.top > vh - r.bottom) {
       top = r.top - gap - mh;
     }
-    top = Math.max(pad, Math.min(top, vh - mh - pad));
+    const headerH =
+      parseInt(
+        getComputedStyle(document.documentElement)
+          .getPropertyValue("--header-h")
+          .trim()
+      ) || 0;
+    const minTop = pad + headerH;
+    top = Math.max(minTop, Math.min(top, vh - mh - pad));
     left = Math.max(pad, Math.min(left, vw - mw - pad));
 
     menu.style.top = `${Math.round(top)}px`;
@@ -2183,6 +2575,10 @@
   root.addEventListener("click", (e) => {
     const btn = e.target.closest(".ch-menu-btn");
     if (!btn) return;
+    if (selected.size) {
+      selected.clear();
+      window.updateBatchBar?.();
+    }
     if (btn.disabled) {
       e.preventDefault();
       e.stopPropagation();
@@ -2212,8 +2608,63 @@
   });
 
   root.addEventListener("click", (e) => {
+    const btn = e.target.closest(".ch-select");
+    if (!btn) return;
+    const card = btn.closest(".ch-card");
+    if (!isSelectableCard(card)) return;
+
+    const id = String(card.dataset.cid);
+    if (selected.has(id)) selected.delete(id);
+    else selected.add(id);
+
+    btn.setAttribute("aria-pressed", selected.has(id) ? "true" : "false");
+    card.classList.toggle("is-selected", selected.has(id));
+    window.updateBatchBar?.();
+  });
+
+  root.addEventListener("click", (e) => {
+    const card = e.target.closest(".ch-card");
+    if (!card) return;
+
+    if (isInteractiveInside(e.target)) return;
+
+    if (isSelectableCard(card)) {
+      toggleCardSelection(card);
+    } else if (selected.size) {
+      selected.clear();
+      render?.();
+      window.updateBatchBar?.();
+    }
+  });
+
+  root.addEventListener(
+    "click",
+    (e) => {
+      if (!e.target.closest(".ch-card") && selected.size) {
+        selected.clear();
+        render?.();
+        window.updateBatchBar?.();
+      }
+    },
+    true
+  );
+
+  root.addEventListener("keydown", (e) => {
+    if (e.key !== " " && e.key !== "Enter") return;
+    const card = e.target.closest(".ch-card");
+    if (!card || !isSelectableCard(card)) return;
+    if (isInteractiveInside(e.target)) return;
+    e.preventDefault();
+    toggleCardSelection(card);
+  });
+
+  root.addEventListener("click", (e) => {
     const btn = e.target.closest(".cat-menu-trigger");
     if (!btn) return;
+    if (selected.size) {
+      selected.clear();
+      window.updateBatchBar?.();
+    }
 
     const chip = btn.closest(".cat-chip");
     const orphanCatId = chip?.dataset.orphanCatId || null;
@@ -2269,6 +2720,20 @@
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") hideMenu();
   });
+
+  document.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (!selected.size) return;
+
+      if (e.target.closest(".cat-menu-trigger, .ch-menu-btn, #ch-menu")) {
+        selected.clear();
+        render?.();
+        window.updateBatchBar?.();
+      }
+    },
+    true
+  );
 
   const closeMenuOnScroll = (e) => {
     if (menu.hidden) return;
@@ -2537,6 +3002,7 @@
   });
 
   function openVerify() {
+    hideMenuForModal();
     lastFocusVerify = document.activeElement;
 
     vDlg.classList.add("compact");
@@ -2622,6 +3088,7 @@
     },
     onConfirm
   ) {
+    hideMenuForModal();
     if (!cModal) {
       onConfirm?.();
       return;
@@ -2800,7 +3267,7 @@
 
     sock.onclose = () => {
       dbg("WS OUT closed");
-      window.showToast("Connection lost…", {
+      window.showToast("Connection lost", {
         type: "warning",
       });
     };
@@ -3238,25 +3705,17 @@
       pill.querySelector(".kill").onclick = () => {
         openConfirm(
           {
-            title: "Delete all orphans?",
-            body: `This will delete <b>${catCount}</b> orphan ${
-              catCount === 1 ? "category" : "categories"
-            } and <b>${chCount}</b> orphan ${
-              chCount === 1 ? "channel" : "channels"
-            } that are <em>not part of the clone</em>.`,
-            okText: "Delete all",
+            title: "Delete orphan channel?",
+            body: `This will delete <b>#${escapeHtml(
+              ch.name
+            )}</b> <span class="muted">(${escapeHtml(ch.id)})</span>.`,
+            okText: "Delete",
             btnClassOk: "btn btn-ghost-red",
           },
           () => {
-            ids.forEach((id) => markPending(id));
+            markPending(ch.id);
             sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
-            bulkDeleteInFlight = true;
-            showBusyOverlay(
-              `Deleting ${catCount} categor${
-                catCount === 1 ? "y" : "ies"
-              } & ${chCount} channel${chCount === 1 ? "" : "s"}…`
-            );
-            sendVerify({ action: "delete_all", ids });
+            sendVerify({ action: "delete_one", kind: "channel", id: ch.id });
           }
         );
       };
@@ -3383,6 +3842,9 @@
   }
 
   function openBackfillDialog(channelId) {
+    hideMenuForModal();
+    if (vBack) vBack.hidden = true;
+
     const cloneId = String(channelId);
     bfChannelId = cloneId;
 
@@ -3390,6 +3852,7 @@
       window.showToast("A clone for this channel is already in progress.", {
         type: "warning",
       });
+      bfChannelId = null;
       return;
     }
 
@@ -3397,30 +3860,71 @@
     const back = document.getElementById("backfill-backdrop");
     if (!dlg) return;
 
+    // Only now that we know we're opening do we add modal-open
+    document.body.classList.add("modal-open");
+
     if (back) back.hidden = false;
     dlg.hidden = false;
     dlg.classList.add("show");
 
     const card = dlg.querySelector(".modal-card");
+
     const onEsc = (e) => {
       if (e.key === "Escape") closeBackfillDialog();
     };
-    const onOutside = (e) => {
-      if (card && !card.contains(e.target)) closeBackfillDialog();
-    };
-    document.addEventListener("keydown", onEsc);
-    document.addEventListener("mousedown", onOutside, true);
 
-    bfCleanup = () => {
-      document.removeEventListener("keydown", onEsc);
-      document.removeEventListener("mousedown", onOutside, true);
-      dlg.removeEventListener("mousedown", clearErrorsOnClickInside);
+    const onOutside = (e) => {
+      if (card && !card.contains(e.target)) {
+        setTimeout(closeBackfillDialog, 0);
+      }
     };
+
+    function selectAllVisibleCards() {
+      const cards = [...document.querySelectorAll(".ch-card")].filter(
+        (el) => el.offsetParent !== null && isSelectableCard(el)
+      );
+      for (const el of cards) selected.add(String(el.dataset.cid));
+      render?.();
+      window.updateBatchBar?.();
+    }
+
+    const onCtrlA = (e) => {
+      if (!(e.key === "a" || e.key === "A") || !(e.ctrlKey || e.metaKey))
+        return;
+
+      const a = document.activeElement;
+      const isEditable =
+        a &&
+        (a.tagName === "INPUT" ||
+          a.tagName === "TEXTAREA" ||
+          a.isContentEditable ||
+          a.getAttribute?.("role") === "textbox");
+
+      if (isEditable) return;
+
+      if (!dlg.contains(a)) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      selectAllVisibleCards();
+    };
+
+    dlg.addEventListener("keydown", onCtrlA, true);
+
+    document.addEventListener("keydown", onEsc);
+    document.addEventListener("click", onOutside, true);
 
     const clearErrorsOnClickInside = (e) => {
       if (card && card.contains(e.target)) hideAllFieldErrors(dlg);
     };
     dlg.addEventListener("mousedown", clearErrorsOnClickInside);
+
+    bfCleanup = () => {
+      document.removeEventListener("keydown", onEsc);
+      document.removeEventListener("click", onOutside, true);
+      dlg.removeEventListener("mousedown", clearErrorsOnClickInside);
+      dlg.removeEventListener("keydown", onCtrlA, true);
+    };
 
     const form = dlg.querySelector("#bf-form");
     if (form) {
@@ -3438,10 +3942,6 @@
     const rowSince = sinceEl?.closest(".indent");
     const rowLast = lastEl?.closest(".indent");
     const rowBetween = dlg.querySelector(".bf-row-between");
-
-    attachPicker(sinceEl);
-    attachPicker(fromEl);
-    attachPicker(toEl);
 
     [sinceEl, lastEl, fromEl, toEl].forEach((el) =>
       el?.addEventListener("input", () => {
@@ -3491,14 +3991,12 @@
     function hideMenuMessage() {
       alertBox?.classList.remove("show");
     }
-
     [startBtn, dlg].forEach((el) =>
       el?.addEventListener("blur", hideMenuMessage, true)
     );
 
     function onSubmit(ev) {
       ev.preventDefault();
-
       if (cloneIsLocked(cloneId)) return;
 
       if (startBtn) startBtn.disabled = true;
@@ -3612,7 +4110,6 @@
     if (form) {
       form.setAttribute("novalidate", "");
       form.addEventListener("invalid", (e) => e.preventDefault(), true);
-
       if (form.__bfSubmit) form.removeEventListener("submit", form.__bfSubmit);
       form.__bfSubmit = onSubmit;
       form.addEventListener("submit", onSubmit);
@@ -3636,6 +4133,283 @@
     }
     if (back) back.hidden = true;
     bfChannelId = null;
+    document.body.classList.remove("modal-open");
+    window.updateBatchBar?.();
+  }
+
+  function openBatchBackfillDialog(channelIds) {
+    hideMenuForModal();
+    const dlgId = "backfill-batch-dialog";
+    let dlg = document.getElementById(dlgId);
+
+    if (!dlg) {
+      const fieldsHTML = `
+        <fieldset class="field bf-field">
+          <legend>How far back?</legend>
+  
+          <label class="radio">
+            <input type="radio" name="mode" value="all" checked>
+            All history
+          </label>
+  
+          <label class="radio">
+            <input type="radio" name="mode" value="since">
+            Since date/time
+          </label>
+          <div class="indent">
+            <input class="input" type="date" id="bf-batch-since" name="since" disabled>
+          </div>
+  
+          <label class="radio">
+            <input type="radio" name="mode" value="between">
+            Between dates
+          </label>
+          <div class="indent bf-row-between">
+            <div class="bf-dual">
+              <label class="sr-only" for="bf-batch-from">From</label>
+              <input class="input" type="date" id="bf-batch-from" disabled>
+            </div>
+            <div class="bf-dual" style="margin-top:8px">
+              <label class="sr-only" for="bf-batch-to">To</label>
+              <input class="input" type="date" id="bf-batch-to" disabled>
+            </div>
+          </div>
+  
+          <label class="radio">
+            <input type="radio" name="mode" value="last">
+            Last N messages
+          </label>
+          <div class="indent">
+            <input class="input" type="number" id="bf-batch-lastn" min="1" step="1" placeholder="100" disabled>
+          </div>
+        </fieldset>
+      `;
+
+      dlg = document.createElement("div");
+      dlg.id = dlgId;
+      dlg.className = "modal bf-modal bf-skin";
+      dlg.setAttribute("aria-hidden", "true");
+      dlg.hidden = true;
+      dlg.innerHTML = `
+        <div class="modal-backdrop" data-role="backdrop" hidden></div>
+        <div class="modal-card bf-card" role="dialog" aria-modal="true" aria-labelledby="bf-batch-title" tabindex="-1">
+          <header class="modal-head bf-head">
+            <h3 id="bf-batch-title">Clone Selected Channels</h3>
+            <button class="icon-btn verify-close" id="bf-batch-close" aria-label="Close">✕</button>
+          </header>
+          <div class="modal-body bf-body">
+            <form id="bf-batch-form" novalidate>
+              ${fieldsHTML}
+              <div class="buttons">
+                <button id="bf-batch-start" class="btn btn-ghost" type="submit">Start</button>
+              </div>
+            </form>
+            <div class="muted mt">You selected <b id="bf-batch-n"></b> channel(s).</div>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(dlg);
+    }
+
+    const back = dlg.querySelector('[data-role="backdrop"]');
+    const card = dlg.querySelector(".modal-card");
+    const form = dlg.querySelector("#bf-batch-form");
+    const btnClose = dlg.querySelector("#bf-batch-close");
+    const startBtn = dlg.querySelector("#bf-batch-start");
+    const countEl = dlg.querySelector("#bf-batch-n");
+
+    try {
+      bfBatchCleanup?.();
+    } finally {
+      bfBatchCleanup = null;
+    }
+
+    if (countEl) countEl.textContent = String(channelIds?.length || 0);
+
+    resetBatchBackfillForm(dlg);
+
+    document.body.classList.add("modal-open");
+    back?.removeAttribute("hidden");
+    dlg.hidden = false;
+    dlg.removeAttribute("aria-hidden");
+    dlg.classList.add("show");
+    setTimeout(() => card?.focus?.({ preventScroll: true }), 0);
+
+    const onEsc = (e) => {
+      if (e.key === "Escape") closeBatchBackfillDialog();
+    };
+    const onBackdrop = (e) => {
+      if (e.target === back) closeBatchBackfillDialog();
+    };
+    const onOutside = (e) => {
+      if (card && !card.contains(e.target))
+        setTimeout(closeBatchBackfillDialog, 0);
+    };
+
+    document.addEventListener("keydown", onEsc);
+    back?.addEventListener("click", onBackdrop);
+    document.addEventListener("click", onOutside, true);
+    btnClose?.addEventListener("click", closeBatchBackfillDialog, {
+      once: true,
+    });
+
+    async function onSubmit(ev) {
+      ev.preventDefault();
+      if (!Array.isArray(channelIds) || !channelIds.length) return;
+
+      const ids = [...new Set(channelIds.map(String))];
+
+      const mode =
+        form.querySelector('input[name="mode"]:checked')?.value || "all";
+      const sinceEl = dlg.querySelector("#bf-batch-since");
+      const lastEl = dlg.querySelector("#bf-batch-lastn");
+      const fromEl = dlg.querySelector("#bf-batch-from");
+      const toEl = dlg.querySelector("#bf-batch-to");
+
+      const _startOfDayIsoLocal = (d) =>
+        typeof startOfDayIsoLocal === "function"
+          ? startOfDayIsoLocal(d)
+          : `${d}T00:00`;
+      const _nextDayStartIsoLocal = (d) =>
+        typeof nextDayStartIsoLocal === "function"
+          ? nextDayStartIsoLocal(d)
+          : (() => {
+              const dt = new Date(`${d}T00:00`);
+              dt.setDate(dt.getDate() + 1);
+              const y = dt.getFullYear(),
+                m = String(dt.getMonth() + 1).padStart(2, "0"),
+                day = String(dt.getDate()).padStart(2, "0");
+              return `${y}-${m}-${day}T00:00`;
+            })();
+
+      startBtn.disabled = true;
+
+      const body = { channel_ids: ids, mode };
+
+      if (mode === "since") {
+        const since = (sinceEl?.value || "").trim();
+        if (!since) {
+          window.showToast("Pick a start date.", { type: "warning" });
+          sinceEl?.focus();
+          startBtn.disabled = false;
+          return;
+        }
+        body.after_iso = _startOfDayIsoLocal(since);
+      } else if (mode === "last") {
+        const n = parseInt((lastEl?.value || "").trim(), 10);
+        if (!Number.isFinite(n) || n <= 0) {
+          window.showToast("Enter a valid positive number.", {
+            type: "warning",
+          });
+          lastEl?.focus();
+          startBtn.disabled = false;
+          return;
+        }
+        body.last_n = n;
+      } else if (mode === "between") {
+        const from = (fromEl?.value || "").trim();
+        const to = (toEl?.value || "").trim();
+        if (!from || !to) {
+          window.showToast("Select both From and To dates.", {
+            type: "warning",
+          });
+          (from ? toEl : fromEl)?.focus();
+          startBtn.disabled = false;
+          return;
+        }
+        if (
+          typeof validateBetween === "function" &&
+          !validateBetween(fromEl, toEl)
+        ) {
+          startBtn.disabled = false;
+          return;
+        }
+        body.after_iso = _startOfDayIsoLocal(from);
+        body.before_iso = _nextDayStartIsoLocal(to);
+      }
+
+      try {
+        const res = await fetch("/api/backfill/start-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          cache: "no-store",
+          body: JSON.stringify(body),
+        });
+        const json = await res.json().catch(() => ({}));
+
+        if (!res.ok || json?.ok === false) {
+          window.showToast(json?.error || "Failed to start batch clone.", {
+            type: "error",
+          });
+          startBtn.disabled = false;
+          return;
+        }
+
+        (json.results || []).forEach((r, i) => {
+          if (r?.ok) {
+            try {
+              setCloneLaunching(ids[i], true);
+            } catch {}
+          }
+        });
+
+        const c = json.counts || {};
+        window.showToast(
+          `Batch: started ${c.started || 0}, locked ${c.locked || 0}, failed ${
+            c.failed || 0
+          }.`,
+          { type: c.started ? "success" : "warning" }
+        );
+
+        closeBatchBackfillDialog();
+        try {
+          await fetchAndApplyInflight();
+        } catch {}
+      } catch {
+        window.showToast("Network error starting batch clone.", {
+          type: "error",
+        });
+        startBtn.disabled = false;
+      }
+    }
+
+    if (form) {
+      if (form.__bfBatchSubmit)
+        form.removeEventListener("submit", form.__bfBatchSubmit);
+      form.__bfBatchSubmit = onSubmit;
+      form.addEventListener("submit", onSubmit);
+    }
+
+    bfBatchCleanup = () => {
+      document.removeEventListener("keydown", onEsc);
+      document.removeEventListener("click", onOutside, true);
+      back?.removeEventListener("click", onBackdrop);
+      if (form?.__bfBatchSubmit) {
+        form.removeEventListener("submit", form.__bfBatchSubmit);
+        form.__bfBatchSubmit = null;
+      }
+    };
+  }
+
+  function toggleCardSelection(card) {
+    if (!isSelectableCard(card)) return;
+    const id = String(card.dataset.cid);
+    const next = !selected.has(id);
+    if (next) selected.add(id);
+    else selected.delete(id);
+    card.classList.toggle("is-selected", next);
+    card.setAttribute("aria-checked", next ? "true" : "false");
+    card
+      .querySelector(".ch-select")
+      ?.setAttribute("aria-pressed", next ? "true" : "false");
+    window.updateBatchBar?.();
+  }
+
+  function isInteractiveInside(el) {
+    return !!el.closest(
+      'button, a, input, textarea, select, [role="button"], .ch-menu-btn, .cat-menu-trigger'
+    );
   }
 
   async function checkResumeAndPrompt(originalId) {

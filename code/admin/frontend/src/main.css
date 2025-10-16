@@ -443,7 +443,7 @@ th {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0 !important;
 }
 .modal-title {
   margin: 0;
@@ -2470,7 +2470,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0 !important;
 }
 .bf-body {
   padding: 16px;
@@ -2551,11 +2551,11 @@ body {
   outline: 0 !important;
   box-shadow: none !important;
 }
-.ch-card:not(.orphan),
-.ch-card:not(.orphan):focus,
-.ch-card:not(.orphan):focus-visible,
-.ch-card:not(.orphan):focus-within,
-.ch-card:not(.orphan):hover {
+.ch-card:not(.orphan):not(.is-selected),
+.ch-card:not(.orphan):not(.is-selected):focus,
+.ch-card:not(.orphan):not(.is-selected):focus-visible,
+.ch-card:not(.orphan):not(.is-selected):focus-within,
+.ch-card:not(.orphan):not(.is-selected):hover {
   box-shadow: none !important;
   outline: 0 !important;
 }
@@ -5830,4 +5830,349 @@ body.is-loading {
 #confirm-modal .resume-modal .question {
   margin-top: 6px !important;
   margin-bottom: 0 !important;
+}
+
+.ch-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.channels-head,
+.ch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#bf-batchbar.inline.minimal {
+  position: static;
+  margin-left: auto;
+  transform: none;
+  opacity: 1;
+  pointer-events: auto;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  max-width: none;
+}
+#bf-batchbar.inline.minimal .inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+}
+#bf-batchbar.inline.minimal .spacer {
+  display: none;
+}
+#bf-batchbar.inline.minimal:not(.show) {
+  display: none;
+}
+#bf-batchbar.inline.minimal .btn,
+#bf-batchbar.inline.minimal .btn-ghost {
+  height: 28px;
+  line-height: 28px;
+  padding: 0 10px;
+}
+
+#bf-batchbar.popover.minimal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  opacity: 0;
+  transform: translateY(-4px);
+  pointer-events: none;
+  z-index: 10005;
+  transition: opacity 0.14s ease-out, transform 0.14s ease-out;
+  will-change: top, left, opacity, transform;
+}
+#bf-batchbar.popover.minimal.show {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+#bf-batchbar.popover.minimal .inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0;
+}
+#bf-batchbar.popover.minimal #bf-count {
+  font-size: 12px;
+  line-height: 1;
+  color: var(--muted-2, #a8a2b6);
+}
+#bf-batchbar.popover.minimal .spacer {
+  display: none;
+}
+#bf-batchbar.popover.minimal .btn,
+#bf-batchbar.popover.minimal .btn-ghost {
+  height: 28px;
+  line-height: 28px;
+  padding: 0 10px;
+}
+@media (max-width: 560px) {
+  #bf-batchbar.popover.minimal .btn,
+  #bf-batchbar.popover.minimal .btn-ghost {
+    padding: 0 8px;
+  }
+}
+
+.ch-card[data-clickable='1'] {
+  cursor: pointer;
+}
+.ch-card:focus {
+  outline: 0;
+  box-shadow: 0 0 0 2px var(--focus-ring, #2563eb);
+}
+.ch-card.is-selected,
+.ch-card.is-selected:focus,
+.ch-card.is-selected:hover {
+  --sel: var(--good, #10b981);
+  box-shadow: 0 0 0 2px var(--sel) !important;
+  background: color-mix(in srgb, var(--sel) 10%, transparent) !important;
+  background-color: rgba(16, 185, 129, 0.1);
+}
+
+.ch-card[aria-checked='true'] {
+  --sel: var(--good, #10b981);
+  box-shadow: 0 0 0 2px var(--sel) !important;
+  background: color-mix(in srgb, var(--sel) 10%, transparent) !important;
+  background-color: rgba(16, 185, 129, 0.1);
+}
+
+.ch-card.is-selected .ch-select {
+  background: var(--accent, #3b82f6);
+  color: #fff;
+}
+.ch-card .ch-select {
+  display: none !important;
+}
+[hidden] {
+  display: none !important;
+}
+
+body.modal-open #bf-batchbar {
+  display: none !important;
+}
+
+#backfill-backdrop,
+#verify-backdrop,
+#backfill-batch-dialog .modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(18, 10, 34, 0.66);
+  z-index: 10008;
+}
+#ch-menu {
+  position: fixed;
+  z-index: 9990;
+}
+
+#backfill-dialog,
+#backfill-batch-dialog {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: calc(var(--header-h, 60px) + 24px);
+  z-index: 10010;
+}
+#backfill-dialog.show,
+#backfill-batch-dialog.show {
+  display: flex;
+}
+
+#backfill-dialog .modal-card,
+#backfill-batch-dialog .modal-card {
+  position: fixed;
+  top: calc(var(--header-h, 60px) + 24px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(720px, 95vw);
+  max-height: calc(100vh - var(--header-h, 60px) - 48px);
+  overflow: auto;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: var(--card-solid, #1b1030);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  z-index: 10012;
+}
+
+#backfill-dialog .modal-header,
+#backfill-batch-dialog .modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 0 !important;
+}
+
+#backfill-batch-dialog .modal-header {
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+}
+
+#backfill-dialog .modal-body,
+#backfill-batch-dialog .modal-body {
+  padding-top: 10px;
+}
+#backfill-dialog .bf-row,
+#backfill-batch-dialog .bf-row {
+  margin: 10px 0;
+}
+#backfill-dialog .indent,
+#backfill-batch-dialog .indent {
+  margin: 8px 0 0 28px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+#backfill-dialog .btns,
+#backfill-batch-dialog .btns {
+  margin-top: 14px;
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+#backfill-dialog .btn,
+#backfill-batch-dialog .btn {
+  background: linear-gradient(180deg, #1f1237, #160b2a);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 600;
+}
+
+#backfill-dialog .btn.btn-ghost,
+#backfill-batch-dialog .btn.btn-ghost {
+  background: #ffffff0a;
+  border-color: var(--border);
+  color: var(--accent);
+}
+#backfill-dialog .btn.btn-ghost:hover,
+#backfill-batch-dialog .btn.btn-ghost:hover {
+  background: #ffffff14;
+}
+#backfill-dialog .btn.btn-ghost:active,
+#backfill-batch-dialog .btn.btn-ghost:active {
+  background: #ffffff1f;
+}
+
+#backfill-batch-dialog {
+  --bf-accent: var(--accent, var(--brand, var(--purple, #7c5cff)));
+  --bf-text: var(--text, #e7e9ef);
+  --bf-muted: var(--muted, #aeb3c2);
+  --bf-bg: var(--panel, #15171a);
+  --bf-input: var(--panel-2, rgba(255, 255, 255, 0.045));
+  --bf-border: var(--border, rgba(255, 255, 255, 0.12));
+  --bf-input-w: 300px;
+  color-scheme: dark;
+}
+
+#backfill-batch-dialog,
+#backfill-batch-dialog * {
+  filter: none !important;
+  -webkit-filter: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+#backfill-batch-dialog input[type='date'],
+#backfill-batch-dialog input[type='number'] {
+  width: min(100%, var(--bf-input-w));
+  max-width: var(--bf-input-w);
+  background: var(--bf-input);
+  color: var(--bf-text);
+  border: 1px solid var(--bf-border);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font: 500 14px/1.2 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  outline: none;
+  transition: box-shadow 0.15s, border-color 0.15s;
+  -webkit-appearance: auto;
+  -moz-appearance: auto;
+  appearance: auto;
+}
+
+#backfill-dialog .bf-cal-btn,
+#backfill-batch-dialog .bf-cal-btn {
+  display: none !important;
+}
+#backfill-dialog .bf-input-wrap,
+#backfill-batch-dialog .bf-input-wrap {
+  display: contents !important;
+}
+
+#backfill-batch-dialog .bf-row-between .indent {
+  align-items: center;
+}
+#backfill-batch-dialog .bf-row-between .bf-dual {
+  margin-top: 0 !important;
+}
+
+#backfill-batch-dialog label.sr-only {
+  margin: 0 !important;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+#backfill-dialog .bf-row-between .indent,
+#backfill-batch-dialog .bf-row-between .indent {
+  align-items: center;
+}
+
+#backfill-dialog .bf-row-between .bf-dual,
+#backfill-batch-dialog .bf-row-between .bf-dual {
+  margin-top: 0 !important;
+}
+
+#backfill-dialog .indent,
+#backfill-batch-dialog .indent {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+#backfill-dialog label.sr-only,
+#backfill-batch-dialog label.sr-only {
+  margin: 0 !important;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+#backfill-batch-dialog label.radio {
+  margin: 18px 0;
+  display: flex;
+  align-items: center;
+}
+#backfill-batch-dialog label.radio > input[type='radio'] {
+  margin-right: 8px;
+}
+
+#backfill-batch-dialog .bf-field .indent {
+  margin: 6px 0 10px 1.75rem;
 }
