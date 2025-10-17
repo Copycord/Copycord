@@ -20,6 +20,8 @@ from datetime import datetime, timezone
 import time
 import logging
 import time
+import re
+from typing import Optional
 from common.config import Config
 from common.db import DBManager
 from server.rate_limiter import RateLimitManager, ActionType
@@ -1642,6 +1644,90 @@ class CloneCommands(commands.Cog):
                 description=summary,
                 color=discord.Color.green() if not dry_run else discord.Color.blurple(),
             ),
+            ephemeral=True,
+        )
+                
+    @commands.slash_command(
+        name="pull_assets",
+        description="Export server emojis and/or stickers to /data/assets as a .tar.gz",
+        guild_ids=[GUILD_ID],
+    )
+    async def pull_assets(
+        self,
+        ctx: discord.ApplicationContext,
+        asset: str = Option(
+            str,
+            "Choose which assets to export",
+            choices=["both", "emojis", "stickers"],
+            required=True,
+            default="both",
+        ),
+        guild_id: Optional[str] = Option(
+            str,
+            "Guild ID to pull from (optional). Leave blank for the host guild.",
+            required=False,
+        ),
+    ):
+        await ctx.defer(ephemeral=True)
+
+        # Parse optional guild_id string into an int snowflake, if provided.
+        parsed_gid: Optional[int] = None
+        if guild_id:
+            m = re.search(r"\d{16,20}", guild_id)
+            if not m:
+                return await ctx.followup.send(
+                    embed=self._err_embed("Invalid Guild ID", "Please provide a numeric guild ID (16–20 digits)."),
+                    ephemeral=True,
+                )
+            try:
+                parsed_gid = int(m.group(0))
+                if parsed_gid <= 0:
+                    raise ValueError()
+            except Exception:
+                return await ctx.followup.send(
+                    embed=self._err_embed("Invalid Guild ID", "That didn’t look like a valid snowflake."),
+                    ephemeral=True,
+                )
+
+        payload = {"type": "pull_assets", "data": {"asset": asset}}
+        if parsed_gid:
+            payload["data"]["guild_id"] = parsed_gid
+
+        try:
+            resp = await self.bot.ws_manager.request(payload)
+        except Exception as e:
+            return await ctx.followup.send(
+                embed=self._err_embed("Export Failed", f"WebSocket error: {e}"),
+                ephemeral=True,
+            )
+
+        if not resp or not resp.get("ok"):
+            reason = (resp or {}).get("error") or (resp or {}).get("reason") or "Unknown error"
+            return await ctx.followup.send(
+                embed=self._err_embed("Export Rejected", reason),
+                ephemeral=True,
+            )
+
+        saved   = int(resp.get("saved", 0))
+        total   = int(resp.get("total", saved))
+        failed  = int(resp.get("failed", 0))
+        arch    = resp.get("archive")
+        se      = int(resp.get("saved_emojis", 0))
+        ss      = int(resp.get("saved_stickers", 0))
+        te      = int(resp.get("total_emojis", 0))
+        ts      = int(resp.get("total_stickers", 0))
+
+        fields = [
+            ("Saved (total)",   f"**{saved}** / {total}", True),
+            ("Saved (emojis)",  f"{se} / {te}", True),
+            ("Saved (stickers)",f"{ss} / {ts}", True),
+            ("Failed",          f"{failed}", True),
+        ]
+        if arch:
+            fields.append(("Archive", f"`{arch}`", False))
+
+        await ctx.followup.send(
+            embed=self._ok_embed("Asset export complete", "Compressed archive is ready.", fields=fields),
             ephemeral=True,
         )
 
