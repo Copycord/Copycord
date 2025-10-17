@@ -638,6 +638,7 @@ class MemberScraper:
         include_username: bool = False,
         include_avatar_url: bool = False,
         include_bio: bool = False,
+        include_roles: bool = False,
         alphabet: str = "abcdefghijklmnopqrstuvwxyz0123456789_-.",
         max_parallel_per_session: int = 3,
         hello_ready_delay: float = 0.8,
@@ -683,6 +684,8 @@ class MemberScraper:
         guild = self.bot.get_guild(gid_int)
         if not guild:
             raise RuntimeError(f"Guild {gid_int} not found or not cached")
+        
+        role_name_by_id = {str(r.id): r.name for r in getattr(guild, "roles", [])}
 
         gname = getattr(guild, "name", "UNKNOWN")
         self.log.debug(
@@ -1859,6 +1862,12 @@ class MemberScraper:
                                                     rec["avatar_url"] = (
                                                         build_avatar_url(uid, av)
                                                     )
+                                                if include_roles:
+                                                    role_ids = [str(r) for r in (m.get("roles") or [])]
+                                                    rec["roles"] = [
+                                                        {"id": rid, "name": role_name_by_id.get(rid, "Unknown")}
+                                                        for rid in role_ids
+                                                    ]
                                                 if include_bio:
                                                     rec["bio"] = None
                                                     await bio_queue.put(uid)
@@ -2153,6 +2162,8 @@ class MemberScraper:
                     allowed.add("avatar_url")
                 if include_bio:
                     allowed.add("bio")
+                if include_roles:
+                    allowed.add("roles")
 
                 filtered = {k: v for k, v in m.items() if k in allowed}
 

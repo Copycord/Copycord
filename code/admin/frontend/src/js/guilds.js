@@ -1168,6 +1168,11 @@
               <span>Avatar</span>
             </label>
 
+            <label class="check has-tip">
+              <input type="checkbox" id="scr-inc-roles">
+              <span>Roles</span>
+            </label>
+
           <label class="check has-tip">
             <input type="checkbox" id="scr-inc-bio">
             <span class="label-text">Bio</span>
@@ -1261,6 +1266,7 @@
         const include_avatar_url =
           !!modal.querySelector("#scr-inc-avatar")?.checked;
         const include_bio = !!modal.querySelector("#scr-inc-bio")?.checked;
+        const include_roles = !!modal.querySelector("#scr-inc-roles")?.checked;
 
         try {
           modal.remove();
@@ -1274,6 +1280,7 @@
               include_username,
               include_avatar_url,
               include_bio,
+              include_roles,
             }),
           });
 

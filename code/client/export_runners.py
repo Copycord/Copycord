@@ -7,11 +7,14 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 from __future__ import annotations
 
 import asyncio
 import json
 import os
+import shutil
+import unicodedata
 import aiohttp
 import re
 import time
@@ -2115,3 +2118,258 @@ class BackfillEngine:
             await self._safe_ws_send(
                 {"type": "backfill_stream_end", "data": {"channel_id": channel_id}}
             )
+
+
+class AssetExportRunner:
+    """
+    Export selected guild assets (emojis, stickers, or both) into a timestamped
+    directory structured as:
+        <ts>/emoji/...
+        <ts>/stickers/...
+    Compress that directory as a single .tar.gz, then remove the directory so
+    only the archive remains.
+
+    Output file:
+      /data/assets/<safe_guild>_<id>/<safe_guild>_<id>__<YYYYMMDD-HHMMSS>.tar.gz
+    """
+
+    _active_lock: asyncio.Lock = asyncio.Lock()
+    _active: set[int] = set()
+
+    def __init__(
+        self,
+        bot,
+        ws,
+        logger: Optional[logging.Logger] = None,
+        *,
+        out_root: str = "/data/assets",
+    ):
+        self.bot = bot
+        self.ws = ws
+        self.log = logger or logging.getLogger("asset_export")
+        self.out_root = out_root
+
+    async def _try_begin(self, guild_id: int) -> bool:
+        async with self._active_lock:
+            if guild_id in self._active:
+                return False
+            self._active.add(guild_id)
+            return True
+
+    async def _end(self, guild_id: int) -> None:
+        async with self._active_lock:
+            self._active.discard(guild_id)
+
+    @staticmethod
+    def _safe_name(s: str) -> str:
+        s = unicodedata.normalize("NFKD", s or "").strip()
+        return (
+            "".join(ch for ch in s if s and (ch.isalnum() or ch in ("-", "_")))
+            or "asset"
+        )
+
+    async def _download_via_asset_or_url(
+        self, obj, session: aiohttp.ClientSession
+    ) -> bytes:
+        asset_or_url = getattr(obj, "url", None)
+        if asset_or_url is None:
+            raise RuntimeError("no-url")
+        if hasattr(asset_or_url, "read"):
+            return await asset_or_url.read()
+        url = str(asset_or_url)
+        async with session.get(url) as r:
+            r.raise_for_status()
+            return await r.read()
+
+    @staticmethod
+    def _guess_ext_from_url_or_obj(url_str: str, obj, *, is_sticker: bool) -> str:
+        base = url_str.split("?", 1)[0]
+        if "." in base:
+            return base.rsplit(".", 1)[-1].lower()
+        if is_sticker:
+            fmt = getattr(obj, "format", None)
+            name = getattr(fmt, "name", "").lower()
+            if "lottie" in name:
+                return "json"
+            if "apng" in name:
+                return "apng"
+            if "gif" in name:
+                return "gif"
+            return "png"
+        else:
+            return "gif" if getattr(obj, "animated", False) else "png"
+
+    async def run(
+        self, guild, *, include_emojis: bool = True, include_stickers: bool = True
+    ) -> dict:
+        """
+        Returns:
+          {
+            "saved": int, "failed": int, "total": int,
+            "saved_emojis": int, "saved_stickers": int,
+            "failed_emojis": int, "failed_stickers": int,
+            "total_emojis": int, "total_stickers": int,
+            "dir": None,
+            "archive": <.tar.gz path or None>,
+            "files_emojis": [first few],
+            "files_stickers": [first few],
+          }
+        """
+        gid = getattr(guild, "id", None)
+        gname = getattr(guild, "name", "") or "Unknown"
+        if gid is None:
+            return {
+                "saved": 0,
+                "failed": 0,
+                "total": 0,
+                "dir": None,
+                "archive": None,
+                "saved_emojis": 0,
+                "saved_stickers": 0,
+                "failed_emojis": 0,
+                "failed_stickers": 0,
+                "total_emojis": 0,
+                "total_stickers": 0,
+                "files_emojis": [],
+                "files_stickers": [],
+            }
+
+        acquired = await self._try_begin(gid)
+        if not acquired:
+            self.log.warning(f"[asset-export] already running for guild={gid}")
+            return {
+                "saved": 0,
+                "failed": 0,
+                "total": 0,
+                "dir": None,
+                "archive": None,
+                "saved_emojis": 0,
+                "saved_stickers": 0,
+                "failed_emojis": 0,
+                "failed_stickers": 0,
+                "total_emojis": 0,
+                "total_stickers": 0,
+                "files_emojis": [],
+                "files_stickers": [],
+            }
+
+        try:
+
+            emojis, stickers = [], []
+            if include_emojis:
+                emojis = list(getattr(guild, "emojis", []) or [])
+                if not emojis:
+                    try:
+                        emojis = list(await guild.fetch_emojis())
+                    except Exception:
+                        emojis = []
+            if include_stickers:
+                stickers = list(getattr(guild, "stickers", []) or [])
+                if not stickers:
+                    try:
+                        stickers = list(await guild.fetch_stickers())
+                    except Exception:
+                        stickers = []
+
+            total_emojis = len(emojis)
+            total_stickers = len(stickers)
+            total = total_emojis + total_stickers
+
+            safe_gname = self._safe_name(gname or f"guild_{gid}")
+            base_dir = os.path.join(self.out_root, f"{safe_gname}_{gid}")
+            os.makedirs(base_dir, exist_ok=True)
+
+            ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+            run_dir = os.path.join(base_dir, ts)
+            os.makedirs(run_dir, exist_ok=True)
+
+            emoji_dir = os.path.join(run_dir, "emoji")
+            sticker_dir = os.path.join(run_dir, "stickers")
+            if include_emojis:
+                os.makedirs(emoji_dir, exist_ok=True)
+            if include_stickers:
+                os.makedirs(sticker_dir, exist_ok=True)
+
+            saved_emojis = saved_stickers = 0
+            failed_emojis = failed_stickers = 0
+            files_emojis, files_stickers = [], []
+
+            async with aiohttp.ClientSession() as sess:
+                if include_emojis and emojis:
+                    for em in emojis:
+                        try:
+                            u = str(getattr(em, "url", ""))
+                            ext = self._guess_ext_from_url_or_obj(
+                                u, em, is_sticker=False
+                            )
+                            fname = f"{self._safe_name(getattr(em, 'name', 'emoji'))}_{int(em.id)}.{ext}"
+                            with open(os.path.join(emoji_dir, fname), "wb") as f:
+                                f.write(await self._download_via_asset_or_url(em, sess))
+                            files_emojis.append(fname)
+                            saved_emojis += 1
+                        except Exception as e:
+                            failed_emojis += 1
+                            self.log.debug(
+                                f"[asset-export] emoji fail id={getattr(em,'id',None)}: {e}"
+                            )
+
+                if include_stickers and stickers:
+                    for st in stickers:
+                        try:
+                            u = str(getattr(st, "url", ""))
+                            ext = self._guess_ext_from_url_or_obj(
+                                u, st, is_sticker=True
+                            )
+                            fname = f"{self._safe_name(getattr(st, 'name', 'sticker'))}_{int(st.id)}.{ext}"
+                            with open(os.path.join(sticker_dir, fname), "wb") as f:
+                                f.write(await self._download_via_asset_or_url(st, sess))
+                            files_stickers.append(fname)
+                            saved_stickers += 1
+                        except Exception as e:
+                            failed_stickers += 1
+                            self.log.debug(
+                                f"[asset-export] sticker fail id={getattr(st,'id',None)}: {e}"
+                            )
+
+            archive_base = os.path.join(base_dir, f"{safe_gname}_{gid}__{ts}")
+            archive_path = None
+            try:
+                archive_path = shutil.make_archive(
+                    archive_base, "gztar", root_dir=base_dir, base_dir=ts
+                )
+            except Exception as e:
+                self.log.warning(f"[asset-export] tar.gz failed for guild={gid}: {e}")
+
+            if archive_path:
+                try:
+                    shutil.rmtree(run_dir, ignore_errors=True)
+                except Exception as e:
+                    self.log.warning(
+                        f"[asset-export] cleanup failed for guild={gid}: {e}"
+                    )
+
+            saved = saved_emojis + saved_stickers
+            failed = failed_emojis + failed_stickers
+
+            self.log.info(
+                f"[asset-export] done guild={gid}({gname}) total={total} "
+                f"emojis={total_emojis}/{saved_emojis} stickers={total_stickers}/{saved_stickers} "
+                f"archive={archive_path}"
+            )
+            return {
+                "saved": saved,
+                "failed": failed,
+                "total": total,
+                "saved_emojis": saved_emojis,
+                "saved_stickers": saved_stickers,
+                "failed_emojis": failed_emojis,
+                "failed_stickers": failed_stickers,
+                "total_emojis": total_emojis,
+                "total_stickers": total_stickers,
+                "dir": None,
+                "archive": archive_path,
+                "files_emojis": files_emojis[:10],
+                "files_stickers": files_stickers[:10],
+            }
+        finally:
+            await self._end(gid)
