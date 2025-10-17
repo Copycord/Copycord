@@ -248,3 +248,23 @@ If enabled, you’ll receive a direct message with the new member’s details wh
 
 **Notes:**
 - Only one DM export per user can run at a time.
+
+---
+### `/pull_assets <asset> [guild_id]`
+**Description:** Export server **emojis** and/or **stickers** into a compressed folder.
+
+**Options:**
+- `asset` *(required, string; choices: `both`, `emojis`, `stickers`; default: `both`)* — Which assets to export.
+- `guild_id` *(optional, string)* — Target server’s Discord ID. If omitted, the host guild is used.
+
+**Usage Example:**
+```
+/pull_assets both
+/pull_assets emojis
+/pull_assets stickers 159962941502783488
+```
+
+**Notes:**
+- The resulting archive is saved under: `/data/assets`.
+- Inside the archive, assets are organized as:
+---
