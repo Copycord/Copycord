@@ -684,6 +684,8 @@ class MemberScraper:
         guild = self.bot.get_guild(gid_int)
         if not guild:
             raise RuntimeError(f"Guild {gid_int} not found or not cached")
+        
+        role_name_by_id = {str(r.id): r.name for r in getattr(guild, "roles", [])}
 
         gname = getattr(guild, "name", "UNKNOWN")
         self.log.debug(
@@ -1861,7 +1863,11 @@ class MemberScraper:
                                                         build_avatar_url(uid, av)
                                                     )
                                                 if include_roles:
-                                                    rec["roles"] = [str(r) for r in (m.get("roles") or [])]
+                                                    role_ids = [str(r) for r in (m.get("roles") or [])]
+                                                    rec["roles"] = [
+                                                        {"id": rid, "name": role_name_by_id.get(rid, "Unknown")}
+                                                        for rid in role_ids
+                                                    ]
                                                 if include_bio:
                                                     rec["bio"] = None
                                                     await bio_queue.put(uid)
