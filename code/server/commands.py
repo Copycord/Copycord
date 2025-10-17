@@ -503,7 +503,9 @@ class CloneCommands(commands.Cog):
                     ephemeral=True,
                 )
             else:
-                return await ctx.respond("Nothing was deleted (row no longer exists).", ephemeral=True)
+                return await ctx.respond(
+                    "Nothing was deleted (row no longer exists).", ephemeral=True
+                )
 
         subs_cache: dict[tuple[int, str], int] = {}
 
@@ -1285,7 +1287,7 @@ class CloneCommands(commands.Cog):
             str,
             "Optional: Webhook URL to forward messages",
             required=False,
-            default="",   # <-- optional now
+            default="",  # <-- optional now
         ),
         json_file: bool = Option(
             bool,
@@ -1347,7 +1349,7 @@ class CloneCommands(commands.Cog):
             ),
             ephemeral=True,
         )
-        
+
     @commands.slash_command(
         name="onjoin_role",
         description="Toggle an on-join role for THIS server (run again to remove).",
@@ -1365,7 +1367,8 @@ class CloneCommands(commands.Cog):
         if not guild:
             logger.warning(
                 "onjoin_role: no guild context user_id=%s role_id=%s",
-                getattr(ctx.user, "id", "unknown"), getattr(role, "id", "unknown")
+                getattr(ctx.user, "id", "unknown"),
+                getattr(role, "id", "unknown"),
             )
             return await ctx.followup.send(
                 embed=discord.Embed(
@@ -1376,11 +1379,11 @@ class CloneCommands(commands.Cog):
                 ephemeral=True,
             )
 
-
         if role.managed:
             logger.warning(
                 "onjoin_role: reject managed role guild_id=%s role_id=%s",
-                guild.id, role.id
+                guild.id,
+                role.id,
             )
             return await ctx.followup.send(
                 embed=discord.Embed(
@@ -1396,12 +1399,17 @@ class CloneCommands(commands.Cog):
             action = "ADDED" if added else "REMOVED"
             logger.info(
                 "onjoin_role: %s guild_id=%s role_id=%s by user_id=%s",
-                action, guild.id, role.id, ctx.user.id
+                action,
+                guild.id,
+                role.id,
+                ctx.user.id,
             )
         except Exception:
             logger.exception(
                 "onjoin_role: DB toggle failed guild_id=%s role_id=%s user_id=%s",
-                guild.id, role.id, ctx.user.id
+                guild.id,
+                role.id,
+                ctx.user.id,
             )
             return await ctx.followup.send(
                 embed=discord.Embed(
@@ -1415,8 +1423,8 @@ class CloneCommands(commands.Cog):
         title = "On-Join Role Added" if added else "On-Join Role Removed"
         desc = (
             f"{role.mention} will be granted automatically to **new members** on join."
-            if added else
-            f"{role.mention} will **no longer** be granted on join."
+            if added
+            else f"{role.mention} will **no longer** be granted on join."
         )
         color = discord.Color.green() if added else discord.Color.orange()
 
@@ -1428,9 +1436,10 @@ class CloneCommands(commands.Cog):
         dt = (time.perf_counter() - t0) * 1000
         logger.debug(
             "onjoin_role: finished guild_id=%s role_id=%s in %.1fms",
-            guild.id, role.id, dt
+            guild.id,
+            role.id,
+            dt,
         )
-
 
     @commands.slash_command(
         name="onjoin_roles",
@@ -1440,20 +1449,33 @@ class CloneCommands(commands.Cog):
     async def onjoin_roles_list(
         self,
         ctx: discord.ApplicationContext,
-        clear: bool = Option(bool, "Delete ALL on-join roles for this server", required=False, default=False),
+        clear: bool = Option(
+            bool,
+            "Delete ALL on-join roles for this server",
+            required=False,
+            default=False,
+        ),
     ):
         t0 = time.perf_counter()
         await ctx.defer(ephemeral=True)
         guild = ctx.guild
 
         if not guild:
-            logger.warning("onjoin_roles: no guild context user_id=%s", getattr(ctx.user, "id", "unknown"))
+            logger.warning(
+                "onjoin_roles: no guild context user_id=%s",
+                getattr(ctx.user, "id", "unknown"),
+            )
             return await ctx.followup.send("Run this inside a server.", ephemeral=True)
 
         if clear:
             try:
                 removed = self.db.clear_onjoin_roles(guild.id)
-                logger.warning("onjoin_roles: cleared %s entries guild_id=%s by user_id=%s", removed, guild.id, ctx.user.id)
+                logger.warning(
+                    "onjoin_roles: cleared %s entries guild_id=%s by user_id=%s",
+                    removed,
+                    guild.id,
+                    ctx.user.id,
+                )
             except Exception:
                 logger.exception("onjoin_roles: clear failed guild_id=%s", guild.id)
                 return await ctx.followup.send(
@@ -1509,7 +1531,9 @@ class CloneCommands(commands.Cog):
 
         logger.info(
             "onjoin_roles: listed %s roles (missing=%s) guild_id=%s",
-            len(role_ids), missing, guild.id
+            len(role_ids),
+            missing,
+            guild.id,
         )
 
         await ctx.followup.send(
@@ -1532,15 +1556,25 @@ class CloneCommands(commands.Cog):
     async def onjoin_sync(
         self,
         ctx: discord.ApplicationContext,
-        include_bots: bool = Option(bool, "Also give on-join roles to bots", required=False, default=False),
-        dry_run: bool = Option(bool, "Show what would change without modifying roles", required=False, default=False),
+        include_bots: bool = Option(
+            bool, "Also give on-join roles to bots", required=False, default=False
+        ),
+        dry_run: bool = Option(
+            bool,
+            "Show what would change without modifying roles",
+            required=False,
+            default=False,
+        ),
     ):
         t0 = time.perf_counter()
         await ctx.defer(ephemeral=True)
         guild = ctx.guild
 
         if not guild:
-            logger.warning("onjoin_sync: no guild context user_id=%s", getattr(ctx.user, "id", "unknown"))
+            logger.warning(
+                "onjoin_sync: no guild context user_id=%s",
+                getattr(ctx.user, "id", "unknown"),
+            )
             return await ctx.followup.send("Run this inside a server.", ephemeral=True)
 
         try:
@@ -1585,7 +1619,9 @@ class CloneCommands(commands.Cog):
         if skipped_roles:
             logger.warning(
                 "onjoin_sync: skipped %s roles above bot or managed guild_id=%s role_ids=%s",
-                len(skipped_roles), guild.id, [r.id for r in skipped_roles]
+                len(skipped_roles),
+                guild.id,
+                [r.id for r in skipped_roles],
             )
 
         changed_users = 0
@@ -1606,22 +1642,38 @@ class CloneCommands(commands.Cog):
             if dry_run:
                 changed_pairs += len(missing)
                 changed_users += 1
-                logger.debug("onjoin_sync: DRY missing member_id=%s roles=%s", m.id, [r.id for r in missing])
+                logger.debug(
+                    "onjoin_sync: DRY missing member_id=%s roles=%s",
+                    m.id,
+                    [r.id for r in missing],
+                )
                 continue
 
             try:
                 await m.add_roles(*missing, reason="Copycord onjoin_sync")
                 changed_pairs += len(missing)
                 changed_users += 1
-                logger.debug("onjoin_sync: added member_id=%s roles=%s", m.id, [r.id for r in missing])
+                logger.debug(
+                    "onjoin_sync: added member_id=%s roles=%s",
+                    m.id,
+                    [r.id for r in missing],
+                )
             except Exception:
                 failed += 1
-                logger.exception("onjoin_sync: add_roles failed member_id=%s roles=%s", m.id, [r.id for r in missing])
+                logger.exception(
+                    "onjoin_sync: add_roles failed member_id=%s roles=%s",
+                    m.id,
+                    [r.id for r in missing],
+                )
 
         dt = (time.perf_counter() - t0) * 1000
         logger.info(
             "onjoin_sync: done guild_id=%s changed_users=%s changed_pairs=%s failed=%s duration_ms=%.1f",
-            guild.id, changed_users, changed_pairs, failed, dt
+            guild.id,
+            changed_users,
+            changed_pairs,
+            failed,
+            dt,
         )
 
         summary = (
@@ -1646,10 +1698,10 @@ class CloneCommands(commands.Cog):
             ),
             ephemeral=True,
         )
-                
+
     @commands.slash_command(
         name="pull_assets",
-        description="Export server emojis and/or stickers to /data/assets as a .tar.gz",
+        description="Export server emojis and/or stickers to a compressed archive.",
         guild_ids=[GUILD_ID],
     )
     async def pull_assets(
@@ -1670,13 +1722,15 @@ class CloneCommands(commands.Cog):
     ):
         await ctx.defer(ephemeral=True)
 
-        # Parse optional guild_id string into an int snowflake, if provided.
         parsed_gid: Optional[int] = None
         if guild_id:
             m = re.search(r"\d{16,20}", guild_id)
             if not m:
                 return await ctx.followup.send(
-                    embed=self._err_embed("Invalid Guild ID", "Please provide a numeric guild ID (16–20 digits)."),
+                    embed=self._err_embed(
+                        "Invalid Guild ID",
+                        "Please provide a numeric guild ID (16–20 digits).",
+                    ),
                     ephemeral=True,
                 )
             try:
@@ -1685,7 +1739,9 @@ class CloneCommands(commands.Cog):
                     raise ValueError()
             except Exception:
                 return await ctx.followup.send(
-                    embed=self._err_embed("Invalid Guild ID", "That didn’t look like a valid snowflake."),
+                    embed=self._err_embed(
+                        "Invalid Guild ID", "That didn’t look like a valid snowflake."
+                    ),
                     ephemeral=True,
                 )
 
@@ -1702,34 +1758,41 @@ class CloneCommands(commands.Cog):
             )
 
         if not resp or not resp.get("ok"):
-            reason = (resp or {}).get("error") or (resp or {}).get("reason") or "Unknown error"
+            reason = (
+                (resp or {}).get("error")
+                or (resp or {}).get("reason")
+                or "Unknown error"
+            )
             return await ctx.followup.send(
                 embed=self._err_embed("Export Rejected", reason),
                 ephemeral=True,
             )
 
-        saved   = int(resp.get("saved", 0))
-        total   = int(resp.get("total", saved))
-        failed  = int(resp.get("failed", 0))
-        arch    = resp.get("archive")
-        se      = int(resp.get("saved_emojis", 0))
-        ss      = int(resp.get("saved_stickers", 0))
-        te      = int(resp.get("total_emojis", 0))
-        ts      = int(resp.get("total_stickers", 0))
+        saved = int(resp.get("saved", 0))
+        total = int(resp.get("total", saved))
+        failed = int(resp.get("failed", 0))
+        arch = resp.get("archive")
+        se = int(resp.get("saved_emojis", 0))
+        ss = int(resp.get("saved_stickers", 0))
+        te = int(resp.get("total_emojis", 0))
+        ts = int(resp.get("total_stickers", 0))
 
         fields = [
-            ("Saved (total)",   f"**{saved}** / {total}", True),
-            ("Saved (emojis)",  f"{se} / {te}", True),
-            ("Saved (stickers)",f"{ss} / {ts}", True),
-            ("Failed",          f"{failed}", True),
+            ("Saved (total)", f"**{saved}** / {total}", True),
+            ("Saved (emojis)", f"{se} / {te}", True),
+            ("Saved (stickers)", f"{ss} / {ts}", True),
+            ("Failed", f"{failed}", True),
         ]
         if arch:
             fields.append(("Archive", f"`{arch}`", False))
 
         await ctx.followup.send(
-            embed=self._ok_embed("Asset export complete", "Compressed archive is ready.", fields=fields),
+            embed=self._ok_embed(
+                "Asset export complete", "Compressed archive is ready.", fields=fields
+            ),
             ephemeral=True,
         )
+
 
 def setup(bot: commands.Bot):
     bot.add_cog(CloneCommands(bot))
