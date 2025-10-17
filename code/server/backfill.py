@@ -15,6 +15,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 import time
 import uuid
+import os
 from server.rate_limiter import RateLimitManager, ActionType
 
 logger = logging.getLogger("server")
@@ -33,6 +34,8 @@ class BackfillManager:
         self._temps_cache: dict[int, list[str]] = {}
         self._created_cache: dict[int, list[int]] = defaultdict(list)
         self.semaphores: dict[int, asyncio.Semaphore] = {}
+        self._attach_count: dict[int, int] = defaultdict(int)
+        self._last_attach_ts: dict[int, float] = defaultdict(float)
         self._temp_locks: dict[int, asyncio.Lock] = {}
         self._temp_ready: dict[int, asyncio.Event] = {}
         self._global_lock: asyncio.Lock = asyncio.Lock()
@@ -73,6 +76,9 @@ class BackfillManager:
             return
         self._attached[cid].add(task)
         self._inflight[cid] = self._inflight.get(cid, 0) + 1
+        loop = asyncio.get_event_loop()
+        self._attach_count[cid] = self._attach_count.get(cid, 0) + 1
+        self._last_attach_ts[cid] = loop.time()
 
         def _done_cb(t: asyncio.Task, c=cid):
             self._attached[c].discard(t)
@@ -351,7 +357,8 @@ class BackfillManager:
     async def on_done(self, original_id: int, *, wait_cleanup: bool = False) -> None:
         cid = int(original_id)
 
-        await self._wait_drain(cid, no_progress_timeout=120.0)
+        stall = float(os.getenv("BACKFILL_DRAIN_NO_PROGRESS_SECS", "600"))
+        await self._wait_drain(cid, no_progress_timeout=stall)
 
         st = self._progress.get(cid) or {}
         delivered = int(st.get("delivered", 0))
@@ -409,7 +416,8 @@ class BackfillManager:
                 self._by_clone.pop(int(clone_id), None)
             await self.clear_sink(cid)
             await self.end_global_sync(cid)
-            await self._wait_drain(cid, no_progress_timeout=120.0)
+            stall = float(os.getenv("BACKFILL_DRAIN_NO_PROGRESS_SECS", "600"))
+            await self._wait_drain(cid, no_progress_timeout=stall)
             return
 
         async def _cleanup_and_teardown(orig: int, clone: int):
@@ -497,46 +505,47 @@ class BackfillManager:
                 self._inflight.pop(cid, None)
 
     async def _wait_drain(
-        self, cid: int, no_progress_timeout: float = 120.0, log_every: float = 5.0
+        self,
+        cid: int,
+        no_progress_timeout: float = 1800.0,
+        log_every: float = 5.0,
     ) -> None:
-        """
-        Wait until in-flight == 0. Only cancel if there's been *no* progress
-        (in-flight down or delivered up) for `no_progress_timeout` seconds.
-        """
         loop = asyncio.get_event_loop()
-        last_change_ts = loop.time()
+        first_seen = loop.time()
+        last_change_ts = first_seen
         last_inflight = self._inflight.get(cid, 0)
         last_delivered = (self._progress.get(cid) or {}).get("delivered", 0)
+        last_attach_count = self._attach_count.get(cid, 0)
         last_log_ts = 0.0
 
-        while self._inflight.get(cid, 0) > 0:
+        hard_cap = float(os.getenv("BACKFILL_DRAIN_HARD_CAP_SECS", "0")) or None
+
+        while True:
             now = loop.time()
             inflight = self._inflight.get(cid, 0)
             delivered = (self._progress.get(cid) or {}).get("delivered", 0)
+            attach_count = self._attach_count.get(cid, 0)
 
-            if inflight < last_inflight or delivered > last_delivered:
+            if inflight == 0:
+                break
+
+            if (inflight < last_inflight) or (delivered > last_delivered) or (attach_count > last_attach_count):
                 last_change_ts = now
                 last_inflight = inflight
                 last_delivered = delivered
+                last_attach_count = attach_count
 
             if now - last_log_ts >= log_every:
-                logger.debug(
-                    "[📦] draining #%s | inflight=%d delivered=%d",
-                    cid,
-                    inflight,
-                    delivered,
-                )
+                logger.debug("[📦] draining #%s | inflight=%d delivered=%d", cid, inflight, delivered)
                 last_log_ts = now
 
-            if (now - last_change_ts) >= no_progress_timeout:
+            if (now - last_change_ts) >= no_progress_timeout and inflight > 0:
+                logger.debug("[📦] soft-stall but inflight=%d; keeping tasks alive for #%s", inflight, cid)
+                last_change_ts = now
+
+            if hard_cap and (now - first_seen) >= hard_cap:
                 stuck = list(self._attached.get(cid, ()))
-                logger.warning(
-                    "[📦] Drain stalled for #%s (no progress %ss, inflight=%d); cancelling %d task(s)",
-                    cid,
-                    int(no_progress_timeout),
-                    inflight,
-                    len(stuck),
-                )
+                logger.warning("[📦] Hard-cap cancelling %d task(s) for #%s after %ds", len(stuck), cid, int(hard_cap))
                 for t in stuck:
                     t.cancel()
                 if stuck:

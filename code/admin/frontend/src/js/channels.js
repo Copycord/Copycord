@@ -172,11 +172,20 @@
       "#ch-sort",
       "#ch-sortdir",
       "#ch-filter",
+      "#ch-menu",
+      "#bf-batchbar",
     ],
 
     require: "both",
 
     onDown() {
+      try {
+        hideMenuForModal();
+      } catch {}
+      try {
+        const bar = document.getElementById("bf-batchbar");
+        if (bar) bar.classList.remove("show");
+      } catch {}
       try {
         resetAllCloningUI();
       } catch {}
@@ -940,9 +949,9 @@
       <div class="inner">
         <span id="bf-count">0 selected</span>
         <div class="spacer"></div>
-        <button id="bf-selectall" class="btn btn-ghost" type="button">Select all in view</button>
-        <button id="bf-clear" class="btn btn-ghost" type="button">Clear</button>
-        <button id="bf-batch" class="btn btn-ghost" type="button" disabled>Clone Messages</button>
+        <button id="bf-selectall" class="btn btn-ghost btn-compact" type="button">Select Listed</button>
+        <button id="bf-clear" class="btn btn-ghost btn-compact" type="button">Clear Selected</button>
+        <button id="bf-batch" class="btn btn-ghost btn-compact" type="button" disabled>Clone Messages</button>
       </div>
     `;
     document.body.appendChild(bar);
@@ -973,33 +982,25 @@
 
     btnStart.addEventListener("click", () => {
       if (!selected.size) return;
-      openBatchBackfillDialog([...selected]);
+
+      const ids = [...selected];
+      selected.clear();
+      window.updateBatchBar?.();
+      render?.();
+
+      if (ids.length === 1) {
+        openBackfillDialog(ids[0]);
+      } else {
+        openBatchBackfillDialog(ids);
+      }
     });
 
     function placePopover() {
+      const bar = document.getElementById("bf-batchbar");
       const anchor = document.getElementById("orph-delall");
-      if (!anchor) {
-        // Fallback: pin near right side of toolbar if the button isn't available
-        const wrap = document.querySelector(
-          ".channels-head, .ch-controls, .ch-toolbar"
-        );
-        const r = wrap
-          ? wrap.getBoundingClientRect()
-          : { top: 16, right: window.innerWidth - 16, height: 36 };
-        const bw = bar.offsetWidth || 280;
-        const bh = bar.offsetHeight || 32;
-        const top = r.top + window.scrollY + Math.max(0, (r.height - bh) / 2);
-        const left = r.right + window.scrollX - bw;
-        bar.style.top = `${Math.max(
-          window.scrollY + 8,
-          Math.min(top, window.scrollY + window.innerHeight - bh - 8)
-        )}px`;
-        bar.style.left = `${Math.max(
-          window.scrollX + 8,
-          Math.min(left, window.scrollX + window.innerWidth - bw - 8)
-        )}px`;
-        return;
-      }
+      const wrap = document.querySelector(
+        ".channels-head, .ch-controls, .ch-toolbar"
+      );
 
       const wasHidden = !bar.classList.contains("show");
       if (wasHidden) {
@@ -1008,20 +1009,66 @@
         bar.classList.add("show");
       }
 
-      const ar = anchor.getBoundingClientRect();
-      const bw = bar.offsetWidth;
-      const bh = bar.offsetHeight;
+      const container =
+        (anchor && anchor.closest && anchor.closest(".card")) ||
+        document.querySelector(".channels-page .container.wide .card") ||
+        document.querySelector(".channels-page .card") ||
+        document.querySelector(".card");
 
-      let top = ar.top + window.scrollY + Math.max(0, (ar.height - bh) / 2);
-      let left = ar.right + window.scrollX + 8;
+      const clampRect = container
+        ? container.getBoundingClientRect()
+        : {
+            left: 0,
+            top: 0,
+            right: window.innerWidth,
+            bottom: window.innerHeight,
+          };
 
-      const maxLeft = window.scrollX + window.innerWidth - bw - 8;
-      const maxTop = window.scrollY + window.innerHeight - bh - 8;
-      top = Math.max(window.scrollY + 8, Math.min(top, maxTop));
-      left = Math.min(left, maxLeft);
+      const r = (anchor || wrap)?.getBoundingClientRect() || {
+        top: 16,
+        left: 16,
+        right: window.innerWidth - 16,
+        height: 36,
+        bottom: 16,
+      };
 
-      bar.style.top = `${Math.round(top)}px`;
+      const bw = bar.offsetWidth || 280;
+      const bh = bar.offsetHeight || 32;
+      const pad = 8;
+      const gap = 8;
+
+      let top = r.top + Math.max(0, (r.height - bh) / 2);
+      let left = r.right + gap;
+
+      if (
+        left + bw > clampRect.right &&
+        r.left - gap - bw >= clampRect.left + pad
+      ) {
+        left = r.left - gap - bw;
+      }
+
+      if (
+        top + bh > clampRect.bottom &&
+        r.top - gap - bh >= clampRect.top + pad
+      ) {
+        top = r.top - gap - bh;
+      }
+
+      left = Math.max(
+        clampRect.left + pad,
+        Math.min(left, clampRect.right - bw - pad)
+      );
+      top = Math.max(
+        clampRect.top + pad,
+        Math.min(top, clampRect.bottom - bh - pad)
+      );
+
+      const maxW = Math.max(160, clampRect.right - clampRect.left - 2 * pad);
+      bar.style.maxWidth = `${Math.floor(maxW)}px`;
+
+      bar.style.position = "fixed";
       bar.style.left = `${Math.round(left)}px`;
+      bar.style.top = `${Math.round(top)}px`;
 
       if (wasHidden) {
         bar.classList.remove("show");
@@ -4138,6 +4185,9 @@
   }
 
   function openBatchBackfillDialog(channelIds) {
+    selected.clear();
+    window.updateBatchBar?.();
+    render?.();
     hideMenuForModal();
     const dlgId = "backfill-batch-dialog";
     let dlg = document.getElementById(dlgId);
@@ -4183,6 +4233,28 @@
             <input class="input" type="number" id="bf-batch-lastn" min="1" step="1" placeholder="100" disabled>
           </div>
         </fieldset>
+
+    <fieldset class="field bf-field" style="margin-top:12px">
+      <legend>Mode</legend>
+
+      <label class="radio has-tip">
+        <input type="radio" name="bf_action" value="resume" checked>
+        <span>Resume previous</span>
+        <button class="info-dot" type="button" aria-describedby="tip-bf-resume"></button>
+        <div id="tip-bf-resume" class="tip-bubble" role="tooltip" aria-hidden="true">
+          Resumes any in-progress runs or starts fresh runs if none exist
+        </div>
+      </label>
+
+      <label class="radio has-tip">
+        <input type="radio" name="bf_action" value="new">
+        <span>Start new</span>
+        <button class="info-dot" type="button" aria-describedby="tip-bf-new"></button>
+        <div id="tip-bf-new" class="tip-bubble" role="tooltip" aria-hidden="true">
+          Discards any in-progress runs and begins fresh runs
+        </div>
+      </label>
+    </fieldset>
       `;
 
       dlg = document.createElement("div");
@@ -4257,10 +4329,14 @@
       ev.preventDefault();
       if (!Array.isArray(channelIds) || !channelIds.length) return;
 
-      const ids = [...new Set(channelIds.map(String))];
+      const ids = Array.from(new Set(channelIds.map(String)));
 
       const mode =
         form.querySelector('input[name="mode"]:checked')?.value || "all";
+      const action =
+        form.querySelector('input[name="bf_action"]:checked')?.value ||
+        "resume";
+
       const sinceEl = dlg.querySelector("#bf-batch-since");
       const lastEl = dlg.querySelector("#bf-batch-lastn");
       const fromEl = dlg.querySelector("#bf-batch-from");
@@ -4282,19 +4358,15 @@
               return `${y}-${m}-${day}T00:00`;
             })();
 
-      startBtn.disabled = true;
-
-      const body = { channel_ids: ids, mode };
-
+      const base = { mode };
       if (mode === "since") {
         const since = (sinceEl?.value || "").trim();
         if (!since) {
           window.showToast("Pick a start date.", { type: "warning" });
           sinceEl?.focus();
-          startBtn.disabled = false;
           return;
         }
-        body.after_iso = _startOfDayIsoLocal(since);
+        base.after_iso = _startOfDayIsoLocal(since);
       } else if (mode === "last") {
         const n = parseInt((lastEl?.value || "").trim(), 10);
         if (!Number.isFinite(n) || n <= 0) {
@@ -4302,10 +4374,9 @@
             type: "warning",
           });
           lastEl?.focus();
-          startBtn.disabled = false;
           return;
         }
-        body.last_n = n;
+        base.last_n = n;
       } else if (mode === "between") {
         const from = (fromEl?.value || "").trim();
         const to = (toEl?.value || "").trim();
@@ -4314,64 +4385,133 @@
             type: "warning",
           });
           (from ? toEl : fromEl)?.focus();
-          startBtn.disabled = false;
           return;
         }
         if (
           typeof validateBetween === "function" &&
           !validateBetween(fromEl, toEl)
         ) {
-          startBtn.disabled = false;
           return;
         }
-        body.after_iso = _startOfDayIsoLocal(from);
-        body.before_iso = _nextDayStartIsoLocal(to);
+        base.after_iso = _startOfDayIsoLocal(from);
+        base.before_iso = _nextDayStartIsoLocal(to);
       }
 
-      try {
-        const res = await fetch("/api/backfill/start-batch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          cache: "no-store",
-          body: JSON.stringify(body),
-        });
-        const json = await res.json().catch(() => ({}));
+      startBtn.disabled = true;
 
-        if (!res.ok || json?.ok === false) {
-          window.showToast(json?.error || "Failed to start batch clone.", {
+      if (action === "new") {
+        const body = { channel_ids: ids, ...base, resume: false };
+        try {
+          const res = await fetch("/api/backfill/start-batch", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            cache: "no-store",
+            body: JSON.stringify(body),
+          });
+          const json = await res.json().catch(() => ({}));
+
+          if (!res.ok || json?.ok === false) {
+            window.showToast(json?.error || "Failed to start batch clone.", {
+              type: "error",
+            });
+            startBtn.disabled = false;
+            return;
+          }
+
+          (json.results || []).forEach((r, i) => {
+            if (r?.ok) {
+              try {
+                setCloneLaunching(ids[i], true);
+              } catch {}
+            }
+          });
+
+          const c = json.counts || {};
+          window.showToast(
+            `Batch: started ${c.started || 0}, locked ${
+              c.locked || 0
+            }, failed ${c.failed || 0}.`,
+            { type: c.started ? "success" : "warning" }
+          );
+
+          closeBatchBackfillDialog();
+          try {
+            await fetchAndApplyInflight();
+          } catch {}
+        } catch {
+          window.showToast("Network error starting batch clone.", {
             type: "error",
           });
           startBtn.disabled = false;
-          return;
         }
-
-        (json.results || []).forEach((r, i) => {
-          if (r?.ok) {
-            try {
-              setCloneLaunching(ids[i], true);
-            } catch {}
-          }
-        });
-
-        const c = json.counts || {};
-        window.showToast(
-          `Batch: started ${c.started || 0}, locked ${c.locked || 0}, failed ${
-            c.failed || 0
-          }.`,
-          { type: c.started ? "success" : "warning" }
-        );
-
-        closeBatchBackfillDialog();
-        try {
-          await fetchAndApplyInflight();
-        } catch {}
-      } catch {
-        window.showToast("Network error starting batch clone.", {
-          type: "error",
-        });
-        startBtn.disabled = false;
+        return;
       }
+
+      let started = 0,
+        locked = 0,
+        failed = 0;
+
+      for (const cid of ids) {
+        let canResume = false,
+          checkpoint = null;
+        try {
+          const r = await fetch(
+            `/api/backfills/resume-info?channel_id=${encodeURIComponent(cid)}`,
+            { credentials: "same-origin", cache: "no-store" }
+          );
+          const j = await r.json().catch(() => ({}));
+          const info = j?.data || j?.resume || null;
+          canResume = !!(info?.resumable || info?.active);
+          checkpoint = info?.checkpoint || null;
+        } catch {}
+
+        const body = {
+          channel_id: cid,
+          ...base,
+          resume: canResume,
+          ...(canResume && checkpoint ? { checkpoint } : {}),
+        };
+
+        try {
+          const res = await fetch("/api/backfill/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            cache: "no-store",
+            body: JSON.stringify(body),
+          });
+          const json = await res.json().catch(() => ({}));
+
+          if (res.status === 409) {
+            locked += 1;
+            continue;
+          }
+          if (!res.ok || json?.ok === false) {
+            failed += 1;
+            continue;
+          }
+
+          started += 1;
+          try {
+            setCloneLaunching(cid, true);
+          } catch {}
+        } catch {
+          failed += 1;
+        }
+      }
+
+      window.showToast(
+        `Batch: started ${started}, locked ${locked}, failed ${failed}.`,
+        { type: started ? "success" : "warning" }
+      );
+
+      closeBatchBackfillDialog();
+      try {
+        await fetchAndApplyInflight();
+      } catch {}
+
+      startBtn.disabled = false;
     }
 
     if (form) {

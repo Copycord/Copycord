@@ -3606,6 +3606,23 @@ body {
   opacity: 0.6;
   cursor: not-allowed;
 }
+.btn-compact,
+.btn-ghost.btn-compact {
+  --cc-control-h: 34px;
+  box-sizing: border-box;
+  height: var(--cc-control-h);
+  min-height: var(--cc-control-h);
+  line-height: calc(var(--cc-control-h) - 2px);
+  padding: 0 10px;
+  margin: 0;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.btn-compact[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 #confirm-modal .modal-content {
   width: min(420px, 92vw) !important;
   max-height: min(48vh, 520px) !important;
@@ -6001,7 +6018,7 @@ body.modal-open #bf-batchbar {
   border: 1px solid var(--border);
   background: var(--card-solid, #1b1030);
   color: var(--text);
-  box-shadow: var(--shadow);
+  box-shadow: none !important;
   padding: 16px;
   display: flex;
   flex-direction: column;
@@ -6175,4 +6192,8 @@ body.modal-open #bf-batchbar {
 
 #backfill-batch-dialog .bf-field .indent {
   margin: 6px 0 10px 1.75rem;
+}
+
+.bf-field .radio.has-tip .info-dot {
+  margin-left: 2px;
 }
