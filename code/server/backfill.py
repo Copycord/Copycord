@@ -195,8 +195,7 @@ class BackfillManager:
             self._temp_locks.setdefault(clone_id, asyncio.Lock())
             self._temp_ready.pop(clone_id, None)
             self.invalidate_rotation(clone_id)
-            await self.ensure_temps_ready(clone_id)
-
+            st["temps_deferred"] = True
         if hasattr(self, "tracker"):
             await self.tracker.start(str(cid), st.get("meta") or {})
 
@@ -303,25 +302,56 @@ class BackfillManager:
             )
 
     def update_expected_total(self, channel_id: int, total: int) -> None:
-        """Set/raise expected total (from client precount)."""
+        """Set/raise expected total (from client precount) and short-circuit if zero."""
         cid = int(channel_id)
         st = self._progress.get(cid)
         if not st:
             return
+
+        try:
+            t = int(total)
+        except Exception:
+            return
+
+        # If the precount says "no messages", force 0 and end immediately.
+        if t == 0:
+            st["expected_total"] = 0
+            run_id = st.get("run_id")
+            if run_id:
+                with contextlib.suppress(Exception):
+                    self.r.db.backfill_update_checkpoint(run_id, expected_total=0)
+
+            logger.debug("[bf] set expected_total=0 | channel=%s — ending early", cid)
+
+            # If this channel is currently marked as running, finish it now.
+            # (on_done will publish backfill_done + cleanup and clear state.)
+            if cid in self._flags:
+                import asyncio  # safe if already imported elsewhere
+                asyncio.create_task(self.on_done(cid, wait_cleanup=True))
+            return
+
+        # Normal non-zero path: only raise the bar (never lower).
         prev = int(st.get("expected_total") or 0)
-        st["expected_total"] = max(prev, int(total))
-        run_id = (st or {}).get("run_id")
+        st["expected_total"] = max(prev, t)
+        run_id = st.get("run_id")
         if run_id:
             with contextlib.suppress(Exception):
-                self.r.db.backfill_update_checkpoint(
-                    run_id, expected_total=st["expected_total"]
-                )
+                self.r.db.backfill_update_checkpoint(run_id, expected_total=st["expected_total"])
+
         logger.debug(
             "[bf] set expected_total | channel=%s total=%s (prev=%s)",
             cid,
             st["expected_total"],
             prev,
         )
+
+        # If we deferred temp-webhook creation at start, do it now that we know there's work.
+        if st.pop("temps_deferred", False):
+            clone_id = st.get("clone_channel_id")
+            if clone_id is not None:
+                import asyncio
+                asyncio.create_task(self.ensure_temps_ready(int(clone_id)))
+
 
     def add_expected_total(self, channel_id: int, delta: int = 1) -> None:
         """Increment expected_total by delta (used for synthetic units like text-thread creations)."""

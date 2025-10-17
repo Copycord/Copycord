@@ -616,6 +616,14 @@ class ServerReceiver:
                     self.backfill.update_expected_total(cid, int(total))
                 except Exception:
                     pass
+            try:
+                if total is not None and int(total) == 0:
+                    await self.backfill.on_done(cid, wait_cleanup=True)
+                    self._active_backfills.discard(cid)
+                    return
+            except Exception:
+                pass
+
             if sent is not None:
                 try:
                     await self.backfill.on_progress(cid, int(sent))

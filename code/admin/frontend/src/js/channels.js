@@ -32,6 +32,19 @@
     .querySelector("#backfill-batch-dialog .modal-header")
     ?.classList.add("bf-head");
 
+  const completedAt = new Map();
+
+  function markCompleted(cid) {
+    const k = String(cid);
+    completedAt.set(k, Date.now());
+    launchKeyByCid.delete(k);
+    startedHere.delete(k);
+    setClonePulling(k, false);
+    setCloneCleaning(k, false);
+    inflightMisses.delete(k);
+    inflightMisses.delete(`clean:${k}`);
+  }
+
   const DEBUG_BF = true;
   const dbg = (...a) => {
     if (DEBUG_BF) console.debug(...a);
@@ -225,11 +238,22 @@
   let bfCleanup = null;
 
   function shouldTrustBackfillPayload(p, cid) {
-    if (p?.task_id && taskMap.has(String(p.task_id))) return true;
-    if (startedHere.has(String(cid))) return true;
+    const k = String(cid);
+    const hasTask = !!p?.task_id && taskMap.has(String(p.task_id));
+    const running = launchingClones.has(k) || runningClones.has(k);
+    const liveInflight = inflightReady && inflightByOrig.has(k);
+    const finishedRecently = Date.now() - (completedAt.get(k) || 0) < 5000;
 
-    if (inflightReady && inflightByOrig.has(String(cid))) return true;
-    return false;
+    const isStartish =
+      p?.type === "backfill_started" ||
+      p?.type === "backfill_ack" ||
+      p?.type === "backfill_busy";
+
+    if (isStartish && (hasTask || running || liveInflight)) return true;
+
+    if (finishedRecently && !hasTask && !running) return false;
+
+    return hasTask || running || liveInflight;
   }
 
   function isSelectableCard(card) {
@@ -248,10 +272,12 @@
     }
   }
 
-  function finalizeBackfillUI(cid, { announce = false } = {}) {
+  function finalizeBackfillUI(cid, { announce = false, taskId = null } = {}) {
     const k = String(cid);
-    setClonePulling(k, false);
-    setCloneCleaning(k, false);
+    const shouldAnnounce =
+      announce && startedHere.has(k) && shouldAnnounceNow();
+
+    markCompleted(k);
     unlockBackfill(k);
     inflightByOrig.delete(k);
 
@@ -260,11 +286,10 @@
     card?.querySelector(".ch-status")?.remove();
     card?.querySelector(".ch-progress")?.remove();
 
-    if (announce && startedHere.has(k) && shouldAnnounceNow()) {
-      announceBackfillDone(k);
-    }
-    fetchAndApplyInflight().catch(() => {});
+    if (shouldAnnounce) announceBackfillDone(k, taskId);
+
     render();
+    setTimeout(() => fetchAndApplyInflight().catch(() => {}), 1200);
   }
 
   function findRowByAnyChannelId(id) {
@@ -512,7 +537,7 @@
       return null;
     }
   }
-
+  const launchKeyByCid = new Map();
   const taskMap = new Map(
     (() => {
       try {
@@ -1263,18 +1288,22 @@
     return null;
   }
 
-  function announceBackfillDone(cid) {
-    const wasCancelled =
-      cancelledThisSession.has(String(cid)) ||
-      !!sessionStorage.getItem(`bf:cancelled:${cid}`);
+  function announceBackfillDone(cid, taskId = null) {
+    try {
+      sessionStorage.removeItem(`bf:cancelled:${cid}`);
+    } catch {}
 
+    const wasCancelled = cancelledThisSession.has(String(cid));
     if (!wasCancelled && shouldAnnounceNow()) {
       const chName = getChannelDisplayName(cid);
       const msg = chName
         ? `Clone completed for #${chName}.`
         : `Clone completed (channel ${cid}).`;
 
-      toastOncePersist(`bf:done:${cid}`, msg, { type: "success" }, 15000);
+      const key = taskId
+        ? `bf:done:${cid}:${taskId}`
+        : `bf:done:${cid}:${Date.now()}`;
+      toastOncePersist(key, msg, { type: "success" }, 15000);
     }
 
     const card = document.querySelector(`.ch-card[data-cid="${String(cid)}"]`);
@@ -1304,6 +1333,9 @@
     inflightByOrig.clear();
     for (const [cid, info] of Object.entries(itemsObj || {})) {
       const k = String(cid);
+      if (Date.now() - (completedAt.get(k) || 0) < 5000) continue;
+      setCloneRunning(k, true);
+      const card = document.querySelector(`.ch-card[data-cid="${k}"]`);
       inflightByOrig.set(k, info || {});
     }
 
@@ -1420,8 +1452,16 @@
   function setCloneLaunching(id, on) {
     dbg("[STATE] launching", { id: String(id), on });
     const k = String(id);
-    if (on) launchingClones.add(k);
-    else launchingClones.delete(k);
+    if (on) {
+      launchingClones.add(k);
+
+      launchKeyByCid.set(
+        k,
+        `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+      );
+    } else {
+      launchingClones.delete(k);
+    }
     try {
       localStorage.setItem(
         "bf:launching",
@@ -1429,6 +1469,7 @@
       );
     } catch {}
   }
+
   function cloneIsLocked(id) {
     const k = String(id);
     return launchingClones.has(k) || runningClones.has(k);
@@ -3404,19 +3445,32 @@
 
             if (p.task_id && cid) rememberTask(p.task_id, cid);
 
+            const wasLaunching = launchingClones.has(String(cid));
+            try {
+              sessionStorage.removeItem(`bf:cancelled:${cid}`);
+            } catch {}
+            const launchKey = launchKeyByCid.get(String(cid));
+            const hasTaskId = !!p?.task_id;
             setCloneLaunching(cid, false);
             setCloneRunning(cid, true);
             setClonePulling(cid, true);
             startedHere.add(String(cid));
             setCardLoading(cid, true, PULLING_LABEL);
-            if (shouldAnnounceNow() && launchingClones.has(String(cid))) {
-              window.showToast(
+
+            if (shouldAnnounceNow() && wasLaunching) {
+              const startedKey = hasTaskId
+                ? `bf:started:${cid}:${p.task_id}`
+                : `bf:started:${cid}:${launchKey || Date.now()}`;
+              toastOncePersist(
+                startedKey,
                 t === "backfill_busy"
                   ? "A clone for this channel is already running or finishing up."
                   : "Clone started…",
-                { type: "warning" }
+                { type: t === "backfill_busy" ? "warning" : "success" },
+                15000
               );
             }
+
             closeBackfillDialog();
             return;
           }
@@ -3484,17 +3538,40 @@
           }
 
           if (t === "backfill_done") {
-            let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
-            if (!cid && p.task_id) cid = taskMap.get(String(p.task_id));
+            let cid = backfillIdFrom(p?.data) || backfillIdFrom(p);
+            if (!cid && p?.task_id) cid = taskMap.get(String(p.task_id));
             cid = toOriginalCid(cid);
             if (!cid) return;
             if (!shouldTrustBackfillPayload(p, cid)) return;
-            if (p.task_id) forgetTask(p.task_id);
-            finalizeBackfillUI(cid, { announce: true });
+
+            const d = (p && (p.data ?? p)) || {};
+            const deliveredNum = Number.isFinite(d.sent)
+              ? d.sent
+              : Number.isFinite(d.delivered)
+              ? d.delivered
+              : Number.isFinite(d.count)
+              ? d.count
+              : null;
+
+            const totalNum = Number.isFinite(d.total)
+              ? d.total
+              : Number.isFinite(d.expected_total)
+              ? d.expected_total
+              : Number.isFinite(d.expected)
+              ? d.expected
+              : null;
+
+            finalizeBackfillUI(cid, {
+              announce: true,
+              taskId: p?.task_id || null,
+            });
+
+            if (p?.task_id) forgetTask(p.task_id);
             return;
           }
 
           if (t === "backfill_cancelled") {
+            launchKeyByCid.delete(k);
             let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             if (!cid && p.task_id) cid = taskMap.get(String(p.task_id));
             cid = toOriginalCid(cid);
@@ -3502,6 +3579,7 @@
             if (p.task_id) forgetTask(p.task_id);
 
             if (cid) {
+              markCompleted(cid);
               unlockBackfill(cid);
               setCardLoading?.(cid, false);
               cancelledThisSession.add(String(cid));
@@ -4136,12 +4214,6 @@
             return;
           }
 
-          toastOncePersist(
-            `bf:start:${cloneId}`,
-            "Clone started…",
-            { type: "success" },
-            15000
-          );
           startedHere.add(String(cloneId));
           closeBackfillDialog();
         })
