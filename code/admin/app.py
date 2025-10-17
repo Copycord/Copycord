@@ -1815,6 +1815,7 @@ async def api_scrape(request: Request):
     include_username = bool(payload.get("include_username", False))
     include_avatar_url = bool(payload.get("include_avatar_url", False))
     include_bio = bool(payload.get("include_bio", False))
+    include_roles = bool(payload.get("include_roles", False))
 
     if payload.get("include_names") and not (
         payload.get("include_username")
@@ -1840,13 +1841,15 @@ async def api_scrape(request: Request):
     gid = payload.get("guild_id")
 
     LOGGER.debug(
-        "Dispatching scrape to agent: gid=%s ns=%s mpps=%s username=%s avatar=%s bio=%s",
+        "Dispatching scrape to agent: gid=%s ns=%s mpps=%s username=%s avatar=%s bio=%s roles=%s",
         gid,
         ns,
         mpps,
         include_username,
         include_avatar_url,
         include_bio,
+        include_bio,
+        include_roles,
     )
 
     try:
@@ -1861,6 +1864,8 @@ async def api_scrape(request: Request):
                     "include_username": include_username,
                     "include_avatar_url": include_avatar_url,
                     "include_bio": include_bio,
+                    "include_bio": include_bio,
+                    "include_roles": include_roles,
                 },
             },
             timeout=CLIENT_AGENT_TIMEOUT,

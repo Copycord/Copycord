@@ -267,6 +267,7 @@ class ClientListener:
             inc_username = bool(data.get("include_username", False))
             inc_avatar_url = bool(data.get("include_avatar_url", False))
             inc_bio = bool(data.get("include_bio", False))
+            inc_roles = bool(data.get("include_roles", False))
             gid = str(data.get("guild_id") or "")
             self._scrape_gid = gid
 
@@ -314,6 +315,7 @@ class ClientListener:
                                         "include_bio": inc_bio,
                                         "num_sessions": ns,
                                         "max_parallel_per_session": mpps,
+                                        "include_roles": inc_roles,
                                     },
                                 },
                             },
@@ -332,6 +334,7 @@ class ClientListener:
                         include_username=inc_username,
                         include_avatar_url=inc_avatar_url,
                         include_bio=inc_bio,
+                        include_roles=inc_roles,
                         num_sessions=ns,
                         max_parallel_per_session=mpps,
                     ),
