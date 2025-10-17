@@ -1848,7 +1848,6 @@ async def api_scrape(request: Request):
         include_username,
         include_avatar_url,
         include_bio,
-        include_bio,
         include_roles,
     )
 
@@ -1863,7 +1862,6 @@ async def api_scrape(request: Request):
                     "max_parallel_per_session": mpps,
                     "include_username": include_username,
                     "include_avatar_url": include_avatar_url,
-                    "include_bio": include_bio,
                     "include_bio": include_bio,
                     "include_roles": include_roles,
                 },
