@@ -27,6 +27,7 @@ class BackfillManager:
         self.bot = receiver.bot
         self.ratelimit = RateLimitManager()
         self._cleanup_task_ids: dict[int, str] = {}
+        self._finalized_by_channel: dict[int, str] = {}
         self._flags: set[int] = set()
         self._progress: dict[int, dict] = {}
         self._inflight = defaultdict(int)
@@ -211,8 +212,8 @@ class BackfillManager:
             if t is not None:
                 st["task_id"] = t.id
                 if not reused:
-
                     st["run_id"] = t.id
+                self._finalized_by_channel.pop(cid, None)
             else:
                 with contextlib.suppress(Exception):
                     st["task_id"] = await self.tracker.get_task_id(str(cid)) or st.get(
@@ -387,6 +388,7 @@ class BackfillManager:
 
         if t == 0:
             st["expected_total"] = 0
+            st["no_work"] = True
             run_id = st.get("run_id")
             if run_id:
                 with contextlib.suppress(Exception):
@@ -395,9 +397,13 @@ class BackfillManager:
             logger.debug("[bf] set expected_total=0 | channel=%s — ending early", cid)
 
             if cid in self._flags:
-                import asyncio
-
-                asyncio.create_task(self.on_done(cid, wait_cleanup=True))
+                asyncio.create_task(
+                    self.on_done(
+                        cid,
+                        wait_cleanup=True,
+                        expected_task_id=(st or {}).get("task_id"),
+                    )
+                )
             return
 
         prev = int(st.get("expected_total") or 0)
@@ -455,7 +461,40 @@ class BackfillManager:
             ):
                 self._global_sync = None
 
-    async def on_done(self, original_id: int, *, wait_cleanup: bool = False) -> None:
+    async def on_done(
+        self,
+        original_id: int,
+        *,
+        wait_cleanup: bool = False,
+        expected_task_id: str | None = None,
+    ) -> None:
+        cid = int(original_id)
+
+        st = self._progress.get(cid) or {}
+        live_tid = (st or {}).get("task_id")
+        if not live_tid and hasattr(self, "tracker"):
+            with contextlib.suppress(Exception):
+                live_tid = await self.tracker.get_task_id(str(cid))
+
+        # If caller provided a task id and it doesn't match the live one → ignore
+        if expected_task_id and live_tid and expected_task_id != live_tid:
+            logger.debug(
+                "[bf] on_done ignored for #%s; task mismatch (%s != %s)",
+                cid,
+                expected_task_id,
+                live_tid,
+            )
+            return
+
+        final_tid = expected_task_id or live_tid
+        if final_tid and self._finalized_by_channel.get(cid) == final_tid:
+            logger.debug(
+                "[bf] on_done already finalized for #%s (task=%s)", cid, final_tid
+            )
+            return
+
+        if final_tid:
+            self._finalized_by_channel[cid] = final_tid
         cid = int(original_id)
 
         stall = float(os.getenv("BACKFILL_DRAIN_NO_PROGRESS_SECS", "600"))
@@ -484,6 +523,8 @@ class BackfillManager:
             with contextlib.suppress(Exception):
                 self.r.db.backfill_mark_done(run_id)
 
+        no_work = bool(st.get("no_work") or (total == 0))
+
         try:
             tid = (st or {}).get("task_id")
             if not tid and hasattr(self, "tracker"):
@@ -501,6 +542,7 @@ class BackfillManager:
                         "task_id": tid,
                         "sent": delivered,
                         "total": total,
+                        **({"no_work": True} if no_work else {}),
                     },
                 },
             )

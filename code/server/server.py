@@ -148,6 +148,8 @@ class ServerReceiver:
         self._latest_edit_payload: dict[int, dict] = {}
         self._pending_deletes: set[int] = set()
         self._bf_throttle: dict[int, dict] = {}
+        self._task_for_channel: dict[int, str] = {}
+        self._done_task_ids: set[str] = set()
         self._bf_delay = 2.0
         orig_on_connect = self.bot.on_connect
         self.onclonejoin = OnCloneJoin(self.bot, self.db)
@@ -571,6 +573,12 @@ class ServerReceiver:
                 logger.error("backfill_started missing/invalid channel_id: %r", cid_raw)
                 return
 
+            # NEW: remember the task id for this channel (if present)
+            tid = (msg.get("task_id")
+                or (data.get("task_id") if isinstance(data, dict) else None))
+            if tid:
+                self._task_for_channel[orig] = str(tid)
+
             if orig in self._active_backfills:
                 await self.bus.publish(
                     "client", {"type": "backfill_busy", "data": {"channel_id": orig}}
@@ -609,62 +617,18 @@ class ServerReceiver:
 
             total = data.get("total")
             sent = data.get("sent")
-            count = data.get("count")
 
             if total is not None:
                 try:
                     self.backfill.update_expected_total(cid, int(total))
                 except Exception:
                     pass
-            try:
-                if total is not None and int(total) == 0:
-                    await self.backfill.on_done(cid, wait_cleanup=True)
-                    self._active_backfills.discard(cid)
-                    await self.bot.ws_manager.send(
-                        {
-                            "type": "backfill_done",
-                            "data": {"channel_id": str(cid), "sent": 0, "total": 0},
-                        }
-                    )
-                    return
-            except Exception:
-                pass
 
             if sent is not None:
                 try:
                     await self.backfill.on_progress(cid, int(sent))
                 except Exception:
                     pass
-            elif count is not None:
-                try:
-                    await self.backfill.on_progress(cid, int(count))
-                except Exception:
-                    pass
-
-            delivered, total_est = self.backfill.get_progress(cid)
-
-            payload = {
-                "type": "backfill_progress",
-            }
-
-            try:
-                if hasattr(self.backfill, "tracker"):
-                    tid = await self.backfill.tracker.get_task_id(str(cid))
-                    if tid:
-                        payload["task_id"] = tid
-            except Exception:
-                pass
-
-            data_out = {"channel_id": str(cid)}
-            if delivered is not None:
-                data_out["delivered"] = delivered
-            if total_est is not None:
-
-                data_out["total"] = total_est
-
-            payload["data"] = data_out
-
-            await self.bus.publish("client", payload)
             return
 
         elif typ == "backfill_stream_end":
@@ -675,8 +639,18 @@ class ServerReceiver:
             except (TypeError, ValueError):
                 logger.error("backfill_done missing/invalid channel_id: %r", cid_raw)
                 return
+            
+            tid = None
+            if hasattr(self.backfill, "tracker"):
+                with contextlib.suppress(Exception):
+                    tid = await self.backfill.tracker.get_task_id(str(orig))
 
-            await self.backfill.on_done(orig, wait_cleanup=True)
+            await self.backfill.on_done(
+                orig,
+                wait_cleanup=True,
+                expected_task_id=(str(tid) if tid else None),
+            )
+
             self._active_backfills.discard(orig)
 
             try:
@@ -684,9 +658,10 @@ class ServerReceiver:
             except Exception:
                 delivered, total_est = (None, None)
 
-            # NEW: don't emit a "done" WS during shutdown
             if getattr(self, "_shutting_down", False):
                 return
+            
+            no_work = (total_est is not None and int(total_est) == 0)
 
             try:
                 await self.bot.ws_manager.send(
@@ -696,6 +671,7 @@ class ServerReceiver:
                             "channel_id": str(orig),
                             "sent": delivered,
                             "total": total_est,
+                            **({"no_work": True} if no_work else {}),
                         },
                     }
                 )
