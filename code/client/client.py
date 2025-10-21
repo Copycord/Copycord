@@ -1665,11 +1665,11 @@ class ClientListener:
 
                 self._bf_active.add(chan_id)
 
-                with contextlib.suppress(Exception):
-                    await self.bus.publish(
-                        "client",
-                        {"type": "backfill_ack", "data": {"channel_id": chan_id}},
-                    )
+                # with contextlib.suppress(Exception):
+                #     await self.bus.publish(
+                #         "client",
+                #         {"type": "backfill_ack", "data": {"channel_id": chan_id}},
+                #     )
 
                 await self.backfill.run_channel(chan_id, **(params or {}))
 

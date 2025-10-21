@@ -598,9 +598,24 @@ class ServerReceiver:
                 },
             )
 
+            tid = None
+            try:
+                st = self.backfill._progress.get(orig) or {}
+                tid = st.get("task_id")
+                if not tid and hasattr(self.backfill, "tracker"):
+                    with contextlib.suppress(Exception):
+                        tid = await self.backfill.tracker.get_task_id(str(orig))
+            except Exception:
+                tid = None
+
             await self.bus.publish(
                 "client",
-                {"type": "backfill_ack", "data": {"channel_id": str(orig)}, "ok": True},
+                {
+                    "type": "backfill_ack",
+                    "task_id": tid,
+                    "data": {"channel_id": str(orig), "task_id": tid},
+                    "ok": True,
+                },
             )
             return
 
