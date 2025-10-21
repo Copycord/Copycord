@@ -14,6 +14,7 @@ from typing import Tuple, Dict, Optional
 class ActionType(Enum):
     WEBHOOK_MESSAGE = "webhook_message"
     WEBHOOK_CREATE = "webhook_create"
+    WEBHOOK_DELETE = "webhook_delete"
     CREATE_CHANNEL = "create_channel"
     EDIT_CHANNEL = "edit_channel"
     DELETE_CHANNEL = "delete_channel"
@@ -93,6 +94,7 @@ class RateLimitManager:
             ActionType.WEBHOOK_MESSAGE: (5, 2.5),
             ActionType.CREATE_CHANNEL: (2, 15.0),
             ActionType.WEBHOOK_CREATE: (1, 30.0),
+            ActionType.WEBHOOK_DELETE: (1, 10.0),
             ActionType.EDIT_CHANNEL: (3, 15.0),
             ActionType.DELETE_CHANNEL: (3, 15.0),
             ActionType.ROLE: (1, 10.0),

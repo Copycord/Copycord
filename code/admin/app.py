@@ -1612,6 +1612,18 @@ async def channels_api():
     return {"items": out}
 
 
+@app.get("/api/backfills/queue")
+async def api_backfills_queue():
+    """
+    Ask the client for its current backfill queue (active + queued).
+    """
+
+    res = await _ws_cmd(CLIENT_AGENT_URL, {"type": "backfills_queue_query"})
+    items = (res or {}).get("data", {}).get("items", [])
+
+    return JSONResponse({"ok": True, "items": items})
+
+
 @app.get("/api/backfills/inflight")
 async def api_backfills_inflight():
 
@@ -1715,7 +1727,6 @@ async def api_backfill_start(payload: dict = Body(...)):
 
     data = {"channel_id": channel_id}
 
-    # Normal range params
     if after_iso:
         data["after_iso"] = str(after_iso)
     if before_iso:
@@ -1775,7 +1786,6 @@ async def api_backfill_start_batch(payload: dict = Body(...)):
             {"ok": False, "error": "invalid-channel_ids"}, status_code=400
         )
 
-    # Coerce & dedupe
     ids: list[int] = []
     bad: list[object] = []
     seen: set[int] = set()

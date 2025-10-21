@@ -1477,12 +1477,21 @@ class DBManager:
             )
             return cur.rowcount
         
-    def backfill_create_run(self, original_channel_id: int, range_json: dict|None) -> str:
-        run_id = uuid.uuid4().hex
+    def backfill_create_run(
+        self,
+        original_channel_id: int,
+        range_json: dict | None,
+        *,
+        run_id: str | None = None,
+    ) -> str:
+        run_id = run_id or uuid.uuid4().hex
         now = datetime.utcnow().isoformat() + "Z"
         self.conn.execute(
-            "INSERT INTO backfill_runs(run_id, original_channel_id, range_json, started_at, updated_at) VALUES(?,?,?,?,?)",
-            (run_id, int(original_channel_id), json.dumps(range_json or {}), now, now)
+            """
+            INSERT INTO backfill_runs(run_id, original_channel_id, range_json, started_at, updated_at)
+            VALUES(?,?,?,?,?)
+            """,
+            (run_id, int(original_channel_id), json.dumps(range_json or {}), now, now),
         )
         self.conn.commit()
         return run_id
