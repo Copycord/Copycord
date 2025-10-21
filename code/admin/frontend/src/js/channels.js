@@ -239,7 +239,12 @@
       } catch {}
     },
   });
-  if (!gate.lastUpIsFresh()) gate.showGateSoon();
+  if (!gate.lastUpIsFresh()) {
+    try {
+      resetAllCloningUI();
+    } catch {}
+    gate.showGateSoon();
+  }
 
   let data = [];
   let filtered = [];
@@ -247,6 +252,7 @@
   let menuForId = null;
   let wsIn;
   let wsOut;
+  let wsOutSeq = 0;
   let orph = { categories: [], channels: [] };
   let sortBy = "name";
   let sortDir = "asc";
@@ -387,44 +393,41 @@
   }
 
   function shouldTrustBackfillPayload(p, cid) {
-    const tid = p?.task_id && String(p.task_id);
+    if (!cid) return false;
 
-    if (tid && isTaskDone(tid)) return false;
     const k = String(cid);
     const type = p?.type;
-    const hasTask = !!p?.task_id && taskMap.has(String(p.task_id));
-    const running = launchingClones.has(k) || runningClones.has(k);
+    const tid = p?.task_id && String(p.task_id);
 
+    // Ignore stragglers for tasks we've already finalized.
+    if (tid && isTaskDone(tid)) return false;
+
+    const hasTask = !!tid && taskMap.has(tid);
+    const running = launchingClones.has(k) || runningClones.has(k);
     const liveInflight = inflightByOrig.has(k);
-    const recent = Date.now() - (lastActiveAt.get(k) || 0) < 120_000;
-    const finishedRecently = Date.now() - (completedAt.get(k) || 0) < 5000;
+    const startedLocal = startedHere.has(k);
 
     const isStartish =
       type === "backfill_started" ||
       type === "backfill_ack" ||
       type === "backfill_busy";
-    if (isStartish) return true;
+
+    if (isStartish) {
+      if (!inflightReady && !startedLocal && !hasTask) return false;
+      return startedLocal || hasTask || liveInflight || running;
+    }
 
     const isCleanupFinished =
       type === "backfill_cleanup" && p?.data?.state === "finished";
     const isFinishish = type === "backfill_done" || isCleanupFinished;
-    if (isFinishish && tid && isTaskDone(tid)) return false;
 
     if (isFinishish) {
-      if (!isCleanupFinished && !inflightReady) return false;
-      return (
-        hasTask ||
-        running ||
-        liveInflight ||
-        startedHere.has(k) ||
-        seenThisSession.has(k) ||
-        recent
-      );
+      if (!inflightReady && !startedLocal && !hasTask) return false;
+      return startedLocal || hasTask || running || liveInflight;
     }
 
-    if (finishedRecently && !hasTask && !running) return false;
-
-    return hasTask || running || liveInflight || recent;
+    if (!inflightReady && !startedLocal && !hasTask) return false;
+    return startedLocal || hasTask || running || liveInflight;
   }
 
   function isSelectableCard(card) {
@@ -2001,26 +2004,135 @@
   }
 
   function resetAllCloningUI() {
-    for (const id of [...runningClones]) setCardLoading(id, false);
-    for (const id of [...launchingClones]) setCardLoading(id, false);
-    runningClones.clear();
-    launchingClones.clear();
+    const allIds = new Set([
+      ...(runningClones || []),
+      ...(launchingClones || []),
+      ...(pullingClones || []),
+      ...(cleaningClones || []),
+      ...(queuedClones || []),
+    ]);
+
+    for (const id of allIds) {
+      try {
+        setCloneQueued(id, false);
+      } catch {}
+      try {
+        setCloneCleaning(id, false);
+      } catch {}
+      try {
+        setClonePulling(id, false);
+      } catch {}
+      try {
+        setCloneRunning(id, false);
+      } catch {}
+      try {
+        setCardLoading(id, false);
+      } catch {}
+      try {
+        resetProgressForChannel(id);
+      } catch {}
+    }
+
     try {
-      localStorage.setItem("bf:running", "[]");
-      localStorage.setItem("bf:launching", "[]");
+      runningClones.clear();
     } catch {}
     try {
-      const key = `toast:persist:bf:stopped`;
+      launchingClones.clear();
+    } catch {}
+    try {
+      pullingClones.clear();
+    } catch {}
+    try {
+      cleaningClones.clear();
+    } catch {}
+    try {
+      queuedClones.clear();
+    } catch {}
+
+    try {
+      inflightByOrig?.clear?.();
+    } catch {}
+    try {
+      inflightMisses?.clear?.();
+    } catch {}
+    try {
+      queueMisses?.clear?.();
+    } catch {}
+    try {
+      wsLeadUntil?.clear?.();
+    } catch {}
+    try {
+      lastShownProgress?.clear?.();
+    } catch {}
+    try {
+      completedAt?.clear?.();
+    } catch {}
+    try {
+      lastActiveAt?.clear?.();
+    } catch {}
+    try {
+      launchKeyByCid?.clear?.();
+    } catch {}
+    try {
+      startedHere?.clear?.();
+    } catch {}
+
+    try {
+      localStorage.removeItem("bf:running");
+    } catch {}
+    try {
+      localStorage.removeItem("bf:launching");
+    } catch {}
+    try {
+      localStorage.removeItem("bf:pulling");
+    } catch {}
+    try {
+      localStorage.removeItem("bf:queued");
+    } catch {}
+    try {
+      localStorage.removeItem("bf:cleaning");
+    } catch {}
+
+    try {
+      localStorage.removeItem("bf:done_tasks");
+    } catch {}
+    try {
+      doneTasks?.clear?.();
+    } catch {}
+
+    try {
+      sessionStorage.removeItem("bf:taskmap");
+    } catch {}
+    try {
+      taskMap?.clear?.();
+    } catch {}
+
+    try {
       sessionStorage.setItem(
-        key,
+        "toast:persist:bf:stopped",
         JSON.stringify({ expiresAt: Date.now() + 10_000 })
       );
     } catch {}
-    try {
-      localStorage.setItem("bf:pulling", "[]");
-    } catch {}
-    pullingClones.clear();
   }
+
+  (function applyBackfillWipeOnBoot() {
+    try {
+      const ts = Number(localStorage.getItem("bf:__wipe") || "0");
+      if (ts) {
+        resetAllCloningUI();
+        // consume the flag so it doesn't keep wiping forever
+        localStorage.removeItem("bf:__wipe");
+      }
+    } catch {}
+  })();
+
+  window.addEventListener("storage", (e) => {
+    if (e && e.key === "bf:__wipe" && e.newValue) {
+      try {
+        resetAllCloningUI();
+      } catch {}
+    }
+  });
 
   async function load() {
     try {
@@ -3854,31 +3966,37 @@
 
     const url = location.origin.replace(/^http/, "ws") + "/ws/out";
     const sock = new WebSocket(url);
+    const seq = ++wsOutSeq;
+    sock.__seq = seq;
     wsOut = sock;
 
     sock.onopen = () => {
+      if (seq !== wsOutSeq || wsOut !== sock) return;
       dbg("WS OUT connected");
+
       inflightReady = false;
-      fetchAndApplyInflight().finally(() => {
-        inflightReady = true;
-        fetchAndApplyInflight()
-          .then(() => cleanupTaskMapAgainstInflight())
-          .finally(() => {
-            inflightReady = true;
-          });
-      });
+
+      Promise.resolve()
+        .then(() => fetchAndApplyInflight())
+        .then(() => cleanupTaskMapAgainstInflight?.())
+        .catch((e) => dbg("inflight bootstrap failed", e))
+        .finally(() => {
+          if (seq !== wsOutSeq || wsOut !== sock) return;
+          inflightReady = true;
+        });
     };
 
     sock.onclose = () => {
+      if (seq !== wsOutSeq || wsOut !== sock) return;
       dbg("WS OUT closed");
-      window.showToast("Connection lost", {
-        type: "warning",
-      });
+      wsOut = null;
+      window.showToast?.("Connection lost", { type: "warning" });
     };
 
     sock.onerror = (e) => {
+      if (seq !== wsOutSeq || wsOut !== sock) return;
       dbg("WS OUT error", e);
-      window.showToast("Connection issue — attempting to recover…", {
+      window.showToast?.("Connection issue — attempting to recover…", {
         type: "warning",
       });
     };
@@ -3932,6 +4050,7 @@
     }
 
     wsOut.onmessage = (ev) => {
+      if (seq !== wsOutSeq || wsOut !== sock) return;
       try {
         group("WS IN ← /ws/out", () =>
           dbg({ raw: ev.data?.slice?.(0, 2048) || ev.data })
@@ -3940,6 +4059,7 @@
         const p = raw?.payload ?? raw;
         const kind = raw?.kind ?? p?.kind ?? "client";
         if (!p) return;
+
         const t = p?.type;
         dbg("[/ws/out] parsed", {
           kind,
@@ -3956,12 +4076,11 @@
           ) {
             let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             cid = toOriginalCid(cid);
-            markSeen(cid);
             if (!cid) return;
             if (!shouldTrustBackfillPayload(p, cid)) return;
 
             if (p.task_id && cid) rememberTask(p.task_id, cid);
-
+            markSeen(cid);
             preferWS(cid);
 
             const wasLaunching = launchingClones.has(String(cid));
@@ -3971,7 +4090,6 @@
             const launchKey = launchKeyByCid.get(String(cid));
             const hasTaskId = !!p?.task_id;
 
-            // mark live; keep running set so later WS progress isn't filtered
             setCloneLaunching(cid, false);
             setCloneRunning(cid, true);
             setClonePulling(cid, true);
@@ -4004,16 +4122,14 @@
 
           if (t === "backfill_progress") {
             const d0 = (p && (p.data ?? p)) || {};
-
             let cid = backfillIdFrom(d0) || backfillIdFrom(p);
             cid = toOriginalCid(cid);
-            markSeen(cid);
             if (!cid) return;
-
-            if (p?.task_id) rememberTask(p.task_id, cid);
             if (!shouldTrustBackfillPayload(p, cid)) return;
+            if (p?.task_id) rememberTask(p.task_id, cid);
             if (cleaningClones.has(String(cid))) return;
 
+            markSeen(cid);
             setCloneLaunching(cid, false);
             setCloneRunning(cid, true);
             touchActive(cid);
@@ -4058,7 +4174,6 @@
               delivered: haveD ? d : null,
               expected_total: haveT ? t : null,
             });
-
             return;
           }
 
@@ -4067,29 +4182,16 @@
             let cid = backfillIdFrom(d) || backfillIdFrom(p) || d.channel_id;
             cid = toOriginalCid(cid);
             if (!cid) return;
-            if (p?.task_id && cid) rememberTask(p.task_id, cid);
 
-            let trusted = shouldTrustBackfillPayload(
+            const trusted = shouldTrustBackfillPayload(
               { type: "backfill_cleanup", task_id: p?.task_id, data: d },
               cid
             );
-            if (!trusted) {
-              const recent =
-                Date.now() - (lastActiveAt.get(String(cid)) || 0) < 120000;
-              const hasTask = p?.task_id && taskMap.has(String(p.task_id));
-              if (
-                recent ||
-                hasTask ||
-                startedHere.has(String(cid)) ||
-                seenThisSession.has(String(cid))
-              ) {
-                trusted = true;
-              }
-            }
             if (!trusted) return;
 
-            const card = document.querySelector(`.ch-card[data-cid="${cid}"]`);
+            if (p?.task_id && cid) rememberTask(p.task_id, cid);
 
+            const card = document.querySelector(`.ch-card[data-cid="${cid}"]`);
             if (d.state === "starting") {
               markSeen(cid);
               touchActive(cid);
@@ -4098,7 +4200,6 @@
               setProgressCleanupMode(card, true);
               return;
             }
-
             if (d.state === "finished") {
               setProgressCleanupMode(card, false);
               markSeen(cid);
@@ -4117,11 +4218,11 @@
               (p?.task_id && taskMap.get(String(p.task_id)));
             cid = toOriginalCid(cid);
             if (!cid) return;
-
-            if (p?.task_id) rememberTask(p.task_id, cid);
             if (!shouldTrustBackfillPayload(p, cid)) return;
+            if (p?.task_id) rememberTask(p.task_id, cid);
 
             const card = document.querySelector(`.ch-card[data-cid="${cid}"]`);
+            markSeen(cid);
             touchActive(cid);
             preferWS(cid);
 
@@ -4135,10 +4236,11 @@
             let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
             if (!cid && p.task_id) cid = taskMap.get(String(p.task_id));
             cid = toOriginalCid(cid);
+
+            const trusted = shouldTrustBackfillPayload(p, cid);
+            if (!trusted) return;
+
             if (cid) launchKeyByCid.delete(String(cid));
-            if (!cid && p.task_id) cid = taskMap.get(String(p.task_id));
-            cid = toOriginalCid(cid);
-            dbg("[bf] cancelled", { cid, task_id: p?.task_id, payload: p });
             if (p.task_id) forgetTask(p.task_id);
 
             if (cid) {
@@ -4179,7 +4281,6 @@
                 15000
               );
             }
-
             render();
             return;
           }
