@@ -3457,6 +3457,50 @@ body {
   content: none !important;
   display: none !important;
 }
+
+.ch-card.is-cloning .ch-progress,
+.ch-card.is-pending .ch-progress {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ch-card.is-cloning .ch-progress.indeterminate .bar,
+.ch-card.is-pending .ch-progress.indeterminate .bar {
+  animation: ch-progress-indeterminate 1.2s infinite linear;
+}
+
+.ch-card.is-pending .ch-progress.indeterminate .bar,
+.ch-card.is-cloning .ch-progress.indeterminate .bar {
+  animation: ch-progress-indeterminate 1.2s infinite linear;
+}
+
+.ch.progress,
+.ch-progress {
+  position: relative;
+  overflow: hidden;
+}
+.ch-progress .bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -30%;
+}
+
+@keyframes ch-progress-indeterminate {
+  0% {
+    left: -30%;
+    width: 30%;
+  }
+  50% {
+    left: 35%;
+    width: 30%;
+  }
+  100% {
+    left: 100%;
+    width: 30%;
+  }
+}
+
 .ch-card .ch-status {
   position: absolute;
   top: 8px;

@@ -34,9 +34,6 @@
 
   const completedAt = new Map();
   const seenThisSession = new Set();
-  const seenHere = (id) =>
-    id != null &&
-    (startedHere.has(String(id)) || seenThisSession.has(String(id)));
 
   const lastActiveAt = new Map();
   function touchActive(id) {
@@ -51,6 +48,60 @@
     }
   }
 
+  const TOAST_TTL_MS = 24 * 60 * 60 * 1000;
+  const TOAST_VERIFY_MAX_MS = 10_000;
+  const TOAST_VERIFY_MAX_ATTEMPTS = 5;
+  const TOAST_VERIFY_BASE_DELAY = 300;
+
+  function toastPersistKey(key) {
+    return `toast:persist:${key}`;
+  }
+  function toastReceiptKey(key) {
+    return `toast:receipt:${key}`;
+  }
+
+  function markToastDelivered(key, ttlMs = TOAST_TTL_MS) {
+    const now = Date.now();
+    try {
+      localStorage.setItem(
+        toastReceiptKey(key),
+        JSON.stringify({ deliveredAt: now })
+      );
+      localStorage.setItem(
+        toastPersistKey(key),
+        JSON.stringify({ expiresAt: now + ttlMs })
+      );
+      tlog("receipt:delivered+persist", {
+        key,
+        until: new Date(now + ttlMs).toISOString(),
+      });
+    } catch (err) {
+      tlog("receipt:error", { key, error: String(err?.message || err) });
+    }
+  }
+
+  function wasToastDelivered(key, withinMs = TOAST_TTL_MS) {
+    try {
+      const rec = JSON.parse(
+        localStorage.getItem(toastReceiptKey(key)) || "null"
+      );
+      return !!rec && Date.now() - Number(rec.deliveredAt || 0) < withinMs;
+    } catch {
+      return false;
+    }
+  }
+
+  function isToastPersistValid(key) {
+    try {
+      const p = JSON.parse(
+        localStorage.getItem(toastPersistKey(key)) || "null"
+      );
+      return !!p && Date.now() < Number(p.expiresAt || 0);
+    } catch {
+      return false;
+    }
+  }
+
   function markCompleted(cid) {
     const k = String(cid);
     completedAt.set(k, Date.now());
@@ -60,6 +111,21 @@
     setCloneCleaning(k, false);
     inflightMisses.delete(k);
     inflightMisses.delete(`clean:${k}`);
+  }
+
+  const TLOG_NS = "[TOAST]";
+  function tlog(event, meta = {}) {
+    if (DEBUG_BF)
+      console.debug(TLOG_NS, event, { ts: new Date().toISOString(), ...meta });
+  }
+  function tgroup(label, fn) {
+    if (!DEBUG_BF) return fn();
+    console.groupCollapsed(`${TLOG_NS} ${label}`);
+    try {
+      fn();
+    } finally {
+      console.groupEnd();
+    }
   }
 
   const DEBUG_BF = true;
@@ -274,7 +340,7 @@
     const card = cardByAnyId(k);
     const pillText = card?.querySelector(".ch-status")?.textContent || "";
 
-    if (/\bCloning\s*\(\d+\s*\/\s*\d+\)/i.test(pillText)) return true;
+    if (/^Cleaning up\b/i.test(pillText)) return true;
 
     if (/^Queued\b/i.test(pillText) || queuedClones.has(k)) return true;
 
@@ -298,90 +364,6 @@
     return cid;
   }
 
-  function applyWSProgress(p) {
-    const cid = resolveCidFromWS(p);
-    if (!cid) return;
-
-    preferWS(cid);
-    touchActive(cid);
-    const type = p?.type;
-
-    if (type === "backfill_ack" || type === "backfill_started") {
-      setCloneLaunching(cid, false);
-      // ⛔ GUARD: if we've already shown cloning progress, don't bounce back to "Pulling"
-      resetProgressForChannel(cid);
-      setCloneRunning(cid, true);
-      setCardLoadingCoarse(cid, "Cloning");
-      updateProgressBar(cardByAnyId(cid), null, null);
-      return;
-    }
-
-    if (type === "backfill_progress") {
-      setCloneLaunching(cid, false);
-      setClonePulling(cid, false);
-      setCloneRunning(cid, true);
-
-      const d =
-        num(p?.data?.delivered) ??
-        num(p?.data?.delivered_count) ??
-        num(p?.data?.count);
-      const t =
-        num(p?.data?.expected_total) ??
-        num(p?.data?.total) ??
-        num(p?.data?.expected);
-
-      const prev = lastShownProgress.get(String(cid)) || { d: 0, t: null };
-      const nd = Math.max(prev.d || 0, d ?? 0);
-      const nt = Number.isFinite(t) ? t : prev.t;
-
-      lastShownProgress.set(String(cid), { d: nd, t: nt });
-
-      const card = cardByAnyId(cid);
-      if (Number.isFinite(nd) && Number.isFinite(nt) && nt > 0) {
-        setCardLoading(cid, true, `Cloning (${fmtInt(nd)}/${fmtInt(nt)})`);
-        updateProgressBar(card, nd, nt);
-      } else if (Number.isFinite(nd)) {
-        setCardLoading(cid, true, `Cloning (${fmtInt(nd)})`);
-        updateProgressBar(card, nd, null);
-      } else {
-        setCardLoading(cid, true, "Cloning");
-        updateProgressBar(card, null, null);
-      }
-      return;
-    }
-
-    if (type === "backfill_done") {
-      setCloneLaunching(cid, false);
-
-      setCloneCleaning(cid, true);
-      const card = cardByAnyId(cid);
-      setCardLoading(cid, true, "Cleaning up");
-      setProgressCleanupMode(card, true);
-      return;
-    }
-
-    if (type === "backfill_cleanup") {
-      setCloneLaunching(cid, false);
-      const state = String(p?.data?.state || "").toLowerCase();
-      if (state === "started") {
-        setCloneCleaning(cid, true);
-        const card = cardByAnyId(cid);
-        setCardLoading(cid, true, "Cleaning up");
-        setProgressCleanupMode(card, true);
-        return;
-      }
-      if (state === "finished") {
-        const initiatedHere =
-          startedHere.has(String(cid)) || hasLocalTaskForChannel(cid);
-        finalizeBackfillUI(cid, {
-          announce: initiatedHere,
-          taskId: p?.task_id || null,
-        });
-        return;
-      }
-    }
-  }
-
   function preferWS(cid, ms = WS_LEAD_MS) {
     if (cid == null) return;
     wsLeadUntil.set(String(cid), Date.now() + ms);
@@ -399,13 +381,19 @@
     const type = p?.type;
     const tid = p?.task_id && String(p.task_id);
 
-    // Ignore stragglers for tasks we've already finalized.
+    const isCleanupStart =
+      p?.type === "backfill_cleanup" &&
+      String(p?.data?.state || "").toLowerCase() === "started";
+
     if (tid && isTaskDone(tid)) return false;
 
     const hasTask = !!tid && taskMap.has(tid);
     const running = launchingClones.has(k) || runningClones.has(k);
+    const cleaning = cleaningClones.has(k);
     const liveInflight = inflightByOrig.has(k);
     const startedLocal = startedHere.has(k);
+    const queued = queuedClones.has(k);
+    const noWork = type === "backfill_done" && p?.data?.no_work === true;
 
     const isStartish =
       type === "backfill_started" ||
@@ -414,7 +402,8 @@
 
     if (isStartish) {
       if (!inflightReady && !startedLocal && !hasTask) return false;
-      return startedLocal || hasTask || liveInflight || running;
+      if (isCleanupStart) return hasTask || running || liveInflight || cleaning;
+      return startedLocal || hasTask || running || liveInflight;
     }
 
     const isCleanupFinished =
@@ -422,8 +411,13 @@
     const isFinishish = type === "backfill_done" || isCleanupFinished;
 
     if (isFinishish) {
-      if (!inflightReady && !startedLocal && !hasTask) return false;
-      return startedLocal || hasTask || running || liveInflight;
+      if (noWork) return true;
+      if (!inflightReady && !startedLocal && !hasTask && !cleaning && !queued)
+        return false;
+
+      return (
+        startedLocal || hasTask || running || liveInflight || cleaning || queued
+      );
     }
 
     if (!inflightReady && !startedLocal && !hasTask) return false;
@@ -446,40 +440,95 @@
     }
   }
 
-  function finalizeBackfillUI(cid, { announce = false, taskId = null } = {}) {
+  function forceUnlockIfNotInflight(cid) {
+    const k = String(cid);
+    if (!inflightByOrig.has(k) && !queuedClones.has(k)) {
+      setCloneLaunching(k, false);
+      setCloneRunning(k, false);
+
+      setCardLoading(k, false);
+    }
+  }
+
+  function finalizeBackfillUI(
+    cid,
+    { announce, taskId = null, keepQueued = false } = {}
+  ) {
     const k = String(cid);
 
-    if (taskId && isTaskDone(taskId)) {
+    tgroup("finalizeBackfillUI", () => {
+      const computedAnnounce =
+        announce === undefined
+          ? startedHere.has(k) ||
+            hasLocalTaskForChannel(k) ||
+            queuedClones.has(k) ||
+            hasAnyProgress(k) ||
+            !!lastActiveAt.get(k)
+          : announce;
+
+      tlog("start", {
+        cid: k,
+        taskId,
+        keepQueued,
+        announce_in: announce,
+        announce_resolved: computedAnnounce,
+        startedHere: startedHere.has(k),
+        hasLocalTask: hasLocalTaskForChannel(k),
+        queued: queuedClones.has(k),
+        cleaning: cleaningClones.has(k),
+        running: runningClones.has(k),
+      });
+
+      if (taskId && isTaskDone(taskId)) {
+        tlog("task:already-done", { taskId });
+        markCompleted(k);
+        preferWS(k, 10_000);
+        unlockBackfill(k);
+        inflightByOrig.delete(k);
+        if (!keepQueued) setCloneQueued(k, false);
+        setCloneCleaning(k, false);
+        setCardLoading(k, false);
+        resetProgressForChannel(k);
+        if (computedAnnounce) {
+          tlog("announce:call (already-done)", { cid: k, taskId });
+          announceBackfillDone(k, taskId);
+        }
+        if (taskId) forgetTask(taskId);
+        render();
+        return;
+      }
+
+      if (taskId) markTaskDone(taskId);
+      tlog("task:mark-done", { taskId });
+
       markCompleted(k);
-      preferWS(k, 10_000);
       unlockBackfill(k);
       inflightByOrig.delete(k);
-      setCloneQueued(k, false);
+
+      if (!keepQueued) setCloneQueued(k, false);
       setCloneCleaning(k, false);
       setCardLoading(k, false);
       resetProgressForChannel(k);
-      return;
-    }
 
-    // Mark the task as done BEFORE announcing, so any re-entrancy won't re-toast
-    if (taskId) markTaskDone(taskId);
+      if (computedAnnounce) {
+        tlog("announce:call", { cid: k, taskId, force: true });
+        announceBackfillDone(k, taskId, { force: true });
+      } else {
+        tlog("announce:skipped", { reason: "computedAnnounce=false" });
+      }
 
-    markCompleted(k);
-    unlockBackfill(k);
-    inflightByOrig.delete(k);
+      const card = cardByAnyId(k);
+      card?.querySelector(".ch-progress")?.remove();
+      if (taskId) forgetTask(taskId);
+      render();
 
-    setCloneQueued(k, false);
-    setCloneCleaning(k, false);
-    setCardLoading(k, false);
-    resetProgressForChannel(k);
-
-    if (announce) announceBackfillDone(k, taskId);
-
-    const card = cardByAnyId(k);
-    card?.querySelector(".ch-progress")?.remove();
-    if (taskId) forgetTask(taskId);
-    render();
-    setTimeout(() => fetchAndApplyQueue().catch(() => {}), 250);
+      setTimeout(() => {
+        fetchAndApplyQueue()
+          .then(() => forceUnlockIfNotInflight(k))
+          .catch(() => {})
+          .finally(() => tlog("post:queue-refresh", { cid: k }));
+      }, 250);
+    });
   }
 
   function findRowByAnyChannelId(id) {
@@ -605,11 +654,10 @@
     if (!pr) return;
 
     const bar = pr.querySelector(".bar");
-    const indeterminate = !(
-      Number.isFinite(delivered) &&
-      Number.isFinite(total) &&
-      total > 0
-    );
+
+    const haveDelivered = Number.isFinite(delivered) && delivered > 0;
+    const haveTotal = Number.isFinite(total) && total > 0;
+    const indeterminate = !(haveDelivered && haveTotal);
 
     if (indeterminate) {
       pr.classList.add("indeterminate");
@@ -656,6 +704,7 @@
     if (!card) return;
 
     if (on) {
+      card.classList.remove("is-pending");
       card.classList.add("is-cloning");
       card.setAttribute("aria-busy", "true");
       upsertStatusPill(card, text);
@@ -675,71 +724,143 @@
     const k = String(cid);
     const lp = lastShownProgress.get(k) || {};
     const info = inflightByOrig.get(k) || {};
+
     const d = Number.isFinite(lp.d)
       ? lp.d
       : Number.isFinite(info.delivered)
       ? info.delivered
       : null;
+
     const t = Number.isFinite(lp.t)
       ? lp.t
       : Number.isFinite(info.expected_total)
       ? info.expected_total
       : null;
-    const card = document.querySelector(`.ch-card[data-cid="${k}"]`);
-    const pillHasCounts = !!card
-      ?.querySelector(".ch-status")
-      ?.textContent?.match(/\bCloning\s*\(/i);
 
-    if (Number.isFinite(d) && Number.isFinite(t) && t > 0) {
+    const haveDelivered = Number.isFinite(d) && d > 0;
+    const haveTotal = Number.isFinite(t) && t > 0;
+
+    const card = document.querySelector(`.ch-card[data-cid="${k}"]`);
+
+    if (!haveDelivered) {
+      setCloneQueued(k, true);
+      ensureProgressBar(card);
+      updateProgressBar(card, null, null);
+      return;
+    }
+
+    setCloneQueued(k, false);
+    if (haveTotal) {
       setCardLoading(k, true, `Cloning (${fmtInt(d)}/${fmtInt(t)})`);
       updateProgressBar(card, d, t);
-      return;
+    } else {
+      setCardLoading(k, true, `Cloning (${fmtInt(d)})`);
+      updateProgressBar(card, d, null);
     }
-    if (Number.isFinite(d) || Number.isFinite(t) || pillHasCounts) {
-      setCardLoading(k, true, `Cloning (${fmtInt(d ?? 0)})`);
-      updateProgressBar(card, d ?? 0, null);
-      return;
-    }
+  }
 
-    setCardLoading(k, true, text);
+  function guaranteeToast(key, message, opts = {}, ttlMs = TOAST_TTL_MS) {
+    tgroup("guaranteeToast", () => {
+      if (wasToastDelivered(key, ttlMs) || isToastPersistValid(key)) {
+        tlog("skip:already-delivered", { key });
+        return;
+      }
+
+      const start = Date.now();
+      let attempts = 0;
+
+      const attempt = () => {
+        if (wasToastDelivered(key, ttlMs)) {
+          tlog("verify:ok", { key, attempts });
+          return;
+        }
+        const elapsed = Date.now() - start;
+        if (
+          attempts >= TOAST_VERIFY_MAX_ATTEMPTS ||
+          elapsed >= TOAST_VERIFY_MAX_MS
+        ) {
+          tlog("verify:giveup", { key, attempts, elapsed });
+          return;
+        }
+        attempts += 1;
+        tlog("verify:send", { key, attempts });
+        emitToast(message, opts, key, ttlMs);
+        const nextDelay = TOAST_VERIFY_BASE_DELAY * Math.pow(2, attempts - 1);
+        setTimeout(attempt, nextDelay);
+      };
+
+      emitToast(message, opts, key, ttlMs);
+      setTimeout(attempt, TOAST_VERIFY_BASE_DELAY);
+    });
   }
 
   function toastOncePersist(key, message, opts = {}, ttlMs = 8000) {
-    const now = Date.now();
-    const k = `toast:persist:${key}`;
-    const prev = JSON.parse(localStorage.getItem(k) || "null");
-    localStorage.setItem(k, JSON.stringify({ expiresAt: now + ttlMs }));
-    emitToast(message, opts);
+    tgroup("toastOncePersist", () => {
+      tlog("start", { key, ttlMs });
+      guaranteeToast(key, message, opts, ttlMs);
+    });
   }
 
   const __toastQ = [];
-  function emitToast(message, opts) {
-    if (typeof window.showToast === "function") {
-      try {
-        window.showToast(message, opts);
-      } catch {}
-    } else {
-      __toastQ.push([message, opts]);
-    }
+  function emitToast(message, opts, key = null, ttlMs = TOAST_TTL_MS) {
+    tgroup("emitToast", () => {
+      const hasShow = typeof window.showToast === "function";
+      tlog("pre", { hasShow, message, opts, key });
+      if (hasShow) {
+        try {
+          window.showToast(message, opts);
+          if (key) markToastDelivered(key, ttlMs);
+          tlog("sent", { message, key });
+        } catch (err) {
+          __toastQ.push({ key, message, opts, ttlMs });
+          tlog("queued:on-error", {
+            qLen: __toastQ.length,
+            error: String(err?.message || err),
+          });
+        }
+      } else {
+        __toastQ.push({ key, message, opts, ttlMs });
+        tlog("queued:no-showToast", { qLen: __toastQ.length });
+      }
+    });
   }
+
   function __flushQueuedToasts() {
-    if (typeof window.showToast !== "function") return;
-    while (__toastQ.length) {
-      const [m, o] = __toastQ.shift();
-      try {
-        window.showToast(m, o);
-      } catch {}
-    }
+    const hasShow = typeof window.showToast === "function";
+    tgroup("flushQueuedToasts", () => {
+      tlog("start", { hasShow, qLen: __toastQ.length });
+      if (!hasShow) return;
+      while (__toastQ.length) {
+        const { key, message, opts, ttlMs } = __toastQ.shift();
+        try {
+          window.showToast(message, opts);
+          if (key) markToastDelivered(key, ttlMs);
+          tlog("flush:sent", { key, message, remaining: __toastQ.length });
+        } catch (err) {
+          __toastQ.push({ key, message, opts, ttlMs });
+          tlog("flush:error-requeue", {
+            key,
+            error: String(err?.message || err),
+          });
+          break;
+        }
+      }
+    });
   }
   document.addEventListener("DOMContentLoaded", __flushQueuedToasts);
   setTimeout(__flushQueuedToasts, 0);
-
-  let tries = 0;
-  const iv = setInterval(() => {
+  let __toastFlushTries = 0;
+  const __toastIv = setInterval(() => {
     __flushQueuedToasts();
-    if (typeof window.showToast === "function" || ++tries > 40)
-      clearInterval(iv);
+    if (typeof window.showToast === "function" || ++__toastFlushTries > 40)
+      clearInterval(__toastIv);
   }, 125);
+
+  window.addEventListener("storage", (e) => {
+    if (e && typeof e.key === "string" && e.key.startsWith("toast:receipt:")) {
+      tlog("storage:receipt-seen", { key: e.key });
+    }
+  });
 
   const BOOT_TS = Date.now();
   const SUPPRESS_BOOT_MS = 1200;
@@ -851,7 +972,6 @@
     dismissTransientUI();
     const modal = document.getElementById("customize-modal");
     const back = modal.querySelector('[data-role="backdrop"]');
-    const dlg = modal.querySelector(".modal-content");
     const name = document.getElementById("customize-name");
     const btnSave = document.getElementById("customize-save");
     const btnClose = document.getElementById("customize-close");
@@ -1043,37 +1163,6 @@
   function tooltipForCategory(orig, pin) {
     if (!pin || pin.trim() === "" || pin === orig) return "";
     return `Cloned category = ${orig}\nCustomized category = ${pin}`;
-  }
-
-  function updateCategoryChipUI(originalName, pinnedName) {
-    const sel = `.cat-chip[data-cat-name="${
-      window.CSS && CSS.escape
-        ? CSS.escape(originalName)
-        : String(originalName).replace(/"/g, '\\"')
-    }"]`;
-
-    const chip = document.querySelector(sel);
-    if (!chip) return;
-
-    const isOrphan = chip.classList.contains("badge-orphan");
-
-    const display = pinnedName && pinnedName.trim() ? pinnedName : originalName;
-
-    chip.innerHTML = `
-      ${escapeHtml(display)}
-      <button class="cat-menu-trigger" aria-haspopup="menu" aria-controls="ch-menu" aria-label="Category menu" type="button">⋯</button>
-    `;
-
-    chip.classList.toggle(
-      "badge-custom",
-      !!(pinnedName && pinnedName.trim() && pinnedName !== originalName)
-    );
-
-    const tip = tooltipForCategory(originalName, pinnedName);
-    if (tip) chip.setAttribute("title", tip);
-    else chip.removeAttribute("title");
-
-    chip.setAttribute("data-cat-name", originalName);
   }
 
   function injectCustomizeCategoryModal() {
@@ -1390,19 +1479,6 @@
     window.updateBatchBar = updateBatchBar;
 
     (function wireOutsideClickToClearSelection() {
-      const OPEN_MODAL_SEL = [
-        ".modal.show",
-        ".bf-modal.show",
-        "#backfill-dialog.show",
-        "#backfill-batch-dialog.show",
-        "#customize-modal.show",
-        "#customize-cat-modal.show",
-        "#confirm-modal.show",
-        "#verify-dialog.show",
-        '[role="dialog"]:not([aria-hidden="true"])',
-        ".modal[open]",
-      ].join(",");
-
       const MODAL_ZONE_SEL = [
         ".modal",
         ".modal-backdrop",
@@ -1513,17 +1589,28 @@
 
   function setCloneQueued(id, on, position = null) {
     const k = String(id);
+
+    if (on) queuedClones.add(k);
+    else queuedClones.delete(k);
+
+    try {
+      localStorage.setItem("bf:queued", JSON.stringify([...queuedClones]));
+    } catch {}
+
     const card = document.querySelector(`.ch-card[data-cid="${k}"]`);
     if (!card) return;
 
     if (on) {
-      queuedClones.add(k);
+      touchActive(k);
       card.classList.add("is-pending");
+      card.classList.remove("is-cloning");
       card.setAttribute("aria-busy", "true");
-      upsertStatusPill(card, position != null ? `Queued` : "Queued");
+      upsertStatusPill(card, "Queued");
+
+      ensureProgressBar(card);
+      updateProgressBar(card, null, null);
       setCardInteractive(card, false);
     } else {
-      queuedClones.delete(k);
       card.classList.remove("is-pending");
       card.removeAttribute("aria-busy");
 
@@ -1531,10 +1618,6 @@
       if (pill && /^Queued/.test(pill.textContent || "")) pill.remove();
       setCardInteractive(card, true);
     }
-
-    try {
-      localStorage.setItem("bf:queued", JSON.stringify([...queuedClones]));
-    } catch {}
   }
 
   function setClonePulling(id, on) {
@@ -1572,7 +1655,7 @@
 
   const inflightMisses = new Map();
   const queueMisses = new Map();
-  const MAX_QUEUE_MISSES = 3;
+  const MAX_QUEUE_MISSES = 1;
   const MAX_MISSES = 6;
 
   function clearQueuedNotIn(serverIds) {
@@ -1616,73 +1699,100 @@
     return null;
   }
 
-  function announceBackfillDone(cid, taskId = null) {
+  function announceBackfillDone(cid, taskId = null, { force = false } = {}) {
     const k = String(cid);
 
-    // Per-tab short dedupe so rapid duplicate events don't flicker the UI
-    announceBackfillDone._last ??= new Map();
-    const lastAnnounced = announceBackfillDone._last.get(k) || 0;
-    if (Date.now() - lastAnnounced < 20000) {
-      setCloneQueued(k, false);
-      return;
-    }
+    tgroup("announceBackfillDone", () => {
+      tlog("input", { cid: k, taskId, force });
 
-    if (!shouldAnnounceNow()) {
-      setTimeout(() => announceBackfillDone(k, taskId), SUPPRESS_BOOT_MS + 120);
-      return;
-    }
-
-    const doneKey = taskId ? `bf:done-task:${taskId}` : `bf:done:${k}`;
-    const persistKey = `toast:persist:${doneKey}`;
-    try {
-      const prev = JSON.parse(localStorage.getItem(persistKey) || "null");
-      if (prev && Date.now() < prev.expiresAt) {
+      announceBackfillDone._last ??= new Map();
+      const lastAnnounced = announceBackfillDone._last.get(k) || 0;
+      const since = Date.now() - lastAnnounced;
+      if (since < 20000) {
+        tlog("skip:recent-dedupe", { sinceMs: since });
         setCloneQueued(k, false);
         return;
       }
-    } catch {}
 
-    try {
-      sessionStorage.removeItem(`bf:cancelled:${k}`);
-    } catch {}
-    const wasCancelled = cancelledThisSession.has(k);
-
-    const initiatedHere = startedHere.has(k) || hasLocalTaskForChannel(k);
-
-    if (!wasCancelled && initiatedHere) {
-      const chName = getChannelDisplayName(k);
-      const msg = chName
-        ? `Clone completed for #${chName}.`
-        : `Clone completed (channel ${k}).`;
-
-      toastOncePersist(doneKey, msg, { type: "success" }, 24 * 60 * 60 * 1000);
-
-      // …and cross-tab persistence so new tabs don't re-announce.
-      try {
-        localStorage.setItem(
-          persistKey,
-          JSON.stringify({ expiresAt: Date.now() + 24 * 60 * 60 * 1000 })
+      const age = Date.now() - BOOT_TS;
+      if (!shouldAnnounceNow()) {
+        tlog("delay:boot-suppress", { bootAgeMs: age, SUPPRESS_BOOT_MS });
+        setTimeout(
+          () => announceBackfillDone(k, taskId),
+          SUPPRESS_BOOT_MS + 120
         );
-      } catch {}
-
-      announceBackfillDone._last.set(k, Date.now());
-    }
-
-    setCloneQueued(k, false);
-
-    if (initiatedHere) {
-      const card = document.querySelector(`.ch-card[data-cid="${k}"]`);
-      if (card) {
-        let pill = card.querySelector(".ch-status");
-        if (!pill) {
-          pill = document.createElement("span");
-          pill.className = "ch-status";
-          card.querySelector(".ch-top-right")?.prepend(pill);
-        }
-        pill.textContent = "Synced ✓";
-        setTimeout(() => pill?.remove(), 2000);
+        return;
       }
-    }
+
+      const doneKey = taskId ? `bf:done-task:${taskId}` : `bf:done:${k}`;
+      const persistKey = `toast:persist:${doneKey}`;
+      let prev = null;
+      try {
+        prev = JSON.parse(localStorage.getItem(persistKey) || "null");
+      } catch {}
+      const stillValid = prev && Date.now() < prev.expiresAt;
+      tlog("persist-check", { doneKey, persistKey, stillValid, prev });
+
+      if (stillValid) {
+        tlog("skip:24h-dedupe", {});
+        setCloneQueued(k, false);
+        return;
+      }
+
+      try {
+        sessionStorage.removeItem(`bf:cancelled:${k}`);
+      } catch {}
+      const wasCancelled = cancelledThisSession.has(k);
+
+      const initiatedHere =
+        startedHere.has(k) || hasLocalTaskForChannel(k) || queuedClones.has(k);
+      const observedHere = hasAnyProgress(k) || !!lastActiveAt.get(k);
+      const shouldToast =
+        !wasCancelled && (force || initiatedHere || observedHere);
+      const chName = getChannelDisplayName(k);
+
+      tlog("decision", {
+        wasCancelled,
+        initiatedHere,
+        observedHere,
+        force,
+        shouldToast,
+        chName,
+      });
+
+      setCloneQueued(k, false);
+
+      if (shouldToast) {
+        const msg = chName
+          ? `Clone completed for #${chName}.`
+          : `Clone completed (channel ${k}).`;
+        tlog("toast:guarantee", { msg, taskId, doneKey });
+        guaranteeToast(doneKey, msg, { type: "success" }, 24 * 60 * 60 * 1000);
+
+        announceBackfillDone._last.set(k, Date.now());
+      } else {
+        tlog("toast:skipped", {
+          reason: wasCancelled ? "wasCancelled" : "gate:false",
+        });
+      }
+
+      if (initiatedHere) {
+        const card = document.querySelector(`.ch-card[data-cid="${k}"]`);
+        if (card) {
+          let pill = card.querySelector(".ch-status");
+          if (!pill) {
+            pill = document.createElement("span");
+            pill.className = "ch-status";
+            card.querySelector(".ch-top-right")?.prepend(pill);
+          }
+          pill.textContent = "Synced ✓";
+          setTimeout(() => pill?.remove(), 2000);
+          tlog("pill:update", { cid: k, applied: true });
+        } else {
+          tlog("pill:update", { cid: k, applied: false });
+        }
+      }
+    });
   }
 
   function applyInflightUI(itemsObj) {
@@ -1708,8 +1818,10 @@
     for (const [cid, info] of inflightByOrig.entries()) {
       if (Date.now() - (completedAt.get(String(cid)) || 0) < 8000) continue;
       if (isWSLeading(cid)) continue;
+
       setCloneLaunching(cid, false);
       setCloneRunning(cid, true);
+
       const card = document.querySelector(`.ch-card[data-cid="${cid}"]`);
       const d = Number.isFinite(info?.delivered) ? info.delivered : null;
       const t = Number.isFinite(info?.expected_total)
@@ -1718,22 +1830,21 @@
 
       const haveDelivered = Number.isFinite(d) && d > 0;
       const haveTotal = Number.isFinite(t) && t > 0;
-      if (haveDelivered || haveTotal) setClonePulling(cid, false);
-      const isPulling =
-        pullingClones.has(String(cid)) && !(haveDelivered || haveTotal);
 
-      if (isPulling) {
-        setCardLoading(cid, true, PULLING_LABEL);
+      if (haveDelivered) setClonePulling(cid, false);
+
+      if (!haveDelivered) {
+        setCloneQueued(cid, true);
+        ensureProgressBar(card);
         updateProgressBar(card, null, null);
-      } else if (haveDelivered && haveTotal) {
+      } else if (haveTotal) {
+        setCloneQueued(cid, false);
         setCardLoading(cid, true, `Cloning (${fmtInt(d)}/${fmtInt(t)})`);
         updateProgressBar(card, d, t);
-      } else if (haveDelivered) {
+      } else {
+        setCloneQueued(cid, false);
         setCardLoading(cid, true, `Cloning (${fmtInt(d)})`);
         updateProgressBar(card, d, null);
-      } else {
-        setCardLoading(cid, true, "Cloning");
-        updateProgressBar(card, null, null);
       }
     }
 
@@ -1780,9 +1891,25 @@
       const misses = (inflightMisses.get(`clean:${k}`) || 0) + 1;
       inflightMisses.set(`clean:${k}`, misses);
       if (misses >= MAX_MISSES) {
-        setCloneCleaning(k, false);
-        setCardLoading(k, false);
+        const tId =
+          [...taskMap.entries()].find(
+            ([, c]) => String(c) === String(id)
+          )?.[0] || null;
+
+        const shouldAnnounce =
+          startedHere.has(k) ||
+          hasLocalTaskForChannel(k) ||
+          queuedClones.has(k) ||
+          hasAnyProgress(k) ||
+          !!lastActiveAt.get(k);
+
         inflightMisses.delete(`clean:${k}`);
+
+        finalizeBackfillUI(k, {
+          announce: shouldAnnounce,
+          taskId: tId || null,
+          keepQueued: false,
+        });
       }
     }
 
@@ -1810,9 +1937,12 @@
         JSON.stringify([...new Set(inflightByOrig.keys())])
       );
     } catch {}
+
+    for (const k of [...launchingClones, ...runningClones]) {
+      if (!inflightByOrig.has(String(k))) forceUnlockIfNotInflight(k);
+    }
   }
 
-  /** Fetch current in-flight backfills and apply to UI */
   async function fetchAndApplyInflight() {
     try {
       const res = await fetch("/api/backfills/inflight", {
@@ -1826,7 +1956,6 @@
     } catch {}
   }
 
-  /** Fetch queued + active from server and apply queued/active UI */
   async function fetchAndApplyQueue() {
     try {
       const res = await fetch("/api/backfills/queue", {
@@ -1848,12 +1977,12 @@
         const k = String(id);
         const completedRecently = Date.now() - (completedAt.get(k) || 0) < 8000;
         if (isWSLeading(k) || completedRecently) continue;
-        setCloneQueued(k, false);
 
-        if (isWSLeading(k) || hasAnyProgress(k)) {
-          setCloneRunning(k, true); // keep the state, but don't change the pill
-          continue;
-        }
+        setCloneRunning(k, true);
+
+        const info = inflightByOrig.get(k) || {};
+        const d = Number.isFinite(info?.delivered) ? info.delivered : null;
+        const haveDelivered = Number.isFinite(d) && d > 0;
 
         if (cleaningClones.has(k)) {
           const card = document.querySelector(`.ch-card[data-cid="${k}"]`);
@@ -1862,8 +1991,15 @@
           continue;
         }
 
-        setCloneRunning(k, true);
-        if (!hasAnyProgress(k)) setCardLoadingCoarse(k, "Cloning");
+        if (haveDelivered) {
+          setCloneQueued(k, false);
+          setCardLoadingCoarse(k, "Cloning");
+        } else {
+          setCloneQueued(k, true);
+          const card = cardByAnyId(k);
+          ensureProgressBar(card);
+          updateProgressBar(card, null, null);
+        }
       }
 
       for (const q of items) {
@@ -1872,7 +2008,6 @@
         if (!activeIds.has(cid)) setCloneQueued(cid, true, q.position);
       }
 
-      // Anything we thought was queued but server doesn't list → clear
       const serverIds = new Set(items.map((i) => String(i.channel_id)));
       clearQueuedNotIn(serverIds);
     } catch {}
@@ -1960,9 +2095,6 @@
     );
   }
 
-  function cloneIsRunning(id) {
-    return runningClones.has(String(id));
-  }
   function setCloneRunning(id, on) {
     dbg("[STATE] running", {
       id: String(id),
@@ -1988,7 +2120,6 @@
 
     const k = String(id);
 
-    // don't unlock yet (prevents flicker mid-run).
     const activeRecently = Date.now() - (lastActiveAt.get(k) || 0) < 30000;
     const completedRecently = Date.now() - (completedAt.get(k) || 0) < 60000;
 
@@ -2120,7 +2251,6 @@
       const ts = Number(localStorage.getItem("bf:__wipe") || "0");
       if (ts) {
         resetAllCloningUI();
-        // consume the flag so it doesn't keep wiping forever
         localStorage.removeItem("bf:__wipe");
       }
     } catch {}
@@ -2586,9 +2716,10 @@
 
       root.appendChild(section);
 
-      for (const id of launchingClones) setCardLoading(id, true, "Cloning");
-      for (const id of runningClones) setCardLoading(id, true, "Cloning");
-      for (const id of pullingClones) setCardLoading(id, true, PULLING_LABEL);
+      for (const id of launchingClones) setCardLoadingCoarse(id, "Cloning");
+      for (const id of runningClones) setCardLoadingCoarse(id, "Cloning");
+
+      for (const id of pullingClones) setCardLoadingCoarse(id, PULLING_LABEL);
       for (const id of queuedClones) setCloneQueued(id, true);
     }
   }
@@ -2662,7 +2793,6 @@
       let top = r.bottom + gap;
       let left = Math.min(r.left, vw - mw - pad);
 
-      // flip up if there isn't enough room below
       if (vh - r.bottom < mh && r.top > vh - r.bottom) {
         top = r.top - gap - mh;
       }
