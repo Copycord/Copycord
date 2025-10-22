@@ -1229,8 +1229,8 @@ body {
 }
 
 .menu-btn:hover {
-  background: #2c1d4a;
-  border-color: #2c1d4a;
+  background: var(--rail-rest);
+  border-color: var(--rail-rest);
   color: #fff;
   box-shadow: none !important;
 }
@@ -1325,11 +1325,6 @@ body {
 
   --rail-rest-rgb: 44 29 74;
   --rail-hover-rgb: 167 139 250;
-  --glass-blur: 10px;
-  --glass-sat: 120%;
-  --glass-border: rgba(255, 255, 255, 0.1);
-  --glass-inner: rgba(255, 255, 255, 0.08);
-  --glass-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
 }
 
 .side-menu-body {
@@ -1360,16 +1355,12 @@ body {
   border-radius: var(--rail-radius);
   color: #fff;
   text-decoration: none;
-  border: 1px solid var(--glass-border);
 
   background: linear-gradient(
     180deg,
     rgba(var(--rail-rest-rgb) / 0.34),
     rgba(var(--rail-rest-rgb) / 0.22)
   );
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
-  box-shadow: var(--glass-shadow);
   transition: background 0.16s ease, border-color 0.16s ease,
     transform 80ms ease;
 }
@@ -1432,7 +1423,6 @@ body {
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
     background: var(--rail-rest);
-    border-color: var(--glass-border);
     box-shadow: none;
   }
   .side-menu .menu-list li a:is(:hover, :focus-visible),
