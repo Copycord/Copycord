@@ -1097,7 +1097,7 @@ table.runtime th:nth-child(3) {
   width: min(320px, 86vw);
   background: #0f0820;
   border-right: 1px solid var(--border);
-  box-shadow: var(--shadow);
+  box-shadow: none !important;
   transform: translateX(-100%);
   transition: transform 0.22s ease;
   z-index: 75;
@@ -1328,7 +1328,7 @@ body {
   --glass-blur: 10px;
   --glass-sat: 120%;
   --glass-border: rgba(255, 255, 255, 0.1);
-  --glass-inner: rgba(255, 255, 255, 0.08); /* soft inner sheen */
+  --glass-inner: rgba(255, 255, 255, 0.08);
   --glass-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
 }
 
@@ -1416,9 +1416,6 @@ body {
   width: 18px;
   height: 18px;
   display: block;
-}
-.side-menu .menu-list li a svg path {
-  fill: currentColor;
 }
 .side-menu .menu-list li a .mi {
   color: currentColor;
@@ -2479,6 +2476,71 @@ body {
 }
 .side-menu {
   z-index: 10002;
+}
+
+.side-menu {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.side-menu-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.side-menu-footer {
+  position: static;
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.18));
+}
+
+.sm-version {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.9;
+  color: #a78bfa;
+}
+
+.sm-footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sm-footer-link svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+}
+
+.sm-footer-link span {
+  line-height: 1;
+}
+
+.side-menu .menu-item .mi svg {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+.side-menu .menu-item .mi svg:not([fill='none']) {
+  fill: currentColor;
+}
+
+.side-menu .menu-item .mi svg[fill='none'] {
+  fill: none !important;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .bf-modal[hidden] {
@@ -6335,4 +6397,61 @@ body.modal-open #bf-batchbar {
 
 .bf-field .radio.has-tip .info-dot {
   margin-left: 2px;
+}
+
+.side-menu .menu-list li a {
+  background: transparent !important;
+  border: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+.side-menu .menu-list li a::before {
+  content: none !important;
+}
+
+.side-menu .menu-list li a:hover {
+  background: rgba(var(--rail-hover-rgb) / 0.16) !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.side-menu .menu-list li a.is-active,
+.side-menu .menu-list li a[aria-current='page'] {
+  background: rgba(var(--rail-hover-rgb) / 0.28) !important;
+  border: 0 !important;
+  box-shadow: none !important;
+}
+
+.side-menu .menu-list li a:focus-visible {
+  background: transparent !important;
+  border: 0 !important;
+  outline: 2px solid rgba(var(--rail-hover-rgb) / 0.7);
+  outline-offset: 2px;
+  box-shadow: none !important;
+}
+.side-menu .menu-list li a.is-active:focus-visible,
+.side-menu .menu-list li a[aria-current='page']:focus-visible {
+  outline: 2px solid rgba(var(--rail-hover-rgb) / 0.85);
+  outline-offset: 2px;
+}
+
+.side-menu .menu-list li a:active {
+  transform: none !important;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .side-menu .menu-list li a {
+    background: transparent !important;
+    border: 0 !important;
+  }
+  .side-menu .menu-list li a:hover {
+    background: rgba(var(--rail-hover-rgb) / 0.16) !important;
+  }
+  .side-menu .menu-list li a.is-active,
+  .side-menu .menu-list li a[aria-current='page'] {
+    background: rgba(var(--rail-hover-rgb) / 0.28) !important;
+    border: 0 !important;
+  }
 }
