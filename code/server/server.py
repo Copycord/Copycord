@@ -102,7 +102,6 @@ class ServerReceiver:
         self.clone_guild_id = int(self.config.CLONE_GUILD_ID)
         self.bot.ws_manager = self.ws
         self.db = DBManager(self.config.DB_PATH)
-        self.backfill = BackfillManager(self)
         self.session: aiohttp.ClientSession = None
         self.sitemap_queue: Queue = Queue()
         self._processor_started = False
@@ -156,13 +155,14 @@ class ServerReceiver:
         self.bus = AdminBus(
             role="server", logger=logger, admin_ws_url=self.config.ADMIN_WS_URL
         )
+        self.ratelimit = RateLimitManager()
+        self.backfill = BackfillManager(self, ratelimit=self.ratelimit)
         self.backfills = BackfillTracker(
             bus=self.bus,
             on_done_cb=self.backfill.on_done,
             progress_provider=self.backfill.get_progress,
         )
         self.backfill.tracker = self.backfills
-        self.ratelimit = RateLimitManager()
         self.emojis = EmojiManager(
             bot=self.bot,
             db=self.db,
