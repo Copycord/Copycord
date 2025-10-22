@@ -119,17 +119,14 @@ class MessageUtils:
         if "description" in e:
             e["description"] = self.sanitize_inline(e.get("description"), message, id_map)
 
-        # author
         if isinstance(e.get("author"), dict) and "name" in e["author"]:
             e["author"] = dict(e["author"])
             e["author"]["name"] = self.sanitize_inline(e["author"].get("name"), message, id_map)
 
-        # footer
         if isinstance(e.get("footer"), dict) and "text" in e["footer"]:
             e["footer"] = dict(e["footer"])
             e["footer"]["text"] = self.sanitize_inline(e["footer"].get("text"), message, id_map)
 
-        # fields
         if isinstance(e.get("fields"), list):
             new_fields = []
             for f in e["fields"]:

@@ -103,7 +103,7 @@ window.createStatusGate = function createStatusGate(opts = {}) {
       <div class="sg-logo" aria-hidden="true">
         <img src="/static/logo.png" alt="" draggable="false">
       </div>
-      <div class="sg-msg" role="status" aria-live="polite">Connecting to Discord…</div>
+      <div class="sg-msg" role="status" aria-live="polite">Checking bot status...</div>
     `;
     document.body.appendChild(gate);
   }
@@ -202,10 +202,10 @@ window.createStatusGate = function createStatusGate(opts = {}) {
   }
 
   async function checkAndGate(onReady, fromRetry = false) {
-    setGateText(fromRetry ? "Rechecking…" : "Connecting to Discord…");
+    setGateText(fromRetry ? "Server or Client were disconnected..." : "Checking bot connection…");
     const j = await fetchRuntime();
     if (!j) {
-      setGateText("Can’t reach Discord. The bots may be offline.");
+      setGateText("Make sure Server and Client are started and connected to Discord.");
       if (!statusPoll)
         statusPoll = setInterval(() => checkAndGate(onReady, true), 5000);
       fireStatus(false, j);
@@ -228,12 +228,12 @@ window.createStatusGate = function createStatusGate(opts = {}) {
     } else {
       if (require === "both") {
         if (!st.serverReady && !st.clientReady)
-          setGateText("Waiting for server and client to be ready…");
+          setGateText("Waiting for Server and Client connection...");
         else if (!st.serverReady)
-          setGateText("Waiting for server to be ready…");
-        else setGateText("Waiting for client to be ready…");
+          setGateText("Waiting for Server to connect to Discord gateway...");
+        else setGateText("Waiting for Client to connect to Discord gateway...");
       } else {
-        setGateText("Bot is not ready yet…");
+        setGateText("Bot is not connected to Discord yet…");
       }
       showGateNow();
       fireStatus(false, j);

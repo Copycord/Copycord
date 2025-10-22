@@ -7,6 +7,7 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 import asyncio
 import contextlib
 import re
@@ -142,6 +143,15 @@ class ClientListener:
             bot=self.bot, ws=self.ws, msg_serializer=self.msg.serialize, logger=logger
         )
         self.backfill = BackfillEngine(self, logger=logger)
+        self._bf_max = int(os.getenv("BACKFILL_MAX_CONCURRENT", "2"))
+        self._bf_queue: asyncio.Queue[tuple[int, dict]] = asyncio.Queue(
+            maxsize=int(os.getenv("BACKFILL_QUEUE_MAX", "500"))
+        )
+        self._bf_active: set[int] = set()
+        self._bf_queued: set[int] = set()
+        self._bf_worker_task: asyncio.Task | None = None
+        self._bf_waiters: dict[int, asyncio.Event] = {}
+        self._bf_pull_gate = asyncio.Semaphore(1)
 
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
@@ -211,13 +221,11 @@ class ClientListener:
                 or data.get("since")
                 or (rng.get("value") if mode == "since" else None)
             )
-
             before_iso = (
                 data.get("before_iso")
                 or (rng.get("before") if mode in ("between", "range") else None)
                 or data.get("until")
             )
-
             _n = data.get("last_n") or (
                 rng.get("value") if mode in ("last", "last_n") else None
             )
@@ -229,17 +237,70 @@ class ClientListener:
             resume = bool(data.get("resume"))
             after_id = data.get("after_id")
 
-            asyncio.create_task(
-                self.backfill.run_channel(
-                    chan_id,
-                    after_iso=after_iso,
-                    before_iso=before_iso,
-                    last_n=last_n,
-                    resume=resume,
-                    after_id=after_id,
+            params = {
+                "after_iso": after_iso,
+                "before_iso": before_iso,
+                "last_n": last_n,
+                "resume": resume,
+                "after_id": after_id,
+            }
+            return await self._enqueue_backfill(chan_id, params)
+
+        elif typ == "backfill_done":
+            data = msg.get("data") or {}
+            cid_raw = data.get("channel_id")
+            try:
+                cid = int(cid_raw)
+            except (TypeError, ValueError):
+                return
+            ev = self._bf_waiters.get(cid)
+            if ev:
+                ev.set()
+            self._bf_active.discard(cid)
+
+            return
+
+        elif typ == "backfills_queue_query":
+
+            try:
+
+                pending = list(getattr(self._bf_queue, "_queue", []))
+            except Exception:
+                pending = []
+
+            pending_items = []
+            for idx, tup in enumerate(pending, start=1):
+                try:
+                    cid = int(tup[0])
+                except Exception:
+                    continue
+                pending_items.append(
+                    {
+                        "channel_id": str(cid),
+                        "position": idx,
+                        "state": "queued",
+                    }
                 )
-            )
-            return {"ok": True}
+
+            active_items = []
+            for cid in list(self._bf_active):
+                try:
+                    cid_int = int(cid)
+                except Exception:
+                    continue
+                active_items.append(
+                    {
+                        "channel_id": str(cid_int),
+                        "position": 0,
+                        "state": "active",
+                    }
+                )
+
+            return {
+                "type": "backfills_queue",
+                "data": {"items": active_items + pending_items},
+                "ok": True,
+            }
 
         elif typ == "sitemap_request":
             if not self.config.ENABLE_CLONING:
@@ -368,7 +429,6 @@ class ClientListener:
                         with open(outfile, "w", encoding="utf-8") as f:
                             json.dump(result or {}, f, ensure_ascii=False, indent=2)
 
-                        # Tell UI we're done
                         try:
                             await self.bus.publish(
                                 kind="client",
@@ -595,7 +655,7 @@ class ClientListener:
             try:
                 from export_runners import AssetExportRunner
             except Exception:
-                from .export_runners import AssetExportRunner  # type: ignore
+                from .export_runners import AssetExportRunner
 
             try:
                 req_gid_val = (data or {}).get("guild_id")
@@ -806,7 +866,6 @@ class ClientListener:
             if self.sitemap.is_excluded_ids(ch_id, cat_id):
                 return True
         except Exception:
-            # Fail-safe: don't break message flow
             pass
 
         if message.type == MessageType.thread_created:
@@ -1588,6 +1647,63 @@ class ClientListener:
                 self.db.delete_guild(gid)
         except Exception:
             logger.exception("[guilds] snapshot failed (outer)")
+
+    async def _ensure_backfill_worker(self) -> None:
+        if self._bf_worker_task and not self._bf_worker_task.done():
+            return
+        self._bf_worker_task = asyncio.create_task(self._backfill_worker(0))
+
+    async def _backfill_worker(self, worker_id: int):
+        while True:
+            chan_id, params = await self._bf_queue.get()
+            try:
+
+                if chan_id in self._bf_active:
+                    self._bf_queued.discard(chan_id)
+                    continue
+
+                self._bf_active.add(chan_id)
+
+                await self.backfill.run_channel(chan_id, **(params or {}))
+
+                await self.ws.send(
+                    {
+                        "type": "backfill_stream_end",
+                        "data": {"channel_id": str(chan_id)},
+                    }
+                )
+
+            except asyncio.CancelledError:
+
+                raise
+            except Exception:
+                try:
+                    logger.exception(
+                        "[backfill] worker-%s failed for channel=%s", worker_id, chan_id
+                    )
+                except NameError:
+                    import logging
+
+                    logging.getLogger("backfill").exception(
+                        "[backfill] worker-%s failed for channel=%s", worker_id, chan_id
+                    )
+            finally:
+                self._bf_queued.discard(chan_id)
+                self._bf_queue.task_done()
+
+    async def _enqueue_backfill(self, chan_id: int, params: dict) -> dict:
+        await self._ensure_backfill_worker()
+        if chan_id in self._bf_active or chan_id in self._bf_queued:
+            return {
+                "ok": True,
+                "queued": True,
+                "position": None,
+                "note": "already pending",
+            }
+        await self._bf_queue.put((chan_id, params))
+        self._bf_queued.add(chan_id)
+        pos = self._bf_queue.qsize()
+        return {"ok": True, "queued": True, "position": pos}
 
     async def _shutdown(self):
         """

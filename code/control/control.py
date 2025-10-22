@@ -22,8 +22,8 @@ import time
 from datetime import datetime, timezone
 from common.db import DBManager
 
-# ------------------- Defaults & wiring -------------------
-ROLE = os.getenv("ROLE", "server").strip().lower()  # "server" or "client"
+
+ROLE = os.getenv("ROLE", "server").strip().lower()
 DEFAULT_PORT = 9101 if ROLE == "server" else 9102
 PORT = int(os.getenv("CONTROL_PORT", str(DEFAULT_PORT)))
 ROOT = Path("/app")
@@ -84,10 +84,9 @@ class ControlService:
         self._child: Optional[subprocess.Popen] = None
         self._reader_thread: Optional[threading.Thread] = None
         self._stop_event: Optional[asyncio.Event] = None
-        self._started_wall: Optional[float] = None   
-        self._started_mono: Optional[float] = None   
+        self._started_wall: Optional[float] = None
+        self._started_mono: Optional[float] = None
 
-    # ----------------- DB-backed environment -----------------
     def _load_env_for_child(self) -> dict:
         """
         Merge current ENV with config values from DB.app_config,
@@ -95,12 +94,12 @@ class ControlService:
         """
         env = dict(os.environ)
         env["PYTHONPATH"] = self.pythonpath
-        env["DB_PATH"] = self.db_path  # let the child know where the DB is
+        env["DB_PATH"] = self.db_path
 
         try:
-            all_cfg = self._db.get_all_config()  # {key: value}
+            all_cfg = self._db.get_all_config()
         except Exception as e:
-            # If DB is not ready for any reason, proceed with current env
+
             sys.stdout.write(f"[control] DB read failed: {e}\n")
             sys.stdout.flush()
             all_cfg = {}
@@ -110,7 +109,6 @@ class ControlService:
                 env[k] = str(v)
         return env
 
-    # ----------------- Child process control -----------------
     def is_running(self) -> bool:
         return self._child is not None and self._child.poll() is None
 
@@ -123,10 +121,10 @@ class ControlService:
             logfile.parent.mkdir(parents=True, exist_ok=True)
             with open(logfile, "a", encoding="utf-8") as lf:
                 for line in iter(proc.stdout.readline, ""):
-                    # stream to docker logs
+
                     sys.stdout.write(line)
                     sys.stdout.flush()
-                    # stream to file
+
                     lf.write(line)
                     lf.flush()
         except Exception as e:
@@ -145,7 +143,6 @@ class ControlService:
 
         env = self._load_env_for_child()
 
-        # Spawn the real bot process as a module so package imports work.
         self._child = subprocess.Popen(
             [sys.executable, "-u", "-m", self.module],
             cwd=str(self.root),
@@ -156,13 +153,12 @@ class ControlService:
             bufsize=1,
         )
 
-        # Record PID and start the tee thread
         self.pidfile.write_text(str(self._child.pid), encoding="utf-8")
         self._reader_thread = threading.Thread(
             target=self._tee_stdout, args=(self._child, self.log_out), daemon=True
         )
         self._reader_thread.start()
-        
+
         self._started_wall = time.time()
         self._started_mono = time.monotonic()
 
@@ -198,7 +194,6 @@ class ControlService:
             self._started_mono = None
             return {"ok": True, "status": "stopped", "code": code}
 
-    # ----------------- WebSocket protocol -----------------
     async def _handle_ws_message(self, msg: dict) -> dict:
         """
         Handle incoming WebSocket messages and respond based on the command type.
@@ -209,11 +204,13 @@ class ControlService:
             running = self.is_running()
             started_at = (
                 datetime.fromtimestamp(self._started_wall, tz=timezone.utc).isoformat()
-                if running and self._started_wall else None
+                if running and self._started_wall
+                else None
             )
             uptime_sec = (
                 max(0.0, time.monotonic() - self._started_mono)
-                if running and self._started_mono else None
+                if running and self._started_mono
+                else None
             )
             return {
                 "ok": True,
@@ -247,7 +244,6 @@ class ControlService:
             except Exception:
                 pass
 
-    # ----------------- Server lifecycle -----------------
     async def run(self):
         import websockets
 
@@ -266,7 +262,6 @@ class ControlService:
             if self._stop_event:
                 self._stop_event.set()
 
-        # SIG handlers (no-op on Windows)
         for sig in (signal.SIGTERM, signal.SIGINT):
             try:
                 loop.add_signal_handler(sig, _on_term)
@@ -278,7 +273,6 @@ class ControlService:
         await server.wait_closed()
 
 
-# ----------------- Entrypoint -----------------
 if __name__ == "__main__":
     service = ControlService(
         role=ROLE,

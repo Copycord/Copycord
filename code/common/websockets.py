@@ -6,7 +6,6 @@
 #  version 3.0. A copy of the license is available at:
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
-
 from __future__ import annotations
 
 import asyncio
@@ -30,6 +29,7 @@ from websockets.server import WebSocketServerProtocol
 logger = logging.getLogger(__name__)
 
 MessageHandler = Callable[[dict], Awaitable[None]]
+
 
 def _ptype(p: dict | None) -> str:
     try:
@@ -65,8 +65,8 @@ class WebsocketManager:
     def __init__(
         self,
         send_url: str,
-        listen_host: Optional[str] = None,  # optional
-        listen_port: Optional[int] = None,  # optional
+        listen_host: Optional[str] = None,
+        listen_port: Optional[int] = None,
         logger: Optional[logging.Logger] = None,
     ):
         self.send_url = send_url
@@ -75,7 +75,6 @@ class WebsocketManager:
         self.logger = logger or logging.getLogger("WebsocketManager")
         self._shutting_down = False
 
-    # ---------- lifecycle ----------
     def begin_shutdown(self) -> None:
         """Mark the manager as shutting down; short-circuit retries/timeouts."""
         self._shutting_down = True
@@ -84,7 +83,6 @@ class WebsocketManager:
         """Coroutine alias so callers can `await ws.stop()` during teardown."""
         self.begin_shutdown()
 
-    # ---------- inbound server ----------
     async def start_server(
         self,
         handler: Callable[[dict], Awaitable[dict | None]],
@@ -99,9 +97,11 @@ class WebsocketManager:
             self.listen_port,
             max_size=None,
         )
-        self.logger.debug("WS server listening on %s:%s", self.listen_host, self.listen_port)
+        self.logger.debug(
+            "WS server listening on %s:%s", self.listen_host, self.listen_port
+        )
         try:
-            await asyncio.Future()  # run forever
+            await asyncio.Future()
         finally:
             self.logger.debug("WS server shutting down…")
             server.close()
@@ -128,7 +128,9 @@ class WebsocketManager:
                     t0 = time.monotonic()
                     raw = await ws.recv()
                     dt = (time.monotonic() - t0) * 1000
-                    self.logger.debug("[ws←] recv bytes=%d ms=%.1f", _bytes_len(raw), dt)
+                    self.logger.debug(
+                        "[ws←] recv bytes=%d ms=%.1f", _bytes_len(raw), dt
+                    )
                 except ConnectionClosedOK:
                     self.logger.debug("[ws] peer closed (OK)")
                     break
@@ -140,7 +142,9 @@ class WebsocketManager:
                     req = json.loads(raw)
                 except Exception:
                     self.logger.debug("[ws] bad-json; echoing error")
-                    if not await self._safe_send(ws, _json({"ok": False, "error": "bad-json"})):
+                    if not await self._safe_send(
+                        ws, _json({"ok": False, "error": "bad-json"})
+                    ):
                         break
                     continue
 
@@ -159,17 +163,25 @@ class WebsocketManager:
                     dt = (time.monotonic() - t1) * 1000
                     self.logger.debug(
                         "[ws] handler done type=%s rid=%s ms=%.1f ok=%s",
-                        ptype, rid, dt, isinstance(response, dict) and response.get("ok"),
+                        ptype,
+                        rid,
+                        dt,
+                        isinstance(response, dict) and response.get("ok"),
                     )
                 except Exception:
-                    self.logger.exception("Error in WS handler type=%s rid=%s", ptype, rid)
+                    self.logger.exception(
+                        "Error in WS handler type=%s rid=%s", ptype, rid
+                    )
                     response = {"ok": False, "error": "handler-failed", "rid": rid}
 
                 payload = _json(response)
                 ok = await self._safe_send(ws, payload)
                 self.logger.debug(
                     "[ws→] reply type=%s rid=%s ok=%s bytes=%d",
-                    ptype, rid, ok, _bytes_len(payload),
+                    ptype,
+                    rid,
+                    ok,
+                    _bytes_len(payload),
                 )
                 if not ok:
                     break
@@ -195,19 +207,27 @@ class WebsocketManager:
     async def _close_quietly(self, ws) -> None:
         """Attempt a graceful close; ignore transport/close-frame issues."""
         with contextlib.suppress(
-            ConnectionClosedOK, ConnectionClosedError, ProtocolError, RuntimeError, OSError, Exception
+            ConnectionClosedOK,
+            ConnectionClosedError,
+            ProtocolError,
+            RuntimeError,
+            OSError,
+            Exception,
         ):
             await ws.close()
 
-    async def _sleep_backoff(self, attempt: int, base: float, cap: float, jitter: float) -> None:
+    async def _sleep_backoff(
+        self, attempt: int, base: float, cap: float, jitter: float
+    ) -> None:
         """Exponential backoff with jitter. attempt >= 1"""
         delay = min(cap, base * (2 ** (attempt - 1)))
         j = random.random() * (jitter * delay)
         delay += j
-        self.logger.debug("[ws⏳] backoff attempt=%d delay=%.2fs (jitter=%.2fs)", attempt, delay, j)
+        self.logger.debug(
+            "[ws⏳] backoff attempt=%d delay=%.2fs (jitter=%.2fs)", attempt, delay, j
+        )
         await asyncio.sleep(delay)
 
-    # ---------- outbound helpers ----------
     async def send_json(self, obj: Any) -> bool:
         """
         Convenience helper: ensure we hand a dict to `send()`.
@@ -244,7 +264,7 @@ class WebsocketManager:
         Retries on OSError/Timeout with exponential backoff.
         During shutdown, retries/timeouts collapse to a single quick attempt.
         """
-        # normalize payload
+
         if isinstance(payload, str):
             try:
                 payload = json.loads(payload)
@@ -256,7 +276,6 @@ class WebsocketManager:
         payload["rid"] = rid
         ptype = _ptype(payload)
 
-        # collapse retries/timeouts while shutting down
         if self._shutting_down:
             max_attempts = 1
             if connect_timeout is None or connect_timeout > 0.25:
@@ -268,17 +287,25 @@ class WebsocketManager:
             try:
                 self.logger.debug(
                     "WS send attempt %d/%d → %s type=%s rid=%s",
-                    attempt, max_attempts, self.send_url, ptype, rid
+                    attempt,
+                    max_attempts,
+                    self.send_url,
+                    ptype,
+                    rid,
                 )
 
                 t0 = time.monotonic()
                 if connect_timeout is not None:
                     ws = await asyncio.wait_for(
-                        websockets.connect(self.send_url, max_size=None, ping_interval=None),
+                        websockets.connect(
+                            self.send_url, max_size=None, ping_interval=None
+                        ),
                         connect_timeout,
                     )
                 else:
-                    ws = await websockets.connect(self.send_url, max_size=None, ping_interval=None)
+                    ws = await websockets.connect(
+                        self.send_url, max_size=None, ping_interval=None
+                    )
                 tconn = (time.monotonic() - t0) * 1000
                 self.logger.debug("WS send connected ms=%.1f rid=%s", tconn, rid)
 
@@ -293,19 +320,32 @@ class WebsocketManager:
                     tsend = (time.monotonic() - t1) * 1000
                     self.logger.debug(
                         "WS send payload bytes=%d ms=%.1f type=%s rid=%s",
-                        _bytes_len(raw), tsend, ptype, rid
+                        _bytes_len(raw),
+                        tsend,
+                        ptype,
+                        rid,
                     )
                 finally:
                     await self._close_quietly(ws)
                     self.logger.debug("WS send closed rid=%s", rid)
 
-                return  # success
+                return
 
             except (asyncio.TimeoutError, OSError) as e:
-                # Be quiet(er) during shutdown; no long backoffs
-                lvl = self.logger.info if (self._shutting_down or attempt >= max_attempts) else self.logger.warning
-                lvl("[WS] send error attempt %d/%d rid=%s type=%s: %s",
-                    attempt, max_attempts, rid, ptype, e)
+
+                lvl = (
+                    self.logger.info
+                    if (self._shutting_down or attempt >= max_attempts)
+                    else self.logger.warning
+                )
+                lvl(
+                    "[WS] send error attempt %d/%d rid=%s type=%s: %s",
+                    attempt,
+                    max_attempts,
+                    rid,
+                    ptype,
+                    e,
+                )
 
                 if self._shutting_down or attempt >= max_attempts:
                     break
@@ -313,9 +353,16 @@ class WebsocketManager:
 
             except Exception as e:
                 if self._shutting_down:
-                    self.logger.info("[WS] send aborted during shutdown rid=%s type=%s: %s", rid, ptype, e)
+                    self.logger.info(
+                        "[WS] send aborted during shutdown rid=%s type=%s: %s",
+                        rid,
+                        ptype,
+                        e,
+                    )
                     break
-                self.logger.error("[⛔] WS send unexpected failure rid=%s type=%s: %s", rid, ptype, e)
+                self.logger.error(
+                    "[⛔] WS send unexpected failure rid=%s type=%s: %s", rid, ptype, e
+                )
                 break
 
         self.logger.info("[WS] send give-up rid=%s type=%s", rid, ptype)
@@ -341,7 +388,6 @@ class WebsocketManager:
         payload["rid"] = rid
         ptype = _ptype(payload)
 
-        # collapse retries while shutting down
         if self._shutting_down:
             max_attempts = min(max_attempts, 1)
             if connect_timeout is None or connect_timeout > 0.25:
@@ -351,7 +397,11 @@ class WebsocketManager:
 
         self.logger.debug(
             "WS request starting rid=%s type=%s url=%s timeout=%s attempts=%d",
-            rid, ptype, self.send_url, timeout, max_attempts,
+            rid,
+            ptype,
+            self.send_url,
+            timeout,
+            max_attempts,
         )
 
         for attempt in range(1, max_attempts + 1):
@@ -359,18 +409,27 @@ class WebsocketManager:
                 t0 = time.monotonic()
                 if connect_timeout is not None:
                     ws = await asyncio.wait_for(
-                        websockets.connect(self.send_url, max_size=None, ping_interval=None),
+                        websockets.connect(
+                            self.send_url, max_size=None, ping_interval=None
+                        ),
                         connect_timeout,
                     )
                 else:
-                    ws = await websockets.connect(self.send_url, max_size=None, ping_interval=None)
+                    ws = await websockets.connect(
+                        self.send_url, max_size=None, ping_interval=None
+                    )
                 tconn = (time.monotonic() - t0) * 1000
                 self.logger.debug("WS request connected ms=%.1f rid=%s", tconn, rid)
 
                 try:
                     raw_out = _json(payload)
                     await ws.send(raw_out)
-                    self.logger.debug("WS request sent bytes=%d rid=%s type=%s", _bytes_len(raw_out), rid, ptype)
+                    self.logger.debug(
+                        "WS request sent bytes=%d rid=%s type=%s",
+                        _bytes_len(raw_out),
+                        rid,
+                        ptype,
+                    )
 
                     t1 = time.monotonic()
                     if timeout is not None:
@@ -378,34 +437,71 @@ class WebsocketManager:
                     else:
                         raw_in = await ws.recv()
                     trecv = (time.monotonic() - t1) * 1000
-                    self.logger.debug("WS request recv bytes=%d ms=%.1f rid=%s", _bytes_len(raw_in), trecv, rid)
+                    self.logger.debug(
+                        "WS request recv bytes=%d ms=%.1f rid=%s",
+                        _bytes_len(raw_in),
+                        trecv,
+                        rid,
+                    )
 
                     data = json.loads(raw_in)
                     drid = (data or {}).get("rid")
                     if drid and drid != rid:
-                        self.logger.info("WS request rid mismatch sent=%s got=%s type=%s", rid, drid, ptype)
+                        self.logger.info(
+                            "WS request rid mismatch sent=%s got=%s type=%s",
+                            rid,
+                            drid,
+                            ptype,
+                        )
                     return data
                 finally:
                     await self._close_quietly(ws)
                     self.logger.debug("WS request closed rid=%s", rid)
 
             except asyncio.CancelledError:
-                self.logger.info("WS request cancelled (shutdown) rid=%s type=%s", rid, ptype)
+                self.logger.info(
+                    "WS request cancelled (shutdown) rid=%s type=%s", rid, ptype
+                )
                 return None
 
-            except (asyncio.TimeoutError, OSError, ConnectionClosedError, ProtocolError) as e:
-                lvl = self.logger.info if (self._shutting_down or attempt >= max_attempts) else self.logger.warning
-                lvl("[WS] request error (attempt %d/%d) rid=%s type=%s: %s",
-                    attempt, max_attempts, rid, ptype, e)
+            except (
+                asyncio.TimeoutError,
+                OSError,
+                ConnectionClosedError,
+                ProtocolError,
+            ) as e:
+                lvl = (
+                    self.logger.info
+                    if (self._shutting_down or attempt >= max_attempts)
+                    else self.logger.warning
+                )
+                lvl(
+                    "[WS] request error (attempt %d/%d) rid=%s type=%s: %s",
+                    attempt,
+                    max_attempts,
+                    rid,
+                    ptype,
+                    e,
+                )
                 if self._shutting_down or attempt >= max_attempts:
                     return None
                 await self._sleep_backoff(attempt, base_backoff, backoff_cap, jitter)
 
             except Exception as e:
                 if self._shutting_down:
-                    self.logger.info("[WS] request aborted during shutdown rid=%s type=%s: %s", rid, ptype, e)
+                    self.logger.info(
+                        "[WS] request aborted during shutdown rid=%s type=%s: %s",
+                        rid,
+                        ptype,
+                        e,
+                    )
                     return None
-                self.logger.error("[⛔] WS request unexpected failure rid=%s type=%s: %s", rid, ptype, e)
+                self.logger.error(
+                    "[⛔] WS request unexpected failure rid=%s type=%s: %s",
+                    rid,
+                    ptype,
+                    e,
+                )
                 break
 
         return None
@@ -415,11 +511,12 @@ class AdminBus:
     """
     Helper to publish events to Admin's /bus.
     """
+
     def __init__(
         self,
         role: str,
         logger: Optional[logging.Logger] = None,
-        admin_ws_url: Optional[str] = None,   # <— allow override/injection
+        admin_ws_url: Optional[str] = None,
     ):
         self.role = role
         self.logger = logger or logging.getLogger(f"AdminBus[{role}]")
@@ -433,7 +530,6 @@ class AdminBus:
         await self.ws.stop()
 
     async def publish(self, kind: str, payload: Any):
-        # Coerce anything that's not a dict into a log payload
         if not isinstance(payload, dict):
             payload = {"text": str(payload)}
             kind = kind or "log"
@@ -448,22 +544,24 @@ class AdminBus:
 
     async def log(self, text: str):
         await self.publish("log", {"text": text})
-        
+
     async def subscribe(self, admin_ws_url: str, handler: MessageHandler):
         """
         Connect to admin /ws/out and invoke `handler(event_dict)` per JSON event.
         """
-        # NORMALIZE: allow both .../bus and the bare base
+
         base = (admin_ws_url or "").rstrip("/")
         if base.endswith("/bus"):
-            base = base[:-4]  # strip the '/bus'
+            base = base[:-4]
 
         ws_out = f"{base}/ws/out"
         attempt = 0
         while True:
             try:
                 self.logger.debug("AdminBus subscribe → %s", ws_out)
-                async with websockets.connect(ws_out, ping_interval=None, max_size=None) as ws:
+                async with websockets.connect(
+                    ws_out, ping_interval=None, max_size=None
+                ) as ws:
                     attempt = 0
                     async for raw in ws:
                         try:
@@ -474,15 +572,22 @@ class AdminBus:
                             try:
                                 await handler(ev)
                             except Exception:
-                                self.logger.exception("AdminBus handler failed kind=%s role=%s",
-                                                    ev.get("kind"), ev.get("role"))
+                                self.logger.exception(
+                                    "AdminBus handler failed kind=%s role=%s",
+                                    ev.get("kind"),
+                                    ev.get("role"),
+                                )
             except (ConnectionClosedOK, asyncio.CancelledError):
                 self.logger.debug("AdminBus subscribe cancelled/closed")
                 return
             except (OSError, ConnectionClosedError, InvalidStatusCode) as e:
                 attempt += 1
-                delay = min(8.0, 0.5 * (2 ** (attempt - 1))) * (1 + random.random() * 0.2)
-                self.logger.warning("AdminBus subscribe error: %s (retry in %.2fs)", e, delay)
+                delay = min(8.0, 0.5 * (2 ** (attempt - 1))) * (
+                    1 + random.random() * 0.2
+                )
+                self.logger.warning(
+                    "AdminBus subscribe error: %s (retry in %.2fs)", e, delay
+                )
                 await asyncio.sleep(delay)
             except Exception as e:
                 self.logger.exception("AdminBus subscribe unexpected error: %s", e)

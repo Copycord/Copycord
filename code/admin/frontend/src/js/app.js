@@ -1390,6 +1390,19 @@
 
           if (isSuccess) {
             showToast(messages[actionPath] || "Done.", { type: "success" });
+          
+            // NEW: when stopping, mark a wipe and clear persisted backfill state
+            if (actionPath === "/stop") {
+              try {
+                // stamp a short-lived wipe flag
+                localStorage.setItem("bf:__wipe", String(Date.now()));
+                // clear persisted backfill sets so nothing rehydrates
+                ["bf:running","bf:launching","bf:pulling","bf:queued","bf:cleaning","bf:done_tasks"]
+                  .forEach((k) => localStorage.removeItem(k));
+                sessionStorage.removeItem("bf:taskmap");
+              } catch {}
+            }
+          
             if (actionPath === "/start" || actionPath === "/stop") {
               burstStatusPoll(800, 15000, 4000);
             } else if (actionPath === "/save") {

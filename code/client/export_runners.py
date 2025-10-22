@@ -1238,6 +1238,7 @@ class BackfillEngine:
     JITTER = 0.40
     PROGRESS_EVERY = 50
     LOG_EVERY_SEC = 5.0
+    PAGE_DELAY = float(os.getenv("BACKFILL_PAGE_DELAY", "0.15"))
 
     def __init__(self, receiver, *, logger: Optional[logging.Logger] = None):
         self.r = receiver
@@ -1913,7 +1914,22 @@ class BackfillEngine:
 
     def _should_retry_http(self, e: Exception) -> bool:
         status = getattr(e, "status", None)
-        return status in {500, 502, 503, 504, 520, 522, 524}
+        return status in {429, 500, 502, 503, 504, 520, 522, 524}
+    
+    def _retry_delay_for(self, e: Exception, attempt: int) -> float:
+        status = getattr(e, "status", None)
+        if status == 429:
+            raw = getattr(e, "text", "") or ""
+            retry_after = None
+            try:
+                data = json.loads(raw)
+                retry_after = data.get("retry_after")
+            except Exception:
+                pass
+            if retry_after is None:
+                retry_after = min(60.0, self.BASE_DELAY * (2 ** attempt))
+            return float(retry_after) * (1.0 + random.random() * self.JITTER)
+        return self.BASE_DELAY * (2 ** attempt) * (1.0 + random.random() * self.JITTER)
 
     async def _retry(self, desc: str, op):
         for attempt in range(self.MAX_RETRIES + 1):
@@ -1922,17 +1938,10 @@ class BackfillEngine:
             except HTTPException as e:
                 if not self._should_retry_http(e) or attempt >= self.MAX_RETRIES:
                     raise
-                delay = (
-                    self.BASE_DELAY
-                    * (2**attempt)
-                    * (1.0 + random.random() * self.JITTER)
-                )
+                delay = self._retry_delay_for(e, attempt)
                 self.logger.warning(
                     "[backfill] retry %s after HTTP %s attempt=%d sleep=%.2fs",
-                    desc,
-                    getattr(e, "status", "?"),
-                    attempt + 1,
-                    delay,
+                    desc, getattr(e, "status", "?"), attempt + 1, delay,
                 )
                 await asyncio.sleep(delay)
 
@@ -2092,15 +2101,16 @@ class BackfillEngine:
 
                 if not fetched_any:
                     return
+                if self.PAGE_DELAY > 0:
+                    await asyncio.sleep(self.PAGE_DELAY)
                 continue
 
             except HTTPException as e:
                 if self._should_retry_http(e):
-                    delay = self.BASE_DELAY * (1.0 + random.random() * self.JITTER)
+                    delay = self._retry_delay_for(e, 0)
                     self.logger.warning(
-                        "[backfill] transient HTTP %s on history; resuming after sleep=%.2fs",
-                        getattr(e, "status", "?"),
-                        delay,
+                        "[backfill] HTTP %s on history; sleeping %.2fs then resuming",
+                        getattr(e, "status", "?"), delay,
                     )
                     await asyncio.sleep(delay)
                     continue

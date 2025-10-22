@@ -10,22 +10,27 @@
 import asyncio
 import contextlib
 from dataclasses import dataclass, field
+import json
 import logging
 from collections import defaultdict
 from datetime import datetime, timezone
+import random
 import time
 import uuid
-from server.rate_limiter import RateLimitManager, ActionType
+import os
+import aiohttp
+from server.rate_limiter import ActionType
 
 logger = logging.getLogger("server")
 
 
 class BackfillManager:
-    def __init__(self, receiver):
+    def __init__(self, receiver, ratelimit=None):
         self.r = receiver
         self.bot = receiver.bot
-        self.ratelimit = RateLimitManager()
-
+        self.ratelimit = ratelimit or receiver.ratelimit
+        self._cleanup_task_ids: dict[int, str] = {}
+        self._finalized_by_channel: dict[int, str] = {}
         self._flags: set[int] = set()
         self._progress: dict[int, dict] = {}
         self._inflight = defaultdict(int)
@@ -33,6 +38,8 @@ class BackfillManager:
         self._temps_cache: dict[int, list[str]] = {}
         self._created_cache: dict[int, list[int]] = defaultdict(list)
         self.semaphores: dict[int, asyncio.Semaphore] = {}
+        self._attach_count: dict[int, int] = defaultdict(int)
+        self._last_attach_ts: dict[int, float] = defaultdict(float)
         self._temp_locks: dict[int, asyncio.Lock] = {}
         self._temp_ready: dict[int, asyncio.Event] = {}
         self._global_lock: asyncio.Lock = asyncio.Lock()
@@ -40,6 +47,9 @@ class BackfillManager:
         self._rotate_idx: dict[int, int] = {}
         self._rot_locks: dict[int, asyncio.Lock] = {}
         self._attached: dict[int, set[asyncio.Task]] = defaultdict(set)
+        self._cleanup_in_progress: set[int] = set()
+        self._cleanup_events: dict[int, asyncio.Event] = {}
+        self._start_locks: dict[int, asyncio.Lock] = {}
         self._global_sync: dict | None = None
         self._temp_prefix_canon = "Copycord"
         self.temp_webhook_max = 1
@@ -73,6 +83,9 @@ class BackfillManager:
             return
         self._attached[cid].add(task)
         self._inflight[cid] = self._inflight.get(cid, 0) + 1
+        loop = asyncio.get_event_loop()
+        self._attach_count[cid] = self._attach_count.get(cid, 0) + 1
+        self._last_attach_ts[cid] = loop.time()
 
         def _done_cb(t: asyncio.Task, c=cid):
             self._attached[c].discard(t)
@@ -93,8 +106,54 @@ class BackfillManager:
         self._attached.clear()
         self._inflight.clear()
 
+    def _ensure_cleanup_event(self, cid: int) -> asyncio.Event:
+        ev = self._cleanup_events.get(cid)
+        if ev is None:
+            ev = asyncio.Event()
+            ev.set()
+            self._cleanup_events[cid] = ev
+        return ev
+
+    async def _wait_cleanup_if_needed(self, cid: int) -> None:
+        ev = self._ensure_cleanup_event(cid)
+        if not ev.is_set():
+            logger.info("[cleanup] waiting for webhook cleanup to finish for #%s", cid)
+
+            tid = self._cleanup_task_ids.get(cid)
+            if not tid and hasattr(self, "tracker"):
+                with contextlib.suppress(Exception):
+                    tid = await self.tracker.get_task_id(str(cid))
+            await self.r.bus.publish(
+                "client",
+                {
+                    "type": "backfill_cleanup",
+                    "channel_id": str(cid),
+                    "task_id": tid,
+                    "data": {
+                        "channel_id": str(cid),
+                        "task_id": tid,
+                        "state": "waiting",
+                    },
+                },
+            )
+            await ev.wait()
+
+    def _mark_cleanup_start(self, cid: int) -> None:
+        ev = self._ensure_cleanup_event(cid)
+        ev.clear()
+        self._cleanup_in_progress.add(cid)
+
+    def _mark_cleanup_end(self, cid: int) -> None:
+        ev = self._ensure_cleanup_event(cid)
+        ev.set()
+        self._cleanup_in_progress.discard(cid)
+
+    def is_cleanup_in_progress(self, cid: int) -> bool:
+        return not self._ensure_cleanup_event(cid).is_set()
+
     async def on_started(self, original_id: int, *, meta: dict | None = None) -> None:
         cid = int(original_id)
+        await self._wait_cleanup_if_needed(cid)
         self._flags.add(cid)
 
         st = self._progress.get(cid)
@@ -112,7 +171,6 @@ class BackfillManager:
 
         if not is_resume:
             try:
-
                 self.r.db.backfill_abort_running_for_channel(
                     cid, reason="user-declined-resume"
                 )
@@ -134,7 +192,6 @@ class BackfillManager:
                     )
                     st["last_orig_id"] = row.get("last_orig_message_id") or None
                     st["last_ts"] = row.get("last_orig_timestamp") or None
-                    # Seed clone id from DB if meta didn't provide it
                     if st.get("clone_channel_id") is None and row.get(
                         "clone_channel_id"
                     ):
@@ -149,6 +206,22 @@ class BackfillManager:
             if clone:
                 st["clone_channel_id"] = int(clone)
 
+        if hasattr(self, "tracker"):
+            desired_id = st.get("run_id") if (is_resume and reused) else None
+            t = await self.tracker.start(
+                str(cid), st.get("meta") or {}, task_id=desired_id
+            )
+            if t is not None:
+                st["task_id"] = t.id
+                if not reused:
+                    st["run_id"] = t.id
+                self._finalized_by_channel.pop(cid, None)
+            else:
+                with contextlib.suppress(Exception):
+                    st["task_id"] = await self.tracker.get_task_id(str(cid)) or st.get(
+                        "task_id"
+                    )
+
         if not reused:
             try:
                 m = st.get("meta") or {}
@@ -156,6 +229,7 @@ class BackfillManager:
                 st["run_id"] = self.r.db.backfill_create_run(
                     cid,
                     rng or {},
+                    run_id=st.get("task_id"),
                 )
             except Exception:
                 logger.exception("[bf] failed to create backfill run for #%s", cid)
@@ -178,8 +252,8 @@ class BackfillManager:
         st.setdefault("temp_created_ids", [])
 
         self._inflight[cid] = 0
-        for t in list(self._attached.get(cid, ())):
-            self._attached[cid].discard(t)
+        for tsk in list(self._attached.get(cid, ())):
+            self._attached[cid].discard(tsk)
 
         if clone_id is not None:
             clone_id = int(clone_id)
@@ -189,10 +263,7 @@ class BackfillManager:
             self._temp_locks.setdefault(clone_id, asyncio.Lock())
             self._temp_ready.pop(clone_id, None)
             self.invalidate_rotation(clone_id)
-            await self.ensure_temps_ready(clone_id)
-
-        if hasattr(self, "tracker"):
-            await self.tracker.start(str(cid), st.get("meta") or {})
+            st["temps_deferred"] = True
 
     def is_backfilling(self, original_id: int) -> bool:
         """
@@ -229,13 +300,21 @@ class BackfillManager:
         if clone_channel_id:
             self._by_clone[int(clone_channel_id)] = int(channel_id)
 
-    async def cancel(self, channel_id: str):
-        async with self._lock:
-            self._by_channel.pop(channel_id, None)
-        self._stop_pump(channel_id)
-
-    async def clear_sink(self, channel_id: int) -> None:
+    async def clear_sink(
+        self, channel_id: int, expected_run_id: str | None = None
+    ) -> None:
         cid = int(channel_id)
+        st = self._progress.get(cid)
+
+        if expected_run_id and st and st.get("run_id") != expected_run_id:
+            logger.debug(
+                "[bf] clear_sink skipped for #%s; run mismatch (%s != %s)",
+                cid,
+                st.get("run_id"),
+                expected_run_id,
+            )
+            return
+
         self._progress.pop(cid, None)
         self._flags.discard(cid)
         if hasattr(self, "tracker"):
@@ -297,25 +376,57 @@ class BackfillManager:
             )
 
     def update_expected_total(self, channel_id: int, total: int) -> None:
-        """Set/raise expected total (from client precount)."""
+        """Set/raise expected total (from client precount) and short-circuit if zero."""
         cid = int(channel_id)
         st = self._progress.get(cid)
         if not st:
             return
+
+        try:
+            t = int(total)
+        except Exception:
+            return
+
+        if t == 0:
+            st["expected_total"] = 0
+            st["no_work"] = True
+            run_id = st.get("run_id")
+            if run_id:
+                with contextlib.suppress(Exception):
+                    self.r.db.backfill_update_checkpoint(run_id, expected_total=0)
+
+            logger.debug("[bf] set expected_total=0 | channel=%s — ending early", cid)
+
+            if cid in self._flags:
+                asyncio.create_task(
+                    self.on_done(
+                        cid,
+                        wait_cleanup=True,
+                        expected_task_id=(st or {}).get("task_id"),
+                    )
+                )
+            return
+
         prev = int(st.get("expected_total") or 0)
-        st["expected_total"] = max(prev, int(total))
-        run_id = (st or {}).get("run_id")
+        st["expected_total"] = max(prev, t)
+        run_id = st.get("run_id")
         if run_id:
             with contextlib.suppress(Exception):
                 self.r.db.backfill_update_checkpoint(
                     run_id, expected_total=st["expected_total"]
                 )
+
         logger.debug(
             "[bf] set expected_total | channel=%s total=%s (prev=%s)",
             cid,
             st["expected_total"],
             prev,
         )
+
+        if st.pop("temps_deferred", False):
+            clone_id = st.get("clone_channel_id")
+            if clone_id is not None:
+                asyncio.create_task(self.ensure_temps_ready(int(clone_id)))
 
     def add_expected_total(self, channel_id: int, delta: int = 1) -> None:
         """Increment expected_total by delta (used for synthetic units like text-thread creations)."""
@@ -348,10 +459,43 @@ class BackfillManager:
             ):
                 self._global_sync = None
 
-    async def on_done(self, original_id: int, *, wait_cleanup: bool = False) -> None:
+    async def on_done(
+        self,
+        original_id: int,
+        *,
+        wait_cleanup: bool = False,
+        expected_task_id: str | None = None,
+    ) -> None:
         cid = int(original_id)
 
-        await self._wait_drain(cid, no_progress_timeout=120.0)
+        st = self._progress.get(cid) or {}
+        live_tid = (st or {}).get("task_id")
+        if not live_tid and hasattr(self, "tracker"):
+            with contextlib.suppress(Exception):
+                live_tid = await self.tracker.get_task_id(str(cid))
+
+        if expected_task_id and live_tid and expected_task_id != live_tid:
+            logger.debug(
+                "[bf] on_done ignored for #%s; task mismatch (%s != %s)",
+                cid,
+                expected_task_id,
+                live_tid,
+            )
+            return
+
+        final_tid = expected_task_id or live_tid
+        if final_tid and self._finalized_by_channel.get(cid) == final_tid:
+            logger.debug(
+                "[bf] on_done already finalized for #%s (task=%s)", cid, final_tid
+            )
+            return
+
+        if final_tid:
+            self._finalized_by_channel[cid] = final_tid
+        cid = int(original_id)
+
+        stall = float(os.getenv("BACKFILL_DRAIN_NO_PROGRESS_SECS", "600"))
+        await self._wait_drain(cid, no_progress_timeout=stall)
 
         st = self._progress.get(cid) or {}
         delivered = int(st.get("delivered", 0))
@@ -369,20 +513,33 @@ class BackfillManager:
                     str(cid), delivered=delivered, total=total
                 )
 
-        run_id = (self._progress.get(cid) or {}).get("run_id")
-        if run_id:
+        shutting_down = getattr(self.r, "_shutting_down", False)
+
+        run_id = st.get("run_id")
+        if run_id and not shutting_down:
             with contextlib.suppress(Exception):
                 self.r.db.backfill_mark_done(run_id)
 
+        no_work = bool(st.get("no_work") or (total == 0))
+
         try:
+            tid = (st or {}).get("task_id")
+            if not tid and hasattr(self, "tracker"):
+                with contextlib.suppress(Exception):
+                    tid = await self.tracker.get_task_id(str(cid))
+
             await self.r.bus.publish(
                 "client",
                 {
                     "type": "backfill_done",
+                    "channel_id": str(cid),
+                    "task_id": tid,
                     "data": {
                         "channel_id": str(cid),
+                        "task_id": tid,
                         "sent": delivered,
                         "total": total,
+                        **({"no_work": True} if no_work else {}),
                     },
                 },
             )
@@ -394,14 +551,11 @@ class BackfillManager:
         self._flags.discard(cid)
         await self.r._flush_channel_buffer(cid)
 
-        st = self._progress.get(cid) or {}
         clone_id = st.get("clone_channel_id")
-
         if clone_id:
             with contextlib.suppress(Exception):
                 self.r._clear_bf_throttle(int(clone_id))
 
-        shutting_down = getattr(self.r, "_shutting_down", False)
         if shutting_down or not clone_id:
             if clone_id:
                 self._rotate_pool.pop(int(clone_id), None)
@@ -409,24 +563,34 @@ class BackfillManager:
                 self._by_clone.pop(int(clone_id), None)
             await self.clear_sink(cid)
             await self.end_global_sync(cid)
-            await self._wait_drain(cid, no_progress_timeout=120.0)
+            await self._wait_drain(cid, no_progress_timeout=stall)
             return
 
-        async def _cleanup_and_teardown(orig: int, clone: int):
-            try:
-                await self.r.bus.publish(
-                    "client",
-                    {
-                        "type": "backfill_cleanup",
-                        "data": {"channel_id": str(orig), "state": "starting"},
-                    },
-                )
-            except Exception:
-                pass
+        created_ids_for_run = list(st.get("temp_created_ids") or [])
 
+        async def _cleanup_and_teardown(
+            orig: int, clone: int, created_ids: list[int], task_id: str | None
+        ):
             try:
+                with contextlib.suppress(Exception):
+                    await self.r.bus.publish(
+                        "client",
+                        {
+                            "type": "backfill_cleanup",
+                            "channel_id": str(orig),
+                            "task_id": task_id,
+                            "data": {
+                                "channel_id": str(orig),
+                                "task_id": task_id,
+                                "state": "starting",
+                            },
+                        },
+                    )
+
                 try:
-                    stats = await self.delete_created_temps_for(int(clone))
+                    stats = await self.delete_created_temps_for(
+                        int(clone), created_ids=created_ids
+                    )
                     logger.debug(
                         "[🧹] Deleted %d temp webhooks in #%s (created this run)",
                         stats.get("deleted", 0),
@@ -436,14 +600,18 @@ class BackfillManager:
                     logger.debug(
                         "[cleanup] temp deletion failed for #%s", clone, exc_info=True
                     )
+                    stats = {"deleted": None}
             finally:
-                try:
+                with contextlib.suppress(Exception):
                     await self.r.bus.publish(
                         "client",
                         {
                             "type": "backfill_cleanup",
+                            "channel_id": str(orig),
+                            "task_id": task_id,
                             "data": {
                                 "channel_id": str(orig),
+                                "task_id": task_id,
                                 "state": "finished",
                                 "deleted": (
                                     int(stats.get("deleted", 0))
@@ -453,9 +621,9 @@ class BackfillManager:
                             },
                         },
                     )
-                except Exception:
-                    pass
 
+                self._cleanup_task_ids.pop(orig, None)
+                self._mark_cleanup_end(orig)
                 self._rotate_pool.pop(int(clone), None)
                 self._rotate_idx.pop(int(clone), None)
                 self._by_clone.pop(int(clone), None)
@@ -463,14 +631,29 @@ class BackfillManager:
                 self._rot_locks.pop(int(clone), None)
                 self._temp_locks.pop(int(clone), None)
                 self._temp_ready.pop(int(clone), None)
-                await self.clear_sink(orig)
+                await self.clear_sink(orig, expected_run_id=task_id)
                 await self.end_global_sync(orig)
                 await self._wait_drain(orig, no_progress_timeout=120.0)
 
+        task_id_for_run = (st or {}).get("task_id")
+        if not task_id_for_run and hasattr(self, "tracker"):
+            with contextlib.suppress(Exception):
+                task_id_for_run = await self.tracker.get_task_id(str(cid))
+
+        self._mark_cleanup_start(cid)
+        if task_id_for_run:
+            self._cleanup_task_ids[cid] = task_id_for_run
+
         if wait_cleanup:
-            await _cleanup_and_teardown(cid, int(clone_id))
+            await _cleanup_and_teardown(
+                cid, int(clone_id), created_ids_for_run, task_id_for_run
+            )
         else:
-            asyncio.create_task(_cleanup_and_teardown(cid, int(clone_id)))
+            asyncio.create_task(
+                _cleanup_and_teardown(
+                    cid, int(clone_id), created_ids_for_run, task_id_for_run
+                )
+            )
 
     def _on_task_done(self, cid: int, task: asyncio.Task) -> None:
         try:
@@ -497,27 +680,39 @@ class BackfillManager:
                 self._inflight.pop(cid, None)
 
     async def _wait_drain(
-        self, cid: int, no_progress_timeout: float = 120.0, log_every: float = 5.0
+        self,
+        cid: int,
+        no_progress_timeout: float = 1800.0,
+        log_every: float = 5.0,
     ) -> None:
-        """
-        Wait until in-flight == 0. Only cancel if there's been *no* progress
-        (in-flight down or delivered up) for `no_progress_timeout` seconds.
-        """
         loop = asyncio.get_event_loop()
-        last_change_ts = loop.time()
+        first_seen = loop.time()
+        last_change_ts = first_seen
         last_inflight = self._inflight.get(cid, 0)
         last_delivered = (self._progress.get(cid) or {}).get("delivered", 0)
+        last_attach_count = self._attach_count.get(cid, 0)
         last_log_ts = 0.0
 
-        while self._inflight.get(cid, 0) > 0:
+        hard_cap = float(os.getenv("BACKFILL_DRAIN_HARD_CAP_SECS", "0")) or None
+
+        while True:
             now = loop.time()
             inflight = self._inflight.get(cid, 0)
             delivered = (self._progress.get(cid) or {}).get("delivered", 0)
+            attach_count = self._attach_count.get(cid, 0)
 
-            if inflight < last_inflight or delivered > last_delivered:
+            if inflight == 0:
+                break
+
+            if (
+                (inflight < last_inflight)
+                or (delivered > last_delivered)
+                or (attach_count > last_attach_count)
+            ):
                 last_change_ts = now
                 last_inflight = inflight
                 last_delivered = delivered
+                last_attach_count = attach_count
 
             if now - last_log_ts >= log_every:
                 logger.debug(
@@ -528,14 +723,21 @@ class BackfillManager:
                 )
                 last_log_ts = now
 
-            if (now - last_change_ts) >= no_progress_timeout:
+            if (now - last_change_ts) >= no_progress_timeout and inflight > 0:
+                logger.debug(
+                    "[📦] soft-stall but inflight=%d; keeping tasks alive for #%s",
+                    inflight,
+                    cid,
+                )
+                last_change_ts = now
+
+            if hard_cap and (now - first_seen) >= hard_cap:
                 stuck = list(self._attached.get(cid, ()))
                 logger.warning(
-                    "[📦] Drain stalled for #%s (no progress %ss, inflight=%d); cancelling %d task(s)",
-                    cid,
-                    int(no_progress_timeout),
-                    inflight,
+                    "[📦] Hard-cap cancelling %d task(s) for #%s after %ds",
                     len(stuck),
+                    cid,
+                    int(hard_cap),
                 )
                 for t in stuck:
                     t.cancel()
@@ -547,27 +749,90 @@ class BackfillManager:
 
             await asyncio.sleep(0.05)
 
+    def _is_retryable_http(self, e: Exception) -> bool:
+        status = getattr(e, "status", None)
+        if status is None and isinstance(e, aiohttp.ClientResponseError):
+            status = e.status
+
+        if isinstance(e, (aiohttp.ClientError, asyncio.TimeoutError)):
+            return True
+
+        return status in (429, 500, 502, 503, 504)
+
+    def _retry_after_seconds_from_exc(self, e: Exception) -> float | None:
+        """
+        Try to extract a server-provided delay from the exception.
+        Prefers Retry-After / X-RateLimit-Reset-After header, then JSON body.retry_after.
+        """
+        resp = getattr(e, "response", None)
+
+        if resp is not None:
+            try:
+
+                ra = resp.headers.get("Retry-After") or resp.headers.get(
+                    "X-RateLimit-Reset-After"
+                )
+                if ra is not None:
+                    return float(ra)
+            except Exception:
+                pass
+
+            try:
+
+                raw = getattr(e, "text", None)
+                if raw:
+                    data = json.loads(raw)
+                    if isinstance(data, dict) and "retry_after" in data:
+                        return float(data["retry_after"])
+            except Exception:
+                pass
+        return None
+
+    async def _api_with_retry(
+        self, *, what: str, call, action=None, base: float = 0.75, cap: float = 60.0
+    ) -> any:
+        """
+        Indefinitely retry a coroutine factory `call` until it succeeds or we're shutting down.
+        - Honors rate-limit hints from Discord when available.
+        - Exponential backoff with jitter otherwise.
+        - Optionally acquires your RateLimitManager `action` before each attempt.
+        """
+        attempt = 0
+        while True:
+            if getattr(self, "_shutting_down", False):
+                raise asyncio.CancelledError(f"Aborted {what}: shutting down")
+
+            try:
+                if action is not None:
+
+                    await self.ratelimit.acquire(action)
+
+                return await call()
+            except Exception as e:
+                if not self._is_retryable_http(e):
+
+                    raise
+
+                hint = self._retry_after_seconds_from_exc(e)
+                if hint is not None:
+                    delay = max(0.0, float(hint))
+                else:
+                    delay = min(cap, (base * (2**attempt))) + random.random() * 0.333
+
+                logger.warning(
+                    "[retry] %s failed (%s). sleeping %.2fs before retry #%d",
+                    what,
+                    getattr(e, "status", type(e).__name__),
+                    delay,
+                    attempt + 1,
+                )
+                await asyncio.sleep(delay)
+                attempt += 1
+
     async def _ensure_temp_webhooks(
         self, clone_channel_id: int
     ) -> tuple[list[int], list[str]]:
-        """
-        Ensure there are exactly N temp webhooks for rotation in this channel.
-
-        Strategy (efficient):
-        - Never rename/edit temp webhooks to mirror the primary.
-        - Create temps with the canonical name only (e.g., "Copycord").
-        - At send-time, if the PRIMARY webhook is customized, override per-message
-        username/avatar_url to match the PRIMARY (no avatar uploads or edits).
-        - Track and persist:
-            * temp_webhook_ids / temp_webhook_urls (current rotation set)
-            * temp_created_ids (only the IDs we created this run)
-            * primary_identity {"name","avatar_url"} for send-time override
-
-        Returns:
-            (ids, urls) of the temps in ascending webhook-id order (capped at N)
-        """
         try:
-
             ch = self.bot.get_channel(clone_channel_id) or await self.bot.fetch_channel(
                 clone_channel_id
             )
@@ -585,10 +850,19 @@ class BackfillManager:
             primary_name = None
             primary_avatar_url = None
             customized = False
+
             if primary_url and orig is not None:
                 try:
                     wid = int(primary_url.rstrip("/").split("/")[-2])
-                    whp = await self.bot.fetch_webhook(wid)
+
+                    async def _do_fetch_primary():
+                        return await self.bot.fetch_webhook(wid)
+
+                    whp = await self._api_with_retry(
+                        what=f"fetch primary webhook {wid}",
+                        call=_do_fetch_primary,
+                        action=None,
+                    )
                     canonical = self._canonical_temp_name()
                     primary_name = (whp.name or "").strip() or None
                     customized = bool(primary_name and primary_name != canonical)
@@ -616,9 +890,17 @@ class BackfillManager:
                 }
 
             async def _fetch_wh(url: str):
+                if not url:
+                    return None
                 try:
                     wid = int(url.rstrip("/").split("/")[-2])
-                    return await self.bot.fetch_webhook(wid)
+
+                    async def _do_fetch():
+                        return await self.bot.fetch_webhook(wid)
+
+                    return await self._api_with_retry(
+                        what=f"fetch webhook {wid}", call=_do_fetch, action=None
+                    )
                 except Exception:
                     return None
 
@@ -646,7 +928,15 @@ class BackfillManager:
                     await _adopt(u)
 
             try:
-                hooks = await ch.webhooks()
+
+                async def _do_list():
+                    return await ch.webhooks()
+
+                hooks = await self._api_with_retry(
+                    what=f"list webhooks in #{clone_channel_id}",
+                    call=_do_list,
+                    action=None,
+                )
                 for wh in hooks:
                     try:
                         made_by_us = (
@@ -658,7 +948,6 @@ class BackfillManager:
                     if made_by_us and (not primary_url or wh.url != primary_url):
                         await _adopt(wh.url)
             except Exception as e:
-
                 logger.debug(
                     "[temps] list hooks failed for #%s: %s", clone_channel_id, e
                 )
@@ -669,21 +958,26 @@ class BackfillManager:
                     st["temp_webhook_ids"] = ids
                     st["temp_webhook_urls"] = urls
                     st["temp_created_ids"] = []
-
                 self._rotate_pool.pop(clone_channel_id, None)
                 self._rotate_idx.pop(clone_channel_id, None)
                 return ids, urls
 
             while len(pairs) < N:
-
-                logger.info(
+                logger.debug(
                     "[🧹] Creating temp webhook for rotation in #%s...",
                     clone_channel_id,
                 )
-                await self.ratelimit.acquire(ActionType.WEBHOOK_CREATE)
-                wh_new = await ch.create_webhook(
-                    name=self._canonical_temp_name(),
-                    reason="Backfill rotation",
+
+                async def _do_create():
+                    return await ch.create_webhook(
+                        name=self._canonical_temp_name(),
+                        reason="Backfill rotation",
+                    )
+
+                wh_new = await self._api_with_retry(
+                    what=f"create webhook in #{clone_channel_id}",
+                    call=_do_create,
+                    action=ActionType.WEBHOOK_CREATE,
                 )
                 pairs.append((int(wh_new.id), wh_new.url))
                 seen_urls.add(wh_new.url)
@@ -698,7 +992,6 @@ class BackfillManager:
             if st is not None:
                 st["temp_webhook_ids"] = list(ids)
                 st["temp_webhook_urls"] = list(urls)
-
                 st["temp_created_ids"] = [i for i in created_ids if i in ids]
             else:
                 kept = [i for i in created_ids if i in ids]
@@ -823,61 +1116,76 @@ class BackfillManager:
         logger.debug("[rotate] invalidated pool for #%s", clone_channel_id)
 
     async def delete_created_temps_for(
-        self, clone_channel_id: int, *, dry_run: bool = False
+        self,
+        clone_channel_id: int,
+        *,
+        created_ids: list[int] | None = None,
+        dry_run: bool = False,
     ) -> dict:
         """
-        Delete ONLY temp webhooks that were CREATED during the current/last backfill run
-        for this clone channel. Safe: never touches the primary or adopted hooks.
-
+        Delete ONLY temp webhooks created during this backfill run (or the IDs explicitly provided).
         Returns: {"deleted": int}
         """
         stats = {"deleted": 0}
         try:
 
-            orig = self._by_clone.get(int(clone_channel_id))
-            st = self._progress.get(int(orig)) if orig is not None else None
-            if not st:
-                return stats
+            if created_ids is None:
 
-            row = self.r.chan_map.get(int(orig)) or {}
-            primary_url = row.get("channel_webhook_url") or row.get("webhook_url")
-            primary_id = None
-            if primary_url:
-                with contextlib.suppress(Exception):
-                    primary_id = int(primary_url.rstrip("/").split("/")[-2])
+                orig = self._by_clone.get(int(clone_channel_id))
+                st = self._progress.get(int(orig)) if orig is not None else None
+                if not st:
+                    return stats
 
-            created_ids = []
-            if st:
+                row = self.r.chan_map.get(int(orig)) or {}
+                primary_url = row.get("channel_webhook_url") or row.get("webhook_url")
+                primary_id = None
+                if primary_url:
+                    with contextlib.suppress(Exception):
+                        primary_id = int(primary_url.rstrip("/").split("/")[-2])
+
+                created_ids = []
                 created_ids.extend(list(st.get("temp_created_ids") or []))
-            created_ids.extend(self._created_cache.get(int(clone_channel_id), []))
+                created_ids.extend(self._created_cache.get(int(clone_channel_id), []))
+                created_ids = list({int(x) for x in created_ids})
+            else:
 
-            created_ids = list({int(x) for x in created_ids})
+                row = None
+                orig = self._by_clone.get(int(clone_channel_id))
+                if orig is not None:
+                    row = self.r.chan_map.get(int(orig)) or {}
+                primary_url = (row or {}).get("channel_webhook_url") or (row or {}).get(
+                    "webhook_url"
+                )
+                primary_id = None
+                if primary_url:
+                    with contextlib.suppress(Exception):
+                        primary_id = int(primary_url.rstrip("/").split("/")[-2])
+
+                created_ids = [int(x) for x in set(created_ids or [])]
 
             if not created_ids:
                 return stats
 
-            for wid in created_ids:
+            async def _delete_one(wid: int) -> bool:
                 if primary_id and int(wid) == int(primary_id):
-                    continue
+                    return False
                 try:
-                    logger.info("[🧹] Deleting msg-sync temp webhook, please wait...")
+                    wh = await self.bot.fetch_webhook(int(wid))
 
-                    if dry_run:
-                        logger.info(
-                            "[🧹 DRY RUN] Would delete temp webhook %s in #%s",
-                            wid,
-                            clone_channel_id,
-                        )
-                    else:
-                        wh = await self.bot.fetch_webhook(int(wid))
-                        await self.ratelimit.acquire(ActionType.WEBHOOK_CREATE)
-                        await wh.delete(reason="Backfill complete: remove temp webhook")
-                        stats["deleted"] += 1
-                        logger.info(
-                            "[🧹] Sync completed, deleted temp webhook %s in #%s",
-                            wid,
-                            clone_channel_id,
-                        )
+                    acq = getattr(self.ratelimit, "acquire", None)
+                    if acq is not None:
+                        try:
+                            await acq(
+                                getattr(
+                                    ActionType,
+                                    "WEBHOOK_DELETE",
+                                    ActionType.WEBHOOK_CREATE,
+                                )
+                            )
+                        except Exception:
+                            pass
+                    await wh.delete(reason="Backfill complete: remove temp webhook")
+                    return True
                 except Exception as e:
                     logger.debug(
                         "[cleanup] Could not delete webhook %s in #%s: %s",
@@ -885,10 +1193,25 @@ class BackfillManager:
                         clone_channel_id,
                         e,
                     )
+                    return False
 
-            st["temp_created_ids"] = []
-            st["temp_webhook_ids"] = []
-            st["temp_webhook_urls"] = []
+            for wid in created_ids:
+                if dry_run:
+                    logger.info(
+                        "[🧹 DRY RUN] Would delete temp webhook %s in #%s",
+                        wid,
+                        clone_channel_id,
+                    )
+                else:
+                    if await _delete_one(int(wid)):
+                        stats["deleted"] += 1
+
+            sink_key = self._by_clone.get(int(clone_channel_id))
+            if sink_key is not None:
+                st2 = self._progress.get(int(sink_key)) or {}
+                st2["temp_created_ids"] = []
+                st2["temp_webhook_ids"] = []
+                st2["temp_webhook_urls"] = []
             self._created_cache.pop(int(clone_channel_id), None)
             self.invalidate_rotation(int(clone_channel_id))
         except Exception:
@@ -1082,44 +1405,68 @@ class BackfillTracker:
         self._on_done_cb = on_done_cb
         self._progress_provider = progress_provider
         self._pumps: dict[str, asyncio.Task] = {}
+        self._last_id_by_channel: dict[str, str] = {}
 
-    async def start(self, channel_id: str, meta: dict) -> BackfillTask | None:
+    async def start(
+        self, channel_id: str, meta: dict, task_id: str | None = None
+    ) -> BackfillTask | None:
         async with self._lock:
             if channel_id in self._by_channel:
-
                 return None
-            t = BackfillTask(id=str(uuid.uuid4()), channel_id=channel_id)
+            t = BackfillTask(id=(task_id or str(uuid.uuid4())), channel_id=channel_id)
             self._by_channel[channel_id] = t
-        await self._bus.publish(
-            "client",
-            {
-                "type": "backfill_started",
-                "channel_id": channel_id,
-                "task_id": t.id,
-                **(meta or {}),
-            },
-        )
+            self._last_id_by_channel[channel_id] = t.id
+            data_out = {"channel_id": channel_id}
+            data_out.update(meta or {})
+
+            await self._bus.publish(
+                "client",
+                {
+                    "type": "backfill_started",
+                    "task_id": t.id,
+                    "data": data_out,
+                },
+            )
         if self._progress_provider and channel_id not in self._pumps:
             self._pumps[channel_id] = asyncio.create_task(
                 self._progress_pump(channel_id, t.id)
             )
         return t
 
+    async def get_task_id(self, channel_id: str) -> str | None:
+        async with self._lock:
+            t = self._by_channel.get(channel_id)
+            if t:
+                return t.id
+            return self._last_id_by_channel.get(channel_id)
+
+    async def cancel(self, channel_id: str):
+        async with self._lock:
+            t = self._by_channel.pop(channel_id, None)
+            if t:
+
+                self._last_id_by_channel[channel_id] = t.id
+        self._stop_pump(channel_id)
+
     async def publish_progress(
         self, channel_id: str, *, delivered: int | None, total: int | None
     ):
-        async with self._lock:
-            t = self._by_channel.get(channel_id)
-            task_id = t.id if t else str(uuid.uuid4())
+        task_id = await self.get_task_id(channel_id)
+
         payload = {
             "type": "backfill_progress",
-            "channel_id": channel_id,
-            "task_id": task_id,
         }
+        if task_id:
+            payload["task_id"] = task_id
+
+        data_out = {"channel_id": channel_id}
         if delivered is not None:
-            payload["delivered"] = delivered
+            data_out["delivered"] = delivered
         if total is not None:
-            payload["expected_total"] = total
+            data_out["total"] = total
+
+        payload["data"] = data_out
+
         await self._bus.publish("client", payload)
 
     async def _progress_pump(self, channel_id: str, task_id: str):
@@ -1147,21 +1494,19 @@ class BackfillTracker:
                 heartbeat = in_flight > 0
 
                 if changed or (heartbeat and idle_ticks >= 8):
+                    data_out = {"channel_id": channel_id}
+                    if delivered is not None:
+                        data_out["delivered"] = delivered
+                    if total is not None:
+                        data_out["total"] = total
+
                     payload = {
                         "type": "backfill_progress",
-                        "channel_id": channel_id,
                         "task_id": task_id,
+                        "data": data_out,
                     }
-                    if delivered is not None:
-                        payload["delivered"] = delivered
-                    if total is not None:
-                        payload["expected_total"] = total
 
-                    if (
-                        ("delivered" in payload)
-                        or ("expected_total" in payload)
-                        or heartbeat
-                    ):
+                    if ("delivered" in data_out) or ("total" in data_out) or heartbeat:
                         await self._bus.publish("client", payload)
 
                     if changed:

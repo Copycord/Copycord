@@ -23,7 +23,6 @@ class Config:
         self.DB_PATH = os.getenv("DB_PATH", "/data/data.db")
         self.db = DBManager(self.DB_PATH)
 
-        # --- prefer DB value if set, else environment ---
         def _get_from_db(key: str):
             try:
                 return self.db.get_config(key)
@@ -50,21 +49,18 @@ class Config:
             raw = (_str(key, env_default) or "").strip().lower()
             return raw in ("1", "true", "yes", "y", "on")
 
-        # --- Constants / misc ---
         self.RELEASE_CHECK_INTERVAL_SECONDS = 1810
         self.DEFAULT_WEBHOOK_AVATAR_URL = "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/logo/logo.png"
 
-        # --- Tokens / IDs / URLs  ---
         self.SERVER_TOKEN = _str("SERVER_TOKEN")
         self.CLIENT_TOKEN = _str("CLIENT_TOKEN")
 
         self.CLONE_GUILD_ID = _str("CLONE_GUILD_ID", "0") or "0"
         self.HOST_GUILD_ID = _str("HOST_GUILD_ID", "0") or "0"
 
-        # Websocket endpoints
         self.SERVER_WS_HOST = _str("SERVER_WS_HOST", "server") or "server"
         self.SERVER_WS_PORT = _int("SERVER_WS_PORT", "8765")
-        # Back-compat: accept WS_SERVER_URL; else synthesize
+
         self.SERVER_WS_URL = _str(
             "WS_SERVER_URL", f"ws://{self.SERVER_WS_HOST}:{self.SERVER_WS_PORT}"
         )
@@ -82,7 +78,6 @@ class Config:
 
         self.SYNC_INTERVAL_SECONDS = _int("SYNC_INTERVAL_SECONDS", "3600")
 
-        # --- Feature flags  ---
         self.ENABLE_CLONING = _bool("ENABLE_CLONING", "true")
         self.DELETE_CHANNELS = _bool("DELETE_CHANNELS", "false")
         self.EDIT_MESSAGES = _bool("EDIT_MESSAGES", "true")
@@ -95,7 +90,6 @@ class Config:
         self.DELETE_ROLES = _bool("DELETE_ROLES", "true")
         self.MIRROR_CHANNEL_PERMISSIONS = _bool("MIRROR_CHANNEL_PERMISSIONS", "true")
 
-        # --- Users allowed to run admin commands ---
         cmd_users_raw = _str("COMMAND_USERS", os.getenv("COMMAND_USERS", "")) or ""
         self.COMMAND_USERS = []
         for tok in str(cmd_users_raw).split(","):
@@ -106,14 +100,12 @@ class Config:
                 except ValueError:
                     pass
 
-        # --- Logging / misc ---
         self.logger = (logger or logging.getLogger(__name__)).getChild(
             self.__class__.__name__
         )
         self.excluded_category_ids: set[int] = set()
         self.excluded_channel_ids: set[int] = set()
 
-        # --- Load include/exclude filters from DB ---
         self._load_filters_from_db()
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):

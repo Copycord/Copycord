@@ -7,6 +7,7 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 import contextlib
 import signal
 import asyncio
@@ -102,7 +103,6 @@ class ServerReceiver:
         self.clone_guild_id = int(self.config.CLONE_GUILD_ID)
         self.bot.ws_manager = self.ws
         self.db = DBManager(self.config.DB_PATH)
-        self.backfill = BackfillManager(self)
         self.session: aiohttp.ClientSession = None
         self.sitemap_queue: Queue = Queue()
         self._processor_started = False
@@ -148,19 +148,22 @@ class ServerReceiver:
         self._latest_edit_payload: dict[int, dict] = {}
         self._pending_deletes: set[int] = set()
         self._bf_throttle: dict[int, dict] = {}
+        self._task_for_channel: dict[int, str] = {}
+        self._done_task_ids: set[str] = set()
         self._bf_delay = 2.0
         orig_on_connect = self.bot.on_connect
         self.onclonejoin = OnCloneJoin(self.bot, self.db)
         self.bus = AdminBus(
             role="server", logger=logger, admin_ws_url=self.config.ADMIN_WS_URL
         )
+        self.ratelimit = RateLimitManager()
+        self.backfill = BackfillManager(self, ratelimit=self.ratelimit)
         self.backfills = BackfillTracker(
             bus=self.bus,
             on_done_cb=self.backfill.on_done,
             progress_provider=self.backfill.get_progress,
         )
         self.backfill.tracker = self.backfills
-        self.ratelimit = RateLimitManager()
         self.emojis = EmojiManager(
             bot=self.bot,
             db=self.db,
@@ -571,6 +574,12 @@ class ServerReceiver:
                 logger.error("backfill_started missing/invalid channel_id: %r", cid_raw)
                 return
 
+            tid = msg.get("task_id") or (
+                data.get("task_id") if isinstance(data, dict) else None
+            )
+            if tid:
+                self._task_for_channel[orig] = str(tid)
+
             if orig in self._active_backfills:
                 await self.bus.publish(
                     "client", {"type": "backfill_busy", "data": {"channel_id": orig}}
@@ -590,9 +599,24 @@ class ServerReceiver:
                 },
             )
 
+            tid = None
+            try:
+                st = self.backfill._progress.get(orig) or {}
+                tid = st.get("task_id")
+                if not tid and hasattr(self.backfill, "tracker"):
+                    with contextlib.suppress(Exception):
+                        tid = await self.backfill.tracker.get_task_id(str(orig))
+            except Exception:
+                tid = None
+
             await self.bus.publish(
                 "client",
-                {"type": "backfill_ack", "data": {"channel_id": str(orig)}, "ok": True},
+                {
+                    "type": "backfill_ack",
+                    "task_id": tid,
+                    "data": {"channel_id": str(orig), "task_id": tid},
+                    "ok": True,
+                },
             )
             return
 
@@ -609,37 +633,18 @@ class ServerReceiver:
 
             total = data.get("total")
             sent = data.get("sent")
-            count = data.get("count")
 
             if total is not None:
                 try:
                     self.backfill.update_expected_total(cid, int(total))
                 except Exception:
                     pass
+
             if sent is not None:
                 try:
                     await self.backfill.on_progress(cid, int(sent))
                 except Exception:
                     pass
-            elif count is not None:
-                try:
-                    await self.backfill.on_progress(cid, int(count))
-                except Exception:
-                    pass
-
-            delivered, total_est = self.backfill.get_progress(cid)
-
-            await self.bus.publish(
-                "client",
-                {
-                    "type": "backfill_progress",
-                    "data": {
-                        "channel_id": str(cid),
-                        "delivered": delivered,
-                        "total": total_est,
-                    },
-                },
-            )
             return
 
         elif typ == "backfill_stream_end":
@@ -651,9 +656,45 @@ class ServerReceiver:
                 logger.error("backfill_done missing/invalid channel_id: %r", cid_raw)
                 return
 
-            asyncio.create_task(self.backfill.on_done(orig, wait_cleanup=True))
+            tid = None
+            if hasattr(self.backfill, "tracker"):
+                with contextlib.suppress(Exception):
+                    tid = await self.backfill.tracker.get_task_id(str(orig))
+
+            await self.backfill.on_done(
+                orig,
+                wait_cleanup=True,
+                expected_task_id=(str(tid) if tid else None),
+            )
 
             self._active_backfills.discard(orig)
+
+            try:
+                delivered, total_est = self.backfill.get_progress(orig)
+            except Exception:
+                delivered, total_est = (None, None)
+
+            if getattr(self, "_shutting_down", False):
+                return
+
+            no_work = total_est is not None and int(total_est) == 0
+
+            try:
+                await self.bot.ws_manager.send(
+                    {
+                        "type": "backfill_done",
+                        "data": {
+                            "channel_id": str(orig),
+                            "sent": delivered,
+                            "total": total_est,
+                            **({"no_work": True} if no_work else {}),
+                        },
+                    }
+                )
+            except Exception:
+                logger.debug(
+                    "[bf] failed WS notify backfill_done for #%s", orig, exc_info=True
+                )
             return
 
         elif typ == "backfills_status_query":
@@ -4054,7 +4095,6 @@ class ServerReceiver:
                                 )
                             return None
 
-                        # Log creation first
                         logger.info(
                             "[🧵]%s Created forum thread '%s' → cloned_thread_id=%s in #%s",
                             tag,
@@ -4063,7 +4103,6 @@ class ServerReceiver:
                             getattr(cloned_parent, "name", cloned_id),
                         )
 
-                        # Now count and log the initial post send, once
                         if (
                             is_backfill
                             and hasattr(self, "backfill")
@@ -4223,7 +4262,7 @@ class ServerReceiver:
                                         p, include_text=True, thread_obj=clone_thread
                                     )
                                     if is_backfill and hasattr(self, "backfill"):
-                                        # count it first
+
                                         self.backfill.note_sent(
                                             parent_id, int(data["message_id"])
                                         )
@@ -4232,7 +4271,7 @@ class ServerReceiver:
                                             int(data["message_id"]),
                                             data.get("timestamp"),
                                         )
-                                        # then log with the updated suffix
+
                                         logger.info(
                                             "[💬]%s Forwarding message to thread '%s' in #%s from %s (%s)%s",
                                             tag,
@@ -4540,7 +4579,7 @@ class ServerReceiver:
                             return
 
                     if has_textish:
-                        # Send first
+
                         if sem:
                             async with sem:
                                 await _send_webhook_into_thread(

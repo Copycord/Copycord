@@ -1612,6 +1612,18 @@ async def channels_api():
     return {"items": out}
 
 
+@app.get("/api/backfills/queue")
+async def api_backfills_queue():
+    """
+    Ask the client for its current backfill queue (active + queued).
+    """
+
+    res = await _ws_cmd(CLIENT_AGENT_URL, {"type": "backfills_queue_query"})
+    items = (res or {}).get("data", {}).get("items", [])
+
+    return JSONResponse({"ok": True, "items": items})
+
+
 @app.get("/api/backfills/inflight")
 async def api_backfills_inflight():
 
@@ -1715,7 +1727,6 @@ async def api_backfill_start(payload: dict = Body(...)):
 
     data = {"channel_id": channel_id}
 
-    # Normal range params
     if after_iso:
         data["after_iso"] = str(after_iso)
     if before_iso:
@@ -1763,6 +1774,140 @@ async def api_backfill_start(payload: dict = Body(...)):
         )
 
     return JSONResponse({"ok": True})
+
+
+@app.post("/api/backfill/start-batch", response_class=JSONResponse)
+async def api_backfill_start_batch(payload: dict = Body(...)):
+    raw_ids = (
+        payload.get("channel_ids") or payload.get("channels") or payload.get("ids")
+    )
+    if not isinstance(raw_ids, (list, tuple)) or not raw_ids:
+        return JSONResponse(
+            {"ok": False, "error": "invalid-channel_ids"}, status_code=400
+        )
+
+    ids: list[int] = []
+    bad: list[object] = []
+    seen: set[int] = set()
+    for x in raw_ids:
+        try:
+            cid = int(x)
+            if cid not in seen:
+                ids.append(cid)
+                seen.add(cid)
+        except Exception:
+            bad.append(x)
+
+    if not ids:
+        return JSONResponse(
+            {"ok": False, "error": "no-valid-channel_ids", "bad": bad}, status_code=400
+        )
+
+    mode = payload.get("mode") or (payload.get("range") or {}).get("mode") or "all"
+    after_iso = payload.get("since") or payload.get("after_iso")
+    before_iso = (
+        payload.get("before_iso")
+        or (payload.get("range") or {}).get("before")
+        or payload.get("until")
+        or payload.get("to_iso")
+    )
+    last_n = payload.get("last_n")
+
+    def base_payload_for(cid: int) -> dict:
+        data: dict = {"channel_id": cid}
+        if after_iso:
+            data["after_iso"] = str(after_iso)
+        if before_iso:
+            data["before_iso"] = str(before_iso)
+        if last_n is not None:
+            data["last_n"] = int(last_n)
+
+        if mode == "between":
+            data["range"] = {
+                "mode": mode,
+                "value": {"after": after_iso, "before": before_iso},
+            }
+        else:
+            rng_val = (
+                after_iso
+                if after_iso
+                else (data.get("last_n") if "last_n" in data else None)
+            )
+            data["range"] = {"mode": mode, "value": rng_val} if mode else None
+
+        if bool(payload.get("resume")):
+            data["resume"] = True
+            cp = payload.get("checkpoint") or {}
+            after_id = cp.get("last_orig_message_id") or payload.get("after_id")
+            after_ts = cp.get("last_orig_timestamp") or payload.get("after_ts")
+            if after_id:
+                data["after_id"] = str(after_id)
+            if after_ts and not data.get("after_iso"):
+                data["after_iso"] = str(after_ts)
+        return data
+
+    results: list[dict] = []
+    started = locked = failed = 0
+
+    for cid in ids:
+        st = await locks.status(cid)
+        if st in ("launching", "running"):
+            results.append(
+                {
+                    "channel_id": cid,
+                    "ok": False,
+                    "error": "backfill-already-running",
+                    "state": st,
+                    "status": 409,
+                }
+            )
+            locked += 1
+            continue
+
+        ok_lock = await locks.try_acquire_launching(cid)
+        if not ok_lock:
+            results.append(
+                {
+                    "channel_id": cid,
+                    "ok": False,
+                    "error": "backfill-already-running",
+                    "state": "launching",
+                    "status": 409,
+                }
+            )
+            locked += 1
+            continue
+
+        data = base_payload_for(cid)
+        res = await _ws_cmd(CLIENT_AGENT_URL, {"type": "clone_messages", "data": data})
+        if not res or not res.get("ok", True):
+            await locks.release(cid)
+            results.append(
+                {
+                    "channel_id": cid,
+                    "ok": False,
+                    "error": (res or {}).get("error") or "agent-error",
+                }
+            )
+            failed += 1
+        else:
+            results.append({"channel_id": cid, "ok": True, "state": "started"})
+            started += 1
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "counts": {
+                "total": len(ids),
+                "started": started,
+                "locked": locked,
+                "failed": failed,
+                "invalid": len(bad),
+            },
+            "results": results,
+            "invalid": bad,
+        }
+    )
 
 
 @app.get("/guilds")
