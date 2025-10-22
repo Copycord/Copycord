@@ -15,7 +15,7 @@ log = logging.getLogger("discord_hooks")
 
 _ROUTE_MAP: Tuple[Tuple[re.Pattern, ActionType], ...] = (
     (re.compile(r"/channels/\{channel_id\}/webhooks"), ActionType.WEBHOOK_CREATE),
-    (re.compile(r"/channels/\{channel_id\}/webhooks"), ActionType.WEBHOOK_DELETE),
+    (re.compile(r"/webhooks/\{webhook_id\}"),         ActionType.WEBHOOK_DELETE),
     (re.compile(r"/guilds/\{guild_id\}/emojis"), ActionType.EMOJI),
     (re.compile(r"/guilds/\{guild_id\}/stickers"), ActionType.STICKER_CREATE),
     (re.compile(r"/guilds/\{guild_id\}/channels"), ActionType.CREATE_CHANNEL),
@@ -83,29 +83,21 @@ class DiscordHTTPRLHandler(logging.Handler):
             if not m:
                 return
 
-            FIXED_COOLDOWN_SECONDS = 300
-
             bucket = m.group(2)
             action, key, route = self._map_bucket(bucket)
-            if not action:
-                log.debug(
-                    "No ActionType mapping for route=%s (bucket=%s); no penalty applied",
-                    route,
-                    bucket,
-                )
+            if not action or action == ActionType.WEBHOOK_MESSAGE:
                 return
 
-            if action == ActionType.WEBHOOK_MESSAGE:
-                return
+            try:
+                retry = float(m.group(1))
+            except Exception:
+                retry = 5.0
 
-            if action == ActionType.WEBHOOK_CREATE:
-                key = None
-
-            self.rlm.penalize(action, FIXED_COOLDOWN_SECONDS, key=key)
+            delay = max(1.0, min(retry * 1.1 + 0.25, 600.0))
+            self.rlm.penalize(action, delay, key=key)
             log.warning(
-                "[❗] Discord rate limit detected; applying %ss safety net cooldown before next %s action",
-                FIXED_COOLDOWN_SECONDS,
-                action.name,
+                "[❗] Discord rate limit detected; applying %.2fs cooldown before next %s action",
+                delay, action.name
             )
         except Exception as e:
             log.exception("[⛔] Error in DiscordHTTPRLHandler.emit: %s", e)
