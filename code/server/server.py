@@ -7,6 +7,7 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 import contextlib
 import signal
 import asyncio
@@ -573,9 +574,9 @@ class ServerReceiver:
                 logger.error("backfill_started missing/invalid channel_id: %r", cid_raw)
                 return
 
-            # NEW: remember the task id for this channel (if present)
-            tid = (msg.get("task_id")
-                or (data.get("task_id") if isinstance(data, dict) else None))
+            tid = msg.get("task_id") or (
+                data.get("task_id") if isinstance(data, dict) else None
+            )
             if tid:
                 self._task_for_channel[orig] = str(tid)
 
@@ -654,7 +655,7 @@ class ServerReceiver:
             except (TypeError, ValueError):
                 logger.error("backfill_done missing/invalid channel_id: %r", cid_raw)
                 return
-            
+
             tid = None
             if hasattr(self.backfill, "tracker"):
                 with contextlib.suppress(Exception):
@@ -675,8 +676,8 @@ class ServerReceiver:
 
             if getattr(self, "_shutting_down", False):
                 return
-            
-            no_work = (total_est is not None and int(total_est) == 0)
+
+            no_work = total_est is not None and int(total_est) == 0
 
             try:
                 await self.bot.ws_manager.send(

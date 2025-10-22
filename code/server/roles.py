@@ -127,7 +127,6 @@ class RoleManager:
                 cloned.id,
             )
 
-            # it's only false when you just filled the last available slot).
             can_create = len(guild.roles) < self.MAX_ROLES
             return cloned, 1, can_create, create_suppressed_logged
 

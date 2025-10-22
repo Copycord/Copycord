@@ -7,6 +7,7 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 import asyncio
 import contextlib
 import re
@@ -428,7 +429,6 @@ class ClientListener:
                         with open(outfile, "w", encoding="utf-8") as f:
                             json.dump(result or {}, f, ensure_ascii=False, indent=2)
 
-                        # Tell UI we're done
                         try:
                             await self.bus.publish(
                                 kind="client",
@@ -866,7 +866,6 @@ class ClientListener:
             if self.sitemap.is_excluded_ids(ch_id, cat_id):
                 return True
         except Exception:
-            # Fail-safe: don't break message flow
             pass
 
         if message.type == MessageType.thread_created:
@@ -1664,12 +1663,6 @@ class ClientListener:
                     continue
 
                 self._bf_active.add(chan_id)
-
-                # with contextlib.suppress(Exception):
-                #     await self.bus.publish(
-                #         "client",
-                #         {"type": "backfill_ack", "data": {"channel_id": chan_id}},
-                #     )
 
                 await self.backfill.run_channel(chan_id, **(params or {}))
 

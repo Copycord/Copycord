@@ -53,7 +53,7 @@ class CloneCommands(commands.Cog):
         if ctx.user.id in self.allowed_users:
             logger.info(f"[⚡] User {ctx.user.id} executed the '{cmd_name}' command.")
             return True
-        # deny access otherwise
+
         await ctx.respond("You are not authorized to use this command.", ephemeral=True)
         logger.warning(
             f"[⚠️] Unauthorized access: user {ctx.user.id} attempted to run command '{cmd_name}'"
@@ -174,13 +174,12 @@ class CloneCommands(commands.Cog):
         Build a standard success/info embed.
         """
         if description is None:
-            # Only one positional arg was given → it's the description; no title.
             if title_or_desc is None:
                 raise ValueError("description is required")
             title = None
             description = title_or_desc
         else:
-            # Two-arg form → treat first as title.
+
             title = title_or_desc
 
         e = discord.Embed(title=title, description=description, color=color)
@@ -287,7 +286,6 @@ class CloneCommands(commands.Cog):
             await ctx.respond(f"⚠️ Couldn’t toggle `{keyword}`.", ephemeral=True)
             return
 
-        # push update to client
         new_list = self.db.get_blocked_keywords()
         await self.bot.ws_manager.send(
             {"type": "settings_update", "data": {"blocked_keywords": new_list}}
@@ -575,7 +573,6 @@ class CloneCommands(commands.Cog):
                 "No announcement subscriptions found.", ephemeral=True
             )
 
-        # Delete by flat index
         if delete is not None:
             idx = delete - 1
             if idx < 0 or idx >= len(rows):
@@ -601,7 +598,6 @@ class CloneCommands(commands.Cog):
                     "Nothing was deleted (row no longer exists).", ephemeral=True
                 )
 
-        # Build the list (chunked to fit embed field limits)
         lines: list[str] = []
         for i, r in enumerate(rows, start=1):
             gid = int(r["guild_id"])
@@ -645,7 +641,7 @@ class CloneCommands(commands.Cog):
     )
     async def announce_help(self, ctx: discord.ApplicationContext):
         def spacer():
-            # Zero-width space section divider
+
             embed.add_field(name="\u200b", value="\u200b", inline=False)
 
         embed = discord.Embed(
@@ -868,9 +864,7 @@ class CloneCommands(commands.Cog):
             return False
 
         try:
-            # =============================
-            # EMOJIS
-            # =============================
+
             if kind == "emojis":
                 for em in list(guild.emojis):
                     if unmapped_only and _is_mapped("emojis", em.id):
@@ -934,9 +928,6 @@ class CloneCommands(commands.Cog):
                     self.db.conn.execute("DELETE FROM emoji_mappings")
                     self.db.conn.commit()
 
-            # =============================
-            # STICKERS
-            # =============================
             elif kind == "stickers":
                 stickers = list(getattr(guild, "stickers", []))
                 if not stickers:
@@ -1006,9 +997,6 @@ class CloneCommands(commands.Cog):
                     self.db.conn.execute("DELETE FROM sticker_mappings")
                     self.db.conn.commit()
 
-            # =============================
-            # ROLES
-            # =============================
             elif kind == "roles":
                 me, top_role, roles = await helper._resolve_me_and_top(guild)
                 if not me or not top_role:
@@ -1098,9 +1086,6 @@ class CloneCommands(commands.Cog):
                     self.db.conn.execute("DELETE FROM role_mappings")
                     self.db.conn.commit()
 
-            # =============================
-            # Finalize
-            # =============================
             summary = (
                 f"**Target:** `{kind}`\n"
                 f"**Mode:** `{'unmapped_only' if unmapped_only else 'ALL'}`\n"
@@ -1159,7 +1144,6 @@ class CloneCommands(commands.Cog):
                 ephemeral=True,
             )
 
-        # Resolve cloned role id
         try:
             cloned_id = int(role.id if role else role_id)
         except ValueError:
@@ -1170,7 +1154,6 @@ class CloneCommands(commands.Cog):
                 ephemeral=True,
             )
 
-        # Find original via mapping
         mapping = self.db.get_role_mapping_by_cloned_id(cloned_id)
         if not mapping:
             return await ctx.followup.send(
@@ -1185,11 +1168,10 @@ class CloneCommands(commands.Cog):
         original_role_name = mapping["original_role_name"]
 
         newly_added = self.db.add_role_block(original_role_id)
-        # Enforce the block immediately: delete clone if present and remove mapping
+
         g = ctx.guild
         cloned_obj = g.get_role(cloned_id) if g else None
 
-        # Try to delete if safe
         deleted = False
         if cloned_obj:
             me = g.me if g else None
@@ -1211,7 +1193,6 @@ class CloneCommands(commands.Cog):
                         e,
                     )
 
-        # Always drop the mapping so it won't be updated/re-created
         self.db.delete_role_mapping(original_role_id)
 
         if newly_added:
@@ -1287,13 +1268,13 @@ class CloneCommands(commands.Cog):
             str,
             "Optional: Webhook URL to forward messages",
             required=False,
-            default="",  # <-- optional now
+            default="",
         ),
         json_file: bool = Option(
             bool,
             "Save a JSON snapshot (default: true)",
             required=False,
-            default=True,  # <-- default ON now
+            default=True,
         ),
     ):
         await ctx.defer(ephemeral=True)
@@ -1312,7 +1293,7 @@ class CloneCommands(commands.Cog):
             "type": "export_dm_history",
             "data": {
                 "user_id": target_id,
-                "webhook_url": (webhook_url or "").strip() or None,  # normalize
+                "webhook_url": (webhook_url or "").strip() or None,
                 "json_file": json_file,
             },
         }
@@ -1339,7 +1320,6 @@ class CloneCommands(commands.Cog):
                 ephemeral=True,
             )
 
-        # friendly confirmation text
         fw = "enabled" if webhook_url.strip() else "disabled"
         jf = "enabled" if json_file else "disabled"
         return await ctx.followup.send(

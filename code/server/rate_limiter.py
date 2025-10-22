@@ -7,9 +7,11 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 import asyncio, time
 from enum import Enum
 from typing import Tuple, Dict, Optional
+
 
 class ActionType(Enum):
     WEBHOOK_MESSAGE = "webhook_message"
@@ -23,6 +25,7 @@ class ActionType(Enum):
     ROLE = "role"
     STICKER_CREATE = "sticker_create"
 
+
 class RateLimiter:
     def __init__(self, max_rate: int, time_window: float):
         self._max_rate = max_rate
@@ -30,13 +33,12 @@ class RateLimiter:
         self._allowance = max_rate
         self._last_check = time.monotonic()
         self._lock = asyncio.Lock()
-        self._cooldown_until = 0.0  # NEW
+        self._cooldown_until = 0.0
 
     async def acquire(self):
         async with self._lock:
             now = time.monotonic()
 
-            # Respect adaptive cooldowns
             if now < self._cooldown_until:
                 await asyncio.sleep(self._cooldown_until - now)
                 now = time.monotonic()
@@ -44,23 +46,21 @@ class RateLimiter:
             elapsed = now - self._last_check
             self._last_check = now
 
-            # Refill tokens
             self._allowance = min(
                 self._max_rate,
                 self._allowance + elapsed * (self._max_rate / self._time_window),
             )
 
             if self._allowance < 1.0:
-                # Sleep until we have 1 token
+
                 wait = (1.0 - self._allowance) * (self._time_window / self._max_rate)
                 if wait > 0:
                     await asyncio.sleep(wait)
                 self._last_check = time.monotonic()
-                self._allowance = 0.0  # we’ll consume the token below by setting to 0
+                self._allowance = 0.0
             else:
-                # Consume one token
-                self._allowance -= 1.0
 
+                self._allowance -= 1.0
 
     def backoff(self, seconds: float):
         now = time.monotonic()
@@ -110,7 +110,7 @@ class RateLimitManager:
 
     def _get(self, action: ActionType, key: str | None = None) -> Optional[RateLimiter]:
         if action is ActionType.WEBHOOK_MESSAGE:
-            # keyed per-webhook/channel
+
             if key is None:
                 return None
             lim = self._webhook_limiters.get(key)

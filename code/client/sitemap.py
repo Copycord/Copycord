@@ -37,7 +37,9 @@ class SitemapService:
         self.db = db
         self.ws = ws
         try:
-            self.host_guild_id = int(host_guild_id) if host_guild_id is not None else None
+            self.host_guild_id = (
+                int(host_guild_id) if host_guild_id is not None else None
+            )
         except (TypeError, ValueError):
             self.host_guild_id = None
         self.logger = logger or logging.getLogger("client.sitemap")
@@ -47,14 +49,14 @@ class SitemapService:
         """Debounced sitemap send."""
         if self._debounce_task is None:
             self._debounce_task = asyncio.create_task(self._debounced(delay))
-            
+
     def _pick_guild(self) -> Optional["discord.Guild"]:
         """Return the configured host guild, or a sensible fallback (first guild)."""
         g = None
         if self.host_guild_id:
             g = self.bot.get_guild(self.host_guild_id)
         if not g and self.bot.guilds:
-            # fallback: first guild the bot is in
+
             g = self.bot.guilds[0]
         return g
 
@@ -73,7 +75,15 @@ class SitemapService:
             "[sitemap] using guild %s (%s)%s",
             getattr(guild, "name", "?"),
             getattr(guild, "id", "?"),
-            "" if (self.host_guild_id and guild is not None and getattr(guild, "id", None) == self.host_guild_id) else " [fallback]"
+            (
+                ""
+                if (
+                    self.host_guild_id
+                    and guild is not None
+                    and getattr(guild, "id", None) == self.host_guild_id
+                )
+                else " [fallback]"
+            ),
         )
         if not guild:
             self.logger.warning("[⛔] No accessible guild found to build a sitemap.")
@@ -85,7 +95,11 @@ class SitemapService:
                 "emojis": [],
                 "stickers": [],
                 "roles": [],
-                "community": {"enabled": False, "rules_channel_id": None, "public_updates_channel_id": None},
+                "community": {
+                    "enabled": False,
+                    "rules_channel_id": None,
+                    "public_updates_channel_id": None,
+                },
             }
 
         def _enum_int(val, default=0):
@@ -177,38 +191,47 @@ class SitemapService:
             channels = []
             for ch in cat.channels:
                 if isinstance(ch, discord.TextChannel):
-                    channels.append({
-                        "id": ch.id,
-                        "name": ch.name,
-                        "type": ch.type.value,
-                        **(
-                            {"overwrites": self._serialize_role_overwrites(ch)}
-                            if getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False)
-                            else {}
-                        ),
-                    })
-            sitemap["categories"].append({
-                "id": cat.id,
-                "name": cat.name,
-                "channels": channels,
+                    channels.append(
+                        {
+                            "id": ch.id,
+                            "name": ch.name,
+                            "type": ch.type.value,
+                            **(
+                                {"overwrites": self._serialize_role_overwrites(ch)}
+                                if getattr(
+                                    self.config, "MIRROR_CHANNEL_PERMISSIONS", False
+                                )
+                                else {}
+                            ),
+                        }
+                    )
+            sitemap["categories"].append(
+                {
+                    "id": cat.id,
+                    "name": cat.name,
+                    "channels": channels,
+                    **(
+                        {"overwrites": self._serialize_role_overwrites(cat)}
+                        if getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False)
+                        else {}
+                    ),
+                }
+            )
+
+        sitemap["standalone_channels"] = [
+            {
+                "id": ch.id,
+                "name": ch.name,
+                "type": ch.type.value,
                 **(
-                    {"overwrites": self._serialize_role_overwrites(cat)}
+                    {"overwrites": self._serialize_role_overwrites(ch)}
                     if getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False)
                     else {}
                 ),
-            })
-
-        # standalone channels
-        sitemap["standalone_channels"] = [{
-            "id": ch.id,
-            "name": ch.name,
-            "type": ch.type.value,
-            **(
-                {"overwrites": self._serialize_role_overwrites(ch)}
-                if getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False)
-                else {}
-            ),
-        } for ch in guild.text_channels if ch.category is None]
+            }
+            for ch in guild.text_channels
+            if ch.category is None
+        ]
 
         for forum in getattr(guild, "forums", []):
             sitemap["forums"].append(
@@ -277,7 +300,7 @@ class SitemapService:
             return not self._is_filtered_out(getattr(ch, "id", None), cat_id)
         except Exception:
             return True
-        
+
     def _serialize_role_overwrites(self, obj: discord.abc.GuildChannel) -> list[dict]:
         out: list[dict] = []
 
@@ -293,19 +316,20 @@ class SitemapService:
                     rid = int(getattr(ow, "id"))
                     allow_bits = int(getattr(ow, "allow", 0))
                     deny_bits = int(getattr(ow, "deny", 0))
-                    out.append({
-                        "type": "role",
-                        "id": rid,
-                        "allow_bits": allow_bits,
-                        "deny_bits": deny_bits,
-                    })
+                    out.append(
+                        {
+                            "type": "role",
+                            "id": rid,
+                            "allow_bits": allow_bits,
+                            "deny_bits": deny_bits,
+                        }
+                    )
             if out:
                 return out
         except Exception:
             pass
 
         return out
-
 
     def in_scope_thread(self, thr: discord.Thread) -> bool:
         """True if thread's parent survives filtering."""
@@ -497,10 +521,6 @@ class SitemapService:
                 new_categories.append({**cat, "channels": kept_children})
                 kept_cat_cnt += 1
                 continue
-
-            #  - category is WL'd, OR
-            #  - any text channel under this category is WL'd, OR
-            #  - any forum under this category is WL'd, OR
 
             cat_text_ids = {int(ch["id"]) for ch in cat.get("channels", [])}
             has_wl_text_child = bool(inc_chs & cat_text_ids)

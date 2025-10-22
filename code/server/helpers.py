@@ -7,6 +7,7 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 from __future__ import annotations
 import contextlib
 import asyncio
@@ -637,7 +638,6 @@ class VerifyController:
             except Exception:
                 return None
 
-        # threads: look at parent channel's category_id
         parent = getattr(ch, "parent", None)
         if parent is not None:
             try:
@@ -655,7 +655,6 @@ class VerifyController:
         if cat is not None and getattr(cat, "name", None):
             return cat.name
 
-        # threads: derive from parent channel's category
         parent = getattr(ch, "parent", None)
         if parent is not None:
             pcat = getattr(parent, "category", None)
@@ -1011,7 +1010,7 @@ class WebhookDMExporter:
                 avatar_url=avatar_url,
                 embeds=embeds_param,
                 allowed_mentions=discord.AllowedMentions.none(),
-                wait=False,  # non-blocking: do not await Discord's response body
+                wait=False,
             )
             elapsed = (time.perf_counter() - t0) * 1000.0
             author_name = author.get("name") or "Unknown"
@@ -1133,11 +1132,13 @@ class WebhookDMExporter:
 
         return out or None
 
+
 class OnCloneJoin:
     """
     Assign configured on-join roles when members join a clone guild.
     Also exposes a 'sync' helper that the slash command can reuse.
     """
+
     def __init__(self, bot: commands.Bot, db: "DBManager"):
         self.bot = bot
         self.db = db
@@ -1151,7 +1152,8 @@ class OnCloneJoin:
             if not role_ids:
                 self.log.debug(
                     "[🎭] Join roles: No on-join roles configured guild_id=%s member_id=%s",
-                    guild.id, member.id
+                    guild.id,
+                    member.id,
                 )
                 return
 
@@ -1159,11 +1161,10 @@ class OnCloneJoin:
             if not me or not me.guild_permissions.manage_roles:
                 self.log.warning(
                     "[🎭] Join roles: Missing Manage Roles; cannot assign on-join roles guild_id=%s",
-                    guild.id
+                    guild.id,
                 )
                 return
 
-            # Only roles we can give (not managed, below top role, member missing)
             assignable = []
             skipped = []
             for rid in role_ids:
@@ -1189,12 +1190,16 @@ class OnCloneJoin:
             dt = (time.perf_counter() - t0) * 1000
             self.log.info(
                 "[🎭] Join roles: assigned roles for %s (%s): %s duration_ms=%.1f",
-                member.name, member.id, [f"{r.id}:{r.name}" for r in assignable], dt
+                member.name,
+                member.id,
+                [f"{r.id}:{r.name}" for r in assignable],
+                dt,
             )
             if skipped:
                 self.log.debug(
                     "[🎭] Join roles: Skipped join roles member_id=%s details=%s",
-                    member.id, [(rid, reason) for rid, reason in skipped]
+                    member.id,
+                    [(rid, reason) for rid, reason in skipped],
                 )
         except Exception:
             self.log.exception(
@@ -1217,12 +1222,16 @@ class OnCloneJoin:
         role_ids = self.db.get_onjoin_roles(guild.id)
         roles = [guild.get_role(rid) for rid in role_ids if guild.get_role(rid)]
         if not roles:
-            self.log.info("[🎭] Role sync: No on-join roles configured guild_id=%s", guild.id)
+            self.log.info(
+                "[🎭] Role sync: No on-join roles configured guild_id=%s", guild.id
+            )
             return (0, 0, 0, [])
 
         me = guild.me or guild.get_member(self.bot.user.id)
         if not me or not me.guild_permissions.manage_roles:
-            self.log.warning("[🎭] Role sync: Missing Manage Roles guild_id=%s", guild.id)
+            self.log.warning(
+                "[🎭] Role sync: Missing Manage Roles guild_id=%s", guild.id
+            )
             raise PermissionError("Manage Roles missing")
 
         assignable = [r for r in roles if (not r.managed) and (r < me.top_role)]
@@ -1230,18 +1239,22 @@ class OnCloneJoin:
         if skipped_roles:
             self.log.warning(
                 "[🎭] Role sync: Skipped non-assignable roles guild_id=%s role_ids=%s",
-                guild.id, [r.id for r in skipped_roles]
+                guild.id,
+                [r.id for r in skipped_roles],
             )
 
         changed_users = 0
         changed_pairs = 0
         failed = 0
 
-        # Per-member logs can get noisy; keep INFO summary + DEBUG details
         total = len(guild.members)
         self.log.info(
             "[🎭] Role sync starting: guild_id=%s members=%s include_bots=%s dry_run=%s assignable=%s",
-            guild.id, total, include_bots, dry_run, [f"{r.id}:{r.name}" for r in assignable]
+            guild.id,
+            total,
+            include_bots,
+            dry_run,
+            [f"{r.id}:{r.name}" for r in assignable],
         )
 
         for m in list(guild.members):
@@ -1256,7 +1269,8 @@ class OnCloneJoin:
                 changed_pairs += len(missing)
                 self.log.debug(
                     "[🎭] Role sync: DRY member_id=%s missing_roles=%s",
-                    m.id, [f"{r.id}:{r.name}" for r in missing]
+                    m.id,
+                    [f"{r.id}:{r.name}" for r in missing],
                 )
                 continue
 
@@ -1266,22 +1280,28 @@ class OnCloneJoin:
                 changed_pairs += len(missing)
                 self.log.debug(
                     "[🎭] Role sync: Added member_id=%s roles=%s",
-                    m.id, [f"{r.id}:{r.name}" for r in missing]
+                    m.id,
+                    [f"{r.id}:{r.name}" for r in missing],
                 )
             except Exception:
                 failed += 1
                 self.log.exception(
                     "[🎭] Role sync Error: add_roles failed member_id=%s roles=%s",
-                    m.id, [f"{r.id}:{r.name}" for r in missing]
+                    m.id,
+                    [f"{r.id}:{r.name}" for r in missing],
                 )
 
         dt = (time.perf_counter() - t0) * 1000
         self.log.info(
             "[🎭] Role sync finished: changed_users=%s changed_pairs=%s failed=%s duration_ms=%.1f",
-            changed_users, changed_pairs, failed, dt
+            changed_users,
+            changed_pairs,
+            failed,
+            dt,
         )
 
         return (changed_users, changed_pairs, failed, skipped_roles)
+
 
 def _safe_preview(obj) -> str:
     """Shorten & sanitize dicts for logs."""

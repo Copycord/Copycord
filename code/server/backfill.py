@@ -192,7 +192,6 @@ class BackfillManager:
                     )
                     st["last_orig_id"] = row.get("last_orig_message_id") or None
                     st["last_ts"] = row.get("last_orig_timestamp") or None
-                    # Seed clone id from DB if meta didn't provide it
                     if st.get("clone_channel_id") is None and row.get(
                         "clone_channel_id"
                     ):
@@ -307,7 +306,6 @@ class BackfillManager:
         cid = int(channel_id)
         st = self._progress.get(cid)
 
-        # 👇 NEW: if another run already started, don't clear its state
         if expected_run_id and st and st.get("run_id") != expected_run_id:
             logger.debug(
                 "[bf] clear_sink skipped for #%s; run mismatch (%s != %s)",
@@ -425,12 +423,9 @@ class BackfillManager:
             prev,
         )
 
-        # If we deferred temp-webhook creation at start, do it now that we know there's work.
         if st.pop("temps_deferred", False):
             clone_id = st.get("clone_channel_id")
             if clone_id is not None:
-                import asyncio
-
                 asyncio.create_task(self.ensure_temps_ready(int(clone_id)))
 
     def add_expected_total(self, channel_id: int, delta: int = 1) -> None:
@@ -479,7 +474,6 @@ class BackfillManager:
             with contextlib.suppress(Exception):
                 live_tid = await self.tracker.get_task_id(str(cid))
 
-        # If caller provided a task id and it doesn't match the live one → ignore
         if expected_task_id and live_tid and expected_task_id != live_tid:
             logger.debug(
                 "[bf] on_done ignored for #%s; task mismatch (%s != %s)",
@@ -1189,7 +1183,6 @@ class BackfillManager:
                                 )
                             )
                         except Exception:
-                            # If your limiter doesn't know WEBHOOK_DELETE, fall back without blocking.
                             pass
                     await wh.delete(reason="Backfill complete: remove temp webhook")
                     return True

@@ -347,16 +347,14 @@ async def dm_member_by_id(bot, member_id: int, message: str) -> bool:
     DM a member by their ID.
     """
     try:
-        # Try cache first
         member = bot.get_user(member_id)
         if not member:
-            # Fallback to API fetch if not cached
             member = await bot.fetch_user(member_id)
 
         if not member:
             return False
 
-        await member.send(message) # Send the DM
+        await member.send(message)
         return True
 
     except discord.Forbidden:

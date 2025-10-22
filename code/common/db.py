@@ -7,6 +7,7 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 from datetime import datetime
 import json
 import sqlite3, threading
@@ -205,7 +206,6 @@ class DBManager:
                 );
             """,
             required_columns={"guild_id", "keyword", "user_id", "last_updated"},
-            # For existing installs without guild_id, migrate rows and set guild_id=0
             copy_map={
                 "guild_id": "0",
                 "keyword": "keyword",
@@ -218,7 +218,6 @@ class DBManager:
             ],
         )
 
-        # announcement_triggers (guild-scoped)
         self._ensure_table(
             name="announcement_triggers",
             create_sql_template="""
@@ -311,7 +310,7 @@ class DBManager:
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);"
         )
-        
+
         c.execute(
             """
             CREATE TABLE IF NOT EXISTS onjoin_roles (
@@ -323,8 +322,9 @@ class DBManager:
             );
             """
         )
-        
-        c.execute("""
+
+        c.execute(
+            """
         CREATE TABLE IF NOT EXISTS backfill_runs (
             run_id                TEXT PRIMARY KEY,
             original_channel_id   INTEGER NOT NULL,
@@ -339,8 +339,11 @@ class DBManager:
             last_orig_timestamp   TEXT,                              -- ISO timestamp from client payload
             error                 TEXT
         );
-        """)
-        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_bf_runs_by_orig_status ON backfill_runs(original_channel_id, status)")
+        """
+        )
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_bf_runs_by_orig_status ON backfill_runs(original_channel_id, status)"
+        )
         self.conn.commit()
 
     def _table_exists(self, name: str) -> bool:
@@ -376,7 +379,7 @@ class DBManager:
         exists = self._table_exists(name)
 
         if not exists:
-            # Fresh create
+
             self.conn.execute(create_sql_template.format(table=name))
             for stmt in post_sql:
                 self.conn.execute(stmt)
@@ -384,19 +387,16 @@ class DBManager:
 
         existing_cols = self._table_columns(name)
         if required_columns.issubset(existing_cols):
-            # Already matches target; just ensure indexes
+
             for stmt in post_sql:
                 self.conn.execute(stmt)
             return
 
-        # ---- Rebuild path ----
         temp = f"_{name}_new"
 
-        # Capture current FK setting to restore later
         prev_fk = self.conn.execute("PRAGMA foreign_keys").fetchone()[0]
         self.conn.execute("PRAGMA foreign_keys = OFF;")
 
-        # Choose txn primitive: top-level BEGIN or nested SAVEPOINT
         in_txn = self.conn.in_transaction
         sp_name = f"sp_rebuild_{name}"
         try:
@@ -405,15 +405,12 @@ class DBManager:
             else:
                 self.conn.execute("BEGIN;")
 
-            # 1) create new table
             self.conn.execute(create_sql_template.format(table=temp))
 
-            # 2) copy old -> new with defensive fallbacks for missing legacy columns
             new_cols = list(copy_map.keys())
             select_exprs = []
             for new_col in new_cols:
                 expr = copy_map[new_col].strip()
-                # If expression is a bare identifier that isn't in the old table, fallback.
                 if expr.isidentifier() and expr not in existing_cols:
                     expr = (
                         "CURRENT_TIMESTAMP"
@@ -427,15 +424,12 @@ class DBManager:
                 f"SELECT {', '.join(select_exprs)} FROM {name}"
             )
 
-            # 3) swap tables
             self.conn.execute(f"DROP TABLE {name};")
             self.conn.execute(f"ALTER TABLE {temp} RENAME TO {name};")
 
-            # 4) recreate indexes
             for stmt in post_sql:
                 self.conn.execute(stmt)
 
-            # Commit appropriately
             if in_txn:
                 self.conn.execute(f"RELEASE SAVEPOINT {sp_name};")
             else:
@@ -443,14 +437,12 @@ class DBManager:
         except Exception:
             if in_txn:
                 self.conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name};")
-                self.conn.execute(
-                    f"RELEASE SAVEPOINT {sp_name};"
-                )  # end the savepoint scope
+                self.conn.execute(f"RELEASE SAVEPOINT {sp_name};")
             else:
                 self.conn.execute("ROLLBACK;")
             raise
         finally:
-            # Restore FK pragma to its previous value
+
             self.conn.execute(f"PRAGMA foreign_keys = {1 if prev_fk else 0};")
 
     def set_config(self, key: str, value: str) -> None:
@@ -666,7 +658,6 @@ class DBManager:
 
         row = self.get_channel_mapping_by_original_id(any_channel_id)
         if row:
-            # mapping exists and confirms it's original
             cloned = row["cloned_channel_id"]
             return (
                 int(row["original_channel_id"]),
@@ -674,7 +665,6 @@ class DBManager:
                 "from_original",
             )
 
-        # Fallback: we weren't able to find a mapping entry; treat the input as already-original.
         return int(any_channel_id), None, "assumed_original"
 
     def get_all_threads(self) -> List[sqlite3.Row]:
@@ -1431,7 +1421,6 @@ class DBManager:
         except Exception:
             return 0
 
-
     def get_onjoin_roles(self, guild_id: int) -> list[int]:
         rows = self.conn.execute(
             "SELECT role_id FROM onjoin_roles WHERE guild_id=? ORDER BY role_id ASC",
@@ -1446,7 +1435,9 @@ class DBManager:
         ).fetchone()
         return row is not None
 
-    def add_onjoin_role(self, guild_id: int, role_id: int, added_by: int | None = None) -> None:
+    def add_onjoin_role(
+        self, guild_id: int, role_id: int, added_by: int | None = None
+    ) -> None:
         with self.lock, self.conn:
             self.conn.execute(
                 "INSERT OR IGNORE INTO onjoin_roles(guild_id, role_id, added_by) VALUES (?,?,?)",
@@ -1461,7 +1452,9 @@ class DBManager:
             )
             return cur.rowcount > 0
 
-    def toggle_onjoin_role(self, guild_id: int, role_id: int, added_by: int | None = None) -> bool:
+    def toggle_onjoin_role(
+        self, guild_id: int, role_id: int, added_by: int | None = None
+    ) -> bool:
         """Returns True if ADDED, False if REMOVED."""
         if self.has_onjoin_role(guild_id, role_id):
             self.remove_onjoin_role(guild_id, role_id)
@@ -1476,7 +1469,7 @@ class DBManager:
                 (int(guild_id),),
             )
             return cur.rowcount
-        
+
     def backfill_create_run(
         self,
         original_channel_id: int,
@@ -1496,54 +1489,85 @@ class DBManager:
         self.conn.commit()
         return run_id
 
-    def backfill_set_clone(self, run_id: str, clone_channel_id: int|None):
+    def backfill_set_clone(self, run_id: str, clone_channel_id: int | None):
         now = datetime.utcnow().isoformat() + "Z"
-        self.conn.execute("UPDATE backfill_runs SET clone_channel_id=?, updated_at=? WHERE run_id=?",
-                        (int(clone_channel_id) if clone_channel_id else None, now, run_id))
+        self.conn.execute(
+            "UPDATE backfill_runs SET clone_channel_id=?, updated_at=? WHERE run_id=?",
+            (int(clone_channel_id) if clone_channel_id else None, now, run_id),
+        )
         self.conn.commit()
 
-    def backfill_update_checkpoint(self, run_id: str, *, delivered: int|None=None, expected_total: int|None=None,
-                                last_orig_message_id: str|None=None, last_orig_timestamp: str|None=None):
+    def backfill_update_checkpoint(
+        self,
+        run_id: str,
+        *,
+        delivered: int | None = None,
+        expected_total: int | None = None,
+        last_orig_message_id: str | None = None,
+        last_orig_timestamp: str | None = None,
+    ):
         cols, vals = ["updated_at"], [datetime.utcnow().isoformat() + "Z"]
-        if delivered is not None:          cols += ["delivered"];         vals += [int(delivered)]
-        if expected_total is not None:     cols += ["expected_total"];    vals += [int(expected_total)]
-        if last_orig_message_id is not None: cols += ["last_orig_message_id"]; vals += [str(last_orig_message_id)]
-        if last_orig_timestamp is not None:  cols += ["last_orig_timestamp"];  vals += [last_orig_timestamp]
-        sql = f"UPDATE backfill_runs SET {', '.join(c+'=?' for c in cols)} WHERE run_id=?"
+        if delivered is not None:
+            cols += ["delivered"]
+            vals += [int(delivered)]
+        if expected_total is not None:
+            cols += ["expected_total"]
+            vals += [int(expected_total)]
+        if last_orig_message_id is not None:
+            cols += ["last_orig_message_id"]
+            vals += [str(last_orig_message_id)]
+        if last_orig_timestamp is not None:
+            cols += ["last_orig_timestamp"]
+            vals += [last_orig_timestamp]
+        sql = (
+            f"UPDATE backfill_runs SET {', '.join(c+'=?' for c in cols)} WHERE run_id=?"
+        )
         self.conn.execute(sql, (*vals, run_id))
         self.conn.commit()
 
     def backfill_mark_done(self, run_id: str):
         now = datetime.utcnow().isoformat() + "Z"
-        self.conn.execute("UPDATE backfill_runs SET status='completed', updated_at=? WHERE run_id=?", (now, run_id))
+        self.conn.execute(
+            "UPDATE backfill_runs SET status='completed', updated_at=? WHERE run_id=?",
+            (now, run_id),
+        )
         self.conn.commit()
 
-    def backfill_mark_failed(self, run_id: str, error: str|None):
+    def backfill_mark_failed(self, run_id: str, error: str | None):
         now = datetime.utcnow().isoformat() + "Z"
-        self.conn.execute("UPDATE backfill_runs SET status='failed', error=?, updated_at=? WHERE run_id=?", (error, now, run_id))
+        self.conn.execute(
+            "UPDATE backfill_runs SET status='failed', error=?, updated_at=? WHERE run_id=?",
+            (error, now, run_id),
+        )
         self.conn.commit()
 
     def backfill_abandon_running_on_boot(self):
         now = datetime.utcnow().isoformat() + "Z"
-        self.conn.execute("UPDATE backfill_runs SET status='aborted', updated_at=? WHERE status='running'", (now,))
+        self.conn.execute(
+            "UPDATE backfill_runs SET status='aborted', updated_at=? WHERE status='running'",
+            (now,),
+        )
         self.conn.commit()
 
     def backfill_get_incomplete_for_channel(self, original_channel_id: int):
-        cur = self.conn.execute("""
+        cur = self.conn.execute(
+            """
             SELECT run_id, original_channel_id, clone_channel_id, status, range_json,
                 started_at, updated_at, delivered, expected_total, last_orig_message_id, last_orig_timestamp, error
             FROM backfill_runs
             WHERE original_channel_id=? AND status='running'
             ORDER BY updated_at DESC
             LIMIT 1
-        """, (int(original_channel_id),))
+        """,
+            (int(original_channel_id),),
+        )
         row = cur.fetchone()
         if not row:
             return None
-        # return as dict
+
         cols = [c[0] for c in cur.description]
         return dict(zip(cols, row))
-    
+
     def backfill_mark_aborted(self, run_id: str, reason: str | None = None) -> None:
         now = datetime.utcnow().isoformat() + "Z"
         self.conn.execute(
@@ -1552,7 +1576,9 @@ class DBManager:
         )
         self.conn.commit()
 
-    def backfill_abort_running_for_channel(self, original_channel_id: int, reason: str | None = None) -> int:
+    def backfill_abort_running_for_channel(
+        self, original_channel_id: int, reason: str | None = None
+    ) -> int:
         now = datetime.utcnow().isoformat() + "Z"
         cur = self.conn.execute(
             "UPDATE backfill_runs SET status='cancelled', error=COALESCE(?, error), updated_at=? "
