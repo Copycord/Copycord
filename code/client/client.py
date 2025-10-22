@@ -1193,11 +1193,27 @@ class ClientListener:
 
         if not self.config.ENABLE_CLONING or not self.config.EDIT_MESSAGES:
             return
+        
+        if self.host_guild_id and payload.guild_id and payload.guild_id != self.host_guild_id:
+            return
 
         channel = self.bot.get_channel(payload.channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(payload.channel_id)
+            except Exception:
+                return 
+
         guild = getattr(channel, "guild", None)
         if not guild or not self._is_host_guild(guild):
             return
+        
+        if isinstance(channel, discord.Thread):
+            if not self.sitemap.in_scope_thread(channel):
+                return
+        else:
+            if not self.sitemap.in_scope_channel(channel):
+                return
 
         msg = payload.cached_message
         data = payload.data or {}
@@ -1341,11 +1357,27 @@ class ClientListener:
 
         if not self.config.ENABLE_CLONING or not self.config.DELETE_MESSAGES:
             return
+        
+        if self.host_guild_id and payload.guild_id and payload.guild_id != self.host_guild_id:
+            return
 
         channel = self.bot.get_channel(payload.channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(payload.channel_id)
+            except Exception:
+                return
+
         guild = getattr(channel, "guild", None)
         if not guild or not self._is_host_guild(guild):
             return
+
+        if isinstance(channel, discord.Thread):
+            if not self.sitemap.in_scope_thread(channel):
+                return
+        else:
+            if not self.sitemap.in_scope_channel(channel):
+                return
 
         is_thread = getattr(channel, "type", None) in (
             ChannelType.public_thread,
