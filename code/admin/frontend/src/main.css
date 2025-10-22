@@ -1227,10 +1227,18 @@ body {
   cursor: pointer;
   transition: background 0.2s, box-shadow 0.2s, transform 0.15s;
 }
+
 .menu-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow: var(--shadow);
+  background: #2c1d4a;
+  border-color: #2c1d4a;
+  color: #fff;
+  box-shadow: none !important;
 }
+
+.menu-btn:hover .bar {
+  background: currentColor;
+}
+
 .menu-btn .bar {
   width: 20px;
   height: 2px;
@@ -1310,44 +1318,133 @@ body {
 .side-menu-body {
   padding: 12px 14px;
 }
+:root {
+  --rail-rest: #2c1d4a;
+  --rail-hover: #a78bfa;
+  --rail-radius: 4px;
+
+  --rail-rest-rgb: 44 29 74;
+  --rail-hover-rgb: 167 139 250;
+  --glass-blur: 10px;
+  --glass-sat: 120%;
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-inner: rgba(255, 255, 255, 0.08); /* soft inner sheen */
+  --glass-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+
+.side-menu-body {
+  padding-inline: 0 !important;
+}
 .side-menu .menu-list {
-  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.side-menu .menu-list li {
   margin: 0;
   padding: 0;
 }
-.side-menu .menu-list li {
-  margin: 0 -14px;
-  padding: 0 14px;
-}
 .side-menu .menu-list li:hover {
-  background: rgba(167, 139, 250, 0.1);
+  background: transparent !important;
 }
+
 .side-menu .menu-list li a {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
-  padding: 12px 0;
-  text-decoration: none;
-  color: var(--text);
-  border: 0;
-  background: 0 0;
-  transition: color 0.12s ease, transform 80ms ease;
-}
-.side-menu .menu-list li:hover a {
+  padding: 10px 16px;
+  border-radius: var(--rail-radius);
   color: #fff;
+  text-decoration: none;
+  border: 1px solid var(--glass-border);
+
+  background: linear-gradient(
+    180deg,
+    rgba(var(--rail-rest-rgb) / 0.34),
+    rgba(var(--rail-rest-rgb) / 0.22)
+  );
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-sat));
+  box-shadow: var(--glass-shadow);
+  transition: background 0.16s ease, border-color 0.16s ease,
+    transform 80ms ease;
 }
-.side-menu .menu-list li:active a {
-  transform: translateY(0.5px);
+
+.side-menu .menu-list li a::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.2) 0%,
+    rgba(255, 255, 255, 0.07) 35%,
+    rgba(255, 255, 255, 0) 60%
+  );
+  pointer-events: none;
+  mix-blend-mode: screen;
+  opacity: 0.7;
 }
-.side-menu .btn,
-.side-menu .menu-link {
-  all: unset;
+
+.side-menu .menu-list li a:is(:hover, :focus-visible) {
+  background: linear-gradient(
+    180deg,
+    rgba(var(--rail-hover-rgb) / 0.36),
+    rgba(var(--rail-hover-rgb) / 0.26)
+  );
+  border-color: rgba(var(--rail-hover-rgb) / 0.45);
+  outline: none;
+  box-shadow: 0 8px 28px rgba(167, 139, 250, 0.28);
+}
+
+.side-menu .menu-list li a[aria-current='page'],
+.side-menu .menu-list li a.is-active {
+  background: linear-gradient(
+    180deg,
+    rgba(var(--rail-hover-rgb) / 0.4),
+    rgba(var(--rail-hover-rgb) / 0.3)
+  );
+  border-color: rgba(var(--rail-hover-rgb) / 0.5);
+  box-shadow: 0 10px 30px rgba(167, 139, 250, 0.3);
+}
+
+.side-menu .menu-list li a svg {
+  width: 18px;
+  height: 18px;
   display: block;
-  width: 100%;
-  box-sizing: border-box;
-  cursor: pointer;
 }
+.side-menu .menu-list li a svg path {
+  fill: currentColor;
+}
+.side-menu .menu-list li a .mi {
+  color: currentColor;
+}
+
+.side-menu .menu-list li a:active {
+  transform: translateY(1px);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .side-menu .menu-list li a,
+  .side-menu .menu-list li a:is(:hover, :focus-visible),
+  .side-menu .menu-list li a.is-active {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--rail-rest);
+    border-color: var(--glass-border);
+    box-shadow: none;
+  }
+  .side-menu .menu-list li a:is(:hover, :focus-visible),
+  .side-menu .menu-list li a.is-active {
+    background: var(--rail-hover);
+    border-color: rgba(var(--rail-hover-rgb) / 0.5);
+  }
+}
+
 .site-header {
   display: flex !important;
   align-items: center;
@@ -1390,10 +1487,6 @@ body {
   color: var(--text);
   cursor: pointer;
   transition: background 0.2s, box-shadow 0.2s, transform 0.15s;
-}
-.menu-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
-  box-shadow: var(--shadow);
 }
 .menu-btn .bar {
   display: block;
@@ -3481,10 +3574,11 @@ body {
 }
 .ch-progress .bar {
   position: absolute;
-  top: 0; bottom: 0;
-  left: 0;                
-  width: 0;               
-  transition: width .18s ease;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 0;
+  transition: width 0.18s ease;
 }
 
 @keyframes ch-progress-indeterminate {
