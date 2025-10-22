@@ -10,12 +10,15 @@
 import asyncio
 import contextlib
 from dataclasses import dataclass, field
+import json
 import logging
 from collections import defaultdict
 from datetime import datetime, timezone
+import random
 import time
 import uuid
 import os
+import aiohttp
 from server.rate_limiter import RateLimitManager, ActionType
 
 logger = logging.getLogger("server")
@@ -752,27 +755,90 @@ class BackfillManager:
 
             await asyncio.sleep(0.05)
 
+    def _is_retryable_http(self, e: Exception) -> bool:
+        status = getattr(e, "status", None)
+        if status is None and isinstance(e, aiohttp.ClientResponseError):
+            status = e.status
+
+        if isinstance(e, (aiohttp.ClientError, asyncio.TimeoutError)):
+            return True
+
+        return status in (429, 500, 502, 503, 504)
+
+    def _retry_after_seconds_from_exc(self, e: Exception) -> float | None:
+        """
+        Try to extract a server-provided delay from the exception.
+        Prefers Retry-After / X-RateLimit-Reset-After header, then JSON body.retry_after.
+        """
+        resp = getattr(e, "response", None)
+
+        if resp is not None:
+            try:
+
+                ra = resp.headers.get("Retry-After") or resp.headers.get(
+                    "X-RateLimit-Reset-After"
+                )
+                if ra is not None:
+                    return float(ra)
+            except Exception:
+                pass
+
+            try:
+
+                raw = getattr(e, "text", None)
+                if raw:
+                    data = json.loads(raw)
+                    if isinstance(data, dict) and "retry_after" in data:
+                        return float(data["retry_after"])
+            except Exception:
+                pass
+        return None
+
+    async def _api_with_retry(
+        self, *, what: str, call, action=None, base: float = 0.75, cap: float = 60.0
+    ) -> any:
+        """
+        Indefinitely retry a coroutine factory `call` until it succeeds or we're shutting down.
+        - Honors rate-limit hints from Discord when available.
+        - Exponential backoff with jitter otherwise.
+        - Optionally acquires your RateLimitManager `action` before each attempt.
+        """
+        attempt = 0
+        while True:
+            if getattr(self, "_shutting_down", False):
+                raise asyncio.CancelledError(f"Aborted {what}: shutting down")
+
+            try:
+                if action is not None:
+
+                    await self.ratelimit.acquire(action)
+
+                return await call()
+            except Exception as e:
+                if not self._is_retryable_http(e):
+
+                    raise
+
+                hint = self._retry_after_seconds_from_exc(e)
+                if hint is not None:
+                    delay = max(0.0, float(hint))
+                else:
+                    delay = min(cap, (base * (2**attempt))) + random.random() * 0.333
+
+                logger.warning(
+                    "[retry] %s failed (%s). sleeping %.2fs before retry #%d",
+                    what,
+                    getattr(e, "status", type(e).__name__),
+                    delay,
+                    attempt + 1,
+                )
+                await asyncio.sleep(delay)
+                attempt += 1
+
     async def _ensure_temp_webhooks(
         self, clone_channel_id: int
     ) -> tuple[list[int], list[str]]:
-        """
-        Ensure there are exactly N temp webhooks for rotation in this channel.
-
-        Strategy (efficient):
-        - Never rename/edit temp webhooks to mirror the primary.
-        - Create temps with the canonical name only (e.g., "Copycord").
-        - At send-time, if the PRIMARY webhook is customized, override per-message
-        username/avatar_url to match the PRIMARY (no avatar uploads or edits).
-        - Track and persist:
-            * temp_webhook_ids / temp_webhook_urls (current rotation set)
-            * temp_created_ids (only the IDs we created this run)
-            * primary_identity {"name","avatar_url"} for send-time override
-
-        Returns:
-            (ids, urls) of the temps in ascending webhook-id order (capped at N)
-        """
         try:
-
             ch = self.bot.get_channel(clone_channel_id) or await self.bot.fetch_channel(
                 clone_channel_id
             )
@@ -790,10 +856,19 @@ class BackfillManager:
             primary_name = None
             primary_avatar_url = None
             customized = False
+
             if primary_url and orig is not None:
                 try:
                     wid = int(primary_url.rstrip("/").split("/")[-2])
-                    whp = await self.bot.fetch_webhook(wid)
+
+                    async def _do_fetch_primary():
+                        return await self.bot.fetch_webhook(wid)
+
+                    whp = await self._api_with_retry(
+                        what=f"fetch primary webhook {wid}",
+                        call=_do_fetch_primary,
+                        action=None,
+                    )
                     canonical = self._canonical_temp_name()
                     primary_name = (whp.name or "").strip() or None
                     customized = bool(primary_name and primary_name != canonical)
@@ -821,9 +896,17 @@ class BackfillManager:
                 }
 
             async def _fetch_wh(url: str):
+                if not url:
+                    return None
                 try:
                     wid = int(url.rstrip("/").split("/")[-2])
-                    return await self.bot.fetch_webhook(wid)
+
+                    async def _do_fetch():
+                        return await self.bot.fetch_webhook(wid)
+
+                    return await self._api_with_retry(
+                        what=f"fetch webhook {wid}", call=_do_fetch, action=None
+                    )
                 except Exception:
                     return None
 
@@ -851,7 +934,15 @@ class BackfillManager:
                     await _adopt(u)
 
             try:
-                hooks = await ch.webhooks()
+
+                async def _do_list():
+                    return await ch.webhooks()
+
+                hooks = await self._api_with_retry(
+                    what=f"list webhooks in #{clone_channel_id}",
+                    call=_do_list,
+                    action=None,
+                )
                 for wh in hooks:
                     try:
                         made_by_us = (
@@ -863,7 +954,6 @@ class BackfillManager:
                     if made_by_us and (not primary_url or wh.url != primary_url):
                         await _adopt(wh.url)
             except Exception as e:
-
                 logger.debug(
                     "[temps] list hooks failed for #%s: %s", clone_channel_id, e
                 )
@@ -874,21 +964,26 @@ class BackfillManager:
                     st["temp_webhook_ids"] = ids
                     st["temp_webhook_urls"] = urls
                     st["temp_created_ids"] = []
-
                 self._rotate_pool.pop(clone_channel_id, None)
                 self._rotate_idx.pop(clone_channel_id, None)
                 return ids, urls
 
             while len(pairs) < N:
-
                 logger.debug(
                     "[🧹] Creating temp webhook for rotation in #%s...",
                     clone_channel_id,
                 )
-                await self.ratelimit.acquire(ActionType.WEBHOOK_CREATE)
-                wh_new = await ch.create_webhook(
-                    name=self._canonical_temp_name(),
-                    reason="Backfill rotation",
+
+                async def _do_create():
+                    return await ch.create_webhook(
+                        name=self._canonical_temp_name(),
+                        reason="Backfill rotation",
+                    )
+
+                wh_new = await self._api_with_retry(
+                    what=f"create webhook in #{clone_channel_id}",
+                    call=_do_create,
+                    action=ActionType.WEBHOOK_CREATE,
                 )
                 pairs.append((int(wh_new.id), wh_new.url))
                 seen_urls.add(wh_new.url)
@@ -903,7 +998,6 @@ class BackfillManager:
             if st is not None:
                 st["temp_webhook_ids"] = list(ids)
                 st["temp_webhook_urls"] = list(urls)
-
                 st["temp_created_ids"] = [i for i in created_ids if i in ids]
             else:
                 kept = [i for i in created_ids if i in ids]
