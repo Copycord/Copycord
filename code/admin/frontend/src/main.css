@@ -6455,3 +6455,13 @@ body.modal-open #bf-batchbar {
     border: 0 !important;
   }
 }
+
+.header-home{
+  display:flex; align-items:center; gap:8px;
+  text-decoration:none; color:inherit;
+  padding:4px 6px; border-radius:8px;
+}
+.header-home:focus-visible{
+  outline:2px solid var(--accent);
+  outline-offset:3px;
+}

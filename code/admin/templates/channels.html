@@ -11,14 +11,15 @@
 
 <body class="channels-page">
   <header class="site-header" role="banner">
-    <button id="menu-toggle" class="menu-btn" aria-haspopup="true" aria-expanded="false" aria-controls="side-menu"
-      aria-label="Open menu">
+    <button id="menu-toggle" class="menu-btn" aria-haspopup="true" aria-expanded="false"
+            aria-controls="side-menu" aria-label="Open menu">
       <span class="bar"></span><span class="bar"></span><span class="bar"></span>
     </button>
-    <div class="header-left">
-      <img src="/static/logo.png" alt="Logo" class="header-logo">
+  
+    <a class="header-left header-home" href="/" aria-label="">
+      <img src="/static/logo.png" alt="" aria-hidden="true" class="header-logo" draggable="false" />
       <h1>Copycord</h1>
-    </div>
+    </a>
   </header>
 
   <div id="menu-backdrop" class="menu-backdrop" hidden></div>
