@@ -19,16 +19,16 @@ import time
 import uuid
 import os
 import aiohttp
-from server.rate_limiter import RateLimitManager, ActionType
+from server.rate_limiter import ActionType
 
 logger = logging.getLogger("server")
 
 
 class BackfillManager:
-    def __init__(self, receiver):
+    def __init__(self, receiver, ratelimit=None):
         self.r = receiver
         self.bot = receiver.bot
-        self.ratelimit = RateLimitManager()
+        self.ratelimit = ratelimit or receiver.ratelimit
         self._cleanup_task_ids: dict[int, str] = {}
         self._finalized_by_channel: dict[int, str] = {}
         self._flags: set[int] = set()
