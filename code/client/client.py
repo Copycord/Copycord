@@ -1236,7 +1236,15 @@ class ClientListener:
         content = None
         embeds = None
         author = None
+        author_id = None
+        avatar_url = None
         timestamp = None
+
+        if msg is None:
+            try:
+                msg = await channel.fetch_message(payload.message_id)
+            except Exception:
+                msg = None
 
         if msg:
             raw_embeds = [e.to_dict() for e in msg.embeds]
@@ -1245,12 +1253,22 @@ class ClientListener:
                 self.msg.sanitize_embed_dict(e, msg, mention_map) for e in raw_embeds
             ]
             content = self.msg.sanitize_inline(msg.content or "", msg, mention_map)
-            author = getattr(msg.author, "name", None)
+            author = getattr(getattr(msg, "author", None), "name", None)
+            author_id = getattr(getattr(msg, "author", None), "id", None)
+            avatar_url = (
+                str(msg.author.display_avatar.url)
+                if getattr(msg.author, "display_avatar", None)
+                else None
+            )
             timestamp = str(msg.edited_at or msg.created_at)
         else:
             content = data.get("content")
             embeds = data.get("embeds")
-            author = None
+            a = data.get("author") or {}
+            author = a.get("global_name") or a.get("username") or a.get("name")
+            author_id = a.get("id")
+            if a.get("id") and a.get("avatar"):
+                avatar_url = f"https://cdn.discordapp.com/avatars/{a['id']}/{a['avatar']}.png"
             timestamp = data.get("edited_timestamp") or data.get("timestamp")
 
         is_thread = getattr(channel, "type", None) in (
@@ -1271,14 +1289,8 @@ class ClientListener:
                     else None
                 ),
                 "author": author,
-                "author_id": (
-                    getattr(getattr(msg, "author", None), "id", None) if msg else None
-                ),
-                "avatar_url": (
-                    str(msg.author.display_avatar.url)
-                    if msg and msg.author.display_avatar
-                    else None
-                ),
+                "author_id": author_id,
+                "avatar_url": avatar_url,
                 "content": content,
                 "timestamp": timestamp,
                 "embeds": embeds,
