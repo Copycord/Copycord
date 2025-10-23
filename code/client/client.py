@@ -1193,11 +1193,27 @@ class ClientListener:
 
         if not self.config.ENABLE_CLONING or not self.config.EDIT_MESSAGES:
             return
+        
+        if self.host_guild_id and payload.guild_id and payload.guild_id != self.host_guild_id:
+            return
 
         channel = self.bot.get_channel(payload.channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(payload.channel_id)
+            except Exception:
+                return 
+
         guild = getattr(channel, "guild", None)
         if not guild or not self._is_host_guild(guild):
             return
+        
+        if isinstance(channel, discord.Thread):
+            if not self.sitemap.in_scope_thread(channel):
+                return
+        else:
+            if not self.sitemap.in_scope_channel(channel):
+                return
 
         msg = payload.cached_message
         data = payload.data or {}
@@ -1220,7 +1236,15 @@ class ClientListener:
         content = None
         embeds = None
         author = None
+        author_id = None
+        avatar_url = None
         timestamp = None
+
+        if msg is None:
+            try:
+                msg = await channel.fetch_message(payload.message_id)
+            except Exception:
+                msg = None
 
         if msg:
             raw_embeds = [e.to_dict() for e in msg.embeds]
@@ -1229,12 +1253,22 @@ class ClientListener:
                 self.msg.sanitize_embed_dict(e, msg, mention_map) for e in raw_embeds
             ]
             content = self.msg.sanitize_inline(msg.content or "", msg, mention_map)
-            author = getattr(msg.author, "name", None)
+            author = getattr(getattr(msg, "author", None), "name", None)
+            author_id = getattr(getattr(msg, "author", None), "id", None)
+            avatar_url = (
+                str(msg.author.display_avatar.url)
+                if getattr(msg.author, "display_avatar", None)
+                else None
+            )
             timestamp = str(msg.edited_at or msg.created_at)
         else:
             content = data.get("content")
             embeds = data.get("embeds")
-            author = None
+            a = data.get("author") or {}
+            author = a.get("global_name") or a.get("username") or a.get("name")
+            author_id = a.get("id")
+            if a.get("id") and a.get("avatar"):
+                avatar_url = f"https://cdn.discordapp.com/avatars/{a['id']}/{a['avatar']}.png"
             timestamp = data.get("edited_timestamp") or data.get("timestamp")
 
         is_thread = getattr(channel, "type", None) in (
@@ -1255,14 +1289,8 @@ class ClientListener:
                     else None
                 ),
                 "author": author,
-                "author_id": (
-                    getattr(getattr(msg, "author", None), "id", None) if msg else None
-                ),
-                "avatar_url": (
-                    str(msg.author.display_avatar.url)
-                    if msg and msg.author.display_avatar
-                    else None
-                ),
+                "author_id": author_id,
+                "avatar_url": avatar_url,
                 "content": content,
                 "timestamp": timestamp,
                 "embeds": embeds,
@@ -1341,11 +1369,27 @@ class ClientListener:
 
         if not self.config.ENABLE_CLONING or not self.config.DELETE_MESSAGES:
             return
+        
+        if self.host_guild_id and payload.guild_id and payload.guild_id != self.host_guild_id:
+            return
 
         channel = self.bot.get_channel(payload.channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(payload.channel_id)
+            except Exception:
+                return
+
         guild = getattr(channel, "guild", None)
         if not guild or not self._is_host_guild(guild):
             return
+
+        if isinstance(channel, discord.Thread):
+            if not self.sitemap.in_scope_thread(channel):
+                return
+        else:
+            if not self.sitemap.in_scope_channel(channel):
+                return
 
         is_thread = getattr(channel, "type", None) in (
             ChannelType.public_thread,
