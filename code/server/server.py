@@ -138,6 +138,7 @@ class ServerReceiver:
         self._webhooks: dict[str, Webhook] = {}
         self._warn_lock = asyncio.Lock()
         self._active_backfills: set[int] = set()
+        self._bf_event_buffer: dict[int, list[tuple[str, dict]]] = {}
         self._send_tasks: set[asyncio.Task] = set()
         self._wh_identity_state: dict[int, bool] = {}
         self._wh_meta: dict[int, dict] = {}
@@ -487,6 +488,50 @@ class ServerReceiver:
 
         await self.bus.subscribe(base, _handler)
 
+    def _bf_channel_key_for_event(self, typ: str, data: dict) -> int | None:
+        """
+        Return the 'origin channel id' we use to track backfills for this event.
+        For thread events, we key by the parent channel; otherwise by channel_id.
+        """
+        try:
+            if typ.startswith("thread_"):
+                return int(data.get("thread_parent_id") or 0) or None
+            return int(data.get("channel_id") or 0) or None
+        except Exception:
+            return None
+
+    def _maybe_buffer_if_backfilling(self, typ: str, data: dict) -> bool:
+        key = self._bf_channel_key_for_event(typ, data)
+        if not key:
+            return False
+
+        is_bf = (key in self._active_backfills) or (
+            hasattr(self, "backfill") and self.backfill.is_backfilling(key)
+        )
+
+        if is_bf:
+            buf = self._bf_event_buffer.setdefault(key, [])
+
+            if typ in ("message_edit", "thread_message_edit"):
+                try:
+                    mid = int((data or {}).get("message_id") or 0)
+                except Exception:
+                    mid = 0
+                if mid:
+                    buf[:] = [
+                        (t, d)
+                        for (t, d) in buf
+                        if not (
+                            t in ("message_edit", "thread_message_edit")
+                            and int((d or {}).get("message_id") or 0) == mid
+                        )
+                    ]
+
+            buf.append((typ, data))
+            logger.debug("[bf] Buffered %s for #%s (backfill active)", typ, key)
+            return True
+        return False
+
     async def _on_ws(self, msg: dict):
         """
         Handles incoming WebSocket messages and dispatches them based on their type.
@@ -531,15 +576,23 @@ class ServerReceiver:
                 self._track(self.forward_message(data), name="live-forward")
 
         elif typ == "message_edit":
+            if self._maybe_buffer_if_backfilling(typ, data):
+                return
             self._track(self.handle_message_edit(data), name="edit-msg")
 
         elif typ == "thread_message_edit":
+            if self._maybe_buffer_if_backfilling(typ, data):
+                return
             self._track(self.handle_message_edit(data), name="edit-thread-msg")
 
         elif typ == "message_delete":
+            if self._maybe_buffer_if_backfilling(typ, data):
+                return
             self._track(self.handle_message_delete(data), name="del-msg")
 
         elif typ == "thread_message_delete":
+            if self._maybe_buffer_if_backfilling(typ, data):
+                return
             self._track(self.handle_message_delete(data), name="del-thread-msg")
 
         elif typ == "thread_message":
@@ -557,9 +610,54 @@ class ServerReceiver:
                 self._track(self.handle_thread_message(data), name="thread-msg")
 
         elif typ == "thread_delete":
+            parent_id = None
+            try:
+                tid = int((data or {}).get("thread_id") or 0)
+            except Exception:
+                tid = 0
+            if tid:
+                try:
+                    row = next(
+                        (
+                            r
+                            for r in self.db.get_all_threads()
+                            if r["original_thread_id"] == tid
+                        ),
+                        None,
+                    )
+                    if row:
+                        parent_id = (
+                            int(row.get("forum_original_id") or 0)
+                            or int(row.get("original_parent_id") or 0)
+                            or None
+                        )
+                except Exception:
+                    parent_id = None
+
+            if parent_id and parent_id in self._active_backfills:
+                self._bf_event_buffer.setdefault(parent_id, []).append((typ, data))
+                logger.debug(
+                    "[bf] Buffered thread_delete for parent #%s (backfill active)",
+                    parent_id,
+                )
+                return
+
             asyncio.create_task(self.handle_thread_delete(data))
 
         elif typ == "thread_rename":
+            try:
+                parent_id = int((data or {}).get("parent_id") or 0)
+            except Exception:
+                parent_id = 0
+
+            if parent_id and parent_id in self._active_backfills:
+                self._bf_event_buffer.setdefault(parent_id, []).append((typ, data))
+                logger.debug(
+                    "[bf] Buffered thread_rename for parent #%s (backfill active)",
+                    parent_id,
+                )
+                return
+
             asyncio.create_task(self.handle_thread_rename(data))
 
         elif typ == "announce":
@@ -668,6 +766,28 @@ class ServerReceiver:
             )
 
             self._active_backfills.discard(orig)
+
+            try:
+                await self._flush_channel_buffer(orig)
+            except Exception:
+                logger.exception(
+                    "[bf] Failed flushing queued live messages for #%s", orig
+                )
+
+            pending = self._bf_event_buffer.pop(orig, [])
+            if pending:
+                logger.info(
+                    "[bf] Draining %d buffered edit/delete events for #%s",
+                    len(pending),
+                    orig,
+                )
+            for ev_typ, ev_data in pending:
+                if ev_typ in ("message_edit", "thread_message_edit"):
+                    self._track(self.handle_message_edit(ev_data), name="bf-drain-edit")
+                elif ev_typ in ("message_delete", "thread_message_delete"):
+                    self._track(
+                        self.handle_message_delete(ev_data), name="bf-drain-del"
+                    )
 
             try:
                 delivered, total_est = self.backfill.get_progress(orig)
@@ -3432,13 +3552,59 @@ class ServerReceiver:
             return False
 
     async def _fallback_resend_edit(self, data: dict, orig_mid: int):
+
         try:
-            await self.forward_message(data)
-            logger.info("[♻️] Resent edited message as new (orig %s)", orig_mid)
+            cid = int((data or {}).get("channel_id") or 0)
         except Exception:
-            logger.exception(
-                "[❌] Fallback resend failed for edited message (orig %s)", orig_mid
+            cid = 0
+        try:
+            pid = int((data or {}).get("thread_parent_id") or 0)
+        except Exception:
+            pid = 0
+        key = pid or cid
+
+        if key and (
+            key in self._active_backfills
+            or (hasattr(self, "backfill") and self.backfill.is_backfilling(key))
+        ):
+            buf = self._bf_event_buffer.setdefault(key, [])
+
+            try:
+                mid = int((data or {}).get("message_id") or 0)
+            except Exception:
+                mid = 0
+            if mid:
+                buf[:] = [
+                    (t, d)
+                    for (t, d) in buf
+                    if not (
+                        t in ("message_edit", "thread_message_edit")
+                        and int((d or {}).get("message_id") or 0) == mid
+                    )
+                ]
+            buf.append(("thread_message_edit" if pid else "message_edit", data))
+            logger.debug(
+                "[bf] Deferred fallback resend for edited message (orig %s) while backfill active on #%s",
+                orig_mid,
+                key,
             )
+            return
+
+        if cid and any(
+            int((m or {}).get("message_id") or 0) == orig_mid
+            for m in self._pending_msgs.get(cid, [])
+        ):
+
+            self._latest_edit_payload[orig_mid] = data
+            logger.debug(
+                "[queue] Deferred fallback resend; orig %s still queued for #%s",
+                orig_mid,
+                cid,
+            )
+            return
+
+        await self.forward_message(data)
+        logger.info("[♻️] Resent edited message as new (orig %s)", orig_mid)
 
     async def handle_message_edit(self, data: dict):
         """
