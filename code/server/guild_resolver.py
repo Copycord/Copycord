@@ -1,0 +1,52 @@
+# server/guild_resolver.py
+from __future__ import annotations
+from typing import Optional, Iterable, Set
+
+class GuildResolver:
+    def __init__(self, db, config=None):
+        self.db = db
+        self.config = config
+
+    # --- sets of ids ---------------------------------------------------------
+    def all_clone_guild_ids(self) -> Set[int]:
+        ids = set(int(x) for x in (self.db.get_all_clone_guild_ids() or []))
+        # Back-compat: if mapping table empty, fall back to single-guild
+        fallback = getattr(self.config, "CLONE_GUILD_ID", None) if self.config else None
+        if not ids and fallback:
+            ids.add(int(fallback))
+        return ids
+
+    def clones_for_host(self, host_guild_id: int) -> Set[int]:
+        row = self.db.get_mapping_by_original(int(host_guild_id))
+        return {int(row["cloned_guild_id"])} if row and row.get("cloned_guild_id") else set()
+
+    def originals_for_clone(self, clone_guild_id: int) -> Set[int]:
+        row = self.db.get_mapping_by_clone(int(clone_guild_id))
+        return {int(row["original_guild_id"])} if row and row.get("original_guild_id") else set()
+
+    def is_clone(self, gid: int) -> bool:
+        # Fast path via DB; also honor single-guild fallback
+        if self.db.is_clone_guild_id(int(gid)):
+            return True
+        fallback = getattr(self.config, "CLONE_GUILD_ID", None) if self.config else None
+        return bool(fallback and int(fallback) == int(gid))
+
+    # --- the one call most code needs ----------------------------------------
+    def resolve_target_clone(
+        self,
+        *,
+        host_guild_id: Optional[int],
+        explicit_clone_id: Optional[int] = None,
+    ) -> Optional[int]:
+        """
+        Prefer an explicit clone id if it's one of our clones, otherwise map host->clone.
+        Finally, fall back to single-guild CLONE_GUILD_ID if configured.
+        """
+        if explicit_clone_id is not None:
+            return int(explicit_clone_id) if self.is_clone(int(explicit_clone_id)) else None
+        if host_guild_id is not None:
+            row = self.db.get_mapping_by_original(int(host_guild_id))
+            if row and row.get("cloned_guild_id"):
+                return int(row["cloned_guild_id"])
+        fallback = getattr(self.config, "CLONE_GUILD_ID", None) if self.config else None
+        return int(fallback) if fallback else None

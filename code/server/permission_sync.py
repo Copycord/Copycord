@@ -7,6 +7,7 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 from __future__ import annotations
 import asyncio
 import inspect
@@ -26,19 +27,22 @@ class ChannelPermissionSync:
         config,
         db,
         bot: discord.Client | discord.AutoShardedClient,
-        clone_guild_id: int,
-        cat_map: Dict[int, dict],
-        chan_map: Dict[int, dict],
-        logger,
+        clone_guild_id: int | None = None,
+        cat_map: Dict[int, dict] | None = None,
+        chan_map: Dict[int, dict] | None = None,
+        logger=None,
         ratelimit=None,
         rate_limiter_action=None,
     ) -> None:
         self.config = config
         self.db = db
         self.bot = bot
-        self.clone_guild_id = int(clone_guild_id)
-        self.cat_map = cat_map
-        self.chan_map = chan_map
+
+        self.clone_guild_id = int(clone_guild_id or 0)
+
+        self.cat_map = cat_map or {}
+        self.chan_map = chan_map or {}
+
         self.log = logger
         self.ratelimit = ratelimit
         self.rate_limiter_action = rate_limiter_action
@@ -53,10 +57,6 @@ class ChannelPermissionSync:
         task_name: str = "perm_sync_after_roles",
         await_timeout: float = 120.0,
     ) -> None:
-        if not getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False):
-            return
-        if not getattr(self.config, "CLONE_ROLES", False):
-            return
         if guild is None:
             return
 
@@ -112,24 +112,32 @@ class ChannelPermissionSync:
 
         await asyncio.sleep(2.0)
 
-    def _reload_maps_from_db(self) -> None:
+    def _reload_maps_from_db_for_clone(
+        self, clone_gid: int
+    ) -> Tuple[Dict[int, dict], Dict[int, dict]]:
+        """
+        Build and return fresh (cat_map, chan_map) *for this clone guild only*.
+
+        We DO NOT mutate self.cat_map / self.chan_map anymore because multiple
+        guilds can sync at the same time.
+        """
         try:
-            self.cat_map.clear()
-            self.cat_map.update(
-                {
-                    r["original_category_id"]: dict(r)
-                    for r in self.db.get_all_category_mappings()
-                }
-            )
-            self.chan_map.clear()
-            self.chan_map.update(
-                {
-                    r["original_channel_id"]: dict(r)
-                    for r in self.db.get_all_channel_mappings()
-                }
-            )
+            cat_map = {
+                r["original_category_id"]: dict(r)
+                for r in self.db.get_all_category_mappings()
+                if int(r.get("cloned_guild_id") or 0) == int(clone_gid)
+            }
+
+            chan_map = {
+                r["original_channel_id"]: dict(r)
+                for r in self.db.get_all_channel_mappings()
+                if int(r.get("cloned_guild_id") or 0) == int(clone_gid)
+            }
+
+            return cat_map, chan_map
         except Exception as e:
             self.log.warning("[perm-sync] failed to reload maps from DB: %s", e)
+            return {}, {}
 
     async def _sync_permissions(
         self,
@@ -137,14 +145,18 @@ class ChannelPermissionSync:
         sitemap: dict,
         src_everyone_id: Optional[int],
     ) -> List[str]:
-        self._reload_maps_from_db()
-        changed_cat = changed_ch = 0
+
+        cat_map, chan_map = self._reload_maps_from_db_for_clone(int(guild.id))
+
+        changed_cat = 0
+        changed_ch = 0
 
         for cat in sitemap.get("categories", []) or []:
-            row = self.cat_map.get(int(cat["id"]))
+            row = cat_map.get(int(cat["id"]))
             if not row:
                 self.log.info("[perm-sync] skip category %s: no cat_map", cat.get("id"))
                 continue
+
             cc = guild.get_channel(int(row.get("cloned_category_id") or 0))
             if isinstance(cc, CategoryChannel):
                 if await self._apply_overwrites_to_channel(
@@ -153,12 +165,13 @@ class ChannelPermissionSync:
                     changed_cat += 1
 
             for ch in cat.get("channels", []) or []:
-                crow = self.chan_map.get(int(ch["id"]))
+                crow = chan_map.get(int(ch["id"]))
                 if not crow:
                     self.log.info(
                         "[perm-sync] skip channel %s: no chan_map", ch.get("id")
                     )
                     continue
+
                 cch = guild.get_channel(int(crow.get("cloned_channel_id") or 0))
                 if isinstance(cch, TextChannel):
                     if await self._apply_overwrites_to_channel(
@@ -167,13 +180,14 @@ class ChannelPermissionSync:
                         changed_ch += 1
 
         for ch in sitemap.get("standalone_channels", []) or []:
-            crow = self.chan_map.get(int(ch["id"]))
+            crow = chan_map.get(int(ch["id"]))
             if not crow:
                 self.log.info(
                     "[perm-sync] skip channel %s: no chan_map (standalone)",
                     ch.get("id"),
                 )
                 continue
+
             cch = guild.get_channel(int(crow.get("cloned_channel_id") or 0))
             if isinstance(cch, TextChannel):
                 if await self._apply_overwrites_to_channel(
@@ -183,9 +197,10 @@ class ChannelPermissionSync:
 
         parts: List[str] = []
         if changed_cat:
-            parts.append(f"Updated {changed_cat} category permission sets")
+            parts.append(f"{changed_cat} categories updated")
         if changed_ch:
-            parts.append(f"Updated {changed_ch} channel permission sets")
+            parts.append(f"{changed_ch} channels updated")
+
         return parts
 
     @staticmethod

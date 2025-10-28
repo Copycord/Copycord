@@ -1260,12 +1260,16 @@ class BackfillEngine:
         self,
         original_channel_id: int,
         *,
-        after_iso: Optional[str] = None,
-        before_iso: Optional[str] = None,
-        last_n: Optional[int] = None,
-        resume: bool = False,
-        after_id: int | str | None = None,
-    ) -> None:
+        mode="all",
+        after_iso=None,
+        before_iso=None,
+        last_n=None,
+        resume=False,
+        after_id=None,
+        mapping_id: str | None = None,
+        original_guild_id: int | None = None,
+        cloned_guild_id: int | None = None,
+    ):
         """
         Primary entry point used by client code to backfill a single channel.
         """
@@ -1331,6 +1335,9 @@ class BackfillEngine:
                     },
                     "resume": bool(resume),
                     "checkpoint_after_id": int(after_id) if after_id else None,
+                    "mapping_id": mapping_id,
+                    "cloned_guild_id": cloned_guild_id,
+                    "original_guild_id": original_guild_id,
                 },
             }
         )
@@ -1341,7 +1348,13 @@ class BackfillEngine:
                 "[backfill] ⛔ no accessible guild found for channel=%s",
                 original_channel_id,
             )
-            await self._finish_progress_only(original_channel_id, sent)
+            await self._finish_progress_only(
+                original_channel_id,
+                sent,
+                mapping_id=mapping_id,
+                original_guild_id=original_guild_id,
+                cloned_guild_id=cloned_guild_id,
+            )
             return
 
         ch = guild.get_channel(original_channel_id)
@@ -1362,7 +1375,13 @@ class BackfillEngine:
                     original_channel_id,
                     e,
                 )
-                await self._finish_progress_only(original_channel_id, sent)
+                await self._finish_progress_only(
+                    original_channel_id,
+                    sent,
+                    mapping_id=mapping_id,
+                    original_guild_id=original_guild_id,
+                    cloned_guild_id=cloned_guild_id,
+                )
                 return
         else:
             self.logger.debug(
@@ -1510,6 +1529,9 @@ class BackfillEngine:
                     {
                         "type": "backfill_progress",
                         "data": {"channel_id": original_channel_id, "sent": sent},
+                        "mapping_id": mapping_id,
+                        "cloned_guild_id": cloned_guild_id,
+                        "original_guild_id": original_guild_id,
                     }
                 )
                 last_ping = now
@@ -1623,6 +1645,9 @@ class BackfillEngine:
                     {
                         "type": "backfill_progress",
                         "data": {"channel_id": original_channel_id, "total": total},
+                        "mapping_id": mapping_id,
+                        "cloned_guild_id": cloned_guild_id,
+                        "original_guild_id": original_guild_id,
                     }
                 )
 
@@ -1705,6 +1730,9 @@ class BackfillEngine:
                             "data": {
                                 "channel_id": original_channel_id,
                                 "total": combined_total,
+                                "mapping_id": mapping_id,
+                                "cloned_guild_id": cloned_guild_id,
+                                "original_guild_id": original_guild_id,
                             },
                         }
                     )
@@ -1786,6 +1814,9 @@ class BackfillEngine:
                             "data": {
                                 "channel_id": original_channel_id,
                                 "total": combined_total,
+                                "mapping_id": mapping_id,
+                                "cloned_guild_id": cloned_guild_id,
+                                "original_guild_id": original_guild_id,
                             },
                         }
                     )
@@ -1844,7 +1875,13 @@ class BackfillEngine:
                 await self._safe_ws_send(
                     {
                         "type": "backfill_progress",
-                        "data": {"channel_id": original_channel_id, "sent": sent},
+                        "data": {
+                            "channel_id": original_channel_id,
+                            "sent": sent,
+                            "mapping_id": mapping_id,
+                            "cloned_guild_id": cloned_guild_id,
+                            "original_guild_id": original_guild_id,
+                        },
                     }
                 )
             except Exception:
@@ -1862,7 +1899,12 @@ class BackfillEngine:
             await self._safe_ws_send(
                 {
                     "type": "backfill_stream_end",
-                    "data": {"channel_id": original_channel_id},
+                    "data": {
+                        "channel_id": original_channel_id,
+                        "mapping_id": mapping_id,
+                        "cloned_guild_id": cloned_guild_id,
+                        "original_guild_id": original_guild_id,
+                    },
                 }
             )
 
@@ -1915,7 +1957,7 @@ class BackfillEngine:
     def _should_retry_http(self, e: Exception) -> bool:
         status = getattr(e, "status", None)
         return status in {429, 500, 502, 503, 504, 520, 522, 524}
-    
+
     def _retry_delay_for(self, e: Exception, attempt: int) -> float:
         status = getattr(e, "status", None)
         if status == 429:
@@ -2116,17 +2158,40 @@ class BackfillEngine:
                     continue
                 raise
 
-    async def _finish_progress_only(self, channel_id: int, sent: int) -> None:
+    async def _finish_progress_only(
+        self,
+        original_channel_id: int,
+        sent: int,
+        *,
+        mapping_id: str | None = None,
+        original_guild_id: int | None = None,
+        cloned_guild_id: int | None = None,
+    ):
         try:
             await self._safe_ws_send(
                 {
                     "type": "backfill_progress",
-                    "data": {"channel_id": channel_id, "sent": sent},
+                    "data": {
+                        "channel_id": original_channel_id,
+                        "sent": sent,
+                        "mapping_id": mapping_id,
+                        "original_guild_id": original_guild_id,
+                        "cloned_guild_id": cloned_guild_id,
+                    },
                 }
             )
         finally:
             await self._safe_ws_send(
-                {"type": "backfill_stream_end", "data": {"channel_id": channel_id}}
+                {
+                    "type": "backfill_stream_end",
+                    "data": {
+                        "channel_id": original_channel_id,
+                        "sent": sent,
+                        "mapping_id": mapping_id,
+                        "original_guild_id": original_guild_id,
+                        "cloned_guild_id": cloned_guild_id,
+                    },
+                }
             )
 
 

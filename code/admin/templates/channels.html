@@ -99,6 +99,26 @@
       <header class="card-titlebar">
         <h2 class="card-title">Channels</h2>
         <div class="titlebar-actions">
+        <div class="select">
+            <select id="mapping-select">
+            {% if guild_mappings and guild_mappings|length > 0 %}
+                {% for m in guild_mappings %}
+                    <option
+                        value="{{ m.mapping_id }}"
+                        {% if loop.first %}selected{% endif %}
+                    >
+                        {%- if m.mapping_name %}
+                            {{ m.mapping_name }}
+                        {%- else %}
+                            {{ m.original_guild_name }} → {{ m.cloned_guild_name }}
+                        {%- endif %}
+                    </option>
+                {% endfor %}
+            {% else %}
+                <option value="" disabled selected>(no mappings configured)</option>
+            {% endif %}
+            </select>
+        </div>
           <input id="ch-search" class="input" type="text" placeholder="Search channels…" aria-label="Search channels">
 
           <div class="select">

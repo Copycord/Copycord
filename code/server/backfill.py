@@ -53,6 +53,38 @@ class BackfillManager:
         self._global_sync: dict | None = None
         self._temp_prefix_canon = "Copycord"
         self.temp_webhook_max = 1
+        
+    def _cleanup_meta_payload(self, cid: int, *, st_override: dict | None = None) -> dict:
+        """
+        Build the common metadata block for cleanup-related WS messages:
+        mapping_id, original_guild_id, cloned_guild_id, clone_channel_id
+        — all coerced to strings.
+        """
+        st = st_override or self._progress.get(int(cid)) or {}
+
+        def _to_str(val):
+            if val is None:
+                return None
+            try:
+                return str(int(val))
+            except Exception:
+                return str(val)
+
+        out = {}
+
+        # mapping_id is already a string-ish, just str() it
+        if "mapping_id" in st and st["mapping_id"] is not None:
+            out["mapping_id"] = str(st["mapping_id"])
+
+        # snowflake-ish IDs should all ship as strings
+        if "original_guild_id" in st and st["original_guild_id"] is not None:
+            out["original_guild_id"] = _to_str(st["original_guild_id"])
+        if "cloned_guild_id" in st and st["cloned_guild_id"] is not None:
+            out["cloned_guild_id"] = _to_str(st["cloned_guild_id"])
+        if "clone_channel_id" in st and st["clone_channel_id"] is not None:
+            out["clone_channel_id"] = _to_str(st["clone_channel_id"])
+
+        return out
 
     def snapshot_in_progress(self) -> dict[str, dict]:
         out: dict[str, dict] = {}
@@ -60,19 +92,35 @@ class BackfillManager:
             delivered = int(st.get("delivered", 0))
             total = st.get("expected_total")
             inflight = int(self._inflight.get(cid_int, 0))
+
             if total is not None and delivered >= int(total) and inflight == 0:
                 continue
+
+            def _to_str(val):
+                if val is None:
+                    return None
+                try:
+                    return str(int(val))
+                except Exception:
+                    return str(val)
+
             out[str(int(cid_int))] = {
                 "delivered": delivered,
                 "expected_total": (int(total) if total is not None else None),
                 "started_at": (
                     st.get("started_dt").isoformat() if st.get("started_dt") else None
                 ),
-                "clone_channel_id": st.get("clone_channel_id"),
+                "clone_channel_id": _to_str(st.get("clone_channel_id")),
                 "in_flight": inflight,
                 "run_id": st.get("run_id"),
                 "last_orig_message_id": st.get("last_orig_id"),
                 "last_orig_timestamp": st.get("last_ts"),
+                "cloned_guild_id": _to_str(st.get("cloned_guild_id")),
+                "mapping_id": (
+                    str(st.get("mapping_id"))
+                    if st.get("mapping_id") is not None
+                    else None
+                ),
             }
 
         return out
@@ -123,17 +171,23 @@ class BackfillManager:
             if not tid and hasattr(self, "tracker"):
                 with contextlib.suppress(Exception):
                     tid = await self.tracker.get_task_id(str(cid))
+                    
+            meta_block = self._cleanup_meta_payload(cid)
+
+            payload_data = {
+                "channel_id": str(cid),
+                "task_id": tid,
+                "state": "waiting",
+                **meta_block,
+            }
+
             await self.r.bus.publish(
                 "client",
                 {
                     "type": "backfill_cleanup",
                     "channel_id": str(cid),
                     "task_id": tid,
-                    "data": {
-                        "channel_id": str(cid),
-                        "task_id": tid,
-                        "state": "waiting",
-                    },
+                    "data": payload_data,
                 },
             )
             await ev.wait()
@@ -166,14 +220,34 @@ class BackfillManager:
             if meta.get("clone_channel_id") is not None:
                 st["clone_channel_id"] = int(meta["clone_channel_id"])
 
+            if meta.get("cloned_guild_id") is not None:
+                st["cloned_guild_id"] = int(meta["cloned_guild_id"])
+            if meta.get("original_guild_id") is not None:
+                st["original_guild_id"] = int(meta["original_guild_id"])
+            if meta.get("mapping_id"):
+                st["mapping_id"] = str(meta["mapping_id"])
+
         is_resume = bool((meta or {}).get("resume"))
         reused = False
 
+        # figure out which guild we're targeting for this run
+
+        clone_gid = st.get("cloned_guild_id")
+
         if not is_resume:
             try:
-                self.r.db.backfill_abort_running_for_channel(
-                    cid, reason="user-declined-resume"
-                )
+                if clone_gid is not None:
+
+                    self.r.db.backfill_abort_running_for_channel_in_clone(
+                        cid,
+                        int(clone_gid),
+                        reason="user-declined-resume",
+                    )
+                else:
+
+                    self.r.db.backfill_abort_running_for_channel(
+                        cid, reason="user-declined-resume"
+                    )
             except Exception:
                 logger.exception(
                     "[bf] failed to abort previous running run for #%s", cid
@@ -181,7 +255,13 @@ class BackfillManager:
 
         if is_resume:
             try:
-                row = self.r.db.backfill_get_incomplete_for_channel(cid)
+                if clone_gid is not None:
+                    row = self.r.db.backfill_get_incomplete_for_channel_in_clone(
+                        cid, int(clone_gid)
+                    )
+                else:
+                    row = self.r.db.backfill_get_incomplete_for_channel(cid)
+
                 if row and row.get("run_id"):
                     st["run_id"] = row["run_id"]
                     st["delivered"] = int(row.get("delivered") or 0)
@@ -192,13 +272,25 @@ class BackfillManager:
                     )
                     st["last_orig_id"] = row.get("last_orig_message_id") or None
                     st["last_ts"] = row.get("last_orig_timestamp") or None
+
+                    # carry over clone channel if we didn't already set it from meta
                     if st.get("clone_channel_id") is None and row.get(
                         "clone_channel_id"
                     ):
                         st["clone_channel_id"] = int(row["clone_channel_id"])
+
+                    if st.get("original_guild_id") is None and row.get(
+                        "original_guild_id"
+                    ):
+                        st["original_guild_id"] = int(row["original_guild_id"])
+                    if st.get("cloned_guild_id") is None and row.get("cloned_guild_id"):
+                        st["cloned_guild_id"] = int(row["cloned_guild_id"])
+
                     reused = True
             except Exception:
                 logger.exception("[bf] failed to reuse existing run for #%s", cid)
+
+        # 4. Fallback: if we *still* don't know clone_channel_id, grab it from chan_map.
 
         if st.get("clone_channel_id") is None:
             row = self.r.chan_map.get(cid) or {}
@@ -206,11 +298,37 @@ class BackfillManager:
             if clone:
                 st["clone_channel_id"] = int(clone)
 
+        meta_out = dict(st.get("meta") or {})
+
+        def _set_stringified(k: str):
+            v = st.get(k)
+            if v is None:
+                return
+
+            if k == "mapping_id":
+                meta_out[k] = str(v)
+                return
+
+            if k in ("clone_channel_id", "original_guild_id", "cloned_guild_id"):
+                try:
+                    meta_out[k] = str(int(v))
+                except Exception:
+                    meta_out[k] = str(v)
+                return
+
+            meta_out[k] = v
+
+        for key in (
+            "clone_channel_id",
+            "mapping_id",
+            "original_guild_id",
+            "cloned_guild_id",
+        ):
+            _set_stringified(key)
+
         if hasattr(self, "tracker"):
             desired_id = st.get("run_id") if (is_resume and reused) else None
-            t = await self.tracker.start(
-                str(cid), st.get("meta") or {}, task_id=desired_id
-            )
+            t = await self.tracker.start(str(cid), meta_out, task_id=desired_id)
             if t is not None:
                 st["task_id"] = t.id
                 if not reused:
@@ -230,6 +348,8 @@ class BackfillManager:
                     cid,
                     rng or {},
                     run_id=st.get("task_id"),
+                    original_guild_id=st.get("original_guild_id"),
+                    cloned_guild_id=st.get("cloned_guild_id"),
                 )
             except Exception:
                 logger.exception("[bf] failed to create backfill run for #%s", cid)
@@ -528,6 +648,19 @@ class BackfillManager:
                 with contextlib.suppress(Exception):
                     tid = await self.tracker.get_task_id(str(cid))
 
+            mapping_id_val = st.get("mapping_id")
+            orig_gid_val = st.get("original_guild_id")
+            clone_gid_val = st.get("cloned_guild_id")
+            clone_chan_val = st.get("clone_channel_id")
+
+            def _to_str(val):
+                if val is None:
+                    return None
+                try:
+                    return str(int(val))
+                except Exception:
+                    return str(val)
+
             await self.r.bus.publish(
                 "client",
                 {
@@ -539,6 +672,12 @@ class BackfillManager:
                         "task_id": tid,
                         "sent": delivered,
                         "total": total,
+                        "mapping_id": (
+                            str(mapping_id_val) if mapping_id_val is not None else None
+                        ),
+                        "original_guild_id": _to_str(orig_gid_val),
+                        "cloned_guild_id": _to_str(clone_gid_val),
+                        "clone_channel_id": _to_str(clone_chan_val),
                         **({"no_work": True} if no_work else {}),
                     },
                 },
@@ -571,6 +710,16 @@ class BackfillManager:
         async def _cleanup_and_teardown(
             orig: int, clone: int, created_ids: list[int], task_id: str | None
         ):
+            
+            meta_block = self._cleanup_meta_payload(orig)
+
+            payload_data = {
+                "channel_id": str(orig),
+                "task_id": task_id,
+                "state": "starting",
+                **meta_block,
+            }
+
             try:
                 with contextlib.suppress(Exception):
                     await self.r.bus.publish(
@@ -579,11 +728,7 @@ class BackfillManager:
                             "type": "backfill_cleanup",
                             "channel_id": str(orig),
                             "task_id": task_id,
-                            "data": {
-                                "channel_id": str(orig),
-                                "task_id": task_id,
-                                "state": "starting",
-                            },
+                            "data": payload_data,
                         },
                     )
 
@@ -602,25 +747,31 @@ class BackfillManager:
                     )
                     stats = {"deleted": None}
             finally:
+                meta_block = self._cleanup_meta_payload(orig)
+
+                payload_data = {
+                    "channel_id": str(orig),
+                    "task_id": task_id,
+                    "state": "finished",
+                    "deleted": (
+                        int(stats.get("deleted", 0))
+                        if isinstance(stats, dict)
+                        else None
+                    ),
+                    **meta_block,
+                }
                 with contextlib.suppress(Exception):
+
                     await self.r.bus.publish(
                         "client",
                         {
                             "type": "backfill_cleanup",
                             "channel_id": str(orig),
                             "task_id": task_id,
-                            "data": {
-                                "channel_id": str(orig),
-                                "task_id": task_id,
-                                "state": "finished",
-                                "deleted": (
-                                    int(stats.get("deleted", 0))
-                                    if isinstance(stats, dict)
-                                    else None
-                                ),
-                            },
+                            "data": payload_data,
                         },
                     )
+
 
                 self._cleanup_task_ids.pop(orig, None)
                 self._mark_cleanup_end(orig)
@@ -1395,6 +1546,7 @@ class BackfillTask:
     processed: int = 0
     in_flight: int = 0
     client_done: bool = False
+    meta: dict = field(default_factory=dict)
 
 
 class BackfillTracker:
@@ -1413,9 +1565,13 @@ class BackfillTracker:
         async with self._lock:
             if channel_id in self._by_channel:
                 return None
+
             t = BackfillTask(id=(task_id or str(uuid.uuid4())), channel_id=channel_id)
+            t.meta = dict(meta or {})
+
             self._by_channel[channel_id] = t
             self._last_id_by_channel[channel_id] = t.id
+
             data_out = {"channel_id": channel_id}
             data_out.update(meta or {})
 
@@ -1427,6 +1583,7 @@ class BackfillTracker:
                     "data": data_out,
                 },
             )
+
         if self._progress_provider and channel_id not in self._pumps:
             self._pumps[channel_id] = asyncio.create_task(
                 self._progress_pump(channel_id, t.id)
@@ -1449,23 +1606,56 @@ class BackfillTracker:
         self._stop_pump(channel_id)
 
     async def publish_progress(
-        self, channel_id: str, *, delivered: int | None, total: int | None
+        self,
+        channel_id: str,
+        *,
+        delivered: int | None,
+        total: int | None,
     ):
         task_id = await self.get_task_id(channel_id)
 
-        payload = {
-            "type": "backfill_progress",
-        }
-        if task_id:
-            payload["task_id"] = task_id
+        async with self._lock:
+            t = self._by_channel.get(channel_id)
+            meta = dict(getattr(t, "meta", {}) or {})
 
-        data_out = {"channel_id": channel_id}
+        data_out = {
+            "channel_id": channel_id,
+        }
+
         if delivered is not None:
             data_out["delivered"] = delivered
+
+            data_out["sent"] = delivered
         if total is not None:
             data_out["total"] = total
 
-        payload["data"] = data_out
+        def _copy_stringified(k: str):
+            if k not in meta:
+                return
+            v = meta[k]
+            if k == "mapping_id":
+                data_out[k] = str(v)
+            else:
+
+                try:
+                    data_out[k] = str(int(v))
+                except Exception:
+                    data_out[k] = str(v)
+
+        for k in (
+            "mapping_id",
+            "original_guild_id",
+            "cloned_guild_id",
+            "clone_channel_id",
+        ):
+            _copy_stringified(k)
+
+        payload = {
+            "type": "backfill_progress",
+            "data": data_out,
+        }
+        if task_id:
+            payload["task_id"] = task_id
 
         await self._bus.publish("client", payload)
 
@@ -1481,6 +1671,7 @@ class BackfillTracker:
 
                     in_flight = t.in_flight
                     client_done = t.client_done
+                    meta = dict(getattr(t, "meta", {}) or {})
 
                 delivered = total = None
                 if self._progress_provider:
@@ -1490,15 +1681,37 @@ class BackfillTracker:
                         delivered, total = None, None
 
                 changed = delivered is not None and delivered != last_delivered
-
                 heartbeat = in_flight > 0
 
                 if changed or (heartbeat and idle_ticks >= 8):
-                    data_out = {"channel_id": channel_id}
+                    data_out = {
+                        "channel_id": channel_id,
+                    }
                     if delivered is not None:
                         data_out["delivered"] = delivered
+                        data_out["sent"] = delivered
                     if total is not None:
                         data_out["total"] = total
+
+                    def _copy_stringified(k: str):
+                        if k not in meta:
+                            return
+                        v = meta[k]
+                        if k == "mapping_id":
+                            data_out[k] = str(v)
+                        else:
+                            try:
+                                data_out[k] = str(int(v))
+                            except Exception:
+                                data_out[k] = str(v)
+
+                    for k in (
+                        "mapping_id",
+                        "original_guild_id",
+                        "cloned_guild_id",
+                        "clone_channel_id",
+                    ):
+                        _copy_stringified(k)
 
                     payload = {
                         "type": "backfill_progress",

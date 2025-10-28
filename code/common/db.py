@@ -11,12 +11,12 @@
 from datetime import datetime
 import json
 import sqlite3, threading
-from typing import List, Optional
+from typing import Dict, List, Optional
 import uuid
 
 
 class DBManager:
-    def __init__(self, db_path: str):
+    def __init__(self, db_path: str, init_schema: bool = False):
         self.path = db_path
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
@@ -29,7 +29,8 @@ class DBManager:
         self.conn.execute("PRAGMA synchronous = FULL;")
         self.conn.execute("PRAGMA busy_timeout = 5000;")
         self.lock = threading.RLock()
-        self._init_schema()
+        if init_schema:
+            self._init_schema()
 
     def _init_schema(self):
         """
@@ -37,6 +38,49 @@ class DBManager:
         do not exist, and setting up triggers for automatic timestamp updates.
         """
         c = self.conn.cursor()
+
+        self._ensure_table(
+            name="guild_mappings",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    mapping_id            TEXT UNIQUE NOT NULL DEFAULT (LOWER(HEX(RANDOMBLOB(16)))),
+                    mapping_name          TEXT NOT NULL DEFAULT '',
+                    original_guild_id     INTEGER PRIMARY KEY,
+                    original_guild_name   TEXT,
+                    cloned_guild_id       INTEGER UNIQUE,
+                    cloned_guild_name     TEXT,
+                    original_guild_icon_url     TEXT,   
+                    settings              TEXT NOT NULL DEFAULT '{{}}',
+                    created_at            INTEGER   NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+                    last_updated          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """,
+            required_columns={
+                "mapping_id",
+                "mapping_name",
+                "original_guild_id",
+                "original_guild_name",
+                "original_guild_icon_url",
+                "cloned_guild_id",
+                "cloned_guild_name",
+                "settings",
+                "created_at",
+                "last_updated",
+            },
+            copy_map={
+                "mapping_id": "mapping_id",
+                "original_guild_id": "original_guild_id",
+                "original_guild_name": "original_guild_name",
+                "cloned_guild_id": "cloned_guild_id",
+                "cloned_guild_name": "cloned_guild_name",
+                "created_at": "created_at",
+                "last_updated": "last_updated",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS ix_gm_clone_guild   ON guild_mappings(cloned_guild_id);",
+                "CREATE INDEX IF NOT EXISTS ix_gm_uuid          ON guild_mappings(mapping_id);",
+            ],
+        )
 
         c.execute(
             """
@@ -60,42 +104,64 @@ class DBManager:
         """
         )
 
-        c.execute(
-            """
-        CREATE TABLE IF NOT EXISTS category_mappings (
-          original_category_id   INTEGER PRIMARY KEY,
-          original_category_name TEXT    NOT NULL,
-          cloned_category_id     INTEGER,
-          cloned_category_name   TEXT,
-          last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
-        )
-        c.execute(
-            """
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_category_mappings_cloned_id
-        ON category_mappings(cloned_category_id);
-        """
+        self._ensure_table(
+            name="category_mappings",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                original_category_id   INTEGER PRIMARY KEY,
+                original_category_name TEXT    NOT NULL,
+                cloned_category_id     INTEGER,
+                cloned_category_name   TEXT,
+                original_guild_id      INTEGER,
+                cloned_guild_id        INTEGER,
+                last_updated           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """,
+            required_columns={
+                "original_category_id",
+                "original_category_name",
+                "cloned_category_id",
+                "cloned_category_name",
+                "original_guild_id",
+                "cloned_guild_id",
+                "last_updated",
+            },
+            copy_map={
+                "original_category_id": "original_category_id",
+                "original_category_name": "original_category_name",
+                "cloned_category_id": "cloned_category_id",
+                "cloned_category_name": "cloned_category_name",
+                "original_guild_id": "NULL",
+                "cloned_guild_id": "NULL",
+                "last_updated": "last_updated",
+            },
+            post_sql=[
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_category_mappings_cloned_id ON category_mappings(cloned_category_id);",
+                "CREATE INDEX IF NOT EXISTS ix_category_orig_guild  ON category_mappings(original_guild_id);",
+                "CREATE INDEX IF NOT EXISTS ix_category_clone_guild ON category_mappings(cloned_guild_id);",
+            ],
         )
 
         self._ensure_table(
             name="channel_mappings",
             create_sql_template="""
-                CREATE TABLE {table} (
-                    original_channel_id           INTEGER PRIMARY KEY,
-                    original_channel_name         TEXT    NOT NULL,
-                    cloned_channel_id             INTEGER UNIQUE,
-                    clone_channel_name           TEXT,
-                    channel_webhook_url           TEXT,
-                    original_parent_category_id   INTEGER,
-                    cloned_parent_category_id     INTEGER,
-                    channel_type                  INTEGER NOT NULL DEFAULT 0,
-                    last_updated                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(original_parent_category_id)
-                        REFERENCES category_mappings(original_category_id) ON DELETE SET NULL,
-                    FOREIGN KEY(cloned_parent_category_id)
-                        REFERENCES category_mappings(cloned_category_id)   ON DELETE SET NULL
-                );
+            CREATE TABLE {table} (
+                original_channel_id           INTEGER PRIMARY KEY,
+                original_channel_name         TEXT    NOT NULL,
+                cloned_channel_id             INTEGER UNIQUE,
+                clone_channel_name            TEXT,
+                channel_webhook_url           TEXT,
+                original_parent_category_id   INTEGER,
+                cloned_parent_category_id     INTEGER,
+                channel_type                  INTEGER NOT NULL DEFAULT 0,
+                original_guild_id             INTEGER,
+                cloned_guild_id               INTEGER,
+                last_updated                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(original_parent_category_id)
+                    REFERENCES category_mappings(original_category_id) ON DELETE SET NULL,
+                FOREIGN KEY(cloned_parent_category_id)
+                    REFERENCES category_mappings(cloned_category_id)   ON DELETE SET NULL
+            );
             """,
             required_columns={
                 "original_channel_id",
@@ -106,6 +172,8 @@ class DBManager:
                 "original_parent_category_id",
                 "cloned_parent_category_id",
                 "channel_type",
+                "original_guild_id",
+                "cloned_guild_id",
                 "last_updated",
             },
             copy_map={
@@ -117,65 +185,171 @@ class DBManager:
                 "original_parent_category_id": "original_parent_category_id",
                 "cloned_parent_category_id": "cloned_parent_category_id",
                 "channel_type": "channel_type",
+                "original_guild_id": "NULL",
+                "cloned_guild_id": "NULL",
                 "last_updated": "last_updated",
             },
             post_sql=[
                 "CREATE INDEX IF NOT EXISTS ix_channel_parent_orig  ON channel_mappings(original_parent_category_id);",
                 "CREATE INDEX IF NOT EXISTS ix_channel_parent_clone ON channel_mappings(cloned_parent_category_id);",
+                "CREATE INDEX IF NOT EXISTS ix_channel_orig_guild   ON channel_mappings(original_guild_id);",
+                "CREATE INDEX IF NOT EXISTS ix_channel_clone_guild  ON channel_mappings(cloned_guild_id);",
             ],
         )
 
-        c.execute(
-            """
-        CREATE TABLE IF NOT EXISTS threads (
-        original_thread_id   INTEGER PRIMARY KEY,
-        original_thread_name TEXT    NOT NULL,
-        cloned_thread_id     INTEGER,
-        forum_original_id    INTEGER,
-        forum_cloned_id      INTEGER,
-        last_updated         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(forum_original_id)
-            REFERENCES channel_mappings(original_channel_id) ON DELETE SET NULL,
-        FOREIGN KEY(forum_cloned_id)
-            REFERENCES channel_mappings(cloned_channel_id)   ON DELETE SET NULL
-        );
-        """
+        self._ensure_table(
+            name="threads",
+            create_sql_template="""
+                CREATE TABLE {table}(
+                    original_thread_id   INTEGER PRIMARY KEY,
+                    original_thread_name TEXT    NOT NULL,
+                    cloned_thread_id     INTEGER,
+                    forum_original_id    INTEGER,
+                    forum_cloned_id      INTEGER,
+                    original_guild_id    INTEGER,
+                    cloned_guild_id      INTEGER,
+                    last_updated         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY(forum_original_id)
+                    REFERENCES channel_mappings(original_channel_id) ON DELETE SET NULL,
+                    FOREIGN KEY(forum_cloned_id)
+                    REFERENCES channel_mappings(cloned_channel_id)   ON DELETE SET NULL
+                );
+            """,
+            required_columns={
+                "original_thread_id",
+                "original_thread_name",
+                "cloned_thread_id",
+                "forum_original_id",
+                "forum_cloned_id",
+                "original_guild_id",
+                "cloned_guild_id",
+                "last_updated",
+            },
+            copy_map={
+                "original_thread_id": "original_thread_id",
+                "original_thread_name": "original_thread_name",
+                "cloned_thread_id": "cloned_thread_id",
+                "forum_original_id": "forum_original_id",
+                "forum_cloned_id": "forum_cloned_id",
+                "original_guild_id": "NULL",
+                "cloned_guild_id": "NULL",
+                "last_updated": "last_updated",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS ix_threads_orig_guild  ON threads(original_guild_id);",
+                "CREATE INDEX IF NOT EXISTS ix_threads_clone_guild ON threads(cloned_guild_id);",
+            ],
         )
 
-        c.execute(
-            """
-        CREATE TABLE IF NOT EXISTS emoji_mappings (
-          original_emoji_id   INTEGER PRIMARY KEY,
-          original_emoji_name TEXT    NOT NULL,
-          cloned_emoji_id     INTEGER UNIQUE,
-          cloned_emoji_name   TEXT    NOT NULL,
-          last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
+        self._ensure_table(
+            name="emoji_mappings",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                original_emoji_id    INTEGER PRIMARY KEY,
+                original_emoji_name  TEXT    NOT NULL,
+                cloned_emoji_id      INTEGER UNIQUE,
+                cloned_emoji_name    TEXT    NOT NULL,
+                original_guild_id    INTEGER,
+                cloned_guild_id      INTEGER,
+                last_updated         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """,
+            required_columns={
+                "original_emoji_id",
+                "original_emoji_name",
+                "cloned_emoji_id",
+                "cloned_emoji_name",
+                "original_guild_id",
+                "cloned_guild_id",
+                "last_updated",
+            },
+            copy_map={
+                "original_emoji_id": "original_emoji_id",
+                "original_emoji_name": "original_emoji_name",
+                "cloned_emoji_id": "cloned_emoji_id",
+                "cloned_emoji_name": "cloned_emoji_name",
+                "original_guild_id": "NULL",
+                "cloned_guild_id": "NULL",
+                "last_updated": "last_updated",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS ix_emoji_orig_guild  ON emoji_mappings(original_guild_id);",
+                "CREATE INDEX IF NOT EXISTS ix_emoji_clone_guild ON emoji_mappings(cloned_guild_id);",
+            ],
         )
 
-        c.execute(
-            """
-        CREATE TABLE IF NOT EXISTS sticker_mappings (
-        original_sticker_id   INTEGER PRIMARY KEY,
-        original_sticker_name TEXT    NOT NULL,
-        cloned_sticker_id     INTEGER UNIQUE,
-        cloned_sticker_name   TEXT    NOT NULL,
-        last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
+        self._ensure_table(
+            name="sticker_mappings",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                original_sticker_id    INTEGER PRIMARY KEY,
+                original_sticker_name  TEXT    NOT NULL,
+                cloned_sticker_id      INTEGER UNIQUE,
+                cloned_sticker_name    TEXT    NOT NULL,
+                original_guild_id      INTEGER,
+                cloned_guild_id        INTEGER,
+                last_updated           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """,
+            required_columns={
+                "original_sticker_id",
+                "original_sticker_name",
+                "cloned_sticker_id",
+                "cloned_sticker_name",
+                "original_guild_id",
+                "cloned_guild_id",
+                "last_updated",
+            },
+            copy_map={
+                "original_sticker_id": "original_sticker_id",
+                "original_sticker_name": "original_sticker_name",
+                "cloned_sticker_id": "cloned_sticker_id",
+                "cloned_sticker_name": "cloned_sticker_name",
+                "original_guild_id": "NULL",
+                "cloned_guild_id": "NULL",
+                "last_updated": "last_updated",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS ix_sticker_orig_guild  ON sticker_mappings(original_guild_id);",
+                "CREATE INDEX IF NOT EXISTS ix_sticker_clone_guild ON sticker_mappings(cloned_guild_id);",
+            ],
         )
 
-        c.execute(
-            """
-            CREATE TABLE IF NOT EXISTS role_mappings (
-            original_role_id   INTEGER PRIMARY KEY,
-            original_role_name TEXT    NOT NULL,
-            cloned_role_id     INTEGER UNIQUE,
-            cloned_role_name   TEXT    NOT NULL,
-            last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            """
+        self._ensure_table(
+            name="role_mappings",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                original_role_id    INTEGER PRIMARY KEY,
+                original_role_name  TEXT    NOT NULL,
+                cloned_role_id      INTEGER UNIQUE,
+                cloned_role_name    TEXT    NOT NULL,
+                original_guild_id   INTEGER,
+                cloned_guild_id     INTEGER,
+                last_updated        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """,
+            required_columns={
+                "original_role_id",
+                "original_role_name",
+                "cloned_role_id",
+                "cloned_role_name",
+                "original_guild_id",
+                "cloned_guild_id",
+                "last_updated",
+            },
+            copy_map={
+                "original_role_id": "original_role_id",
+                "original_role_name": "original_role_name",
+                "cloned_role_id": "cloned_role_id",
+                "cloned_role_name": "cloned_role_name",
+                "original_guild_id": "NULL",
+                "cloned_guild_id": "NULL",
+                "last_updated": "last_updated",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS ix_role_orig_guild  ON role_mappings(original_guild_id);",
+                "CREATE INDEX IF NOT EXISTS ix_role_clone_guild ON role_mappings(cloned_guild_id);",
+            ],
         )
 
         c.execute(
@@ -287,28 +461,50 @@ class DBManager:
         )
         self.conn.commit()
 
-        self.conn.execute(
-            """
-        CREATE TABLE IF NOT EXISTS messages (
-            original_guild_id    INTEGER NOT NULL,
-            original_channel_id  INTEGER NOT NULL,
-            original_message_id  INTEGER PRIMARY KEY,
-            cloned_channel_id    INTEGER,
-            cloned_message_id    INTEGER,           
-            webhook_url          TEXT,     
-            created_at           INTEGER NOT NULL DEFAULT (strftime('%s','now')),
-            updated_at           INTEGER NOT NULL DEFAULT (strftime('%s','now'))
-        );
-        """
-        )
-        self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_messages_orig_chan ON messages(original_channel_id);"
-        )
-        self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_messages_clone_msg ON messages(cloned_message_id);"
-        )
-        self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);"
+        self._ensure_table(
+            name="messages",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    original_message_id   INTEGER PRIMARY KEY,
+                    original_guild_id     INTEGER,
+                    original_channel_id   INTEGER,
+                    cloned_guild_id       INTEGER,
+                    cloned_channel_id     INTEGER,
+                    cloned_message_id     INTEGER,
+                    webhook_url           TEXT,
+                    created_at            INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+                    updated_at            INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
+                );
+            """,
+            required_columns={
+                "original_message_id",
+                "original_guild_id",
+                "original_channel_id",
+                "cloned_guild_id",
+                "cloned_channel_id",
+                "cloned_message_id",
+                "webhook_url",
+                "created_at",
+                "updated_at",
+            },
+            copy_map={
+                "original_message_id": "original_message_id",
+                "original_guild_id": "original_guild_id",
+                "original_channel_id": "original_channel_id",
+                "cloned_guild_id": "NULL",
+                "cloned_channel_id": "cloned_channel_id",
+                "cloned_message_id": "cloned_message_id",
+                "webhook_url": "webhook_url",
+                "created_at": "created_at",
+                "updated_at": "updated_at",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);",
+                "CREATE INDEX IF NOT EXISTS idx_messages_orig_chan ON messages(original_channel_id);",
+                "CREATE INDEX IF NOT EXISTS idx_messages_clone_msg ON messages(cloned_message_id);",
+                "CREATE INDEX IF NOT EXISTS idx_messages_orig_guild ON messages(original_guild_id);",
+                "CREATE INDEX IF NOT EXISTS idx_messages_clone_guild ON messages(cloned_guild_id);",
+            ],
         )
 
         c.execute(
@@ -323,28 +519,62 @@ class DBManager:
             """
         )
 
-        c.execute(
-            """
-        CREATE TABLE IF NOT EXISTS backfill_runs (
-            run_id                TEXT PRIMARY KEY,
-            original_channel_id   INTEGER NOT NULL,
-            clone_channel_id      INTEGER,
-            status                TEXT NOT NULL DEFAULT 'running',  -- running|completed|failed|aborted
-            range_json            TEXT,                              -- serialized dict of params sent to client
-            started_at            TEXT NOT NULL,                     -- ISO
-            updated_at            TEXT NOT NULL,                     -- ISO
-            delivered             INTEGER NOT NULL DEFAULT 0,
-            expected_total        INTEGER,
-            last_orig_message_id  TEXT,                              -- original message id checkpoint
-            last_orig_timestamp   TEXT,                              -- ISO timestamp from client payload
-            error                 TEXT
-        );
-        """
+        self._ensure_table(
+            name="backfill_runs",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    run_id                TEXT PRIMARY KEY,
+                    original_guild_id     INTEGER,
+                    cloned_guild_id       INTEGER,
+                    original_channel_id   INTEGER NOT NULL,
+                    clone_channel_id      INTEGER,
+                    status                TEXT NOT NULL DEFAULT 'running', 
+                    range_json            TEXT,                             
+                    started_at            TEXT NOT NULL,                 
+                    updated_at            TEXT NOT NULL,                    
+                    delivered             INTEGER NOT NULL DEFAULT 0,
+                    expected_total        INTEGER,
+                    last_orig_message_id  TEXT,                          
+                    last_orig_timestamp   TEXT,                           
+                    error                 TEXT
+                );
+            """,
+            required_columns={
+                "run_id",
+                "original_channel_id",
+                "clone_channel_id",
+                "status",
+                "range_json",
+                "started_at",
+                "updated_at",
+                "delivered",
+                "expected_total",
+                "last_orig_message_id",
+                "last_orig_timestamp",
+                "error",
+                "original_guild_id",
+                "cloned_guild_id",
+            },
+            copy_map={
+                "run_id": "run_id",
+                "original_channel_id": "original_channel_id",
+                "clone_channel_id": "clone_channel_id",
+                "status": "status",
+                "range_json": "range_json",
+                "started_at": "started_at",
+                "updated_at": "updated_at",
+                "delivered": "delivered",
+                "expected_total": "expected_total",
+                "last_orig_message_id": "last_orig_message_id",
+                "last_orig_timestamp": "last_orig_timestamp",
+                "error": "error",
+                "original_guild_id": "NULL",
+                "cloned_guild_id": "NULL",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_bf_runs_by_orig_status ON backfill_runs(original_channel_id, status);",
+            ],
         )
-        self.conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_bf_runs_by_orig_status ON backfill_runs(original_channel_id, status)"
-        )
-        self.conn.commit()
 
     def _table_exists(self, name: str) -> bool:
         row = self.conn.execute(
@@ -513,6 +743,8 @@ class DBManager:
         orig_name: str,
         clone_id: Optional[int],
         clone_name: Optional[str] = None,
+        original_guild_id: int | None = None,
+        cloned_guild_id: int | None = None,
     ):
         with self.lock, self.conn:
             row = self.conn.execute(
@@ -543,9 +775,15 @@ class DBManager:
 
             self.conn.execute(
                 """
-                INSERT INTO category_mappings
-                    (original_category_id, original_category_name, cloned_category_id, cloned_category_name)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO category_mappings (
+                    original_category_id,
+                    original_category_name,
+                    cloned_category_id,
+                    cloned_category_name,
+                    original_guild_id,
+                    cloned_guild_id
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
                 ON CONFLICT(original_category_id) DO UPDATE SET
                     original_category_name = excluded.original_category_name,
                     cloned_category_id     = excluded.cloned_category_id,
@@ -553,9 +791,18 @@ class DBManager:
                         WHEN excluded.cloned_category_id IS NULL THEN NULL
                         WHEN excluded.cloned_category_name IS NOT NULL THEN excluded.cloned_category_name
                         ELSE category_mappings.cloned_category_name
-                    END
+                    END,
+                    original_guild_id      = COALESCE(excluded.original_guild_id, category_mappings.original_guild_id),
+                    cloned_guild_id        = COALESCE(excluded.cloned_guild_id,   category_mappings.cloned_guild_id)
                 """,
-                (orig_id, orig_name, clone_id, clone_name),
+                (
+                    orig_id,
+                    orig_name,
+                    clone_id,
+                    clone_name,
+                    int(original_guild_id) if original_guild_id is not None else None,
+                    int(cloned_guild_id) if cloned_guild_id is not None else None,
+                ),
             )
 
             if clone_id is not None:
@@ -595,12 +842,6 @@ class DBManager:
         Counts the total number of categories in the 'category_mappings' table.
         """
         return self.conn.execute("SELECT COUNT(*) FROM category_mappings").fetchone()[0]
-
-    def get_all_channel_mappings(self) -> List[sqlite3.Row]:
-        """
-        Retrieves all channel mappings from the database.
-        """
-        return self.conn.execute("SELECT * FROM channel_mappings").fetchall()
 
     def get_all_channel_mappings(self) -> List[sqlite3.Row]:
         """
@@ -680,17 +921,29 @@ class DBManager:
         clone_thread_id: Optional[int],
         forum_orig_id: int,
         forum_clone_id: Optional[int],
+        *,
+        original_guild_id: int | None = None,
+        cloned_guild_id: int | None = None,
     ):
         self.conn.execute(
-            """INSERT INTO threads
-                (original_thread_id, original_thread_name, cloned_thread_id,
-                forum_original_id, forum_cloned_id)
-            VALUES (?, ?, ?, ?, ?)
+            """
+            INSERT INTO threads (
+                original_thread_id,
+                original_thread_name,
+                cloned_thread_id,
+                forum_original_id,
+                forum_cloned_id,
+                original_guild_id,
+                cloned_guild_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(original_thread_id) DO UPDATE SET
-                original_thread_name =excluded.original_thread_name,
-                cloned_thread_id     =excluded.cloned_thread_id,
-                forum_original_id    =excluded.forum_original_id,
-                forum_cloned_id      =excluded.forum_cloned_id
+                original_thread_name = excluded.original_thread_name,
+                cloned_thread_id     = excluded.cloned_thread_id,
+                forum_original_id    = excluded.forum_original_id,
+                forum_cloned_id      = excluded.forum_cloned_id,
+                original_guild_id    = COALESCE(excluded.original_guild_id, threads.original_guild_id),
+                cloned_guild_id      = COALESCE(excluded.cloned_guild_id,   threads.cloned_guild_id)
             """,
             (
                 orig_thread_id,
@@ -698,6 +951,8 @@ class DBManager:
                 clone_thread_id,
                 forum_orig_id,
                 forum_clone_id,
+                int(original_guild_id) if original_guild_id is not None else None,
+                int(cloned_guild_id) if cloned_guild_id is not None else None,
             ),
         )
         self.conn.commit()
@@ -723,6 +978,8 @@ class DBManager:
         channel_type: int,
         *,
         clone_name: str | None = None,
+        original_guild_id: int | None = None,
+        cloned_guild_id: int | None = None,
     ):
         self.conn.execute(
             """
@@ -734,33 +991,42 @@ class DBManager:
                 original_parent_category_id,
                 cloned_parent_category_id,
                 channel_type,
-                clone_channel_name
+                clone_channel_name,
+                original_guild_id,
+                cloned_guild_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(original_channel_id) DO UPDATE SET
-            original_channel_name       = excluded.original_channel_name,
-            cloned_channel_id           = excluded.cloned_channel_id,
-            channel_webhook_url         = excluded.channel_webhook_url,
-            original_parent_category_id = excluded.original_parent_category_id,
-            cloned_parent_category_id   = excluded.cloned_parent_category_id,
-            channel_type                = excluded.channel_type,
-            clone_channel_name          = COALESCE(excluded.clone_channel_name,
-                                                    channel_mappings.clone_channel_name),
-            last_updated                = CURRENT_TIMESTAMP
+                original_channel_name       = excluded.original_channel_name,
+                cloned_channel_id           = excluded.cloned_channel_id,
+                channel_webhook_url         = excluded.channel_webhook_url,
+                original_parent_category_id = excluded.original_parent_category_id,
+                cloned_parent_category_id   = excluded.cloned_parent_category_id,
+                channel_type                = excluded.channel_type,
+                clone_channel_name          = COALESCE(excluded.clone_channel_name, channel_mappings.clone_channel_name),
+                original_guild_id           = COALESCE(excluded.original_guild_id, channel_mappings.original_guild_id),
+                cloned_guild_id             = COALESCE(excluded.cloned_guild_id,   channel_mappings.cloned_guild_id),
+                last_updated                = CURRENT_TIMESTAMP
             """,
             (
                 int(original_channel_id),
                 original_channel_name,
-                int(cloned_channel_id) if cloned_channel_id else None,
+                int(cloned_channel_id) if cloned_channel_id is not None else None,
                 channel_webhook_url,
                 (
                     int(original_parent_category_id)
-                    if original_parent_category_id
+                    if original_parent_category_id is not None
                     else None
                 ),
-                int(cloned_parent_category_id) if cloned_parent_category_id else None,
+                (
+                    int(cloned_parent_category_id)
+                    if cloned_parent_category_id is not None
+                    else None
+                ),
                 int(channel_type),
                 (clone_name.strip() if isinstance(clone_name, str) else None),
+                int(original_guild_id) if original_guild_id is not None else None,
+                int(cloned_guild_id) if cloned_guild_id is not None else None,
             ),
         )
         self.conn.commit()
@@ -848,18 +1114,41 @@ class DBManager:
         return self.conn.execute("SELECT * FROM emoji_mappings").fetchall()
 
     def upsert_emoji_mapping(
-        self, orig_id: int, orig_name: str, clone_id: int, clone_name: str
+        self,
+        orig_id: int,
+        orig_name: str,
+        clone_id: int,
+        clone_name: str,
+        *,
+        original_guild_id: int | None = None,
+        cloned_guild_id: int | None = None,
     ):
         self.conn.execute(
-            """INSERT INTO emoji_mappings
-                (original_emoji_id, original_emoji_name, cloned_emoji_id, cloned_emoji_name)
-            VALUES (?, ?, ?, ?)
+            """
+            INSERT INTO emoji_mappings (
+                original_emoji_id,
+                original_emoji_name,
+                cloned_emoji_id,
+                cloned_emoji_name,
+                original_guild_id,
+                cloned_guild_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(original_emoji_id) DO UPDATE SET
-                original_emoji_name=excluded.original_emoji_name,
-                cloned_emoji_id    =excluded.cloned_emoji_id,
-                cloned_emoji_name  =excluded.cloned_emoji_name
+                original_emoji_name = excluded.original_emoji_name,
+                cloned_emoji_id     = excluded.cloned_emoji_id,
+                cloned_emoji_name   = excluded.cloned_emoji_name,
+                original_guild_id   = COALESCE(excluded.original_guild_id, emoji_mappings.original_guild_id),
+                cloned_guild_id     = COALESCE(excluded.cloned_guild_id,   emoji_mappings.cloned_guild_id)
             """,
-            (orig_id, orig_name, clone_id, clone_name),
+            (
+                orig_id,
+                orig_name,
+                clone_id,
+                clone_name,
+                int(original_guild_id) if original_guild_id is not None else None,
+                int(cloned_guild_id) if cloned_guild_id is not None else None,
+            ),
         )
         self.conn.commit()
 
@@ -1053,18 +1342,41 @@ class DBManager:
         ).fetchone()
 
     def upsert_sticker_mapping(
-        self, orig_id: int, orig_name: str, clone_id: int, clone_name: str
+        self,
+        orig_id: int,
+        orig_name: str,
+        clone_id: int,
+        clone_name: str,
+        *,
+        original_guild_id: int | None = None,
+        cloned_guild_id: int | None = None,
     ):
         self.conn.execute(
-            """INSERT INTO sticker_mappings
-                (original_sticker_id, original_sticker_name, cloned_sticker_id, cloned_sticker_name)
-            VALUES (?, ?, ?, ?)
+            """
+            INSERT INTO sticker_mappings (
+                original_sticker_id,
+                original_sticker_name,
+                cloned_sticker_id,
+                cloned_sticker_name,
+                original_guild_id,
+                cloned_guild_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(original_sticker_id) DO UPDATE SET
-                original_sticker_name=excluded.original_sticker_name,
-                cloned_sticker_id    =excluded.cloned_sticker_id,
-                cloned_sticker_name  =excluded.cloned_sticker_name
+                original_sticker_name = excluded.original_sticker_name,
+                cloned_sticker_id     = excluded.cloned_sticker_id,
+                cloned_sticker_name   = excluded.cloned_sticker_name,
+                original_guild_id     = COALESCE(excluded.original_guild_id, sticker_mappings.original_guild_id),
+                cloned_guild_id       = COALESCE(excluded.cloned_guild_id,   sticker_mappings.cloned_guild_id)
             """,
-            (orig_id, orig_name, clone_id, clone_name),
+            (
+                orig_id,
+                orig_name,
+                clone_id,
+                clone_name,
+                int(original_guild_id) if original_guild_id is not None else None,
+                int(cloned_guild_id) if cloned_guild_id is not None else None,
+            ),
         )
         self.conn.commit()
 
@@ -1083,17 +1395,36 @@ class DBManager:
         orig_name: str,
         clone_id: Optional[int],
         clone_name: Optional[str],
+        *,
+        original_guild_id: int | None = None,
+        cloned_guild_id: int | None = None,
     ):
         self.conn.execute(
-            """INSERT INTO role_mappings
-                (original_role_id, original_role_name, cloned_role_id, cloned_role_name)
-            VALUES (?, ?, ?, ?)
+            """
+            INSERT INTO role_mappings (
+                original_role_id,
+                original_role_name,
+                cloned_role_id,
+                cloned_role_name,
+                original_guild_id,
+                cloned_guild_id
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(original_role_id) DO UPDATE SET
-                original_role_name=excluded.original_role_name,
-                cloned_role_id    =excluded.cloned_role_id,
-                cloned_role_name  =excluded.cloned_role_name
+                original_role_name = excluded.original_role_name,
+                cloned_role_id     = excluded.cloned_role_id,
+                cloned_role_name   = excluded.cloned_role_name,
+                original_guild_id  = COALESCE(excluded.original_guild_id, role_mappings.original_guild_id),
+                cloned_guild_id    = COALESCE(excluded.cloned_guild_id,   role_mappings.cloned_guild_id)
             """,
-            (orig_id, orig_name, clone_id, clone_name),
+            (
+                orig_id,
+                orig_name,
+                clone_id,
+                clone_name,
+                int(original_guild_id) if original_guild_id is not None else None,
+                int(cloned_guild_id) if cloned_guild_id is not None else None,
+            ),
         )
         self.conn.commit()
 
@@ -1351,37 +1682,46 @@ class DBManager:
         cloned_channel_id: int | None,
         cloned_message_id: int | None,
         webhook_url: str | None = None,
+        *,
+        cloned_guild_id: int | None = None,
     ) -> None:
         with self.lock, self.conn:
             self.conn.execute(
                 """
                 INSERT INTO messages (
-                    original_guild_id, original_channel_id, original_message_id,
-                    cloned_channel_id, cloned_message_id, webhook_url, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+                    original_guild_id,
+                    original_channel_id,
+                    original_message_id,
+                    cloned_guild_id,
+                    cloned_channel_id,
+                    cloned_message_id,
+                    webhook_url,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
                 ON CONFLICT(original_message_id) DO UPDATE SET
-                    original_guild_id   = excluded.original_guild_id,
-                    original_channel_id = excluded.original_channel_id,
-                    cloned_channel_id   = excluded.cloned_channel_id,
-                    cloned_message_id   = excluded.cloned_message_id,
-                    webhook_url         = COALESCE(excluded.webhook_url, webhook_url),
+                    -- never overwrite with NULL; keep existing when excluded is NULL
+                    original_guild_id   = COALESCE(excluded.original_guild_id, messages.original_guild_id),
+                    original_channel_id = COALESCE(excluded.original_channel_id, messages.original_channel_id),
+                    cloned_guild_id     = COALESCE(excluded.cloned_guild_id,     messages.cloned_guild_id),
+                    cloned_channel_id   = COALESCE(excluded.cloned_channel_id,   messages.cloned_channel_id),
+                    cloned_message_id   = COALESCE(excluded.cloned_message_id,   messages.cloned_message_id),
+                    webhook_url         = COALESCE(excluded.webhook_url,         messages.webhook_url),
+                    -- preserve created_at from first insert
+                    created_at          = messages.created_at,
                     updated_at          = strftime('%s','now')
                 """,
                 (
                     int(original_guild_id),
                     int(original_channel_id),
                     int(original_message_id),
+                    int(cloned_guild_id) if cloned_guild_id is not None else None,
                     int(cloned_channel_id) if cloned_channel_id is not None else None,
                     int(cloned_message_id) if cloned_message_id is not None else None,
                     str(webhook_url) if webhook_url else None,
                 ),
             )
-
-    def get_mapping_by_original(self, original_message_id: int):
-        return self.conn.execute(
-            "SELECT * FROM messages WHERE original_message_id = ?",
-            (int(original_message_id),),
-        ).fetchone()
 
     def get_mapping_by_cloned(self, cloned_message_id: int):
         return self.conn.execute(
@@ -1476,17 +1816,37 @@ class DBManager:
         range_json: dict | None,
         *,
         run_id: str | None = None,
+        original_guild_id: int | None = None,
+        cloned_guild_id: int | None = None,
     ) -> str:
         run_id = run_id or uuid.uuid4().hex
         now = datetime.utcnow().isoformat() + "Z"
-        self.conn.execute(
-            """
-            INSERT INTO backfill_runs(run_id, original_channel_id, range_json, started_at, updated_at)
-            VALUES(?,?,?,?,?)
-            """,
-            (run_id, int(original_channel_id), json.dumps(range_json or {}), now, now),
-        )
-        self.conn.commit()
+
+        with self.lock, self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO backfill_runs(
+                    run_id,
+                    original_guild_id,
+                    cloned_guild_id,
+                    original_channel_id,
+                    range_json,
+                    started_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    int(original_guild_id) if original_guild_id is not None else None,
+                    int(cloned_guild_id) if cloned_guild_id is not None else None,
+                    int(original_channel_id),
+                    json.dumps(range_json or {}),
+                    now,
+                    now,
+                ),
+            )
+            self.conn.commit()
         return run_id
 
     def backfill_set_clone(self, run_id: str, clone_channel_id: int | None):
@@ -1552,13 +1912,26 @@ class DBManager:
     def backfill_get_incomplete_for_channel(self, original_channel_id: int):
         cur = self.conn.execute(
             """
-            SELECT run_id, original_channel_id, clone_channel_id, status, range_json,
-                started_at, updated_at, delivered, expected_total, last_orig_message_id, last_orig_timestamp, error
+            SELECT
+                run_id,
+                original_channel_id,
+                clone_channel_id,
+                status,
+                range_json,
+                started_at,
+                updated_at,
+                delivered,
+                expected_total,
+                last_orig_message_id,
+                last_orig_timestamp,
+                error,
+                original_guild_id,
+                cloned_guild_id
             FROM backfill_runs
-            WHERE original_channel_id=? AND status='running'
+            WHERE original_channel_id = ? AND status = 'running'
             ORDER BY updated_at DESC
             LIMIT 1
-        """,
+            """,
             (int(original_channel_id),),
         )
         row = cur.fetchone()
@@ -1584,6 +1957,580 @@ class DBManager:
             "UPDATE backfill_runs SET status='cancelled', error=COALESCE(?, error), updated_at=? "
             "WHERE original_channel_id=? AND status='running'",
             (reason, now, int(original_channel_id)),
+        )
+        self.conn.commit()
+        return cur.rowcount
+
+    def get_clone_guild_ids(self, original_guild_id: int) -> List[int]:
+        """
+        Given a host/original guild, return all clone guild IDs.
+        """
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                "SELECT cloned_guild_id FROM guild_mappings WHERE original_guild_id = ?;",
+                (original_guild_id,),
+            )
+            return [row[0] for row in cur.fetchall() if row[0] is not None]
+
+    def get_host_guild_ids(self, cloned_guild_id: int) -> List[int]:
+        """
+        Given a clone guild, return all original/host guild IDs.
+        """
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                "SELECT original_guild_id FROM guild_mappings WHERE cloned_guild_id = ?;",
+                (cloned_guild_id,),
+            )
+            return [row[0] for row in cur.fetchall() if row[0] is not None]
+
+    def upsert_guild_mapping(
+        self,
+        *,
+        mapping_id: Optional[str],
+        mapping_name: str,
+        original_guild_id: int,
+        original_guild_name: str,
+        original_guild_icon_url: str | None,
+        cloned_guild_id: int,
+        cloned_guild_name: str,
+        settings: Dict,
+        overwrite_identity: bool = False,
+    ) -> str:
+        """
+        Insert or update a guild mapping row.
+
+        If overwrite_identity is False:
+        - We will NOT update original_guild_name,
+            original_guild_icon_url, or cloned_guild_name on conflict.
+            ( protects bot-learned metadata from being wiped by UI PATCH )
+
+        If overwrite_identity is True:
+        - We WILL update those 3 identity fields on conflict.
+            ( used by sitemap/backfill where we trust fresh truth )
+        """
+        if not mapping_id:
+            mapping_id = uuid.uuid4().hex
+
+        settings_json = json.dumps(settings or {}, separators=(",", ":"))
+
+        update_assignments = [
+            "mapping_name      = excluded.mapping_name",
+            "original_guild_id = excluded.original_guild_id",
+            "cloned_guild_id   = excluded.cloned_guild_id",
+            "settings          = excluded.settings",
+            "last_updated      = CURRENT_TIMESTAMP",
+        ]
+
+        if overwrite_identity:
+            update_assignments.extend(
+                [
+                    "original_guild_name     = excluded.original_guild_name",
+                    "original_guild_icon_url = excluded.original_guild_icon_url",
+                    "cloned_guild_name       = excluded.cloned_guild_name",
+                ]
+            )
+
+        update_sql = ",\n                ".join(update_assignments)
+
+        sql = f"""
+            INSERT INTO guild_mappings (
+                mapping_id,
+                mapping_name,
+                original_guild_id,
+                original_guild_name,
+                original_guild_icon_url,
+                cloned_guild_id,
+                cloned_guild_name,
+                settings,
+                created_at,
+                last_updated
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CAST(strftime('%s','now') AS INTEGER), CURRENT_TIMESTAMP)
+            ON CONFLICT(mapping_id) DO UPDATE SET
+                    {update_sql}
+        """
+
+        with self.conn:
+            self.conn.execute(
+                sql,
+                (
+                    mapping_id,
+                    mapping_name or "",
+                    int(original_guild_id),
+                    original_guild_name or "",
+                    original_guild_icon_url or None,
+                    int(cloned_guild_id),
+                    cloned_guild_name or "",
+                    settings_json,
+                ),
+            )
+
+        return mapping_id
+
+    def delete_guild_mapping(self, mapping_id: str) -> None:
+        """
+        Permanently remove a mapping row.
+        """
+        with self.conn:
+            self.conn.execute(
+                "DELETE FROM guild_mappings WHERE mapping_id = ?", (mapping_id,)
+            )
+
+    def get_mapping_by_original(self, original_guild_id: int) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM guild_mappings WHERE original_guild_id = ? LIMIT 1",
+            (int(original_guild_id),),
+        ).fetchone()
+        if not row:
+            return None
+        d = {k: row[k] for k in row.keys()}
+        try:
+            d["settings"] = json.loads(d.get("settings") or "{}")
+        except Exception:
+            d["settings"] = {}
+        return d
+
+    def get_mapping_by_clone(self, cloned_guild_id: int) -> Optional[dict]:
+        row = self.conn.execute(
+            "SELECT * FROM guild_mappings WHERE cloned_guild_id = ?",
+            (int(cloned_guild_id),),
+        ).fetchone()
+        if not row:
+            return None
+        cols = [
+            c[1] for c in self.conn.execute("PRAGMA table_info(guild_mappings)")
+        ].fetchall()
+        d = dict(zip(cols, row))
+        try:
+            d["settings"] = json.loads(d.get("settings") or "{}")
+        except Exception:
+            d["settings"] = {}
+        return d
+
+    def list_guild_mappings(self) -> List[dict]:
+        cur = self.conn.execute(
+            """
+            SELECT
+                mapping_id,
+                mapping_name,
+                original_guild_id,
+                original_guild_name,
+                original_guild_icon_url,
+                cloned_guild_id,
+                cloned_guild_name,
+                settings,
+                created_at,
+                last_updated
+            FROM guild_mappings
+            ORDER BY created_at ASC, mapping_id ASC
+            """
+        )
+        rows = cur.fetchall()
+        out = []
+        for r in rows:
+            settings_raw = r["settings"]
+            try:
+                settings_obj = json.loads(settings_raw or "{}")
+            except Exception:
+                settings_obj = {}
+
+            out.append(
+                {
+                    "mapping_id": r["mapping_id"],
+                    "mapping_name": r["mapping_name"],
+                    "original_guild_id": str(r["original_guild_id"] or ""),
+                    "original_guild_name": r["original_guild_name"] or "",
+                    "original_guild_icon_url": r["original_guild_icon_url"] or "",
+                    "cloned_guild_id": str(r["cloned_guild_id"] or ""),
+                    "cloned_guild_name": r["cloned_guild_name"] or "",
+                    "settings": settings_obj,
+                }
+            )
+        return out
+
+    def get_all_original_guild_ids(self) -> list[int]:
+        rows = self.conn.execute(
+            "SELECT original_guild_id FROM guild_mappings"
+        ).fetchall()
+        return [int(r[0]) for r in rows]
+
+    def get_all_clone_guild_ids(self) -> list[int]:
+        rows = self.conn.execute(
+            "SELECT cloned_guild_id FROM guild_mappings"
+        ).fetchall()
+        return [int(r[0]) for r in rows]
+
+    def is_clone_guild_id(self, guild_id: int) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM guild_mappings WHERE cloned_guild_id = ?",
+            (int(guild_id),),
+        ).fetchone()
+        return bool(row)
+
+    def bulk_fill_guild_ids(self, *, host_guild_id: int, clone_guild_id: int) -> dict:
+        """
+        Backfill original_guild_id and cloned_guild_id for legacy rows.
+        - Uses precise joins where possible (e.g., categories → channels, forums → threads)
+        - Only updates rows where the target column is NULL (or 0)
+        - Bumps last_updated where a change is made
+        Returns a dict of changed-row counts per table.
+        """
+        host = int(host_guild_id)
+        clone = int(clone_guild_id)
+        out = {}
+
+        with self.lock, self.conn:
+            cur = self.conn.cursor()
+
+            cur.execute(
+                """
+                UPDATE category_mappings
+                SET original_guild_id = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE (original_guild_id IS NULL OR original_guild_id = 0)
+            """,
+                (host,),
+            )
+            out["category_mappings.original_set"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE category_mappings
+                SET cloned_guild_id = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE (cloned_guild_id IS NULL OR cloned_guild_id = 0)
+            """,
+                (clone,),
+            )
+            out["category_mappings.cloned_set"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE channel_mappings AS ch
+                SET original_guild_id = (
+                    SELECT cm.original_guild_id
+                    FROM category_mappings AS cm
+                    WHERE cm.original_category_id = ch.original_parent_category_id
+                ),
+                    last_updated = CURRENT_TIMESTAMP
+                WHERE (ch.original_guild_id IS NULL OR ch.original_guild_id = 0)
+                AND ch.original_parent_category_id IS NOT NULL
+            """
+            )
+            out["channel_mappings.orig_from_parent"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE channel_mappings AS ch
+                SET cloned_guild_id = (
+                    SELECT cm.cloned_guild_id
+                    FROM category_mappings AS cm
+                    WHERE cm.cloned_category_id = ch.cloned_parent_category_id
+                ),
+                    last_updated = CURRENT_TIMESTAMP
+                WHERE (ch.cloned_guild_id IS NULL OR ch.cloned_guild_id = 0)
+                AND ch.cloned_parent_category_id IS NOT NULL
+            """
+            )
+            out["channel_mappings.clone_from_parent"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE channel_mappings
+                SET original_guild_id = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE (original_guild_id IS NULL OR original_guild_id = 0)
+            """,
+                (host,),
+            )
+            out["channel_mappings.orig_fallback"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE channel_mappings
+                SET cloned_guild_id = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE (cloned_guild_id IS NULL OR cloned_guild_id = 0)
+            """,
+                (clone,),
+            )
+            out["channel_mappings.clone_fallback"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE threads AS t
+                SET original_guild_id = (
+                    SELECT ch.original_guild_id
+                    FROM channel_mappings AS ch
+                    WHERE ch.original_channel_id = t.forum_original_id
+                ),
+                    last_updated = CURRENT_TIMESTAMP
+                WHERE (t.original_guild_id IS NULL OR t.original_guild_id = 0)
+                AND t.forum_original_id IS NOT NULL
+            """
+            )
+            out["threads.orig_from_forum"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE threads AS t
+                SET cloned_guild_id = (
+                    SELECT ch.cloned_guild_id
+                    FROM channel_mappings AS ch
+                    WHERE ch.cloned_channel_id = t.forum_cloned_id
+                ),
+                    last_updated = CURRENT_TIMESTAMP
+                WHERE (t.cloned_guild_id IS NULL OR t.cloned_guild_id = 0)
+                AND t.forum_cloned_id IS NOT NULL
+            """
+            )
+            out["threads.clone_from_forum"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE threads
+                SET original_guild_id = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE (original_guild_id IS NULL OR original_guild_id = 0)
+            """,
+                (host,),
+            )
+            out["threads.orig_fallback"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE threads
+                SET cloned_guild_id = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE (cloned_guild_id IS NULL OR cloned_guild_id = 0)
+            """,
+                (clone,),
+            )
+            out["threads.clone_fallback"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE emoji_mappings
+                SET original_guild_id = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE (original_guild_id IS NULL OR original_guild_id = 0)
+            """,
+                (host,),
+            )
+            out["emoji_mappings.orig_set"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE emoji_mappings
+                SET cloned_guild_id = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE (cloned_guild_id IS NULL OR cloned_guild_id = 0)
+            """,
+                (clone,),
+            )
+            out["emoji_mappings.clone_set"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE sticker_mappings
+                SET original_guild_id = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE (original_guild_id IS NULL OR original_guild_id = 0)
+            """,
+                (host,),
+            )
+            out["sticker_mappings.orig_set"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE sticker_mappings
+                SET cloned_guild_id = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE (cloned_guild_id IS NULL OR cloned_guild_id = 0)
+            """,
+                (clone,),
+            )
+            out["sticker_mappings.clone_set"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE role_mappings
+                SET original_guild_id = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE (original_guild_id IS NULL OR original_guild_id = 0)
+            """,
+                (host,),
+            )
+            out["role_mappings.orig_set"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE role_mappings
+                SET cloned_guild_id = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE (cloned_guild_id IS NULL OR cloned_guild_id = 0)
+            """,
+                (clone,),
+            )
+            out["role_mappings.clone_set"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE messages AS m
+                SET cloned_guild_id = (
+                    SELECT ch.cloned_guild_id
+                    FROM channel_mappings AS ch
+                    WHERE ch.cloned_channel_id = m.cloned_channel_id
+                ),
+                    updated_at = strftime('%s','now')
+                WHERE (m.cloned_guild_id IS NULL OR m.cloned_guild_id = 0)
+                  AND m.cloned_channel_id IS NOT NULL
+                """
+            )
+            out["messages.clone_from_channel"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE messages
+                SET original_guild_id = ?,
+                    updated_at = strftime('%s','now')
+                WHERE (original_guild_id IS NULL OR original_guild_id = 0)
+                """,
+                (host,),
+            )
+            out["messages.orig_fallback"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE messages
+                SET cloned_guild_id = ?,
+                    updated_at = strftime('%s','now')
+                WHERE (cloned_guild_id IS NULL OR cloned_guild_id = 0)
+                """,
+                (clone,),
+            )
+            out["messages.clone_fallback"] = cur.rowcount
+
+        return out
+
+    def delete_config(self, key: str) -> None:
+        """
+        Remove a key from app_config.
+        Safe to call even if the key doesn't exist.
+        """
+        with self.lock, self.conn:
+            self.conn.execute(
+                "DELETE FROM app_config WHERE key = ?",
+                (key,),
+            )
+            self.conn.commit()
+
+    def get_mapping_by_id(self, mapping_id: str) -> dict | None:
+        """
+        Return a single guild_mappings row (plus parsed settings) for a mapping_id.
+        Keys match list_guild_mappings() output.
+        """
+        row = self.conn.execute(
+            """
+            SELECT
+                mapping_id,
+                mapping_name,
+                original_guild_id,
+                original_guild_name,
+                original_guild_icon_url,
+                cloned_guild_id,
+                cloned_guild_name,
+                settings,
+                created_at,
+                last_updated
+            FROM guild_mappings
+            WHERE mapping_id = ?
+            LIMIT 1
+            """,
+            (mapping_id,),
+        ).fetchone()
+
+        if not row:
+            return None
+
+        try:
+            settings_obj = json.loads(row["settings"] or "{}")
+        except Exception:
+            settings_obj = {}
+
+        return {
+            "mapping_id": row["mapping_id"],
+            "mapping_name": row["mapping_name"],
+            "original_guild_id": str(row["original_guild_id"] or ""),
+            "original_guild_name": row["original_guild_name"] or "",
+            "original_guild_icon_url": row["original_guild_icon_url"] or "",
+            "cloned_guild_id": str(row["cloned_guild_id"] or ""),
+            "cloned_guild_name": row["cloned_guild_name"] or "",
+            "settings": settings_obj,
+        }
+
+    def get_channel_mapping_for_mapping(
+        self, original_channel_id: int, mapping_id: str
+    ):
+        with self.conn:
+            return self.conn.execute(
+                """
+                SELECT cm.*
+                FROM channel_mappings cm
+                JOIN guild_mappings gm ON gm.cloned_guild_id = cm.cloned_guild_id
+                WHERE cm.original_channel_id = ?
+                AND gm.mapping_id = ?
+                LIMIT 1
+                """,
+                (int(original_channel_id), str(mapping_id)),
+            ).fetchone()
+
+    def backfill_get_incomplete_for_channel_in_clone(
+        self, original_channel_id: int, cloned_guild_id: int
+    ):
+        cur = self.conn.execute(
+            """
+            SELECT
+                run_id,
+                original_channel_id,
+                clone_channel_id,
+                status,
+                range_json,
+                started_at,
+                updated_at,
+                delivered,
+                expected_total,
+                last_orig_message_id,
+                last_orig_timestamp,
+                error,
+                original_guild_id,
+                cloned_guild_id
+            FROM backfill_runs
+            WHERE original_channel_id = ?
+            AND cloned_guild_id = ?
+            AND status = 'running'
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (int(original_channel_id), int(cloned_guild_id)),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+
+        cols = [c[0] for c in cur.description]
+        return dict(zip(cols, row))
+
+    def backfill_abort_running_for_channel_in_clone(
+        self,
+        original_channel_id: int,
+        cloned_guild_id: int,
+        reason: str | None = None,
+    ) -> int:
+        """
+        Abort any 'running' backfill_runs rows for this (source channel, target clone guild)
+        combo only. We do NOT touch runs for other cloned_guild_id values.
+        """
+        now = datetime.utcnow().isoformat() + "Z"
+        cur = self.conn.execute(
+            """
+            UPDATE backfill_runs
+            SET status='cancelled',
+                error=COALESCE(?, error),
+                updated_at=?
+            WHERE original_channel_id = ?
+            AND cloned_guild_id = ?
+            AND status='running'
+            """,
+            (reason, now, int(original_channel_id), int(cloned_guild_id)),
         )
         self.conn.commit()
         return cur.rowcount

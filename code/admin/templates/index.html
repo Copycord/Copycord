@@ -11,11 +11,11 @@
 
 <body>
   <header class="site-header" role="banner">
-    <button id="menu-toggle" class="menu-btn" aria-haspopup="true" aria-expanded="false"
-            aria-controls="side-menu" aria-label="Open menu">
+    <button id="menu-toggle" class="menu-btn" aria-haspopup="true" aria-expanded="false" aria-controls="side-menu"
+      aria-label="Open menu">
       <span class="bar"></span><span class="bar"></span><span class="bar"></span>
     </button>
-  
+
     <a class="header-left header-home" href="/" aria-label="">
       <img src="/static/logo.png" alt="" aria-hidden="true" class="header-logo" draggable="false" />
       <h1>Copycord</h1>
@@ -129,7 +129,6 @@
         </span>
       </a>
 
-
       <a class="promo-card promo-donate" href="{{ links.kofi }}" target="_blank" rel="noopener">
         <span class="promo-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
@@ -190,34 +189,37 @@
       </div>
     </div>
 
-    <div class="card">
-      <h3>Configuration</h3>
+    {# Shared tips dictionary for global + mapping modal #}
+    {% set FIELD_TIPS = {
+    "SERVER_TOKEN": "Bot token for the server-side agent.",
+    "CLIENT_TOKEN": "Self bot token for the client-side agent.",
+    "COMMAND_USERS": "Comma-separated user IDs allowed to run admin commands.",
+    "LOG_LEVEL": "INFO for normal use, DEBUG for troubleshooting.",
 
-      {% set FIELD_TIPS = {
-      "SERVER_TOKEN": "Bot token from the Discord Developer Portal.",
-      "CLIENT_TOKEN": "Discord account token.",
-      "DELETE_ROLES": "When enabled, remove any roles in the clone that do not exist in the host.",
-      "MIRROR_ROLE_PERMISSIONS": "When enabled, mirror role permissions from the host to the clone.",
-      "COMMAND_USERS": "User IDs authorized to run admin commands.",
-      "HOST_GUILD_ID": "ID of the host (source) server to mirror. Leave empty if not cloning servers.",
-      "CLONE_GUILD_ID": "ID of your destination (clone) server.",
-      "EDIT_MESSAGES": "Messages that are edited in the host will be edited in the clone.",
-      "DELETE_MESSAGES": "Messages that are deleted in the host will be deleted in the clone.",
-      "DELETE_THREADS": "When enabled, delete in the clone any threads that were removed in the host.",
-      "DELETE_CHANNELS": "When enabled, delete in the clone any channels that were removed in the host.",
-      "CLONE_EMOJI": "When enabled, synchronize emojis from the host to the clone.",
-      "CLONE_STICKER": "When enabled, synchronize stickers from the host to the clone.",
-      "CLONE_ROLES": "When enabled, synchronize roles from the host to the clone.",
-      "MIRROR_CHANNEL_PERMISSIONS": "When enabled, channel permissions will sync with the host. CLONE_ROLES must be
-      enabled.",
-      "ENABLE_CLONING": "Master switch to enable or disable cloning.",
-      } %}
+    "HOST_GUILD_ID": "ID of the host (source) server to mirror. Your self bot must be a member of this server.",
+    "CLONE_GUILD_ID": "ID of the destination (clone) server. Your bot must be a member of this server.",
+    "DELETE_ROLES": "When enabled, remove any roles in the clone that do not exist in the host.",
+    "MIRROR_ROLE_PERMISSIONS": "When enabled, mirror role permissions from the host to the clone.",
+    "EDIT_MESSAGES": "Messages that are edited in the host will be edited in the clone.",
+    "DELETE_MESSAGES": "Messages that are deleted in the host will be deleted in the clone.",
+    "DELETE_THREADS": "When enabled, delete in the clone any threads that were removed in the host.",
+    "DELETE_CHANNELS": "When enabled, delete in the clone any channels that were removed in the host.",
+    "CLONE_EMOJI": "When enabled, synchronize emojis from the host to the clone.",
+    "CLONE_STICKER": "When enabled, synchronize stickers from the host to the clone.",
+    "CLONE_ROLES": "When enabled, synchronize roles from the host to the clone.",
+    "MIRROR_CHANNEL_PERMISSIONS": "When enabled, channel permissions will sync with the host. CLONE_ROLES must be
+    enabled.",
+    "ENABLE_CLONING": "Master switch to enable or disable cloning."
+    } %}
+
+    <div class="card" id="global-config-card">
+      <h3>Global Configuration</h3>
 
       <form method="post" action="/save" id="cfg-form" novalidate>
         <div class="grid">
+          {# text_keys now only includes SERVER_TOKEN, CLIENT_TOKEN, etc. It no longer includes guild IDs #}
           {% for k in text_keys if k != 'COMMAND_USERS' %}
           {% set is_token = 'TOKEN' in k %}
-          {% set is_id = k.endswith('_ID') %}
           <div class="field">
             <label for="{{ k }}" class="has-tip">
               <span class="label-text">{{ k }}</span>
@@ -231,8 +233,7 @@
             </label>
 
             <input type="{{ 'password' if is_token else 'text' }}" id="{{ k }}" name="{{ k }}"
-              value="{{ env.get(k,'') }}" {% if is_id %} inputmode="numeric" {% endif %} {% if is_token %}
-              autocomplete="off" spellcheck="false" {% endif %} />
+              value="{{ env.get(k,'') }}" {% if is_token %}autocomplete="off" spellcheck="false" {% endif %} />
           </div>
           {% endfor %}
 
@@ -254,85 +255,13 @@
             <input type="hidden" name="COMMAND_USERS" id="COMMAND_USERS" value="{{ env.get('COMMAND_USERS','') }}">
           </div>
 
-          {% for k in bool_keys %}
-          {% if k not in ['EDIT_MESSAGES', 'DELETE_MESSAGES'] %}
-          <div class="field">
-            <label for="{{ k }}" class="has-tip">
-              <span class="label-text">{{ k }}</span>
-              {% if FIELD_TIPS.get(k) %}
-              <button type="button" class="info-dot" aria-label="What is {{ k }}?"
-                aria-describedby="tip-{{ k }}"></button>
-              <span id="tip-{{ k }}" role="tooltip" class="tip-bubble">
-                {{ FIELD_TIPS[k] }}
-              </span>
-              {% endif %}
-            </label>
-            <div class="select">
-              {% set val = env.get(k, 'True' if k!='MIRROR_ROLE_PERMISSIONS' else 'False') %}
-              <select id="{{ k }}" name="{{ k }}">
-                <option value="True" {{ 'selected' if val|string|lower in ['true','1','yes','on'] else '' }}>True
-                </option>
-                <option value="False" {{ 'selected' if val|string|lower in ['false','0','no','off'] else '' }}>False
-                </option>
-              </select>
-            </div>
-          </div>
-
-          {% if k == 'DELETE_CHANNELS' %}
-          <div class="field">
-            <label for="EDIT_MESSAGES" class="has-tip">
-              <span class="label-text">EDIT_MESSAGES</span>
-              {% if FIELD_TIPS.get('EDIT_MESSAGES') %}
-              <button type="button" class="info-dot" aria-label="What is EDIT_MESSAGES?"
-                aria-describedby="tip-EDIT_MESSAGES"></button>
-              <span id="tip-EDIT_MESSAGES" role="tooltip" class="tip-bubble">
-                {{ FIELD_TIPS['EDIT_MESSAGES'] }}
-              </span>
-              {% endif %}
-            </label>
-            <div class="select">
-              {% set val_edit = env.get('EDIT_MESSAGES', 'True') %}
-              <select id="EDIT_MESSAGES" name="EDIT_MESSAGES">
-                <option value="True" {{ 'selected' if val_edit|string|lower in ['true','1','yes','on'] else '' }}>True
-                </option>
-                <option value="False" {{ 'selected' if val_edit|string|lower in ['false','0','no','off'] else '' }}>
-                  False</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="DELETE_MESSAGES" class="has-tip">
-              <span class="label-text">DELETE_MESSAGES</span>
-              {% if FIELD_TIPS.get('DELETE_MESSAGES') %}
-              <button type="button" class="info-dot" aria-label="What is DELETE_MESSAGES?"
-                aria-describedby="tip-DELETE_MESSAGES"></button>
-              <span id="tip-DELETE_MESSAGES" role="tooltip" class="tip-bubble">
-                {{ FIELD_TIPS['DELETE_MESSAGES'] }}
-              </span>
-              {% endif %}
-            </label>
-            <div class="select">
-              {% set val_del = env.get('DELETE_MESSAGES', 'True') %}
-              <select id="DELETE_MESSAGES" name="DELETE_MESSAGES">
-                <option value="True" {{ 'selected' if val_del|string|lower in ['true','1','yes','on'] else '' }}>True
-                </option>
-                <option value="False" {{ 'selected' if val_del|string|lower in ['false','0','no','off'] else '' }}>False
-                </option>
-              </select>
-            </div>
-          </div>
-          {% endif %}
-          {% endif %}
-          {% endfor %}
-
           <div class="field">
             <label for="LOG_LEVEL" class="has-tip">
               <span class="label-text">LOG_LEVEL</span>
               <button type="button" class="info-dot" aria-label="What is LOG_LEVEL?"
                 aria-describedby="tip-LOG_LEVEL"></button>
               <span id="tip-LOG_LEVEL" role="tooltip" class="tip-bubble">
-                INFO for normal use, DEBUG for troubleshooting.
+                {{ FIELD_TIPS['LOG_LEVEL'] }}
               </span>
             </label>
             <div class="select">
@@ -344,13 +273,57 @@
           </div>
 
           <div class="btns">
-            <button class="btn btn-ghost" type="submit">Save</button>
-            <button type="button" class="btn btn-ghost" id="btn-cancel" hidden>Cancel</button>
+            <button class="btn btn-ghost" type="submit" id="cfg-save-btn">Save</button>
+            <button type="button" class="btn btn-ghost" id="cfg-cancel-btn" hidden>Cancel</button>
           </div>
         </div>
       </form>
     </div>
 
+    <div class="card" id="guild-config-card">
+      <h3>Guild Configuration</h3>
+
+      <div class="guild-config-header">
+        <p class="text-subtle">
+          Map a host server to clone server and enable mirroring.
+        </p>
+      </div>
+
+      <div id="guild-mapping-list" class="guild-mapping-list">
+        {# render each existing mapping #}
+        {% for m in guild_mappings %}
+        <div class="guild-card" data-id="{{ m.mapping_id }}">
+          {% set icon_src = m.original_guild_icon_url or '/static/logo.png' %}
+          <div class="guild-card-logo">
+            <img src="{{ icon_src }}" alt="" class="guild-card-logo-img">
+          </div>
+
+          <div class="guild-card-inner">
+            <div class="guild-card-main">
+              <div class="guild-card-name">
+                <div class="guild-card-name-title" title="{{ m.mapping_name|e }}">
+                  {{ m.mapping_name }}
+                </div>
+                <div class="guild-card-name-meta"></div>
+              </div>
+
+              <div class="guild-card-actions">
+                <button class="btn-icon edit-mapping-btn" data-id="{{ m.mapping_id }}"
+                  aria-label="Edit mapping">⚙</button>
+                <button class="btn-icon delete-mapping-btn" data-id="{{ m.mapping_id }}"
+                  aria-label="Delete mapping">🗑</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+
+      </div>
+    </div>
+
+
+
+    {# tips for filters UI #}
     {% set FILTER_TIPS = {
     "wl_categories": "Host category IDs to whitelist. Only these categories (and their channels) are cloned.",
     "wl_channels": "Host channel IDs to whitelist. Only these channels (and their linked categories) will be cloned.",
@@ -365,15 +338,20 @@
         <details class="info-details">
           <summary>Info</summary>
           <div class="info-content">
-            <p><strong>Whitelist (allow-list):</strong> If <em>any</em> IDs are listed, <em>only</em> those
-              categories/channels are cloned. Leave <em>both</em> whitelist lists empty to disable whitelist mode.</p>
+            <p><strong>Whitelist (allow-list):</strong> If <em>any</em> IDs are listed,
+              <em>only</em> those categories/channels are cloned. Leave <em>both</em>
+              whitelist lists empty to disable whitelist mode.
+            </p>
+
             <p><strong>Excluded (deny-list):</strong> Anything listed here is dropped.</p>
+
             <p><strong>Precedence:</strong></p>
             <ol>
               <li><strong>Channel whitelist</strong> &gt; channel exclude</li>
               <li><strong>Channel exclude</strong> &gt; category whitelist</li>
               <li><strong>Category whitelist</strong> &gt; category exclude</li>
             </ol>
+
             <p><strong>IDs:</strong> Use IDs from the <em>host (source) guild</em>, not the clone.</p>
           </div>
         </details>
@@ -484,6 +462,89 @@
           <button type="button" id="confirm-cancel" class="btn btn-ghost">Cancel</button>
           <button type="button" id="confirm-okay" class="btn btn-ghost">Delete</button>
         </div>
+      </div>
+    </div>
+
+    <div id="mapping-modal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="mapping-title">
+        <div class="modal-header">
+          <h4 id="mapping-title" class="modal-title">Guild Mapping</h4>
+          <button type="button" id="mapping-close" class="icon-btn verify-close" aria-label="Close">✕</button>
+        </div>
+
+        <form id="mapping-form" class="padded" autocomplete="off">
+          <input type="hidden" id="map_mapping_id" name="mapping_id" />
+
+          <div class="field">
+            <label for="map_mapping_name" class="has-tip">
+              <span class="label-text">Mapping Name</span>
+              <button type="button" class="info-dot" aria-label="What is Mapping Name?"
+                aria-describedby="tip-mapping_name"></button>
+              <span id="tip-mapping_name" role="tooltip" class="tip-bubble">
+                A friendly label for this clone pair. Shown on the dashboard cards.
+              </span>
+            </label>
+            <input type="text" id="map_mapping_name" name="mapping_name" maxlength="64" required />
+          </div>
+
+          <div class="grid">
+            <div class="field">
+              <label for="map_original_guild_id" class="has-tip">
+                <span class="label-text">HOST_GUILD_ID</span>
+                <button type="button" class="info-dot" aria-label="What is HOST_GUILD_ID?"
+                  aria-describedby="tip-HOST_GUILD_ID"></button>
+                <span id="tip-HOST_GUILD_ID" role="tooltip" class="tip-bubble">
+                  {{ FIELD_TIPS['HOST_GUILD_ID'] }}
+                </span>
+              </label>
+              <input type="text" id="map_original_guild_id" name="original_guild_id" inputmode="numeric" required />
+            </div>
+
+            <div class="field">
+              <label for="map_cloned_guild_id" class="has-tip">
+                <span class="label-text">CLONE_GUILD_ID</span>
+                <button type="button" class="info-dot" aria-label="What is CLONE_GUILD_ID?"
+                  aria-describedby="tip-CLONE_GUILD_ID"></button>
+                <span id="tip-CLONE_GUILD_ID" role="tooltip" class="tip-bubble">
+                  {{ FIELD_TIPS['CLONE_GUILD_ID'] }}
+                </span>
+              </label>
+              <input type="text" id="map_cloned_guild_id" name="cloned_guild_id" inputmode="numeric" required />
+            </div>
+
+            {% for k in mapping_bool_keys %}
+            <div class="field">
+              <label for="map_{{ k }}" class="has-tip">
+                <span class="label-text">{{ k }}</span>
+                {% if FIELD_TIPS.get(k) %}
+                <button type="button" class="info-dot" aria-label="What is {{ k }}?"
+                  aria-describedby="tip-{{ k }}"></button>
+                <span id="tip-{{ k }}" role="tooltip" class="tip-bubble">
+                  {{ FIELD_TIPS[k] }}
+                </span>
+                {% endif %}
+              </label>
+              <div class="select">
+                <select id="map_{{ k }}" name="{{ k }}">
+                  <option value="True">True</option>
+                  <option value="False">False</option>
+                </select>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+
+          <div class="btns">
+            <button class="btn btn-ghost" type="submit" id="mapping-save-btn">
+              Save Mapping
+            </button>
+            <button class="btn btn-ghost" type="button" id="mapping-cancel-btn">
+              Cancel
+            </button>
+          </div>
+        </form>
       </div>
     </div>
 

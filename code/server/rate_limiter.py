@@ -7,7 +7,6 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-
 import asyncio, time
 from enum import Enum
 from typing import Tuple, Dict, Optional
@@ -52,14 +51,12 @@ class RateLimiter:
             )
 
             if self._allowance < 1.0:
-
                 wait = (1.0 - self._allowance) * (self._time_window / self._max_rate)
                 if wait > 0:
                     await asyncio.sleep(wait)
                 self._last_check = time.monotonic()
                 self._allowance = 0.0
             else:
-
                 self._allowance -= 1.0
 
     def backoff(self, seconds: float):
@@ -72,10 +69,6 @@ class RateLimiter:
         self._cooldown_until = 0.0
 
     def relax(self, factor: float = 0.5):
-        """
-        Reduce the remaining cooldown by 'factor' (50% by default).
-        factor=0 clears it immediately, factor=1 leaves it unchanged.
-        """
         if factor <= 0:
             self._cooldown_until = 0.0
             return
@@ -102,15 +95,24 @@ class RateLimitManager:
             ActionType.EMOJI: (1, 60.0),
             ActionType.STICKER_CREATE: (1, 60.0),
         }
-        self._limiters: Dict[ActionType, RateLimiter] = {
-            a: RateLimiter(*cfg[a]) for a in cfg if a is not ActionType.WEBHOOK_MESSAGE
-        }
+        self._cfg = cfg
+
         self._webhook_config = cfg[ActionType.WEBHOOK_MESSAGE]
         self._webhook_limiters: Dict[str, RateLimiter] = {}
 
-    def _get(self, action: ActionType, key: str | None = None) -> Optional[RateLimiter]:
-        if action is ActionType.WEBHOOK_MESSAGE:
+        self._scoped_limiters: Dict[ActionType, Dict[str, RateLimiter]] = {
+            a: {} for a in cfg if a is not ActionType.WEBHOOK_MESSAGE
+        }
 
+    @staticmethod
+    def _scope_key(key: Optional[str]) -> str:
+
+        return str(key) if key is not None else "GLOBAL"
+
+    def _get(
+        self, action: ActionType, key: Optional[str] = None
+    ) -> Optional[RateLimiter]:
+        if action is ActionType.WEBHOOK_MESSAGE:
             if key is None:
                 return None
             lim = self._webhook_limiters.get(key)
@@ -120,28 +122,54 @@ class RateLimitManager:
                 self._webhook_limiters[key] = lim
             return lim
 
-        return self._limiters.get(action)
+        scope = self._scope_key(key)
+        bucket = self._scoped_limiters.get(action)
+        if bucket is None:
+            return None
+        lim = bucket.get(scope)
+        if not lim:
+            rate, window = self._cfg[action]
+            lim = RateLimiter(rate, window)
+            bucket[scope] = lim
+        return lim
 
-    async def acquire(self, action: ActionType, key: str = None):
+    async def acquire(self, action: ActionType, key: str | None = None):
         lim = self._get(action, key)
         if lim:
             await lim.acquire()
+
+    async def acquire_for_guild(self, action: ActionType, clone_guild_id: int):
+        await self.acquire(action, key=str(int(clone_guild_id)))
 
     def penalize(self, action: ActionType, seconds: float, key: str | None = None):
         lim = self._get(action, key)
         if lim:
             lim.backoff(seconds)
 
+    def penalize_for_guild(
+        self, action: ActionType, seconds: float, clone_guild_id: int
+    ):
+        self.penalize(action, seconds, key=str(int(clone_guild_id)))
+
     def relax(self, action: ActionType, factor: float = 0.5, key: str | None = None):
         lim = self._get(action, key)
         if lim:
             lim.relax(factor)
+
+    def relax_for_guild(self, action: ActionType, factor: float, clone_guild_id: int):
+        self.relax(action, factor, key=str(int(clone_guild_id)))
 
     def reset(self, action: ActionType, key: str | None = None):
         lim = self._get(action, key)
         if lim:
             lim.reset()
 
+    def reset_for_guild(self, action: ActionType, clone_guild_id: int):
+        self.reset(action, key=str(int(clone_guild_id)))
+
     def remaining(self, action: ActionType, key: str | None = None) -> float:
         lim = self._get(action, key)
         return lim.remaining_cooldown() if lim else 0.0
+
+    def remaining_for_guild(self, action: ActionType, clone_guild_id: int) -> float:
+        return self.remaining(action, key=str(int(clone_guild_id)))

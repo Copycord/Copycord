@@ -12,6 +12,7 @@ import asyncio
 import logging
 from typing import List, Dict, Optional
 import discord
+from common.common_helpers import resolve_mapping_settings
 
 
 class SitemapService:
@@ -45,6 +46,28 @@ class SitemapService:
         self.logger = logger or logging.getLogger("client.sitemap")
         self._debounce_task: asyncio.Task | None = None
 
+    def _mapped_original_ids(self) -> list[int]:
+        """All original (host) guild IDs from guild_mappings."""
+        try:
+
+            return list(self.db.get_all_original_guild_ids())
+        except Exception:
+            return []
+
+    def _iter_mapped_guilds(self):
+        """Yield discord.Guild objects for each mapped origin the bot can see."""
+        ids = self._mapped_original_ids()
+        if not ids:
+
+            g = self._pick_guild()
+            if g:
+                yield g
+            return
+        for gid in ids:
+            g = self.bot.get_guild(int(gid))
+            if g:
+                yield g
+
     def schedule_sync(self, delay: float = 1.0) -> None:
         """Debounced sitemap send."""
         if self._debounce_task is None:
@@ -60,17 +83,29 @@ class SitemapService:
             g = self.bot.guilds[0]
         return g
 
-    async def build_and_send(self) -> None:
-        """Build, filter, and send the sitemap via websocket."""
-        sitemap = await self.build()
-        if not sitemap:
-            return
-        await self.ws.send({"type": "sitemap", "data": sitemap})
-        self.logger.info("[📩] Sitemap sent to Server")
+    async def build_and_send_all(self) -> None:
+        """Build and send a sitemap for each mapped host guild."""
+        sent = 0
 
-    async def build(self) -> Dict:
-        """Build the raw sitemap, then filter it per config."""
-        guild = self._pick_guild()
+        async def _send_one(g: "discord.Guild"):
+            sm = await self.build_for_guild(g)
+            if sm:
+                await self.ws.send({"type": "sitemap", "data": sm})
+                self.logger.info(
+                    "[📩] Sitemap sent to Server (guild=%s/%s)", g.name, g.id
+                )
+
+        for g in self._iter_mapped_guilds():
+            try:
+                await _send_one(g)
+                sent += 1
+            except Exception as e:
+                self.logger.exception(
+                    "[sitemap] failed to send for guild %s (%s): %s", g.name, g.id, e
+                )
+
+    async def build_for_guild(self, guild: "discord.Guild") -> Dict:
+        """Build the raw sitemap for a specific guild, then filter it per config."""
         self.logger.debug(
             "[sitemap] using guild %s (%s)%s",
             getattr(guild, "name", "?"),
@@ -85,9 +120,13 @@ class SitemapService:
                 else " [fallback]"
             ),
         )
+        settings = resolve_mapping_settings(
+            self.db, self.config, original_guild_id=guild.id
+        )
         if not guild:
             self.logger.warning("[⛔] No accessible guild found to build a sitemap.")
             return {
+                "guild": {"id": None, "name": None},
                 "categories": [],
                 "standalone_channels": [],
                 "forums": [],
@@ -118,11 +157,14 @@ class SitemapService:
                 u = getattr(asset, "url", None) if asset else None
             return str(u) if u else ""
 
-        try:
-            fetched_stickers = await guild.fetch_stickers()
-        except Exception as e:
-            self.logger.warning("[🎟️] Could not fetch stickers: %s", e)
-            fetched_stickers = list(getattr(guild, "stickers", []))
+        if settings.get("CLONE_STICKER", True):
+            try:
+                fetched_stickers = await guild.fetch_stickers()
+            except Exception as e:
+                self.logger.warning("[🎟️] Could not fetch stickers: %s", e)
+                fetched_stickers = list(getattr(guild, "stickers", []))
+        else:
+            fetched_stickers = []
 
         try:
             guild_sticker_type_val = getattr(discord.StickerType, "guild").value
@@ -149,31 +191,54 @@ class SitemapService:
             )
 
         sitemap: Dict = {
+            "guild": {
+                "id": guild.id,
+                "name": guild.name,
+                "owner_id": getattr(getattr(guild, "owner", None), "id", None),
+                "icon": (
+                    str(getattr(guild, "icon", ""))
+                    if getattr(guild, "icon", None)
+                    else None
+                ),
+            },
             "categories": [],
             "standalone_channels": [],
             "forums": [],
             "threads": [],
-            "emojis": [
-                {"id": e.id, "name": e.name, "url": str(e.url), "animated": e.animated}
-                for e in guild.emojis
-            ],
+            "emojis": (
+                []
+                if not settings.get("CLONE_EMOJI", True)
+                else [
+                    {
+                        "id": e.id,
+                        "name": e.name,
+                        "url": str(e.url),
+                        "animated": e.animated,
+                    }
+                    for e in guild.emojis
+                ]
+            ),
             "stickers": stickers_payload,
-            "roles": [
-                {
-                    "id": r.id,
-                    "name": r.name,
-                    "permissions": r.permissions.value,
-                    "color": (
-                        r.color.value if hasattr(r.color, "value") else int(r.color)
-                    ),
-                    "hoist": r.hoist,
-                    "mentionable": r.mentionable,
-                    "managed": r.managed,
-                    "everyone": (r == r.guild.default_role),
-                    "position": r.position,
-                }
-                for r in guild.roles
-            ],
+            "roles": (
+                []
+                if not settings.get("CLONE_ROLES", True)
+                else [
+                    {
+                        "id": r.id,
+                        "name": r.name,
+                        "permissions": r.permissions.value,
+                        "color": (
+                            r.color.value if hasattr(r.color, "value") else int(r.color)
+                        ),
+                        "hoist": r.hoist,
+                        "mentionable": r.mentionable,
+                        "managed": r.managed,
+                        "everyone": (r == r.guild.default_role),
+                        "position": r.position,
+                    }
+                    for r in guild.roles
+                ]
+            ),
             "community": {
                 "enabled": "COMMUNITY" in guild.features,
                 "rules_channel_id": (
@@ -187,6 +252,8 @@ class SitemapService:
             },
         }
 
+        include_overwrites = settings.get("MIRROR_CHANNEL_PERMISSIONS", False)
+
         for cat in guild.categories:
             channels = []
             for ch in cat.channels:
@@ -198,13 +265,12 @@ class SitemapService:
                             "type": ch.type.value,
                             **(
                                 {"overwrites": self._serialize_role_overwrites(ch)}
-                                if getattr(
-                                    self.config, "MIRROR_CHANNEL_PERMISSIONS", False
-                                )
+                                if include_overwrites
                                 else {}
                             ),
                         }
                     )
+
             sitemap["categories"].append(
                 {
                     "id": cat.id,
@@ -212,7 +278,7 @@ class SitemapService:
                     "channels": channels,
                     **(
                         {"overwrites": self._serialize_role_overwrites(cat)}
-                        if getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False)
+                        if include_overwrites
                         else {}
                     ),
                 }
@@ -225,7 +291,7 @@ class SitemapService:
                 "type": ch.type.value,
                 **(
                     {"overwrites": self._serialize_role_overwrites(ch)}
-                    if getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False)
+                    if include_overwrites
                     else {}
                 ),
             }
@@ -274,6 +340,42 @@ class SitemapService:
 
         sitemap = self._filter_sitemap(sitemap)
         return sitemap
+
+    async def build(self) -> Dict:
+        """(Legacy) Build for a single guild using _pick_guild()."""
+        guild = self._pick_guild()
+        self.logger.debug(
+            "[sitemap] using guild %s (%s)%s",
+            getattr(guild, "name", "?"),
+            getattr(guild, "id", "?"),
+            (
+                ""
+                if (
+                    self.host_guild_id
+                    and guild
+                    and getattr(guild, "id", None) == self.host_guild_id
+                )
+                else " [fallback]"
+            ),
+        )
+        if not guild:
+            self.logger.warning("[⛔] No accessible guild found to build a sitemap.")
+            return {
+                "guild": {"id": None, "name": None},
+                "categories": [],
+                "standalone_channels": [],
+                "forums": [],
+                "threads": [],
+                "emojis": [],
+                "stickers": [],
+                "roles": [],
+                "community": {
+                    "enabled": False,
+                    "rules_channel_id": None,
+                    "public_updates_channel_id": None,
+                },
+            }
+        return await self.build_for_guild(guild)
 
     def reload_filters_and_resend(self):
         """
@@ -375,7 +477,7 @@ class SitemapService:
     async def _debounced(self, delay: float):
         try:
             await asyncio.sleep(delay)
-            await self.build_and_send()
+            await self.build_and_send_all()
         finally:
             self._debounce_task = None
 

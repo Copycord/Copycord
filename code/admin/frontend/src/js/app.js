@@ -2,10 +2,17 @@
   let uiSock = null;
   let toggleLocked = false;
   const RUNTIME_CACHE = {};
+  let GUILD_MAPPINGS = [];
+  let lastRunning = null;
+  let tooltipEl = null;
+  let cModal, cTitle, cBody, cBtnOk, cBtnX, cBtnCa, cBack;
+  let confirmResolve = null;
+  let confirmReject = null;
   const UPTIME_KEY = (role) => `cpc:uptime:${role}`;
 
   let lastFocusLog = null;
   let lastFocusConfirm = null;
+  let lastFocusMapping = null;
 
   function setInert(el, on) {
     if (!el) return;
@@ -40,20 +47,20 @@
   async function refreshFooterVersion() {
     const wrap = document.getElementById("footer-version");
     if (!wrap) return;
-  
+
     const link = document.getElementById("footer-version-link");
     const plain = document.getElementById("footer-version-text");
-  
+
     try {
       const res = await fetch("/version", { credentials: "same-origin" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const v = await res.json();
-  
+
       if (v.update_available) {
         if (link) {
           link.textContent = v.current || "dev";
-          link.classList.add("update-flash");  
-          link.href = v.url;              
+          link.classList.add("update-flash");
+          link.href = v.url;
           link.setAttribute("aria-label", "New update available");
         } else if (plain) {
           plain.textContent = v.current ? `Version ${v.current}` : "dev";
@@ -61,7 +68,7 @@
           plain.style.cursor = "pointer";
           plain.onclick = () => window.open(v.url, "_blank", "noopener");
         }
-  
+
         const notice = document.getElementById("update-notice");
         if (notice) {
           notice.style.display = "block";
@@ -72,7 +79,7 @@
         if (link) {
           link.textContent = v.current || "dev";
           link.classList.remove("update-flash");
-  
+
           const def = link.getAttribute("data-default-href");
           link.href =
             def ||
@@ -84,7 +91,7 @@
           plain.onclick = null;
           plain.style.cursor = "";
         }
-  
+
         const notice = document.getElementById("update-notice");
         if (notice) {
           notice.style.display = "none";
@@ -95,7 +102,6 @@
       console.debug("Footer version check failed:", err);
     }
   }
-  
 
   (function initToasts() {
     function ensureToastRoot() {
@@ -353,6 +359,91 @@
   let uiSockTimer = null;
   let currentInterval = 4000;
 
+  function ensureTooltipEl() {
+    if (!tooltipEl) {
+      tooltipEl = document.createElement("div");
+      tooltipEl.className = "lock-tooltip";
+      tooltipEl.innerHTML = `
+      <div class="lock-tooltip-text">Stop the bot to edit server mappings</div>
+      <div class="lock-tooltip-arrow"></div>
+    `;
+      document.body.appendChild(tooltipEl);
+    }
+    return tooltipEl;
+  }
+
+  function showTooltip(x, y) {
+    const tip = ensureTooltipEl();
+
+    const offsetY = 16;
+    tip.style.left = x + "px";
+    tip.style.top = y - offsetY + "px";
+    tip.style.opacity = "1";
+  }
+
+  function hideTooltip() {
+    if (tooltipEl) {
+      tooltipEl.style.opacity = "0";
+    }
+  }
+
+  function attachLockOverlay(card) {
+    if (card.querySelector(".guild-card-lock-overlay")) return;
+
+    const cs = window.getComputedStyle(card);
+    if (cs.position === "static") {
+      card.style.position = "relative";
+    }
+
+    const overlay = document.createElement("div");
+    overlay.className = "guild-card-lock-overlay";
+
+    const kill = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    overlay.addEventListener("click", kill);
+    overlay.addEventListener("mousedown", kill);
+    overlay.addEventListener("mouseup", kill);
+    overlay.addEventListener("touchstart", kill);
+    overlay.addEventListener("touchend", kill);
+
+    overlay.addEventListener("mouseenter", (e) => {
+      showTooltip(e.clientX, e.clientY);
+    });
+
+    overlay.addEventListener("mousemove", (e) => {
+      showTooltip(e.clientX, e.clientY);
+    });
+
+    overlay.addEventListener("mouseleave", () => {
+      hideTooltip();
+    });
+
+    card.appendChild(overlay);
+  }
+
+  function detachLockOverlay(card) {
+    const overlay = card.querySelector(".guild-card-lock-overlay");
+    if (overlay) overlay.remove();
+
+    // but it's harmless to leave it relative.
+  }
+
+  function setGuildCardsLocked(running) {
+    const cards = document.querySelectorAll("#guild-mapping-list .guild-card");
+    cards.forEach((card) => {
+      if (running) {
+        card.classList.add("locked");
+        attachLockOverlay(card);
+      } else {
+        card.classList.remove("locked");
+        detachLockOverlay(card);
+      }
+    });
+    if (!running) hideTooltip();
+  }
+
   async function fetchAndRenderStatus() {
     try {
       const res = await fetch("/api/status", { credentials: "same-origin" });
@@ -364,6 +455,9 @@
       updateToggleButton(data);
 
       const running = getCurrentRunning(data);
+
+      setGuildCardsLocked(running);
+
       if (lastRunning === null) lastRunning = running;
 
       if (toggleLocked && running !== lastRunning) {
@@ -477,6 +571,8 @@
     setInert(modal, false);
     modal.setAttribute("aria-hidden", "false");
 
+    document.body.classList.add("body-lock-scroll");
+
     LOG_LINES = [];
     LOG_QUERY = "";
     renderLogView();
@@ -484,7 +580,6 @@
     const qInput = document.getElementById("log-search-input");
     if (qInput) {
       qInput.value = "";
-
       setTimeout(() => qInput.focus(), 0);
 
       let t;
@@ -571,6 +666,9 @@
     setInert(modal, true);
     modal.classList.remove("show");
     modal.setAttribute("aria-hidden", "true");
+
+    document.body.classList.remove("body-lock-scroll");
+
     if (lastFocusLog && typeof lastFocusLog.focus === "function") {
       try {
         lastFocusLog.focus();
@@ -787,16 +885,16 @@
 
   function initCollapsibleCards() {
     const cards = document.querySelectorAll(".card");
-  
+
     cards.forEach((card, idx) => {
       const h = card.querySelector(":scope > h3");
       if (!h) return;
-  
+
       const titleBar = document.createElement("div");
       titleBar.className = "card-titlebar";
       h.parentNode.insertBefore(titleBar, h);
       titleBar.appendChild(h);
-  
+
       const body =
         card.querySelector(":scope > .card-body") ||
         (() => {
@@ -808,13 +906,13 @@
           }
           return b;
         })();
-  
+
       const slug = (h.textContent || `panel-${idx}`)
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/(^-|-$)/g, "");
       body.id = body.id || `card-body-${slug}`;
-  
+
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "btn btn-ghost btn-icon card-toggle";
@@ -823,10 +921,10 @@
       btn.setAttribute("aria-label", "Collapse panel");
       btn.innerHTML = `<span class="chev" aria-hidden="true">▾</span>`;
       titleBar.appendChild(btn);
-  
+
       const key = `cpc.collapsed.${slug}`;
       applyCollapse(card, btn, body, localStorage.getItem(key) === "1");
-  
+
       const toggle = () => {
         const nowCollapsed = !card.classList.contains("collapsed");
         applyCollapse(card, btn, body, nowCollapsed);
@@ -835,24 +933,26 @@
       btn.addEventListener("click", toggle);
       titleBar.addEventListener("dblclick", toggle);
     });
-  
+
     function applyCollapse(card, btn, body, collapsed) {
-      // Keep the card’s layout intact
       card.classList.toggle("collapsed", collapsed);
-      // Hide only the body
+
       body.hidden = !!collapsed;
-    
-      // ARIA state
+
       btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      btn.setAttribute("aria-label", collapsed ? "Expand panel" : "Collapse panel");
-    
-      // Belt-and-suspenders: ensure full width while collapsed too
+      btn.setAttribute(
+        "aria-label",
+        collapsed ? "Expand panel" : "Collapse panel"
+      );
+
       card.style.width = "100%";
       card.style.maxWidth = "100%";
       card.style.minWidth = "100%";
-    
-      // Notify listeners
-      const ev = new CustomEvent("card-toggled", { detail: { collapsed }, bubbles: true });
+
+      const ev = new CustomEvent("card-toggled", {
+        detail: { collapsed },
+        bubbles: true,
+      });
       card.dispatchEvent(ev);
     }
   }
@@ -1100,23 +1200,23 @@
     return new URLSearchParams(fd).toString();
   }
 
-  const REQUIRED_KEYS = [
-    "SERVER_TOKEN",
-    "CLIENT_TOKEN",
-    "CLONE_GUILD_ID",
-  ];
+  const REQUIRED_KEYS = ["SERVER_TOKEN", "CLIENT_TOKEN"];
   let cfgValidated = false;
 
   function configState() {
     const get = (id) => (document.getElementById(id)?.value || "").trim();
     const vals = Object.fromEntries(REQUIRED_KEYS.map((k) => [k, get(k)]));
-    const idsOK = /^\d+$/.test(vals.CLONE_GUILD_ID);
-    const ok = !!(vals.SERVER_TOKEN && vals.CLIENT_TOKEN && idsOK);
+
+    const hasTokens = !!(vals.SERVER_TOKEN && vals.CLIENT_TOKEN);
+    const hasAtLeastOneMapping =
+      Array.isArray(GUILD_MAPPINGS) && GUILD_MAPPINGS.length > 0;
+
+    const ok = hasTokens && hasAtLeastOneMapping;
 
     const missing = [];
     if (!vals.SERVER_TOKEN) missing.push("SERVER_TOKEN");
     if (!vals.CLIENT_TOKEN) missing.push("CLIENT_TOKEN");
-    if (!/^\d+$/.test(vals.CLONE_GUILD_ID)) missing.push("CLONE_GUILD_ID");
+    if (!hasAtLeastOneMapping) missing.push("GUILD_MAPPINGS");
 
     return { ok, missing };
   }
@@ -1152,23 +1252,400 @@
     const running =
       form.action.endsWith("/stop") ||
       btn.textContent.trim().toLowerCase() === "stop";
+
     const blockStart = !ok && !running;
     btn.dataset.invalid = blockStart ? "1" : "0";
     btn.title = blockStart
-      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, CLONE_GUILD_ID to start."
+      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, and at least one Guild Mapping to start."
       : "";
     btn.disabled = !!toggleLocked || blockStart;
   }
 
-  document.addEventListener("DOMContentLoaded", () => {
-    const cModal = document.getElementById("confirm-modal");
-    const cTitle = document.getElementById("confirm-title");
-    const cBody = document.getElementById("confirm-body");
-    const cBtnOk = document.getElementById("confirm-okay");
-    const cBtnX = document.getElementById("confirm-close");
-    const cBtnCa = document.getElementById("confirm-cancel");
-    const cBack = cModal ? cModal.querySelector(".modal-backdrop") : null;
+  function collectMappingForm() {
+    const id = document.getElementById("map_mapping_id").value.trim() || null;
+    const mapping_name = document
+      .getElementById("map_mapping_name")
+      .value.trim();
 
+    const original_guild_id = document
+      .getElementById("map_original_guild_id")
+      .value.trim();
+
+    const cloned_guild_id = document
+      .getElementById("map_cloned_guild_id")
+      .value.trim();
+
+    const settings = {};
+    document
+      .querySelectorAll("#mapping-form select[id^='map_']")
+      .forEach((sel) => {
+        const key = sel.id.replace(/^map_/, "");
+        const val = sel.value;
+        settings[key] = String(val).toLowerCase() === "true";
+      });
+
+    return {
+      mapping_id: id,
+      mapping_name,
+      original_guild_id,
+      cloned_guild_id,
+      settings,
+    };
+  }
+
+  function closeMappingModal() {
+    const modal = document.getElementById("mapping-modal");
+    if (!modal) return;
+
+    if (modal._outsideClickHandler) {
+      modal.removeEventListener("mousedown", modal._outsideClickHandler);
+      modal._outsideClickHandler = null;
+    }
+
+    // blur active element if it's still inside the modal
+    const active = document.activeElement;
+    if (active && modal.contains(active)) {
+      try {
+        active.blur();
+      } catch {}
+    }
+
+    setInert(modal, true);
+    modal.classList.remove("show");
+    modal.setAttribute("aria-hidden", "true");
+
+    document.body.classList.remove("body-lock-scroll");
+
+    if (lastFocusMapping && typeof lastFocusMapping.focus === "function") {
+      try {
+        lastFocusMapping.focus();
+      } catch {}
+    }
+    lastFocusMapping = null;
+  }
+
+  function openMappingModal(mapping) {
+    const modal = document.getElementById("mapping-modal");
+    if (!modal) return;
+
+    lastFocusMapping = document.activeElement;
+
+    const idInput = document.getElementById("map_mapping_id");
+    const nameInput = document.getElementById("map_mapping_name");
+    const hostInput = document.getElementById("map_original_guild_id");
+    const cloneInput = document.getElementById("map_cloned_guild_id");
+
+    if (idInput) idInput.value = (mapping && mapping.mapping_id) || "";
+    if (nameInput) nameInput.value = (mapping && mapping.mapping_name) || "";
+    if (hostInput)
+      hostInput.value = (mapping && mapping.original_guild_id) || "";
+    if (cloneInput)
+      cloneInput.value = (mapping && mapping.cloned_guild_id) || "";
+
+    document
+      .querySelectorAll("#mapping-form select[id^='map_']")
+      .forEach((sel) => {
+        const key = sel.id.replace(/^map_/, "");
+
+        const rawVal =
+          mapping && mapping.settings ? mapping.settings[key] : undefined;
+
+        let normalized;
+        if (typeof rawVal === "boolean") {
+          normalized = rawVal;
+        } else if (typeof rawVal === "string") {
+          const lower = rawVal.toLowerCase();
+          if (lower === "true") {
+            normalized = true;
+          } else if (lower === "false") {
+            normalized = false;
+          } else {
+            normalized = true;
+          }
+        } else {
+          normalized = true;
+        }
+
+        sel.value = normalized ? "True" : "False";
+
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+
+    setInert(modal, false);
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+
+    document.body.classList.add("body-lock-scroll");
+
+    const cancelBtn = document.getElementById("mapping-cancel-btn");
+    if (cancelBtn) {
+      cancelBtn.onclick = closeMappingModal;
+    }
+
+    const headerCloseBtn = document.getElementById("mapping-close");
+    if (headerCloseBtn) {
+      headerCloseBtn.onclick = closeMappingModal;
+    }
+
+    const firstField =
+      nameInput || document.getElementById("mapping-save-btn") || modal;
+    setTimeout(() => {
+      if (firstField && typeof firstField.focus === "function") {
+        try {
+          firstField.focus();
+        } catch {}
+      }
+    }, 0);
+
+    modal._outsideClickHandler = function (evt) {
+      const contentEl = modal.querySelector(".modal-content");
+      if (contentEl && !contentEl.contains(evt.target)) {
+        closeMappingModal();
+      }
+    };
+    modal.addEventListener("mousedown", modal._outsideClickHandler);
+  }
+
+  window.openMappingModal = openMappingModal;
+  window.closeMappingModal = closeMappingModal;
+
+  async function saveMappingFromModal() {
+    const data = collectMappingForm();
+    const isEdit = !!data.mapping_id;
+
+    const url = isEdit
+      ? `/api/guild-mappings/${encodeURIComponent(data.mapping_id)}`
+      : "/api/guild-mappings";
+    const method = isEdit ? "PATCH" : "POST";
+
+    const payload = {
+      mapping_name: data.mapping_name,
+      original_guild_id: data.original_guild_id,
+      cloned_guild_id: data.cloned_guild_id,
+
+      original_guild_name: "",
+      cloned_guild_name: "",
+      settings: data.settings,
+    };
+
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      console.warn("save mapping failed");
+      return;
+    }
+
+    await refreshGuildMappings();
+    closeMappingModal();
+    validateConfigAndToggle({ decorate: false });
+  }
+
+  function closeConfirm() {
+    if (!cModal) return;
+
+    // blur focus if we're still inside the modal
+    const active = document.activeElement;
+    if (active && cModal.contains(active)) {
+      try {
+        active.blur();
+      } catch {}
+    }
+
+    setInert(cModal, true);
+    cModal.classList.remove("show");
+    cModal.setAttribute("aria-hidden", "true");
+
+    document.body.classList.remove("body-lock-scroll");
+
+    if (lastFocusConfirm && typeof lastFocusConfirm.focus === "function") {
+      try {
+        lastFocusConfirm.focus();
+      } catch {}
+    }
+    lastFocusConfirm = null;
+
+    confirmResolve = null;
+    confirmReject = null;
+  }
+
+  function openConfirm({
+    title,
+    body,
+    confirmText = "OK",
+    confirmClass = "btn-ghost",
+    onConfirm,
+    showCancel = true,
+  }) {
+    if (!cModal) return;
+
+    confirmResolve = () => {
+      try {
+        onConfirm && onConfirm();
+      } finally {
+        closeConfirm();
+      }
+    };
+
+    confirmReject = () => closeConfirm();
+    lastFocusConfirm = document.activeElement;
+
+    cTitle.textContent = title || "Confirm";
+    cBody.textContent = body || "Are you sure?";
+    cBtnOk.textContent = confirmText || "OK";
+
+    cBtnOk.classList.remove(
+      "btn-primary",
+      "btn-outline",
+      "btn-ghost",
+      "btn-danger"
+    );
+    cBtnOk.classList.add(confirmClass || "btn-primary");
+
+    if (cBtnCa) {
+      if (showCancel) {
+        cBtnCa.removeAttribute("hidden");
+      } else {
+        cBtnCa.setAttribute("hidden", "");
+      }
+    }
+
+    cModal.classList.add("show");
+    setInert(cModal, false);
+    cModal.setAttribute("aria-hidden", "false");
+
+    document.body.classList.add("body-lock-scroll");
+
+    setTimeout(() => (cBtnOk || cModal).focus(), 0);
+  }
+
+  function renderGuildMappings() {
+    const listEl = document.getElementById("guild-mapping-list");
+    if (!listEl) return;
+    listEl.innerHTML = "";
+
+    // Fallback logo for when a guild doesn't have an icon
+    const LOGO_SRC = "/static/logo.png";
+
+    GUILD_MAPPINGS.forEach((m) => {
+      const safeName = (m.mapping_name || "").replace(/</g, "&lt;");
+
+      // Prefer original guild's icon from DB, otherwise use fallback logo
+      const iconSrc =
+        (m.original_guild_icon_url && m.original_guild_icon_url.trim()) ||
+        LOGO_SRC;
+
+      const cardHtml = `
+      <div class="guild-card" data-id="${m.mapping_id}">
+        <!-- watermark icon / logo layer -->
+        <div class="guild-card-logo">
+          <img src="${iconSrc}" alt="">
+        </div>
+
+        <!-- actual content above watermark -->
+        <div class="guild-card-inner">
+          <div class="guild-card-main">
+            <div class="guild-card-name">
+              <div class="guild-card-name-title" title="${safeName}">
+                ${safeName}
+              </div>
+              <div class="guild-card-name-meta"></div>
+            </div>
+
+            <div class="guild-card-actions">
+              <button class="btn-icon edit-mapping-btn"
+                      data-id="${m.mapping_id}"
+                      aria-label="Edit mapping">⚙</button>
+              <button class="btn-icon delete-mapping-btn"
+                      data-id="${m.mapping_id}"
+                      aria-label="Delete mapping">🗑</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+      listEl.insertAdjacentHTML("beforeend", cardHtml);
+    });
+
+    const newCardHtml = `
+    <div class="guild-card guild-card--new"
+         id="new-mapping-card"
+         role="button"
+         tabindex="0"
+         aria-label="Add new mapping">
+      <div class="new-card-inner">
+        <div class="new-card-plus">+</div>
+      </div>
+    </div>
+  `;
+    listEl.insertAdjacentHTML("beforeend", newCardHtml);
+
+    listEl.querySelectorAll(".edit-mapping-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-id");
+        const found = GUILD_MAPPINGS.find((x) => x.mapping_id === id);
+        openMappingModal(found || null);
+      });
+    });
+
+    listEl.querySelectorAll(".delete-mapping-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.getAttribute("data-id");
+
+        openConfirm({
+          title: "Delete Mapping?",
+          body: "This will stop cloning for that pair.",
+          confirmText: "Delete",
+          confirmClass: "btn-ghost-red",
+          showCancel: true,
+          onConfirm: async () => {
+            await fetch(`/api/guild-mappings/${encodeURIComponent(id)}`, {
+              method: "DELETE",
+            });
+            await refreshGuildMappings();
+            validateConfigAndToggle({ decorate: false });
+          },
+        });
+      });
+    });
+
+    const newCardEl = document.getElementById("new-mapping-card");
+    if (newCardEl) {
+      newCardEl.addEventListener("click", () => openMappingModal(null));
+      newCardEl.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openMappingModal(null);
+        }
+      });
+    }
+  }
+
+  async function refreshGuildMappings() {
+    const res = await fetch("/api/guild-mappings", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    GUILD_MAPPINGS = data.mappings || [];
+    renderGuildMappings();
+    setGuildCardsLocked(lastRunning === true);
+    updateStartButtonOnly();
+  }
+
+  document.addEventListener("DOMContentLoaded", () => {
+    cModal = document.getElementById("confirm-modal");
+    cTitle = document.getElementById("confirm-title");
+    cBody = document.getElementById("confirm-body");
+    cBtnOk = document.getElementById("confirm-okay");
+    cBtnX = document.getElementById("confirm-close");
+    cBtnCa = document.getElementById("confirm-cancel");
+    cBack = cModal ? cModal.querySelector(".modal-backdrop") : null;
     refreshFooterVersion();
     setInterval(refreshFooterVersion, 600_000);
 
@@ -1199,97 +1676,54 @@
     attachAdminBus();
     initSlideMenu();
 
-    let confirmResolve = null,
-      confirmReject = null,
-      lastFocus = null;
-
-    function openConfirm({
-      title,
-      body,
-      confirmText = "OK",
-      confirmClass = "btn-ghost",
-      onConfirm,
-      showCancel = true,
-    }) {
-      if (!cModal) return;
-      confirmResolve = () => {
-        try {
-          onConfirm && onConfirm();
-        } finally {
-          closeConfirm();
-        }
-      };
-      confirmReject = () => closeConfirm();
-      lastFocusConfirm = document.activeElement;
-
-      cTitle.textContent = title || "Confirm";
-      cBody.textContent = body || "Are you sure?";
-      cBtnOk.textContent = confirmText || "OK";
-
-      cBtnOk.classList.remove(
-        "btn-primary",
-        "btn-outline",
-        "btn-ghost",
-        "btn-danger"
-      );
-      cBtnOk.classList.add(confirmClass || "btn-primary");
-
-      if (cBtnCa) {
-        if (showCancel) cBtnCa.removeAttribute("hidden");
-        else cBtnCa.setAttribute("hidden", "");
-      }
-
-      cModal.classList.add("show");
-      setInert(cModal, false);
-      cModal.setAttribute("aria-hidden", "false");
-
-      setTimeout(() => (cBtnOk || cModal).focus(), 0);
-    }
-
-    function closeConfirm() {
-      if (!cModal) return;
-      const active = document.activeElement;
-      if (active && cModal.contains(active)) {
-        try {
-          active.blur();
-        } catch {}
-      }
-      setInert(cModal, true);
-      cModal.classList.remove("show");
-      cModal.setAttribute("aria-hidden", "true");
-      if (lastFocusConfirm && typeof lastFocusConfirm.focus === "function") {
-        try {
-          lastFocusConfirm.focus();
-        } catch {}
-      }
-      lastFocusConfirm = null;
-      confirmResolve = null;
-      confirmReject = null;
-    }
-
     if (cBtnOk)
-      cBtnOk.addEventListener(
-        "click",
-        () => confirmResolve && confirmResolve()
-      );
+      cBtnOk.addEventListener("click", () => {
+        if (confirmResolve) confirmResolve();
+      });
+
     if (cBtnX)
-      cBtnX.addEventListener("click", () => confirmReject && confirmReject());
+      cBtnX.addEventListener("click", () => {
+        if (confirmReject) confirmReject();
+      });
+
     if (cBtnCa)
-      cBtnCa.addEventListener("click", () => confirmReject && confirmReject());
+      cBtnCa.addEventListener("click", () => {
+        if (confirmReject) confirmReject();
+      });
+
     if (cBack)
-      cBack.addEventListener("click", () => confirmReject && confirmReject());
+      cBack.addEventListener("click", () => {
+        if (confirmReject) confirmReject();
+      });
+
     document.addEventListener("keydown", (e) => {
-      if (cModal && cModal.classList.contains("show")) {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          confirmReject && confirmReject();
-        }
-        if (e.key === "Enter") {
-          e.preventDefault();
-          confirmResolve && confirmResolve();
-        }
+      const open = cModal && cModal.classList.contains("show");
+      if (!open) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (confirmReject) confirmReject();
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (confirmResolve) confirmResolve();
       }
     });
+
+    function bindNewMappingCard() {
+      const newCard = document.getElementById("new-mapping-card");
+      if (!newCard) return;
+      newCard.addEventListener("click", () => {
+        openMappingModal(null);
+      });
+      newCard.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openMappingModal(null);
+        }
+      });
+    }
+
+    bindNewMappingCard();
 
     const clearForm = document.querySelector('form[action="/logs/clear"]');
     if (clearForm) {
@@ -1390,19 +1824,23 @@
 
           if (isSuccess) {
             showToast(messages[actionPath] || "Done.", { type: "success" });
-          
-            // NEW: when stopping, mark a wipe and clear persisted backfill state
+
             if (actionPath === "/stop") {
               try {
-                // stamp a short-lived wipe flag
                 localStorage.setItem("bf:__wipe", String(Date.now()));
-                // clear persisted backfill sets so nothing rehydrates
-                ["bf:running","bf:launching","bf:pulling","bf:queued","bf:cleaning","bf:done_tasks"]
-                  .forEach((k) => localStorage.removeItem(k));
+
+                [
+                  "bf:running",
+                  "bf:launching",
+                  "bf:pulling",
+                  "bf:queued",
+                  "bf:cleaning",
+                  "bf:done_tasks",
+                ].forEach((k) => localStorage.removeItem(k));
                 sessionStorage.removeItem("bf:taskmap");
               } catch {}
             }
-          
+
             if (actionPath === "/start" || actionPath === "/stop") {
               burstStatusPoll(800, 15000, 4000);
             } else if (actionPath === "/save") {
@@ -1692,6 +2130,38 @@
 
       window.InfoDots = { init, prime };
     })();
+
+    const mapModal = document.getElementById("mapping-modal");
+    const mapClose = document.getElementById("mapping-close");
+    const mapCancel = document.getElementById("mapping-cancel-btn");
+    const mapForm = document.getElementById("mapping-form");
+    const addBtn = document.getElementById("add-mapping-btn");
+
+    if (addBtn) {
+      addBtn.addEventListener("click", () => {
+        openMappingModal(null);
+      });
+    }
+    if (mapClose) {
+      mapClose.addEventListener("click", () => {
+        closeMappingModal();
+      });
+    }
+    if (mapCancel) {
+      mapCancel.addEventListener("click", () => {
+        closeMappingModal();
+      });
+    }
+    if (mapForm) {
+      mapForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        await saveMappingFromModal();
+      });
+    }
+
+    // We can read what's already on the page (#guild-mapping-list that was
+
+    refreshGuildMappings();
   });
 
   ["server", "client"].forEach((role) => {
@@ -1717,8 +2187,6 @@
 
   function isFieldValid(key, raw) {
     const v = String(raw || "").trim();
-    if (key === "CLONE_GUILD_ID")
-      return /^\d+$/.test(v);
     return v.length > 0;
   }
 
@@ -1738,12 +2206,13 @@
     const running =
       form.action.endsWith("/stop") ||
       btn.textContent.trim().toLowerCase() === "stop";
+
     const blockStart = !ok && !running;
 
     btn.dataset.invalid = blockStart ? "1" : "0";
     btn.title = blockStart
-      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, CLONE_GUILD_ID to start."
+      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, and at least one Guild Mapping to start."
       : "";
     btn.disabled = !!toggleLocked || blockStart;
-  }  
+  }
 })();

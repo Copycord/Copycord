@@ -26,6 +26,7 @@ from common.db import DBManager
 from client.sitemap import SitemapService
 from client.message_utils import MessageUtils
 from common.websockets import WebsocketManager, AdminBus
+from common.common_helpers import resolve_mapping_settings
 from client.scraper import MemberScraper
 from client.helpers import ClientUiController
 from client.export_runners import (
@@ -76,6 +77,7 @@ class ClientListener:
     def __init__(self):
         self.config = Config(logger=logger)
         self.db = DBManager(self.config.DB_PATH)
+        self._mapped_original_ids: set[int] = set(self.db.get_all_original_guild_ids())
         raw = (self.config.HOST_GUILD_ID or "").strip()
         self.host_guild_id = int(raw) if raw.isdigit() else None
         self.blocked_keywords = self.db.get_blocked_keywords()
@@ -114,6 +116,8 @@ class ClientListener:
         self.bot.event(self.on_guild_join)
         self.bot.event(self.on_guild_remove)
         self.bot.event(self.on_guild_update)
+        self.bot.event(self.on_guild_emojis_update)
+        self.bot.event(self.on_guild_stickers_update)
         self.bus = AdminBus(
             role="client", logger=logger, admin_ws_url=self.config.ADMIN_WS_URL
         )
@@ -159,6 +163,28 @@ class ClientListener:
                 sig, lambda s=sig: asyncio.create_task(self.bot.close())
             )
 
+    def _settings_for_origin(self, guild_id: int | None) -> dict:
+        if not guild_id:
+            return self.config.default_mapping_settings()
+        return resolve_mapping_settings(
+            self.db, self.config, original_guild_id=int(guild_id)
+        )
+
+    def _is_mapped_origin(self, guild_id: int | None) -> bool:
+        try:
+            return bool(guild_id and int(guild_id) in self._mapped_original_ids)
+        except Exception:
+            return False
+
+    def _reload_mapped_ids(self) -> None:
+        try:
+            self._mapped_original_ids = set(self.db.get_all_original_guild_ids())
+            logger.debug(
+                "[🔁] Reloaded mapped origins: %s", sorted(self._mapped_original_ids)
+            )
+        except Exception:
+            logger.exception("Failed reloading mapped origins")
+
     async def _on_ws(self, msg: dict) -> dict | None:
         """
         Handles WebSocket (WS) messages received by the client.
@@ -166,7 +192,12 @@ class ClientListener:
         typ = msg.get("type")
         data = msg.get("data", {})
 
-        if typ == "settings_update":
+        if typ == "mappings_reload":
+            self._reload_mapped_ids()
+            asyncio.create_task(self.sitemap.build_and_send_all())
+            return {"ok": True, "mapped": list(self._mapped_original_ids)}
+
+        elif typ == "settings_update":
             kws = data.get("blocked_keywords") or []
             self._rebuild_blocklist(kws)
             logger.info(
@@ -191,25 +222,13 @@ class ClientListener:
                 },
             }
         elif typ == "filters_reload":
-            if not self.host_guild_id or not self.config.ENABLE_CLONING:
-                logger.debug(
-                    "[⚙️] Ignoring filters_reload: no host guild or cloning disabled"
-                )
-                return {
-                    "ok": False,
-                    "skipped": True,
-                    "reason": "no-host-or-cloning-disabled",
-                }
-
             self.config._load_filters_from_db()
             logger.info("[⚙️] Filters reloaded from DB")
-
             try:
                 self.sitemap.reload_filters_and_resend()
             except AttributeError:
-                asyncio.create_task(self.sitemap.build_and_send())
-
-            return {"ok": True, "note": "filters reloaded"}
+                asyncio.create_task(self.sitemap.build_and_send_all())
+            return {"ok": True}
 
         elif typ == "clone_messages":
             chan_id = int(data.get("channel_id"))
@@ -243,6 +262,9 @@ class ClientListener:
                 "last_n": last_n,
                 "resume": resume,
                 "after_id": after_id,
+                "mapping_id": data.get("mapping_id"),
+                "cloned_guild_id": data.get("cloned_guild_id"),
+                "original_guild_id": data.get("original_guild_id"),
             }
             return await self._enqueue_backfill(chan_id, params)
 
@@ -303,22 +325,6 @@ class ClientListener:
             }
 
         elif typ == "sitemap_request":
-            if not self.config.ENABLE_CLONING:
-                return {"ok": False, "error": "Cloning is disabled"}
-
-            if not self.host_guild_id:
-                logger.warning("[🌐] sitemap_request ignored: no host guild configured")
-                return {"ok": False, "error": "No host guild configured"}
-
-            if not self.bot.get_guild(int(self.host_guild_id)):
-                logger.warning(
-                    "[🌐] sitemap_request ignored: not a member of host guild %s",
-                    self.host_guild_id,
-                )
-                return {
-                    "ok": False,
-                    "error": f"Not a member of host guild {self.host_guild_id}",
-                }
 
             self.schedule_sync()
             logger.info("[🌐] Received sitemap request")
@@ -673,8 +679,10 @@ class ClientListener:
                 host_gid = 0
 
             gid = req_gid or host_gid
-            if not gid:
-                return {"ok": False, "reason": "no-host-guild"}
+            if self._mapped_original_ids:
+                gid = next(iter(self._mapped_original_ids))
+            else:
+                return {"ok": False, "reason": "no-host-or-mapped-guild"}
 
             guild = self.bot.get_guild(int(gid))
             if guild is None:
@@ -728,19 +736,19 @@ class ClientListener:
 
         guild = getattr(channel, "guild", None)
         if guild is None:
-
-            host_guild = None
-            if hasattr(self, "host_guild_id") and self.host_guild_id:
+            host_guild = next(
+                (
+                    self.bot.get_guild(gid)
+                    for gid in sorted(self._mapped_original_ids)
+                    if self.bot.get_guild(gid)
+                ),
+                None,
+            )
+            if host_guild is None and self.host_guild_id:
                 host_guild = self.bot.get_guild(int(self.host_guild_id))
-
             if host_guild is None and self.bot.guilds:
                 host_guild = self.bot.guilds[0]
             guild = host_guild
-
-        if guild is None:
-            raise discord.Forbidden(
-                None, {"message": "No guild available for fallback"}
-            )
 
         if channel is None:
             me = guild.me or guild.get_member(
@@ -773,7 +781,7 @@ class ClientListener:
         await asyncio.sleep(5)
         while True:
             try:
-                await self.sitemap.build_and_send()
+                await self.sitemap.build_and_send_all()
             except Exception:
                 logger.exception("Error in periodic sync loop")
             await asyncio.sleep(self.config.SYNC_INTERVAL_SECONDS)
@@ -782,7 +790,8 @@ class ClientListener:
         self.sitemap.schedule_sync()
 
     def _is_host_guild(self, g: "discord.Guild | None") -> bool:
-        if not self.config.ENABLE_CLONING:
+        settings = self._settings_for_origin(g.id)
+        if not settings.get("cloning_enabled", True):
             return False
         if self.host_guild_id is None:
             return False
@@ -799,31 +808,40 @@ class ClientListener:
             self._sync_task = None
 
     async def on_ready(self):
-        host_guild = (
-            self.bot.get_guild(self.host_guild_id) if self.host_guild_id else None
-        )
 
-        if host_guild is None and self.config.ENABLE_CLONING:
-            await self._disable_cloning(
-                "No host guild configured or not a member of host guild."
-            )
-            host_name = "(no host guild)"
-        else:
-            host_name = host_guild.name if host_guild else "(no host guild)"
+        self._reload_mapped_ids()
+
+        mapped_origins = set(self._mapped_original_ids)
+
+        active_enabled_origin_ids = []
+        for g in self.bot.guilds:
+            if g.id in mapped_origins:
+                s = self._settings_for_origin(g.id)
+                if s.get("ENABLE_CLONING", True):
+                    active_enabled_origin_ids.append(g.id)
+
+        has_active_enabled_origins = bool(active_enabled_origin_ids)
 
         asyncio.create_task(self.config.setup_release_watcher(self, should_dm=False))
         self.ui_controller.start()
 
-        msg = f"Logged in as {self.bot.user.display_name}"
-        await self.bus.status(running=True, status=msg, discord={"ready": True})
+        who = getattr(getattr(self.bot, "user", None), "display_name", "(unknown)")
+        msg = f"Logged in as {who}"
+        await self.bus.status(
+            running=True,
+            status=msg,
+            discord={"ready": True},
+        )
         logger.info("[🤖] %s", msg)
 
-        if self.config.ENABLE_CLONING and host_guild is not None:
+        if has_active_enabled_origins:
             if self._sync_task is None:
                 self._sync_task = asyncio.create_task(self.periodic_sync_loop())
         else:
-            if self.host_guild_id is not None:
-                logger.info("[🔕] Server cloning is disabled...")
+            logger.info(
+                "[🔕] No eligible mapped origin guilds with cloning enabled; "
+                "skipping periodic sync."
+            )
 
         if self._ws_task is None:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
@@ -874,7 +892,10 @@ class ClientListener:
         if message.type == MessageType.channel_name_change:
             return True
 
-        if not self._is_host_guild(message.guild):
+        g = getattr(message, "guild", None)
+        if not g or not self._is_mapped_origin(g.id):
+            return True
+        if not self._settings_for_origin(g.id).get("ENABLE_CLONING", True):
             return True
 
         if message.channel.type in (ChannelType.voice, ChannelType.stage_voice):
@@ -955,12 +976,15 @@ class ClientListener:
         Handles incoming Discord messages and processes them for forwarding.
         This method is triggered whenever a message is sent in a channel the bot has access to.
         """
-        await self.maybe_send_announcement(message)
-
-        if not self.config.ENABLE_CLONING:
+        g = getattr(message, "guild", None)
+        if not g or not self._is_mapped_origin(g.id):
             return
 
-        if not self._is_host_guild(message.guild):
+        await self.maybe_send_announcement(message)
+
+        settings = self._settings_for_origin(g.id)
+
+        if not settings.get("ENABLE_CLONING", True):
             return
 
         if self.should_ignore(message):
@@ -1084,12 +1108,18 @@ class ClientListener:
         """
         When an upstream message is edited, forward the new content/embeds/components.
         """
-        if not self.config.ENABLE_CLONING:
+        g = getattr(after, "guild", None)
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
-        if not self.config.EDIT_MESSAGES:
+
+        settings = self._settings_for_origin(g.id)
+
+        if not settings.get("ENABLE_CLONING", True):
             return
-        if not self._is_host_guild(after.guild):
+
+        if not settings.get("EDIT_MESSAGES", True):
             return
+
         if self.should_ignore(after):
             return
 
@@ -1188,13 +1218,19 @@ class ClientListener:
         )
 
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):
+        gid = getattr(payload, "guild_id", None)
+        if not gid or not self._is_mapped_origin(gid):
+            return
+
         if payload.cached_message is not None:
             return
 
-        if not self.config.ENABLE_CLONING or not self.config.EDIT_MESSAGES:
+        settings = self._settings_for_origin(gid)
+
+        if not settings.get("ENABLE_CLONING", True):
             return
-        
-        if self.host_guild_id and payload.guild_id and payload.guild_id != self.host_guild_id:
+
+        if not settings.get("EDIT_MESSAGES", True):
             return
 
         channel = self.bot.get_channel(payload.channel_id)
@@ -1202,12 +1238,8 @@ class ClientListener:
             try:
                 channel = await self.bot.fetch_channel(payload.channel_id)
             except Exception:
-                return 
+                return
 
-        guild = getattr(channel, "guild", None)
-        if not guild or not self._is_host_guild(guild):
-            return
-        
         if isinstance(channel, discord.Thread):
             if not self.sitemap.in_scope_thread(channel):
                 return
@@ -1268,7 +1300,9 @@ class ClientListener:
             author = a.get("global_name") or a.get("username") or a.get("name")
             author_id = a.get("id")
             if a.get("id") and a.get("avatar"):
-                avatar_url = f"https://cdn.discordapp.com/avatars/{a['id']}/{a['avatar']}.png"
+                avatar_url = (
+                    f"https://cdn.discordapp.com/avatars/{a['id']}/{a['avatar']}.png"
+                )
             timestamp = data.get("edited_timestamp") or data.get("timestamp")
 
         is_thread = getattr(channel, "type", None) in (
@@ -1317,14 +1351,19 @@ class ClientListener:
         """
         When an upstream message is deleted, tell the server to delete the cloned webhook message.
         """
-        if not self.config.ENABLE_CLONING:
+        g = getattr(message, "guild", None)
+
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
-        if not self.config.DELETE_MESSAGES:
+
+        settings = self._settings_for_origin(g.id)
+
+        if not settings.get("ENABLE_CLONING", True):
             return
-        if not getattr(message, "guild", None) or not self._is_host_guild(
-            message.guild
-        ):
+
+        if not settings.get("DELETE_MESSAGES", True):
             return
+
         if self.should_ignore(message):
             return
 
@@ -1364,13 +1403,17 @@ class ClientListener:
         """
         Same as above but for uncached messages.
         """
+        gid = getattr(payload, "guild_id", None)
+        if not gid or not self._is_mapped_origin(gid):
+            return
+
         if payload.cached_message is not None:
             return
 
-        if not self.config.ENABLE_CLONING or not self.config.DELETE_MESSAGES:
-            return
-        
-        if self.host_guild_id and payload.guild_id and payload.guild_id != self.host_guild_id:
+        settings = self._settings_for_origin(gid)
+        if not settings.get("ENABLE_CLONING", True) or not settings.get(
+            "DELETE_MESSAGES", True
+        ):
             return
 
         channel = self.bot.get_channel(payload.channel_id)
@@ -1379,10 +1422,6 @@ class ClientListener:
                 channel = await self.bot.fetch_channel(payload.channel_id)
             except Exception:
                 return
-
-        guild = getattr(channel, "guild", None)
-        if not guild or not self._is_host_guild(guild):
-            return
 
         if isinstance(channel, discord.Thread):
             if not self.sitemap.in_scope_thread(channel):
@@ -1398,7 +1437,9 @@ class ClientListener:
         payload_out = {
             "type": "thread_message_delete" if is_thread else "message_delete",
             "data": {
-                "guild_id": getattr(guild, "id", None),
+                "guild_id": (
+                    int(payload.guild_id) if payload.guild_id is not None else None
+                ),
                 "message_id": int(payload.message_id),
                 "channel_id": int(payload.channel_id),
                 "channel_name": getattr(channel, "name", str(payload.channel_id)),
@@ -1432,27 +1473,38 @@ class ClientListener:
         This method checks if the deleted thread belongs to the host guild. If it does,
         it sends a notification payload to the WebSocket server with the thread's ID.
         """
-        if self.config.ENABLE_CLONING:
-            if not self._is_host_guild(thread.guild):
-                return
-            if not self.sitemap.in_scope_thread(thread):
-                logger.debug(
-                    "[thread] Ignoring delete for filtered-out thread %s (parent=%s)",
-                    getattr(thread, "id", None),
-                    getattr(getattr(thread, "parent", None), "id", None),
-                )
-                return
-            payload = {"type": "thread_delete", "data": {"thread_id": thread.id}}
-            await self.ws.send(payload)
-            logger.info("[📩] Notified server of deleted thread %s", thread.id)
+        g = getattr(thread, "guild", None)
+        if not g or not self._is_mapped_origin(g.id):
+            return
+        settings = self._settings_for_origin(g.id)
+        if not settings.get("ENABLE_CLONING", True):
+            return
+
+        if not self.sitemap.in_scope_thread(thread):
+            logger.debug(
+                "[thread] Ignoring delete for filtered-out thread %s (parent=%s)",
+                getattr(thread, "id", None),
+                getattr(getattr(thread, "parent", None), "id", None),
+            )
+            return
+        payload = {
+            "type": "thread_delete",
+            "data": {"guild_id": thread.guild.id, "thread_id": thread.id},
+        }
+        await self.ws.send(payload)
+        logger.info("[📩] Notified server of deleted thread %s", thread.id)
 
     async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
         """
         Handles updates to a Discord thread, such as renaming.
         """
-        if not self.config.ENABLE_CLONING:
+        g = getattr(before, "guild", None)
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
-        if not (before.guild and self._is_host_guild(before.guild)):
+
+        settings = self._settings_for_origin(getattr(g, "id", None))
+
+        if not settings.get("ENABLE_CLONING", True):
             return
 
         if not (
@@ -1469,6 +1521,7 @@ class ClientListener:
             payload = {
                 "type": "thread_rename",
                 "data": {
+                    "guild_id": before.guild.id,
                     "thread_id": before.id,
                     "new_name": after.name,
                     "old_name": before.name,
@@ -1485,25 +1538,36 @@ class ClientListener:
         """
         Event handler that is triggered when a new channel is created in a guild.
         """
-        if self.config.ENABLE_CLONING:
-            if not self._is_host_guild(channel.guild):
-                return
+        g = getattr(channel, "guild", None)
 
-            if not self.sitemap.in_scope_channel(channel):
-                logger.debug(
-                    "Ignored create for filtered-out channel/category %s",
-                    getattr(channel, "id", None),
-                )
-                return
-            self.schedule_sync()
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
+            return
+
+        settings = self._settings_for_origin(getattr(g, "id", None))
+
+        if not settings.get("ENABLE_CLONING", True):
+            return
+
+        if not self.sitemap.in_scope_channel(channel):
+            logger.debug(
+                "Ignored create for filtered-out channel/category %s",
+                getattr(channel, "id", None),
+            )
+            return
+        self.schedule_sync()
 
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
         """
         Event handler that is triggered when a guild channel is deleted.
         """
-        if self.config.ENABLE_CLONING:
-            if not self._is_host_guild(channel.guild):
-                return
+        g = getattr(channel, "guild", None)
+
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
+            return
+
+        settings = self._settings_for_origin(channel.guild.id)
+
+        if settings.get("ENABLE_CLONING", True):
             if not self.sitemap.in_scope_channel(channel):
                 logger.debug(
                     "Ignored delete for filtered-out channel/category %s",
@@ -1520,74 +1584,100 @@ class ClientListener:
         structural changes (such as a name change or a change in the parent category).
         If a structural change is detected, it schedules a synchronization process.
         """
-        if self.config.ENABLE_CLONING:
-            if not self._is_host_guild(before.guild):
-                return
+        g = getattr(before, "guild", None)
 
+        if not g or not self._is_mapped_origin(g.id):
+            return
+        settings = self._settings_for_origin(g.id)
+        if not settings.get("ENABLE_CLONING", True):
+            return
+
+        perms_changed = False
+        try:
+            perms_changed = getattr(before, "overwrites", None) != getattr(
+                after, "overwrites", None
+            )
+        except Exception:
             perms_changed = False
-            try:
-                perms_changed = getattr(before, "overwrites", None) != getattr(
-                    after, "overwrites", None
-                )
-            except Exception:
-                perms_changed = False
 
-            if (
-                getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False)
-                and getattr(self.config, "CLONE_ROLES", False)
-                and perms_changed
-            ):
-                self.schedule_sync()
-                return
+        if (
+            settings.get("MIRROR_ROLE_PERMISSIONS", False)
+            and settings.get("CLONE_ROLES", False)
+            and perms_changed
+        ):
+            self.schedule_sync()
+            return
 
-            if not (
-                self.sitemap.in_scope_channel(before)
-                or self.sitemap.in_scope_channel(after)
-            ):
-                logger.debug(
-                    "Ignored update for filtered-out channel/category %s",
-                    getattr(before, "id", None),
-                )
-                return
-            name_changed = before.name != after.name
-            parent_before = getattr(before, "category_id", None)
-            parent_after = getattr(after, "category_id", None)
-            parent_changed = parent_before != parent_after
+        if not (
+            self.sitemap.in_scope_channel(before)
+            or self.sitemap.in_scope_channel(after)
+        ):
+            logger.debug(
+                "Ignored update for filtered-out channel/category %s",
+                getattr(before, "id", None),
+            )
+            return
+        name_changed = before.name != after.name
+        parent_before = getattr(before, "category_id", None)
+        parent_after = getattr(after, "category_id", None)
+        parent_changed = parent_before != parent_after
 
-            if name_changed or parent_changed:
-                self.schedule_sync()
-            else:
-                logger.debug(
-                    "Ignored channel update for %s: non-structural change", before.id
-                )
+        if name_changed or parent_changed:
+            self.schedule_sync()
+        else:
+            logger.debug(
+                "Ignored channel update for %s: non-structural change", before.id
+            )
 
     async def on_guild_role_create(self, role: discord.Role):
-        if not self.config.ENABLE_CLONING or not getattr(
-            self.config, "CLONE_ROLES", True
-        ):
+
+        g = getattr(role, "guild", None)
+
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
-        if not self._is_host_guild(role.guild):
+
+        settings = self._settings_for_origin(getattr(g, "id", None))
+
+        if not settings.get("ENABLE_CLONING", True):
             return
+
+        if not settings.get("CLONE_ROLES", True):
+            return
+
         logger.debug("[roles] create: %s (%d) → scheduling sitemap", role.name, role.id)
         self.schedule_sync()
 
     async def on_guild_role_delete(self, role: discord.Role):
-        if not self.config.ENABLE_CLONING or not getattr(
-            self.config, "CLONE_ROLES", True
-        ):
+        g = getattr(role, "guild", None)
+
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
-        if not self._is_host_guild(role.guild):
+
+        settings = self._settings_for_origin(getattr(g, "id", None))
+
+        if not settings.get("ENABLE_CLONING", True):
             return
+
+        if not settings.get("CLONE_ROLES", True):
+            return
+
         logger.debug("[roles] delete: %s (%d) → scheduling sitemap", role.name, role.id)
         self.schedule_sync()
 
     async def on_guild_role_update(self, before: discord.Role, after: discord.Role):
-        if not self.config.ENABLE_CLONING or not getattr(
-            self.config, "CLONE_ROLES", True
-        ):
+        g = getattr(before, "guild", None)
+
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
-        if not self._is_host_guild(after.guild):
+
+        settings = self._settings_for_origin(getattr(g, "id", None))
+
+        if not settings.get("ENABLE_CLONING", True):
             return
+
+        if not settings.get("CLONE_ROLES", True):
+            return
+
         if not self.sitemap.role_change_is_relevant(before, after):
             logger.debug(
                 "[roles] update ignored (irrelevant): %s (%d)", after.name, after.id
@@ -1654,6 +1744,22 @@ class ClientListener:
 
         except Exception:
             logger.exception("Failed to forward member_joined")
+
+    async def on_guild_emojis_update(self, guild, before, after):
+        if not self._is_mapped_origin(guild.id):
+            return
+        if resolve_mapping_settings(
+            self.db, self.config, original_guild_id=guild.id
+        ).get("CLONE_EMOJI", True):
+            self.schedule_sync()
+
+    async def on_guild_stickers_update(self, guild, before, after):
+        if not self._is_mapped_origin(guild.id):
+            return
+        if resolve_mapping_settings(
+            self.db, self.config, original_guild_id=guild.id
+        ).get("CLONE_STICKER", True):
+            self.schedule_sync()
 
     def _guild_row_from_obj(self, g: discord.Guild) -> dict:
         try:

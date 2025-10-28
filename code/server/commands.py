@@ -32,6 +32,20 @@ logger = logging.getLogger("server")
 config = Config(logger=logger)
 GUILD_ID = config.CLONE_GUILD_ID
 
+_db_boot = DBManager(config.DB_PATH)
+try:
+    _ids = _db_boot.get_all_clone_guild_ids()
+except Exception:
+    _ids = []
+
+GUILD_IDS: list[int] = sorted({int(g) for g in (_ids or []) if g})
+
+
+def guild_scoped_slash_command(*dargs, **dkwargs):
+    """Wrapper that always scopes slash commands to our mapped clone guilds."""
+    dkwargs.setdefault("guild_ids", GUILD_IDS)
+    return commands.slash_command(*dargs, **dkwargs)
+
 
 class CloneCommands(commands.Cog):
     """
@@ -60,6 +74,27 @@ class CloneCommands(commands.Cog):
         )
         return False
 
+    def _refresh_command_guilds(self) -> list[int]:
+        """
+        Recompute which clone guilds should have our slash commands,
+        and update each command object's .guild_ids so sync_commands() will
+        register them everywhere.
+
+        Returns the new guild_ids list.
+        """
+        try:
+            ids = self.db.get_all_clone_guild_ids() or []
+        except Exception:
+            ids = []
+
+        new_ids = sorted({int(g) for g in ids if g})
+
+        for cmd in self.bot.application_commands:
+            if getattr(cmd, "guild_ids", None) is not None:
+                cmd.guild_ids = new_ids
+
+        return new_ids
+
     @commands.Cog.listener()
     async def on_application_command_error(self, interaction, error):
         """
@@ -81,17 +116,20 @@ class CloneCommands(commands.Cog):
 
     @commands.Cog.listener()
     async def on_ready(self):
-        """
-        Fired when the bot is ready. Logs allowed users status.
-        """
         if not self.allowed_users:
-            logger.warning(
-                "[⚠️] No allowed users configured: commands will not work for anyone."
-            )
+            logger.warning("[⚠️] No allowed users configured.")
         else:
             logger.debug(
-                f"[⚙️] Commands permissions set for users: {self.allowed_users}"
+                "[⚙️] Commands permissions set for users: %s",
+                self.allowed_users,
             )
+
+        try:
+            new_ids = self._refresh_command_guilds()
+            await self.bot.sync_commands()
+            logger.info("[✅] Slash commands synced to %s", new_ids)
+        except Exception:
+            logger.exception("Slash command sync failed")
 
     async def _reply_or_dm(
         self,
@@ -206,10 +244,9 @@ class CloneCommands(commands.Cog):
             timestamp=datetime.now(timezone.utc),
         )
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="ping_server",
         description="Show server latency and server information.",
-        guild_ids=[GUILD_ID],
     )
     async def ping(self, ctx: discord.ApplicationContext):
         """Responds with bot latency, server name, member count, and uptime."""
@@ -228,10 +265,9 @@ class CloneCommands(commands.Cog):
 
         await ctx.respond(embed=embed, ephemeral=True)
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="ping_client",
         description="Show client latency and server information.",
-        guild_ids=[GUILD_ID],
     )
     async def ping_client(self, ctx: discord.ApplicationContext):
         """Responds with gateway latency, round‑trip time, client uptime, and timestamps."""
@@ -265,10 +301,9 @@ class CloneCommands(commands.Cog):
 
         await ctx.followup.send(embed=embed, ephemeral=True)
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="block_add",
         description="Add or remove a keyword from the block list.",
-        guild_ids=[GUILD_ID],
     )
     async def block_add(
         self,
@@ -295,10 +330,9 @@ class CloneCommands(commands.Cog):
             f"{emoji} `{keyword}` {action} in block list.", ephemeral=True
         )
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="block_list",
         description="List all blocked keywords.",
-        guild_ids=[GUILD_ID],
     )
     async def block_list(self, ctx: discord.ApplicationContext):
         """Show currently blocked keywords."""
@@ -309,10 +343,9 @@ class CloneCommands(commands.Cog):
             formatted = "\n".join(f"• `{kw}`" for kw in kws)
             await ctx.respond(f"📋 **Blocked keywords:**\n{formatted}", ephemeral=True)
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="announcement_trigger_add",
         description="Register a trigger: guild_id + keyword + user_id + optional channel_id",
-        guild_ids=[GUILD_ID],
     )
     async def announcement_trigger(
         self,
@@ -389,10 +422,9 @@ class CloneCommands(commands.Cog):
 
         await ctx.respond(embed=embed, ephemeral=True)
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="announce_subscription_toggle",
         description="Toggle a user's subscription to a keyword (or all) announcements in a guild",
-        guild_ids=[GUILD_ID],
     )
     async def announcement_user(
         self,
@@ -456,10 +488,9 @@ class CloneCommands(commands.Cog):
         embed.add_field(name="Action", value=action, inline=True)
         await ctx.respond(embed=embed, ephemeral=True)
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="announce_trigger_list",
         description="List/delete ALL announcement triggers across every guild",
-        guild_ids=[GUILD_ID],
     )
     async def announcement_list(
         self,
@@ -557,10 +588,9 @@ class CloneCommands(commands.Cog):
 
         await ctx.respond(embed=embed, ephemeral=True)
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="announce_subscription_list",
         description="List/delete ALL announcement subscriptions",
-        guild_ids=[GUILD_ID],
     )
     async def announcement_subscriptions(
         self,
@@ -634,10 +664,9 @@ class CloneCommands(commands.Cog):
 
         await ctx.respond(embed=embed, ephemeral=True)
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="announce_help",
         description="How to use the announcement trigger & subscription commands",
-        guild_ids=[GUILD_ID],
     )
     async def announce_help(self, ctx: discord.ApplicationContext):
         def spacer():
@@ -740,10 +769,9 @@ class CloneCommands(commands.Cog):
 
         await ctx.respond(embed=embed, ephemeral=True)
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="onjoin_dm",
         description="Toggle DM notifications to you when someone joins the given server ID",
-        guild_ids=[GUILD_ID],
     )
     async def onjoin_dm(
         self,
@@ -780,10 +808,9 @@ class CloneCommands(commands.Cog):
             ephemeral=True,
         )
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="purge_assets",
         description="Delete ALL emojis, stickers, or roles.",
-        guild_ids=[GUILD_ID],
     )
     async def purge_assets(
         self,
@@ -1108,10 +1135,9 @@ class CloneCommands(commands.Cog):
                 mention_on_channel_fallback=True,
             )
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="role_block",
         description="Block a role from being cloned/updated. Provide either the cloned role (picker) or its ID.",
-        guild_ids=[GUILD_ID],
     )
     async def role_block(
         self,
@@ -1215,10 +1241,9 @@ class CloneCommands(commands.Cog):
             embed=self._ok_embed(title, desc, color=color), ephemeral=True
         )
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="role_block_clear",
         description="Clear the entire role block list (allows previously blocked roles to be synced again).",
-        guild_ids=[GUILD_ID],
     )
     async def role_block_clear(self, ctx: discord.ApplicationContext):
         """
@@ -1255,10 +1280,9 @@ class CloneCommands(commands.Cog):
                 ephemeral=True,
             )
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="export_dms",
         description="Export a user's DM history to a JSON file, with optional webhook forwarding.",
-        guild_ids=[GUILD_ID],
     )
     async def export_dm_history_cmd(
         self,
@@ -1330,10 +1354,9 @@ class CloneCommands(commands.Cog):
             ephemeral=True,
         )
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="onjoin_role",
         description="Toggle an on-join role for THIS server (run again to remove).",
-        guild_ids=[GUILD_ID],
     )
     async def onjoin_role_toggle(
         self,
@@ -1421,10 +1444,9 @@ class CloneCommands(commands.Cog):
             dt,
         )
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="onjoin_roles",
         description="List or clear the on-join roles for THIS server.",
-        guild_ids=[GUILD_ID],
     )
     async def onjoin_roles_list(
         self,
@@ -1528,10 +1550,9 @@ class CloneCommands(commands.Cog):
         dt = (time.perf_counter() - t0) * 1000
         logger.debug("onjoin_roles: finished guild_id=%s in %.1fms", guild.id, dt)
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="onjoin_sync",
         description="Go through members and add any missing on-join roles.",
-        guild_ids=[GUILD_ID],
     )
     async def onjoin_sync(
         self,
@@ -1679,10 +1700,9 @@ class CloneCommands(commands.Cog):
             ephemeral=True,
         )
 
-    @commands.slash_command(
+    @guild_scoped_slash_command(
         name="pull_assets",
         description="Export server emojis and/or stickers to a compressed archive.",
-        guild_ids=[GUILD_ID],
     )
     async def pull_assets(
         self,

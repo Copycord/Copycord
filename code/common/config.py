@@ -78,18 +78,6 @@ class Config:
 
         self.SYNC_INTERVAL_SECONDS = _int("SYNC_INTERVAL_SECONDS", "3600")
 
-        self.ENABLE_CLONING = _bool("ENABLE_CLONING", "true")
-        self.DELETE_CHANNELS = _bool("DELETE_CHANNELS", "false")
-        self.EDIT_MESSAGES = _bool("EDIT_MESSAGES", "true")
-        self.DELETE_MESSAGES = _bool("DELETE_MESSAGES", "true")
-        self.DELETE_THREADS = _bool("DELETE_THREADS", "false")
-        self.CLONE_EMOJI = _bool("CLONE_EMOJI", "true")
-        self.CLONE_STICKER = _bool("CLONE_STICKER", "true")
-        self.CLONE_ROLES = _bool("CLONE_ROLES", "true")
-        self.MIRROR_ROLE_PERMISSIONS = _bool("MIRROR_ROLE_PERMISSIONS", "true")
-        self.DELETE_ROLES = _bool("DELETE_ROLES", "true")
-        self.MIRROR_CHANNEL_PERMISSIONS = _bool("MIRROR_CHANNEL_PERMISSIONS", "true")
-
         cmd_users_raw = _str("COMMAND_USERS", os.getenv("COMMAND_USERS", "")) or ""
         self.COMMAND_USERS = []
         for tok in str(cmd_users_raw).split(","):
@@ -107,6 +95,23 @@ class Config:
         self.excluded_channel_ids: set[int] = set()
 
         self._load_filters_from_db()
+        
+    def default_mapping_settings(self) -> dict:
+        return {
+            "ENABLE_CLONING": True,
+            "DELETE_CHANNELS": True,
+            "DELETE_THREADS": True,
+            "DELETE_ROLES": True,
+            "DELETE_MESSAGES": True,
+            "MIRROR_CHANNEL_PERMISSIONS": False,
+            "CLONE_ROLES": True,
+            "CLONE_EMOJI": True,
+            "CLONE_STICKER": True,
+            "EDIT_MESSAGES": True,
+            "MIRROR_ROLE_PERMISSIONS": False,
+        }
+        
+        
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):
         await receiver.bot.wait_until_ready()

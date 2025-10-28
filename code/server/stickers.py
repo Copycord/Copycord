@@ -22,63 +22,157 @@ logger = logging.getLogger("server.stickers")
 class StickerManager:
     def __init__(
         self,
-        bot: discord.Bot,
+        bot,
         db,
-        ratelimit: RateLimitManager,
-        clone_guild_id: int,
-        session: Optional[aiohttp.ClientSession] = None,
+        guild_resolver,
+        ratelimit,
+        clone_guild_id: int | None = None,
+        session=None,
     ):
         self.bot = bot
         self.db = db
         self.ratelimit = ratelimit
-        self.clone_guild_id = clone_guild_id
+        self.clone_guild_id = int(clone_guild_id or 0)
         self.session = session
-
-        self._cache: dict[int, discord.GuildSticker] = {}
-        self._cache_ts: float | None = None
-        self._last_sitemap: list[dict] = []
-        self._task: asyncio.Task | None = None
-        self._lock = asyncio.Lock()
-
+        self.guild_resolver = guild_resolver
+        self._state: dict[int, dict] = {}
+        self._tasks: dict[int, asyncio.Task] = {}
+        self._locks: dict[int, asyncio.Lock] = {}
         self._std_ok: set[int] = set()
         self._std_bad: set[int] = set()
 
     def set_session(self, session: aiohttp.ClientSession | None):
         self.session = session
 
-    def set_last_sitemap(self, stickers: list[dict] | None):
-        self._last_sitemap = stickers or []
+    def _ensure_state(self, clone_gid: int) -> dict:
+        """
+        Get or create the state bucket for this clone guild.
+        """
+        if clone_gid not in self._state:
+            self._state[clone_gid] = {
+                "host_id": None,
+                "sitemap": [],
+                "cache": {},
+                "cache_ts": None,
+            }
+        return self._state[clone_gid]
 
-    async def refresh_cache(self) -> None:
-        guild = self.bot.get_guild(self.clone_guild_id)
+    def _get_lock_for_clone(self, clone_gid: int) -> asyncio.Lock:
+        """
+        Get/create the lock dedicated to this clone guild.
+        We serialize sticker writes per clone guild, but allow
+        different clone guilds to sync in parallel.
+        """
+        if clone_gid not in self._locks:
+            self._locks[clone_gid] = asyncio.Lock()
+        return self._locks[clone_gid]
+
+    def set_last_sitemap(
+        self,
+        clone_guild_id: int,
+        stickers: list[dict] | None,
+        host_guild_id: int | None,
+    ):
+        """
+        Record the latest upstream sticker sitemap for *this* clone guild.
+        """
+        st = self._ensure_state(int(clone_guild_id))
+        st["sitemap"] = stickers or []
+        st["host_id"] = int(host_guild_id) if host_guild_id else None
+
+    async def refresh_cache(self, clone_gid: int) -> None:
+        """
+        Refresh the cached stickers list for a specific clone guild.
+        """
+        st = self._ensure_state(clone_gid)
+
+        guild = self.bot.get_guild(clone_gid)
         if not guild:
+            st["cache"] = {}
+            st["cache_ts"] = None
             return
+
         try:
             stickers = await guild.fetch_stickers()
         except Exception:
             stickers = []
-        self._cache = {int(s.id): s for s in stickers}
 
-    def kickoff_sync(self) -> None:
-        """Schedule a background sticker sync if not running."""
-        if self._task and not self._task.done():
-            logger.debug("Sticker sync already running; skip kickoff.")
+        st["cache"] = {int(s.id): s for s in stickers}
+
+        st["cache_ts"] = None
+
+    def kickoff_sync(
+        self,
+        target_clone_guild_id: int,
+        *,
+        validate_mapping: bool = True,
+    ) -> None:
+        """
+        Start (or skip) a sync task for this specific clone guild.
+        Multiple clone guilds can sync in parallel.
+        """
+        clone_gid = int(target_clone_guild_id)
+        st = self._ensure_state(clone_gid)
+
+        existing = self._tasks.get(clone_gid)
+        if existing and not existing.done():
+            logger.debug(
+                "Sticker sync already running for clone %s; skip kickoff.",
+                clone_gid,
+            )
             return
-        guild = self.bot.get_guild(self.clone_guild_id)
+
+        host_id = st["host_id"]
+
+        if validate_mapping and host_id:
+            try:
+                clones = set(self.guild_resolver.clones_for_host(host_id))
+                if clones and clone_gid not in clones:
+                    logger.warning(
+                        "[sticker] host %s is not mapped to clone %s; proceeding anyway",
+                        host_id,
+                        clone_gid,
+                    )
+            except Exception:
+                logger.exception(
+                    "[sticker] mapping validation threw, continuing anyway"
+                )
+
+        guild = self.bot.get_guild(clone_gid)
         if not guild:
-            logger.debug("kickoff_sync: clone guild not available yet; skip.")
+            logger.debug(
+                "Sticker sync: clone guild %s unavailable; aborting",
+                clone_gid,
+            )
             return
-        logger.debug("[🎟️] Sticker sync task scheduled.")
-        self._task = asyncio.create_task(self._run_sync(guild, self._last_sitemap))
 
-    async def _run_sync(self, guild: discord.Guild, stickers: list[dict]) -> None:
+        stickers = st["sitemap"] or []
+
+        async def _run_one():
+            await self._run_sync(
+                guild=guild,
+                stickers=stickers,
+                host_id=host_id,
+                clone_gid=clone_gid,
+            )
+
+        logger.debug("[🎟️] Sticker sync scheduled for clone=%s", clone_gid)
+        task = asyncio.create_task(_run_one())
+        self._tasks[clone_gid] = task
+
+    async def _run_sync(
+        self,
+        guild: discord.Guild,
+        stickers: list[dict],
+        host_id: int | None,
+        clone_gid: int,
+    ) -> None:
         """
-        Synchronizes stickers for a given Discord guild with the provided list of sticker data.
-        This method ensures that the stickers in the guild are consistent with the provided
-        list by performing necessary operations such as deletion, renaming, or creation of stickers.
-        It also updates the cache if any changes are made.
+        Run the actual sync for a single clone guild.
         """
-        async with self._lock:
+        lock = self._get_lock_for_clone(clone_gid)
+
+        async with lock:
             try:
                 upstream = len(stickers or [])
                 try:
@@ -86,18 +180,26 @@ class StickerManager:
                 except Exception:
                     clone_list = []
                 mappings = len(list(self.db.get_all_sticker_mappings()))
+
                 logger.debug(
-                    "[🎟️] Sticker sync start: upstream=%d, clone=%d, mappings=%d",
+                    "[🎟️] Sticker sync start clone=%s: upstream=%d, clone=%d, mappings=%d",
+                    clone_gid,
                     upstream,
                     len(clone_list),
                     mappings,
                 )
 
-                d, r, c = await self._sync(guild, stickers or [])
+                d, r, c = await self._sync(
+                    guild=guild,
+                    stickers=stickers or [],
+                    host_id=host_id,
+                )
+
                 if any((d, r, c)):
-                    await self.refresh_cache()
+                    await self.refresh_cache(clone_gid)
                     logger.debug(
-                        "[🎟️] Sticker sync: %s",
+                        "[🎟️] Sticker sync clone=%s: %s",
+                        clone_gid,
                         ", ".join(
                             f"{label} {n}"
                             for label, n in (
@@ -109,21 +211,40 @@ class StickerManager:
                         ),
                     )
                 else:
-                    logger.debug("[🎟️] Sticker sync: no changes needed")
+                    logger.debug(
+                        "[🎟️] Sticker sync clone=%s: no changes needed",
+                        clone_gid,
+                    )
+
+            except asyncio.CancelledError:
+                logger.debug(
+                    "[🎟️] Sticker sync canceled for clone %s.",
+                    clone_gid,
+                )
             except Exception:
-                logger.exception("[🎟️] Sticker sync failed")
+                logger.exception(
+                    "[🎟️] Sticker sync failed for clone %s",
+                    clone_gid,
+                )
             finally:
-                self._task = None
+
+                t = self._tasks.get(clone_gid)
+                if t and t.done():
+
+                    pass
+                else:
+                    self._tasks.pop(clone_gid, None)
 
     async def _sync(
-        self, guild: discord.Guild, stickers: list[dict]
+        self,
+        guild: discord.Guild,
+        stickers: list[dict],
+        host_id: int | None,
     ) -> Tuple[int, int, int]:
         """
-        Synchronizes stickers between the provided guild and the given list of stickers.
-        This method performs the following operations:
-        - Deletes stickers in the guild that are no longer present in the incoming list.
-        - Renames stickers in the guild if their names differ from the incoming list.
-        - Creates new stickers in the guild based on the incoming list, respecting guild limits.
+        Sync stickers for (host_id -> guild.id).
+        Only touch mappings where original_guild_id == host_id
+        AND cloned_guild_id == guild.id.
         """
         deleted = renamed = created = 0
         skipped_limit = size_failed = 0
@@ -139,9 +260,16 @@ class StickerManager:
         current_count = len(clone_stickers)
         clone_by_id = {s.id: s for s in clone_stickers}
 
-        current = {
-            r["original_sticker_id"]: r for r in self.db.get_all_sticker_mappings()
-        }
+        rows = self.db.get_all_sticker_mappings()
+        current: dict[int, dict] = {}
+        for r in rows:
+            row = dict(r)
+            if (
+                host_id is None
+                or int(row.get("original_guild_id") or 0) == int(host_id)
+            ) and int(row.get("cloned_guild_id") or 0) == int(guild.id):
+                current[int(row["original_sticker_id"])] = row
+
         incoming = {int(s["id"]): s for s in stickers if s.get("id")}
 
         for orig_id in set(current) - set(incoming):
@@ -149,56 +277,84 @@ class StickerManager:
             cloned = clone_by_id.get(row["cloned_sticker_id"])
             if cloned:
                 try:
-                    await self.ratelimit.acquire(ActionType.STICKER_CREATE)
+                    await self.ratelimit.acquire_for_guild(
+                        ActionType.STICKER_CREATE, guild.id
+                    )
                     await cloned.delete()
                     deleted += 1
                     current_count = max(0, current_count - 1)
-                    logger.info(f"[🎟️] Deleted sticker {row['cloned_sticker_name']}")
+                    logger.info(
+                        "[🎟️] Deleted sticker %s",
+                        row["cloned_sticker_name"],
+                    )
                 except discord.Forbidden:
                     logger.warning(
-                        f"[⚠️] No permission to delete sticker {row['cloned_sticker_name']}"
+                        "[⚠️] No permission to delete sticker %s",
+                        row["cloned_sticker_name"],
                     )
                 except discord.HTTPException as e:
                     logger.error(
-                        f"[⛔] Error deleting sticker {row['cloned_sticker_name']}: {e}"
+                        "[⛔] Error deleting sticker %s: %s",
+                        row["cloned_sticker_name"],
+                        e,
                     )
+
             self.db.delete_sticker_mapping(orig_id)
 
         for orig_id, info in incoming.items():
             name = info.get("name") or f"sticker_{orig_id}"
             url = info.get("url") or ""
             mapping = current.get(orig_id)
+
             cloned = None
             if mapping:
                 cloned = clone_by_id.get(mapping["cloned_sticker_id"])
                 if mapping and not cloned:
                     logger.warning(
-                        f"[⚠️] Sticker {mapping['original_sticker_name']} missing in clone; will recreate"
+                        "[⚠️] Sticker %s missing in clone; will recreate",
+                        mapping["original_sticker_name"],
                     )
                     self.db.delete_sticker_mapping(orig_id)
                     mapping = None
 
             if mapping and cloned and mapping["original_sticker_name"] != name:
                 try:
-                    await self.ratelimit.acquire(ActionType.STICKER_CREATE)
+                    await self.ratelimit.acquire_for_guild(
+                        ActionType.STICKER_CREATE, guild.id
+                    )
                     await cloned.edit(name=name)
                     renamed += 1
                     self.db.upsert_sticker_mapping(
-                        orig_id, name, cloned.id, cloned.name
+                        orig_id,
+                        name,
+                        cloned.id,
+                        cloned.name,
+                        original_guild_id=host_id,
+                        cloned_guild_id=guild.id,
                     )
                     logger.info(
-                        f"[🎟️] Renamed sticker {mapping['original_sticker_name']} → {name}"
+                        "[🎟️] Renamed sticker %s → %s",
+                        mapping["original_sticker_name"],
+                        name,
                     )
                 except discord.HTTPException as e:
-                    logger.error(f"[⛔] Failed renaming sticker {cloned.name}: {e}")
+                    logger.error(
+                        "[⛔] Failed renaming sticker %s: %s",
+                        cloned.name,
+                        e,
+                    )
                 continue
 
             if mapping:
                 continue
 
             if not url:
-                logger.warning(f"[⚠️] Sticker {name} has no URL; skipping")
+                logger.warning(
+                    "[⚠️] Sticker %s has no URL; skipping",
+                    name,
+                )
                 continue
+
             if current_count >= limit:
                 skipped_limit += 1
                 continue
@@ -210,11 +366,19 @@ class StickerManager:
                 async with self.session.get(url) as resp:
                     raw = await resp.read()
             except Exception as e:
-                logger.error(f"[⛔] Failed fetching sticker {name} at {url}: {e}")
+                logger.error(
+                    "[⛔] Failed fetching sticker %s at %s: %s",
+                    name,
+                    url,
+                    e,
+                )
                 continue
 
             if raw and len(raw) > 512 * 1024:
-                logger.info(f"[🎟️] Skipping {name}: exceeds size limit")
+                logger.info(
+                    "[🎟️] Skipping %s: exceeds size limit",
+                    name,
+                )
                 size_failed += 1
                 continue
 
@@ -225,56 +389,79 @@ class StickerManager:
             desc = (info.get("description") or "")[:100]
 
             try:
-                await self.ratelimit.acquire(ActionType.STICKER_CREATE)
+                await self.ratelimit.acquire_for_guild(
+                    ActionType.STICKER_CREATE, guild.id
+                )
                 created_stk = await guild.create_sticker(
                     name=name,
                     description=desc,
                     emoji=tag,
                     file=file,
-                    reason="Clonecord sync",
+                    reason="Copycord sync",
                 )
                 created += 1
                 current_count += 1
+
                 self.db.upsert_sticker_mapping(
-                    orig_id, name, created_stk.id, created_stk.name
+                    orig_id,
+                    name,
+                    created_stk.id,
+                    created_stk.name,
+                    original_guild_id=host_id,
+                    cloned_guild_id=guild.id,
                 )
-                logger.info(f"[🎟️] Created sticker {name}")
+
+                logger.info("[🎟️] Created sticker %s", name)
             except discord.HTTPException as e:
+
                 if getattr(e, "code", None) == 30039 or "30039" in str(e):
                     skipped_limit += 1
                     logger.info(
                         "[🎟️] Skipped creating sticker due to clone guild sticker limit."
                     )
                 else:
-                    logger.error(f"[⛔] Failed creating sticker {name}: {e}")
+                    logger.error(
+                        "[⛔] Failed creating sticker %s: %s",
+                        name,
+                        e,
+                    )
 
         if skipped_limit:
             logger.info(
-                f"[🎟️] Skipped {skipped_limit} stickers due to clone guild limit ({limit})."
+                "[🎟️] Skipped %d stickers due to clone guild limit (%d).",
+                skipped_limit,
+                limit,
             )
         if size_failed:
             logger.info(
-                f"[🎟️] Skipped {size_failed} stickers because they exceed 512 KiB."
+                "[🎟️] Skipped %d stickers because they exceed 512 KiB.",
+                size_failed,
             )
 
         return deleted, renamed, created
 
     def resolve_cloned(
-        self, stickers: list[dict]
+        self,
+        clone_gid: int,
+        stickers: list[dict],
     ) -> Tuple[List[discord.StickerItem], List[str]]:
         """
-        Resolves cloned stickers based on a provided list of sticker dictionaries.
-        This method matches stickers from the input list with their corresponding
-        cloned stickers using a preloaded database mapping. It returns a tuple
-        containing a list of `discord.StickerItem` objects and a list of sticker names.
+        For this clone guild only, return StickerItem objects for the given upstream stickers.
         """
+        raw_rows = self.db.get_all_sticker_mappings()
+        rows: dict[int, dict] = {}
+        for r in raw_rows:
+            row = dict(r)
+            if int(row.get("cloned_guild_id") or 0) == int(clone_gid):
+                rows[int(row["original_sticker_id"])] = row
 
-        rows = {r["original_sticker_id"]: r for r in self.db.get_all_sticker_mappings()}
-        guild = self.bot.get_guild(self.clone_guild_id)
+        st = self._ensure_state(clone_gid)
+        guild = self.bot.get_guild(clone_gid)
 
         items: List[discord.StickerItem] = []
         names: List[str] = []
-        for s in stickers:
+
+        for s in stickers or []:
             try:
                 orig_id = int(s.get("id"))
             except Exception:
@@ -282,8 +469,9 @@ class StickerManager:
             row = rows.get(orig_id)
             if not row:
                 continue
+
             clone_id = int(row["cloned_sticker_id"])
-            stk = self._cache.get(clone_id)
+            stk = st["cache"].get(clone_id)
             if not stk and guild:
                 stk = next(
                     (
@@ -295,8 +483,10 @@ class StickerManager:
                 )
             if not stk:
                 continue
+
             items.append(discord.Object(id=stk.id))
             names.append(getattr(stk, "name", s.get("name", "sticker")))
+
         return items, names
 
     def _compose_content(self, author: str, base_content: str | None) -> str:
@@ -349,17 +539,22 @@ class StickerManager:
         u = u.lower()
         return u.endswith((".png", ".webp", ".gif", ".apng", ".jpg", ".jpeg"))
 
-    def lookup_original_urls(self, stickers: list[dict]) -> list[tuple[str, str]]:
+    def lookup_original_urls(
+        self,
+        clone_gid: int,
+        stickers: list[dict],
+    ) -> list[tuple[str, str]]:
         """
-        For each incoming sticker (up to 3), try to find an original CDN URL
-        from the most recent sitemap the server received from the client.
-        Returns a list of (name, url) pairs, filtered to image URLs only.
+        For each incoming sticker (up to 3), try to find original CDN URLs
+        that we saw in that clone guild's last sitemap from its host.
         """
-        if not self._last_sitemap:
+        st = self._ensure_state(clone_gid)
+        last_map = st["sitemap"] or []
+        if not last_map:
             return []
 
         by_id: dict[int, dict] = {}
-        for row in self._last_sitemap:
+        for row in last_map:
             rid = row.get("id")
             url = row.get("url")
             if rid is None or not url:
@@ -377,14 +572,11 @@ class StickerManager:
                 sid_int = int(sid)
             except Exception:
                 continue
-
             row = by_id.get(sid_int)
             if not row:
                 continue
-
             url = row.get("url")
             if not url or not self._is_image_url(url):
-
                 continue
 
             name = row.get("name") or s.get("name") or "sticker"
@@ -409,6 +601,7 @@ class StickerManager:
 
         suppress_text = bool(msg.get("__stickers_no_text__"))
         prefer_embeds = bool(msg.get("__stickers_prefer_embeds__"))
+        clone_gid = getattr(getattr(ch, "guild", None), "id", None)
 
         if msg.get("__stickers_embeds_added__"):
             return False
@@ -443,7 +636,7 @@ class StickerManager:
                 all_custom = all_custom and _is_custom_sticker_dict(s)
             if not pairs:
 
-                extra = self.lookup_original_urls(sts)
+                extra = self.lookup_original_urls(clone_gid, sts)
                 if extra:
                     pairs.extend(extra[: max(0, 3 - len(pairs))])
 
@@ -472,7 +665,7 @@ class StickerManager:
             )
             return True
 
-        objs, _ = self.resolve_cloned(stickers)
+        objs, _ = self.resolve_cloned(clone_gid, stickers)
         if objs:
             author = msg.get("author")
             base_content = (msg.get("content") or "").strip()

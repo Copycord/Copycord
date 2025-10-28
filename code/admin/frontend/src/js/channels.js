@@ -1,6 +1,7 @@
 (() => {
   const root = document.getElementById("channels-root");
   const empty = document.getElementById("channels-empty");
+  const mappingSel = document.getElementById("mapping-select");
   const search = document.getElementById("ch-search");
   const sortSel = document.getElementById("ch-sort");
   const menu = document.getElementById("ch-menu");
@@ -270,6 +271,7 @@
       "#ch-filter",
       "#ch-menu",
       "#bf-batchbar",
+      "#mapping-select",
     ],
 
     require: "both",
@@ -2266,14 +2268,27 @@
 
   async function load() {
     try {
-      const chRes = await fetch("/api/channels");
+      const mid = mappingSel?.value || "";
+
+      const url = mid
+        ? `/api/channels?mapping_id=${encodeURIComponent(mid)}`
+        : `/api/channels`;
+
+      const chRes = await fetch(url, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+
       const chJson = await chRes.json();
+
       data = chJson.items || [];
       pinsByOrig = new Map();
-      data = chJson.items || [];
+
       filtered = [...data];
+
       rebuildCategoryPinMaps(data);
       render();
+
       await fetchAndApplyQueue();
       startQueuePolling();
     } catch (e) {
@@ -3542,6 +3557,12 @@
   if (filterSel) {
     filterSel.addEventListener("change", render);
     filterSel.addEventListener("input", render);
+  }
+
+  if (mappingSel) {
+    mappingSel.addEventListener("change", () => {
+      load().catch(() => {});
+    });
   }
 
   document.addEventListener("click", (e) => {
@@ -4957,8 +4978,10 @@
 
       setCloneLaunching(cloneId, true);
 
+      const mappingId = mappingSel?.value || "";
       const body = {
         channel_id: cloneId,
+        mapping_id: mappingId,
         mode,
         ...(mode === "since" ? { since: startOfDayIsoLocal(sinceRaw) } : {}),
         ...(mode === "last" ? { last_n: lastVal } : {}),
@@ -5047,13 +5070,13 @@
   }
 
   async function fetchResumeInfo(channelId) {
-    const url = `/api/backfills/resume-info?channel_id=${encodeURIComponent(
-      channelId
-    )}`;
-    const res = await fetch(url, {
-      credentials: "same-origin",
-      cache: "no-store",
-    });
+    const mappingId = mappingSel?.value || "";
+    const res = await fetch(
+      `/api/backfills/resume-info?channel_id=${encodeURIComponent(
+        channelId
+      )}&mapping_id=${encodeURIComponent(mappingId)}`,
+      { credentials: "same-origin", cache: "no-store" }
+    );
     const json = await res.json().catch(() => ({}));
     if (!res.ok || json?.ok === false) return null;
     return json?.data || null;
@@ -5326,13 +5349,15 @@
       let started = 0,
         locked = 0,
         failed = 0;
-
+      const mappingId = mappingSel?.value || "";
       for (const cid of ids) {
         let canResume = false,
           checkpoint = null;
         try {
           const r = await fetch(
-            `/api/backfills/resume-info?channel_id=${encodeURIComponent(cid)}`,
+            `/api/backfills/resume-info?channel_id=${encodeURIComponent(
+              cid
+            )}&mapping_id=${encodeURIComponent(mappingId)}`,
             { credentials: "same-origin", cache: "no-store" }
           );
           const j = await r.json().catch(() => ({}));
@@ -5344,6 +5369,7 @@
         const body = {
           channel_id: cid,
           ...base,
+          mapping_id: mappingId,
           resume: canResume,
           ...(canResume && checkpoint ? { checkpoint } : {}),
         };
@@ -5443,10 +5469,12 @@
             "'": "&#39;",
           }[c])
       );
-
+    const mappingId = mappingSel?.value || "";
     try {
       const res = await fetch(
-        `/api/backfills/resume-info?channel_id=${encodeURIComponent(cid)}`,
+        `/api/backfills/resume-info?channel_id=${encodeURIComponent(
+          cid
+        )}&mapping_id=${encodeURIComponent(mappingId)}`,
         { credentials: "same-origin", cache: "no-store" }
       );
       const json = await res.json().catch(() => ({}));
@@ -5523,6 +5551,7 @@
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 channel_id: cid,
+                mapping_id: mappingSel?.value,
                 resume: true,
                 run_id: info?.run_id ?? undefined,
                 checkpoint: info?.checkpoint ?? null,

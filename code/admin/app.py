@@ -7,11 +7,13 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 from __future__ import annotations
 from collections import deque
 import contextlib
 import json
 import os
+import sqlite3
 import uuid
 import asyncio
 import websockets
@@ -42,6 +44,7 @@ from fastapi import (
     File,
     UploadFile,
     Form,
+    Query,
 )
 from anyio import EndOfStream
 from fastapi.responses import (
@@ -123,7 +126,7 @@ APP_TITLE = "Copycord"
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = os.getenv("DB_PATH", "/data/data.db")
-db = DBManager(DB_PATH)
+db = DBManager(DB_PATH, init_schema=True)
 
 BACKUP_DIR = Path(os.getenv("BACKUP_DIR", str(DATA_DIR / "backups")))
 BACKUP_RETAIN = int(os.getenv("BACKUP_RETAIN", "14"))
@@ -166,25 +169,13 @@ SERVER_AGENT_URL = os.getenv("WS_SERVER_URL", "ws://server:8765")
 
 ALLOWED_ENV = [
     "SERVER_TOKEN",
-    "CLONE_GUILD_ID",
-    "COMMAND_USERS",
-    "DELETE_CHANNELS",
-    "DELETE_MESSAGES",
-    "EDIT_MESSAGES",
-    "DELETE_THREADS",
-    "DELETE_ROLES",
-    "CLONE_EMOJI",
-    "CLONE_STICKER",
-    "CLONE_ROLES",
-    "MIRROR_ROLE_PERMISSIONS",
     "CLIENT_TOKEN",
-    "HOST_GUILD_ID",
-    "ENABLE_CLONING",
+    "COMMAND_USERS",
     "LOG_LEVEL",
-    "LOG_FORMAT",
-    "MIRROR_CHANNEL_PERMISSIONS",
 ]
-REQUIRED = ["SERVER_TOKEN", "CLIENT_TOKEN", "CLONE_GUILD_ID"]
+
+REQUIRED = ["SERVER_TOKEN", "CLIENT_TOKEN"]
+
 BOOL_KEYS = [
     "DELETE_CHANNELS",
     "DELETE_THREADS",
@@ -210,7 +201,6 @@ DEFAULTS: Dict[str, str] = {
     "MIRROR_ROLE_PERMISSIONS": "False",
     "ENABLE_CLONING": "True",
     "LOG_LEVEL": "INFO",
-    "LOG_FORMAT": "HUMAN",
     "COMMAND_USERS": "",
     "MIRROR_CHANNEL_PERMISSIONS": "False",
 }
@@ -438,33 +428,41 @@ class BackfillLocks:
             self._launching.clear()
             self._running.clear()
 
-    async def try_acquire_launching(self, channel_id: int) -> bool:
+    async def try_acquire_launching(
+        self, channel_id: int, cloned_guild_id: int | None
+    ) -> bool:
+        key = f"{int(channel_id)}:{int(cloned_guild_id or 0)}"
         now = time.time()
         async with self._lock:
             self._launching = {
-                cid: exp for cid, exp in self._launching.items() if exp > now
+                k: exp for k, exp in self._launching.items() if exp > now
             }
-            if channel_id in self._running or channel_id in self._launching:
+            if key in self._running or key in self._launching:
                 return False
-            self._launching[channel_id] = now + self._launching_ttl
+            self._launching[key] = now + self._launching_ttl
             return True
 
-    async def promote_to_running(self, channel_id: int):
+    async def promote_to_running(self, channel_id: int, cloned_guild_id: int | None):
+        key = f"{int(channel_id)}:{int(cloned_guild_id or 0)}"
         async with self._lock:
-            self._launching.pop(channel_id, None)
-            self._running.add(channel_id)
+            self._launching.pop(key, None)
+            self._running.add(key)
 
-    async def release(self, channel_id: int):
+    async def release(self, channel_id: int, cloned_guild_id: int | None):
+        key = f"{int(channel_id)}:{int(cloned_guild_id or 0)}"
         async with self._lock:
-            self._launching.pop(channel_id, None)
-            self._running.discard(channel_id)
+            self._launching.pop(key, None)
+            self._running.discard(key)
 
-    async def status(self, channel_id: int) -> Literal["idle", "launching", "running"]:
+    async def status(
+        self, channel_id: int, cloned_guild_id: int | None
+    ) -> Literal["idle", "launching", "running"]:
+        key = f"{int(channel_id)}:{int(cloned_guild_id or 0)}"
         now = time.time()
         async with self._lock:
-            if channel_id in self._running:
+            if key in self._running:
                 return "running"
-            if self._launching.get(channel_id, 0) > now:
+            if self._launching.get(key, 0) > now:
                 return "launching"
             return "idle"
 
@@ -486,19 +484,24 @@ async def _lock_listener():
         t = p.get("type")
         d = p.get("data") or {}
         cid = d.get("channel_id") or p.get("channel_id")
+
         try:
             cid = int(cid)
         except Exception:
             continue
-        if t in ("backfill_ack",):
-            await locks.promote_to_running(cid)
-        elif t in ("backfill_done",):
-            await locks.release(cid)
-        elif t in ("backfill_busy",):
-            await locks.promote_to_running(cid)
-        elif t in ("backfill_stream_end",):
 
-            pass
+        gid = d.get("cloned_guild_id") or p.get("cloned_guild_id")
+        try:
+            gid = int(gid) if gid is not None else 0
+        except Exception:
+            gid = 0
+
+        if t in ("backfill_ack",):
+            await locks.promote_to_running(cid, gid)
+        elif t in ("backfill_done",):
+            await locks.release(cid, gid)
+        elif t in ("backfill_busy",):
+            await locks.promote_to_running(cid, gid)
 
 
 async def _close_ws_quietly(
@@ -841,6 +844,131 @@ async def _ws_cmd(url: str, payload: dict, timeout: float = 0.7) -> dict:
             return {"ok": False, "running": False, "error": str(e)}
 
 
+def _as_bool(v: str | None, default: bool = False) -> bool:
+    """
+    Normalize legacy string-y boolean config values ("true", "1", "yes") -> bool.
+    """
+    if v is None or v == "":
+        return default
+    return str(v).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _bootstrap_legacy_mapping_if_needed() -> dict:
+    """
+    One-time V2 -> V3 migration.
+
+    If guild_mappings is EMPTY and legacy single-guild fields still live
+    in app_config (HOST_GUILD_ID / CLONE_GUILD_ID + old per-guild flags),
+    we do three things in this order:
+
+      1. Backfill original_guild_id / cloned_guild_id into every legacy row
+         across tables (messages, threads, channel_mappings, etc.).
+      2. Create the first row in guild_mappings using those legacy values.
+      3. Wipe the legacy keys from app_config so we never do this again.
+
+    Returns a summary dict for logging.
+    """
+
+    try:
+        existing = db.list_guild_mappings() or []
+    except Exception:
+        existing = []
+    if existing:
+        return {
+            "created": False,
+            "skipped_reason": "guild_mappings_already_present",
+            "count": len(existing),
+        }
+
+    legacy_host_id = (db.get_config("HOST_GUILD_ID", "") or "").strip()
+    legacy_clone_id = (db.get_config("CLONE_GUILD_ID", "") or "").strip()
+
+    # If either is missing we can't infer anything.
+    if not legacy_host_id or not legacy_clone_id:
+        return {
+            "created": False,
+            "skipped_reason": "no_legacy_ids_found",
+            "host": legacy_host_id,
+            "clone": legacy_clone_id,
+        }
+
+    try:
+        host_gid = int(legacy_host_id)
+        clone_gid = int(legacy_clone_id)
+    except Exception:
+        return {
+            "created": False,
+            "skipped_reason": "legacy_ids_not_int",
+            "host": legacy_host_id,
+            "clone": legacy_clone_id,
+        }
+
+    backfill_summary: dict[str, object] = {}
+    try:
+        backfill_summary = db.bulk_fill_guild_ids(
+            host_guild_id=host_gid,
+            clone_guild_id=clone_gid,
+        )
+    except Exception as e:
+        # We don't want the whole migration to fail just because of partial data,
+
+        backfill_summary = {"error": str(e)}
+
+    host_name = db.get_config("HOST_GUILD_NAME", "") or ""
+    clone_name = (
+        db.get_config("CLONED_GUILD_NAME", "")
+        or db.get_config("CLONE_GUILD_NAME", "")
+        or ""
+    )
+    host_icon = db.get_config("HOST_GUILD_ICON_URL", "") or ""
+
+    settings_obj: dict[str, bool] = {}
+    for key in BOOL_KEYS:
+        legacy_val = db.get_config(key, None)
+        default_val = DEFAULTS.get(key, False)
+        settings_obj[key] = _as_bool(legacy_val, default=default_val)
+
+    mapping_name = f"{host_gid}"
+
+    new_mapping_id = db.upsert_guild_mapping(
+        mapping_id=None,
+        mapping_name=mapping_name,
+        original_guild_id=host_gid,
+        original_guild_name=host_name,
+        original_guild_icon_url=host_icon,
+        cloned_guild_id=clone_gid,
+        cloned_guild_name=clone_name,
+        settings=settings_obj,
+    )
+
+    cleanup_keys = [
+        "HOST_GUILD_ID",
+        "CLONE_GUILD_ID",
+        "HOST_GUILD_NAME",
+        "CLONE_GUILD_NAME",
+        "CLONED_GUILD_NAME",
+        "HOST_GUILD_ICON_URL",
+        "CLONE_CHANNEL_PERMISSIONS",
+        "LOG_FORMAT",
+    ]
+    cleanup_keys.extend(list(BOOL_KEYS))
+
+    for k in cleanup_keys:
+        try:
+            db.delete_config(k)
+        except Exception:
+
+            pass
+
+    return {
+        "created": True,
+        "mapping_id": new_mapping_id,
+        "host_guild_id": host_gid,
+        "clone_guild_id": clone_gid,
+        "backfill": backfill_summary,
+    }
+
+
 @app.get("/", response_class=None)
 async def index(request: Request):
     env = _read_env()
@@ -849,21 +977,12 @@ async def index(request: Request):
 
     both_running = bool(s_server.get("running")) and bool(s_client.get("running"))
 
-    text_keys = [
-        "SERVER_TOKEN",
-        "CLIENT_TOKEN",
-        "HOST_GUILD_ID",
-        "CLONE_GUILD_ID",
-        "COMMAND_USERS",
-    ]
+    text_keys = [k for k in ALLOWED_ENV if k != "LOG_LEVEL"]
+
     bool_keys = BOOL_KEYS
-    log_level = env.get("LOG_LEVEL", "INFO")
-    LOGGER.debug(
-        "GET / | both_running=%s server=%s client=%s",
-        both_running,
-        s_server.get("status"),
-        s_client.get("status"),
-    )
+    log_levels = ["DEBUG", "INFO", "WARNING", "ERROR"]
+    guild_mappings = db.list_guild_mappings()
+    mapping_bool_keys = BOOL_KEYS
 
     return templates.TemplateResponse(
         "index.html",
@@ -873,7 +992,9 @@ async def index(request: Request):
             "env": env,
             "text_keys": text_keys,
             "bool_keys": bool_keys,
-            "log_level": log_level,
+            "log_level": log_levels,
+            "guild_mappings": guild_mappings,
+            "mapping_bool_keys": mapping_bool_keys,
             "server_status": s_server,
             "client_status": s_client,
             "both_running": both_running,
@@ -911,7 +1032,7 @@ async def save(request: Request):
 
 @app.post("/start")
 async def start_all():
-    errs = _validate(_read_env())
+    errs = _validate(_read_env(), for_start=True)
     if errs:
         LOGGER.warning("POST /start blocked | errs=%s", errs)
         return PlainTextResponse("Cannot start: " + "; ".join(errs), status_code=400)
@@ -1006,6 +1127,28 @@ async def _startup_links():
     await startup_links(app, templates_env=templates.env, set_jinja_global=True)
 
 
+@app.on_event("startup")
+async def _migrate_legacy_single_mapping():
+    try:
+        result = _bootstrap_legacy_mapping_if_needed()
+        if result.get("created"):
+            LOGGER.info(
+                "[migrate] Bootstrapped legacy HOST/CLONE → guild_mappings row | "
+                "mapping_id=%s host=%s clone=%s backfill=%s",
+                result.get("mapping_id"),
+                result.get("host_guild_id"),
+                result.get("clone_guild_id"),
+                result.get("backfill"),
+            )
+        else:
+            LOGGER.debug(
+                "[migrate] No legacy bootstrap needed | %s",
+                result.get("skipped_reason"),
+            )
+    except Exception:
+        LOGGER.exception("Legacy single-guild → multi-guild bootstrap failed")
+
+
 @app.on_event("shutdown")
 async def _shutdown():
     await shutdown_links(app)
@@ -1017,16 +1160,12 @@ async def _apply_db_log_level_and_banner():
         env = _read_env()
         lvl_name = (env.get("LOG_LEVEL") or "INFO").upper()
         LOGGER.logger.setLevel(getattr(logging, lvl_name, logging.INFO))
-        if env.get("LOG_FORMAT"):
-            os.environ["LOG_FORMAT"] = env["LOG_FORMAT"]
-            configure_app_logging()
     except Exception:
         pass
     LOGGER.debug(
-        "Starting %s | LOG_LEVEL=%s | LOG_FORMAT=%s | WS_SERVER_CTRL=%s | WS_CLIENT_CTRL=%s",
+        "Starting %s | LOG_LEVEL=%s | WS_SERVER_CTRL=%s | WS_CLIENT_CTRL=%s",
         APP_TITLE,
         logging.getLevelName(LOGGER.logger.level),
-        os.getenv("LOG_FORMAT", "HUMAN"),
         SERVER_CTRL_URL,
         CLIENT_CTRL_URL,
     )
@@ -1510,33 +1649,39 @@ def _write_env(values: Dict[str, str]) -> None:
             v = _norm_bool_str(v)
         if k == "LOG_LEVEL":
             v = "DEBUG" if str(v).upper() == "DEBUG" else "INFO"
-        if k == "LOG_FORMAT":
-            v = "JSON" if str(v).upper() == "JSON" else "HUMAN"
         db.set_config(k, v)
     LOGGER.info("Config saved | %s", _redact_dict(values))
 
 
-def _validate(values: Dict[str, str]) -> List[str]:
+def _validate(values: Dict[str, str], *, for_start: bool = False) -> List[str]:
     errs: List[str] = []
 
     for k in REQUIRED:
         if not (values.get(k) or "").strip():
             errs.append(f"Missing {k}")
 
-    raw_clone = (values.get("CLONE_GUILD_ID", "") or "").strip()
-    try:
-        if int(raw_clone) <= 0:
-            errs.append("CLONE_GUILD_ID must be a positive integer")
-    except Exception:
-        errs.append("CLONE_GUILD_ID must be an integer")
-
-    raw_host = (values.get("HOST_GUILD_ID", "") or "").strip()
-    if raw_host != "":
+    cg = (values.get("CLONE_GUILD_ID") or "").strip()
+    if cg != "":
         try:
-            if int(raw_host) <= 0:
+            if int(cg) <= 0:
+                errs.append("CLONE_GUILD_ID must be a positive integer")
+        except Exception:
+            errs.append("CLONE_GUILD_ID must be an integer")
+
+    hg = (values.get("HOST_GUILD_ID") or "").strip()
+    if hg != "":
+        try:
+            if int(hg) <= 0:
                 errs.append("HOST_GUILD_ID must be a positive integer")
         except Exception:
             errs.append("HOST_GUILD_ID must be an integer")
+
+    if not errs and for_start:
+        try:
+            if len(db.list_guild_mappings()) == 0:
+                errs.append("At least one guild_mapping is required")
+        except Exception:
+            errs.append("At least one guild_mapping is required")
 
     if errs:
         LOGGER.warning("Config validation failed | errs=%s", errs)
@@ -1553,11 +1698,15 @@ def _norm_bool_str(v: str) -> str:
 @app.get("/channels")
 async def channels_page(request: Request):
     env = _read_env()
+    guild_mappings = db.list_guild_mappings()
+
     return templates.TemplateResponse(
         "channels.html",
         {
             "request": request,
-            "title": APP_TITLE,
+            "title": APP_TITLE + " – Channels",
+            "env": env,
+            "guild_mappings": guild_mappings,
             "version": CURRENT_VERSION,
             "log_level": env.get("LOG_LEVEL", "INFO"),
         },
@@ -1565,51 +1714,134 @@ async def channels_page(request: Request):
 
 
 @app.get("/api/channels", response_class=JSONResponse)
-async def channels_api():
-    chans = [dict(r) for r in db.get_all_channel_mappings()]
-    cat_rows = [dict(r) for r in db.get_all_category_mappings()]
+async def api_channels(mapping_id: str | None = Query(default=None)):
 
-    cats_by_id = {int(r["original_category_id"]): r for r in cat_rows}
+    raw_rows = db.get_all_channel_mappings()
+    raw_cat_rows = db.get_all_category_mappings()
 
-    out = []
-    for ch in chans:
-        pid = ch.get("original_parent_category_id")
-        pid_int = int(pid) if pid not in (None, "", 0) else None
+    if mapping_id:
+        mapping_row = db.get_mapping_by_id(mapping_id)
+        if mapping_row:
+            allowed_host = str(mapping_row["original_guild_id"])
+            allowed_clone = str(mapping_row["cloned_guild_id"])
 
-        cat_info = cats_by_id.get(pid_int, {})
-        original_cat_name = cat_info.get("original_category_name")
-        cloned_cat_name = cat_info.get("cloned_category_name") or None
-        cloned_cat_id = (
-            str(cat_info.get("cloned_category_id"))
-            if cat_info.get("cloned_category_id") not in (None, "", 0)
-            else None
-        )
+            def _belongs(row: sqlite3.Row) -> bool:
+                og = str(row["original_guild_id"] or "")
+                cg = str(row["cloned_guild_id"] or "")
+                return (og == allowed_host) or (cg == allowed_clone)
 
-        out.append(
+            raw_rows = [r for r in raw_rows if _belongs(r)]
+            raw_cat_rows = [r for r in raw_cat_rows if _belongs(r)]
+        else:
+
+            raw_rows = []
+            raw_cat_rows = []
+
+    rows = [dict(r) for r in raw_rows]
+    cat_rows = [dict(r) for r in raw_cat_rows]
+
+    cat_channels: dict[str, list[dict]] = {}
+    for ch in rows:
+        parent = ch.get("original_parent_category_id")
+        if parent:
+            key = str(parent)
+            cat_channels.setdefault(key, []).append(ch)
+
+    grouped_categories = []
+    for cr in cat_rows:
+        cat_key = str(cr["original_category_id"])
+
+        chs_for_cat = cat_channels.get(cat_key, [])
+
+        grouped_categories.append(
             {
-                "original_channel_id": (
-                    str(ch["original_channel_id"])
-                    if ch.get("original_channel_id")
+                # category metadata (as strings so JS doesn't get sci notation)
+                "original_category_id": (
+                    str(cr["original_category_id"])
+                    if cr.get("original_category_id")
                     else ""
                 ),
-                "original_channel_name": ch.get("original_channel_name") or "",
-                "cloned_channel_id": (
-                    str(ch["cloned_channel_id"])
-                    if ch.get("cloned_channel_id")
-                    else None
+                "original_category_name": cr.get("original_category_name") or "",
+                "cloned_category_id": (
+                    str(cr["cloned_category_id"])
+                    if cr.get("cloned_category_id")
+                    else ""
                 ),
-                "channel_type": int(ch.get("channel_type", 0)),
-                "category_name": original_cat_name,
-                "original_category_name": original_cat_name,
-                "cloned_category_name": cloned_cat_name,
-                "original_parent_category_id": str(pid_int) if pid_int else None,
-                "cloned_category_id": cloned_cat_id,
-                "channel_webhook_url": ch.get("channel_webhook_url"),
-                "clone_channel_name": ch.get("clone_channel_name") or None,
+                "cloned_category_name": cr.get("cloned_category_name") or "",
+                "channels": [
+                    {
+                        "original_channel_id": str(c["original_channel_id"]),
+                        "original_channel_name": c["original_channel_name"],
+                        "cloned_channel_id": (
+                            str(c["cloned_channel_id"])
+                            if c.get("cloned_channel_id")
+                            else ""
+                        ),
+                        "clone_channel_name": c.get("clone_channel_name") or "",
+                        "is_thread": False,
+                        "pin_count": 0,
+                        "channel_webhook_url": c.get("channel_webhook_url") or "",
+                        "channel_type": c.get("channel_type") or "",
+                        "original_guild_id": str(c.get("original_guild_id") or ""),
+                        "cloned_guild_id": str(c.get("cloned_guild_id") or ""),
+                    }
+                    for c in chs_for_cat
+                ],
             }
         )
 
-    return {"items": out}
+    uncategorized_channels = [
+        {
+            "original_channel_id": str(ch["original_channel_id"]),
+            "original_channel_name": ch["original_channel_name"],
+            "cloned_channel_id": (
+                str(ch["cloned_channel_id"]) if ch.get("cloned_channel_id") else ""
+            ),
+            "clone_channel_name": ch.get("clone_channel_name") or "",
+            "is_thread": False,
+            "pin_count": 0,
+            "channel_webhook_url": ch.get("channel_webhook_url") or "",
+            "channel_type": ch.get("channel_type") or "",
+            "original_guild_id": str(ch.get("original_guild_id") or ""),
+            "cloned_guild_id": str(ch.get("cloned_guild_id") or ""),
+        }
+        for ch in rows
+        if not ch.get("original_parent_category_id")
+    ]
+
+    if uncategorized_channels:
+        grouped_categories.append(
+            {
+                "original_category_id": "",
+                "original_category_name": "Uncategorized",
+                "cloned_category_id": "",
+                "cloned_category_name": "",
+                "channels": uncategorized_channels,
+            }
+        )
+
+    items: list[dict] = []
+    for cat in grouped_categories:
+        cat_name = (
+            cat.get("cloned_category_name")
+            or cat.get("original_category_name")
+            or "Uncategorized"
+        )
+
+        orig_cat_id_str = str(cat.get("original_category_id") or "")
+        clone_cat_id_str = str(cat.get("cloned_category_id") or "")
+
+        for ch in cat["channels"]:
+            items.append(
+                {
+                    **ch,
+                    "category_name": cat_name,
+                    "original_category_id": orig_cat_id_str,
+                    "cloned_category_id": clone_cat_id_str,
+                }
+            )
+
+    return {"items": items}
 
 
 @app.get("/api/backfills/queue")
@@ -1634,7 +1866,7 @@ async def api_backfills_inflight():
 
 
 @app.get("/api/backfills/resume-info", response_class=JSONResponse)
-async def api_backfills_resume_info(channel_id: int):
+async def api_backfills_resume_info(channel_id: int, mapping_id: str | None = None):
     try:
         cid = int(channel_id)
     except Exception:
@@ -1642,10 +1874,36 @@ async def api_backfills_resume_info(channel_id: int):
             {"ok": False, "error": "invalid-channel_id"}, status_code=400
         )
 
-    row = db.backfill_get_incomplete_for_channel(cid)
+    row = None
+    if mapping_id:
+        m = db.get_mapping_by_id(mapping_id)
+        if not m:
+            return JSONResponse(
+                {"ok": False, "error": "unknown-mapping"}, status_code=404
+            )
+
+        try:
+            cloned_gid = int(m["cloned_guild_id"])
+        except Exception:
+            cloned_gid = None
+
+        if cloned_gid is not None:
+            row = db.backfill_get_incomplete_for_channel_in_clone(cid, cloned_gid)
+        else:
+            row = None
+    else:
+        row = db.backfill_get_incomplete_for_channel(cid)
+
+    def _parse_range(r):
+        try:
+            return json.loads(r or "{}")
+        except Exception:
+            return {}
 
     payload = {
         "channel_id": str(cid),
+        "original_guild_id": "",
+        "cloned_guild_id": "",
         "active": bool(row is not None),
         "resumable": False,
         "run_id": None,
@@ -1673,9 +1931,11 @@ async def api_backfills_resume_info(channel_id: int):
                     "last_orig_timestamp": row.get("last_orig_timestamp"),
                 },
                 "clone_channel_id": row.get("clone_channel_id"),
-                "range": json.loads(row.get("range_json") or "{}"),
+                "range": _parse_range(row.get("range_json")),
                 "started_at": row.get("started_at"),
                 "updated_at": row.get("updated_at"),
+                "original_guild_id": str(row.get("original_guild_id") or ""),
+                "cloned_guild_id": str(row.get("cloned_guild_id") or ""),
             }
         )
 
@@ -1691,25 +1951,33 @@ async def api_backfill_start(payload: dict = Body(...)):
             {"ok": False, "error": "invalid-channel_id"}, status_code=400
         )
 
-    st = await locks.status(channel_id)
+    mapping_id = (payload.get("mapping_id") or "").strip()
+    m = db.get_mapping_by_id(mapping_id) if mapping_id else None
+    if not m:
+        return JSONResponse({"ok": False, "error": "unknown-mapping"}, status_code=404)
+    cloned_guild_id = int(m["cloned_guild_id"])
+    original_guild_id = int(m["original_guild_id"])
+
+    st = await locks.status(channel_id, cloned_guild_id)
     if st in ("launching", "running"):
         return JSONResponse(
             {
                 "ok": False,
                 "error": "backfill-already-running",
                 "channel_id": channel_id,
+                "cloned_guild_id": cloned_guild_id,
                 "state": st,
             },
             status_code=409,
         )
 
-    ok = await locks.try_acquire_launching(channel_id)
-    if not ok:
+    if not await locks.try_acquire_launching(channel_id, cloned_guild_id):
         return JSONResponse(
             {
                 "ok": False,
                 "error": "backfill-already-running",
                 "channel_id": channel_id,
+                "cloned_guild_id": cloned_guild_id,
                 "state": "launching",
             },
             status_code=409,
@@ -1725,8 +1993,12 @@ async def api_backfill_start(payload: dict = Body(...)):
     )
     last_n = payload.get("last_n")
 
-    data = {"channel_id": channel_id}
-
+    data = {
+        "channel_id": channel_id,
+        "mapping_id": mapping_id,
+        "original_guild_id": original_guild_id,
+        "cloned_guild_id": cloned_guild_id,
+    }
     if after_iso:
         data["after_iso"] = str(after_iso)
     if before_iso:
@@ -1735,7 +2007,7 @@ async def api_backfill_start(payload: dict = Body(...)):
         try:
             data["last_n"] = int(last_n)
         except Exception:
-            await locks.release(channel_id)
+            await locks.release(channel_id, cloned_guild_id)
             return JSONResponse(
                 {"ok": False, "error": "invalid-last_n"}, status_code=400
             )
@@ -1746,28 +2018,22 @@ async def api_backfill_start(payload: dict = Body(...)):
             "value": {"after": after_iso, "before": before_iso},
         }
     else:
-        rng_val = (
-            after_iso
-            if after_iso
-            else (data.get("last_n") if "last_n" in data else None)
-        )
+        rng_val = after_iso or (data.get("last_n") if "last_n" in data else None)
         data["range"] = {"mode": mode, "value": rng_val} if mode else None
 
-    if bool(payload.get("resume")):
+    if payload.get("resume"):
         data["resume"] = True
         cp = payload.get("checkpoint") or {}
         after_id = cp.get("last_orig_message_id") or payload.get("after_id")
         after_ts = cp.get("last_orig_timestamp") or payload.get("after_ts")
-
         if after_id:
             data["after_id"] = str(after_id)
         if after_ts and not data.get("after_iso"):
             data["after_iso"] = str(after_ts)
 
     res = await _ws_cmd(CLIENT_AGENT_URL, {"type": "clone_messages", "data": data})
-
     if not res.get("ok", True):
-        await locks.release(channel_id)
+        await locks.release(channel_id, cloned_guild_id)
         return JSONResponse(
             {"ok": False, "error": res.get("error") or "client-agent-failed"},
             status_code=502,
@@ -1778,6 +2044,12 @@ async def api_backfill_start(payload: dict = Body(...)):
 
 @app.post("/api/backfill/start-batch", response_class=JSONResponse)
 async def api_backfill_start_batch(payload: dict = Body(...)):
+    mapping_id = (payload.get("mapping_id") or "").strip()
+    m = db.get_mapping_by_id(mapping_id) if mapping_id else None
+    if not m:
+        return JSONResponse({"ok": False, "error": "unknown-mapping"}, status_code=404)
+    cloned_guild_id = int(m["cloned_guild_id"])
+
     raw_ids = (
         payload.get("channel_ids") or payload.get("channels") or payload.get("ids")
     )
@@ -1786,9 +2058,7 @@ async def api_backfill_start_batch(payload: dict = Body(...)):
             {"ok": False, "error": "invalid-channel_ids"}, status_code=400
         )
 
-    ids: list[int] = []
-    bad: list[object] = []
-    seen: set[int] = set()
+    ids, bad, seen = [], [], set()
     for x in raw_ids:
         try:
             cid = int(x)
@@ -1797,7 +2067,6 @@ async def api_backfill_start_batch(payload: dict = Body(...)):
                 seen.add(cid)
         except Exception:
             bad.append(x)
-
     if not ids:
         return JSONResponse(
             {"ok": False, "error": "no-valid-channel_ids", "bad": bad}, status_code=400
@@ -1814,28 +2083,26 @@ async def api_backfill_start_batch(payload: dict = Body(...)):
     last_n = payload.get("last_n")
 
     def base_payload_for(cid: int) -> dict:
-        data: dict = {"channel_id": cid}
+        data = {
+            "channel_id": cid,
+            "mapping_id": mapping_id,
+            "cloned_guild_id": cloned_guild_id,
+        }
         if after_iso:
             data["after_iso"] = str(after_iso)
         if before_iso:
             data["before_iso"] = str(before_iso)
         if last_n is not None:
             data["last_n"] = int(last_n)
-
         if mode == "between":
             data["range"] = {
                 "mode": mode,
                 "value": {"after": after_iso, "before": before_iso},
             }
         else:
-            rng_val = (
-                after_iso
-                if after_iso
-                else (data.get("last_n") if "last_n" in data else None)
-            )
+            rng_val = after_iso or (data.get("last_n") if "last_n" in data else None)
             data["range"] = {"mode": mode, "value": rng_val} if mode else None
-
-        if bool(payload.get("resume")):
+        if payload.get("resume"):
             data["resume"] = True
             cp = payload.get("checkpoint") or {}
             after_id = cp.get("last_orig_message_id") or payload.get("after_id")
@@ -1846,11 +2113,9 @@ async def api_backfill_start_batch(payload: dict = Body(...)):
                 data["after_iso"] = str(after_ts)
         return data
 
-    results: list[dict] = []
-    started = locked = failed = 0
-
+    results, started, locked, failed = [], 0, 0, 0
     for cid in ids:
-        st = await locks.status(cid)
+        st = await locks.status(cid, cloned_guild_id)
         if st in ("launching", "running"):
             results.append(
                 {
@@ -1864,8 +2129,7 @@ async def api_backfill_start_batch(payload: dict = Body(...)):
             locked += 1
             continue
 
-        ok_lock = await locks.try_acquire_launching(cid)
-        if not ok_lock:
+        if not await locks.try_acquire_launching(cid, cloned_guild_id):
             results.append(
                 {
                     "channel_id": cid,
@@ -1881,7 +2145,7 @@ async def api_backfill_start_batch(payload: dict = Body(...)):
         data = base_payload_for(cid)
         res = await _ws_cmd(CLIENT_AGENT_URL, {"type": "clone_messages", "data": data})
         if not res or not res.get("ok", True):
-            await locks.release(cid)
+            await locks.release(cid, cloned_guild_id)
             results.append(
                 {
                     "channel_id": cid,
@@ -2475,6 +2739,67 @@ async def api_export_messages(request: Request):
             status_code=502,
         )
     return JSONResponse({"ok": True, "accepted": True})
+
+
+@app.get("/api/guild-mappings", response_class=JSONResponse)
+async def api_list_guild_mappings():
+    rows = db.list_guild_mappings()
+    return JSONResponse({"ok": True, "mappings": rows})
+
+
+@app.post("/api/guild-mappings", response_class=JSONResponse)
+async def api_create_mapping(payload: dict = Body(...)):
+    try:
+        original_id = int(payload.get("original_guild_id"))
+        clone_id = int(payload.get("cloned_guild_id"))
+    except Exception:
+        return JSONResponse(
+            {"ok": False, "error": "invalid-guild-ids"}, status_code=400
+        )
+
+    mapping_id = db.upsert_guild_mapping(
+        mapping_id=None,
+        mapping_name=str(payload.get("mapping_name") or "").strip(),
+        original_guild_id=original_id,
+        original_guild_name=str(payload.get("original_guild_name") or ""),
+        original_guild_icon_url=(payload.get("original_guild_icon_url") or None),
+        cloned_guild_id=clone_id,
+        cloned_guild_name=str(payload.get("cloned_guild_name") or ""),
+        settings=payload.get("settings") or {},
+    )
+
+    return JSONResponse({"ok": True, "mapping_id": mapping_id})
+
+
+@app.patch("/api/guild-mappings/{mapping_id}", response_class=JSONResponse)
+async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
+    try:
+        original_id = int(payload.get("original_guild_id"))
+        clone_id = int(payload.get("cloned_guild_id"))
+    except Exception:
+        return JSONResponse(
+            {"ok": False, "error": "invalid-guild-ids"}, status_code=400
+        )
+
+    db.upsert_guild_mapping(
+        mapping_id=mapping_id,
+        mapping_name=str(payload.get("mapping_name") or "").strip(),
+        original_guild_id=original_id,
+        original_guild_name=str(payload.get("original_guild_name") or ""),
+        original_guild_icon_url=(payload.get("original_guild_icon_url") or None),
+        cloned_guild_id=clone_id,
+        cloned_guild_name=str(payload.get("cloned_guild_name") or ""),
+        settings=payload.get("settings") or {},
+        overwrite_identity=False,
+    )
+
+    return JSONResponse({"ok": True, "mapping_id": mapping_id})
+
+
+@app.delete("/api/guild-mappings/{mapping_id}", response_class=JSONResponse)
+async def api_delete_mapping(mapping_id: str):
+    db.delete_guild_mapping(mapping_id)
+    return JSONResponse({"ok": True})
 
 
 app = ConnCloseOnShutdownASGI(app)

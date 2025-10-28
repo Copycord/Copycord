@@ -20,40 +20,118 @@ logger = logging.getLogger("server.emojis")
 class EmojiManager:
     def __init__(
         self,
-        bot: discord.Bot,
+        bot,
         db,
-        ratelimit: RateLimitManager,
-        clone_guild_id: int,
-        session: Optional[aiohttp.ClientSession] = None,
+        guild_resolver,
+        ratelimit,
+        clone_guild_id: int | None = None,
+        session=None,
     ):
         self.bot = bot
         self.db = db
         self.ratelimit = ratelimit
-        self.clone_guild_id = clone_guild_id
+        self.clone_guild_id = int(clone_guild_id or 0)
         self.session = session
+        self.guild_resolver = guild_resolver
 
-        self._task: asyncio.Task | None = None
-        self._lock = asyncio.Lock()
+        self._tasks: dict[int, asyncio.Task] = {}
+
+        self._locks: dict[int, asyncio.Lock] = {}
 
     def set_session(self, session: aiohttp.ClientSession | None):
         self.session = session
 
-    def kickoff_sync(self, emojis: list[dict]) -> None:
-        """Schedule a background emoji sync if not running."""
-        if self._task and not self._task.done():
-            logger.debug("Emoji sync already running; skip kickoff.")
-            return
-        guild = self.bot.get_guild(self.clone_guild_id)
-        if not guild:
-            logger.debug("kickoff_sync: clone guild not available yet; skip.")
-            return
-        logger.debug("[😊] Emoji sync task scheduled.")
-        self._task = asyncio.create_task(self._run_sync(guild, emojis or []))
+    def _get_lock_for_clone(self, clone_gid: int) -> asyncio.Lock:
+        """
+        Return (and cache) the lock for this clone guild.
+        We serialize emoji writes per clone guild, but different clone guilds
+        can sync in parallel.
+        """
+        if clone_gid not in self._locks:
+            self._locks[clone_gid] = asyncio.Lock()
+        return self._locks[clone_gid]
 
-    async def _run_sync(self, guild: discord.Guild, emoji_data: list[dict]) -> None:
-        async with self._lock:
+    def kickoff_sync(
+        self,
+        emojis: list[dict],
+        host_guild_id: int | None,
+        target_clone_guild_id: int,
+        *,
+        validate_mapping: bool = True,
+    ) -> None:
+        host_id = int(host_guild_id) if host_guild_id else None
+        clone_gid = int(target_clone_guild_id)
+
+        # if there's already a running task for THIS clone guild, skip
+        existing = self._tasks.get(clone_gid)
+        if existing and not existing.done():
+            logger.debug(
+                "[emoji] Sync already running for clone %s; skip kickoff.",
+                clone_gid,
+            )
+            return
+
+        if validate_mapping and host_id is not None:
             try:
-                d, r, c = await self._sync(guild, emoji_data)
+                clones = set(self.guild_resolver.clones_for_host(host_id))
+                if clones and clone_gid not in clones:
+                    logger.warning(
+                        "[emoji] host %s is not mapped to clone %s; proceeding anyway",
+                        host_id,
+                        clone_gid,
+                    )
+            except Exception:
+                # if resolver blows up we don't want to hard-crash kickoff
+                logger.exception("[emoji] mapping validation threw, continuing anyway")
+
+        guild = self.bot.get_guild(clone_gid)
+        if not guild:
+            logger.debug(
+                "[emoji] clone guild %s unavailable; aborting sync",
+                clone_gid,
+            )
+            return
+
+        async def _run_one():
+            await self._run_sync_for_guild(
+                guild=guild,
+                emoji_data=emojis or [],
+                host_guild_id=host_id,
+                clone_gid=clone_gid,
+            )
+
+        logger.debug("[😊] Emoji sync scheduled for clone=%s", clone_gid)
+        task = asyncio.create_task(_run_one())
+        self._tasks[clone_gid] = task
+
+    async def _run_sync_for_guild(
+        self,
+        guild: discord.Guild,
+        emoji_data: list[dict],
+        host_guild_id: Optional[int],
+        clone_gid: int,
+    ):
+
+        return await self._run_sync(
+            guild=guild,
+            emoji_data=emoji_data,
+            host_guild_id=host_guild_id,
+            clone_gid=clone_gid,
+        )
+
+    async def _run_sync(
+        self,
+        guild: discord.Guild,
+        emoji_data: list[dict],
+        host_guild_id: Optional[int],
+        clone_gid: int,
+    ) -> None:
+        lock = self._get_lock_for_clone(clone_gid)
+
+        async with lock:
+            try:
+                d, r, c = await self._sync(guild, emoji_data, host_guild_id)
+
                 changes = []
                 if d:
                     changes.append(f"Deleted {d} emojis")
@@ -61,20 +139,42 @@ class EmojiManager:
                     changes.append(f"Renamed {r} emojis")
                 if c:
                     changes.append(f"Created {c} emojis")
+
                 if changes:
-                    logger.info("[😊] Emoji sync changes: " + "; ".join(changes))
+                    logger.info(
+                        "[😊] Emoji sync changes for clone %s: %s",
+                        clone_gid,
+                        "; ".join(changes),
+                    )
                 else:
-                    logger.debug("[😊] Emoji sync: no changes needed")
+                    logger.debug(
+                        "[😊] Emoji sync: no changes needed for clone %s",
+                        clone_gid,
+                    )
+
             except asyncio.CancelledError:
-                logger.debug("[😊] Emoji sync task was canceled before completion.")
+                logger.debug(
+                    "[😊] Emoji sync task was canceled before completion for clone %s.",
+                    clone_gid,
+                )
             except Exception:
-                logger.exception("[😊] Emoji sync failed")
+                logger.exception(
+                    "[😊] Emoji sync failed for clone %s",
+                    clone_gid,
+                )
             finally:
-                self._task = None
+                # if we're still the registered task for this guild, clear it
+                task = self._tasks.get(clone_gid)
+                if task and task.done():
+
+                    pass
+                else:
+
+                    self._tasks.pop(clone_gid, None)
 
     async def _sync(
-        self, guild: discord.Guild, emojis: list[dict]
-    ) -> Tuple[int, int, int]:
+        self, guild, emojis, host_guild_id: Optional[int]
+    ) -> tuple[int, int, int]:
         """
         Mirror host custom emojis → clone guild, handling deletions, renames, and creations
         with static/animated limits and size shrinking.
@@ -86,7 +186,16 @@ class EmojiManager:
         animated_count = sum(1 for e in guild.emojis if e.animated)
         limit = guild.emoji_limit
 
-        current = {r["original_emoji_id"]: r for r in self.db.get_all_emoji_mappings()}
+        rows = self.db.get_all_emoji_mappings()
+        current: dict[int, dict] = {}
+        for r in rows:
+            row = dict(r)
+            if (
+                host_guild_id is None
+                or int(row.get("original_guild_id") or 0) == int(host_guild_id)
+            ) and int(row.get("cloned_guild_id") or 0) == int(guild.id):
+                current[int(row["original_emoji_id"])] = row
+
         incoming = {e["id"]: e for e in emojis}
 
         for orig_id in set(current) - set(incoming):
@@ -94,7 +203,7 @@ class EmojiManager:
             cloned = discord.utils.get(guild.emojis, id=row["cloned_emoji_id"])
             if cloned:
                 try:
-                    await self.ratelimit.acquire(ActionType.EMOJI)
+                    await self.ratelimit.acquire_for_guild(ActionType.EMOJI, guild.id)
                     await cloned.delete()
                     deleted += 1
                     logger.info(f"[😊] Deleted emoji {row['cloned_emoji_name']}")
@@ -124,11 +233,18 @@ class EmojiManager:
 
             if mapping and cloned and cloned.name != name:
                 try:
-                    await self.ratelimit.acquire(ActionType.EMOJI)
+                    await self.ratelimit.acquire_for_guild(ActionType.EMOJI, guild.id)
                     await cloned.edit(name=name)
                     renamed += 1
                     logger.info(f"[😊] Restored emoji {cloned.name} → {name}")
-                    self.db.upsert_emoji_mapping(orig_id, name, cloned.id, name)
+                    self.db.upsert_emoji_mapping(
+                        orig_id,
+                        name,
+                        cloned.id,
+                        name,
+                        original_guild_id=host_guild_id,
+                        cloned_guild_id=guild.id,
+                    )
                 except discord.HTTPException as e:
                     logger.error(
                         f"[⛔] Failed restoring emoji {getattr(cloned,'name','?')}: {e}"
@@ -137,13 +253,20 @@ class EmojiManager:
 
             if mapping and cloned and mapping["original_emoji_name"] != name:
                 try:
-                    await self.ratelimit.acquire(ActionType.EMOJI)
+                    await self.ratelimit.acquire_for_guild(ActionType.EMOJI, guild.id)
                     await cloned.edit(name=name)
                     renamed += 1
                     logger.info(
                         f"[😊] Renamed emoji {mapping['original_emoji_name']} → {name}"
                     )
-                    self.db.upsert_emoji_mapping(orig_id, name, cloned.id, cloned.name)
+                    self.db.upsert_emoji_mapping(
+                        orig_id,
+                        name,
+                        cloned.id,
+                        cloned.name,
+                        original_guild_id=host_guild_id,
+                        cloned_guild_id=guild.id,
+                    )
                 except discord.HTTPException as e:
                     logger.error(
                         f"[⛔] Failed renaming emoji {getattr(cloned,'name','?')}: {e}"
@@ -178,12 +301,17 @@ class EmojiManager:
                 logger.error(f"[⛔] Error shrinking emoji {name}: {e}")
 
             try:
-                await self.ratelimit.acquire(ActionType.EMOJI)
+                await self.ratelimit.acquire_for_guild(ActionType.EMOJI, guild.id)
                 created_emo = await guild.create_custom_emoji(name=name, image=raw)
                 created += 1
                 logger.info(f"[😊] Created emoji {name}")
                 self.db.upsert_emoji_mapping(
-                    orig_id, name, created_emo.id, created_emo.name
+                    orig_id,
+                    name,
+                    created_emo.id,
+                    created_emo.name,
+                    original_guild_id=host_guild_id,
+                    cloned_guild_id=guild.id,
                 )
                 if created_emo.animated:
                     animated_count += 1
