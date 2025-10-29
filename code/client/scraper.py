@@ -946,7 +946,6 @@ class MemberScraper:
             current_sess = sess
             try:
                 while True:
-                    # bail out if we're done and queue is drained
                     if (
                         stop_event.is_set() or self._cancel_event.is_set()
                     ) and bio_queue.empty():
@@ -972,7 +971,6 @@ class MemberScraper:
                     except asyncio.TimeoutError:
                         continue
 
-                    # we'll only call task_done() once per uid
                     already_done = False
 
                     if self._cancel_event.is_set():
@@ -1046,7 +1044,6 @@ class MemberScraper:
                                     r.headers.get("Retry-After"),
                                 )
 
-                            # through to the bottom where we'd call task_done() again.
                             if used_header and retry_after >= 300:
                                 self.log.debug(
                                     "[Copycord Scraper] Severe 429 in bio scrape session for uid=%s → Retry-After=%ss. Starting new session..",
@@ -1085,7 +1082,6 @@ class MemberScraper:
                                     retry_counts[uid],
                                 )
                                 success = True
-                                # note: we DON'T task_done() yet; let bottom do it once
                             else:
 
                                 await bio_queue.put(uid)
@@ -1148,7 +1144,6 @@ class MemberScraper:
 
                     next_allowed_at = time.time() + 1.25 + random.uniform(0.1, 0.4)
 
-                    # only call task_done() here if we *didn't* already do it in a special branch
                     if not already_done:
                         bio_queue.task_done()
 
