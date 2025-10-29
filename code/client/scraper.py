@@ -684,7 +684,7 @@ class MemberScraper:
         guild = self.bot.get_guild(gid_int)
         if not guild:
             raise RuntimeError(f"Guild {gid_int} not found or not cached")
-        
+
         role_name_by_id = {str(r.id): r.name for r in getattr(guild, "roles", [])}
 
         gname = getattr(guild, "name", "UNKNOWN")
@@ -946,6 +946,7 @@ class MemberScraper:
             current_sess = sess
             try:
                 while True:
+                    # bail out if we're done and queue is drained
                     if (
                         stop_event.is_set() or self._cancel_event.is_set()
                     ) and bio_queue.empty():
@@ -960,7 +961,7 @@ class MemberScraper:
                         )
                         while not bio_queue.empty():
                             try:
-                                bio_queue.get_nowait()
+                                _ = bio_queue.get_nowait()
                                 bio_queue.task_done()
                             except Exception:
                                 break
@@ -971,11 +972,15 @@ class MemberScraper:
                     except asyncio.TimeoutError:
                         continue
 
+                    # we'll only call task_done() once per uid
+                    already_done = False
+
                     if self._cancel_event.is_set():
                         self.log.debug(
                             "[Copycord Scraper] Cancelled bio scrape mid-loop — exiting before next request"
                         )
                         bio_queue.task_done()
+                        already_done = True
                         return
 
                     url = f"https://discord.com/api/v10/users/{uid}/profile"
@@ -998,6 +1003,7 @@ class MemberScraper:
                                 "[Copycord Scraper] Cancelled bio scrape mid-retry — exiting cleanly"
                             )
                             bio_queue.task_done()
+                            already_done = True
                             return
 
                         try:
@@ -1011,6 +1017,7 @@ class MemberScraper:
                                     "[Copycord Scraper] Bio scrape session already closed on cancel — stopping"
                                 )
                                 bio_queue.task_done()
+                                already_done = True
                                 return
                             raise
 
@@ -1039,14 +1046,15 @@ class MemberScraper:
                                     r.headers.get("Retry-After"),
                                 )
 
+                            # through to the bottom where we'd call task_done() again.
                             if used_header and retry_after >= 300:
                                 self.log.debug(
                                     "[Copycord Scraper] Severe 429 in bio scrape session for uid=%s → Retry-After=%ss. Starting new session..",
                                     uid,
                                     retry_after,
                                 )
-                            async with members_lock:
-                                bio_status[uid] = "rate_limited"
+                                async with members_lock:
+                                    bio_status[uid] = "rate_limited"
 
                                 current_sess = await rotate_session(current_sess)
                                 sleep_for = 30 + random.uniform(0, 15)
@@ -1057,6 +1065,7 @@ class MemberScraper:
                                 await asyncio.sleep(sleep_for)
 
                                 bio_queue.task_done()
+                                already_done = True
                                 success = True
                                 break
 
@@ -1076,15 +1085,19 @@ class MemberScraper:
                                     retry_counts[uid],
                                 )
                                 success = True
+                                # note: we DON'T task_done() yet; let bottom do it once
                             else:
+
                                 await bio_queue.put(uid)
                                 self.log.warning(
                                     "[Copycord Scraper] uid=%s bio 429 → backoff %.2fs (attempt %d/%d)",
                                     uid,
                                     retry_after,
-                                    retry_counts[uid],
+                                    attempt + 1,
                                     max_retries_per_uid,
                                 )
+                                success = True
+
                             break
 
                         if status != 200:
@@ -1120,7 +1133,7 @@ class MemberScraper:
                                 )
                             else:
                                 self.log.debug(
-                                    "[Bio Scraper] User %s bio empty — %d found %d remaining",
+                                    "[Copycord Scraper] User %s bio empty — %d found %d remaining",
                                     uid,
                                     bio_processed,
                                     remaining,
@@ -1134,7 +1147,11 @@ class MemberScraper:
                             bio_status[uid] = f"failed_{last_status}"
 
                     next_allowed_at = time.time() + 1.25 + random.uniform(0.1, 0.4)
-                    bio_queue.task_done()
+
+                    # only call task_done() here if we *didn't* already do it in a special branch
+                    if not already_done:
+                        bio_queue.task_done()
+
             finally:
                 if not current_sess.closed:
                     self.log.debug("[Copycord Scraper] Closing bio session on exit")
@@ -1151,7 +1168,6 @@ class MemberScraper:
             EMPTY_SWEEP_BURST = 3
 
             parallel_limit = max_parallel_per_session
-        
 
             try_total_hint = (
                 int(max_total_seen)
@@ -1165,7 +1181,7 @@ class MemberScraper:
 
             if (try_total_hint or 0) >= 500_000:
                 parallel_limit = max(parallel_limit, 8)
-                
+
             small_guild = (
                 try_total_hint is not None and try_total_hint <= 150
             ) or small_guild_hint
@@ -1198,13 +1214,17 @@ class MemberScraper:
 
             def session_mode(num_sessions: int, total_hint: Optional[int]) -> str:
                 huge = (total_hint or 0) >= 200_000
-                if num_sessions <= 1: return "lean_plus" if huge else "lean"
-                if num_sessions == 2: return "balanced"
-                if num_sessions >= 3 and huge: return "full-lite"
-                if num_sessions == 3: return "wide"
-                if num_sessions == 4: return "full-lite"
+                if num_sessions <= 1:
+                    return "lean_plus" if huge else "lean"
+                if num_sessions == 2:
+                    return "balanced"
+                if num_sessions >= 3 and huge:
+                    return "full-lite"
+                if num_sessions == 3:
+                    return "wide"
+                if num_sessions == 4:
+                    return "full-lite"
                 return "full"
-
 
             def build_roots_for_mode(mode: str) -> list[str]:
                 letters = [c for c in letter_priority]
@@ -1863,9 +1883,17 @@ class MemberScraper:
                                                         build_avatar_url(uid, av)
                                                     )
                                                 if include_roles:
-                                                    role_ids = [str(r) for r in (m.get("roles") or [])]
+                                                    role_ids = [
+                                                        str(r)
+                                                        for r in (m.get("roles") or [])
+                                                    ]
                                                     rec["roles"] = [
-                                                        {"id": rid, "name": role_name_by_id.get(rid, "Unknown")}
+                                                        {
+                                                            "id": rid,
+                                                            "name": role_name_by_id.get(
+                                                                rid, "Unknown"
+                                                            ),
+                                                        }
                                                         for rid in role_ids
                                                     ]
                                                 if include_bio:
