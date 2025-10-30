@@ -7,44 +7,28 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 from __future__ import annotations
 import asyncio
 import logging
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional, Set
 import discord
 from common.common_helpers import resolve_mapping_settings
 
 
 class SitemapService:
-    """
-    Builds the guild sitemap and applies whitelist/exclude filtering.
-    Also exposes helpers used by the client:
-      - in_scope_channel / in_scope_thread
-      - role_change_is_relevant
-      - schedule_sync (debounced)
-    """
-
-    def __init__(
-        self,
-        bot: discord.Bot,
-        config,
-        db,
-        ws,
-        host_guild_id: Optional[int],
-        logger: Optional[logging.Logger] = None,
-    ):
+    def __init__(self, bot, config, db, ws, logger=None):
         self.bot = bot
         self.config = config
         self.db = db
         self.ws = ws
-        try:
-            self.host_guild_id = (
-                int(host_guild_id) if host_guild_id is not None else None
-            )
-        except (TypeError, ValueError):
-            self.host_guild_id = None
         self.logger = logger or logging.getLogger("client.sitemap")
-        self._debounce_task: asyncio.Task | None = None
+        self._debounce_task = None
+        self._dirty_guild_ids: Set[int] = set()
+        self._dirty_lock = asyncio.Lock()
+
+    def _pick_guild(self) -> Optional[discord.Guild]:
+        return self.bot.guilds[0] if self.bot.guilds else None
 
     def _mapped_original_ids(self) -> list[int]:
         """All original (host) guild IDs from guild_mappings."""
@@ -68,20 +52,49 @@ class SitemapService:
             if g:
                 yield g
 
-    def schedule_sync(self, delay: float = 1.0) -> None:
-        """Debounced sitemap send."""
+    def schedule_sync(self, guild_id: int | None, delay: float = 1.0) -> None:
+        """
+        Mark a guild as needing a sitemap resend, and debounce the actual send.
+        guild_id may be None (fallback: send all mapped guilds once).
+        """
+
+        if guild_id is not None:
+            try:
+                self._dirty_guild_ids.add(int(guild_id))
+            except Exception:
+                pass
+        else:
+            # None means "we don't know which one", so mark all mapped origins
+            for gid in self._mapped_original_ids():
+                self._dirty_guild_ids.add(int(gid))
+
         if self._debounce_task is None:
             self._debounce_task = asyncio.create_task(self._debounced(delay))
 
-    def _pick_guild(self) -> Optional["discord.Guild"]:
-        """Return the configured host guild, or a sensible fallback (first guild)."""
-        g = None
-        if self.host_guild_id:
-            g = self.bot.get_guild(self.host_guild_id)
-        if not g and self.bot.guilds:
-
-            g = self.bot.guilds[0]
-        return g
+    async def _build_and_send_selected(self, origin_ids: list[int]) -> None:
+        """
+        Build/send sitemap for just the given original guild ids.
+        """
+        for ogid in origin_ids:
+            g = self.bot.get_guild(int(ogid))
+            if not g:
+                continue
+            try:
+                sm = await self.build_for_guild(g)
+                if sm:
+                    await self.ws.send({"type": "sitemap", "data": sm})
+                    self.logger.info(
+                        "[📩] Sitemap sent to Server (guild=%s/%s)",
+                        g.name,
+                        g.id,
+                    )
+            except Exception as e:
+                self.logger.exception(
+                    "[sitemap] failed to send for guild %s (%s): %s",
+                    getattr(g, "name", "?"),
+                    getattr(g, "id", "?"),
+                    e,
+                )
 
     async def build_and_send_all(self) -> None:
         """Build and send a sitemap for each mapped host guild."""
@@ -106,20 +119,6 @@ class SitemapService:
 
     async def build_for_guild(self, guild: "discord.Guild") -> Dict:
         """Build the raw sitemap for a specific guild, then filter it per config."""
-        self.logger.debug(
-            "[sitemap] using guild %s (%s)%s",
-            getattr(guild, "name", "?"),
-            getattr(guild, "id", "?"),
-            (
-                ""
-                if (
-                    self.host_guild_id
-                    and guild is not None
-                    and getattr(guild, "id", None) == self.host_guild_id
-                )
-                else " [fallback]"
-            ),
-        )
         settings = resolve_mapping_settings(
             self.db, self.config, original_guild_id=guild.id
         )
@@ -338,26 +337,14 @@ class SitemapService:
                 }
             )
 
-        sitemap = self._filter_sitemap(sitemap)
+        filter_view = self._build_filter_view_for_guild(int(guild.id))
+
+        sitemap = self._filter_sitemap(sitemap, filter_view)
         return sitemap
 
     async def build(self) -> Dict:
         """(Legacy) Build for a single guild using _pick_guild()."""
         guild = self._pick_guild()
-        self.logger.debug(
-            "[sitemap] using guild %s (%s)%s",
-            getattr(guild, "name", "?"),
-            getattr(guild, "id", "?"),
-            (
-                ""
-                if (
-                    self.host_guild_id
-                    and guild
-                    and getattr(guild, "id", None) == self.host_guild_id
-                )
-                else " [fallback]"
-            ),
-        )
         if not guild:
             self.logger.warning("[⛔] No accessible guild found to build a sitemap.")
             return {
@@ -376,6 +363,32 @@ class SitemapService:
                 },
             }
         return await self.build_for_guild(guild)
+
+    def _build_filter_view_for_guild(self, origin_guild_id: int) -> Dict[str, object]:
+        """
+        Build a 'filter view' for a specific source/original guild.
+
+        This merges:
+        - global filters (NULL/NULL rows)
+        - filters scoped to this origin_guild_id
+        and returns sets plus whitelist_enabled just like Config.
+        """
+        f = self.db.get_filters(original_guild_id=origin_guild_id)
+
+        include_category_ids = set(f["whitelist"]["category"])
+        include_channel_ids = set(f["whitelist"]["channel"])
+        excluded_category_ids = set(f["exclude"]["category"])
+        excluded_channel_ids = set(f["exclude"]["channel"])
+
+        whitelist_enabled = bool(include_category_ids or include_channel_ids)
+
+        return {
+            "include_category_ids": include_category_ids,
+            "include_channel_ids": include_channel_ids,
+            "excluded_category_ids": excluded_category_ids,
+            "excluded_channel_ids": excluded_channel_ids,
+            "whitelist_enabled": whitelist_enabled,
+        }
 
     def reload_filters_and_resend(self):
         """
@@ -477,7 +490,15 @@ class SitemapService:
     async def _debounced(self, delay: float):
         try:
             await asyncio.sleep(delay)
-            await self.build_and_send_all()
+
+            dirty: list[int] = list(self._dirty_guild_ids)
+            self._dirty_guild_ids.clear()
+
+            if not dirty:
+                dirty = list(self._mapped_original_ids())
+
+            await self._build_and_send_selected(dirty)
+
         finally:
             self._debounce_task = None
 
@@ -510,224 +531,181 @@ class SitemapService:
             return "excluded category"
         return "allowed"
 
-    def _filter_sitemap(self, sitemap: dict) -> dict:
-        self._log_filter_settings()
+    def _filter_sitemap(
+        self, sitemap: Dict[str, Any], view: Dict[str, object]
+    ) -> Dict[str, Any]:
+        """
+        Apply whitelist / blacklist rules (now guild-scoped) to a sitemap dict.
 
-        inc_cats = getattr(self.config, "include_category_ids", set())
-        inc_chs = getattr(self.config, "include_channel_ids", set())
-        exc_cats = getattr(self.config, "excluded_category_ids", set())
-        exc_chs = getattr(self.config, "excluded_channel_ids", set())
+        view = {
+            "include_category_ids": set[int],
+            "include_channel_ids": set[int],
+            "excluded_category_ids": set[int],
+            "excluded_channel_ids": set[int],
+            "whitelist_enabled": bool,
+        }
+        """
 
-        guild_cat_ids = {int(c["id"]) for c in sitemap.get("categories", [])}
-        guild_ch_ids = (
-            {
-                int(ch["id"])
-                for c in sitemap.get("categories", [])
-                for ch in c.get("channels", [])
-            }
-            | {int(ch["id"]) for ch in sitemap.get("standalone_channels", [])}
-            | {int(f["id"]) for f in sitemap.get("forums", [])}
+        include_category_ids: Set[int] = view["include_category_ids"]
+        include_channel_ids: Set[int] = view["include_channel_ids"]
+        excluded_category_ids: Set[int] = view["excluded_category_ids"]
+        excluded_channel_ids: Set[int] = view["excluded_channel_ids"]
+
+        wl_on_global = bool(
+            view["whitelist_enabled"] and (include_category_ids or include_channel_ids)
         )
 
-        wl_on_global = bool(self.config.whitelist_enabled and (inc_cats or inc_chs))
-        wl_has_overlap = bool(inc_cats & guild_cat_ids) or bool(inc_chs & guild_ch_ids)
-        wl_on = wl_on_global and wl_has_overlap
-        if wl_on_global and not wl_has_overlap:
-            self.logger.warning(
-                "[filter] Whitelist enabled but has no overlap with this guild. "
-                "Treating whitelist as OFF for this build."
-            )
+        categories = sitemap.get("categories", [])
+        standalone_channels = sitemap.get("channels", [])
+        thread_entries = sitemap.get("threads", [])
 
-        def is_out(channel_id: int | None, category_id: int | None) -> bool:
-            wl_ch = bool(channel_id and channel_id in inc_chs)
-            wl_cat = bool(category_id and category_id in inc_cats)
-            ex_ch = bool(channel_id and channel_id in exc_chs)
-            ex_cat = bool(category_id and category_id in exc_cats)
+        kept_categories: List[Dict[str, Any]] = []
+        kept_standalones: List[Dict[str, Any]] = []
+        kept_threads: List[Dict[str, Any]] = []
+        dropped_channels: List[Dict[str, Any]] = []
 
-            if wl_on and not (wl_ch or wl_cat):
-                return True
-            if ex_ch and not wl_ch:
-                return True
-            if ex_cat and not (wl_cat or wl_ch):
-                return True
-            return False
+        def _why_drop(cat_id: Optional[int], ch_id: Optional[int]) -> str:
+            in_wl_cat = cat_id in include_category_ids if cat_id else False
+            in_wl_ch = ch_id in include_channel_ids if ch_id else False
+            in_ex_cat = cat_id in excluded_category_ids if cat_id else False
+            in_ex_ch = ch_id in excluded_channel_ids if ch_id else False
 
-        def reason(channel_id: int | None, category_id: int | None) -> str:
-            wl_ch = bool(channel_id and channel_id in inc_chs)
-            wl_cat = bool(category_id and category_id in inc_cats)
-            ex_ch = bool(channel_id and channel_id in exc_chs)
-            ex_cat = bool(category_id and category_id in exc_cats)
+            reasons: List[str] = []
 
-            if wl_on and not (wl_ch or wl_cat):
-                return "blocked by whitelist (not listed)"
-            if ex_ch and not wl_ch:
-                return "excluded channel"
-            if ex_cat and not (wl_cat or wl_ch):
-                return "excluded category"
-            return "allowed"
-
-        kept_cat_cnt = kept_chan_cnt = kept_standalone_cnt = kept_forum_cnt = (
-            kept_thread_cnt
-        ) = 0
-        drop_cat_cnt = drop_chan_cnt = drop_standalone_cnt = drop_forum_cnt = (
-            drop_thread_cnt
-        ) = 0
-
-        forums_raw = list(sitemap.get("forums", []))
-        forums_by_cat: dict[int | None, set[int]] = {}
-        kept_forums_by_cat: dict[int | None, set[int]] = {}
-        kept_forum_ids: set[int] = set()
-
-        for f in forums_raw:
-            f_id = int(f["id"])
-            f_cat_id = int(f.get("category_id") or 0) or None
-            forums_by_cat.setdefault(f_cat_id, set()).add(f_id)
-
-            if is_out(f_id, f_cat_id):
-                drop_forum_cnt += 1
-                self.logger.debug(
-                    "[filter] drop forum %s (%d) under cat_id=%s: %s",
-                    f.get("name", str(f_id)),
-                    f_id,
-                    f_cat_id,
-                    reason(f_id, f_cat_id),
-                )
-            else:
-                kept_forum_ids.add(f_id)
-                kept_forums_by_cat.setdefault(f_cat_id, set()).add(f_id)
-
-        new_categories = []
-        for cat in sitemap.get("categories", []):
-            cat_id = int(cat["id"])
-            cat_name = cat.get("name", str(cat_id))
-
-            kept_children = []
-            for ch in cat.get("channels", []):
-                ch_id = int(ch["id"])
-                ch_name = ch.get("name", str(ch_id))
-                if is_out(ch_id, cat_id):
-                    drop_chan_cnt += 1
-                    self.logger.debug(
-                        "[filter] drop channel %s (%d) in category %s (%d): %s",
-                        ch_name,
-                        ch_id,
-                        cat_name,
-                        cat_id,
-                        reason(ch_id, cat_id),
-                    )
+            if wl_on_global:
+                if in_wl_cat or in_wl_ch:
+                    reasons.append("whitelist-in")
                 else:
-                    kept_children.append(ch)
-                    kept_chan_cnt += 1
+                    reasons.append("whitelist-out")
 
-            if kept_children:
-                new_categories.append({**cat, "channels": kept_children})
-                kept_cat_cnt += 1
-                continue
+            if in_ex_cat or in_ex_ch:
+                reasons.append("blacklisted")
 
-            cat_text_ids = {int(ch["id"]) for ch in cat.get("channels", [])}
-            has_wl_text_child = bool(inc_chs & cat_text_ids)
-            forum_ids_in_cat = forums_by_cat.get(cat_id, set())
-            has_wl_forum_child = bool(inc_chs & forum_ids_in_cat)
-            has_kept_forum = bool(kept_forums_by_cat.get(cat_id))
+            return ", ".join(reasons) or "none"
 
-            keep_empty = (
-                (not wl_on)
-                or (cat_id in inc_cats)
-                or has_wl_text_child
-                or has_wl_forum_child
-                or has_kept_forum
+        for cat in categories:
+            cat_id = int(cat["id"])
+            channels = cat.get("channels", [])
+
+            valid_channels: List[Dict[str, Any]] = []
+
+            for ch in channels:
+                ch_id = int(ch["id"])
+
+                blacklisted = (cat_id in excluded_category_ids) or (
+                    ch_id in excluded_channel_ids
+                )
+                whitelisted = (cat_id in include_category_ids) or (
+                    ch_id in include_channel_ids
+                )
+
+                keep_ch = True
+                if wl_on_global and not whitelisted:
+                    keep_ch = False
+                if blacklisted:
+                    keep_ch = False
+
+                if keep_ch:
+                    valid_channels.append(ch)
+                else:
+                    dropped_channels.append(
+                        {
+                            "category_id": str(cat_id),
+                            "channel_id": str(ch_id),
+                            "name": ch.get("name"),
+                            "reason": _why_drop(cat_id, ch_id),
+                        }
+                    )
+
+            if valid_channels:
+                kept_categories.append(
+                    {
+                        **cat,
+                        "channels": valid_channels,
+                    }
+                )
+            else:
+
+                dropped_channels.append(
+                    {
+                        "category_id": str(cat_id),
+                        "channel_id": None,
+                        "name": cat.get("name"),
+                        "reason": _why_drop(cat_id, None),
+                    }
+                )
+
+        for ch in standalone_channels:
+            ch_id = int(ch["id"])
+
+            blacklisted = ch_id in excluded_channel_ids
+            whitelisted = ch_id in include_channel_ids
+
+            keep_ch = True
+            if wl_on_global and not whitelisted:
+                keep_ch = False
+            if blacklisted:
+                keep_ch = False
+
+            if keep_ch:
+                kept_standalones.append(ch)
+            else:
+                dropped_channels.append(
+                    {
+                        "category_id": None,
+                        "channel_id": str(ch_id),
+                        "name": ch.get("name"),
+                        "reason": _why_drop(None, ch_id),
+                    }
+                )
+
+        for th in thread_entries:
+            parent_id = int(th.get("parent_channel_id") or 0)
+            th_id = int(th["id"])
+
+            blacklisted = (
+                parent_id in excluded_channel_ids or th_id in excluded_channel_ids
+            )
+            whitelisted = (
+                parent_id in include_channel_ids or th_id in include_channel_ids
             )
 
-            if keep_empty:
-                new_categories.append({**cat, "channels": []})
-                kept_cat_cnt += 1
-                self.logger.debug(
-                    "[filter] keep empty category shell %s (%d) "
-                    "[wl_on=%s cat_in_wl=%s wl_text=%s wl_forum=%s kept_forum=%s]",
-                    cat_name,
-                    cat_id,
-                    wl_on,
-                    (cat_id in inc_cats),
-                    has_wl_text_child,
-                    has_wl_forum_child,
-                    has_kept_forum,
-                )
+            keep_th = True
+            if wl_on_global and not whitelisted:
+                keep_th = False
+            if blacklisted:
+                keep_th = False
+
+            if keep_th:
+                kept_threads.append(th)
             else:
-                drop_cat_cnt += 1
-                self.logger.debug(
-                    "[filter] drop empty category %s (%d): no kept children and no WL/kept forum in cat",
-                    cat_name,
-                    cat_id,
+                dropped_channels.append(
+                    {
+                        "category_id": None,
+                        "channel_id": str(th_id),
+                        "name": th.get("name"),
+                        "reason": _why_drop(None, th_id),
+                    }
                 )
 
-        standalones = []
-        for ch in sitemap.get("standalone_channels", []):
-            ch_id = int(ch["id"])
-            ch_name = ch.get("name", str(ch_id))
-            if is_out(ch_id, None):
-                drop_standalone_cnt += 1
-                self.logger.debug(
-                    "[filter] drop standalone channel %s (%d): %s",
-                    ch_name,
-                    ch_id,
-                    reason(ch_id, None),
-                )
-            else:
-                standalones.append(ch)
-                kept_standalone_cnt += 1
-
-        forums = []
-        for f in forums_raw:
-            f_id = int(f["id"])
-            if f_id in kept_forum_ids:
-                forums.append(f)
-                kept_forum_cnt += 1
-            else:
-
-                pass
-
-        keep_forum_ids_set = set(kept_forum_ids)
-        threads = []
-        for t in sitemap.get("threads", []):
-            t_id = int(t["id"])
-            raw_forum_id = t.get("forum_id")
-            try:
-                forum_id = int(raw_forum_id) if raw_forum_id is not None else 0
-            except (TypeError, ValueError):
-                forum_id = 0
-            if forum_id in keep_forum_ids_set:
-                threads.append(t)
-                kept_thread_cnt += 1
-            else:
-                drop_thread_cnt += 1
-                self.logger.debug(
-                    "[filter] drop thread %s (%d): parent forum %s not kept",
-                    t.get("name", str(t_id)),
-                    t_id,
-                    raw_forum_id,
-                )
+        sitemap["categories"] = kept_categories
+        sitemap["channels"] = kept_standalones
+        sitemap["threads"] = kept_threads
 
         self.logger.debug(
-            "[filter] kept: categories=%d channels=%d standalones=%d forums=%d threads=%d | "
-            "dropped: categories=%d channels=%d standalones=%d forums=%d threads=%d",
-            kept_cat_cnt,
-            kept_chan_cnt,
-            kept_standalone_cnt,
-            kept_forum_cnt,
-            kept_thread_cnt,
-            drop_cat_cnt,
-            drop_chan_cnt,
-            drop_standalone_cnt,
-            drop_forum_cnt,
-            drop_thread_cnt,
+            "[filter] settings (guild=%s) | wl_enabled=%s "
+            "| inc_cats=%d inc_chs=%d | ex_cats=%d ex_chs=%d",
+            sitemap.get("guild", {}).get("id"),
+            wl_on_global,
+            len(include_category_ids),
+            len(include_channel_ids),
+            len(excluded_category_ids),
+            len(excluded_channel_ids),
         )
 
-        out = dict(sitemap)
-        out["categories"] = new_categories
-        out["standalone_channels"] = standalones
-        out["forums"] = forums
-        out["threads"] = threads
-        return out
+        sitemap["dropped"] = dropped_channels
+
+        return sitemap
 
     def _is_filtered_out(self, channel_id: int | None, category_id: int | None) -> bool:
         cfg = self.config

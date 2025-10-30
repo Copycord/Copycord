@@ -7,13 +7,13 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-
 from __future__ import annotations
 import asyncio
 import inspect
 from typing import Dict, List, Optional, Tuple, Any
 import discord
 from discord.channel import CategoryChannel, TextChannel
+from server import logctx
 
 
 class ChannelPermissionSync:
@@ -47,6 +47,29 @@ class ChannelPermissionSync:
         self.ratelimit = ratelimit
         self.rate_limiter_action = rate_limiter_action
 
+    def _log(self, level: str, msg: str, *args) -> None:
+        """
+        Permission-sync logger that prefixes with the current sync context.
+        """
+        prefix = logctx.format_prefix()
+        base = self.log
+        if base is None:
+            import logging
+
+            base = logging.getLogger("server.perm-sync")
+
+        line = prefix + msg
+        if level == "info":
+            base.info(line, *args)
+        elif level == "warning":
+            base.warning(line, *args)
+        elif level == "error":
+            base.error(line, *args)
+        elif level == "debug":
+            base.debug(line, *args)
+        else:
+            base.log(20, line, *args)
+
     def schedule_after_role_sync(
         self,
         roles_manager,
@@ -76,13 +99,24 @@ class ChannelPermissionSync:
                 )
                 parts = await self._sync_permissions(guild, sitemap, src_everyone_id)
                 if parts:
-                    self.log.info("[perm-sync] %s", "; ".join(parts))
+                    self._log(
+                        "info",
+                        "[🔐] Channel permission sync complete: %s",
+                        "; ".join(parts),
+                    )
                 else:
-                    self.log.debug("[perm-sync] No permission changes needed")
+                    self._log(
+                        "info",
+                        "[🔐] Channel permission sync complete: no changes needed",
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                self.log.warning("[perm-sync] Background sync failed: %s", e)
+                self._log(
+                    "warning",
+                    "[perm-sync] Background sync failed: %s",
+                    e,
+                )
 
         asyncio.create_task(_runner(), name=task_name)
 
@@ -123,20 +157,23 @@ class ChannelPermissionSync:
         """
         try:
             cat_map = {
-                r["original_category_id"]: dict(r)
-                for r in self.db.get_all_category_mappings()
-                if int(r.get("cloned_guild_id") or 0) == int(clone_gid)
+                int(rd["original_category_id"]): rd
+                for rd in (dict(r) for r in self.db.get_all_category_mappings())
+                if int(rd.get("cloned_guild_id") or 0) == int(clone_gid)
             }
-
             chan_map = {
-                r["original_channel_id"]: dict(r)
-                for r in self.db.get_all_channel_mappings()
-                if int(r.get("cloned_guild_id") or 0) == int(clone_gid)
+                int(rd["original_channel_id"]): rd
+                for rd in (dict(r) for r in self.db.get_all_channel_mappings())
+                if int(rd.get("cloned_guild_id") or 0) == int(clone_gid)
             }
-
             return cat_map, chan_map
         except Exception as e:
-            self.log.warning("[perm-sync] failed to reload maps from DB: %s", e)
+            self._log(
+                "warning",
+                "[perm-sync] failed to reload maps from DB: %s",
+                e,
+            )
+
             return {}, {}
 
     async def _sync_permissions(
@@ -145,7 +182,6 @@ class ChannelPermissionSync:
         sitemap: dict,
         src_everyone_id: Optional[int],
     ) -> List[str]:
-
         cat_map, chan_map = self._reload_maps_from_db_for_clone(int(guild.id))
 
         changed_cat = 0
@@ -154,7 +190,11 @@ class ChannelPermissionSync:
         for cat in sitemap.get("categories", []) or []:
             row = cat_map.get(int(cat["id"]))
             if not row:
-                self.log.info("[perm-sync] skip category %s: no cat_map", cat.get("id"))
+                self._log(
+                    "info",
+                    "[perm-sync] skip category %s: no cat_map",
+                    cat.get("id"),
+                )
                 continue
 
             cc = guild.get_channel(int(row.get("cloned_category_id") or 0))
@@ -167,8 +207,10 @@ class ChannelPermissionSync:
             for ch in cat.get("channels", []) or []:
                 crow = chan_map.get(int(ch["id"]))
                 if not crow:
-                    self.log.info(
-                        "[perm-sync] skip channel %s: no chan_map", ch.get("id")
+                    self._log(
+                        "info",
+                        "[perm-sync] skip channel %s: no chan_map",
+                        ch.get("id"),
                     )
                     continue
 
@@ -182,7 +224,8 @@ class ChannelPermissionSync:
         for ch in sitemap.get("standalone_channels", []) or []:
             crow = chan_map.get(int(ch["id"]))
             if not crow:
-                self.log.info(
+                self._log(
+                    "info",
                     "[perm-sync] skip channel %s: no chan_map (standalone)",
                     ch.get("id"),
                 )
@@ -290,7 +333,8 @@ class ChannelPermissionSync:
                 row = self.db.get_role_mapping(orig_role_id)
                 clone_role_id = self._extract_cloned_role_id(row) or 0
                 if not clone_role_id:
-                    self.log.info(
+                    self._log(
+                        "info",
                         "[perm-sync] #%s skip role %s: no cloned mapping",
                         getattr(ch, "id", "?"),
                         orig_role_id,
@@ -309,17 +353,20 @@ class ChannelPermissionSync:
 
             current = self._normalize_role_map(self._raw_role_bits_map_from_channel(ch))
             if not current:
-                self.log.debug(
+                self._log(
+                    "debug",
                     "[perm-sync] #%s equal: no role overwrites desired or present",
                     getattr(ch, "id", "?"),
                 )
+
                 return False
 
         else:
 
             current = self._normalize_role_map(self._raw_role_bits_map_from_channel(ch))
             if current == desired_role_map:
-                self.log.debug(
+                self._log(
+                    "debug",
                     "[perm-sync] #%s equal: role overwrites already match",
                     getattr(ch, "id", "?"),
                 )
@@ -354,13 +401,16 @@ class ChannelPermissionSync:
 
         try:
             if self.ratelimit and self.rate_limiter_action is not None:
-                await self.ratelimit.acquire(self.rate_limiter_action)
+                await self.ratelimit.acquire_for_guild(
+                    self.rate_limiter_action, int(guild.id)
+                )
             await ch._state.http.edit_channel(
                 ch.id,
                 permission_overwrites=payload_overwrites,
-                reason="Mirror role permissions",
+                reason=f"Copycord perm sync (task {logctx.sync_display_id.get() or '?'})",
             )
-            self.log.info(
+            self._log(
+                "info",
                 "[🔐] Applied permissions on #%s (%s) (roles=%d)",
                 getattr(ch, "id", "?"),
                 getattr(ch, "name", "?"),
@@ -368,7 +418,8 @@ class ChannelPermissionSync:
             )
             return True
         except Exception as e:
-            self.log.warning(
+            self._log(
+                "warning",
                 "[perm-sync] Failed to apply permissions on #%s: %s",
                 getattr(ch, "id", "?"),
                 e,

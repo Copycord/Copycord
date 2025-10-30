@@ -3561,7 +3561,10 @@
 
   if (mappingSel) {
     mappingSel.addEventListener("change", () => {
-      load().catch(() => {});
+      orph = { categories: [], channels: [] };
+      renderOrphans?.();
+      sendVerify({ action: "list" });
+      load()?.catch(() => {});
     });
   }
 
@@ -4576,7 +4579,12 @@
 
   function sendVerify(payload) {
     ensureIn();
-    const env = { kind: "verify", role: "ui", payload };
+    const mappingId = mappingSel?.value || "";
+    const env = {
+      kind: "verify",
+      role: "ui",
+      payload: { mapping_id: mappingId, ...payload },
+    };
     const json = JSON.stringify(env);
     const sock = wsIn;
 
@@ -5298,7 +5306,15 @@
       startBtn.disabled = true;
 
       if (action === "new") {
-        const body = { channel_ids: ids, ...base, resume: false };
+        const mappingId = mappingSel?.value || "";
+
+        const body = {
+          channel_ids: ids,
+          mapping_id: mappingId,
+          ...base,
+          resume: false,
+        };
+
         try {
           const res = await fetch("/api/backfill/start-batch", {
             method: "POST",

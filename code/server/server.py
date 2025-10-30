@@ -7,7 +7,6 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-
 import contextlib
 import signal
 import asyncio
@@ -54,6 +53,7 @@ from server.helpers import (
 )
 from server.permission_sync import ChannelPermissionSync
 from server.guild_resolver import GuildResolver
+from server import logctx
 
 LOG_DIR = "/data"
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -155,6 +155,8 @@ class ServerReceiver:
         self._bf_throttle: dict[int, dict] = {}
         self._task_for_channel: dict[int, str] = {}
         self._done_task_ids: set[str] = set()
+        self._host_name_cache: dict[int, str] = {}
+        self._task_display_id: dict[int, str] = {}
         self._bf_delay = 2.0
         orig_on_connect = self.bot.on_connect
         self.onclonejoin = OnCloneJoin(self.bot, self.db)
@@ -241,6 +243,31 @@ class ServerReceiver:
             except Exception:
                 pass
 
+    def _prep_sitemap_task_meta(self, sitemap: dict) -> tuple[int, str, str]:
+        """
+        Extracts:
+        - host/original guild id (int)
+        - host/original guild name (str fallback "host:<id>")
+        - human-friendly 5-char task code like 'az4dc'
+        """
+        ginfo = sitemap.get("guild") or {}
+        raw_id = ginfo.get("id") or 0
+        try:
+            host_gid = int(raw_id)
+        except Exception:
+            host_gid = 0
+
+        host_name = (ginfo.get("name") or "").strip() or f"host:{host_gid}"
+
+        display_id = "".join(
+            random.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(5)
+        )
+
+        if host_gid:
+            self._host_name_cache[host_gid] = host_name
+
+        return host_gid, host_name, display_id
+
     def _get_or_create_sitemap_queue(self, host_guild_id: int) -> asyncio.Queue:
         q = self._sitemap_queues.get(host_guild_id)
         if q is None:
@@ -252,36 +279,61 @@ class ServerReceiver:
         return q
 
     async def _process_sitemap_queue_for_guild(self, host_gid: int, q: asyncio.Queue):
-
+        """
+        Worker loop for ONE origin/host guild.
+        We coalesce bursts, then run sync_structure once using the newest sitemap.
+        """
         while True:
-            task_id, sitemap = await q.get()
+
+            task_id, display_id, sitemap = await q.get()
 
             dropped = 0
             while True:
                 try:
-                    task_id, sitemap = q.get_nowait()
+                    task_id, display_id, sitemap = q.get_nowait()
                     q.task_done()
                     dropped += 1
                 except asyncio.QueueEmpty:
                     break
+
+            guild_name = self._host_name_cache.get(host_gid, f"host:{host_gid}")
+
             if dropped:
                 logger.debug(
-                    "[📥] [host=%s] Dropped %d outdated sitemap(s); processing #%d",
-                    host_gid,
+                    "[%s] Dropped %d outdated sitemap(s); processing %s",
+                    guild_name,
                     dropped,
-                    task_id,
+                    display_id,
                 )
+
             try:
                 summary = await self.sync_structure(task_id, sitemap)
                 logger.info(
-                    "[✅] [host=%s] Sync #%d finished: %s", host_gid, task_id, summary
+                    "[✅] [%s] Sync task %s primary pass complete: %s",
+                    guild_name,
+                    display_id,
+                    summary,
                 )
             except Exception:
                 logger.exception(
-                    "Error processing sitemap %d for host guild %s", task_id, host_gid
+                    "Error processing sitemap %s for host guild %s",
+                    display_id,
+                    host_gid,
                 )
             finally:
                 q.task_done()
+
+    def _action_log(self, level: str, msg: str, *args) -> None:
+        prefix = logctx.format_prefix()
+
+        if level == "info":
+            logger.info(prefix + msg, *args)
+        elif level == "warning":
+            logger.warning(prefix + msg, *args)
+        elif level == "error":
+            logger.error(prefix + msg, *args)
+        else:
+            logger.debug(prefix + msg, *args)
 
     def _get_sync_lock(self, clone_guild_id: int) -> asyncio.Lock:
         lock = self._guild_sync_locks.get(int(clone_guild_id))
@@ -353,7 +405,7 @@ class ServerReceiver:
         for clone_gid in present:
             await self.stickers.refresh_cache(clone_gid)
 
-        msg = f"Logged in as {self.bot.user.name} cloning {len(present)} guild(s)"
+        msg = f"Logged in as {self.bot.user.name}"
 
         await self.bus.status(running=True, status=msg, discord={"ready": True})
 
@@ -472,11 +524,21 @@ class ServerReceiver:
         )
 
     async def on_guild_channel_delete(self, channel):
-        """When a cloned channel/category is deleted, request a sitemap"""
+        """
+        When a cloned channel/category is deleted in one clone guild,
+        request a sitemap refresh ONLY for that mapping's host/original guild.
+        """
         try:
+
             if not self.db.is_clone_guild_id(channel.guild.id):
+                logger.info(
+                    "[🛑] Ignoring delete of channel %s in non-clone guild %s",
+                    channel.id,
+                    channel.guild.id,
+                )
                 return
         except AttributeError:
+
             return
 
         lock = self._guild_sync_locks.get(int(channel.guild.id))
@@ -495,32 +557,72 @@ class ServerReceiver:
 
         if is_category:
             hit_src_cat_id = None
+            hit_row = None
+
             for orig_cat_id, row in list(self.cat_map.items()):
+
                 if int(row.get("cloned_category_id") or 0) == int(channel.id):
                     hit_src_cat_id = int(orig_cat_id)
+                    hit_row = row
                     break
 
-            if hit_src_cat_id is None:
+            if hit_src_cat_id is None or hit_row is None:
                 return
 
             self.cat_map.pop(hit_src_cat_id, None)
 
+            host_guild_id = hit_row.get("original_guild_id")
+            if not host_guild_id:
+                logger.info(
+                    "[⚠️] No original_guild_id in cat_map row for deleted category "
+                    "clone_g=%s chan=%s",
+                    channel.guild.id,
+                    channel.id,
+                )
+                return
+
             logger.warning(
-                "[🧹] Cloned category deleted: id=%s name=%s (src_cat=%s). Requesting sitemap.",
+                "[🧹] Cloned category deleted in clone_g=%s: clone_cat=%s name=%s "
+                "(src_cat=%s host_g=%s). Requesting sitemap.",
+                channel.guild.id,
                 channel.id,
                 getattr(channel, "name", "?"),
                 hit_src_cat_id,
+                host_guild_id,
             )
-            await self.bot.ws_manager.send({"type": "sitemap_request"})
+
+            self._action_log(
+                "warning",
+                "Cloned category deleted in clone_g=%s: clone_cat=%s name=%s "
+                "(src_cat=%s host_g=%s). Requesting sitemap.",
+                channel.guild.id,
+                channel.id,
+                getattr(channel, "name", "?"),
+                hit_src_cat_id,
+                host_guild_id,
+            )
+
+            # tell the client EXACTLY which host/original guild's sitemap to refresh
+            await self.bot.ws_manager.send(
+                {
+                    "type": "sitemap_request",
+                    "data": {
+                        "guild_id": str(host_guild_id),
+                    },
+                }
+            )
             return
 
         hit_src_id = None
+        hit_row = None
+
         for src_id, row in list(self.chan_map.items()):
             if int(row.get("cloned_channel_id") or 0) == int(channel.id):
                 hit_src_id = int(src_id)
+                hit_row = row
                 break
 
-        if hit_src_id is None:
+        if hit_src_id is None or hit_row is None:
             return
 
         try:
@@ -530,14 +632,34 @@ class ServerReceiver:
 
         self.chan_map.pop(hit_src_id, None)
 
+        host_guild_id = hit_row.get("original_guild_id")
+        if not host_guild_id:
+            logger.debug(
+                "[⚠️] No original_guild_id in chan_map row for deleted channel "
+                "clone_g=%s chan=%s",
+                channel.guild.id,
+                channel.id,
+            )
+            return
+
         logger.warning(
-            "[🧹] Cloned channel deleted: id=%s name=%s (src=%s). Requesting sitemap.",
+            "[🧹] Cloned channel deleted in clone_g=%s: clone_chan=%s name=%s "
+            "(src_chan=%s host_g=%s). Requesting sitemap.",
+            channel.guild.id,
             channel.id,
             getattr(channel, "name", "?"),
             hit_src_id,
+            host_guild_id,
         )
 
-        await self.bot.ws_manager.send({"type": "sitemap_request"})
+        await self.bot.ws_manager.send(
+            {
+                "type": "sitemap_request",
+                "data": {
+                    "guild_id": str(host_guild_id),
+                },
+            }
+        )
 
     async def _verify_listen_loop(self):
         """
@@ -609,19 +731,24 @@ class ServerReceiver:
         if typ == "sitemap":
             if getattr(self, "_shutting_down", False):
                 return
+
             self._sitemap_task_counter += 1
             task_id = self._sitemap_task_counter
 
-            host_gid = int((data.get("guild") or {}).get("id") or 0)
+            host_gid, host_name, display_id = self._prep_sitemap_task_meta(data)
+
             if not host_gid:
                 logger.warning(
-                    "[⛔] sitemap missing guild.id; dropping task #%d", task_id
+                    "[⛔] sitemap missing guild.id; dropping task %s", display_id
                 )
                 return
 
+            self._task_display_id[task_id] = display_id
+
             q = self._get_or_create_sitemap_queue(host_gid)
-            q.put_nowait((task_id, data))
-            logger.info("[📩] [host=%s] Sync task #%d received", host_gid, task_id)
+            q.put_nowait((task_id, display_id, data))
+
+            logger.info("[✉️][%s] Sync task %s received", host_name, display_id)
             return
 
         elif typ == "message":
@@ -1027,7 +1154,7 @@ class ServerReceiver:
             if int(row.get("cloned_guild_id") or 0) != guild.id:
                 continue
             if not guild.get_channel(row["cloned_category_id"]):
-                logger.info("[🗑️] Purging category mapping %s", orig)
+                self._action_log("info", "[🗑️] Purging category mapping %s", orig)
                 try:
                     self.db.delete_category_mapping(int(orig))
                 except Exception:
@@ -1038,7 +1165,7 @@ class ServerReceiver:
             if int(row.get("cloned_guild_id") or 0) != guild.id:
                 continue
             if not guild.get_channel(row["cloned_channel_id"]):
-                logger.info("[🗑️] Purging channel mapping %s", orig)
+                self._action_log("info", "[🗑️] Purging channel mapping %s", orig)
                 try:
                     self.db.delete_channel_mapping(int(orig))
                 except Exception:
@@ -1050,95 +1177,144 @@ class ServerReceiver:
         Synchronizes the structure of a Discord guild based on the provided sitemap.
         """
         logger.debug(f"Sync Task #{task_id}: Processing sitemap {sitemap}")
+
         host_guild_id_raw = (sitemap.get("guild") or {}).get("id")
         host_guild_id = int(host_guild_id_raw) if host_guild_id_raw else None
         target_clone_gid = self._target_clone_gid_for_origin(host_guild_id)
+        self._maybe_enrich_mapping_identity_from_sitemap(sitemap)
 
-        if not target_clone_gid:
-            logger.warning(
-                "[⛔] No guild_mappings row for origin %s; cannot sync.", host_guild_id
-            )
-            return "Error: no mapped clone guild for origin"
+        try:
+            host_gid_int = int(host_guild_id) if host_guild_id else 0
+        except Exception:
+            host_gid_int = 0
 
-        lock = self._get_sync_lock(int(target_clone_gid))
-        async with lock:
-            guild = self.bot.get_guild(target_clone_gid)
-            if not guild:
-                logger.error(
-                    "[⛔] Clone guild %s not found (origin=%s)",
-                    target_clone_gid,
+        host_name = self._host_name_cache.get(host_gid_int, f"host:{host_gid_int}")
+        sync_tag = self._task_display_id.get(task_id, "?")
+
+        _host_token = logctx.sync_host_name.set(host_name)
+        _id_token = logctx.sync_display_id.set(sync_tag)
+
+        try:
+            if not target_clone_gid:
+                self._action_log(
+                    "warning",
+                    "[⛔] No guild_mappings row for origin %s; cannot sync.",
                     host_guild_id,
                 )
-                return "Error: clone guild missing"
+                return "Error: no mapped clone guild for origin"
 
-            settings = resolve_mapping_settings(
-                self.db, self.config, original_guild_id=host_guild_id
-            )
-            self._load_mappings()
-            self.stickers.set_last_sitemap(
-                clone_guild_id=target_clone_gid,
-                stickers=sitemap.get("stickers"),
-                host_guild_id=host_guild_id,
-            )
+            lock = self._get_sync_lock(int(target_clone_gid))
+            async with lock:
+                guild = self.bot.get_guild(target_clone_gid)
+                if not guild:
+                    self._action_log(
+                        "error",
+                        "[⛔] Clone guild %s not found (origin=%s)",
+                        target_clone_gid,
+                        host_guild_id,
+                    )
+                    return "Error: clone guild missing"
 
-            if settings.get("CLONE_EMOJI", True):
-                self.emojis.kickoff_sync(
-                    sitemap.get("emojis", []),
-                    host_guild_id,
-                    target_clone_guild_id=target_clone_gid,
+                settings = resolve_mapping_settings(
+                    self.db, self.config, original_guild_id=host_guild_id
                 )
 
-            if settings.get("CLONE_STICKER", True):
-                self.stickers.kickoff_sync(target_clone_guild_id=target_clone_gid)
+                # Track any background jobs we kick off so we can report them
+                bg_jobs: list[str] = []
 
-            roles_handle = None
-            if settings.get("CLONE_ROLES", True):
-                roles_handle = self.roles.kickoff_sync(
-                    sitemap.get("roles", []),
+                # Refresh mappings before we act
+                self._load_mappings()
+
+                # Stash latest stickers in case sticker sync needs them later
+                self.stickers.set_last_sitemap(
+                    clone_guild_id=target_clone_gid,
+                    stickers=sitemap.get("stickers"),
                     host_guild_id=host_guild_id,
-                    target_clone_guild_id=target_clone_gid,
-                    delete_roles=settings.get("DELETE_ROLES", False),
-                    mirror_permissions=settings.get("MIRROR_ROLE_PERMISSIONS", False),
                 )
 
-            cat_created, ch_reparented = await self._repair_deleted_categories(
-                guild, sitemap
-            )
-            self._purge_stale_mappings(guild)
+                # Emoji sync (background task)
+                if settings.get("CLONE_EMOJI", True):
+                    self.emojis.kickoff_sync(
+                        sitemap.get("emojis", []),
+                        host_guild_id,
+                        target_clone_guild_id=target_clone_gid,
+                    )
+                    bg_jobs.append("emoji")
 
-            parts: List[str] = []
-            if cat_created:
-                parts.append(f"Created {cat_created} categories")
-            if ch_reparented:
-                parts.append(f"Reparented {ch_reparented} channels")
+                # Sticker sync (background task)
+                if settings.get("CLONE_STICKER", True):
+                    self.stickers.kickoff_sync(
+                        target_clone_guild_id=target_clone_gid
+                    )
+                    bg_jobs.append("sticker")
 
-            parts += await self._sync_community(guild, sitemap)
-            parts += await self._sync_categories(guild, sitemap)
-            parts += await self._sync_forums(guild, sitemap)
-            parts += await self._sync_channels(guild, sitemap)
+                # Role sync (background task, plus optional permission mirroring)
+                roles_handle = None
+                if settings.get("CLONE_ROLES", True):
+                    roles_handle = self.roles.kickoff_sync(
+                        sitemap.get("roles", []),
+                        host_guild_id=host_guild_id,
+                        target_clone_guild_id=target_clone_gid,
+                        delete_roles=settings.get("DELETE_ROLES", False),
+                        mirror_permissions=settings.get(
+                            "MIRROR_ROLE_PERMISSIONS", False
+                        ),
+                    )
+                    bg_jobs.append("roles")
 
-            moved = await self._handle_master_channel_moves(
-                guild, self._parse_sitemap(sitemap), host_guild_id
-            )
-            if moved:
-                parts.append(f"Reparented {moved} channels")
+                # --- Immediate / foreground structure work ---
 
-            parts += await self._sync_threads(guild, sitemap)
-
-            self._load_mappings()
-
-            if settings.get("MIRROR_ROLE_PERMISSIONS", False) and settings.get(
-                "CLONE_ROLES", False
-            ):
-                self.perms.schedule_after_role_sync(
-                    roles_manager=self.roles,
-                    roles_handle_or_none=roles_handle,
-                    guild=guild,
-                    sitemap=sitemap,
+                cat_created, ch_reparented = await self._repair_deleted_categories(
+                    guild, sitemap
                 )
+                self._purge_stale_mappings(guild)
 
-        self._schedule_flush()
-        return "; ".join(parts) if parts else "No structure changes needed"
+                parts: List[str] = []
+                if cat_created:
+                    parts.append(f"Created {cat_created} categories")
+                if ch_reparented:
+                    parts.append(f"Reparented {ch_reparented} channels")
+
+                parts += await self._sync_community(guild, sitemap)
+                parts += await self._sync_categories(guild, sitemap)
+                parts += await self._sync_forums(guild, sitemap)
+                parts += await self._sync_channels(guild, sitemap)
+
+                moved = await self._handle_master_channel_moves(
+                    guild, self._parse_sitemap(sitemap), host_guild_id
+                )
+                if moved:
+                    parts.append(f"Reparented {moved} channels")
+
+                parts += await self._sync_threads(guild, sitemap)
+
+                # Reload mappings after all structure edits
+                self._load_mappings()
+
+                # Channel permission sync (also background-ish, usually depends on roles)
+                if settings.get("MIRROR_ROLE_PERMISSIONS", False) and settings.get(
+                    "CLONE_ROLES", False
+                ):
+                    self.perms.schedule_after_role_sync(
+                        roles_manager=self.roles,
+                        roles_handle_or_none=roles_handle,
+                        guild=guild,
+                        sitemap=sitemap,
+                    )
+                    bg_jobs.append("channel-perms")
+
+            # Build the human summary string we return to caller / log
+            main_summary = "; ".join(parts) if parts else "No structure changes needed"
+
+            # queue a flush after all this work
+            self._schedule_flush()
+
+            return main_summary
+
+        finally:
+            logctx.sync_host_name.reset(_host_token)
+            logctx.sync_display_id.reset(_id_token)
+
 
     async def _sync_community(self, guild: Guild, sitemap: Dict) -> List[str]:
         """
@@ -1162,11 +1338,12 @@ class ServerReceiver:
                 if rm and um:
                     rc = guild.get_channel(rm["cloned_channel_id"])
                     uc = guild.get_channel(um["cloned_channel_id"])
-                    if curr_rules == rc and curr_updates == uc:
+                    if rc and uc and curr_rules == rc and curr_updates == uc:
                         return parts
             else:
                 return parts
 
+        # Case 1: We want community disabled and it's currently enabled → disable it.
         if curr_enabled and not want:
             try:
                 await self.ratelimit.acquire_for_guild(
@@ -1174,9 +1351,19 @@ class ServerReceiver:
                 )
                 await guild.edit(community=False)
                 parts.append("[⚙️] Disabled Community mode")
-                logger.info("[⚙️] Community mode disabled.")
+
+                self._action_log(
+                    "info", "[⚙️] Community mode disabled for guild %s", guild.id
+                )
+
             except Exception as e:
-                logger.warning("[⚠️] Failed disabling Community mode: %s", e)
+                self._action_log(
+                    "warning",
+                    "[⚠️] Failed disabling Community mode for guild %s: %s",
+                    guild.id,
+                    e,
+                )
+
             return parts
 
         if want and rules_id and updates_id:
@@ -1186,21 +1373,43 @@ class ServerReceiver:
                 rc = guild.get_channel(rm["cloned_channel_id"])
                 uc = guild.get_channel(um["cloned_channel_id"])
 
+                # If either channel is missing in the clone guild, we can't safely edit
+
+                if not rc or not uc:
+                    self._action_log(
+                        "warning",
+                        "[⚠️] Community sync skipped for guild %s: "
+                        "rules/updates clone channel missing (rc=%s uc=%s wanted=%s).",
+                        guild.id,
+                        getattr(rc, "id", None),
+                        getattr(uc, "id", None),
+                        want,
+                    )
+
+                    return parts
+
                 edit_kwargs = {
                     "community": True,
                     "rules_channel": rc,
                     "public_updates_channel": uc,
                 }
+
                 changes = []
                 if not curr_enabled:
                     changes.append("enabled")
                 if curr_rules != rc:
                     changes.append(
-                        f"rules {curr_rules.id if curr_rules else 'None'}→{rc.id}"
+                        "rules {}→{}".format(
+                            getattr(curr_rules, "id", "None"),
+                            getattr(rc, "id", "None"),
+                        )
                     )
                 if curr_updates != uc:
                     changes.append(
-                        f"updates {curr_updates.id if curr_updates else 'None'}→{uc.id}"
+                        "updates {}→{}".format(
+                            getattr(curr_updates, "id", "None"),
+                            getattr(uc, "id", "None"),
+                        )
                     )
 
                 try:
@@ -1209,24 +1418,38 @@ class ServerReceiver:
                     )
                     await guild.edit(**edit_kwargs)
                     parts.append("Updated Community mode")
-                    logger.info(
-                        "[⚙️] Community settings changed: %s", ", ".join(changes)
+                    self._action_log(
+                        "info",
+                        "[⚙️] Community settings changed: %s",
+                        ", ".join(changes),
                     )
                 except discord.Forbidden as e:
+
                     if (
                         "150011" in getattr(e, "text", "")
                         or getattr(e, "code", None) == 150011
                     ):
-                        logger.warning(
-                            "[⚠️] Cannot enable Community mode automatically: "
-                            "please enable it once manually in the server settings."
+                        self._action_log(
+                            "warning",
+                            "[⚠️] Cannot enable Community mode automatically for guild %s: "
+                            "missing permission or prerequisite setup.",
+                            guild.id,
                         )
+
                     else:
-                        logger.warning(
-                            "[⚠️] Failed enabling/updating Community mode: %s", e
+                        self._action_log(
+                            "warning",
+                            "[⚠️] Failed editing Community settings for guild %s: %s",
+                            guild.id,
+                            e,
                         )
                 except Exception as e:
-                    logger.warning("[⚠️] Failed enabling/updating Community mode: %s", e)
+                    self._action_log(
+                        "warning",
+                        "[⚠️] Failed editing Community settings for guild %s: %s",
+                        guild.id,
+                        e,
+                    )
 
         return parts
 
@@ -1296,7 +1519,8 @@ class ServerReceiver:
                             ActionType.EDIT_CHANNEL, guild.id
                         )
                         await ch.edit(category=new_cat)
-                        logger.info(
+                        self._action_log(
+                            "info",
                             "[✏️] Reparented channel '%s' (ID %d) → category '%s' (ID %d)",
                             ch.name,
                             ch.id,
@@ -1445,8 +1669,11 @@ class ServerReceiver:
                     )
                     await ch.edit(type=ChannelType.news)
                     converted += 1
-                    logger.info(
-                        "[✏️] Converted channel '%s' #%d → Announcement", ch.name, ch.id
+                    self._action_log(
+                        "info",
+                        "[✏️] Converted channel '%s' (ID %d) to Announcement",
+                        ch.name,
+                        ch.id,
                     )
 
                     row = self.chan_map.get(orig, {})
@@ -1521,11 +1748,14 @@ class ServerReceiver:
                 clone_ch = None
 
             if clone_ch is None and orig_id in valid_upstream_ids:
-                logger.info(
+
+                self._action_log(
+                    "info",
                     "[🧹] Cloned thread missing (clone=%s) for '%s'; clearing mapping.",
                     clone_id,
                     thread_name,
                 )
+
                 self.db.delete_forum_thread_mapping(orig_id)
                 cleared_missing_clone += 1
                 continue
@@ -1551,18 +1781,21 @@ class ServerReceiver:
                         orig_id,
                     )
                 else:
-
-                    logger.info(
-                        "[🗑️] Thread %s no longer present in the host server; clearing mapping (clone=%s)",
+                    self._action_log(
+                        "info",
+                        "[🗑️] Original thread '%s' no longer exists; clearing mapping (clone=%s)",
                         thread_name,
                         clone_id,
                     )
+
                     if clone_ch and getattr(self.config, "DELETE_THREADS", False):
                         await self.ratelimit.acquire_for_guild(
                             ActionType.DELETE_CHANNEL, guild.id
                         )
                         await clone_ch.delete()
-                        logger.info("[🗑️] Deleted cloned thread %s", clone_id)
+                        self._action_log(
+                            "info", "[🗑️] Deleted cloned thread %s", clone_id
+                        )
                     self.db.delete_forum_thread_mapping(orig_id)
                     deleted_original_gone += 1
                     continue
@@ -1621,7 +1854,11 @@ class ServerReceiver:
                     original_guild_id=int(sitemap.get("guild_id") or 0),
                     cloned_guild_id=guild.id,
                 )
-                logger.info("[✏️] Renamed thread %s: %r → %r", ch.id, old, src["name"])
+
+                self._action_log(
+                    "info", "[✏️] Renamed thread %s: %r → %r", ch.id, old, src["name"]
+                )
+
                 renamed += 1
 
         if renamed:
@@ -1846,11 +2083,14 @@ class ServerReceiver:
             return
         if not self._can_create_in_category(guild, category):
             cat_label = category.name if category else "<root>"
-            logger.warning(
-                "[⚠️] Category %s full (or guild at cap); creating '%s' as standalone",
+            self._action_log(
+                "warning",
+                "[⚠️] Category %s full for guild %s (or guild at cap); creating '%s' as standalone",
+                guild.id,
                 cat_label,
                 name,
             )
+
             category = None
 
         if kind == "forum":
@@ -1860,7 +2100,7 @@ class ServerReceiver:
             await self.ratelimit.acquire_for_guild(ActionType.CREATE_CHANNEL, guild.id)
             ch = await guild.create_text_channel(name=name, category=category)
 
-        logger.info("[➕] Created %s channel '%s' #%s", kind, name, ch.id)
+        self._action_log("info", "[➕] Created %s channel '%s' #%s", kind, name, ch.id)
 
         if kind == "news":
             if "NEWS" in guild.features:
@@ -1869,15 +2109,20 @@ class ServerReceiver:
                         ActionType.EDIT_CHANNEL, guild.id
                     )
                     await ch.edit(type=ChannelType.news)
-                    logger.info("[✏️] Converted '%s' #%d to Announcement", name, ch.id)
+                    self._action_log(
+                        "info", "[✏️] Converted '%s' #%d to Announcement", name, ch.id
+                    )
                 except HTTPException as e:
-                    logger.warning(
-                        "[⚠️] Could not convert '%s' to Announcement: %s; left as text",
+                    self._action_log(
+                        "warning",
+                        "[⚠️] Could not convert '%s' to Announcement in guild %s: %s; left as text",
                         name,
+                        guild.id,
                         e,
                     )
             else:
-                logger.warning(
+                self._action_log(
+                    "warning",
                     "[⚠️] Guild %s doesn’t support NEWS; '%s' left as text",
                     guild.id,
                     name,
@@ -1947,7 +2192,8 @@ class ServerReceiver:
                         ActionType.EDIT_CHANNEL, ch.guild.id
                     )
                     await ch.edit(name=pinned_name)
-                    logger.info(
+                    self._action_log(
+                        "info",
                         "[📌] Enforced pinned name on #%d: %r → %r",
                         ch.id,
                         old,
@@ -1962,8 +2208,12 @@ class ServerReceiver:
                     ActionType.EDIT_CHANNEL, ch.guild.id
                 )
                 await ch.edit(name=upstream_name)
-                logger.info(
-                    "[✏️] Renamed channel #%d: %r → %r", ch.id, old, upstream_name
+                self._action_log(
+                    "info",
+                    "[✏️] Renamed channel #%d: %r → %r",
+                    ch.id,
+                    old,
+                    upstream_name,
                 )
                 return True, "match_upstream"
 
@@ -1983,19 +2233,29 @@ class ServerReceiver:
         """
         valid_ids = {c["id"] for c in sitemap.get("categories", [])}
         removed = 0
-
         for orig_id, row in list(self.cat_map.items()):
             if int(row.get("cloned_guild_id") or 0) != guild.id:
                 continue
             if orig_id not in valid_ids:
-
                 ch = guild.get_channel(row["cloned_category_id"])
-                if ch and self.config.DELETE_CHANNELS:
+                delete_channels = False
+                settings = (
+                    resolve_mapping_settings(
+                        self.db,
+                        self.config,
+                        original_guild_id=int(row.get("original_guild_id") or 0),
+                        cloned_guild_id=int(row.get("cloned_guild_id") or guild.id),
+                    )
+                    or {}
+                )
+                delete_channels = bool(settings.get("DELETE_CHANNELS", False))
+
+                if ch and delete_channels:
                     await self.ratelimit.acquire_for_guild(
                         ActionType.DELETE_CHANNEL, guild.id
                     )
                     await ch.delete()
-                    logger.info("[🗑️] Deleted category %s", ch.name)
+                    self._action_log("info", "[🗑️] Deleted category %s", ch.name)
 
                 self.db.delete_category_mapping(orig_id)
                 self.cat_map.pop(orig_id, None)
@@ -2031,10 +2291,32 @@ class ServerReceiver:
             clone_id = int(row["cloned_channel_id"])
             ch = guild.get_channel(clone_id)
 
-            if ch and self.config.DELETE_CHANNELS:
+        for orig_id, row in list(self.chan_map.items()):
+            if int(row.get("cloned_guild_id") or 0) != guild.id:
+                continue
+            if int(orig_id) in valid_ids:
+                continue
+
+            clone_id = int(row["cloned_channel_id"])
+            ch = guild.get_channel(clone_id)
+
+            delete_channels = False
+            settings = (
+                resolve_mapping_settings(
+                    self.db,
+                    self.config,
+                    original_guild_id=int(row.get("original_guild_id") or 0),
+                    cloned_guild_id=int(row.get("cloned_guild_id") or guild.id),
+                )
+                or {}
+            )
+            delete_channels = bool(settings.get("DELETE_CHANNELS", False))
+
+            if ch and delete_channels:
 
                 if ch.id in protected:
-                    logger.info(
+                    self._action_log(
+                        "info",
                         "[🛡️] Skipping deletion of protected channel #%s (%d) (community/system assignment).",
                         ch.name,
                         ch.id,
@@ -2046,25 +2328,34 @@ class ServerReceiver:
                     )
                     try:
                         await ch.delete()
-                        logger.info("[🗑️] Deleted channel #%s (%d)", ch.name, ch.id)
+                        self._action_log(
+                            "info", "[🗑️] Deleted channel #%s (%d)", ch.name, ch.id
+                        )
                     except discord.HTTPException as e:
 
                         if getattr(
                             e, "code", None
                         ) == 50074 or "required for community" in str(e):
-                            logger.info(
+                            self._action_log(
+                                "info",
                                 "[🛡️] API blocked deletion of #%s (%d): protected. Will skip and drop mapping.",
                                 getattr(ch, "name", "?"),
                                 ch.id,
                             )
+
                         else:
-                            logger.warning(
-                                "[⚠️] Failed to delete channel #%d: %s", ch.id, e
+                            self._action_log(
+                                "warning",
+                                "[⚠️] Failed to delete channel #%d: %s",
+                                ch.id,
+                                e,
                             )
 
             elif not ch:
-                logger.info(
-                    "[🗑️] Cloned channel #%d not found; removing mapping", clone_id
+                self._action_log(
+                    "info",
+                    "[🗑️] Cloned channel #%d not found; removing mapping",
+                    clone_id,
                 )
 
             self.db.delete_channel_mapping(orig_id)
@@ -2124,15 +2415,24 @@ class ServerReceiver:
             await cat.edit(name=desired)
 
             if has_pin:
-                logger.info(
+
+                self._action_log(
+                    "info",
                     "[📌] Enforced pinned category name on %d: %r → %r",
                     cat.id,
                     old,
                     desired,
                 )
+
                 return (True, "pinned_enforced")
             else:
-                logger.info("[✏️] Renamed category %d: %r → %r", cat.id, old, desired)
+                self._action_log(
+                    "info",
+                    "[✏️] Renamed category %d: %r → %r",
+                    cat.id,
+                    old,
+                    desired,
+                )
                 return (True, "match_upstream")
 
         except Exception:
@@ -2189,12 +2489,7 @@ class ServerReceiver:
 
         await self.ratelimit.acquire_for_guild(ActionType.CREATE_CHANNEL, guild.id)
         cat = await guild.create_category(name)
-        logger.info(
-            "[➕] Created category %r (orig ID %d) → clone ID %d",
-            name,
-            original_id,
-            cat.id,
-        )
+        self._action_log("info", "[➕] Created category '%s' #%d", name, cat.id)
 
         self.db.upsert_category_mapping(
             orig_id=original_id,
@@ -2223,7 +2518,9 @@ class ServerReceiver:
             except Exception:
                 pass
             webhook = await ch.create_webhook(name=name, avatar=avatar_bytes)
-            logger.info("[➕] Created a webhook in channel %s", ch.name)
+            self._action_log(
+                "info", "[➕] Created webhook '%s' in channel #%s", name, ch.id
+            )
 
             if hasattr(self, "_wh_meta"):
                 self._wh_meta.clear()
@@ -2389,7 +2686,8 @@ class ServerReceiver:
                 moved += 1
                 old_name = actual_parent.name if actual_parent else "standalone"
                 new_name = desired_parent.name if desired_parent else "standalone"
-                logger.info(
+                self._action_log(
+                    "info",
                     "[✏️] Reparented channel '%s' (ID %d) from '%s' → '%s'",
                     ch.name,
                     clone_id,
@@ -2397,12 +2695,14 @@ class ServerReceiver:
                     new_name,
                 )
             except Exception as e:
-                logger.warning(
+                self._action_log(
+                    "warning",
                     "[⚠️] Failed to reparent channel '%s' (ID %d): %s",
                     ch.name,
                     clone_id,
                     e,
                 )
+
                 continue
             ctype = ch.type.value if ch else None
 
@@ -2582,11 +2882,13 @@ class ServerReceiver:
                     cloned_guild_id=guild.id,
                 )
 
-                logger.info(
+                self._action_log(
+                    "info",
                     "[➕] Recreated missing webhook for channel `%s` #%s",
                     fresh["original_channel_name"],
                     original_id,
                 )
+
                 self.chan_map[original_id]["channel_webhook_url"] = new_url
                 self._schedule_flush(
                     chan_ids={original_id},
@@ -2644,8 +2946,9 @@ class ServerReceiver:
                     )
 
             self.db.delete_forum_thread_mapping(orig_tid)
-            logger.info(
-                "[threads] delete: removed mapping for thread %s (clone_guild=%s)",
+            self._action_log(
+                "info",
+                "[🗑️] Deleted thread mapping for thread %s in guild %s ",
                 orig_tid,
                 clone_gid,
             )
@@ -2704,19 +3007,34 @@ class ServerReceiver:
             try:
                 ch = await self.bot.fetch_channel(cloned_id)
             except NotFound:
-                logger.warning(
-                    f"[⚠️] Thread renamed in #{parent_name}: {old_name} → {new_name}; not found in cloned server, cannot rename"
+                self._action_log(
+                    "warning",
+                    "[⚠️] Thread renamed in #%s: %r → %r; not found in cloned server, cannot rename",
+                    parent_name,
+                    old_name,
+                    new_name,
                 )
+
                 return
 
         try:
             await self.ratelimit.acquire_for_guild(ActionType.EDIT_CHANNEL, guild.id)
             await ch.edit(name=new_name)
-            logger.info(
-                f"[✏️] Renamed thread in #{ch.parent.name}: {old_name} → {new_name}"
+            self._action_log(
+                "info",
+                "[✏️] Renamed thread in #%s: %r → %r",
+                ch.parent.name if ch.parent else "Unknown",
+                old_name,
+                new_name,
             )
+
         except Exception as e:
-            logger.error(f"[⛔] Failed to rename thread {old_name} in #{ch.name}: {e}")
+            self._action_log(
+                "error",
+                "[⛔] Failed to rename thread in #%s: %s",
+                ch.parent.name if ch.parent else "Unknown",
+                e,
+            )
 
         self.db.upsert_forum_thread_mapping(
             orig_thread_id,
@@ -2765,21 +3083,29 @@ class ServerReceiver:
                 await thread.edit(archived=True)
                 parent = thread.parent
                 parent_name = parent.name if parent else "Unknown"
-                logger.info(
+                self._action_log(
+                    "info",
                     "[✏️] Auto-archived thread '%s' in #%s to respect thread limits",
                     thread.name,
                     parent_name,
                 )
+
             except HTTPException as e:
                 if e.status == 404:
-                    logger.warning(
+                    self._action_log(
+                        "warning",
                         "[⚠️] Thread %s not found; clearing mapping and skipping future attempts",
                         thread.id,
                     )
+
                     self.db.delete_forum_thread_mapping(thread.id)
                 else:
-                    logger.warning(
-                        "[⚠️] Failed to auto-archive thread %s: %s", thread.id, e
+                    self._action_log(
+                        "warning",
+                        "[⚠️] Failed to auto-archive thread '%s' in #%s: %s",
+                        thread.name,
+                        parent_name,
+                        e,
                     )
 
     def _sanitize_inline(self, s: str | None) -> str | None:
@@ -5335,16 +5661,99 @@ class ServerReceiver:
         if mapped:
             return int(next(iter(mapped)))
 
-        try:
-            if self.config.CLONE_GUILD_ID:
-                return int(self.config.CLONE_GUILD_ID)
-        except Exception:
-            pass
-
         if getattr(self.bot, "guilds", None):
             return int(self.bot.guilds[0].id)
 
         return None
+
+    def _maybe_enrich_mapping_identity_from_sitemap(self, sitemap: dict) -> None:
+        """
+        Backfill identity fields in guild_mappings (names/icon URLs) using data
+        we already have at sync time.
+        """
+        guild_info = sitemap.get("guild") or {}
+        try:
+            host_gid = int(guild_info.get("id") or 0)
+        except (TypeError, ValueError):
+            host_gid = 0
+
+        if not host_gid:
+            return  # can't map without a source guild id
+
+        mrow = self.db.get_mapping_by_original(host_gid)
+        if not mrow:
+
+            return
+
+        # See what's missing.
+        need_orig_name = not str(mrow.get("original_guild_name") or "").strip()
+        need_orig_icon = not str(mrow.get("original_guild_icon_url") or "").strip()
+        need_clone_name = not str(mrow.get("cloned_guild_name") or "").strip()
+
+        if not (need_orig_name or need_orig_icon or need_clone_name):
+
+            return
+
+        sitemap_orig_name = str(guild_info.get("name") or "").strip()
+        sitemap_icon_url = str(guild_info.get("icon") or "").strip()
+
+        clone_gid = mrow.get("cloned_guild_id")
+        clone_guild_name = None
+        if need_clone_name and clone_gid:
+            try:
+                clone_gid_int = int(clone_gid)
+            except (TypeError, ValueError):
+                clone_gid_int = 0
+            if clone_gid_int:
+                clone_guild_obj = self.bot.get_guild(clone_gid_int)
+                if clone_guild_obj:
+                    clone_guild_name = getattr(clone_guild_obj, "name", None)
+
+        # fall back to existing if we didn't discover something new).
+        final_orig_name = (
+            sitemap_orig_name
+            if (need_orig_name and sitemap_orig_name)
+            else mrow.get("original_guild_name") or ""
+        )
+        final_orig_icon = (
+            sitemap_icon_url
+            if (need_orig_icon and sitemap_icon_url)
+            else mrow.get("original_guild_icon_url") or None
+        )
+        final_clone_name = (
+            clone_guild_name
+            if (need_clone_name and clone_guild_name)
+            else mrow.get("cloned_guild_name") or ""
+        )
+
+        mapping_id = mrow.get("mapping_id")
+        mapping_name = mrow.get("mapping_name") or ""
+        cloned_gid_val = mrow.get("cloned_guild_id") or 0
+        settings_dict = mrow.get("settings") or {}
+
+        try:
+            self.db.upsert_guild_mapping(
+                mapping_id=mapping_id,
+                mapping_name=mapping_name,
+                original_guild_id=host_gid,
+                original_guild_name=final_orig_name,
+                original_guild_icon_url=final_orig_icon,
+                cloned_guild_id=cloned_gid_val,
+                cloned_guild_name=final_clone_name,
+                settings=settings_dict,
+                overwrite_identity=True,
+            )
+            logger.debug(
+                "[guild-id-meta] enriched mapping %s: orig_name=%r icon=%r clone_name=%r",
+                mapping_id,
+                final_orig_name,
+                final_orig_icon,
+                final_clone_name,
+            )
+        except Exception:
+            logger.exception(
+                "[guild-id-meta] failed to enrich mapping for origin guild %s", host_gid
+            )
 
     async def _shutdown(self):
         """

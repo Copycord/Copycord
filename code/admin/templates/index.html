@@ -217,7 +217,6 @@
 
       <form method="post" action="/save" id="cfg-form" novalidate>
         <div class="grid">
-          {# text_keys now only includes SERVER_TOKEN, CLIENT_TOKEN, etc. It no longer includes guild IDs #}
           {% for k in text_keys if k != 'COMMAND_USERS' %}
           {% set is_token = 'TOKEN' in k %}
           <div class="field">
@@ -289,150 +288,7 @@
         </p>
       </div>
 
-      <div id="guild-mapping-list" class="guild-mapping-list">
-        {# render each existing mapping #}
-        {% for m in guild_mappings %}
-        <div class="guild-card" data-id="{{ m.mapping_id }}">
-          {% set icon_src = m.original_guild_icon_url or '/static/logo.png' %}
-          <div class="guild-card-logo">
-            <img src="{{ icon_src }}" alt="" class="guild-card-logo-img">
-          </div>
-
-          <div class="guild-card-inner">
-            <div class="guild-card-main">
-              <div class="guild-card-name">
-                <div class="guild-card-name-title" title="{{ m.mapping_name|e }}">
-                  {{ m.mapping_name }}
-                </div>
-                <div class="guild-card-name-meta"></div>
-              </div>
-
-              <div class="guild-card-actions">
-                <button class="btn-icon edit-mapping-btn" data-id="{{ m.mapping_id }}"
-                  aria-label="Edit mapping">⚙</button>
-                <button class="btn-icon delete-mapping-btn" data-id="{{ m.mapping_id }}"
-                  aria-label="Delete mapping">🗑</button>
-              </div>
-            </div>
-          </div>
-        </div>
-        {% endfor %}
-
-      </div>
-    </div>
-
-
-
-    {# tips for filters UI #}
-    {% set FILTER_TIPS = {
-    "wl_categories": "Host category IDs to whitelist. Only these categories (and their channels) are cloned.",
-    "wl_channels": "Host channel IDs to whitelist. Only these channels (and their linked categories) will be cloned.",
-    "ex_categories": "Host category IDs to exclude from cloning.",
-    "ex_channels": "Host channel IDs to exclude from cloning."
-    } %}
-
-    <div class="card" id="card-filters">
-      <h3>Sync Filters</h3>
-      <div class="card-body">
-
-        <details class="info-details">
-          <summary>Info</summary>
-          <div class="info-content">
-            <p><strong>Whitelist (allow-list):</strong> If <em>any</em> IDs are listed,
-              <em>only</em> those categories/channels are cloned. Leave <em>both</em>
-              whitelist lists empty to disable whitelist mode.
-            </p>
-
-            <p><strong>Excluded (deny-list):</strong> Anything listed here is dropped.</p>
-
-            <p><strong>Precedence:</strong></p>
-            <ol>
-              <li><strong>Channel whitelist</strong> &gt; channel exclude</li>
-              <li><strong>Channel exclude</strong> &gt; category whitelist</li>
-              <li><strong>Category whitelist</strong> &gt; category exclude</li>
-            </ol>
-
-            <p><strong>IDs:</strong> Use IDs from the <em>host (source) guild</em>, not the clone.</p>
-          </div>
-        </details>
-
-        <form id="form-filters" action="/filters/save" method="post">
-          <div class="filters-grid">
-            <div class="filters-col">
-              <h4>Whitelist (allow-list)</h4>
-
-              <div class="chips-field" style="position:relative">
-                <label class="chips-label has-tip" for="wl_categories_input">
-                  <span class="label-text">Categories to allow</span>
-                  <button type="button" class="info-dot" aria-label="What is Categories to allow?"
-                    aria-describedby="tip-wl_categories"></button>
-                  <span id="tip-wl_categories" role="tooltip" class="tip-bubble">
-                    {{ FILTER_TIPS['wl_categories'] }}
-                  </span>
-                </label>
-                <div class="chips chips-compact" data-chips="wl_categories">
-                  <input id="wl_categories_input" class="chip-input" type="text" inputmode="numeric" />
-                </div>
-                <input type="hidden" name="wl_categories" id="wl_categories" value="">
-              </div>
-
-              <div class="chips-field" style="position:relative">
-                <label class="chips-label has-tip" for="wl_channels_input">
-                  <span class="label-text">Channels to allow</span>
-                  <button type="button" class="info-dot" aria-label="What is Channels to allow?"
-                    aria-describedby="tip-wl_channels"></button>
-                  <span id="tip-wl_channels" role="tooltip" class="tip-bubble">
-                    {{ FILTER_TIPS['wl_channels'] }}
-                  </span>
-                </label>
-                <div class="chips chips-compact" data-chips="wl_channels">
-                  <input id="wl_channels_input" class="chip-input" type="text" inputmode="numeric" />
-                </div>
-                <input type="hidden" name="wl_channels" id="wl_channels" value="">
-              </div>
-            </div>
-
-            <div class="filters-col">
-              <h4>Exclude (deny-list)</h4>
-
-              <div class="chips-field" style="position:relative">
-                <label class="chips-label has-tip" for="ex_categories_input">
-                  <span class="label-text">Categories to drop</span>
-                  <button type="button" class="info-dot" aria-label="What is Categories to drop?"
-                    aria-describedby="tip-ex_categories"></button>
-                  <span id="tip-ex_categories" role="tooltip" class="tip-bubble">
-                    {{ FILTER_TIPS['ex_categories'] }}
-                  </span>
-                </label>
-                <div class="chips chips-compact" data-chips="ex_categories">
-                  <input id="ex_categories_input" class="chip-input" type="text" inputmode="numeric" />
-                </div>
-                <input type="hidden" name="ex_categories" id="ex_categories" value="">
-              </div>
-
-              <div class="chips-field" style="position:relative">
-                <label class="chips-label has-tip" for="ex_channels_input">
-                  <span class="label-text">Channels to drop</span>
-                  <button type="button" class="info-dot" aria-label="What is Channels to drop?"
-                    aria-describedby="tip-ex_channels"></button>
-                  <span id="tip-ex_channels" role="tooltip" class="tip-bubble">
-                    {{ FILTER_TIPS['ex_channels'] }}
-                  </span>
-                </label>
-                <div class="chips chips-compact" data-chips="ex_channels">
-                  <input id="ex_channels_input" class="chip-input" type="text" inputmode="numeric" />
-                </div>
-                <input type="hidden" name="ex_channels" id="ex_channels" value="">
-              </div>
-            </div>
-          </div>
-
-          <div class="btns mt-3">
-            <button class="btn btn-ghost" type="submit">Save Filters</button>
-            <button type="button" class="btn btn-ghost" id="btn-cancel-filters" hidden>Cancel</button>
-          </div>
-        </form>
-      </div>
+      <div id="guild-mapping-list" class="guild-mapping-list"></div>
     </div>
 
     <div id="log-modal" class="modal" aria-hidden="true">
@@ -547,6 +403,128 @@
         </form>
       </div>
     </div>
+
+
+    <div id="filters-modal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="filters-title">
+        <div class="modal-header">
+          <h4 id="filters-title" class="modal-title">Filters</h4>
+          <button id="filters-close" type="button" class="icon-btn verify-close" aria-label="Close">✕</button>
+        </div>
+
+        <form id="form-filters" class="padded" method="post" action="" autocomplete="off">
+          <input type="hidden" id="filters_mapping_id" name="mapping_id" value="">
+
+          <div class="filters-grid">
+            <fieldset class="filters-col">
+              <legend>Whitelist (Allow-list)</legend>
+
+              <div class="field">
+                <label for="wl_categories_input" class="has-tip">
+                  <span class="label-text">Allowed Category IDs</span>
+                  <button type="button" class="info-dot" aria-label="Only sync channels inside these category IDs."
+                    aria-describedby="tip-wl_categories"></button>
+                  <span id="tip-wl_categories" role="tooltip" class="tip-bubble">
+                    Only these categories (and their channels) will sync.
+                    Leave empty to allow all categories.
+                  </span>
+                </label>
+
+                <div class="chips" data-chips="wl_categories">
+                  <span class="chip-input-wrap">
+                    <input class="chip-input" id="wl_categories_input" type="text" inputmode="numeric"
+                      placeholder="Add category ID(s)…" />
+                  </span>
+                </div>
+
+                <input type="hidden" id="wl_categories" name="wl_categories" value="">
+              </div>
+
+              <div class="field">
+                <label for="wl_channels_input" class="has-tip">
+                  <span class="label-text">Allowed Channel IDs</span>
+                  <button type="button" class="info-dot" aria-label="Only sync these specific text channels."
+                    aria-describedby="tip-wl_channels"></button>
+                  <span id="tip-wl_channels" role="tooltip" class="tip-bubble">
+                    If you list channel IDs here, we’ll only sync
+                    those channels (plus anything allowed by category).
+                  </span>
+                </label>
+
+                <div class="chips" data-chips="wl_channels">
+                  <span class="chip-input-wrap">
+                    <input class="chip-input" id="wl_channels_input" type="text" inputmode="numeric"
+                      placeholder="Add channel ID(s)…" />
+                  </span>
+                </div>
+
+                <input type="hidden" id="wl_channels" name="wl_channels" value="">
+              </div>
+            </fieldset>
+
+            <fieldset class="filters-col">
+              <legend>Exclude (Deny-list)</legend>
+
+              <div class="field">
+                <label for="ex_categories_input" class="has-tip">
+                  <span class="label-text">Blocked Category IDs</span>
+                  <button type="button" class="info-dot" aria-label="Skip any channels in these categories."
+                    aria-describedby="tip-ex_categories"></button>
+                  <span id="tip-ex_categories" role="tooltip" class="tip-bubble">
+                    Channels inside these categories will be skipped
+                    entirely, even if they would normally sync.
+                  </span>
+                </label>
+
+                <div class="chips" data-chips="ex_categories">
+                  <span class="chip-input-wrap">
+                    <input class="chip-input" id="ex_categories_input" type="text" inputmode="numeric"
+                      placeholder="Add category ID(s)…" />
+                  </span>
+                </div>
+
+                <input type="hidden" id="ex_categories" name="ex_categories" value="">
+              </div>
+
+              <div class="field">
+                <label for="ex_channels_input" class="has-tip">
+                  <span class="label-text">Blocked Channel IDs</span>
+                  <button type="button" class="info-dot" aria-label="Never sync these specific channels."
+                    aria-describedby="tip-ex_channels"></button>
+                  <span id="tip-ex_channels" role="tooltip" class="tip-bubble">
+                    These channels will never sync, even if their category is allowed.
+                  </span>
+                </label>
+
+                <div class="chips" data-chips="ex_channels">
+                  <span class="chip-input-wrap">
+                    <input class="chip-input" id="ex_channels_input" type="text" inputmode="numeric"
+                      placeholder="Add channel ID(s)…" />
+                  </span>
+                </div>
+
+                <input type="hidden" id="ex_channels" name="ex_channels" value="">
+              </div>
+            </fieldset>
+          </div>
+
+          <div class="btns modal-footer-row">
+            <button id="filters-save-btn" type="submit" class="btn btn-ghost">
+              Save Filters
+            </button>
+
+            <button id="btn-cancel-filters" type="button" class="btn btn-ghost-red" hidden>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+
+
 
     <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
 

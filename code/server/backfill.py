@@ -53,8 +53,10 @@ class BackfillManager:
         self._global_sync: dict | None = None
         self._temp_prefix_canon = "Copycord"
         self.temp_webhook_max = 1
-        
-    def _cleanup_meta_payload(self, cid: int, *, st_override: dict | None = None) -> dict:
+
+    def _cleanup_meta_payload(
+        self, cid: int, *, st_override: dict | None = None
+    ) -> dict:
         """
         Build the common metadata block for cleanup-related WS messages:
         mapping_id, original_guild_id, cloned_guild_id, clone_channel_id
@@ -72,11 +74,9 @@ class BackfillManager:
 
         out = {}
 
-        # mapping_id is already a string-ish, just str() it
         if "mapping_id" in st and st["mapping_id"] is not None:
             out["mapping_id"] = str(st["mapping_id"])
 
-        # snowflake-ish IDs should all ship as strings
         if "original_guild_id" in st and st["original_guild_id"] is not None:
             out["original_guild_id"] = _to_str(st["original_guild_id"])
         if "cloned_guild_id" in st and st["cloned_guild_id"] is not None:
@@ -171,7 +171,7 @@ class BackfillManager:
             if not tid and hasattr(self, "tracker"):
                 with contextlib.suppress(Exception):
                     tid = await self.tracker.get_task_id(str(cid))
-                    
+
             meta_block = self._cleanup_meta_payload(cid)
 
             payload_data = {
@@ -710,7 +710,7 @@ class BackfillManager:
         async def _cleanup_and_teardown(
             orig: int, clone: int, created_ids: list[int], task_id: str | None
         ):
-            
+
             meta_block = self._cleanup_meta_payload(orig)
 
             payload_data = {
@@ -771,7 +771,6 @@ class BackfillManager:
                             "data": payload_data,
                         },
                     )
-
 
                 self._cleanup_task_ids.pop(orig, None)
                 self._mark_cleanup_end(orig)

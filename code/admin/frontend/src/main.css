@@ -2725,6 +2725,7 @@ body {
   flex-direction: column;
   align-items: center;
 }
+
 .guild-card:hover {
   outline: 1px solid rgba(167, 139, 250, 0.35);
   box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.18) inset, var(--shadow);
@@ -6562,12 +6563,13 @@ body.modal-open #bf-batchbar {
   flex-shrink: 0;
 }
 
+/* Smaller action buttons on guild cards */
 .guild-card .btn-icon {
-  width: 28px;
-  min-height: 28px;
-  height: 28px;
-  border-radius: 8px;
-  font-size: 13px;
+  width: 24px;          /* ↓ from 28 */
+  height: 24px;         /* ↓ from 28 */
+  min-height: 24px;
+  border-radius: 6px;   /* ↓ from 8 */
+  font-size: 12px;      /* not used for SVG, keeps fallback tidy */
   line-height: 1;
   cursor: pointer;
 
@@ -6576,8 +6578,25 @@ body.modal-open #bf-batchbar {
   color: var(--accent);
 
   box-shadow: none;
-  transition: background-color 0.12s ease, border-color 0.12s ease,
-    color 0.12s ease;
+  transition:
+    background-color .12s ease,
+    border-color .12s ease,
+    color .12s ease,
+    transform .08s ease;
+}
+
+/* Keep icons crisp inside the smaller buttons */
+.guild-card .btn-icon svg {
+  width: 16px;   /* scale icon down to match 24px button */
+  height: 16px;
+  display: block;
+  stroke: currentColor;  /* for outline icons */
+  fill: none;            /* keep outline look; remove if you use filled icons */
+}
+
+/* Optional: slightly tighter spacing between buttons */
+.guild-card-actions {
+  gap: 6px;   /* ↓ from 8 if you want them closer */
 }
 
 .guild-card .btn-icon:hover {
@@ -6585,6 +6604,11 @@ body.modal-open #bf-batchbar {
   border-color: var(--accent);
   color: var(--text);
 }
+
+.guild-card .btn-icon:active {
+  transform: translateY(1px);
+}
+
 
 .guild-config-header {
   display: flex;
@@ -7099,3 +7123,203 @@ body.modal-open {
   border-style: solid;
   border-color: rgba(15, 15, 20, 0.9) transparent transparent transparent;
 }
+
+#filters-modal .modal-content {
+  /* make this modal a little wider/taller than default */
+  width: min(960px, 94vw);
+  max-height: 85vh;
+  margin: 5vh auto;
+  border-radius: 20px;
+}
+
+#filters-modal .modal-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+#filters-modal .modal-title {
+  font-size: 15px;
+  line-height: 1.3;
+  font-weight: 600;
+  color: var(--accent);
+  margin: 0;
+}
+
+/* scroll area inside the modal */
+#filters-modal .padded {
+  padding: 20px;
+  padding-top: 16px;
+  padding-bottom: 20px;
+  overflow-y: auto;
+  max-height: calc(85vh - 60px); /* header height buffer */
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* collapsible "How these filters work" block */
+#filters-modal details.info-details {
+  margin: 0;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.03);
+}
+#filters-modal details.info-details > summary {
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+#filters-modal details.info-details .info-body,
+#filters-modal details.info-details .info-content {
+  padding: 12px 14px 16px 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+  border-top: 1px solid rgba(255,255,255,0.07);
+}
+
+/* two-column layout with a little more air */
+#filters-modal .filters-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px; /* was 1rem */
+}
+@media (max-width: 900px) {
+  #filters-modal .filters-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* each side card */
+#filters-modal fieldset.filters-col {
+  border: 1px solid var(--border);
+  background: #140b26;
+  border-radius: 16px;
+  padding: 16px 18px 20px;
+  min-width: 0;
+}
+#filters-modal fieldset.filters-col > legend {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 0 4px;
+  margin: 0 0 10px 0;
+  line-height: 1.3;
+}
+
+/* spacing for each chips field block */
+#filters-modal .field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 16px;
+}
+#filters-modal .field:first-of-type {
+  margin-top: 0;
+}
+
+/* label row + tooltip icon */
+#filters-modal .field > label.has-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.3;
+  color: var(--muted);
+  margin: 0;
+}
+
+/* chips container style in the modal */
+#filters-modal .chips {
+  background: #0f0820;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 10px 6px;
+  min-height: 48px;
+
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+  box-sizing: border-box;
+}
+#filters-modal .chips:focus-within {
+  border-color: var(--accent);
+  box-shadow: none;
+}
+
+/* each chip pill */
+#filters-modal .chip {
+  margin: 0;
+  background: rgba(255,255,255,0.05) !important;
+  border: 1px solid rgba(255,255,255,0.1) !important;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+#filters-modal .chip:hover {
+  background: rgba(255,255,255,0.08) !important;
+  border-color: rgba(255,255,255,0.15) !important;
+}
+
+/* chip input inside chips row */
+#filters-modal .chip-input {
+  flex: 1 1 180px;
+  min-width: 140px;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+  padding: 4px 2px 8px;
+  outline: none;
+}
+
+/* helper line under each chips block */
+#filters-modal .tip {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--muted);
+  opacity: 0.9;
+  margin-top: -2px;
+}
+
+/* tooltip bubble position in this modal */
+#filters-modal .tip-bubble {
+  top: calc(100% + 8px);
+  left: 0;
+  max-width: 260px;
+  min-width: 200px;
+  width: max-content;
+  white-space: normal;
+  word-break: break-word;
+}
+
+/* footer row (Save / Cancel buttons) */
+#filters-modal .modal-footer-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 4px;
+  border-top: none;
+}
+
+/* make Save stronger in this modal */
+#filters-modal #filters-save-btn.btn-primary {
+  min-height: 42px;
+  padding: 10px 16px;
+  font-size: 14px;
+  border-radius: 12px;
+  background: linear-gradient(
+    180deg,
+    var(--primary),
+    var(--primary-700)
+  );
+  border-color: #3b2168;
+  color: #fff;
+}
+

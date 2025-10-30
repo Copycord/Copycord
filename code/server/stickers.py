@@ -14,7 +14,8 @@ import asyncio
 import discord
 import aiohttp
 import logging
-from server.rate_limiter import RateLimitManager, ActionType
+from server.rate_limiter import ActionType
+from server import logctx
 
 logger = logging.getLogger("server.stickers")
 
@@ -40,6 +41,26 @@ class StickerManager:
         self._locks: dict[int, asyncio.Lock] = {}
         self._std_ok: set[int] = set()
         self._std_bad: set[int] = set()
+
+    def _log(self, level: str, msg: str, *args):
+        """
+        Sticker sync logging with sync context.
+        """
+        prefix = logctx.format_prefix()
+        line = prefix + msg
+
+        if level == "debug":
+            logger.debug(line, *args)
+        elif level == "info":
+            logger.info(line, *args)
+        elif level == "warning":
+            logger.warning(line, *args)
+        elif level == "error":
+            logger.error(line, *args)
+        elif level == "exception":
+            logger.exception(line, *args)
+        else:
+            logger.log(logging.INFO, line, *args)
 
     def set_session(self, session: aiohttp.ClientSession | None):
         self.session = session
@@ -116,9 +137,9 @@ class StickerManager:
 
         existing = self._tasks.get(clone_gid)
         if existing and not existing.done():
-            logger.debug(
-                "Sticker sync already running for clone %s; skip kickoff.",
-                clone_gid,
+            self._log(
+                "debug",
+                "[🎟️] Sticker sync already running; skip kickoff.",
             )
             return
 
@@ -128,21 +149,23 @@ class StickerManager:
             try:
                 clones = set(self.guild_resolver.clones_for_host(host_id))
                 if clones and clone_gid not in clones:
-                    logger.warning(
+                    self._log(
+                        "warning",
                         "[sticker] host %s is not mapped to clone %s; proceeding anyway",
                         host_id,
                         clone_gid,
                     )
             except Exception:
-                logger.exception(
-                    "[sticker] mapping validation threw, continuing anyway"
+                self._log(
+                    "exception",
+                    "[sticker] mapping validation threw, continuing anyway",
                 )
 
         guild = self.bot.get_guild(clone_gid)
         if not guild:
-            logger.debug(
-                "Sticker sync: clone guild %s unavailable; aborting",
-                clone_gid,
+            self._log(
+                "debug",
+                "[🎟️] Clone guild unavailable; aborting"
             )
             return
 
@@ -156,7 +179,10 @@ class StickerManager:
                 clone_gid=clone_gid,
             )
 
-        logger.debug("[🎟️] Sticker sync scheduled for clone=%s", clone_gid)
+        self._log(
+            "debug",
+            "[🎟️] Sticker sync scheduled",
+        )
         task = asyncio.create_task(_run_one())
         self._tasks[clone_gid] = task
 
@@ -181,9 +207,9 @@ class StickerManager:
                     clone_list = []
                 mappings = len(list(self.db.get_all_sticker_mappings()))
 
-                logger.debug(
-                    "[🎟️] Sticker sync start clone=%s: upstream=%d, clone=%d, mappings=%d",
-                    clone_gid,
+                self._log(
+                    "debug",
+                    "[🎟️] Sticker sync start: upstream=%d, clone=%d, mappings=%d",
                     upstream,
                     len(clone_list),
                     mappings,
@@ -195,36 +221,36 @@ class StickerManager:
                     host_id=host_id,
                 )
 
-                if any((d, r, c)):
+                summary_parts = [
+                    f"{label} {n}"
+                    for (label, n) in (
+                        ("Deleted", d),
+                        ("Renamed", r),
+                        ("Created", c),
+                    )
+                    if n
+                ]
+                if summary_parts:
                     await self.refresh_cache(clone_gid)
-                    logger.debug(
-                        "[🎟️] Sticker sync clone=%s: %s",
-                        clone_gid,
-                        ", ".join(
-                            f"{label} {n}"
-                            for label, n in (
-                                ("Deleted", d),
-                                ("Renamed", r),
-                                ("Created", c),
-                            )
-                            if n
-                        ),
-                    )
+                    summary_text = ", ".join(summary_parts)
                 else:
-                    logger.debug(
-                        "[🎟️] Sticker sync clone=%s: no changes needed",
-                        clone_gid,
-                    )
+                    summary_text = "no changes needed"
+
+                self._log(
+                    "info",
+                    "[🎟️] Sticker sync complete: %s",
+                    summary_text,
+                )
 
             except asyncio.CancelledError:
-                logger.debug(
-                    "[🎟️] Sticker sync canceled for clone %s.",
-                    clone_gid,
+                self._log(
+                    "debug",
+                    "[🎟️] Sticker sync canceled before completion."
                 )
-            except Exception:
-                logger.exception(
-                    "[🎟️] Sticker sync failed for clone %s",
-                    clone_gid,
+            except Exception as e:
+                self._log(
+                    "exception",
+                    "[🎟️] Sticker sync failed: %s", e
                 )
             finally:
 
@@ -283,17 +309,21 @@ class StickerManager:
                     await cloned.delete()
                     deleted += 1
                     current_count = max(0, current_count - 1)
-                    logger.info(
+                    self._log(
+                        "info",
                         "[🎟️] Deleted sticker %s",
                         row["cloned_sticker_name"],
                     )
+
                 except discord.Forbidden:
-                    logger.warning(
+                    self._log(
+                        "warning",
                         "[⚠️] No permission to delete sticker %s",
                         row["cloned_sticker_name"],
                     )
                 except discord.HTTPException as e:
-                    logger.error(
+                    self._log(
+                        "error",
                         "[⛔] Error deleting sticker %s: %s",
                         row["cloned_sticker_name"],
                         e,
@@ -310,10 +340,12 @@ class StickerManager:
             if mapping:
                 cloned = clone_by_id.get(mapping["cloned_sticker_id"])
                 if mapping and not cloned:
-                    logger.warning(
+                    self._log(
+                        "warning",
                         "[⚠️] Sticker %s missing in clone; will recreate",
                         mapping["original_sticker_name"],
                     )
+
                     self.db.delete_sticker_mapping(orig_id)
                     mapping = None
 
@@ -332,13 +364,16 @@ class StickerManager:
                         original_guild_id=host_id,
                         cloned_guild_id=guild.id,
                     )
-                    logger.info(
+                    self._log(
+                        "info",
                         "[🎟️] Renamed sticker %s → %s",
                         mapping["original_sticker_name"],
                         name,
                     )
+
                 except discord.HTTPException as e:
-                    logger.error(
+                    self._log(
+                        "error",
                         "[⛔] Failed renaming sticker %s: %s",
                         cloned.name,
                         e,
@@ -349,7 +384,8 @@ class StickerManager:
                 continue
 
             if not url:
-                logger.warning(
+                self._log(
+                    "warning",
                     "[⚠️] Sticker %s has no URL; skipping",
                     name,
                 )
@@ -366,16 +402,19 @@ class StickerManager:
                 async with self.session.get(url) as resp:
                     raw = await resp.read()
             except Exception as e:
-                logger.error(
+                self._log(
+                    "error",
                     "[⛔] Failed fetching sticker %s at %s: %s",
                     name,
                     url,
                     e,
                 )
+
                 continue
 
             if raw and len(raw) > 512 * 1024:
-                logger.info(
+                self._log(
+                    "info",
                     "[🎟️] Skipping %s: exceeds size limit",
                     name,
                 )
@@ -411,29 +450,39 @@ class StickerManager:
                     cloned_guild_id=guild.id,
                 )
 
-                logger.info("[🎟️] Created sticker %s", name)
+                self._log(
+                    "info",
+                    "[🎟️] Created sticker %s",
+                    name,
+                )
+
             except discord.HTTPException as e:
 
                 if getattr(e, "code", None) == 30039 or "30039" in str(e):
                     skipped_limit += 1
-                    logger.info(
+                    self._log(
+                        "info",
                         "[🎟️] Skipped creating sticker due to clone guild sticker limit."
                     )
+
                 else:
-                    logger.error(
+                    self._log(
+                        "error",
                         "[⛔] Failed creating sticker %s: %s",
                         name,
                         e,
                     )
 
         if skipped_limit:
-            logger.info(
+            self._log(
+                "info",
                 "[🎟️] Skipped %d stickers due to clone guild limit (%d).",
                 skipped_limit,
                 limit,
             )
         if size_failed:
-            logger.info(
+            self._log(
+                "info",
                 "[🎟️] Skipped %d stickers because they exceed 512 KiB.",
                 size_failed,
             )

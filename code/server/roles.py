@@ -19,6 +19,7 @@ logger = logging.getLogger("server.roles")
 import asyncio, logging, discord
 from typing import List, Dict, Tuple, Optional
 from server.rate_limiter import RateLimitManager, ActionType
+from server import logctx
 
 logger = logging.getLogger("server.roles")
 
@@ -48,6 +49,23 @@ class RoleManager:
         self._locks: dict[int, asyncio.Lock] = {}
 
         self.MAX_ROLES = 250
+
+    def _log(self, level: str, msg: str, *args) -> None:
+        """
+        Role sync logging with sync task context.
+        Adds the same prefix that structure sync uses so every
+        role create/update/delete line is tied to the sync task id.
+        """
+        prefix = logctx.format_prefix()
+
+        if level == "info":
+            logger.info(prefix + msg, *args)
+        elif level == "warning":
+            logger.warning(prefix + msg, *args)
+        elif level == "error":
+            logger.error(prefix + msg, *args)
+        else:
+            logger.debug(prefix + msg, *args)
 
     def _get_lock_for_clone(self, clone_gid: int) -> asyncio.Lock:
         """
@@ -87,7 +105,8 @@ class RoleManager:
             try:
                 clones = set(self.guild_resolver.clones_for_host(int(host_guild_id)))
                 if clones and clone_gid not in clones:
-                    logger.warning(
+                    self._log(
+                        "warning",
                         "[roles] host %s is not mapped to clone %s; proceeding anyway",
                         host_guild_id,
                         clone_gid,
@@ -160,21 +179,21 @@ class RoleManager:
                     parts.append(f"Created {created} roles")
 
                 if parts:
-                    logger.info(
-                        "[🧩] Role sync changes for clone %s: %s",
-                        clone_id,
+                    self._log(
+                        "info",
+                        "[🧩] Role sync complete: %s",
                         "; ".join(parts),
                     )
                 else:
-                    logger.debug(
-                        "[🧩] Role sync: no changes needed for clone %s",
-                        clone_id,
+                    self._log(
+                        "info",
+                        "[🧩] Role sync complete: no changes needed",
                     )
 
             except asyncio.CancelledError:
-                logger.debug("[🧩] Role sync canceled for clone %s.", clone_id)
-            except Exception:
-                logger.exception("[🧩] Role sync failed for clone %s", clone_id)
+                self._log("warning", "[🧩] Role sync canceled.")
+            except Exception as e:
+                self._log("error", "[🧩] Role sync failed: %s", e)
             finally:
                 t = self._tasks.get(clone_id)
                 if t and t.done():
@@ -207,7 +226,8 @@ class RoleManager:
         """
         if not can_create:
             if not create_suppressed_logged:
-                logger.warning(
+                self._log(
+                    "warning",
                     "[🧩] Can't recreate role %r — guild at max role count (%d).",
                     want_name,
                     self.MAX_ROLES,
@@ -240,7 +260,8 @@ class RoleManager:
 
             clone_by_id[cloned.id] = cloned
 
-            logger.info(
+            self._log(
+                "info",
                 "[🧩] Recreated missing cloned role for upstream %r → %s (%d)",
                 want_name,
                 cloned.name,
@@ -251,8 +272,11 @@ class RoleManager:
             return cloned, 1, can_create, create_suppressed_logged
 
         except Exception as e:
-            logger.warning(
-                "[⚠️] Failed recreating missing cloned role for %r: %s", want_name, e
+            self._log(
+                "warning",
+                "[⚠️] Failed recreating missing cloned role for %r: %s",
+                want_name,
+                e,
             )
             return None, 0, can_create, create_suppressed_logged
 
@@ -312,13 +336,15 @@ class RoleManager:
 
                     self.db.delete_role_mapping(orig_id)
                     if cloned_role:
-                        logger.info(
+                        self._log(
+                            "info",
                             "[🧩] Host role deleted; kept cloned role %s (%d), removed mapping.",
                             cloned_role.name,
                             cloned_role.id,
                         )
                     else:
-                        logger.info(
+                        self._log(
+                            "info",
                             "[🧩] Host role deleted; cloned missing, removed mapping only."
                         )
                     continue
@@ -332,24 +358,33 @@ class RoleManager:
 
                     self.db.delete_role_mapping(orig_id)
                     if cloned_role:
-                        logger.info(
+                        self._log(
+                            "info",
                             "[🧩] Skipped deleting role %s (%d); removed mapping.",
                             cloned_role.name,
                             cloned_role.id,
                         )
                     else:
-                        logger.info("[🧩] Cloned role missing; removed mapping.")
+                        self._log(
+                            "info",
+                            "[🧩] Cloned role missing; removed mapping."
+                        )
                     continue
 
                 try:
                     await self.ratelimit.acquire_for_guild(ActionType.ROLE, clone_id)
                     await cloned_role.delete()
                     deleted += 1
-                    logger.info(
-                        "[🧩] Deleted role %s (%d)", cloned_role.name, cloned_role.id
+                    self._log(
+                        "info",
+                        "[🧩] Deleted role %s (%d)",
+                        cloned_role.name,
+                        cloned_role.id,
                     )
+
                 except Exception as e:
-                    logger.warning(
+                    self._log(
+                        "warning",
                         "[⚠️] Failed deleting role %s (%s); removing mapping anyway: %s",
                         getattr(cloned_role, "name", "?"),
                         cloned_id,
@@ -397,13 +432,15 @@ class RoleManager:
                         await cloned_role.delete(
                             reason="Blocked by Copycord role blocklist"
                         )
-                        logger.info(
+                        self._log(
+                            "info",
                             "[🧩] Deleted blocked role %s (%d)",
                             cloned_role.name,
                             cloned_role.id,
                         )
                     except Exception as e:
-                        logger.warning(
+                        self._log(
+                            "warning",
                             "[⚠️] Failed deleting blocked role %s: %s",
                             getattr(cloned_role, "name", "?"),
                             e,
@@ -443,7 +480,8 @@ class RoleManager:
             if not mapping:
                 if not can_create:
                     if not create_suppressed_logged:
-                        logger.warning(
+                        self._log(
+                            "warning",
                             "[🧩] Can't create more roles. Guild is at max role count (%d).",
                             self.MAX_ROLES,
                         )
@@ -475,13 +513,22 @@ class RoleManager:
                     )
 
                     clone_by_id[new_role.id] = new_role
-                    logger.info("[🧩] Created role %s", new_role.name)
+                    self._log(
+                        "info",
+                        "[🧩] Created role %s",
+                        new_role.name,
+                    )
 
                     can_create = len(guild.roles) < self.MAX_ROLES
                     continue
 
                 except Exception as e:
-                    logger.warning("[⚠️] Failed creating role %s: %s", want_name, e)
+                    self._log(
+                        "warning",
+                        "[⚠️] Failed creating role %s: %s",
+                        want_name,
+                        e,
+                    )
                     continue
 
             if (
@@ -535,7 +582,8 @@ class RoleManager:
                     )
 
                 if changes:
-                    logger.debug(
+                    self._log(
+                        "debug",
                         "[🧩] update details for %s (%d): %s",
                         cloned_role.name,
                         cloned_role.id,
@@ -566,11 +614,18 @@ class RoleManager:
                             original_guild_id=host_id,
                             cloned_guild_id=clone_id,
                         )
-                        logger.info("[🧩] Updated role %s", cloned_role.name)
+                        self._log(
+                            "info",
+                            "[🧩] Updated role %s",
+                            cloned_role.name,
+                        )
 
                     except Exception as e:
-                        logger.warning(
-                            "[⚠️] Failed updating role %s: %s", cloned_role.name, e
+                        self._log(
+                            "warning",
+                            "[⚠️] Failed updating role %s: %s",
+                            getattr(cloned_role, "name", "?"),
+                            e,
                         )
 
         return deleted, updated, created

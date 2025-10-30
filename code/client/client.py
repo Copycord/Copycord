@@ -78,10 +78,8 @@ class ClientListener:
         self.config = Config(logger=logger)
         self.db = DBManager(self.config.DB_PATH)
         self._mapped_original_ids: set[int] = set(self.db.get_all_original_guild_ids())
-        raw = (self.config.HOST_GUILD_ID or "").strip()
-        self.host_guild_id = int(raw) if raw.isdigit() else None
-        self.blocked_keywords = self.db.get_blocked_keywords()
-        self._rebuild_blocklist(self.blocked_keywords)
+        self.blocked_keywords_map = self.db.get_blocked_keywords_by_origin()
+        self._rebuild_blocklist(self.blocked_keywords_map)
         self.start_time = datetime.now(timezone.utc)
         self.bot = commands.Bot(command_prefix="!", self_bot=True)
         self.msg = MessageUtils(self.bot)
@@ -128,18 +126,12 @@ class ClientListener:
             logger=logger,
         )
         self.sitemap = SitemapService(
-            bot=self.bot,
-            config=self.config,
-            db=self.db,
-            ws=self.ws,
-            host_guild_id=self.host_guild_id,
-            logger=logger,
+            bot=self.bot, config=self.config, db=self.db, ws=self.ws, logger=logger
         )
         self.ui_controller = ClientUiController(
             bus=self.bus,
             admin_base_url=self.config.ADMIN_WS_URL,
             bot=self.bot,
-            guild_id=self.host_guild_id,
             listener=self,
             logger=logging.getLogger("client.ui"),
         )
@@ -198,10 +190,14 @@ class ClientListener:
             return {"ok": True, "mapped": list(self._mapped_original_ids)}
 
         elif typ == "settings_update":
-            kws = data.get("blocked_keywords") or []
-            self._rebuild_blocklist(kws)
+            kw_map = data.get("blocked_keywords_map") or {}
+            self._rebuild_blocklist(kw_map)
+
+            total_words = sum(len(v) for v in self.blocked_keywords_map.values())
             logger.info(
-                "[⚙️] Updated block list: %d keywords", len(self.blocked_keywords)
+                "[⚙️] Updated block list: %s guild scopes / %s total keywords",
+                len(self.blocked_keywords_map),
+                total_words,
             )
             return
 
@@ -325,9 +321,14 @@ class ClientListener:
             }
 
         elif typ == "sitemap_request":
+            target_gid = None
+            try:
+                target_gid = int((data or {}).get("guild_id"))
+            except Exception:
+                target_gid = None
 
-            self.schedule_sync()
-            logger.info("[🌐] Received sitemap request")
+            self.schedule_sync(guild_id=target_gid)
+            logger.info("[🌐] Received sitemap request for %s", target_gid or "ALL")
             return {"ok": True}
 
         elif typ == "scrape_members":
@@ -457,12 +458,7 @@ class ClientListener:
 
                         snap = await self.scraper.snapshot_members()
                         try:
-                            rgid = str(
-                                self._scrape_gid
-                                or gid
-                                or self.host_guild_id
-                                or "unknown"
-                            )
+                            rgid = str(self._scrape_gid or gid or "unknown")
                             try:
                                 g = self.bot.get_guild(int(rgid))
                             except Exception:
@@ -669,20 +665,20 @@ class ClientListener:
             except Exception:
                 req_gid = 0
 
+            req_gid_val = (data or {}).get("guild_id")
             try:
-                host_gid = (
-                    int(self.host_guild_id)
-                    if getattr(self, "host_guild_id", None)
+                gid = int(req_gid_val) if req_gid_val is not None else 0
+            except Exception:
+                gid = 0
+
+            if not gid:
+                gid = (
+                    next(iter(self._mapped_original_ids))
+                    if self._mapped_original_ids
                     else 0
                 )
-            except Exception:
-                host_gid = 0
-
-            gid = req_gid or host_gid
-            if self._mapped_original_ids:
-                gid = next(iter(self._mapped_original_ids))
-            else:
-                return {"ok": False, "reason": "no-host-or-mapped-guild"}
+            if not gid:
+                return {"ok": False, "reason": "no-mapped-origin"}
 
             guild = self.bot.get_guild(int(gid))
             if guild is None:
@@ -719,8 +715,17 @@ class ClientListener:
 
         channel_id = int(orig_channel_id)
         if hasattr(self, "chan_map"):
-            for src_id, row in self.chan_map.items():
-                if int(row.get("cloned_channel_id") or 0) == channel_id:
+
+            def _row_get(row, key, default=None):
+                try:
+                    if isinstance(row, dict):
+                        return row.get(key, default)
+                    return row[key] if key in row.keys() else default
+                except Exception:
+                    return default
+
+            for src_id, row in getattr(self, "chan_map", {}).items():
+                if int(_row_get(row, "cloned_channel_id", 0) or 0) == channel_id:
                     logger.debug(
                         f"[map] Mapped cloned channel {channel_id} -> host channel {src_id}"
                     )
@@ -744,8 +749,6 @@ class ClientListener:
                 ),
                 None,
             )
-            if host_guild is None and self.host_guild_id:
-                host_guild = self.bot.get_guild(int(self.host_guild_id))
             if host_guild is None and self.bot.guilds:
                 host_guild = self.bot.guilds[0]
             guild = host_guild
@@ -786,16 +789,20 @@ class ClientListener:
                 logger.exception("Error in periodic sync loop")
             await asyncio.sleep(self.config.SYNC_INTERVAL_SECONDS)
 
-    def schedule_sync(self):
-        self.sitemap.schedule_sync()
+    def schedule_sync(self, guild_id: int | None = None, delay: float = 1.0):
+        """
+        Ask SitemapService to (debounced) resend sitemap(s).
 
-    def _is_host_guild(self, g: "discord.Guild | None") -> bool:
-        settings = self._settings_for_origin(g.id)
-        if not settings.get("cloning_enabled", True):
-            return False
-        if self.host_guild_id is None:
-            return False
-        return bool(g and g.id == self.host_guild_id)
+        guild_id:
+        - int -> only that origin guild's sitemap will be rebuilt/sent
+        - None -> fallback: mark all mapped origins dirty (legacy "send everything")
+        """
+        try:
+            self.sitemap.schedule_sync(guild_id=guild_id, delay=delay)
+        except TypeError:
+            self.sitemap.schedule_sync(None, delay=delay)
+        except Exception:
+            logger.exception("[sitemap] failed to schedule sync for %s", guild_id)
 
     async def _disable_cloning(self, reason: str = ""):
         logger.info("[🔕] Disabling server cloning: %s", reason or "(no reason)")
@@ -848,19 +855,46 @@ class ClientListener:
 
         asyncio.create_task(self._snapshot_all_guilds_once())
 
-    def _rebuild_blocklist(self, keywords: list[str] | None = None) -> None:
-        if keywords is None:
-            keywords = self.db.get_blocked_keywords()
+    def _rebuild_blocklist(self, kw_map: dict | None = None) -> None:
+        """
+        kw_map: { origin_guild_id (int/str or 0): ["badword", ...], ... }
 
-        self.blocked_keywords = [
-            k.lower().strip() for k in (keywords or []) if k and k.strip()
-        ]
+        After this runs:
+        self.blocked_keywords_map[guild_id] = ["badword", "otherword", ...]
+        self._blocked_patterns_map[guild_id] = [(compiled_regex, "badword"), ...]
+        """
+        if kw_map is None:
+            kw_map = self.db.get_blocked_keywords_by_origin()
 
-        self._blocked_patterns = [
-            re.compile(rf"(?<!\w){re.escape(k)}(?!\w)", re.IGNORECASE)
-            for k in self.blocked_keywords
-        ]
-        logger.debug("[⚙️] Block list now: %s", self.blocked_keywords)
+        normalized_map: dict[int, list[str]] = {}
+        patterns_map: dict[int, list[tuple[re.Pattern, str]]] = {}
+
+        for gid_key, words in (kw_map or {}).items():
+            try:
+                gid_int = int(gid_key)
+            except (TypeError, ValueError):
+                continue
+
+            cleaned_words = [
+                (w or "").strip().lower() for w in (words or []) if w and str(w).strip()
+            ]
+
+            normalized_map[gid_int] = cleaned_words
+
+            pat_list: list[tuple[re.Pattern, str]] = []
+            for w in cleaned_words:
+                regex = re.compile(
+                    rf"(?<!\w){re.escape(w)}(?!\w)",
+                    re.IGNORECASE,
+                )
+                pat_list.append((regex, w))
+
+            patterns_map[gid_int] = pat_list
+
+        self.blocked_keywords_map = normalized_map
+        self._blocked_patterns_map = patterns_map
+
+        logger.debug("[⚙️] Block list now: %s", self.blocked_keywords_map)
 
     def should_ignore(self, message: discord.Message) -> bool:
         """
@@ -903,12 +937,29 @@ class ClientListener:
             return True
 
         content = unicodedata.normalize("NFKC", message.content or "")
-        for pat in getattr(self, "_blocked_patterns", []):
+
+        g = getattr(message, "guild", None)
+        guild_id = getattr(g, "id", None)
+        guild_name = getattr(g, "name", "unknown")
+
+        patterns_to_check: list[tuple[re.Pattern, str]] = []
+
+        patterns_to_check.extend(self._blocked_patterns_map.get(0, []))
+
+        if guild_id is not None:
+            try:
+                gid_int = int(guild_id)
+                patterns_to_check.extend(self._blocked_patterns_map.get(gid_int, []))
+            except (TypeError, ValueError):
+                pass
+
+        for pat, kw in patterns_to_check:
             if pat.search(content):
                 logger.info(
-                    "[❌] Dropping message %s: blocked keyword matched (%s)",
+                    "[❌] Dropping message %s in %s: blocked keyword (%s)",
                     message.id,
-                    pat.pattern,
+                    guild_name,
+                    kw,
                 )
                 return True
 
@@ -1554,7 +1605,7 @@ class ClientListener:
                 getattr(channel, "id", None),
             )
             return
-        self.schedule_sync()
+        self.schedule_sync(guild_id=g.id)
 
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
         """
@@ -1574,7 +1625,7 @@ class ClientListener:
                     getattr(channel, "id", None),
                 )
                 return
-            self.schedule_sync()
+            self.schedule_sync(guild_id=g.id)
 
     async def on_guild_channel_update(self, before, after):
         """
@@ -1605,7 +1656,7 @@ class ClientListener:
             and settings.get("CLONE_ROLES", False)
             and perms_changed
         ):
-            self.schedule_sync()
+            self.schedule_sync(guild_id=g.id)
             return
 
         if not (
@@ -1623,7 +1674,7 @@ class ClientListener:
         parent_changed = parent_before != parent_after
 
         if name_changed or parent_changed:
-            self.schedule_sync()
+            self.schedule_sync(guild_id=g.id)
         else:
             logger.debug(
                 "Ignored channel update for %s: non-structural change", before.id
@@ -1645,7 +1696,7 @@ class ClientListener:
             return
 
         logger.debug("[roles] create: %s (%d) → scheduling sitemap", role.name, role.id)
-        self.schedule_sync()
+        self.schedule_sync(guild_id=g.id)
 
     async def on_guild_role_delete(self, role: discord.Role):
         g = getattr(role, "guild", None)
@@ -1662,7 +1713,7 @@ class ClientListener:
             return
 
         logger.debug("[roles] delete: %s (%d) → scheduling sitemap", role.name, role.id)
-        self.schedule_sync()
+        self.schedule_sync(guild_id=g.id)
 
     async def on_guild_role_update(self, before: discord.Role, after: discord.Role):
         g = getattr(before, "guild", None)
@@ -1686,7 +1737,7 @@ class ClientListener:
         logger.debug(
             "[roles] update: %s (%d) → scheduling sitemap", after.name, after.id
         )
-        self.schedule_sync()
+        self.schedule_sync(guild_id=g.id)
 
     async def on_guild_join(self, guild: discord.Guild):
         try:
@@ -1751,7 +1802,7 @@ class ClientListener:
         if resolve_mapping_settings(
             self.db, self.config, original_guild_id=guild.id
         ).get("CLONE_EMOJI", True):
-            self.schedule_sync()
+            self.schedule_sync(guild_id=g.id)
 
     async def on_guild_stickers_update(self, guild, before, after):
         if not self._is_mapped_origin(guild.id):
@@ -1759,7 +1810,7 @@ class ClientListener:
         if resolve_mapping_settings(
             self.db, self.config, original_guild_id=guild.id
         ).get("CLONE_STICKER", True):
-            self.schedule_sync()
+            self.schedule_sync(guild_id=g.id)
 
     def _guild_row_from_obj(self, g: discord.Guild) -> dict:
         try:

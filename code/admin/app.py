@@ -1542,64 +1542,66 @@ async def api_status_alias():
     return await _collect_status()
 
 
-@app.get("/filters")
-def get_filters():
-    f = db.get_filters()
-    out = {
-        "whitelist": {"category": [], "channel": []},
-        "exclude": {"category": [], "channel": []},
+@app.get("/filters/{mapping_id}")
+async def get_filters_for_mapping(mapping_id: str):
+    """
+    Return whitelist / exclude for this mapping_id only.
+    {
+      "whitelist": { "category": [...], "channel": [...] },
+      "exclude":   { "category": [...], "channel": [...] }
     }
-    for scope in ("category", "channel"):
-        out["whitelist"][scope] = [str(i) for i in sorted(f["whitelist"][scope])]
-        out["exclude"][scope] = [str(i) for i in sorted(f["exclude"][scope])]
-    LOGGER.debug(
-        "GET /filters | wl_cat=%d wl_ch=%d ex_cat=%d ex_ch=%d",
-        len(out["whitelist"]["category"]),
-        len(out["whitelist"]["channel"]),
-        len(out["exclude"]["category"]),
-        len(out["exclude"]["channel"]),
-    )
-    return out
+    """
+    m = db.get_mapping_by_id(mapping_id)
+    if not m:
+        return JSONResponse(
+            {"error": "mapping_not_found"}, status_code=404
+        )
 
+    flt = db.get_filters_for_mapping(mapping_id)
 
-@app.post("/filters/save")
-async def save_filters(request: Request):
+    return JSONResponse(flt)
+
+@app.post("/filters/{mapping_id}/save")
+async def save_filters_for_mapping(mapping_id: str, request: Request):
+    """
+    Replace the allow/deny lists for just this mapping.
+    Expects same form fields we already collect in app.js:
+      wl_categories, wl_channels, ex_categories, ex_channels
+    """
+
+    m = db.get_mapping_by_id(mapping_id)
+    if not m:
+        return PlainTextResponse("Unknown mapping", status_code=404)
+
     form = await request.form()
 
-    def parse_ids(key: str) -> list[int]:
-        raw = str(form.get(key, "") or "").replace("\n", ",").replace(" ", ",")
-        items = [s for s in (x.strip() for x in raw.split(",")) if s]
+    def parse_csv(name: str):
+        raw = form.get(name, "") or ""
+        parts = [p.strip() for p in re.split(r"[^\d]+", raw) if p.strip()]
+        # dedupe while preserving order
+        seen = set()
         out = []
-        for s in items:
-            try:
-                out.append(int(s))
-            except Exception:
-                pass
-        return list(dict.fromkeys(out))
+        for p in parts:
+            if p not in seen:
+                seen.add(p)
+                out.append(p)
+        return out
 
-    wl_cats = parse_ids("wl_categories")
-    wl_chs = parse_ids("wl_channels")
-    ex_cats = parse_ids("ex_categories")
-    ex_chs = parse_ids("ex_channels")
+    wl_categories = parse_csv("wl_categories")
+    wl_channels   = parse_csv("wl_channels")
+    ex_categories = parse_csv("ex_categories")
+    ex_channels   = parse_csv("ex_channels")
 
-    db.replace_filters(wl_cats, wl_chs, ex_cats, ex_chs)
-
-    payload = {
-        "whitelist": {"category": wl_cats, "channel": wl_chs},
-        "exclude": {"category": ex_cats, "channel": ex_chs},
-    }
-    LOGGER.info(
-        "POST /filters/save | wl_cat=%d wl_ch=%d ex_cat=%d ex_ch=%d",
-        len(wl_cats),
-        len(wl_chs),
-        len(ex_cats),
-        len(ex_chs),
+    db.replace_filters_for_mapping(
+        mapping_id,
+        wl_categories=wl_categories,
+        wl_channels=wl_channels,
+        ex_categories=ex_categories,
+        ex_channels=ex_channels,
     )
-    await hub.publish("filters", "both", payload)
-    asyncio.create_task(
-        _ws_cmd(CLIENT_AGENT_URL, {"type": "filters_reload"}, timeout=1.0)
-    )
-    return RedirectResponse("/", status_code=303)
+
+    return PlainTextResponse("ok", status_code=200)
+
 
 
 @app.post("/api/filters/blacklist", response_class=JSONResponse)
@@ -2086,6 +2088,7 @@ async def api_backfill_start_batch(payload: dict = Body(...)):
         data = {
             "channel_id": cid,
             "mapping_id": mapping_id,
+            "original_guild_id": int(m["original_guild_id"]),
             "cloned_guild_id": cloned_guild_id,
         }
         if after_iso:

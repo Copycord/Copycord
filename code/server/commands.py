@@ -30,7 +30,6 @@ from server.helpers import PurgeAssetHelper
 logger = logging.getLogger("server")
 
 config = Config(logger=logger)
-GUILD_ID = config.CLONE_GUILD_ID
 
 _db_boot = DBManager(config.DB_PATH)
 try:
@@ -127,7 +126,7 @@ class CloneCommands(commands.Cog):
         try:
             new_ids = self._refresh_command_guilds()
             await self.bot.sync_commands()
-            logger.info("[✅] Slash commands synced to %s", new_ids)
+            logger.info("[✅] Server slash commands synced for: %s", new_ids)
         except Exception:
             logger.exception("Slash command sync failed")
 
@@ -303,45 +302,94 @@ class CloneCommands(commands.Cog):
 
     @guild_scoped_slash_command(
         name="block_add",
-        description="Add or remove a keyword from the block list.",
+        description="Add or remove a keyword from THIS clone servers block list.",
     )
     async def block_add(
         self,
         ctx: discord.ApplicationContext,
         keyword: str = Option(
-            description="Keyword to block (will toggle)", required=True
+            description="Keyword to block (toggles for this clone/source pair)",
+            required=True,
         ),
     ):
-        """Toggle a blocked keyword in blocked_keywords."""
-        if self.db.add_blocked_keyword(keyword):
-            action, emoji = "added", "✅"
-        elif self.db.remove_blocked_keyword(keyword):
-            action, emoji = "removed", "🗑️"
-        else:
-            await ctx.respond(f"⚠️ Couldn’t toggle `{keyword}`.", ephemeral=True)
-            return
+        guild = ctx.guild
+        if not guild:
+            return await ctx.respond(
+                "This command must be run inside a server.", ephemeral=True
+            )
 
-        new_list = self.db.get_blocked_keywords()
-        await self.bot.ws_manager.send(
-            {"type": "settings_update", "data": {"blocked_keywords": new_list}}
+        # figure out which mapping this clone guild belongs to
+        mapping_row = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping_row:
+            return await ctx.respond(
+                "This server isn't mapped to a source guild, so I can't scope the block.",
+                ephemeral=True,
+            )
+
+        orig_id = int(mapping_row["original_guild_id"])
+        clone_id = int(mapping_row["cloned_guild_id"])
+
+        changed, action = self.db.toggle_blocked_keyword(
+            keyword,
+            original_guild_id=orig_id,
+            cloned_guild_id=clone_id,
         )
 
+        if not changed:
+            return await ctx.respond(
+                f"⚠️ Couldn't toggle `{keyword}`.", ephemeral=True
+            )
+
+        emoji = "✅" if action == "added" else "🗑️"
         await ctx.respond(
-            f"{emoji} `{keyword}` {action} in block list.", ephemeral=True
+            f"{emoji} `{keyword}` {action} for this clone server.",
+            ephemeral=True,
+        )
+
+        # Push live update to the client(s):
+        kw_map = self.db.get_blocked_keywords_by_origin()
+        await self.bot.ws_manager.send(
+            {
+                "type": "settings_update",
+                "data": {
+                    "blocked_keywords_map": kw_map
+                },
+            }
         )
 
     @guild_scoped_slash_command(
         name="block_list",
-        description="List all blocked keywords.",
+        description="List this clone servers blocked keywords.",
     )
     async def block_list(self, ctx: discord.ApplicationContext):
-        """Show currently blocked keywords."""
-        kws = self.db.get_blocked_keywords()
+        guild = ctx.guild
+        if not guild:
+            return await ctx.respond(
+                "This command must be run inside a server.", ephemeral=True
+            )
+
+        mapping_row = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping_row:
+            return await ctx.respond(
+                "This server isn't mapped to a source guild, so I can't find its block list.",
+                ephemeral=True,
+            )
+
+        orig_id = int(mapping_row["original_guild_id"])
+
+        kws = self.db.get_blocked_keywords_for_origin(orig_id)
         if not kws:
-            await ctx.respond("📋 Your block list is empty.", ephemeral=True)
-        else:
-            formatted = "\n".join(f"• `{kw}`" for kw in kws)
-            await ctx.respond(f"📋 **Blocked keywords:**\n{formatted}", ephemeral=True)
+            return await ctx.respond(
+                "📋 Your block list for this clone server is empty.",
+                ephemeral=True,
+            )
+
+        formatted = "\n".join(f"• `{kw}`" for kw in kws)
+        await ctx.respond(
+            f"📋 **Blocked keywords for this clone server:**\n{formatted}",
+            ephemeral=True,
+        )
+
 
     @guild_scoped_slash_command(
         name="announcement_trigger_add",

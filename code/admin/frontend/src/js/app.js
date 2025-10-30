@@ -9,10 +9,34 @@
   let confirmResolve = null;
   let confirmReject = null;
   const UPTIME_KEY = (role) => `cpc:uptime:${role}`;
+  const ICONS = {
+    trash: `
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+      </svg>
+    `,
+    settings: `
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+      </svg>
+    `,
+    filters: `
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z" />
+      </svg>
+    `,
+  };
 
   let lastFocusLog = null;
   let lastFocusConfirm = null;
   let lastFocusMapping = null;
+  let lastFocusFilters = null;
+  let currentFilterMapping = null;
+  let FILTERS_BASELINE = "";
 
   function setInert(el, on) {
     if (!el) return;
@@ -958,55 +982,50 @@
   }
 
   class ChipsInput {
-    /**
-     * @param {HTMLElement} root .chips element
-     * @param {HTMLInputElement} hidden hidden input to carry CSV to server
-     */
     constructor(root, hidden) {
       this.root = root;
-      this.entry = root.querySelector(".chip-input");
       this.hidden = hidden;
+
+      this.entry = root.querySelector(".chip-input");
+
+      this.entryWrap = this.entry
+        ? this.entry.closest(".chip-input-wrap") || this.entry
+        : null;
+
       this.values = [];
 
-      this.root.addEventListener("click", (e) => {
-        const chipEl = e.target.closest(".chip");
-        if (chipEl) {
-          const id = chipEl.dataset.id;
-          if (id) this.remove(id);
-        } else {
-          this.entry.focus();
-        }
-      });
+      if (this.entry) {
+        this.entry.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            this.addFromText(this.entry.value);
+            this.entry.value = "";
+          } else if (
+            e.key === "Backspace" &&
+            this.entry.value === "" &&
+            this.values.length
+          ) {
+            this.remove(this.values[this.values.length - 1]);
+          }
+        });
 
-      this.entry.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          this.addFromText(this.entry.value);
-          this.entry.value = "";
-        } else if (
-          e.key === "Backspace" &&
-          this.entry.value === "" &&
-          this.values.length
-        ) {
-          this.remove(this.values[this.values.length - 1]);
-        }
-      });
-
-      this.entry.addEventListener("paste", (e) => {
-        const text = (e.clipboardData || navigator.clipboard).getData("text");
-        if (text) {
-          e.preventDefault();
-          this.addFromText(text);
-        }
-      });
+        this.entry.addEventListener("paste", (e) => {
+          const text =
+            (e.clipboardData && e.clipboardData.getData("text")) || "";
+          if (text) {
+            e.preventDefault();
+            this.addFromText(text);
+          }
+        });
+      }
     }
 
-    /** Accept a string; split on anything non-digit; add integers */
     addFromText(text) {
       const parts = String(text)
         .split(/[^\d]+/)
         .map((s) => s.trim())
         .filter(Boolean);
+
       const ids = [];
       for (const s of parts) {
         try {
@@ -1035,10 +1054,10 @@
       const ix = this.values.indexOf(id);
       if (ix >= 0) {
         this.values.splice(ix, 1);
-        const el = this.root.querySelector(
+        const chipEl = this.root.querySelector(
           `.chip[data-id="${CSS.escape(id)}"]`
         );
-        if (el) el.remove();
+        if (chipEl) chipEl.remove();
         this.syncHidden();
       }
     }
@@ -1047,8 +1066,19 @@
       const chip = document.createElement("span");
       chip.className = "chip";
       chip.dataset.id = id;
-      chip.innerHTML = `<span class="chip-text">${escapeHtml(id)}</span>`;
-      this.root.insertBefore(chip, this.entry);
+      chip.textContent = id;
+
+      chip.addEventListener("click", () => {
+        this.remove(id);
+      });
+
+      if (this.entryWrap && this.entryWrap.parentNode === this.root) {
+        this.root.insertBefore(chip, this.entryWrap);
+      } else if (this.entry && this.entry.parentNode === this.root) {
+        this.root.insertBefore(chip, this.entry);
+      } else {
+        this.root.appendChild(chip);
+      }
     }
 
     syncHidden() {
@@ -1059,11 +1089,14 @@
 
     set(list) {
       this.values = [];
+
       Array.from(this.root.querySelectorAll(".chip")).forEach((el) =>
         el.remove()
       );
       this.addMany((list || []).map(String));
-      if (this.entry) this.entry.value = "";
+      if (this.entry) {
+        this.entry.value = "";
+      }
     }
 
     get() {
@@ -1472,6 +1505,114 @@
     confirmReject = null;
   }
 
+  function closeFiltersModal() {
+    const modal = document.getElementById("filters-modal");
+    if (!modal) return;
+
+    const active = document.activeElement;
+    if (active && modal.contains(active)) {
+      try {
+        active.blur();
+      } catch {}
+    }
+
+    setInert(modal, true);
+    modal.classList.remove("show");
+    modal.setAttribute("aria-hidden", "true");
+
+    document.body.classList.remove("body-lock-scroll");
+
+    if (lastFocusFilters && typeof lastFocusFilters.focus === "function") {
+      try {
+        lastFocusFilters.focus();
+      } catch {}
+    }
+    lastFocusFilters = null;
+    currentFilterMapping = null;
+  }
+
+  /**
+   * Open the per-mapping Sync Filters modal.
+   * @param {object} mapping - the guild mapping row (mapping_id, mapping_name, original_guild_id, cloned_guild_id, etc.)
+   */
+  async function openFiltersModal(mapping) {
+    const modal = document.getElementById("filters-modal");
+    if (!modal) return;
+
+    lastFocusFilters = document.activeElement;
+    currentFilterMapping = mapping || null;
+
+    const form = document.getElementById("form-filters");
+    const titleEl = document.getElementById("filters-title");
+    const mapIdInput = document.getElementById("filters_mapping_id");
+    const cancelBtn = document.getElementById("btn-cancel-filters");
+
+    const mid = mapping?.mapping_id || "";
+    if (mapIdInput) mapIdInput.value = mid;
+    if (titleEl) {
+      const niceName = mapping?.mapping_name || mid || "Filters";
+      titleEl.textContent = `Filters – ${niceName}`;
+    }
+
+    if (form) {
+      form.action = `/filters/${encodeURIComponent(mid)}/save`;
+    }
+
+    // load this mapping's filters from server and populate chips
+    await loadFiltersIntoFormForMapping(mid);
+
+    if (form) {
+      FILTERS_BASELINE = snapshotForm(form);
+    }
+    if (cancelBtn) {
+      cancelBtn.hidden = true;
+    }
+
+    setInert(modal, false);
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("body-lock-scroll");
+
+    const xBtn = document.getElementById("filters-close");
+    if (xBtn) xBtn.onclick = closeFiltersModal;
+    if (cancelBtn) {
+      cancelBtn.onclick = async () => {
+        await loadFiltersIntoFormForMapping(mid);
+        const f2 = document.getElementById("form-filters");
+        if (f2) {
+          FILTERS_BASELINE = snapshotForm(f2);
+        }
+        cancelBtn.hidden = true;
+      };
+    }
+
+    if (modal._outsideClickHandler) {
+      modal.removeEventListener("mousedown", modal._outsideClickHandler);
+    }
+    modal._outsideClickHandler = function (evt) {
+      const contentEl = modal.querySelector(".modal-content");
+      if (contentEl && !contentEl.contains(evt.target)) {
+        closeFiltersModal();
+      }
+    };
+    modal.addEventListener("mousedown", modal._outsideClickHandler);
+
+    const firstField =
+      document.getElementById("wl_categories_input") ||
+      document.getElementById("filters-save-btn") ||
+      modal;
+    setTimeout(() => {
+      if (firstField && typeof firstField.focus === "function") {
+        try {
+          firstField.focus();
+        } catch {}
+      }
+    }, 0);
+  }
+
+  window.openFiltersModal = openFiltersModal;
+  window.closeFiltersModal = closeFiltersModal;
+
   function openConfirm({
     title,
     body,
@@ -1522,107 +1663,136 @@
     setTimeout(() => (cBtnOk || cModal).focus(), 0);
   }
 
+  function confirmDeleteMapping(mapping) {
+    if (!mapping || !mapping.mapping_id) return;
+
+    const name = (mapping.mapping_name || "").trim();
+    const label = name ? `“${name}”` : `ID ${mapping.mapping_id}`;
+
+    openConfirm({
+      title: "Delete guild mapping?",
+      body: `This will remove the mapping ${label}. This cannot be undone.`,
+      confirmText: "Delete mapping",
+      confirmClass: "btn-ghost-red",
+      showCancel: true,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(
+            `/api/guild-mappings/${encodeURIComponent(mapping.mapping_id)}`,
+            { method: "DELETE", credentials: "same-origin" }
+          );
+
+          if (!res.ok) {
+            const txt = await (async () => {
+              try {
+                return await res.text();
+              } catch {
+                return "";
+              }
+            })();
+            showToast(txt || `Delete failed (${res.status})`, {
+              type: "error",
+              timeout: 7000,
+            });
+            return;
+          }
+
+          showToast("Mapping deleted.", { type: "success" });
+          await refreshGuildMappings();
+
+          validateConfigAndToggle({ decorate: false });
+        } catch {
+          showToast("Network error", { type: "error" });
+        }
+      },
+    });
+  }
+
+  window.confirmDeleteMapping = confirmDeleteMapping;
+
+  function findMappingById(id) {
+    if (!id) return null;
+
+    const sid = String(id);
+    return (
+      GUILD_MAPPINGS.find((m) => m && String(m.mapping_id) === sid) || null
+    );
+  }
+
   function renderGuildMappings() {
     const listEl = document.getElementById("guild-mapping-list");
     if (!listEl) return;
-    listEl.innerHTML = "";
 
-    // Fallback logo for when a guild doesn't have an icon
-    const LOGO_SRC = "/static/logo.png";
+    listEl.innerHTML = GUILD_MAPPINGS.map((m) => {
+      const iconSrc = m.original_guild_icon_url || "/static/logo.png";
+      return `
+        <div class="guild-card" data-id="${m.mapping_id}">
+          <div class="guild-card-logo">
+            <img src="${iconSrc}" alt="" class="guild-card-logo-img">
+          </div>
 
-    GUILD_MAPPINGS.forEach((m) => {
-      const safeName = (m.mapping_name || "").replace(/</g, "&lt;");
-
-      // Prefer original guild's icon from DB, otherwise use fallback logo
-      const iconSrc =
-        (m.original_guild_icon_url && m.original_guild_icon_url.trim()) ||
-        LOGO_SRC;
-
-      const cardHtml = `
-      <div class="guild-card" data-id="${m.mapping_id}">
-        <!-- watermark icon / logo layer -->
-        <div class="guild-card-logo">
-          <img src="${iconSrc}" alt="">
-        </div>
-
-        <!-- actual content above watermark -->
-        <div class="guild-card-inner">
-          <div class="guild-card-main">
-            <div class="guild-card-name">
-              <div class="guild-card-name-title" title="${safeName}">
-                ${safeName}
+          <div class="guild-card-inner">
+            <div class="guild-card-main">
+              <div class="guild-card-name">
+                <div class="guild-card-name-title" title="${escapeHtml(
+                  m.mapping_name || ""
+                )}">
+                  ${escapeHtml(m.mapping_name || "")}
+                </div>
+                <div class="guild-card-name-meta"></div>
               </div>
-              <div class="guild-card-name-meta"></div>
-            </div>
 
             <div class="guild-card-actions">
               <button class="btn-icon edit-mapping-btn"
                       data-id="${m.mapping_id}"
-                      aria-label="Edit mapping">⚙</button>
+                      aria-label="Edit mapping"
+                      title="Settings">
+                ${ICONS.settings}
+              </button>
+
+              <button class="btn-icon mapping-filters-btn"
+                      data-id="${m.mapping_id}"
+                      aria-label="Filters for this mapping"
+                      title="Filters">
+                ${ICONS.filters}
+              </button>
+
               <button class="btn-icon delete-mapping-btn"
                       data-id="${m.mapping_id}"
-                      aria-label="Delete mapping">🗑</button>
+                      aria-label="Delete mapping"
+                      title="Delete">
+                ${ICONS.trash}
+              </button>
+            </div>
             </div>
           </div>
         </div>
-      </div>
-    `;
-
-      listEl.insertAdjacentHTML("beforeend", cardHtml);
-    });
-
-    const newCardHtml = `
-    <div class="guild-card guild-card--new"
-         id="new-mapping-card"
-         role="button"
-         tabindex="0"
-         aria-label="Add new mapping">
-      <div class="new-card-inner">
-        <div class="new-card-plus">+</div>
-      </div>
-    </div>
-  `;
-    listEl.insertAdjacentHTML("beforeend", newCardHtml);
+      `;
+    }).join("");
 
     listEl.querySelectorAll(".edit-mapping-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = btn.getAttribute("data-id");
-        const found = GUILD_MAPPINGS.find((x) => x.mapping_id === id);
-        openMappingModal(found || null);
+      btn.addEventListener("click", (ev) => {
+        const mapId = ev.currentTarget.getAttribute("data-id");
+        const mapping = findMappingById(mapId);
+        openMappingModal(mapping);
+      });
+    });
+
+    listEl.querySelectorAll(".mapping-filters-btn").forEach((btn) => {
+      btn.addEventListener("click", async (ev) => {
+        const mapId = ev.currentTarget.getAttribute("data-id");
+        const mapping = findMappingById(mapId);
+        await openFiltersModal(mapping);
       });
     });
 
     listEl.querySelectorAll(".delete-mapping-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const id = btn.getAttribute("data-id");
-
-        openConfirm({
-          title: "Delete Mapping?",
-          body: "This will stop cloning for that pair.",
-          confirmText: "Delete",
-          confirmClass: "btn-ghost-red",
-          showCancel: true,
-          onConfirm: async () => {
-            await fetch(`/api/guild-mappings/${encodeURIComponent(id)}`, {
-              method: "DELETE",
-            });
-            await refreshGuildMappings();
-            validateConfigAndToggle({ decorate: false });
-          },
-        });
+      btn.addEventListener("click", (ev) => {
+        const mapId = ev.currentTarget.getAttribute("data-id");
+        const mapping = findMappingById(mapId);
+        confirmDeleteMapping(mapping);
       });
     });
-
-    const newCardEl = document.getElementById("new-mapping-card");
-    if (newCardEl) {
-      newCardEl.addEventListener("click", () => openMappingModal(null));
-      newCardEl.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          openMappingModal(null);
-        }
-      });
-    }
   }
 
   async function refreshGuildMappings() {
@@ -1636,6 +1806,27 @@
     renderGuildMappings();
     setGuildCardsLocked(lastRunning === true);
     updateStartButtonOnly();
+  }
+
+  async function loadFiltersIntoFormForMapping(mappingId) {
+    try {
+      const res = await fetch(`/filters/${encodeURIComponent(mappingId)}`, {
+        cache: "no-store",
+        credentials: "same-origin",
+      });
+      if (!res.ok) {
+        console.warn("failed to load filters for", mappingId, res.status);
+        return;
+      }
+      const data = await res.json();
+
+      CHIPS["wl_categories"]?.set(data.whitelist?.category ?? []);
+      CHIPS["wl_channels"]?.set(data.whitelist?.channel ?? []);
+      CHIPS["ex_categories"]?.set(data.exclude?.category ?? []);
+      CHIPS["ex_channels"]?.set(data.exclude?.channel ?? []);
+    } catch (err) {
+      console.warn("Failed loading scoped filters", err);
+    }
   }
 
   document.addEventListener("DOMContentLoaded", () => {
@@ -1823,7 +2014,14 @@
           const isSuccess = res.ok || (res.status >= 300 && res.status < 400);
 
           if (isSuccess) {
-            showToast(messages[actionPath] || "Done.", { type: "success" });
+            const isFilterSave =
+              /^\/filters\/[^/]+\/save$/.test(actionPath) ||
+              actionPath === "/filters/save";
+
+            showToast(
+              isFilterSave ? "Filters saved." : messages[actionPath] || "Done.",
+              { type: "success" }
+            );
 
             if (actionPath === "/stop") {
               try {
@@ -1856,14 +2054,14 @@
                   ?.setAttribute("hidden", "");
               }
               fetchAndRenderStatus();
-            } else if (actionPath === "/filters/save") {
+            } else if (isFilterSave) {
               const ff = document.getElementById("form-filters");
               if (ff) {
-                BASELINES.filters = snapshotForm(ff);
-                document
-                  .getElementById("btn-cancel-filters")
-                  ?.setAttribute("hidden", "");
+                FILTERS_BASELINE = snapshotForm(ff);
               }
+              const cancelBtn = document.getElementById("btn-cancel-filters");
+              if (cancelBtn) cancelBtn.setAttribute("hidden", "");
+              closeFiltersModal();
             }
           } else {
             const text = await safeText(res);
@@ -1885,65 +2083,29 @@
     initCollapsibleCards();
     initChips();
 
-    const filtersForm = document.getElementById("form-filters");
-    const filtersCancel = document.getElementById("btn-cancel-filters");
+    const modalFiltersForm = document.getElementById("form-filters");
 
-    function updateFiltersDirty() {
-      if (!filtersForm || !filtersCancel) return;
-      filtersCancel.hidden = snapshotForm(filtersForm) === BASELINES.filters;
-    }
-
-    async function loadFiltersIntoForm() {
-      try {
-        const res = await fetch("/filters", {
-          cache: "no-store",
-          credentials: "same-origin",
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        CHIPS["wl_categories"]?.set(data.whitelist?.category ?? []);
-        CHIPS["wl_channels"]?.set(data.whitelist?.channel ?? []);
-        CHIPS["ex_categories"]?.set(data.exclude?.category ?? []);
-        CHIPS["ex_channels"]?.set(data.exclude?.channel ?? []);
-      } catch (e) {
-        console.warn("Failed loading filters", e);
-      }
-    }
-
-    (async () => {
-      await loadFiltersIntoForm();
-      if (filtersForm) {
-        BASELINES.filters = snapshotForm(filtersForm);
-        if (filtersCancel) filtersCancel.hidden = true;
-      }
-    })();
-
-    const filtersCard = document.getElementById("card-filters");
-    if (filtersCard) {
-      filtersCard.addEventListener("card-toggled", async (e) => {
-        if (!e.detail?.collapsed) {
-          await loadFiltersIntoForm();
-          if (filtersForm) {
-            BASELINES.filters = snapshotForm(filtersForm);
-            updateFiltersDirty();
-          }
-        }
+    if (modalFiltersForm) {
+      modalFiltersForm.addEventListener("input", updateFiltersDirtyForModal);
+      modalFiltersForm.addEventListener("change", updateFiltersDirtyForModal);
+      modalFiltersForm.addEventListener("reset", () => {
+        setTimeout(updateFiltersDirtyForModal, 0);
       });
     }
 
-    if (filtersForm && filtersCancel) {
-      filtersForm.addEventListener("input", updateFiltersDirty);
-      filtersForm.addEventListener("change", updateFiltersDirty);
-      filtersForm.addEventListener("reset", () =>
-        setTimeout(updateFiltersDirty, 0)
-      );
+    document.addEventListener("keydown", (e) => {
+      const fm = document.getElementById("filters-modal");
+      if (e.key === "Escape" && fm && fm.classList.contains("show")) {
+        e.preventDefault();
+        closeFiltersModal();
+      }
+    });
 
-      filtersCancel.addEventListener("click", async () => {
-        filtersForm.reset();
-        await loadFiltersIntoForm();
-        BASELINES.filters = snapshotForm(filtersForm);
-        filtersCancel.hidden = true;
-      });
+    function updateFiltersDirtyForModal() {
+      const form = document.getElementById("form-filters");
+      const cancelBtn = document.getElementById("btn-cancel-filters");
+      if (!form || !cancelBtn) return;
+      cancelBtn.hidden = snapshotForm(form) === FILTERS_BASELINE;
     }
 
     (function initAdminRealtime() {
@@ -2024,7 +2186,9 @@
           try {
             const evt = JSON.parse(ev.data);
             if (evt.kind === "filters") {
-              loadFiltersIntoForm();
+              if (currentFilterMapping && currentFilterMapping.mapping_id) {
+                loadFiltersIntoFormForMapping(currentFilterMapping.mapping_id);
+              }
             }
             if (evt.kind === "status") {
               const prefix = evt.role === "server" ? "server" : "client";

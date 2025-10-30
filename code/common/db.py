@@ -92,16 +92,49 @@ class DBManager:
         """
         )
 
-        c.execute(
-            """
-        CREATE TABLE IF NOT EXISTS filters (
-        kind          TEXT NOT NULL CHECK(kind IN ('whitelist','exclude')),
-        scope         TEXT NOT NULL CHECK(scope IN ('category','channel')),
-        obj_id        INTEGER NOT NULL,
-        last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY(kind, scope, obj_id)
-        );
-        """
+        self._ensure_table(
+            name="filters",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    kind TEXT NOT NULL CHECK(kind IN ('whitelist','exclude')),
+                    scope TEXT NOT NULL CHECK(scope IN ('category','channel')),
+                    obj_id INTEGER NOT NULL,
+
+                    -- NEW: which mapping this filter applies to
+                    original_guild_id INTEGER,
+                    cloned_guild_id   INTEGER,
+
+                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+                    PRIMARY KEY (
+                        kind,
+                        scope,
+                        obj_id,
+                        original_guild_id,
+                        cloned_guild_id
+                    )
+                )
+            """,
+            required_columns={
+                "kind",
+                "scope",
+                "obj_id",
+                "original_guild_id",
+                "cloned_guild_id",
+                "last_updated",
+            },
+            copy_map={
+                "kind": "kind",
+                "scope": "scope",
+                "obj_id": "obj_id",
+                "original_guild_id": "NULL",
+                "cloned_guild_id": "NULL",
+                "last_updated": "last_updated",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_filters_orig ON filters(original_guild_id)",
+                "CREATE INDEX IF NOT EXISTS idx_filters_clone ON filters(cloned_guild_id)",
+            ],
         )
 
         self._ensure_table(
@@ -352,20 +385,61 @@ class DBManager:
             ],
         )
 
-        c.execute(
-            """
-        CREATE TABLE IF NOT EXISTS settings (
-          id                INTEGER PRIMARY KEY CHECK (id = 1),
-          blocked_keywords  TEXT    NOT NULL DEFAULT '',
-          version TEXT NOT NULL DEFAULT '',
-          notified_version TEXT NOT NULL DEFAULT '',
-          last_updated  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
+        self._ensure_table(
+            name="settings",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    id               INTEGER PRIMARY KEY CHECK (id=1),
+                    version          TEXT DEFAULT '',
+                    notified_version TEXT DEFAULT '',
+                    last_updated     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """,
+            required_columns={
+                "id",
+                "version",
+                "notified_version",
+                "last_updated",
+            },
+            copy_map={
+                "id": "id",
+                "version": "version",
+                "notified_version": "notified_version",
+                "last_updated": "last_updated",
+            },
+            post_sql=[
+                "INSERT OR IGNORE INTO settings (id, version, notified_version) VALUES (1, '', '')"
+            ],
+            forbidden_columns={"blocked_keywords"},
         )
 
-        c.execute(
-            "INSERT OR IGNORE INTO settings (id, blocked_keywords, version, notified_version) VALUES (1, '', '', '')"
+        self._ensure_table(
+            name="blocked_keywords",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    keyword            TEXT NOT NULL,
+                    original_guild_id  INTEGER,
+                    cloned_guild_id    INTEGER,
+                    added_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (keyword, original_guild_id, cloned_guild_id)
+                )
+            """,
+            required_columns={
+                "keyword",
+                "original_guild_id",
+                "cloned_guild_id",
+                "added_at",
+            },
+            copy_map={
+                "keyword": "keyword",
+                "original_guild_id": "original_guild_id",
+                "cloned_guild_id": "cloned_guild_id",
+                "added_at": "COALESCE(added_at, CURRENT_TIMESTAMP)",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_blocked_kw_orig ON blocked_keywords(original_guild_id)",
+                "CREATE INDEX IF NOT EXISTS idx_blocked_kw_clone ON blocked_keywords(cloned_guild_id)",
+            ],
         )
 
         self._ensure_table(
@@ -596,28 +670,28 @@ class DBManager:
         required_columns: set[str],
         copy_map: dict[str, str],
         post_sql: list[str] | None = None,
+        forbidden_columns: set[str] | None = None,
     ):
         """
         Create or rebuild table `name` to match the target schema.
-
-        - If table missing -> CREATE and run post_sql.
-        - If table exists and has all required columns -> run post_sql and return.
-        - Else rebuild with a transaction or savepoint (depending on whether we're already
-        inside a transaction), temporarily disabling FKs during the swap.
         """
         post_sql = post_sql or []
+        forbidden_columns = forbidden_columns or set()
+
         exists = self._table_exists(name)
 
         if not exists:
-
             self.conn.execute(create_sql_template.format(table=name))
             for stmt in post_sql:
                 self.conn.execute(stmt)
             return
 
         existing_cols = self._table_columns(name)
-        if required_columns.issubset(existing_cols):
 
+        missing_required = not required_columns.issubset(existing_cols)
+        has_forbidden = bool(forbidden_columns.intersection(existing_cols))
+
+        if (not missing_required) and (not has_forbidden):
             for stmt in post_sql:
                 self.conn.execute(stmt)
             return
@@ -629,6 +703,7 @@ class DBManager:
 
         in_txn = self.conn.in_transaction
         sp_name = f"sp_rebuild_{name}"
+
         try:
             if in_txn:
                 self.conn.execute(f"SAVEPOINT {sp_name};")
@@ -641,12 +716,14 @@ class DBManager:
             select_exprs = []
             for new_col in new_cols:
                 expr = copy_map[new_col].strip()
+
                 if expr.isidentifier() and expr not in existing_cols:
                     expr = (
                         "CURRENT_TIMESTAMP"
                         if expr.lower() == "last_updated"
                         else "NULL"
                     )
+
                 select_exprs.append(expr)
 
             self.conn.execute(
@@ -664,7 +741,9 @@ class DBManager:
                 self.conn.execute(f"RELEASE SAVEPOINT {sp_name};")
             else:
                 self.conn.execute("COMMIT;")
+
         except Exception:
+
             if in_txn:
                 self.conn.execute(f"ROLLBACK TO SAVEPOINT {sp_name};")
                 self.conn.execute(f"RELEASE SAVEPOINT {sp_name};")
@@ -1060,52 +1139,76 @@ class DBManager:
         """
         return self.conn.execute("SELECT COUNT(*) FROM channel_mappings").fetchone()[0]
 
-    def get_blocked_keywords(self) -> list[str]:
-        """Fetches the list of blocked keywords from settings."""
-        cur = self.conn.execute("SELECT blocked_keywords FROM settings WHERE id = 1")
-        row = cur.fetchone()
-        if not row or not row[0].strip():
-            return []
-        return [kw.strip() for kw in row[0].split(",") if kw.strip()]
-
-    def add_blocked_keyword(self, keyword: str) -> bool:
+    def add_blocked_keyword(
+        self,
+        keyword: str,
+        *,
+        original_guild_id: int | None,
+        cloned_guild_id: int | None,
+    ) -> bool:
         """
-        Adds a keyword to the list of blocked keywords in the database.
-        This method retrieves the current list of blocked keywords, checks if the
-        provided keyword (case-insensitive) is already in the list, and if not,
-        adds it to the list and updates the database.
+        Try to add this keyword for (original_guild_id, cloned_guild_id).
+        Returns True if inserted, False if it already existed.
         """
-        kws = self.get_blocked_keywords()
-        k = keyword.lower().strip()
-        if k in kws:
+        kw_norm = keyword.strip().lower()
+        if not kw_norm:
             return False
-        kws.append(k)
-        csv = ",".join(kws)
 
-        cur = self.conn.execute(
-            "UPDATE settings SET blocked_keywords = ? WHERE id = 1", (csv,)
-        )
-        if cur.rowcount == 0:
-            self.conn.execute(
-                "INSERT INTO settings (id, blocked_keywords) VALUES (1, ?)", (csv,)
+        with self.lock, self.conn:
+
+            cur = self.conn.execute(
+                """
+                INSERT OR IGNORE INTO blocked_keywords(
+                    keyword, original_guild_id, cloned_guild_id
+                )
+                VALUES (?, ?, ?)
+                """,
+                (
+                    kw_norm,
+                    int(original_guild_id) if original_guild_id is not None else None,
+                    int(cloned_guild_id) if cloned_guild_id is not None else None,
+                ),
             )
-        self.conn.commit()
-        return True
+            return cur.rowcount > 0
 
-    def remove_blocked_keyword(self, keyword: str) -> bool:
-        """Removes a keyword if present; returns True if removed, False otherwise."""
-        kws = self.get_blocked_keywords()
-        k = keyword.lower().strip()
-        if k not in kws:
+    def remove_blocked_keyword(
+        self,
+        keyword: str,
+        *,
+        original_guild_id: int | None,
+        cloned_guild_id: int | None,
+    ) -> bool:
+        """
+        Remove this keyword for (original_guild_id, cloned_guild_id).
+        Returns True if something was deleted.
+        """
+        kw_norm = keyword.strip().lower()
+        if not kw_norm:
             return False
-        kws.remove(k)
-        csv = ",".join(kws)
-        self.conn.execute(
-            "UPDATE settings SET blocked_keywords = ? WHERE id = 1",
-            (csv,),
-        )
-        self.conn.commit()
-        return True
+
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                """
+                DELETE FROM blocked_keywords
+                WHERE LOWER(keyword) = LOWER(?)
+                AND (
+                        (original_guild_id IS NULL AND ? IS NULL)
+                    OR original_guild_id = ?
+                    )
+                AND (
+                        (cloned_guild_id IS NULL AND ? IS NULL)
+                    OR cloned_guild_id = ?
+                    )
+                """,
+                (
+                    kw_norm,
+                    int(original_guild_id) if original_guild_id is not None else None,
+                    int(original_guild_id) if original_guild_id is not None else None,
+                    int(cloned_guild_id) if cloned_guild_id is not None else None,
+                    int(cloned_guild_id) if cloned_guild_id is not None else None,
+                ),
+            )
+            return cur.rowcount > 0
 
     def get_all_emoji_mappings(self) -> list[sqlite3.Row]:
         """
@@ -1439,19 +1542,74 @@ class DBManager:
             "SELECT * FROM role_mappings WHERE original_role_id = ?", (orig_id,)
         ).fetchone()
 
-    def get_filters(self) -> dict:
+    def get_filters(
+        self,
+        *,
+        original_guild_id: int | None = None,
+        cloned_guild_id: int | None = None,
+    ) -> dict:
         """
         Returns {
           'whitelist': {'category': set[int], 'channel': set[int]},
           'exclude':   {'category': set[int], 'channel': set[int]}
         }
+
+        Behavior:
+        - If neither original_guild_id nor cloned_guild_id is provided:
+            return ONLY the global filters (rows where both guild columns are NULL).
+        - If a guild is provided:
+            return UNION(global rows + rows scoped to that guild).
         """
         out = {
             "whitelist": {"category": set(), "channel": set()},
             "exclude": {"category": set(), "channel": set()},
         }
-        for row in self.conn.execute("SELECT kind, scope, obj_id FROM filters"):
+
+        rows = self.conn.execute(
+            """
+            SELECT kind, scope, obj_id, original_guild_id, cloned_guild_id
+            FROM filters
+            """
+        ).fetchall()
+
+        want_origin = int(original_guild_id) if original_guild_id is not None else None
+        want_clone = int(cloned_guild_id) if cloned_guild_id is not None else None
+
+        for row in rows:
+            row_orig = row["original_guild_id"]
+            row_clone = row["cloned_guild_id"]
+
+            if want_origin is None and want_clone is None:
+
+                if row_orig is not None or row_clone is not None:
+                    continue
+            else:
+                matched = False
+
+                if row_orig is None and row_clone is None:
+                    matched = True
+
+                if (
+                    not matched
+                    and want_origin is not None
+                    and row_orig is not None
+                    and int(row_orig) == want_origin
+                ):
+                    matched = True
+
+                if (
+                    not matched
+                    and want_clone is not None
+                    and row_clone is not None
+                    and int(row_clone) == want_clone
+                ):
+                    matched = True
+
+                if not matched:
+                    continue
+
             out[row["kind"]][row["scope"]].add(int(row["obj_id"]))
+
         return out
 
     def replace_filters(
@@ -1461,31 +1619,79 @@ class DBManager:
         exclude_categories: list[int],
         exclude_channels: list[int],
     ) -> None:
+        """
+        Overwrite the *global* filters (NULL/NULL scope).
+        Guild-scoped filters remain untouched.
+        """
         cur = self.conn.cursor()
-        cur.execute("DELETE FROM filters")
+
+        cur.execute(
+            """
+            DELETE FROM filters
+            WHERE original_guild_id IS NULL
+              AND cloned_guild_id   IS NULL
+            """
+        )
 
         def ins(kind: str, scope: str, ids: list[int]):
             cur.executemany(
-                "INSERT OR IGNORE INTO filters(kind,scope,obj_id) VALUES(?,?,?)",
-                [(kind, scope, int(i)) for i in ids if str(i).strip()],
+                """
+                INSERT OR IGNORE INTO filters(
+                    kind,
+                    scope,
+                    obj_id,
+                    original_guild_id,
+                    cloned_guild_id
+                )
+                VALUES(?,?,?,?,?)
+                """,
+                [(kind, scope, int(i), None, None) for i in ids if str(i).strip()],
             )
 
         ins("whitelist", "category", whitelist_categories)
         ins("whitelist", "channel", whitelist_channels)
         ins("exclude", "category", exclude_categories)
         ins("exclude", "channel", exclude_channels)
+
         self.conn.commit()
 
-    def add_filter(self, kind: str, scope: str, obj_id: int) -> None:
+    def add_filter(
+        self,
+        kind: str,
+        scope: str,
+        obj_id: int,
+        *,
+        original_guild_id: int | None = None,
+        cloned_guild_id: int | None = None,
+    ) -> None:
         """
         Insert a single filter row (no-op if it already exists).
+
         kind: 'whitelist' | 'exclude'
         scope: 'category' | 'channel'
+
+        If you pass original_guild_id / cloned_guild_id, this becomes a
+        per-mapping rule. If you omit them, it's global.
         """
         with self.lock, self.conn:
             self.conn.execute(
-                "INSERT OR IGNORE INTO filters(kind,scope,obj_id) VALUES(?,?,?)",
-                (str(kind), str(scope), int(obj_id)),
+                """
+                INSERT OR IGNORE INTO filters(
+                    kind,
+                    scope,
+                    obj_id,
+                    original_guild_id,
+                    cloned_guild_id
+                )
+                VALUES(?,?,?,?,?)
+                """,
+                (
+                    str(kind),
+                    str(scope),
+                    int(obj_id),
+                    int(original_guild_id) if original_guild_id is not None else None,
+                    int(cloned_guild_id) if cloned_guild_id is not None else None,
+                ),
             )
 
     def upsert_guild(
@@ -2344,6 +2550,26 @@ class DBManager:
 
             cur.execute(
                 """
+                UPDATE filters
+                SET original_guild_id = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE (original_guild_id IS NULL OR original_guild_id = 0)
+            """,
+                (host,),
+            )
+            out["filter_mappings.orig_set"] = cur.rowcount
+
+            cur.execute(
+                """
+                UPDATE filters
+                SET cloned_guild_id = ?, last_updated = CURRENT_TIMESTAMP
+                WHERE (cloned_guild_id IS NULL OR cloned_guild_id = 0)
+            """,
+                (clone,),
+            )
+            out["filter_mappings.clone_set"] = cur.rowcount
+
+            cur.execute(
+                """
                 UPDATE role_mappings
                 SET original_guild_id = ?, last_updated = CURRENT_TIMESTAMP
                 WHERE (original_guild_id IS NULL OR original_guild_id = 0)
@@ -2534,3 +2760,164 @@ class DBManager:
         )
         self.conn.commit()
         return cur.rowcount
+
+    def get_mapping_by_cloned_guild_id(self, cloned_guild_id: int):
+        """
+        Return the guild_mappings row for a given cloned_guild_id.
+        Expected columns in guild_mappings:
+        mapping_id, original_guild_id, cloned_guild_id, ...
+        """
+        return self.conn.execute(
+            "SELECT * FROM guild_mappings WHERE cloned_guild_id = ? LIMIT 1",
+            (int(cloned_guild_id),),
+        ).fetchone()
+
+    def get_blocked_keywords_by_origin(self) -> dict[int, list[str]]:
+        """
+        Returns { original_guild_id(int or 0 for global): [ 'word', 'word2', ... ], ... }
+        Rows with original_guild_id NULL are treated as global (key 0).
+        """
+        rows = self.conn.execute(
+            "SELECT original_guild_id, keyword FROM blocked_keywords"
+        ).fetchall()
+
+        out: dict[int, list[str]] = {}
+        for r in rows:
+            ogid = r["original_guild_id"]
+
+            key = int(ogid) if ogid is not None else 0
+            out.setdefault(key, []).append(str(r["keyword"]))
+        return out
+
+    def get_blocked_keywords_for_origin(self, original_guild_id: int) -> list[str]:
+        """
+        All keywords that apply to this origin guild, plus any global NULL/NULL ones.
+        Deduped, lowercased, sorted.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT keyword
+            FROM blocked_keywords
+            WHERE original_guild_id = ?
+            OR original_guild_id IS NULL
+            """,
+            (int(original_guild_id),),
+        ).fetchall()
+
+        kws = {
+            str(r["keyword"]).strip().lower() for r in rows if str(r["keyword"]).strip()
+        }
+        return sorted(kws)
+
+    def toggle_blocked_keyword(
+        self,
+        keyword: str,
+        *,
+        original_guild_id: int | None,
+        cloned_guild_id: int | None,
+    ) -> tuple[bool, str]:
+        """
+        Toggle this keyword for the given mapping.
+        Returns (changed: bool, action: 'added'|'removed'|'none')
+        """
+        if self.add_blocked_keyword(
+            keyword,
+            original_guild_id=original_guild_id,
+            cloned_guild_id=cloned_guild_id,
+        ):
+            return True, "added"
+
+        if self.remove_blocked_keyword(
+            keyword,
+            original_guild_id=original_guild_id,
+            cloned_guild_id=cloned_guild_id,
+        ):
+            return True, "removed"
+
+        return False, "none"
+
+    def get_filters_for_mapping(self, mapping_id: str) -> dict:
+        m = self.get_mapping_by_id(mapping_id)
+        if not m:
+            return {
+                "whitelist": {"category": [], "channel": []},
+                "exclude": {"category": [], "channel": []},
+            }
+
+        ogid = int(m["original_guild_id"] or 0)
+        cgid = int(m["cloned_guild_id"] or 0)
+
+        rows = self.conn.execute(
+            """
+            SELECT kind, scope, obj_id
+            FROM filters
+            WHERE original_guild_id = ?
+            AND cloned_guild_id   = ?
+            """,
+            (ogid, cgid),
+        ).fetchall()
+
+        wl_cat, wl_ch, ex_cat, ex_ch = [], [], [], []
+
+        for r in rows:
+            k = r["kind"]
+            sc = r["scope"]
+            oid = str(r["obj_id"])
+            if k == "whitelist" and sc == "category":
+                wl_cat.append(oid)
+            elif k == "whitelist" and sc == "channel":
+                wl_ch.append(oid)
+            elif k == "exclude" and sc == "category":
+                ex_cat.append(oid)
+            elif k == "exclude" and sc == "channel":
+                ex_ch.append(oid)
+
+        return {
+            "whitelist": {"category": wl_cat, "channel": wl_ch},
+            "exclude": {"category": ex_cat, "channel": ex_ch},
+        }
+
+    def replace_filters_for_mapping(
+        self,
+        mapping_id: str,
+        wl_categories: list[str],
+        wl_channels: list[str],
+        ex_categories: list[str],
+        ex_channels: list[str],
+    ):
+        m = self.get_mapping_by_id(mapping_id)
+        if not m:
+            return
+
+        ogid = int(m["original_guild_id"] or 0)
+        cgid = int(m["cloned_guild_id"] or 0)
+
+        with self.conn:
+            self.conn.execute(
+                """
+                DELETE FROM filters
+                WHERE original_guild_id = ?
+                AND cloned_guild_id   = ?
+                """,
+                (ogid, cgid),
+            )
+
+            def bulk_insert(kind, scope, ids):
+                for _id in ids:
+                    try:
+                        snow = int(_id)
+                    except Exception:
+                        continue
+                    self.conn.execute(
+                        """
+                        INSERT OR IGNORE INTO filters
+                        (kind, scope, obj_id, original_guild_id, cloned_guild_id, last_updated)
+                        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        """,
+                        (kind, scope, snow, ogid, cgid),
+                    )
+
+            bulk_insert("whitelist", "category", wl_categories)
+            bulk_insert("whitelist", "channel", wl_channels)
+            bulk_insert("exclude", "category", ex_categories)
+            bulk_insert("exclude", "channel", ex_channels)

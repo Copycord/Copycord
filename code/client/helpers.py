@@ -24,7 +24,7 @@ class ClientUiController:
         bus,
         admin_base_url: str,
         bot: discord.Client,
-        guild_id: Optional[int],
+        guild_id: Optional[int] = None,
         listener,
         logger: Optional[logging.Logger] = None,
         topic: str = "client",
