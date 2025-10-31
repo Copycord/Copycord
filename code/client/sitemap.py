@@ -398,22 +398,84 @@ class SitemapService:
 
         self.schedule_sync(delay=0.2)
 
+    def _is_filtered_out_view(
+        self,
+        channel_id: int | None,
+        category_id: int | None,
+        view: Dict[str, object],
+    ) -> bool:
+        """
+        Return True if this channel/category should be filtered out (hidden),
+        using the *per-origin-guild* filter view rather than the old global config.
+        This is the same logic we use when trimming the sitemap.
+        """
+        include_category_ids = view["include_category_ids"]
+        include_channel_ids = view["include_channel_ids"]
+        excluded_category_ids = view["excluded_category_ids"]
+        excluded_channel_ids = view["excluded_channel_ids"]
+
+        wl_on = bool(view["whitelist_enabled"])
+
+        wl_ch = bool(channel_id and channel_id in include_channel_ids)
+        wl_cat = bool(category_id and category_id in include_category_ids)
+
+        ex_ch = bool(channel_id and channel_id in excluded_channel_ids)
+        ex_cat = bool(category_id and category_id in excluded_category_ids)
+
+        # Block if whitelist mode is on and this channel/category isn't whitelisted.
+        if wl_on and not (wl_ch or wl_cat):
+            return True
+
+        if ex_ch and not wl_ch:
+            return True
+
+        if ex_cat and not (wl_cat or wl_ch):
+            return True
+
+        return False
+
     def in_scope_channel(self, ch) -> bool:
-        """True if channel/category belongs in filtered sitemap."""
+        """
+        True if this channel/category/thread should be visible for ITS ORIGIN
+        GUILD'S sitemap. This now respects per-guild / per-mapping filters,
+        not the legacy global self.config lists.
+        """
         try:
+
+            g = getattr(ch, "guild", None)
+            if g is None and isinstance(ch, discord.Thread):
+                parent = getattr(ch, "parent", None)
+                g = getattr(parent, "guild", None)
+
+            origin_gid = int(getattr(g, "id", 0) or 0)
+            view = self._build_filter_view_for_guild(origin_gid)
+
             if isinstance(ch, discord.CategoryChannel):
-                return not self._is_filtered_out(None, ch.id)
+                return not self._is_filtered_out_view(
+                    None,
+                    getattr(ch, "id", None),
+                    view,
+                )
 
             if isinstance(ch, discord.Thread):
                 parent = getattr(ch, "parent", None)
                 if parent is None:
                     return False
                 cat_id = getattr(parent, "category_id", None)
-                return not self._is_filtered_out(parent.id, cat_id)
+                return not self._is_filtered_out_view(
+                    getattr(parent, "id", None),
+                    cat_id,
+                    view,
+                )
 
             cat_id = getattr(ch, "category_id", None)
-            return not self._is_filtered_out(getattr(ch, "id", None), cat_id)
+            return not self._is_filtered_out_view(
+                getattr(ch, "id", None),
+                cat_id,
+                view,
+            )
         except Exception:
+
             return True
 
     def _serialize_role_overwrites(self, obj: discord.abc.GuildChannel) -> list[dict]:
@@ -447,13 +509,24 @@ class SitemapService:
         return out
 
     def in_scope_thread(self, thr: discord.Thread) -> bool:
-        """True if thread's parent survives filtering."""
+        """
+        True if this thread's parent channel is allowed for that origin guild.
+        """
         try:
             parent = getattr(thr, "parent", None)
             if parent is None:
                 return False
+
+            g = getattr(parent, "guild", None)
+            origin_gid = int(getattr(g, "id", 0) or 0)
+            view = self._build_filter_view_for_guild(origin_gid)
+
             cat_id = getattr(parent, "category_id", None)
-            return not self._is_filtered_out(getattr(parent, "id", None), cat_id)
+            return not self._is_filtered_out_view(
+                getattr(parent, "id", None),
+                cat_id,
+                view,
+            )
         except Exception:
             return True
 

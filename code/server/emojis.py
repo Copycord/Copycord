@@ -85,7 +85,6 @@ class EmojiManager:
         host_id = int(host_guild_id) if host_guild_id else None
         clone_gid = int(target_clone_guild_id)
 
-        # if there's already a running task for THIS clone guild, skip
         existing = self._tasks.get(clone_gid)
         if existing and not existing.done():
             self._log(
@@ -105,7 +104,6 @@ class EmojiManager:
                         clone_gid,
                     )
             except Exception:
-                # don't hard crash kickoff if resolver explodes
                 self._log(
                     "exception",
                     "[emoji] mapping validation threw, continuing anyway",
@@ -170,7 +168,7 @@ class EmojiManager:
                 if changes:
                     self._log(
                         "info",
-                        "[😊] Emoji sync changes: %s",
+                        "[😊] Emoji sync complete: %s",
                         "; ".join(changes),
                     )
                 else:

@@ -318,7 +318,6 @@ class CloneCommands(commands.Cog):
                 "This command must be run inside a server.", ephemeral=True
             )
 
-        # figure out which mapping this clone guild belongs to
         mapping_row = self.db.get_mapping_by_cloned_guild_id(guild.id)
         if not mapping_row:
             return await ctx.respond(
@@ -346,7 +345,6 @@ class CloneCommands(commands.Cog):
             ephemeral=True,
         )
 
-        # Push live update to the client(s):
         kw_map = self.db.get_blocked_keywords_by_origin()
         await self.bot.ws_manager.send(
             {

@@ -910,7 +910,6 @@ def _bootstrap_legacy_mapping_if_needed() -> dict:
             clone_guild_id=clone_gid,
         )
     except Exception as e:
-        # We don't want the whole migration to fail just because of partial data,
 
         backfill_summary = {"error": str(e)}
 
@@ -1578,7 +1577,6 @@ async def save_filters_for_mapping(mapping_id: str, request: Request):
     def parse_csv(name: str):
         raw = form.get(name, "") or ""
         parts = [p.strip() for p in re.split(r"[^\d]+", raw) if p.strip()]
-        # dedupe while preserving order
         seen = set()
         out = []
         for p in parts:
@@ -1757,7 +1755,6 @@ async def api_channels(mapping_id: str | None = Query(default=None)):
 
         grouped_categories.append(
             {
-                # category metadata (as strings so JS doesn't get sci notation)
                 "original_category_id": (
                     str(cr["original_category_id"])
                     if cr.get("original_category_id")

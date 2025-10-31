@@ -309,7 +309,7 @@ class ServerReceiver:
             try:
                 summary = await self.sync_structure(task_id, sitemap)
                 logger.info(
-                    "[✅] [%s] Sync task %s primary pass complete: %s",
+                    "[✅] [%s] [%s] Sync task primary pass complete: %s",
                     guild_name,
                     display_id,
                     summary,
@@ -322,18 +322,6 @@ class ServerReceiver:
                 )
             finally:
                 q.task_done()
-
-    def _action_log(self, level: str, msg: str, *args) -> None:
-        prefix = logctx.format_prefix()
-
-        if level == "info":
-            logger.info(prefix + msg, *args)
-        elif level == "warning":
-            logger.warning(prefix + msg, *args)
-        elif level == "error":
-            logger.error(prefix + msg, *args)
-        else:
-            logger.debug(prefix + msg, *args)
 
     def _get_sync_lock(self, clone_guild_id: int) -> asyncio.Lock:
         lock = self._guild_sync_locks.get(int(clone_guild_id))
@@ -591,8 +579,7 @@ class ServerReceiver:
                 host_guild_id,
             )
 
-            self._action_log(
-                "warning",
+            logger.warning(
                 "Cloned category deleted in clone_g=%s: clone_cat=%s name=%s "
                 "(src_cat=%s host_g=%s). Requesting sitemap.",
                 channel.guild.id,
@@ -748,7 +735,7 @@ class ServerReceiver:
             q = self._get_or_create_sitemap_queue(host_gid)
             q.put_nowait((task_id, display_id, data))
 
-            logger.info("[✉️][%s] Sync task %s received", host_name, display_id)
+            logger.info("[✉️][%s] [%s] Sync task received", host_name, display_id)
             return
 
         elif typ == "message":
@@ -1154,7 +1141,7 @@ class ServerReceiver:
             if int(row.get("cloned_guild_id") or 0) != guild.id:
                 continue
             if not guild.get_channel(row["cloned_category_id"]):
-                self._action_log("info", "[🗑️] Purging category mapping %s", orig)
+                logging.info("[🗑️] Purging category mapping %s", orig)
                 try:
                     self.db.delete_category_mapping(int(orig))
                 except Exception:
@@ -1165,7 +1152,7 @@ class ServerReceiver:
             if int(row.get("cloned_guild_id") or 0) != guild.id:
                 continue
             if not guild.get_channel(row["cloned_channel_id"]):
-                self._action_log("info", "[🗑️] Purging channel mapping %s", orig)
+                logging.info("[🗑️] Purging channel mapping %s", orig)
                 try:
                     self.db.delete_channel_mapping(int(orig))
                 except Exception:
@@ -1196,8 +1183,7 @@ class ServerReceiver:
 
         try:
             if not target_clone_gid:
-                self._action_log(
-                    "warning",
+                logger.warning(
                     "[⛔] No guild_mappings row for origin %s; cannot sync.",
                     host_guild_id,
                 )
@@ -1207,8 +1193,7 @@ class ServerReceiver:
             async with lock:
                 guild = self.bot.get_guild(target_clone_gid)
                 if not guild:
-                    self._action_log(
-                        "error",
+                    logger.warning(
                         "[⛔] Clone guild %s not found (origin=%s)",
                         target_clone_gid,
                         host_guild_id,
@@ -1352,13 +1337,11 @@ class ServerReceiver:
                 await guild.edit(community=False)
                 parts.append("[⚙️] Disabled Community mode")
 
-                self._action_log(
-                    "info", "[⚙️] Community mode disabled for guild %s", guild.id
+                logging.info("[⚙️] Community mode disabled for guild %s", guild.id
                 )
 
             except Exception as e:
-                self._action_log(
-                    "warning",
+                logging.warning(
                     "[⚠️] Failed disabling Community mode for guild %s: %s",
                     guild.id,
                     e,
@@ -1376,8 +1359,7 @@ class ServerReceiver:
                 # If either channel is missing in the clone guild, we can't safely edit
 
                 if not rc or not uc:
-                    self._action_log(
-                        "warning",
+                    logging.warning(
                         "[⚠️] Community sync skipped for guild %s: "
                         "rules/updates clone channel missing (rc=%s uc=%s wanted=%s).",
                         guild.id,
@@ -1418,8 +1400,7 @@ class ServerReceiver:
                     )
                     await guild.edit(**edit_kwargs)
                     parts.append("Updated Community mode")
-                    self._action_log(
-                        "info",
+                    logging.info(
                         "[⚙️] Community settings changed: %s",
                         ", ".join(changes),
                     )
@@ -1429,23 +1410,20 @@ class ServerReceiver:
                         "150011" in getattr(e, "text", "")
                         or getattr(e, "code", None) == 150011
                     ):
-                        self._action_log(
-                            "warning",
+                        logging.warning(
                             "[⚠️] Cannot enable Community mode automatically for guild %s: "
                             "missing permission or prerequisite setup.",
                             guild.id,
                         )
 
                     else:
-                        self._action_log(
-                            "warning",
+                        logging.warning(
                             "[⚠️] Failed editing Community settings for guild %s: %s",
                             guild.id,
                             e,
                         )
                 except Exception as e:
-                    self._action_log(
-                        "warning",
+                    logging.warning(
                         "[⚠️] Failed editing Community settings for guild %s: %s",
                         guild.id,
                         e,
@@ -1519,8 +1497,7 @@ class ServerReceiver:
                             ActionType.EDIT_CHANNEL, guild.id
                         )
                         await ch.edit(category=new_cat)
-                        self._action_log(
-                            "info",
+                        logging.info(
                             "[✏️] Reparented channel '%s' (ID %d) → category '%s' (ID %d)",
                             ch.name,
                             ch.id,
@@ -1669,8 +1646,7 @@ class ServerReceiver:
                     )
                     await ch.edit(type=ChannelType.news)
                     converted += 1
-                    self._action_log(
-                        "info",
+                    logging.info(
                         "[✏️] Converted channel '%s' (ID %d) to Announcement",
                         ch.name,
                         ch.id,
@@ -1749,8 +1725,7 @@ class ServerReceiver:
 
             if clone_ch is None and orig_id in valid_upstream_ids:
 
-                self._action_log(
-                    "info",
+                logging.info(
                     "[🧹] Cloned thread missing (clone=%s) for '%s'; clearing mapping.",
                     clone_id,
                     thread_name,
@@ -1781,8 +1756,7 @@ class ServerReceiver:
                         orig_id,
                     )
                 else:
-                    self._action_log(
-                        "info",
+                    logging.warning(
                         "[🗑️] Original thread '%s' no longer exists; clearing mapping (clone=%s)",
                         thread_name,
                         clone_id,
@@ -1793,8 +1767,7 @@ class ServerReceiver:
                             ActionType.DELETE_CHANNEL, guild.id
                         )
                         await clone_ch.delete()
-                        self._action_log(
-                            "info", "[🗑️] Deleted cloned thread %s", clone_id
+                        logging.info("[🗑️] Deleted cloned thread %s", clone_id
                         )
                     self.db.delete_forum_thread_mapping(orig_id)
                     deleted_original_gone += 1
@@ -1855,8 +1828,7 @@ class ServerReceiver:
                     cloned_guild_id=guild.id,
                 )
 
-                self._action_log(
-                    "info", "[✏️] Renamed thread %s: %r → %r", ch.id, old, src["name"]
+                logging.info("[✏️] Renamed thread %s: %r → %r", ch.id, old, src["name"]
                 )
 
                 renamed += 1
@@ -2083,8 +2055,7 @@ class ServerReceiver:
             return
         if not self._can_create_in_category(guild, category):
             cat_label = category.name if category else "<root>"
-            self._action_log(
-                "warning",
+            logging.warning(
                 "[⚠️] Category %s full for guild %s (or guild at cap); creating '%s' as standalone",
                 guild.id,
                 cat_label,
@@ -2100,7 +2071,7 @@ class ServerReceiver:
             await self.ratelimit.acquire_for_guild(ActionType.CREATE_CHANNEL, guild.id)
             ch = await guild.create_text_channel(name=name, category=category)
 
-        self._action_log("info", "[➕] Created %s channel '%s' #%s", kind, name, ch.id)
+        logging.info("[➕] Created %s channel '%s' #%s", kind, name, ch.id)
 
         if kind == "news":
             if "NEWS" in guild.features:
@@ -2109,20 +2080,17 @@ class ServerReceiver:
                         ActionType.EDIT_CHANNEL, guild.id
                     )
                     await ch.edit(type=ChannelType.news)
-                    self._action_log(
-                        "info", "[✏️] Converted '%s' #%d to Announcement", name, ch.id
+                    logging.info("[✏️] Converted '%s' #%d to Announcement", name, ch.id
                     )
                 except HTTPException as e:
-                    self._action_log(
-                        "warning",
+                    logging.warning(
                         "[⚠️] Could not convert '%s' to Announcement in guild %s: %s; left as text",
                         name,
                         guild.id,
                         e,
                     )
             else:
-                self._action_log(
-                    "warning",
+                logging.warning(
                     "[⚠️] Guild %s doesn’t support NEWS; '%s' left as text",
                     guild.id,
                     name,
@@ -2192,8 +2160,7 @@ class ServerReceiver:
                         ActionType.EDIT_CHANNEL, ch.guild.id
                     )
                     await ch.edit(name=pinned_name)
-                    self._action_log(
-                        "info",
+                    logging.info(
                         "[📌] Enforced pinned name on #%d: %r → %r",
                         ch.id,
                         old,
@@ -2208,8 +2175,7 @@ class ServerReceiver:
                     ActionType.EDIT_CHANNEL, ch.guild.id
                 )
                 await ch.edit(name=upstream_name)
-                self._action_log(
-                    "info",
+                logging.info(
                     "[✏️] Renamed channel #%d: %r → %r",
                     ch.id,
                     old,
@@ -2255,7 +2221,7 @@ class ServerReceiver:
                         ActionType.DELETE_CHANNEL, guild.id
                     )
                     await ch.delete()
-                    self._action_log("info", "[🗑️] Deleted category %s", ch.name)
+                    logging.info("[🗑️] Deleted category %s", ch.name)
 
                 self.db.delete_category_mapping(orig_id)
                 self.cat_map.pop(orig_id, None)
@@ -2315,8 +2281,7 @@ class ServerReceiver:
             if ch and delete_channels:
 
                 if ch.id in protected:
-                    self._action_log(
-                        "info",
+                    logging.info(
                         "[🛡️] Skipping deletion of protected channel #%s (%d) (community/system assignment).",
                         ch.name,
                         ch.id,
@@ -2328,32 +2293,28 @@ class ServerReceiver:
                     )
                     try:
                         await ch.delete()
-                        self._action_log(
-                            "info", "[🗑️] Deleted channel #%s (%d)", ch.name, ch.id
+                        logging.info("[🗑️] Deleted channel #%s (%d)", ch.name, ch.id
                         )
                     except discord.HTTPException as e:
 
                         if getattr(
                             e, "code", None
                         ) == 50074 or "required for community" in str(e):
-                            self._action_log(
-                                "info",
+                            logging.info(
                                 "[🛡️] API blocked deletion of #%s (%d): protected. Will skip and drop mapping.",
                                 getattr(ch, "name", "?"),
                                 ch.id,
                             )
 
                         else:
-                            self._action_log(
-                                "warning",
+                            logging.warning(
                                 "[⚠️] Failed to delete channel #%d: %s",
                                 ch.id,
                                 e,
                             )
 
             elif not ch:
-                self._action_log(
-                    "info",
+                logging.info(
                     "[🗑️] Cloned channel #%d not found; removing mapping",
                     clone_id,
                 )
@@ -2416,8 +2377,7 @@ class ServerReceiver:
 
             if has_pin:
 
-                self._action_log(
-                    "info",
+                logging.info(
                     "[📌] Enforced pinned category name on %d: %r → %r",
                     cat.id,
                     old,
@@ -2426,8 +2386,7 @@ class ServerReceiver:
 
                 return (True, "pinned_enforced")
             else:
-                self._action_log(
-                    "info",
+                logging.info(
                     "[✏️] Renamed category %d: %r → %r",
                     cat.id,
                     old,
@@ -2489,7 +2448,7 @@ class ServerReceiver:
 
         await self.ratelimit.acquire_for_guild(ActionType.CREATE_CHANNEL, guild.id)
         cat = await guild.create_category(name)
-        self._action_log("info", "[➕] Created category '%s' #%d", name, cat.id)
+        logging.info("[➕] Created category '%s' #%d", name, cat.id)
 
         self.db.upsert_category_mapping(
             orig_id=original_id,
@@ -2518,8 +2477,7 @@ class ServerReceiver:
             except Exception:
                 pass
             webhook = await ch.create_webhook(name=name, avatar=avatar_bytes)
-            self._action_log(
-                "info", "[➕] Created webhook '%s' in channel #%s", name, ch.id
+            logging.info("[➕] Created webhook '%s' in channel #%s", name, ch.id
             )
 
             if hasattr(self, "_wh_meta"):
@@ -2686,8 +2644,7 @@ class ServerReceiver:
                 moved += 1
                 old_name = actual_parent.name if actual_parent else "standalone"
                 new_name = desired_parent.name if desired_parent else "standalone"
-                self._action_log(
-                    "info",
+                logging.info(
                     "[✏️] Reparented channel '%s' (ID %d) from '%s' → '%s'",
                     ch.name,
                     clone_id,
@@ -2695,8 +2652,7 @@ class ServerReceiver:
                     new_name,
                 )
             except Exception as e:
-                self._action_log(
-                    "warning",
+                logging.warning(
                     "[⚠️] Failed to reparent channel '%s' (ID %d): %s",
                     ch.name,
                     clone_id,
@@ -2882,8 +2838,7 @@ class ServerReceiver:
                     cloned_guild_id=guild.id,
                 )
 
-                self._action_log(
-                    "info",
+                logging.info(
                     "[➕] Recreated missing webhook for channel `%s` #%s",
                     fresh["original_channel_name"],
                     original_id,
@@ -2946,8 +2901,7 @@ class ServerReceiver:
                     )
 
             self.db.delete_forum_thread_mapping(orig_tid)
-            self._action_log(
-                "info",
+            logging.info(
                 "[🗑️] Deleted thread mapping for thread %s in guild %s ",
                 orig_tid,
                 clone_gid,
@@ -3007,8 +2961,7 @@ class ServerReceiver:
             try:
                 ch = await self.bot.fetch_channel(cloned_id)
             except NotFound:
-                self._action_log(
-                    "warning",
+                logging.warning(
                     "[⚠️] Thread renamed in #%s: %r → %r; not found in cloned server, cannot rename",
                     parent_name,
                     old_name,
@@ -3020,8 +2973,7 @@ class ServerReceiver:
         try:
             await self.ratelimit.acquire_for_guild(ActionType.EDIT_CHANNEL, guild.id)
             await ch.edit(name=new_name)
-            self._action_log(
-                "info",
+            logger.info(
                 "[✏️] Renamed thread in #%s: %r → %r",
                 ch.parent.name if ch.parent else "Unknown",
                 old_name,
@@ -3029,8 +2981,7 @@ class ServerReceiver:
             )
 
         except Exception as e:
-            self._action_log(
-                "error",
+            logger.error(
                 "[⛔] Failed to rename thread in #%s: %s",
                 ch.parent.name if ch.parent else "Unknown",
                 e,
@@ -3083,8 +3034,7 @@ class ServerReceiver:
                 await thread.edit(archived=True)
                 parent = thread.parent
                 parent_name = parent.name if parent else "Unknown"
-                self._action_log(
-                    "info",
+                logger.info(
                     "[✏️] Auto-archived thread '%s' in #%s to respect thread limits",
                     thread.name,
                     parent_name,
@@ -3092,16 +3042,14 @@ class ServerReceiver:
 
             except HTTPException as e:
                 if e.status == 404:
-                    self._action_log(
-                        "warning",
+                    logger.warning(
                         "[⚠️] Thread %s not found; clearing mapping and skipping future attempts",
                         thread.id,
                     )
 
                     self.db.delete_forum_thread_mapping(thread.id)
                 else:
-                    self._action_log(
-                        "warning",
+                    logger.warning(
                         "[⚠️] Failed to auto-archive thread '%s' in #%s: %s",
                         thread.name,
                         parent_name,

@@ -902,21 +902,12 @@ class ClientListener:
         """
         ch = message.channel
         try:
-
-            ch_id = getattr(ch, "id", None)
-            cat_id = getattr(ch, "category_id", None)
-
-            if (
-                isinstance(getattr(ch, "__class__", None), type)
-                and getattr(ch.__class__, "__name__", "") == "Thread"
-            ):
-                parent = getattr(ch, "parent", None)
-                if parent is not None:
-
-                    cat_id = getattr(parent, "category_id", cat_id)
-
-            if self.sitemap.is_excluded_ids(ch_id, cat_id):
-                return True
+            if isinstance(ch, discord.Thread):
+                if not self.sitemap.in_scope_thread(ch):
+                    return True
+            else:
+                if not self.sitemap.in_scope_channel(ch):
+                    return True
         except Exception:
             pass
 
