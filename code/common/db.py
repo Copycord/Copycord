@@ -2921,3 +2921,22 @@ class DBManager:
             bulk_insert("whitelist", "channel", wl_channels)
             bulk_insert("exclude", "category", ex_categories)
             bulk_insert("exclude", "channel", ex_channels)
+
+    def get_mapping_name_for_original(self, original_guild_id: int) -> str | None:
+        row = self.conn.execute(
+            "SELECT mapping_name FROM guild_mappings WHERE original_guild_id = ? LIMIT 1",
+            (int(original_guild_id),),
+        ).fetchone()
+        if row and row[0]:
+            return row[0]
+        return None
+
+    def get_mapping_name_for_clone(self, cloned_guild_id: int) -> str | None:
+        row = self.conn.execute(
+            "SELECT mapping_name FROM guild_mappings WHERE cloned_guild_id = ? LIMIT 1",
+            (int(cloned_guild_id),),
+        ).fetchone()
+        if row and row[0]:
+            return row[0]
+        return None
+

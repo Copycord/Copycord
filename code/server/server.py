@@ -7,6 +7,7 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 import contextlib
 import signal
 import asyncio
@@ -88,6 +89,27 @@ for lib in (
 logging.getLogger("discord.client").setLevel(logging.ERROR)
 
 logger = logging.getLogger("server")
+
+
+class _GuildPrefixFilter(logging.Filter):
+    """
+    Prepend mapping name to every server log line.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            prefix = logctx.guild_prefix()
+        except Exception:
+            prefix = ""
+
+        if prefix and not getattr(record, "_guild_prefix_injected", False):
+            record.msg = prefix + str(record.msg)
+            record._guild_prefix_injected = True
+        return True
+
+
+logger.addFilter(_GuildPrefixFilter())
+
 logger.setLevel(LEVEL)
 
 
@@ -195,7 +217,7 @@ class ServerReceiver:
             config=self.config,
             db=self.db,
             bot=self.bot,
-            logger=logger,
+            logger=logger.getChild("perm-sync"),
             ratelimit=self.ratelimit,
             rate_limiter_action=ActionType.EDIT_CHANNEL,
         )
@@ -222,6 +244,77 @@ class ServerReceiver:
 
     def _target_clone_gid_for_origin(self, host_guild_id: int | None) -> int | None:
         return self.guild_resolver.resolve_target_clone(host_guild_id=host_guild_id)
+
+    def _resolve_guild_label(self, typ: str, data: dict) -> str | None:
+        """
+        Best-effort human-readable label for logging.
+        We prefer the mapping_name from guild_mappings.
+        Falls back to Discord guild name, then "guild:<id>".
+        """
+        gid = 0
+        name = ""
+
+        if typ == "sitemap":
+            ginfo = (data or {}).get("guild") or {}
+            raw_gid = ginfo.get("id")
+            try:
+                gid = int(raw_gid or 0)
+            except Exception:
+                gid = 0
+
+            name = (ginfo.get("name") or "").strip()
+        else:
+            raw_gid = (data or {}).get("guild_id")
+            try:
+                gid = int(raw_gid or 0)
+            except Exception:
+                gid = 0
+            name = ""
+
+        if gid:
+            label = ""
+
+            with contextlib.suppress(Exception):
+                mrow = self.db.get_mapping_by_original(gid)
+                if mrow:
+                    nm = (mrow.get("mapping_name") or "").strip()
+                    if nm:
+                        label = nm
+
+            if not label:
+                with contextlib.suppress(Exception):
+                    mrow2 = self.db.get_mapping_by_clone(gid)
+                    if mrow2:
+                        nm = (mrow2.get("mapping_name") or "").strip()
+                        if nm:
+                            label = nm
+
+            # 4. If we STILL don't have a mapping_name, fall back to cache
+            if not label:
+                cached = self._host_name_cache.get(gid, "").strip()
+                if cached:
+                    label = cached
+
+            if not label:
+
+                with contextlib.suppress(Exception):
+                    if not mrow and not mrow2:
+                        mrow = self.db.get_mapping_by_original(gid)
+                if mrow and mrow.get("original_guild_name"):
+                    label = (mrow["original_guild_name"] or "").strip()
+
+            if not label:
+                g_obj = self.bot.get_guild(gid)
+                if g_obj and getattr(g_obj, "name", None):
+                    label = g_obj.name.strip()
+
+            if not label:
+                label = f"guild:{gid}"
+
+            self._host_name_cache[gid] = label
+            name = label
+
+        return name or None
 
     def _clone_gid_for_ctx(
         self, *, host_guild_id: int | None = None, mapping_row: dict | None = None
@@ -284,43 +377,47 @@ class ServerReceiver:
         We coalesce bursts, then run sync_structure once using the newest sitemap.
         """
         while True:
-
             task_id, display_id, sitemap = await q.get()
 
-            dropped = 0
-            while True:
-                try:
-                    task_id, display_id, sitemap = q.get_nowait()
-                    q.task_done()
-                    dropped += 1
-                except asyncio.QueueEmpty:
-                    break
-
-            guild_name = self._host_name_cache.get(host_gid, f"host:{host_gid}")
-
-            if dropped:
-                logger.debug(
-                    "[%s] Dropped %d outdated sitemap(s); processing %s",
-                    guild_name,
-                    dropped,
-                    display_id,
-                )
-
+            token = None
             try:
-                summary = await self.sync_structure(task_id, sitemap)
-                logger.info(
-                    "[✅] [%s] [%s] Sync task primary pass complete: %s",
-                    guild_name,
-                    display_id,
-                    summary,
-                )
-            except Exception:
-                logger.exception(
-                    "Error processing sitemap %s for host guild %s",
-                    display_id,
-                    host_gid,
-                )
+                guild_label = self._resolve_guild_label("sitemap", sitemap)
+                if guild_label:
+                    token = logctx.guild_name.set(guild_label)
+
+                dropped = 0
+                while True:
+                    try:
+                        task_id, display_id, sitemap = q.get_nowait()
+                        q.task_done()
+                        dropped += 1
+                    except asyncio.QueueEmpty:
+                        break
+
+                if dropped:
+                    logger.debug(
+                        "Dropped %d outdated sitemap(s); processing %s",
+                        dropped,
+                        display_id,
+                    )
+
+                try:
+                    summary = await self.sync_structure(task_id, sitemap)
+                    logger.info(
+                        "[✅] [%s] Sync task primary pass complete: %s",
+                        display_id,
+                        summary,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Error processing sitemap %s for host guild %s",
+                        display_id,
+                        host_gid,
+                    )
             finally:
+
+                if token:
+                    logctx.guild_name.reset(token)
                 q.task_done()
 
     def _get_sync_lock(self, clone_guild_id: int) -> asyncio.Lock:
@@ -712,345 +809,372 @@ class ServerReceiver:
         """
         if self._shutting_down:
             return
+
         typ = msg.get("type")
         data = msg.get("data", {})
 
-        if typ == "sitemap":
-            if getattr(self, "_shutting_down", False):
-                return
+        token = None
+        try:
 
-            self._sitemap_task_counter += 1
-            task_id = self._sitemap_task_counter
+            guild_label = self._resolve_guild_label(typ, data)
+            if guild_label:
+                token = logctx.guild_name.set(guild_label)
 
-            host_gid, host_name, display_id = self._prep_sitemap_task_meta(data)
-
-            if not host_gid:
-                logger.warning(
-                    "[⛔] sitemap missing guild.id; dropping task %s", display_id
-                )
-                return
-
-            self._task_display_id[task_id] = display_id
-
-            q = self._get_or_create_sitemap_queue(host_gid)
-            q.put_nowait((task_id, display_id, data))
-
-            logger.info("[✉️][%s] [%s] Sync task received", host_name, display_id)
-            return
-
-        elif typ == "message":
-            ct = data.get("channel_type")
-            if ct in (ChannelType.voice.value, ChannelType.stage_voice.value):
-                logger.debug("[🔇] Drop voice/stage msg | type=%s data=%s", ct, data)
-                return
-
-            if data.get("__backfill__"):
-                try:
-                    orig = int(data.get("channel_id"))
-                except Exception:
+            if typ == "sitemap":
+                if getattr(self, "_shutting_down", False):
                     return
-                if orig not in self._active_backfills:
+
+                self._sitemap_task_counter += 1
+                task_id = self._sitemap_task_counter
+
+                host_gid, host_name, display_id = self._prep_sitemap_task_meta(data)
+
+                if not host_gid:
                     logger.warning(
-                        "Dropping stray backfill message for %s (no active lock)", orig
+                        "[⛔] sitemap missing guild.id; dropping task %s", display_id
                     )
                     return
-                t = self._track(self._handle_backfill_message(data), name="bf-handle")
-                self.backfill.attach_task(orig, t)
-            else:
 
-                self._track(self.forward_message(data), name="live-forward")
+                self._task_display_id[task_id] = display_id
 
-        elif typ == "message_edit":
-            if self._maybe_buffer_if_backfilling(typ, data):
+                q = self._get_or_create_sitemap_queue(host_gid)
+                q.put_nowait((task_id, display_id, data))
+
+                logger.info("[✉️] Sync task %s received", display_id)
                 return
-            self._track(self.handle_message_edit(data), name="edit-msg")
 
-        elif typ == "thread_message_edit":
-            if self._maybe_buffer_if_backfilling(typ, data):
-                return
-            self._track(self.handle_message_edit(data), name="edit-thread-msg")
-
-        elif typ == "message_delete":
-            if self._maybe_buffer_if_backfilling(typ, data):
-                return
-            self._track(self.handle_message_delete(data), name="del-msg")
-
-        elif typ == "thread_message_delete":
-            if self._maybe_buffer_if_backfilling(typ, data):
-                return
-            self._track(self.handle_message_delete(data), name="del-thread-msg")
-
-        elif typ == "thread_message":
-            if data.get("__backfill__"):
-                try:
-                    parent = int(data.get("thread_parent_id") or 0)
-                except Exception:
-                    parent = 0
-                t = self._track(
-                    self._handle_backfill_thread_message(data), name="bf-thread"
-                )
-                if parent:
-                    self.backfill.attach_task(parent, t)
-            else:
-                self._track(self.handle_thread_message(data), name="thread-msg")
-
-        elif typ == "thread_delete":
-            parent_id = None
-            try:
-                tid = int((data or {}).get("thread_id") or 0)
-            except Exception:
-                tid = 0
-            if tid:
-                try:
-                    row = next(
-                        (
-                            r
-                            for r in self.db.get_all_threads()
-                            if r["original_thread_id"] == tid
-                        ),
-                        None,
+            elif typ == "message":
+                ct = data.get("channel_type")
+                if ct in (ChannelType.voice.value, ChannelType.stage_voice.value):
+                    logger.debug(
+                        "[🔇] Drop voice/stage msg | type=%s data=%s", ct, data
                     )
-                    if row:
-                        parent_id = (
-                            int(row.get("forum_original_id") or 0)
-                            or int(row.get("original_parent_id") or 0)
-                            or None
+                    return
+
+                if data.get("__backfill__"):
+                    try:
+                        orig = int(data.get("channel_id"))
+                    except Exception:
+                        return
+                    if orig not in self._active_backfills:
+                        logger.warning(
+                            "Dropping stray backfill message for %s (no active lock)",
+                            orig,
                         )
-                except Exception:
-                    parent_id = None
-
-            if parent_id and parent_id in self._active_backfills:
-                self._bf_event_buffer.setdefault(parent_id, []).append((typ, data))
-                logger.debug(
-                    "[bf] Buffered thread_delete for parent #%s (backfill active)",
-                    parent_id,
-                )
-                return
-
-            asyncio.create_task(self.handle_thread_delete(data))
-
-        elif typ == "thread_rename":
-            try:
-                parent_id = int((data or {}).get("parent_id") or 0)
-            except Exception:
-                parent_id = 0
-
-            if parent_id and parent_id in self._active_backfills:
-                self._bf_event_buffer.setdefault(parent_id, []).append((typ, data))
-                logger.debug(
-                    "[bf] Buffered thread_rename for parent #%s (backfill active)",
-                    parent_id,
-                )
-                return
-
-            asyncio.create_task(self.handle_thread_rename(data))
-
-        elif typ == "announce":
-            asyncio.create_task(self.handle_announce(data))
-
-        elif typ == "backfill_started":
-            data = msg.get("data") or {}
-            cid_raw = data.get("channel_id")
-            mapping_id = data.get("mapping_id")
-            original_gid = data.get("original_guild_id")
-            cloned_gid = data.get("cloned_guild_id")
-            try:
-                orig = int(cid_raw)
-            except (TypeError, ValueError):
-                logger.error("backfill_started missing/invalid channel_id: %r", cid_raw)
-                return
-
-            tid = msg.get("task_id") or (
-                data.get("task_id") if isinstance(data, dict) else None
-            )
-            if tid:
-                self._task_for_channel[orig] = str(tid)
-
-            if orig in self._active_backfills:
-                await self.bus.publish(
-                    "client", {"type": "backfill_busy", "data": {"channel_id": orig}}
-                )
-                return
-
-            is_resume = bool((msg.get("data") or {}).get("resume"))
-
-            self._active_backfills.add(orig)
-
-            await self.backfill.on_started(
-                orig,
-                meta={
-                    "range": (msg.get("data") or {}).get("range"),
-                    "resume": is_resume,
-                    "clone_channel_id": (msg.get("data") or {}).get("clone_channel_id"),
-                    "mapping_id": mapping_id,
-                    "original_guild_id": original_gid,
-                    "cloned_guild_id": cloned_gid,
-                },
-            )
-
-            tid = None
-            try:
-                st = self.backfill._progress.get(orig) or {}
-                tid = st.get("task_id")
-                if not tid and hasattr(self.backfill, "tracker"):
-                    with contextlib.suppress(Exception):
-                        tid = await self.backfill.tracker.get_task_id(str(orig))
-            except Exception:
-                tid = None
-
-            await self.bus.publish(
-                "client",
-                {
-                    "type": "backfill_ack",
-                    "task_id": tid,
-                    "data": {
-                        "channel_id": str(orig),
-                        "task_id": tid,
-                        "mapping_id": mapping_id,
-                        "cloned_guild_id": str(cloned_gid),
-                    },
-                    "ok": True,
-                },
-            )
-            return
-
-        elif typ == "backfill_progress":
-            data = msg.get("data") or {}
-            cid_raw = data.get("channel_id")
-            try:
-                cid = int(cid_raw)
-            except (TypeError, ValueError):
-                logger.error(
-                    "backfill_progress missing/invalid channel_id: %r", cid_raw
-                )
-                return
-
-            total = data.get("total")
-            sent = data.get("sent")
-
-            if total is not None:
-                try:
-                    self.backfill.update_expected_total(cid, int(total))
-                except Exception:
-                    pass
-
-            if sent is not None:
-                try:
-                    await self.backfill.on_progress(cid, int(sent))
-                except Exception:
-                    pass
-            return
-
-        elif typ == "backfill_stream_end":
-            data = msg.get("data") or {}
-            cid_raw = data.get("channel_id")
-            try:
-                orig = int(cid_raw)
-            except (TypeError, ValueError):
-                logger.error("backfill_done missing/invalid channel_id: %r", cid_raw)
-                return
-
-            tid = None
-            if hasattr(self.backfill, "tracker"):
-                with contextlib.suppress(Exception):
-                    tid = await self.backfill.tracker.get_task_id(str(orig))
-
-            await self.backfill.on_done(
-                orig,
-                wait_cleanup=True,
-                expected_task_id=(str(tid) if tid else None),
-            )
-
-            self._active_backfills.discard(orig)
-
-            try:
-                await self._flush_channel_buffer(orig)
-            except Exception:
-                logger.exception(
-                    "[bf] Failed flushing queued live messages for #%s", orig
-                )
-
-            pending = self._bf_event_buffer.pop(orig, [])
-            if pending:
-                logger.info(
-                    "[bf] Draining %d buffered edit/delete events for #%s",
-                    len(pending),
-                    orig,
-                )
-            for ev_typ, ev_data in pending:
-                if ev_typ in ("message_edit", "thread_message_edit"):
-                    self._track(self.handle_message_edit(ev_data), name="bf-drain-edit")
-                elif ev_typ in ("message_delete", "thread_message_delete"):
-                    self._track(
-                        self.handle_message_delete(ev_data), name="bf-drain-del"
+                        return
+                    t = self._track(
+                        self._handle_backfill_message(data), name="bf-handle"
                     )
+                    self.backfill.attach_task(orig, t)
+                else:
 
-            try:
-                delivered, total_est = self.backfill.get_progress(orig)
-            except Exception:
-                delivered, total_est = (None, None)
+                    self._track(self.forward_message(data), name="live-forward")
 
-            if getattr(self, "_shutting_down", False):
-                return
+            elif typ == "message_edit":
+                if self._maybe_buffer_if_backfilling(typ, data):
+                    return
+                self._track(self.handle_message_edit(data), name="edit-msg")
 
-            no_work = total_est is not None and int(total_est) == 0
+            elif typ == "thread_message_edit":
+                if self._maybe_buffer_if_backfilling(typ, data):
+                    return
+                self._track(self.handle_message_edit(data), name="edit-thread-msg")
 
-            try:
-                await self.bot.ws_manager.send(
+            elif typ == "message_delete":
+                if self._maybe_buffer_if_backfilling(typ, data):
+                    return
+                self._track(self.handle_message_delete(data), name="del-msg")
+
+            elif typ == "thread_message_delete":
+                if self._maybe_buffer_if_backfilling(typ, data):
+                    return
+                self._track(self.handle_message_delete(data), name="del-thread-msg")
+
+            elif typ == "thread_message":
+                if data.get("__backfill__"):
+                    try:
+                        parent = int(data.get("thread_parent_id") or 0)
+                    except Exception:
+                        parent = 0
+                    t = self._track(
+                        self._handle_backfill_thread_message(data), name="bf-thread"
+                    )
+                    if parent:
+                        self.backfill.attach_task(parent, t)
+                else:
+                    self._track(self.handle_thread_message(data), name="thread-msg")
+
+            elif typ == "thread_delete":
+                parent_id = None
+                try:
+                    tid = int((data or {}).get("thread_id") or 0)
+                except Exception:
+                    tid = 0
+                if tid:
+                    try:
+                        row = next(
+                            (
+                                r
+                                for r in self.db.get_all_threads()
+                                if r["original_thread_id"] == tid
+                            ),
+                            None,
+                        )
+                        if row:
+                            parent_id = (
+                                int(row.get("forum_original_id") or 0)
+                                or int(row.get("original_parent_id") or 0)
+                                or None
+                            )
+                    except Exception:
+                        parent_id = None
+
+                if parent_id and parent_id in self._active_backfills:
+                    self._bf_event_buffer.setdefault(parent_id, []).append((typ, data))
+                    logger.debug(
+                        "[bf] Buffered thread_delete for parent #%s (backfill active)",
+                        parent_id,
+                    )
+                    return
+
+                asyncio.create_task(self.handle_thread_delete(data))
+
+            elif typ == "thread_rename":
+                try:
+                    parent_id = int((data or {}).get("parent_id") or 0)
+                except Exception:
+                    parent_id = 0
+
+                if parent_id and parent_id in self._active_backfills:
+                    self._bf_event_buffer.setdefault(parent_id, []).append((typ, data))
+                    logger.debug(
+                        "[bf] Buffered thread_rename for parent #%s (backfill active)",
+                        parent_id,
+                    )
+                    return
+
+                asyncio.create_task(self.handle_thread_rename(data))
+
+            elif typ == "announce":
+                asyncio.create_task(self.handle_announce(data))
+
+            elif typ == "backfill_started":
+                data = msg.get("data") or {}
+                cid_raw = data.get("channel_id")
+                mapping_id = data.get("mapping_id")
+                original_gid = data.get("original_guild_id")
+                cloned_gid = data.get("cloned_guild_id")
+                try:
+                    orig = int(cid_raw)
+                except (TypeError, ValueError):
+                    logger.error(
+                        "backfill_started missing/invalid channel_id: %r", cid_raw
+                    )
+                    return
+
+                tid = msg.get("task_id") or (
+                    data.get("task_id") if isinstance(data, dict) else None
+                )
+                if tid:
+                    self._task_for_channel[orig] = str(tid)
+
+                if orig in self._active_backfills:
+                    await self.bus.publish(
+                        "client",
+                        {"type": "backfill_busy", "data": {"channel_id": orig}},
+                    )
+                    return
+
+                is_resume = bool((msg.get("data") or {}).get("resume"))
+
+                self._active_backfills.add(orig)
+
+                await self.backfill.on_started(
+                    orig,
+                    meta={
+                        "range": (msg.get("data") or {}).get("range"),
+                        "resume": is_resume,
+                        "clone_channel_id": (msg.get("data") or {}).get(
+                            "clone_channel_id"
+                        ),
+                        "mapping_id": mapping_id,
+                        "original_guild_id": original_gid,
+                        "cloned_guild_id": cloned_gid,
+                    },
+                )
+
+                tid = None
+                try:
+                    st = self.backfill._progress.get(orig) or {}
+                    tid = st.get("task_id")
+                    if not tid and hasattr(self.backfill, "tracker"):
+                        with contextlib.suppress(Exception):
+                            tid = await self.backfill.tracker.get_task_id(str(orig))
+                except Exception:
+                    tid = None
+
+                await self.bus.publish(
+                    "client",
                     {
-                        "type": "backfill_done",
+                        "type": "backfill_ack",
+                        "task_id": tid,
                         "data": {
                             "channel_id": str(orig),
-                            "sent": delivered,
-                            "total": total_est,
-                            **({"no_work": True} if no_work else {}),
+                            "task_id": tid,
+                            "mapping_id": mapping_id,
+                            "cloned_guild_id": str(cloned_gid),
                         },
-                    }
+                        "ok": True,
+                    },
                 )
-            except Exception:
-                logger.debug(
-                    "[bf] failed WS notify backfill_done for #%s", orig, exc_info=True
+                return
+
+            elif typ == "backfill_progress":
+                data = msg.get("data") or {}
+                cid_raw = data.get("channel_id")
+                try:
+                    cid = int(cid_raw)
+                except (TypeError, ValueError):
+                    logger.error(
+                        "backfill_progress missing/invalid channel_id: %r", cid_raw
+                    )
+                    return
+
+                total = data.get("total")
+                sent = data.get("sent")
+
+                if total is not None:
+                    try:
+                        self.backfill.update_expected_total(cid, int(total))
+                    except Exception:
+                        pass
+
+                if sent is not None:
+                    try:
+                        await self.backfill.on_progress(cid, int(sent))
+                    except Exception:
+                        pass
+                return
+
+            elif typ == "backfill_stream_end":
+                data = msg.get("data") or {}
+                cid_raw = data.get("channel_id")
+                try:
+                    orig = int(cid_raw)
+                except (TypeError, ValueError):
+                    logger.error(
+                        "backfill_done missing/invalid channel_id: %r", cid_raw
+                    )
+                    return
+
+                tid = None
+                if hasattr(self.backfill, "tracker"):
+                    with contextlib.suppress(Exception):
+                        tid = await self.backfill.tracker.get_task_id(str(orig))
+
+                await self.backfill.on_done(
+                    orig,
+                    wait_cleanup=True,
+                    expected_task_id=(str(tid) if tid else None),
                 )
-            return
 
-        elif typ == "backfills_status_query":
+                self._active_backfills.discard(orig)
 
-            logger.debug("Backfill status query received")
-            try:
-                items = self.backfill.snapshot_in_progress()
-            except Exception as e:
-                logger.exception("Failed to snapshot backfills: %s", e)
-                items = {}
+                try:
+                    await self._flush_channel_buffer(orig)
+                except Exception:
+                    logger.exception(
+                        "[bf] Failed flushing queued live messages for #%s", orig
+                    )
 
-            return {
-                "type": "backfills_status",
-                "data": {"items": items},
-            }
+                pending = self._bf_event_buffer.pop(orig, [])
+                if pending:
+                    logger.info(
+                        "[bf] Draining %d buffered edit/delete events for #%s",
+                        len(pending),
+                        orig,
+                    )
+                for ev_typ, ev_data in pending:
+                    if ev_typ in ("message_edit", "thread_message_edit"):
+                        self._track(
+                            self.handle_message_edit(ev_data), name="bf-drain-edit"
+                        )
+                    elif ev_typ in ("message_delete", "thread_message_delete"):
+                        self._track(
+                            self.handle_message_delete(ev_data), name="bf-drain-del"
+                        )
 
-        elif typ == "member_joined":
-            asyncio.create_task(self.onjoin.handle_member_joined(data))
+                try:
+                    delivered, total_est = self.backfill.get_progress(orig)
+                except Exception:
+                    delivered, total_est = (None, None)
 
-        elif typ == "export_dm_message":
-            if (
-                getattr(self, "shutting_down", False)
-                or self.webhook_exporter.is_stopped
-            ):
+                if getattr(self, "_shutting_down", False):
+                    return
+
+                no_work = total_est is not None and int(total_est) == 0
+
+                try:
+                    await self.bot.ws_manager.send(
+                        {
+                            "type": "backfill_done",
+                            "data": {
+                                "channel_id": str(orig),
+                                "sent": delivered,
+                                "total": total_est,
+                                **({"no_work": True} if no_work else {}),
+                            },
+                        }
+                    )
+                except Exception:
+                    logger.debug(
+                        "[bf] failed WS notify backfill_done for #%s",
+                        orig,
+                        exc_info=True,
+                    )
                 return
-            await self.webhook_exporter.handle_ws_export_dm_message(data)
 
-        elif typ == "export_dm_done":
-            await self.webhook_exporter.handle_ws_export_dm_done(data)
+            elif typ == "backfills_status_query":
 
-        elif typ == "export_message":
-            if (
-                getattr(self, "shutting_down", False)
-                or self.webhook_exporter.is_stopped
-            ):
-                return
-            await self.webhook_exporter.handle_ws_export_message(data)
+                logger.debug("Backfill status query received")
+                try:
+                    items = self.backfill.snapshot_in_progress()
+                except Exception as e:
+                    logger.exception("Failed to snapshot backfills: %s", e)
+                    items = {}
 
-        elif typ == "export_messages_done":
-            await self.webhook_exporter.handle_ws_export_messages_done(data)
+                return {
+                    "type": "backfills_status",
+                    "data": {"items": items},
+                }
+
+            elif typ == "member_joined":
+                asyncio.create_task(self.onjoin.handle_member_joined(data))
+
+            elif typ == "export_dm_message":
+                if (
+                    getattr(self, "shutting_down", False)
+                    or self.webhook_exporter.is_stopped
+                ):
+                    return
+                await self.webhook_exporter.handle_ws_export_dm_message(data)
+
+            elif typ == "export_dm_done":
+                await self.webhook_exporter.handle_ws_export_dm_done(data)
+
+            elif typ == "export_message":
+                if (
+                    getattr(self, "shutting_down", False)
+                    or self.webhook_exporter.is_stopped
+                ):
+                    return
+                await self.webhook_exporter.handle_ws_export_message(data)
+
+            elif typ == "export_messages_done":
+                await self.webhook_exporter.handle_ws_export_messages_done(data)
+        finally:
+            if token is not None:
+                logctx.guild_name.reset(token)
 
     async def handle_announce(self, data: dict):
         if self._shutting_down:
@@ -1141,7 +1265,7 @@ class ServerReceiver:
             if int(row.get("cloned_guild_id") or 0) != guild.id:
                 continue
             if not guild.get_channel(row["cloned_category_id"]):
-                logging.info("[🗑️] Purging category mapping %s", orig)
+                logger.info("[🗑️] Purging category mapping %s", orig)
                 try:
                     self.db.delete_category_mapping(int(orig))
                 except Exception:
@@ -1152,7 +1276,7 @@ class ServerReceiver:
             if int(row.get("cloned_guild_id") or 0) != guild.id:
                 continue
             if not guild.get_channel(row["cloned_channel_id"]):
-                logging.info("[🗑️] Purging channel mapping %s", orig)
+                logger.info("[🗑️] Purging channel mapping %s", orig)
                 try:
                     self.db.delete_channel_mapping(int(orig))
                 except Exception:
@@ -1204,20 +1328,16 @@ class ServerReceiver:
                     self.db, self.config, original_guild_id=host_guild_id
                 )
 
-                # Track any background jobs we kick off so we can report them
                 bg_jobs: list[str] = []
 
-                # Refresh mappings before we act
                 self._load_mappings()
 
-                # Stash latest stickers in case sticker sync needs them later
                 self.stickers.set_last_sitemap(
                     clone_guild_id=target_clone_gid,
                     stickers=sitemap.get("stickers"),
                     host_guild_id=host_guild_id,
                 )
 
-                # Emoji sync (background task)
                 if settings.get("CLONE_EMOJI", True):
                     self.emojis.kickoff_sync(
                         sitemap.get("emojis", []),
@@ -1226,14 +1346,10 @@ class ServerReceiver:
                     )
                     bg_jobs.append("emoji")
 
-                # Sticker sync (background task)
                 if settings.get("CLONE_STICKER", True):
-                    self.stickers.kickoff_sync(
-                        target_clone_guild_id=target_clone_gid
-                    )
+                    self.stickers.kickoff_sync(target_clone_guild_id=target_clone_gid)
                     bg_jobs.append("sticker")
 
-                # Role sync (background task, plus optional permission mirroring)
                 roles_handle = None
                 if settings.get("CLONE_ROLES", True):
                     roles_handle = self.roles.kickoff_sync(
@@ -1246,8 +1362,6 @@ class ServerReceiver:
                         ),
                     )
                     bg_jobs.append("roles")
-
-                # --- Immediate / foreground structure work ---
 
                 cat_created, ch_reparented = await self._repair_deleted_categories(
                     guild, sitemap
@@ -1273,10 +1387,8 @@ class ServerReceiver:
 
                 parts += await self._sync_threads(guild, sitemap)
 
-                # Reload mappings after all structure edits
                 self._load_mappings()
 
-                # Channel permission sync (also background-ish, usually depends on roles)
                 if settings.get("MIRROR_ROLE_PERMISSIONS", False) and settings.get(
                     "CLONE_ROLES", False
                 ):
@@ -1288,10 +1400,8 @@ class ServerReceiver:
                     )
                     bg_jobs.append("channel-perms")
 
-            # Build the human summary string we return to caller / log
             main_summary = "; ".join(parts) if parts else "No structure changes needed"
 
-            # queue a flush after all this work
             self._schedule_flush()
 
             return main_summary
@@ -1299,7 +1409,6 @@ class ServerReceiver:
         finally:
             logctx.sync_host_name.reset(_host_token)
             logctx.sync_display_id.reset(_id_token)
-
 
     async def _sync_community(self, guild: Guild, sitemap: Dict) -> List[str]:
         """
@@ -1337,11 +1446,10 @@ class ServerReceiver:
                 await guild.edit(community=False)
                 parts.append("[⚙️] Disabled Community mode")
 
-                logging.info("[⚙️] Community mode disabled for guild %s", guild.id
-                )
+                logger.info("[⚙️] Community mode disabled for guild %s", guild.id)
 
             except Exception as e:
-                logging.warning(
+                logger.warning(
                     "[⚠️] Failed disabling Community mode for guild %s: %s",
                     guild.id,
                     e,
@@ -1359,7 +1467,7 @@ class ServerReceiver:
                 # If either channel is missing in the clone guild, we can't safely edit
 
                 if not rc or not uc:
-                    logging.warning(
+                    logger.warning(
                         "[⚠️] Community sync skipped for guild %s: "
                         "rules/updates clone channel missing (rc=%s uc=%s wanted=%s).",
                         guild.id,
@@ -1400,7 +1508,7 @@ class ServerReceiver:
                     )
                     await guild.edit(**edit_kwargs)
                     parts.append("Updated Community mode")
-                    logging.info(
+                    logger.info(
                         "[⚙️] Community settings changed: %s",
                         ", ".join(changes),
                     )
@@ -1410,20 +1518,20 @@ class ServerReceiver:
                         "150011" in getattr(e, "text", "")
                         or getattr(e, "code", None) == 150011
                     ):
-                        logging.warning(
+                        logger.warning(
                             "[⚠️] Cannot enable Community mode automatically for guild %s: "
                             "missing permission or prerequisite setup.",
                             guild.id,
                         )
 
                     else:
-                        logging.warning(
+                        logger.warning(
                             "[⚠️] Failed editing Community settings for guild %s: %s",
                             guild.id,
                             e,
                         )
                 except Exception as e:
-                    logging.warning(
+                    logger.warning(
                         "[⚠️] Failed editing Community settings for guild %s: %s",
                         guild.id,
                         e,
@@ -1497,7 +1605,7 @@ class ServerReceiver:
                             ActionType.EDIT_CHANNEL, guild.id
                         )
                         await ch.edit(category=new_cat)
-                        logging.info(
+                        logger.info(
                             "[✏️] Reparented channel '%s' (ID %d) → category '%s' (ID %d)",
                             ch.name,
                             ch.id,
@@ -1646,7 +1754,7 @@ class ServerReceiver:
                     )
                     await ch.edit(type=ChannelType.news)
                     converted += 1
-                    logging.info(
+                    logger.info(
                         "[✏️] Converted channel '%s' (ID %d) to Announcement",
                         ch.name,
                         ch.id,
@@ -1725,7 +1833,7 @@ class ServerReceiver:
 
             if clone_ch is None and orig_id in valid_upstream_ids:
 
-                logging.info(
+                logger.info(
                     "[🧹] Cloned thread missing (clone=%s) for '%s'; clearing mapping.",
                     clone_id,
                     thread_name,
@@ -1756,7 +1864,7 @@ class ServerReceiver:
                         orig_id,
                     )
                 else:
-                    logging.warning(
+                    logger.warning(
                         "[🗑️] Original thread '%s' no longer exists; clearing mapping (clone=%s)",
                         thread_name,
                         clone_id,
@@ -1767,8 +1875,7 @@ class ServerReceiver:
                             ActionType.DELETE_CHANNEL, guild.id
                         )
                         await clone_ch.delete()
-                        logging.info("[🗑️] Deleted cloned thread %s", clone_id
-                        )
+                        logger.info("[🗑️] Deleted cloned thread %s", clone_id)
                     self.db.delete_forum_thread_mapping(orig_id)
                     deleted_original_gone += 1
                     continue
@@ -1828,8 +1935,7 @@ class ServerReceiver:
                     cloned_guild_id=guild.id,
                 )
 
-                logging.info("[✏️] Renamed thread %s: %r → %r", ch.id, old, src["name"]
-                )
+                logger.info("[✏️] Renamed thread %s: %r → %r", ch.id, old, src["name"])
 
                 renamed += 1
 
@@ -2055,7 +2161,7 @@ class ServerReceiver:
             return
         if not self._can_create_in_category(guild, category):
             cat_label = category.name if category else "<root>"
-            logging.warning(
+            logger.warning(
                 "[⚠️] Category %s full for guild %s (or guild at cap); creating '%s' as standalone",
                 guild.id,
                 cat_label,
@@ -2071,7 +2177,7 @@ class ServerReceiver:
             await self.ratelimit.acquire_for_guild(ActionType.CREATE_CHANNEL, guild.id)
             ch = await guild.create_text_channel(name=name, category=category)
 
-        logging.info("[➕] Created %s channel '%s' #%s", kind, name, ch.id)
+        logger.info("[➕] Created %s channel '%s' #%s", kind, name, ch.id)
 
         if kind == "news":
             if "NEWS" in guild.features:
@@ -2080,17 +2186,16 @@ class ServerReceiver:
                         ActionType.EDIT_CHANNEL, guild.id
                     )
                     await ch.edit(type=ChannelType.news)
-                    logging.info("[✏️] Converted '%s' #%d to Announcement", name, ch.id
-                    )
+                    logger.info("[✏️] Converted '%s' #%d to Announcement", name, ch.id)
                 except HTTPException as e:
-                    logging.warning(
+                    logger.warning(
                         "[⚠️] Could not convert '%s' to Announcement in guild %s: %s; left as text",
                         name,
                         guild.id,
                         e,
                     )
             else:
-                logging.warning(
+                logger.warning(
                     "[⚠️] Guild %s doesn’t support NEWS; '%s' left as text",
                     guild.id,
                     name,
@@ -2160,7 +2265,7 @@ class ServerReceiver:
                         ActionType.EDIT_CHANNEL, ch.guild.id
                     )
                     await ch.edit(name=pinned_name)
-                    logging.info(
+                    logger.info(
                         "[📌] Enforced pinned name on #%d: %r → %r",
                         ch.id,
                         old,
@@ -2175,7 +2280,7 @@ class ServerReceiver:
                     ActionType.EDIT_CHANNEL, ch.guild.id
                 )
                 await ch.edit(name=upstream_name)
-                logging.info(
+                logger.info(
                     "[✏️] Renamed channel #%d: %r → %r",
                     ch.id,
                     old,
@@ -2221,7 +2326,7 @@ class ServerReceiver:
                         ActionType.DELETE_CHANNEL, guild.id
                     )
                     await ch.delete()
-                    logging.info("[🗑️] Deleted category %s", ch.name)
+                    logger.info("[🗑️] Deleted category %s", ch.name)
 
                 self.db.delete_category_mapping(orig_id)
                 self.cat_map.pop(orig_id, None)
@@ -2281,7 +2386,7 @@ class ServerReceiver:
             if ch and delete_channels:
 
                 if ch.id in protected:
-                    logging.info(
+                    logger.info(
                         "[🛡️] Skipping deletion of protected channel #%s (%d) (community/system assignment).",
                         ch.name,
                         ch.id,
@@ -2293,28 +2398,27 @@ class ServerReceiver:
                     )
                     try:
                         await ch.delete()
-                        logging.info("[🗑️] Deleted channel #%s (%d)", ch.name, ch.id
-                        )
+                        logger.info("[🗑️] Deleted channel #%s (%d)", ch.name, ch.id)
                     except discord.HTTPException as e:
 
                         if getattr(
                             e, "code", None
                         ) == 50074 or "required for community" in str(e):
-                            logging.info(
+                            logger.info(
                                 "[🛡️] API blocked deletion of #%s (%d): protected. Will skip and drop mapping.",
                                 getattr(ch, "name", "?"),
                                 ch.id,
                             )
 
                         else:
-                            logging.warning(
+                            logger.warning(
                                 "[⚠️] Failed to delete channel #%d: %s",
                                 ch.id,
                                 e,
                             )
 
             elif not ch:
-                logging.info(
+                logger.info(
                     "[🗑️] Cloned channel #%d not found; removing mapping",
                     clone_id,
                 )
@@ -2377,7 +2481,7 @@ class ServerReceiver:
 
             if has_pin:
 
-                logging.info(
+                logger.info(
                     "[📌] Enforced pinned category name on %d: %r → %r",
                     cat.id,
                     old,
@@ -2386,7 +2490,7 @@ class ServerReceiver:
 
                 return (True, "pinned_enforced")
             else:
-                logging.info(
+                logger.info(
                     "[✏️] Renamed category %d: %r → %r",
                     cat.id,
                     old,
@@ -2448,7 +2552,7 @@ class ServerReceiver:
 
         await self.ratelimit.acquire_for_guild(ActionType.CREATE_CHANNEL, guild.id)
         cat = await guild.create_category(name)
-        logging.info("[➕] Created category '%s' #%d", name, cat.id)
+        logger.info("[➕] Created category '%s' #%d", name, cat.id)
 
         self.db.upsert_category_mapping(
             orig_id=original_id,
@@ -2477,8 +2581,7 @@ class ServerReceiver:
             except Exception:
                 pass
             webhook = await ch.create_webhook(name=name, avatar=avatar_bytes)
-            logging.info("[➕] Created webhook '%s' in channel #%s", name, ch.id
-            )
+            logger.info("[➕] Created webhook '%s' in channel #%s", name, ch.id)
 
             if hasattr(self, "_wh_meta"):
                 self._wh_meta.clear()
@@ -2644,7 +2747,7 @@ class ServerReceiver:
                 moved += 1
                 old_name = actual_parent.name if actual_parent else "standalone"
                 new_name = desired_parent.name if desired_parent else "standalone"
-                logging.info(
+                logger.info(
                     "[✏️] Reparented channel '%s' (ID %d) from '%s' → '%s'",
                     ch.name,
                     clone_id,
@@ -2652,7 +2755,7 @@ class ServerReceiver:
                     new_name,
                 )
             except Exception as e:
-                logging.warning(
+                logger.warning(
                     "[⚠️] Failed to reparent channel '%s' (ID %d): %s",
                     ch.name,
                     clone_id,
@@ -2838,7 +2941,7 @@ class ServerReceiver:
                     cloned_guild_id=guild.id,
                 )
 
-                logging.info(
+                logger.info(
                     "[➕] Recreated missing webhook for channel `%s` #%s",
                     fresh["original_channel_name"],
                     original_id,
@@ -2901,7 +3004,7 @@ class ServerReceiver:
                     )
 
             self.db.delete_forum_thread_mapping(orig_tid)
-            logging.info(
+            logger.info(
                 "[🗑️] Deleted thread mapping for thread %s in guild %s ",
                 orig_tid,
                 clone_gid,
@@ -2961,7 +3064,7 @@ class ServerReceiver:
             try:
                 ch = await self.bot.fetch_channel(cloned_id)
             except NotFound:
-                logging.warning(
+                logger.warning(
                     "[⚠️] Thread renamed in #%s: %r → %r; not found in cloned server, cannot rename",
                     parent_name,
                     old_name,
@@ -5756,7 +5859,7 @@ class ServerReceiver:
         except Exception:
             logger.debug("[shutdown] ws stop failed", exc_info=True)
         finally:
-            logging.info("Server shutdown complete.")
+            logger.info("Server shutdown complete.")
 
         async def _cancel_and_wait(task, name: str):
             if not task:

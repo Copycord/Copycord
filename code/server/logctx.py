@@ -8,24 +8,36 @@
 # =============================================================================
 
 import contextvars
+from typing import Optional
 
-# Who/what is being synced
 sync_host_name = contextvars.ContextVar("sync_host_name", default=None)
 sync_display_id = contextvars.ContextVar("sync_display_id", default=None)
+guild_name = contextvars.ContextVar("guild_name", default=None)
 
 def format_prefix() -> str:
     """
-    Returns a standard prefix like:
-    "[🛠️] [CC-Testing-Client] [khp6n] "
-    or falls back gracefully if we only have one of them.
+    Keep your existing sync prefix helper. We are NOT touching it here.
+    This is still used for sync/structure stuff.
     """
     host = sync_host_name.get()
-    tag = sync_display_id.get()
+    disp = sync_display_id.get()
 
-    if host and tag:
-        return f"[🛠️] [{host}] [{tag}] "
+    parts = []
     if host:
-        return f"[{host}] "
-    if tag:
-        return f"[{tag}] "
+        parts.append(f"[{host}]")
+    if disp:
+        parts.append(f"[{disp}]")
+
+    if parts:
+        return " ".join(parts) + " "
+    return ""
+
+def guild_prefix() -> str:
+    """
+    Returns something like "[Guild A] " if a guild_name is set
+    for this task/context, else "".
+    """
+    g = guild_name.get()
+    if g:
+        return f"[{g} "
     return ""
