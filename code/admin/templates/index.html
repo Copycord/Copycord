@@ -193,9 +193,8 @@
     {% set FIELD_TIPS = {
     "SERVER_TOKEN": "Bot token for the server-side agent.",
     "CLIENT_TOKEN": "Self bot token for the client-side agent.",
-    "COMMAND_USERS": "Comma-separated user IDs allowed to run admin commands.",
+    "COMMAND_USERS": "Comma-separated Discord user IDs allowed to run slash commands.",
     "LOG_LEVEL": "INFO for normal use, DEBUG for troubleshooting.",
-
     "HOST_GUILD_ID": "ID of the host (source) server to mirror. Your self bot must be a member of this server.",
     "CLONE_GUILD_ID": "ID of the destination (clone) server. Your bot must be a member of this server.",
     "DELETE_ROLES": "When enabled, remove any roles in the clone that do not exist in the host.",
@@ -297,10 +296,10 @@
             </div>
           </div>
 
-          <div class="btns">
-            <button class="btn btn-ghost" type="submit" id="cfg-save-btn">Save</button>
-            <button type="button" class="btn btn-ghost" id="cfg-cancel-btn" hidden>Cancel</button>
-          </div>
+        <div class="btns">
+          <button class="btn btn-ghost" type="submit" id="cfg-save-btn">Save</button>
+          <button type="button" class="btn btn-ghost" id="cfg-cancel-btn">Cancel</button>
+        </div>
         </div>
       </form>
     </div>

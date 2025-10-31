@@ -1104,6 +1104,7 @@ def _bootstrap_legacy_mapping_if_needed() -> dict:
 @app.get("/", response_class=None)
 async def index(request: Request):
     env = _read_env()
+
     s_server = await _ws_cmd(SERVER_CTRL_URL, {"cmd": "status"})
     s_client = await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "status"})
 
@@ -1112,9 +1113,10 @@ async def index(request: Request):
     text_keys = [k for k in ALLOWED_ENV if k != "LOG_LEVEL"]
 
     bool_keys = BOOL_KEYS
-    log_levels = ["DEBUG", "INFO", "WARNING", "ERROR"]
     guild_mappings = db.list_guild_mappings()
     mapping_bool_keys = BOOL_KEYS
+
+    current_log_level = (env.get("LOG_LEVEL") or "INFO").upper()
 
     return templates.TemplateResponse(
         "index.html",
@@ -1124,7 +1126,7 @@ async def index(request: Request):
             "env": env,
             "text_keys": text_keys,
             "bool_keys": bool_keys,
-            "log_level": log_levels,
+            "log_level": current_log_level,
             "guild_mappings": guild_mappings,
             "mapping_bool_keys": mapping_bool_keys,
             "server_status": s_server,

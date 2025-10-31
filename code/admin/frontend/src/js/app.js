@@ -143,18 +143,26 @@
 
   (function initToasts() {
     function ensureToastRoot() {
-      if (!document.getElementById("toast-root")) {
-        const div = document.createElement("div");
+      let div = document.getElementById("toast-root");
+      if (!div) {
+        div = document.createElement("div");
         div.id = "toast-root";
-        div.style.position = "fixed";
-        div.style.top = "16px";
-        div.style.right = "16px";
-        div.style.zIndex = "10000";
-        div.style.display = "flex";
-        div.style.flexDirection = "column";
-        div.style.gap = "8px";
         document.body.appendChild(div);
       }
+
+      div.classList.remove("toast-top-center");
+
+      div.classList.add("toast-root");
+
+      div.style.position = "";
+      div.style.top = "";
+      div.style.right = "";
+      div.style.left = "";
+      div.style.transform = "";
+      div.style.display = "";
+      div.style.flexDirection = "";
+      div.style.gap = "";
+      div.style.zIndex = "";
     }
 
     function clearAllToasts() {
@@ -468,76 +476,67 @@
     // but it's harmless to leave it relative.
   }
 
-function setGlobalConfigLocked(running) {
-  const cfgForm = document.getElementById("cfg-form");
-  const saveBtn = document.getElementById("cfg-save-btn");
-  const cancelBtn = document.getElementById("cfg-cancel-btn");
+  function setGlobalConfigLocked(running) {
+    const cfgForm = document.getElementById("cfg-form");
+    const saveBtn = document.getElementById("cfg-save-btn");
+    const cancelBtn = document.getElementById("cfg-cancel-btn");
 
-  if (!cfgForm) return;
+    if (!cfgForm) return;
 
-  // 👇 NEW: mark the whole form locked/unlocked for CSS to key off of
-  if (running) {
-    cfgForm.classList.add("cfg-locked");
-  } else {
-    cfgForm.classList.remove("cfg-locked");
+    if (running) {
+      cfgForm.classList.add("cfg-locked");
+    } else {
+      cfgForm.classList.remove("cfg-locked");
+    }
+
+    cfgForm
+      .querySelectorAll("input, select, textarea, button")
+      .forEach((el) => {
+        const id = el.id || "";
+        const isSave = id === "cfg-save-btn";
+        const isCancel = id === "cfg-cancel-btn";
+        const isReveal = el.classList.contains("reveal-btn");
+
+        if (isSave || isCancel) {
+          el.disabled = running;
+          el.classList.toggle("disabled-btn", running);
+          el.title = running ? "Stop the bot to edit global configuration" : "";
+          return;
+        }
+
+        if (isReveal) {
+          el.disabled = running;
+          el.classList.toggle("disabled-btn", running);
+          el.title = running ? "Stop the bot to view token values" : "";
+          return;
+        }
+
+        el.disabled = running;
+        if (running) {
+          el.classList.add("locked-field");
+        } else {
+          el.classList.remove("locked-field");
+        }
+      });
+
+    cfgForm.querySelectorAll(".dd").forEach((dd) => {
+      if (running) {
+        dd.setAttribute("data-locked", "1");
+      } else {
+        dd.removeAttribute("data-locked");
+      }
+    });
+
+    cfgForm.querySelectorAll(".chips").forEach((chipsEl) => {
+      if (running) {
+        chipsEl.setAttribute("data-locked", "1");
+        chipsEl.classList.add("locked-field");
+      } else {
+        chipsEl.removeAttribute("data-locked");
+        chipsEl.classList.remove("locked-field");
+      }
+    });
   }
-
-  // 1. Lock/unlock standard inputs.
-  cfgForm.querySelectorAll("input, select, textarea, button").forEach((el) => {
-    const id = el.id || "";
-    const isSave = id === "cfg-save-btn";
-    const isCancel = id === "cfg-cancel-btn";
-    const isReveal = el.classList.contains("reveal-btn");
-
-    // Save/Cancel always disabled while running
-    if (isSave || isCancel) {
-      el.disabled = running;
-      el.classList.toggle("disabled-btn", running);
-      el.title = running
-        ? "Stop the bot to edit global configuration"
-        : "";
-      return;
-    }
-
-    // Reveal buttons stay enabled even when locked
-    if (isReveal) {
-      el.disabled = false;
-      el.classList.remove("disabled-btn");
-      el.title = "";
-      return;
-    }
-
-    // Everything else becomes disabled
-    el.disabled = running;
-    if (running) {
-      el.classList.add("locked-field");
-    } else {
-      el.classList.remove("locked-field");
-    }
-  });
-
-  // 2. Custom dropdown lock
-  cfgForm.querySelectorAll(".dd").forEach((dd) => {
-    if (running) {
-      dd.setAttribute("data-locked", "1");
-    } else {
-      dd.removeAttribute("data-locked");
-    }
-  });
-
-  // 3. Chips lock
-  cfgForm.querySelectorAll(".chips").forEach((chipsEl) => {
-    if (running) {
-      chipsEl.setAttribute("data-locked", "1");
-      chipsEl.classList.add("locked-field");
-    } else {
-      chipsEl.removeAttribute("data-locked");
-      chipsEl.classList.remove("locked-field");
-    }
-  });
-}
-
-
 
   function setGuildCardsLocked(running) {
     const cards = document.querySelectorAll("#guild-mapping-list .guild-card");
@@ -566,7 +565,7 @@ function setGlobalConfigLocked(running) {
       const running = getCurrentRunning(data);
 
       setGuildCardsLocked(running);
-      setGlobalConfigLocked(running); 
+      setGlobalConfigLocked(running);
 
       if (lastRunning === null) lastRunning = running;
 
@@ -1067,328 +1066,315 @@ function setGlobalConfigLocked(running) {
     }
   }
 
-class ChipsInput {
-  constructor(root, hidden) {
-    this.root = root;
-    this.hidden = hidden;
+  class ChipsInput {
+    constructor(root, hidden) {
+      this.root = root;
+      this.hidden = hidden;
 
-    this.entry = root.querySelector(".chip-input");
+      this.entry = root.querySelector(".chip-input");
 
-    this.entryWrap = this.entry
-      ? this.entry.closest(".chip-input-wrap") || this.entry
-      : null;
+      this.entryWrap = this.entry
+        ? this.entry.closest(".chip-input-wrap") || this.entry
+        : null;
 
-    this.values = [];
+      this.values = [];
 
-    if (this.entry) {
-      this.entry.addEventListener("keydown", (e) => {
-        // 🔒 block keyboard changes if locked
-        if (this.root.getAttribute("data-locked") === "1") {
-          e.preventDefault();
-          return;
-        }
+      if (this.entry) {
+        this.entry.addEventListener("keydown", (e) => {
+          if (this.root.getAttribute("data-locked") === "1") {
+            e.preventDefault();
+            return;
+          }
 
-        if (e.key === "Enter") {
-          e.preventDefault();
-          this.addFromText(this.entry.value);
-          this.entry.value = "";
-        } else if (
-          e.key === "Backspace" &&
-          this.entry.value === "" &&
-          this.values.length
-        ) {
-          this.remove(this.values[this.values.length - 1]);
-        }
-      });
-
-      this.entry.addEventListener("paste", (e) => {
-        // 🔒 block paste if locked
-        if (this.root.getAttribute("data-locked") === "1") {
-          e.preventDefault();
-          return;
-        }
-
-        const text =
-          (e.clipboardData && e.clipboardData.getData("text")) || "";
-        if (text) {
-          e.preventDefault();
-          this.addFromText(text);
-        }
-      });
-    }
-  }
-
-  addFromText(text) {
-    // if locked somehow got through, still refuse to mutate
-    if (this.root.getAttribute("data-locked") === "1") {
-      return;
-    }
-
-    const parts = String(text)
-      .split(/[^\d]+/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    const ids = [];
-    for (const s of parts) {
-      try {
-        if (!/^\d+$/.test(s)) continue;
-        const n = BigInt(s);
-        if (n <= 0n) continue;
-        ids.push(n.toString());
-      } catch {}
-    }
-    this.addMany(ids);
-  }
-
-  addMany(arr) {
-    if (this.root.getAttribute("data-locked") === "1") {
-      return;
-    }
-
-    let changed = false;
-    for (const id of arr) {
-      if (!this.values.includes(id)) {
-        this.values.push(id);
-        this.renderChip(id);
-        changed = true;
-      }
-    }
-    if (changed) this.syncHidden();
-  }
-
-  remove(id) {
-    if (this.root.getAttribute("data-locked") === "1") {
-      return;
-    }
-
-    const ix = this.values.indexOf(id);
-    if (ix >= 0) {
-      this.values.splice(ix, 1);
-      const chipEl = this.root.querySelector(
-        `.chip[data-id="${CSS.escape(id)}"]`
-      );
-      if (chipEl) chipEl.remove();
-      this.syncHidden();
-    }
-  }
-
-  renderChip(id) {
-    const chip = document.createElement("span");
-    chip.className = "chip";
-    chip.dataset.id = id;
-    chip.textContent = id;
-
-    chip.addEventListener("click", () => {
-      // 🔒 block click-remove if locked
-      if (this.root.getAttribute("data-locked") === "1") {
-        return;
-      }
-      this.remove(id);
-    });
-
-    if (this.entryWrap && this.entryWrap.parentNode === this.root) {
-      this.root.insertBefore(chip, this.entryWrap);
-    } else if (this.entry && this.entry.parentNode === this.root) {
-      this.root.insertBefore(chip, this.entry);
-    } else {
-      this.root.appendChild(chip);
-    }
-  }
-
-  syncHidden() {
-    this.hidden.value = this.values.join(",");
-
-    this.hidden.dispatchEvent(new Event("input", { bubbles: true }));
-  }
-
-  set(list) {
-    // NOTE: set() is used when we load data from server or reset form.
-    // That should still be allowed even if locked, because it's not user editing.
-    // We KEEP this allowed. Do not early-return here.
-
-    this.values = [];
-
-    Array.from(this.root.querySelectorAll(".chip")).forEach((el) =>
-      el.remove()
-    );
-    this.addMany((list || []).map(String));
-    if (this.entry) {
-      this.entry.value = "";
-    }
-  }
-
-  get() {
-    return [...this.values];
-  }
-}
-
-class WordChipsInput {
-  constructor(rootEl, hiddenEl) {
-    this.root = rootEl;
-    this.hidden = hiddenEl;
-    this.values = [];
-
-    this.entryWrap = rootEl.querySelector(".chip-input-wrap") || rootEl;
-    this.entry = rootEl.querySelector(".chip-input");
-
-    this.root.addEventListener("click", (ev) => {
-      const clickedRootItself =
-        ev.target === this.root || ev.target === this.entryWrap;
-
-      // If locked, don’t force focus into the input at all.
-      if (this.root.getAttribute("data-locked") === "1") {
-        return;
-      }
-
-      if (clickedRootItself && this.entry) {
-        this.entry.focus();
-      }
-    });
-
-    if (this.entry) {
-      this.entry.addEventListener("keydown", (ev) => {
-        // 🔒 block keyboard edits when locked
-        if (this.root.getAttribute("data-locked") === "1") {
-          ev.preventDefault();
-          return;
-        }
-
-        if (ev.key === "Enter" || ev.key === ",") {
-          ev.preventDefault();
-          this.addFromText(this.entry.value);
-          this.entry.value = "";
-          return;
-        }
-
-        if (
-          (ev.key === "Backspace" || ev.key === "Delete") &&
-          !this.entry.value
-        ) {
-          if (this.values.length) {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            this.addFromText(this.entry.value);
+            this.entry.value = "";
+          } else if (
+            e.key === "Backspace" &&
+            this.entry.value === "" &&
+            this.values.length
+          ) {
             this.remove(this.values[this.values.length - 1]);
           }
-        }
-      });
+        });
 
-      this.entry.addEventListener("paste", (ev) => {
-        // 🔒 block paste when locked
-        if (this.root.getAttribute("data-locked") === "1") {
-          ev.preventDefault();
-          return;
-        }
+        this.entry.addEventListener("paste", (e) => {
+          if (this.root.getAttribute("data-locked") === "1") {
+            e.preventDefault();
+            return;
+          }
 
-        const clip = ev.clipboardData?.getData("text") || "";
-        if (!clip) return;
-        ev.preventDefault();
-        this.addFromText(clip);
-        this.entry.value = "";
-      });
-    }
-  }
-
-  addFromText(text) {
-    if (this.root.getAttribute("data-locked") === "1") {
-      return;
-    }
-
-    if (!text) return;
-    const parts = String(text)
-      .split(/[,|\n]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    this.addMany(parts);
-  }
-
-  addMany(arr) {
-    if (this.root.getAttribute("data-locked") === "1") {
-      return;
-    }
-
-    let changed = false;
-    for (const raw of arr) {
-      const word = raw.slice(0, 100);
-      if (!this.values.includes(word)) {
-        this.values.push(word);
-        this._renderChip(word);
-        changed = true;
+          const text =
+            (e.clipboardData && e.clipboardData.getData("text")) || "";
+          if (text) {
+            e.preventDefault();
+            this.addFromText(text);
+          }
+        });
       }
     }
-    if (changed) {
-      this._syncHidden();
-    }
-  }
 
-  remove(word) {
-    if (this.root.getAttribute("data-locked") === "1") {
-      return;
-    }
-
-    const idx = this.values.indexOf(word);
-    if (idx !== -1) {
-      this.values.splice(idx, 1);
-    }
-
-    const sel = `.chip[data-id="${CSS.escape(word)}"]`;
-    const chipEl = this.root.querySelector(sel);
-    if (chipEl) chipEl.remove();
-
-    this._syncHidden();
-  }
-
-  _renderChip(word) {
-    const chip = document.createElement("span");
-    chip.className = "chip";
-    chip.dataset.id = word;
-    chip.textContent = word;
-
-    chip.addEventListener("click", () => {
-      // 🔒 block chip removal click if locked
+    addFromText(text) {
       if (this.root.getAttribute("data-locked") === "1") {
         return;
       }
-      this.remove(word);
-    });
 
-    if (this.entryWrap && this.entryWrap.parentNode === this.root) {
-      this.root.insertBefore(chip, this.entryWrap);
-    } else if (this.entry && this.entry.parentNode === this.root) {
-      this.root.insertBefore(chip, this.entry);
-    } else {
-      this.root.appendChild(chip);
+      const parts = String(text)
+        .split(/[^\d]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const ids = [];
+      for (const s of parts) {
+        try {
+          if (!/^\d+$/.test(s)) continue;
+          const n = BigInt(s);
+          if (n <= 0n) continue;
+          ids.push(n.toString());
+        } catch {}
+      }
+      this.addMany(ids);
+    }
+
+    addMany(arr) {
+      if (this.root.getAttribute("data-locked") === "1") {
+        return;
+      }
+
+      let changed = false;
+      for (const id of arr) {
+        if (!this.values.includes(id)) {
+          this.values.push(id);
+          this.renderChip(id);
+          changed = true;
+        }
+      }
+      if (changed) this.syncHidden();
+    }
+
+    remove(id) {
+      if (this.root.getAttribute("data-locked") === "1") {
+        return;
+      }
+
+      const ix = this.values.indexOf(id);
+      if (ix >= 0) {
+        this.values.splice(ix, 1);
+        const chipEl = this.root.querySelector(
+          `.chip[data-id="${CSS.escape(id)}"]`
+        );
+        if (chipEl) chipEl.remove();
+        this.syncHidden();
+      }
+    }
+
+    renderChip(id) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.dataset.id = id;
+      chip.textContent = id;
+
+      chip.addEventListener("click", () => {
+        if (this.root.getAttribute("data-locked") === "1") {
+          return;
+        }
+        this.remove(id);
+      });
+
+      if (this.entryWrap && this.entryWrap.parentNode === this.root) {
+        this.root.insertBefore(chip, this.entryWrap);
+      } else if (this.entry && this.entry.parentNode === this.root) {
+        this.root.insertBefore(chip, this.entry);
+      } else {
+        this.root.appendChild(chip);
+      }
+    }
+
+    syncHidden() {
+      this.hidden.value = this.values.join(",");
+
+      this.hidden.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    set(list) {
+      // That should still be allowed even if locked, because it's not user editing.
+
+      this.values = [];
+
+      Array.from(this.root.querySelectorAll(".chip")).forEach((el) =>
+        el.remove()
+      );
+      this.addMany((list || []).map(String));
+      if (this.entry) {
+        this.entry.value = "";
+      }
+    }
+
+    get() {
+      return [...this.values];
     }
   }
 
-  _syncHidden() {
-    this.hidden.value = this.values.join(",");
+  class WordChipsInput {
+    constructor(rootEl, hiddenEl) {
+      this.root = rootEl;
+      this.hidden = hiddenEl;
+      this.values = [];
 
-    this.hidden.dispatchEvent(new Event("input", { bubbles: true }));
-  }
+      this.entryWrap = rootEl.querySelector(".chip-input-wrap") || rootEl;
+      this.entry = rootEl.querySelector(".chip-input");
 
-  set(list) {
-    // Same logic as ChipsInput.set(): this is for initializing/resetting,
-    // which should still work even if locked.
-    this.values = [];
-    for (const el of Array.from(this.root.querySelectorAll(".chip"))) {
-      el.remove();
+      this.root.addEventListener("click", (ev) => {
+        const clickedRootItself =
+          ev.target === this.root || ev.target === this.entryWrap;
+
+        if (this.root.getAttribute("data-locked") === "1") {
+          return;
+        }
+
+        if (clickedRootItself && this.entry) {
+          this.entry.focus();
+        }
+      });
+
+      if (this.entry) {
+        this.entry.addEventListener("keydown", (ev) => {
+          if (this.root.getAttribute("data-locked") === "1") {
+            ev.preventDefault();
+            return;
+          }
+
+          if (ev.key === "Enter" || ev.key === ",") {
+            ev.preventDefault();
+            this.addFromText(this.entry.value);
+            this.entry.value = "";
+            return;
+          }
+
+          if (
+            (ev.key === "Backspace" || ev.key === "Delete") &&
+            !this.entry.value
+          ) {
+            if (this.values.length) {
+              this.remove(this.values[this.values.length - 1]);
+            }
+          }
+        });
+
+        this.entry.addEventListener("paste", (ev) => {
+          if (this.root.getAttribute("data-locked") === "1") {
+            ev.preventDefault();
+            return;
+          }
+
+          const clip = ev.clipboardData?.getData("text") || "";
+          if (!clip) return;
+          ev.preventDefault();
+          this.addFromText(clip);
+          this.entry.value = "";
+        });
+      }
     }
 
-    const cleaned = Array.isArray(list)
-      ? list.map((x) => String(x).trim()).filter(Boolean)
-      : [];
-    this.addMany(cleaned);
+    addFromText(text) {
+      if (this.root.getAttribute("data-locked") === "1") {
+        return;
+      }
 
-    if (this.entry) {
-      this.entry.value = "";
+      if (!text) return;
+      const parts = String(text)
+        .split(/[,|\n]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      this.addMany(parts);
+    }
+
+    addMany(arr) {
+      if (this.root.getAttribute("data-locked") === "1") {
+        return;
+      }
+
+      let changed = false;
+      for (const raw of arr) {
+        const word = raw.slice(0, 100);
+        if (!this.values.includes(word)) {
+          this.values.push(word);
+          this._renderChip(word);
+          changed = true;
+        }
+      }
+      if (changed) {
+        this._syncHidden();
+      }
+    }
+
+    remove(word) {
+      if (this.root.getAttribute("data-locked") === "1") {
+        return;
+      }
+
+      const idx = this.values.indexOf(word);
+      if (idx !== -1) {
+        this.values.splice(idx, 1);
+      }
+
+      const sel = `.chip[data-id="${CSS.escape(word)}"]`;
+      const chipEl = this.root.querySelector(sel);
+      if (chipEl) chipEl.remove();
+
+      this._syncHidden();
+    }
+
+    _renderChip(word) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.dataset.id = word;
+      chip.textContent = word;
+
+      chip.addEventListener("click", () => {
+        if (this.root.getAttribute("data-locked") === "1") {
+          return;
+        }
+        this.remove(word);
+      });
+
+      if (this.entryWrap && this.entryWrap.parentNode === this.root) {
+        this.root.insertBefore(chip, this.entryWrap);
+      } else if (this.entry && this.entry.parentNode === this.root) {
+        this.root.insertBefore(chip, this.entry);
+      } else {
+        this.root.appendChild(chip);
+      }
+    }
+
+    _syncHidden() {
+      this.hidden.value = this.values.join(",");
+
+      this.hidden.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    set(list) {
+      this.values = [];
+      for (const el of Array.from(this.root.querySelectorAll(".chip"))) {
+        el.remove();
+      }
+
+      const cleaned = Array.isArray(list)
+        ? list.map((x) => String(x).trim()).filter(Boolean)
+        : [];
+      this.addMany(cleaned);
+
+      if (this.entry) {
+        this.entry.value = "";
+      }
+    }
+
+    get() {
+      return [...this.values];
     }
   }
-
-  get() {
-    return [...this.values];
-  }
-}
-
 
   function parseIdList(str) {
     return String(str || "")
@@ -1542,6 +1528,20 @@ class WordChipsInput {
   const REQUIRED_KEYS = ["SERVER_TOKEN", "CLIENT_TOKEN"];
   let cfgValidated = false;
 
+  function setCfgButtonsVisible(show) {
+    const saveBtn = document.getElementById("cfg-save-btn");
+    const cancelBtn = document.getElementById("cfg-cancel-btn");
+    if (!saveBtn || !cancelBtn) return;
+
+    const vis = show ? "visible" : "hidden";
+
+    saveBtn.style.visibility = vis;
+    cancelBtn.style.visibility = vis;
+
+    saveBtn.disabled = !show;
+    cancelBtn.disabled = !show;
+  }
+
   function configState() {
     const get = (id) => (document.getElementById(id)?.value || "").trim();
     const vals = Object.fromEntries(REQUIRED_KEYS.map((k) => [k, get(k)]));
@@ -1575,71 +1575,63 @@ class WordChipsInput {
     });
   }
 
-function validateConfigAndToggle({ decorate = false } = {}) {
-  const btn = document.getElementById("toggle-btn");
-  const form = document.getElementById("toggle-form");
+  function validateConfigAndToggle({ decorate = false } = {}) {
+    const btn = document.getElementById("toggle-btn");
+    const form = document.getElementById("toggle-form");
 
-  // NEW: grab the global config buttons so we can safely reference them
-  const saveBtn = document.getElementById("cfg-save-btn");
-  const cancelBtn = document.getElementById("cfg-cancel-btn");
+    const saveBtn = document.getElementById("cfg-save-btn");
+    const cancelBtn = document.getElementById("cfg-cancel-btn");
 
-  // Are we currently running? (Either server or client up)
-  const runningNow = !!(RUNTIME_CACHE.server || RUNTIME_CACHE.client);
+    const runningNow = !!(RUNTIME_CACHE.server || RUNTIME_CACHE.client);
 
-  // If the bot is running, hard-lock global config buttons here too,
-  // and bail before we do any "maybe enable Save" logic.
-  if (runningNow) {
+    if (runningNow) {
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.classList.add("disabled-btn");
+        saveBtn.title = "Stop the bot to edit global configuration";
+      }
+      if (cancelBtn) {
+        cancelBtn.disabled = true;
+        cancelBtn.classList.add("disabled-btn");
+        cancelBtn.title = "Stop the bot to edit global configuration";
+      }
+      // Do NOT continue; don't let the rest of the function re-enable controls.
+      return;
+    }
+
+    if (!btn || !form) return;
+
+    const { ok, missing } = configState();
+
+    if (decorate === true) {
+      markInvalid(missing);
+    } else if (decorate === "clear") {
+      clearInvalid();
+    }
+
+    const running =
+      form.action.endsWith("/stop") ||
+      btn.textContent.trim().toLowerCase() === "stop";
+
+    const blockStart = !ok && !running;
+    btn.dataset.invalid = blockStart ? "1" : "0";
+    btn.title = blockStart
+      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, and at least one Guild Mapping to start."
+      : "";
+    btn.disabled = !!toggleLocked || blockStart;
+
+    // Also, if we're not running, allow Save/Cancel again (clear disabled state)
     if (saveBtn) {
-      saveBtn.disabled = true;
-      saveBtn.classList.add("disabled-btn");
-      saveBtn.title = "Stop the bot to edit global configuration";
+      saveBtn.disabled = false;
+      saveBtn.classList.remove("disabled-btn");
+      saveBtn.title = "";
     }
     if (cancelBtn) {
-      cancelBtn.disabled = true;
-      cancelBtn.classList.add("disabled-btn");
-      cancelBtn.title = "Stop the bot to edit global configuration";
+      cancelBtn.disabled = false;
+      cancelBtn.classList.remove("disabled-btn");
+      cancelBtn.title = "";
     }
-    // Do NOT continue; don't let the rest of the function re-enable controls.
-    return;
   }
-
-  // Past this point, bot is NOT running. Normal start/stop validation proceeds.
-
-  if (!btn || !form) return;
-
-  const { ok, missing } = configState();
-
-  if (decorate === true) {
-    markInvalid(missing);
-  } else if (decorate === "clear") {
-    clearInvalid();
-  }
-
-  // "running" here = are we *about* to stop (Stop button showing)
-  const running =
-    form.action.endsWith("/stop") ||
-    btn.textContent.trim().toLowerCase() === "stop";
-
-  const blockStart = !ok && !running;
-  btn.dataset.invalid = blockStart ? "1" : "0";
-  btn.title = blockStart
-    ? "Provide SERVER_TOKEN, CLIENT_TOKEN, and at least one Guild Mapping to start."
-    : "";
-  btn.disabled = !!toggleLocked || blockStart;
-
-  // Also, if we're not running, allow Save/Cancel again (clear disabled state)
-  if (saveBtn) {
-    saveBtn.disabled = false;
-    saveBtn.classList.remove("disabled-btn");
-    saveBtn.title = "";
-  }
-  if (cancelBtn) {
-    cancelBtn.disabled = false;
-    cancelBtn.classList.remove("disabled-btn");
-    cancelBtn.title = "";
-  }
-}
-
 
   function collectMappingForm() {
     const id = document.getElementById("map_mapping_id").value.trim() || null;
@@ -1677,6 +1669,11 @@ function validateConfigAndToggle({ decorate = false } = {}) {
     btn.removeAttribute("title");
 
     btn.addEventListener("click", () => {
+      const cfgForm = document.getElementById("cfg-form");
+      if (cfgForm && cfgForm.classList.contains("cfg-locked")) {
+        return;
+      }
+
       const targetId = btn.getAttribute("data-target");
       const input = document.getElementById(targetId);
       if (!input) return;
@@ -2354,11 +2351,38 @@ function validateConfigAndToggle({ decorate = false } = {}) {
     });
 
     const cfgForm = document.getElementById("cfg-form");
-    if (cfgForm)
+    const cfgSaveBtn = document.getElementById("cfg-save-btn");
+    const cfgCancelBtn = document.getElementById("cfg-cancel-btn");
+
+    if (cfgForm && cfgSaveBtn && cfgCancelBtn) {
+      BASELINES.cfg = snapshotForm(cfgForm);
+
+      setCfgButtonsVisible(false);
+
+      const updateCfgDirty = () => {
+        const dirty = snapshotForm(cfgForm) !== BASELINES.cfg;
+        setCfgButtonsVisible(dirty);
+      };
+
+      cfgForm.addEventListener("input", updateCfgDirty);
+      cfgForm.addEventListener("change", updateCfgDirty);
+
       cfgForm.addEventListener("reset", () => {
         cfgValidated = false;
-        setTimeout(() => validateConfigAndToggle({ decorate: false }), 0);
+        setTimeout(() => {
+          BASELINES.cfg = snapshotForm(cfgForm);
+          validateConfigAndToggle({ decorate: "clear" });
+          setCfgButtonsVisible(false);
+        }, 0);
       });
+
+      cfgCancelBtn.addEventListener("click", () => {
+        cfgForm.reset();
+        cfgValidated = false;
+        validateConfigAndToggle({ decorate: "clear" });
+        setCfgButtonsVisible(false);
+      });
+    }
 
     updateToggleButton({ server: {}, client: {} });
 
@@ -2444,26 +2468,6 @@ function validateConfigAndToggle({ decorate = false } = {}) {
       );
     }
 
-    const cfgCancel = document.getElementById("btn-cancel");
-    if (cfgForm && cfgCancel) {
-      BASELINES.cfg = snapshotForm(cfgForm);
-      cfgCancel.hidden = true;
-
-      const updateCfgDirty = () => {
-        cfgCancel.hidden = snapshotForm(cfgForm) === BASELINES.cfg;
-      };
-
-      cfgForm.addEventListener("input", updateCfgDirty);
-      cfgForm.addEventListener("change", updateCfgDirty);
-      cfgForm.addEventListener("reset", () => setTimeout(updateCfgDirty, 0));
-      cfgCancel.addEventListener("click", () => {
-        cfgForm.reset();
-
-        cfgValidated = false;
-        validateConfigAndToggle({ decorate: "clear" });
-      });
-    }
-
     const messages = {
       "/save": "Configuration saved.",
       "/start": "Start command sent.",
@@ -2477,13 +2481,16 @@ function validateConfigAndToggle({ decorate = false } = {}) {
         e.preventDefault();
 
         const actionPath = new URL(f.action, location.origin).pathname;
+
         if (actionPath === "/save") {
           cfgValidated = true;
           const { missing } = configState();
           markInvalid(missing);
         }
+
         const btn = f.querySelector('button[type="submit"],button:not([type])');
 
+        // Block /start if required config isn't ready
         if (f.id === "toggle-form" && actionPath === "/start") {
           const { ok, missing } = configState();
           if (!ok) {
@@ -2526,7 +2533,6 @@ function validateConfigAndToggle({ decorate = false } = {}) {
             if (actionPath === "/stop") {
               try {
                 localStorage.setItem("bf:__wipe", String(Date.now()));
-
                 [
                   "bf:running",
                   "bf:launching",
@@ -2547,12 +2553,32 @@ function validateConfigAndToggle({ decorate = false } = {}) {
                 BASELINES.cmd_users_csv = cmdHidden.value;
                 cmdHidden.defaultValue = cmdHidden.value;
               }
+
               if (cfgForm) {
                 BASELINES.cfg = snapshotForm(cfgForm);
-                document
-                  .getElementById("btn-cancel")
-                  ?.setAttribute("hidden", "");
+
+                // update each field's default so cfgForm.reset() goes back to this saved state
+                Array.from(cfgForm.elements).forEach((el) => {
+                  if (!el || !el.tagName) return;
+                  const tag = el.tagName.toUpperCase();
+
+                  if (tag === "INPUT" || tag === "TEXTAREA") {
+                    if (el.type === "checkbox" || el.type === "radio") {
+                      el.defaultChecked = el.checked;
+                    } else {
+                      el.defaultValue = el.value;
+                    }
+                  } else if (tag === "SELECT") {
+                    Array.from(el.options).forEach((opt) => {
+                      opt.defaultSelected = opt.selected;
+                    });
+                  }
+                });
+
+                // hide Save / Cancel again, but keep their space so the card doesn't jump
+                setCfgButtonsVisible(false);
               }
+
               fetchAndRenderStatus();
             } else if (isFilterSave) {
               const ff = document.getElementById("form-filters");
@@ -2584,7 +2610,6 @@ function validateConfigAndToggle({ decorate = false } = {}) {
     initChips();
 
     const modalFiltersForm = document.getElementById("form-filters");
-
     if (modalFiltersForm) {
       modalFiltersForm.addEventListener("input", updateFiltersDirtyForModal);
       modalFiltersForm.addEventListener("change", updateFiltersDirtyForModal);
