@@ -177,6 +177,7 @@ ALLOWED_ENV = [
 REQUIRED = ["SERVER_TOKEN", "CLIENT_TOKEN"]
 
 BOOL_KEYS = [
+    "ENABLE_CLONING",
     "DELETE_CHANNELS",
     "DELETE_THREADS",
     "DELETE_MESSAGES",
@@ -186,7 +187,6 @@ BOOL_KEYS = [
     "CLONE_STICKER",
     "CLONE_ROLES",
     "MIRROR_ROLE_PERMISSIONS",
-    "ENABLE_CLONING",
     "MIRROR_CHANNEL_PERMISSIONS",
 ]
 DEFAULTS: Dict[str, str] = {
@@ -509,6 +509,139 @@ async def _close_ws_quietly(
 ):
     with contextlib.suppress(RuntimeError, WebSocketDisconnect, Exception):
         await ws.close(code=code, reason=reason)
+
+
+DISCORD_API_BASE = "https://discord.com/api/v10"
+
+
+async def _check_client_token_valid(raw_token: str) -> bool:
+    """
+    Returns True if CLIENT_TOKEN (selfbot/user token) is a valid session.
+    We just hit /users/@me with the raw token.
+    """
+    token = (raw_token or "").strip()
+    if not token:
+        return False
+
+    url = f"{DISCORD_API_BASE}/users/@me"
+    headers = {
+        "Authorization": token,
+        "User-Agent": "Copycord-ConfigCheck/1.0",
+    }
+
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(url, headers=headers, timeout=10) as resp:
+
+                return resp.status == 200
+    except Exception:
+        return False
+
+
+async def _check_server_token_valid(bot_token: str) -> bool:
+    """
+    Returns True if SERVER_TOKEN (bot token) is valid.
+    We hit /users/@me but with Authorization: Bot <token>.
+    """
+    token = (bot_token or "").strip()
+    if not token:
+        return False
+
+    url = f"{DISCORD_API_BASE}/users/@me"
+    headers = {
+        "Authorization": f"Bot {token}",
+        "User-Agent": "Copycord-ConfigCheck/1.0",
+    }
+
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(url, headers=headers, timeout=10) as resp:
+
+                return resp.status == 200
+    except Exception:
+        return False
+
+
+async def _verify_tokens_for_save(values: dict[str, str]) -> list[str]:
+    """
+    Run both checks and build human-friendly error messages.
+    Called by /save before we actually persist.
+    """
+    errs: list[str] = []
+
+    client_ok = await _check_client_token_valid(values.get("CLIENT_TOKEN", ""))
+    if not client_ok:
+        errs.append(
+            "CLIENT_TOKEN is invalid. "
+            "Make sure the self token is correct and still active."
+        )
+
+    server_ok = await _check_server_token_valid(values.get("SERVER_TOKEN", ""))
+    if not server_ok:
+        errs.append(
+            "SERVER_TOKEN is invalid. "
+            "Make sure the bot token is correct and the bot wasn't reset."
+        )
+
+    return errs
+
+
+async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
+    """
+    Returns True if the user account (CLIENT_TOKEN / self bot)
+    is a member of guild_id.
+    Strategy: GET /users/@me/guilds using the user token.
+    """
+    if not client_token or not guild_id:
+        return False
+
+    url = f"{DISCORD_API_BASE}/users/@me/guilds"
+    headers = {
+        "Authorization": client_token,
+    }
+
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(url, headers=headers, timeout=10) as resp:
+                if resp.status != 200:
+
+                    return False
+                data = await resp.json()
+    except Exception:
+        return False
+
+    g_as_str = str(guild_id)
+    for g in data:
+        if str(g.get("id", "")) == g_as_str:
+            return True
+
+    return False
+
+
+async def _bot_in_guild(server_token: str, guild_id: int) -> bool:
+    """
+    Returns True if the bot (SERVER_TOKEN) is in guild_id.
+    Strategy: GET /guilds/{guild_id} with Bot <token>.
+    If the bot is *not* in that guild, Discord responds 403.
+    """
+    if not server_token or not guild_id:
+        return False
+
+    url = f"{DISCORD_API_BASE}/guilds/{guild_id}?with_counts=true"
+    headers = {
+        "Authorization": f"Bot {server_token}",
+    }
+
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(url, headers=headers, timeout=10) as resp:
+
+                if resp.status == 200:
+                    return True
+
+                return False
+    except Exception:
+        return False
 
 
 @app.websocket("/bus")
@@ -1019,13 +1152,29 @@ async def health():
 @app.post("/save")
 async def save(request: Request):
     form = await request.form()
-    values = {k: str(form.get(k, "")).strip() for k in ALLOWED_ENV}
+
+    values = {k: str(form.get(k, "") or "").strip() for k in ALLOWED_ENV}
+
     LOGGER.debug("POST /save | form=%s", _redact_dict(values))
+
     errs = _validate(values)
+
+    if not errs:
+        token_errs = await _verify_tokens_for_save(values)
+        if token_errs:
+            errs.extend(token_errs)
+
     if errs:
         LOGGER.warning("POST /save invalid | errs=%s", errs)
-        return PlainTextResponse("Invalid config: " + "; ".join(errs), status_code=400)
+        return PlainTextResponse(
+            "Invalid config: " + "; ".join(errs),
+            status_code=400,
+        )
+
     _write_env(values)
+
+    # /save didn't do it.)
+
     return RedirectResponse("/", status_code=303)
 
 
@@ -1542,64 +1691,64 @@ async def api_status_alias():
 
 
 @app.get("/filters/{mapping_id}")
-async def get_filters_for_mapping(mapping_id: str):
-    """
-    Return whitelist / exclude for this mapping_id only.
-    {
-      "whitelist": { "category": [...], "channel": [...] },
-      "exclude":   { "category": [...], "channel": [...] }
-    }
-    """
-    m = db.get_mapping_by_id(mapping_id)
-    if not m:
-        return JSONResponse(
-            {"error": "mapping_not_found"}, status_code=404
-        )
+async def api_get_filters(mapping_id: str):
+    filters = db.get_filters_for_mapping(mapping_id)
+    return JSONResponse(
+        {
+            "wl_categories": filters["whitelist"]["category"],
+            "wl_channels": filters["whitelist"]["channel"],
+            "ex_categories": filters["exclude"]["category"],
+            "ex_channels": filters["exclude"]["channel"],
+            "blocked_words": filters.get("blocked_words", []),
+        }
+    )
 
-    flt = db.get_filters_for_mapping(mapping_id)
-
-    return JSONResponse(flt)
 
 @app.post("/filters/{mapping_id}/save")
-async def save_filters_for_mapping(mapping_id: str, request: Request):
-    """
-    Replace the allow/deny lists for just this mapping.
-    Expects same form fields we already collect in app.js:
-      wl_categories, wl_channels, ex_categories, ex_channels
-    """
-
-    m = db.get_mapping_by_id(mapping_id)
-    if not m:
-        return PlainTextResponse("Unknown mapping", status_code=404)
-
+async def api_save_filters(mapping_id: str, request: Request):
     form = await request.form()
 
-    def parse_csv(name: str):
-        raw = form.get(name, "") or ""
-        parts = [p.strip() for p in re.split(r"[^\d]+", raw) if p.strip()]
-        seen = set()
-        out = []
-        for p in parts:
-            if p not in seen:
-                seen.add(p)
-                out.append(p)
+    def _split_csv_ids(s: str) -> list[int]:
+        out: list[int] = []
+        for tok in str(s or "").split(","):
+            tok = tok.strip()
+            if not tok:
+                continue
+            try:
+                out.append(int(tok))
+            except Exception:
+                pass
         return out
 
-    wl_categories = parse_csv("wl_categories")
-    wl_channels   = parse_csv("wl_channels")
-    ex_categories = parse_csv("ex_categories")
-    ex_channels   = parse_csv("ex_channels")
+    def _split_csv_words(s: str) -> list[str]:
+        out: list[str] = []
+        for tok in str(s or "").split(","):
+            w = tok.strip()
+            if w and w not in out:
+                out.append(w)
+        return out
+
+    wl_categories = _split_csv_ids(form.get("wl_categories", ""))
+    wl_channels = _split_csv_ids(form.get("wl_channels", ""))
+    ex_categories = _split_csv_ids(form.get("ex_categories", ""))
+    ex_channels = _split_csv_ids(form.get("ex_channels", ""))
+
+    blocked_words = _split_csv_words(form.get("blocked_words", ""))
 
     db.replace_filters_for_mapping(
-        mapping_id,
+        mapping_id=mapping_id,
         wl_categories=wl_categories,
         wl_channels=wl_channels,
         ex_categories=ex_categories,
         ex_channels=ex_channels,
     )
 
-    return PlainTextResponse("ok", status_code=200)
+    db.replace_blocked_keywords_for_mapping(
+        mapping_id=mapping_id,
+        words=blocked_words,
+    )
 
+    return JSONResponse({"ok": True})
 
 
 @app.post("/api/filters/blacklist", response_class=JSONResponse)
@@ -2747,50 +2896,141 @@ async def api_list_guild_mappings():
     return JSONResponse({"ok": True, "mappings": rows})
 
 
-@app.post("/api/guild-mappings", response_class=JSONResponse)
+@app.post("/api/guild-mappings")
 async def api_create_mapping(payload: dict = Body(...)):
+
+    mapping_name = (payload.get("mapping_name") or "").strip()
+
     try:
-        original_id = int(payload.get("original_guild_id"))
-        clone_id = int(payload.get("cloned_guild_id"))
+        host_gid = int(payload.get("original_guild_id") or 0)
+        clone_gid = int(payload.get("cloned_guild_id") or 0)
     except Exception:
         return JSONResponse(
-            {"ok": False, "error": "invalid-guild-ids"}, status_code=400
+            {"ok": False, "error": "Invalid HOST_GUILD_ID or CLONE_GUILD_ID."},
+            status_code=400,
         )
 
-    mapping_id = db.upsert_guild_mapping(
-        mapping_id=None,
-        mapping_name=str(payload.get("mapping_name") or "").strip(),
-        original_guild_id=original_id,
-        original_guild_name=str(payload.get("original_guild_name") or ""),
-        original_guild_icon_url=(payload.get("original_guild_icon_url") or None),
-        cloned_guild_id=clone_id,
-        cloned_guild_name=str(payload.get("cloned_guild_name") or ""),
-        settings=payload.get("settings") or {},
-    )
-
-    return JSONResponse({"ok": True, "mapping_id": mapping_id})
-
-
-@app.patch("/api/guild-mappings/{mapping_id}", response_class=JSONResponse)
-async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
-    try:
-        original_id = int(payload.get("original_guild_id"))
-        clone_id = int(payload.get("cloned_guild_id"))
-    except Exception:
+    if not mapping_name:
         return JSONResponse(
-            {"ok": False, "error": "invalid-guild-ids"}, status_code=400
+            {"ok": False, "error": "Missing mapping name."},
+            status_code=400,
+        )
+
+    settings = payload.get("settings") or {}
+
+    existing_host = db.get_mapping_by_original(host_gid)
+    if existing_host:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "That HOST_GUILD_ID is already mapped. Each HOST_GUILD_ID can only be used once.",
+                "which": "original_guild_id",
+            },
+            status_code=400,
+        )
+
+    existing_clone = db.get_mapping_by_clone(clone_gid)
+    if existing_clone:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "That CLONE_GUILD_ID is already mapped. Each CLONE_GUILD_ID can only be used once.",
+                "which": "cloned_guild_id",
+            },
+            status_code=400,
+        )
+
+    client_token = db.get_config("CLIENT_TOKEN", "")
+    server_token = db.get_config("SERVER_TOKEN", "")
+
+    in_host = await _selfbot_in_guild(client_token, host_gid)
+    if not in_host:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "Your CLIENT_TOKEN user is not in the HOST_GUILD_ID you entered.",
+                "which": "original_guild_id",
+            },
+            status_code=400,
+        )
+
+    in_clone = await _bot_in_guild(server_token, clone_gid)
+    if not in_clone:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "Your SERVER_TOKEN bot is not in the CLONE_GUILD_ID you entered.",
+                "which": "cloned_guild_id",
+            },
+            status_code=400,
+        )
+
+    try:
+        new_mapping_id = db.upsert_guild_mapping(
+            mapping_id=None,
+            mapping_name=mapping_name,
+            original_guild_id=host_gid,
+            original_guild_name="",
+            original_guild_icon_url="",
+            cloned_guild_id=clone_gid,
+            cloned_guild_name="",
+            settings=settings,
+        )
+    except sqlite3.IntegrityError:
+
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "HOST_GUILD_ID and CLONE_GUILD_ID must each be unique. You can't map either ID twice.",
+            },
+            status_code=400,
+        )
+
+    return JSONResponse({"ok": True, "mapping_id": new_mapping_id}, status_code=200)
+
+
+@app.patch("/api/guild-mappings/{mapping_id}")
+async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
+    mapping_name = (payload.get("mapping_name") or "").strip()
+    original_guild_id = int(payload.get("original_guild_id") or 0)
+    cloned_guild_id = int(payload.get("cloned_guild_id") or 0)
+    settings = payload.get("settings") or {}
+
+    client_token = db.get_config("CLIENT_TOKEN", "")
+    server_token = db.get_config("SERVER_TOKEN", "")
+
+    in_host = await _selfbot_in_guild(client_token, original_guild_id)
+    in_clone = await _bot_in_guild(server_token, cloned_guild_id)
+
+    if not in_host:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "Your client (self bot) is not in the Original Guild ID you entered.",
+                "which": "original_guild_id",
+            },
+            status_code=400,
+        )
+
+    if not in_clone:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "Your server bot is not in the Cloned Guild ID you entered.",
+                "which": "cloned_guild_id",
+            },
+            status_code=400,
         )
 
     db.upsert_guild_mapping(
         mapping_id=mapping_id,
-        mapping_name=str(payload.get("mapping_name") or "").strip(),
-        original_guild_id=original_id,
-        original_guild_name=str(payload.get("original_guild_name") or ""),
-        original_guild_icon_url=(payload.get("original_guild_icon_url") or None),
-        cloned_guild_id=clone_id,
-        cloned_guild_name=str(payload.get("cloned_guild_name") or ""),
-        settings=payload.get("settings") or {},
-        overwrite_identity=False,
+        mapping_name=mapping_name,
+        original_guild_id=original_guild_id,
+        original_guild_name="",
+        original_guild_icon_url="",
+        cloned_guild_id=cloned_guild_id,
+        cloned_guild_name="",
+        settings=settings,
     )
 
     return JSONResponse({"ok": True, "mapping_id": mapping_id})

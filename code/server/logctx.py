@@ -39,5 +39,5 @@ def guild_prefix() -> str:
     """
     g = guild_name.get()
     if g:
-        return f"[{g} "
+        return f"[{g}] "
     return ""

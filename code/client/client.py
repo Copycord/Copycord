@@ -847,7 +847,7 @@ class ClientListener:
         else:
             logger.info(
                 "[🔕] No eligible mapped origin guilds with cloning enabled; "
-                "skipping periodic sync."
+                "skipping sync."
             )
 
         if self._ws_task is None:

@@ -548,7 +548,10 @@ select.is-hidden-native {
   box-shadow: var(--shadow), 0 14px 50px rgba(0, 0, 0, 0.45);
   padding: 6px;
   max-height: 260px;
-  overflow: auto;
+
+  overflow-y: auto;
+  overflow-x: hidden;
+
   display: none;
   z-index: 55;
 }
@@ -563,6 +566,22 @@ select.is-hidden-native {
   user-select: none;
   transition: background 0.15s ease, color 0.15s ease;
 }
+
+.dd-option {
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+
 .dd-option.kbd-hover,
 .dd-option:hover {
   background: rgba(167, 139, 250, 0.12);
@@ -1562,7 +1581,7 @@ body {
 .info-dot:focus-visible,
 .info-dot:hover {
   border-color: var(--accent);
-  box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.18);
+  box-shadow: none;
 }
 .tip-bubble {
   position: absolute;
@@ -2749,6 +2768,7 @@ body {
     );
   border: 1px solid rgba(255, 255, 255, 0.06);
 }
+
 .guild-icon {
   width: 88px;
   height: 88px;
@@ -6523,16 +6543,19 @@ body.modal-open #bf-batchbar {
 }
 
 .guild-card-name-title {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  font-size: 13px;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  max-width: 100%;
+
+  font-size: 12px;
   font-weight: 600;
   line-height: 1.3;
   color: var(--text);
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
+
+  word-break: break-word;
+  white-space: normal;
 }
 
 .guild-card-name-meta {
@@ -6551,13 +6574,12 @@ body.modal-open #bf-batchbar {
   flex-shrink: 0;
 }
 
-/* Smaller action buttons on guild cards */
 .guild-card .btn-icon {
-  width: 24px;          /* ↓ from 28 */
-  height: 24px;         /* ↓ from 28 */
+  width: 24px;
+  height: 24px;
   min-height: 24px;
-  border-radius: 6px;   /* ↓ from 8 */
-  font-size: 12px;      /* not used for SVG, keeps fallback tidy */
+  border-radius: 6px;
+  font-size: 12px;
   line-height: 1;
   cursor: pointer;
 
@@ -6566,25 +6588,20 @@ body.modal-open #bf-batchbar {
   color: var(--accent);
 
   box-shadow: none;
-  transition:
-    background-color .12s ease,
-    border-color .12s ease,
-    color .12s ease,
-    transform .08s ease;
+  transition: background-color 0.12s ease, border-color 0.12s ease,
+    color 0.12s ease, transform 0.08s ease;
 }
 
-/* Keep icons crisp inside the smaller buttons */
 .guild-card .btn-icon svg {
-  width: 16px;   /* scale icon down to match 24px button */
+  width: 16px;
   height: 16px;
   display: block;
-  stroke: currentColor;  /* for outline icons */
-  fill: none;            /* keep outline look; remove if you use filled icons */
+  stroke: currentColor;
+  fill: none;
 }
 
-/* Optional: slightly tighter spacing between buttons */
 .guild-card-actions {
-  gap: 6px;   /* ↓ from 8 if you want them closer */
+  gap: 6px;
 }
 
 .guild-card .btn-icon:hover {
@@ -6596,7 +6613,6 @@ body.modal-open #bf-batchbar {
 .guild-card .btn-icon:active {
   transform: translateY(1px);
 }
-
 
 .guild-config-header {
   display: flex;
@@ -6815,7 +6831,6 @@ body.modal-open #bf-batchbar {
   box-sizing: border-box;
 
   background: #0f0820;
-  border-top: 1px solid var(--border);
   overflow-x: hidden;
 }
 
@@ -7080,7 +7095,7 @@ body.modal-open {
   border-radius: inherit;
   cursor: default;
   pointer-events: auto;
-  background: rgba(0, 0, 0, 0); /* fully transparent */
+  background: rgba(0, 0, 0, 0);
   z-index: 5;
 }
 
@@ -7113,7 +7128,6 @@ body.modal-open {
 }
 
 #filters-modal .modal-content {
-  /* make this modal a little wider/taller than default */
   width: min(960px, 94vw);
   max-height: 85vh;
   margin: 5vh auto;
@@ -7133,24 +7147,22 @@ body.modal-open {
   margin: 0;
 }
 
-/* scroll area inside the modal */
 #filters-modal .padded {
   padding: 20px;
   padding-top: 16px;
   padding-bottom: 20px;
   overflow-y: auto;
-  max-height: calc(85vh - 60px); /* header height buffer */
+  max-height: calc(85vh - 60px);
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
 
-/* collapsible "How these filters work" block */
 #filters-modal details.info-details {
   margin: 0;
   border-radius: 12px;
-  border: 1px solid rgba(255,255,255,0.08);
-  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
 }
 #filters-modal details.info-details > summary {
   padding: 12px 14px;
@@ -7163,14 +7175,13 @@ body.modal-open {
   font-size: 13px;
   line-height: 1.5;
   color: var(--text);
-  border-top: 1px solid rgba(255,255,255,0.07);
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
 }
 
-/* two-column layout with a little more air */
 #filters-modal .filters-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 24px; /* was 1rem */
+  gap: 24px;
 }
 @media (max-width: 900px) {
   #filters-modal .filters-grid {
@@ -7178,7 +7189,6 @@ body.modal-open {
   }
 }
 
-/* each side card */
 #filters-modal fieldset.filters-col {
   border: 1px solid var(--border);
   background: #140b26;
@@ -7195,7 +7205,6 @@ body.modal-open {
   line-height: 1.3;
 }
 
-/* spacing for each chips field block */
 #filters-modal .field {
   display: flex;
   flex-direction: column;
@@ -7206,7 +7215,6 @@ body.modal-open {
   margin-top: 0;
 }
 
-/* label row + tooltip icon */
 #filters-modal .field > label.has-tip {
   display: flex;
   align-items: center;
@@ -7217,7 +7225,6 @@ body.modal-open {
   margin: 0;
 }
 
-/* chips container style in the modal */
 #filters-modal .chips {
   background: #0f0820;
   border: 1px solid var(--border);
@@ -7236,11 +7243,10 @@ body.modal-open {
   box-shadow: none;
 }
 
-/* each chip pill */
 #filters-modal .chip {
   margin: 0;
-  background: rgba(255,255,255,0.05) !important;
-  border: 1px solid rgba(255,255,255,0.1) !important;
+  background: rgba(255, 255, 255, 0.05) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
   border-radius: 8px;
   padding: 6px 10px;
   font-size: 13px;
@@ -7248,11 +7254,10 @@ body.modal-open {
   cursor: pointer;
 }
 #filters-modal .chip:hover {
-  background: rgba(255,255,255,0.08) !important;
-  border-color: rgba(255,255,255,0.15) !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
 }
 
-/* chip input inside chips row */
 #filters-modal .chip-input {
   flex: 1 1 180px;
   min-width: 140px;
@@ -7266,7 +7271,6 @@ body.modal-open {
   outline: none;
 }
 
-/* helper line under each chips block */
 #filters-modal .tip {
   font-size: 12px;
   line-height: 1.4;
@@ -7275,7 +7279,6 @@ body.modal-open {
   margin-top: -2px;
 }
 
-/* tooltip bubble position in this modal */
 #filters-modal .tip-bubble {
   top: calc(100% + 8px);
   left: 0;
@@ -7286,7 +7289,6 @@ body.modal-open {
   word-break: break-word;
 }
 
-/* footer row (Save / Cancel buttons) */
 #filters-modal .modal-footer-row {
   display: flex;
   flex-wrap: wrap;
@@ -7296,18 +7298,115 @@ body.modal-open {
   border-top: none;
 }
 
-/* make Save stronger in this modal */
 #filters-modal #filters-save-btn.btn-primary {
   min-height: 42px;
   padding: 10px 16px;
   font-size: 14px;
   border-radius: 12px;
-  background: linear-gradient(
-    180deg,
-    var(--primary),
-    var(--primary-700)
-  );
+  background: linear-gradient(180deg, var(--primary), var(--primary-700));
   border-color: #3b2168;
   color: #fff;
 }
 
+.filters-col.filters-words {
+  grid-column: 1 / -1;
+}
+
+.field-token .token-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+}
+
+.field-token .token-input {
+  width: 100%;
+  padding: 12px 36px 12px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #140b26;
+  color: var(--text);
+  outline: 0;
+  transition: border 0.2s ease, box-shadow 0.2s ease;
+  box-sizing: border-box;
+}
+
+.field-token .token-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.15);
+  outline: 0;
+}
+
+.reveal-btn {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  line-height: 0;
+  cursor: pointer;
+
+  color: var(--text);
+  opacity: 0.6;
+  outline: none;
+}
+
+.reveal-btn:hover,
+.reveal-btn:focus {
+  opacity: 1;
+  background: transparent;
+  box-shadow: none;
+}
+
+.reveal-btn svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+  color: var(--text);
+}
+
+.guild-card .btn-icon.delete-mapping-btn:hover,
+.guild-card .btn-icon.delete-mapping-btn:focus {
+  background: rgba(255, 76, 76, 0.1);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.locked-field {
+  opacity: 0.5;
+}
+
+.dd[data-locked='1'] .dd-toggle {
+  pointer-events: none;
+  cursor: not-allowed !important;
+  opacity: 0.5;
+}
+
+.dd[data-locked='1'].open .dd-menu {
+  display: none !important;
+}
+
+.chips[data-locked='1'] {
+  pointer-events: none;
+  opacity: 0.5;
+  cursor: not-allowed !important;
+}
+
+.chips[data-locked='1'] .chip-input {
+  caret-color: transparent;
+}
+
+#cfg-form.cfg-locked .info-dot {
+  cursor: default;
+  pointer-events: none;
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+#cfg-form.cfg-locked .info-dot:hover,
+#cfg-form.cfg-locked .info-dot:focus-visible {
+  border-color: var(--border);
+  box-shadow: none;
+}

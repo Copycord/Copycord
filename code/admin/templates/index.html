@@ -209,7 +209,8 @@
     "CLONE_ROLES": "When enabled, synchronize roles from the host to the clone.",
     "MIRROR_CHANNEL_PERMISSIONS": "When enabled, channel permissions will sync with the host. CLONE_ROLES must be
     enabled.",
-    "ENABLE_CLONING": "Master switch to enable or disable cloning."
+    "ENABLE_CLONING": "Master switch for cloning. Turn this off if you don't want Copycord to actively clone/sync
+    servers, but still want to use the other features."
     } %}
 
     <div class="card" id="global-config-card">
@@ -219,7 +220,7 @@
         <div class="grid">
           {% for k in text_keys if k != 'COMMAND_USERS' %}
           {% set is_token = 'TOKEN' in k %}
-          <div class="field">
+          <div class="field field-token">
             <label for="{{ k }}" class="has-tip">
               <span class="label-text">{{ k }}</span>
               {% if FIELD_TIPS.get(k) %}
@@ -231,10 +232,35 @@
               {% endif %}
             </label>
 
-            <input type="{{ 'password' if is_token else 'text' }}" id="{{ k }}" name="{{ k }}"
-              value="{{ env.get(k,'') }}" {% if is_token %}autocomplete="off" spellcheck="false" {% endif %} />
+            {% if is_token %}
+            <div class="token-wrap">
+              <input type="password" id="{{ k }}" name="{{ k }}" value="{{ env.get(k,'') }}" autocomplete="off"
+                spellcheck="false" class="token-input" />
+
+              <button type="button" class="reveal-btn" data-target="{{ k }}" aria-pressed="false" title="Show">
+                <!-- eye (visible) -->
+                <svg class="icon-eye" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                  viewBox="0 0 24 24">
+                  <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+
+                <!-- eye-off (hidden) -->
+                <svg class="icon-eye-off" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                  viewBox="0 0 24 24" style="display:none">
+                  <path
+                    d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.4 18.4 0 0 1 5.06-5.94M9.9 9.9A3 3 0 0 0 9 12a3 3 0 0 0 3 3 3 3 0 0 0 2.1-.9M1 1l22 22" />
+                </svg>
+              </button>
+            </div>
+            {% else %}
+            <input type="text" id="{{ k }}" name="{{ k }}" value="{{ env.get(k,'') }}" />
+            {% endif %}
           </div>
           {% endfor %}
+
 
           <div class="field field-chips">
             <label for="cmd_users_input" class="has-tip">
@@ -280,11 +306,11 @@
     </div>
 
     <div class="card" id="guild-config-card">
-      <h3>Guild Configuration</h3>
+      <h3>Cloning Configuration</h3>
 
       <div class="guild-config-header">
         <p class="text-subtle">
-          Map a host server to clone server and enable mirroring.
+          Map a source server to a target server to enable cloning for that pair
         </p>
       </div>
 
@@ -509,6 +535,32 @@
               </div>
             </fieldset>
           </div>
+
+          <fieldset class="filters-col filters-words">
+            <legend>Word Filters</legend>
+
+            <div class="field">
+              <label for="blocked_words_input" class="has-tip">
+                <span class="label-text">Blocked Words / Phrases</span>
+                <button type="button" class="info-dot"
+                  aria-label="Messages containing these words will NOT sync for this mapping."
+                  aria-describedby="tip-blocked_words"></button>
+                <span id="tip-blocked_words" role="tooltip" class="tip-bubble">
+                  Any message that contains one of these words will NOT
+                  be forwarded for this guild mapping.
+                </span>
+              </label>
+
+              <div class="chips" data-chips="blocked_words">
+                <span class="chip-input-wrap">
+                  <input class="chip-input" id="blocked_words_input" type="text" inputmode="text"
+                    placeholder="Add word or phrase…" />
+                </span>
+              </div>
+
+              <input type="hidden" id="blocked_words" name="blocked_words" value="">
+            </div>
+          </fieldset>
 
           <div class="btns modal-footer-row">
             <button id="filters-save-btn" type="submit" class="btn btn-ghost">

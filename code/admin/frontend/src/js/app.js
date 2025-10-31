@@ -31,6 +31,20 @@
     `,
   };
 
+  const DEFAULT_MAPPING_SETTINGS = {
+    DELETE_CHANNELS: true,
+    DELETE_THREADS: true,
+    DELETE_MESSAGES: true,
+    EDIT_MESSAGES: true,
+    DELETE_ROLES: true,
+    CLONE_EMOJI: true,
+    CLONE_STICKER: true,
+    CLONE_ROLES: true,
+    MIRROR_ROLE_PERMISSIONS: false,
+    MIRROR_CHANNEL_PERMISSIONS: false,
+    ENABLE_CLONING: true,
+  };
+
   let lastFocusLog = null;
   let lastFocusConfirm = null;
   let lastFocusMapping = null;
@@ -454,6 +468,77 @@
     // but it's harmless to leave it relative.
   }
 
+function setGlobalConfigLocked(running) {
+  const cfgForm = document.getElementById("cfg-form");
+  const saveBtn = document.getElementById("cfg-save-btn");
+  const cancelBtn = document.getElementById("cfg-cancel-btn");
+
+  if (!cfgForm) return;
+
+  // 👇 NEW: mark the whole form locked/unlocked for CSS to key off of
+  if (running) {
+    cfgForm.classList.add("cfg-locked");
+  } else {
+    cfgForm.classList.remove("cfg-locked");
+  }
+
+  // 1. Lock/unlock standard inputs.
+  cfgForm.querySelectorAll("input, select, textarea, button").forEach((el) => {
+    const id = el.id || "";
+    const isSave = id === "cfg-save-btn";
+    const isCancel = id === "cfg-cancel-btn";
+    const isReveal = el.classList.contains("reveal-btn");
+
+    // Save/Cancel always disabled while running
+    if (isSave || isCancel) {
+      el.disabled = running;
+      el.classList.toggle("disabled-btn", running);
+      el.title = running
+        ? "Stop the bot to edit global configuration"
+        : "";
+      return;
+    }
+
+    // Reveal buttons stay enabled even when locked
+    if (isReveal) {
+      el.disabled = false;
+      el.classList.remove("disabled-btn");
+      el.title = "";
+      return;
+    }
+
+    // Everything else becomes disabled
+    el.disabled = running;
+    if (running) {
+      el.classList.add("locked-field");
+    } else {
+      el.classList.remove("locked-field");
+    }
+  });
+
+  // 2. Custom dropdown lock
+  cfgForm.querySelectorAll(".dd").forEach((dd) => {
+    if (running) {
+      dd.setAttribute("data-locked", "1");
+    } else {
+      dd.removeAttribute("data-locked");
+    }
+  });
+
+  // 3. Chips lock
+  cfgForm.querySelectorAll(".chips").forEach((chipsEl) => {
+    if (running) {
+      chipsEl.setAttribute("data-locked", "1");
+      chipsEl.classList.add("locked-field");
+    } else {
+      chipsEl.removeAttribute("data-locked");
+      chipsEl.classList.remove("locked-field");
+    }
+  });
+}
+
+
+
   function setGuildCardsLocked(running) {
     const cards = document.querySelectorAll("#guild-mapping-list .guild-card");
     cards.forEach((card) => {
@@ -481,6 +566,7 @@
       const running = getCurrentRunning(data);
 
       setGuildCardsLocked(running);
+      setGlobalConfigLocked(running); 
 
       if (lastRunning === null) lastRunning = running;
 
@@ -981,128 +1067,328 @@
     }
   }
 
-  class ChipsInput {
-    constructor(root, hidden) {
-      this.root = root;
-      this.hidden = hidden;
+class ChipsInput {
+  constructor(root, hidden) {
+    this.root = root;
+    this.hidden = hidden;
 
-      this.entry = root.querySelector(".chip-input");
+    this.entry = root.querySelector(".chip-input");
 
-      this.entryWrap = this.entry
-        ? this.entry.closest(".chip-input-wrap") || this.entry
-        : null;
+    this.entryWrap = this.entry
+      ? this.entry.closest(".chip-input-wrap") || this.entry
+      : null;
 
-      this.values = [];
+    this.values = [];
 
-      if (this.entry) {
-        this.entry.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            this.addFromText(this.entry.value);
-            this.entry.value = "";
-          } else if (
-            e.key === "Backspace" &&
-            this.entry.value === "" &&
-            this.values.length
-          ) {
-            this.remove(this.values[this.values.length - 1]);
-          }
-        });
-
-        this.entry.addEventListener("paste", (e) => {
-          const text =
-            (e.clipboardData && e.clipboardData.getData("text")) || "";
-          if (text) {
-            e.preventDefault();
-            this.addFromText(text);
-          }
-        });
-      }
-    }
-
-    addFromText(text) {
-      const parts = String(text)
-        .split(/[^\d]+/)
-        .map((s) => s.trim())
-        .filter(Boolean);
-
-      const ids = [];
-      for (const s of parts) {
-        try {
-          if (!/^\d+$/.test(s)) continue;
-          const n = BigInt(s);
-          if (n <= 0n) continue;
-          ids.push(n.toString());
-        } catch {}
-      }
-      this.addMany(ids);
-    }
-
-    addMany(arr) {
-      let changed = false;
-      for (const id of arr) {
-        if (!this.values.includes(id)) {
-          this.values.push(id);
-          this.renderChip(id);
-          changed = true;
+    if (this.entry) {
+      this.entry.addEventListener("keydown", (e) => {
+        // 🔒 block keyboard changes if locked
+        if (this.root.getAttribute("data-locked") === "1") {
+          e.preventDefault();
+          return;
         }
-      }
-      if (changed) this.syncHidden();
-    }
 
-    remove(id) {
-      const ix = this.values.indexOf(id);
-      if (ix >= 0) {
-        this.values.splice(ix, 1);
-        const chipEl = this.root.querySelector(
-          `.chip[data-id="${CSS.escape(id)}"]`
-        );
-        if (chipEl) chipEl.remove();
-        this.syncHidden();
-      }
-    }
-
-    renderChip(id) {
-      const chip = document.createElement("span");
-      chip.className = "chip";
-      chip.dataset.id = id;
-      chip.textContent = id;
-
-      chip.addEventListener("click", () => {
-        this.remove(id);
+        if (e.key === "Enter") {
+          e.preventDefault();
+          this.addFromText(this.entry.value);
+          this.entry.value = "";
+        } else if (
+          e.key === "Backspace" &&
+          this.entry.value === "" &&
+          this.values.length
+        ) {
+          this.remove(this.values[this.values.length - 1]);
+        }
       });
 
-      if (this.entryWrap && this.entryWrap.parentNode === this.root) {
-        this.root.insertBefore(chip, this.entryWrap);
-      } else if (this.entry && this.entry.parentNode === this.root) {
-        this.root.insertBefore(chip, this.entry);
-      } else {
-        this.root.appendChild(chip);
-      }
-    }
+      this.entry.addEventListener("paste", (e) => {
+        // 🔒 block paste if locked
+        if (this.root.getAttribute("data-locked") === "1") {
+          e.preventDefault();
+          return;
+        }
 
-    syncHidden() {
-      this.hidden.value = this.values.join(",");
-
-      this.hidden.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-
-    set(list) {
-      this.values = [];
-
-      Array.from(this.root.querySelectorAll(".chip")).forEach((el) =>
-        el.remove()
-      );
-      this.addMany((list || []).map(String));
-      if (this.entry) {
-        this.entry.value = "";
-      }
-    }
-
-    get() {
-      return [...this.values];
+        const text =
+          (e.clipboardData && e.clipboardData.getData("text")) || "";
+        if (text) {
+          e.preventDefault();
+          this.addFromText(text);
+        }
+      });
     }
   }
+
+  addFromText(text) {
+    // if locked somehow got through, still refuse to mutate
+    if (this.root.getAttribute("data-locked") === "1") {
+      return;
+    }
+
+    const parts = String(text)
+      .split(/[^\d]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    const ids = [];
+    for (const s of parts) {
+      try {
+        if (!/^\d+$/.test(s)) continue;
+        const n = BigInt(s);
+        if (n <= 0n) continue;
+        ids.push(n.toString());
+      } catch {}
+    }
+    this.addMany(ids);
+  }
+
+  addMany(arr) {
+    if (this.root.getAttribute("data-locked") === "1") {
+      return;
+    }
+
+    let changed = false;
+    for (const id of arr) {
+      if (!this.values.includes(id)) {
+        this.values.push(id);
+        this.renderChip(id);
+        changed = true;
+      }
+    }
+    if (changed) this.syncHidden();
+  }
+
+  remove(id) {
+    if (this.root.getAttribute("data-locked") === "1") {
+      return;
+    }
+
+    const ix = this.values.indexOf(id);
+    if (ix >= 0) {
+      this.values.splice(ix, 1);
+      const chipEl = this.root.querySelector(
+        `.chip[data-id="${CSS.escape(id)}"]`
+      );
+      if (chipEl) chipEl.remove();
+      this.syncHidden();
+    }
+  }
+
+  renderChip(id) {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.dataset.id = id;
+    chip.textContent = id;
+
+    chip.addEventListener("click", () => {
+      // 🔒 block click-remove if locked
+      if (this.root.getAttribute("data-locked") === "1") {
+        return;
+      }
+      this.remove(id);
+    });
+
+    if (this.entryWrap && this.entryWrap.parentNode === this.root) {
+      this.root.insertBefore(chip, this.entryWrap);
+    } else if (this.entry && this.entry.parentNode === this.root) {
+      this.root.insertBefore(chip, this.entry);
+    } else {
+      this.root.appendChild(chip);
+    }
+  }
+
+  syncHidden() {
+    this.hidden.value = this.values.join(",");
+
+    this.hidden.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  set(list) {
+    // NOTE: set() is used when we load data from server or reset form.
+    // That should still be allowed even if locked, because it's not user editing.
+    // We KEEP this allowed. Do not early-return here.
+
+    this.values = [];
+
+    Array.from(this.root.querySelectorAll(".chip")).forEach((el) =>
+      el.remove()
+    );
+    this.addMany((list || []).map(String));
+    if (this.entry) {
+      this.entry.value = "";
+    }
+  }
+
+  get() {
+    return [...this.values];
+  }
+}
+
+class WordChipsInput {
+  constructor(rootEl, hiddenEl) {
+    this.root = rootEl;
+    this.hidden = hiddenEl;
+    this.values = [];
+
+    this.entryWrap = rootEl.querySelector(".chip-input-wrap") || rootEl;
+    this.entry = rootEl.querySelector(".chip-input");
+
+    this.root.addEventListener("click", (ev) => {
+      const clickedRootItself =
+        ev.target === this.root || ev.target === this.entryWrap;
+
+      // If locked, don’t force focus into the input at all.
+      if (this.root.getAttribute("data-locked") === "1") {
+        return;
+      }
+
+      if (clickedRootItself && this.entry) {
+        this.entry.focus();
+      }
+    });
+
+    if (this.entry) {
+      this.entry.addEventListener("keydown", (ev) => {
+        // 🔒 block keyboard edits when locked
+        if (this.root.getAttribute("data-locked") === "1") {
+          ev.preventDefault();
+          return;
+        }
+
+        if (ev.key === "Enter" || ev.key === ",") {
+          ev.preventDefault();
+          this.addFromText(this.entry.value);
+          this.entry.value = "";
+          return;
+        }
+
+        if (
+          (ev.key === "Backspace" || ev.key === "Delete") &&
+          !this.entry.value
+        ) {
+          if (this.values.length) {
+            this.remove(this.values[this.values.length - 1]);
+          }
+        }
+      });
+
+      this.entry.addEventListener("paste", (ev) => {
+        // 🔒 block paste when locked
+        if (this.root.getAttribute("data-locked") === "1") {
+          ev.preventDefault();
+          return;
+        }
+
+        const clip = ev.clipboardData?.getData("text") || "";
+        if (!clip) return;
+        ev.preventDefault();
+        this.addFromText(clip);
+        this.entry.value = "";
+      });
+    }
+  }
+
+  addFromText(text) {
+    if (this.root.getAttribute("data-locked") === "1") {
+      return;
+    }
+
+    if (!text) return;
+    const parts = String(text)
+      .split(/[,|\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    this.addMany(parts);
+  }
+
+  addMany(arr) {
+    if (this.root.getAttribute("data-locked") === "1") {
+      return;
+    }
+
+    let changed = false;
+    for (const raw of arr) {
+      const word = raw.slice(0, 100);
+      if (!this.values.includes(word)) {
+        this.values.push(word);
+        this._renderChip(word);
+        changed = true;
+      }
+    }
+    if (changed) {
+      this._syncHidden();
+    }
+  }
+
+  remove(word) {
+    if (this.root.getAttribute("data-locked") === "1") {
+      return;
+    }
+
+    const idx = this.values.indexOf(word);
+    if (idx !== -1) {
+      this.values.splice(idx, 1);
+    }
+
+    const sel = `.chip[data-id="${CSS.escape(word)}"]`;
+    const chipEl = this.root.querySelector(sel);
+    if (chipEl) chipEl.remove();
+
+    this._syncHidden();
+  }
+
+  _renderChip(word) {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.dataset.id = word;
+    chip.textContent = word;
+
+    chip.addEventListener("click", () => {
+      // 🔒 block chip removal click if locked
+      if (this.root.getAttribute("data-locked") === "1") {
+        return;
+      }
+      this.remove(word);
+    });
+
+    if (this.entryWrap && this.entryWrap.parentNode === this.root) {
+      this.root.insertBefore(chip, this.entryWrap);
+    } else if (this.entry && this.entry.parentNode === this.root) {
+      this.root.insertBefore(chip, this.entry);
+    } else {
+      this.root.appendChild(chip);
+    }
+  }
+
+  _syncHidden() {
+    this.hidden.value = this.values.join(",");
+
+    this.hidden.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  set(list) {
+    // Same logic as ChipsInput.set(): this is for initializing/resetting,
+    // which should still work even if locked.
+    this.values = [];
+    for (const el of Array.from(this.root.querySelectorAll(".chip"))) {
+      el.remove();
+    }
+
+    const cleaned = Array.isArray(list)
+      ? list.map((x) => String(x).trim()).filter(Boolean)
+      : [];
+    this.addMany(cleaned);
+
+    if (this.entry) {
+      this.entry.value = "";
+    }
+  }
+
+  get() {
+    return [...this.values];
+  }
+}
+
 
   function parseIdList(str) {
     return String(str || "")
@@ -1111,41 +1397,61 @@
       .filter(Boolean);
   }
 
-  const CHIPS = {};
   const BASELINES = { cmd_users_csv: "", cfg: "", filters: "" };
+  let CHIPS = Object.create(null);
 
   function initChips() {
+    CHIPS = Object.create(null);
+
     const defs = [
-      ["wl_categories", "wl_categories"],
-      ["wl_channels", "wl_channels"],
-      ["ex_categories", "ex_categories"],
-      ["ex_channels", "ex_channels"],
-      ["cmd_users", "COMMAND_USERS"],
+      ["wl_categories", "wl_categories", "ids"],
+      ["wl_channels", "wl_channels", "ids"],
+      ["ex_categories", "ex_categories", "ids"],
+      ["ex_channels", "ex_channels", "ids"],
+      ["blocked_words", "blocked_words", "words"],
+      ["cmd_users", "COMMAND_USERS", "ids"],
     ];
 
-    for (const [dataKey, hiddenId] of defs) {
+    for (const [dataKey, hiddenId, mode] of defs) {
       const root = document.querySelector(`.chips[data-chips="${dataKey}"]`);
+      if (!root) continue;
+
       const hidden = document.getElementById(hiddenId);
-      if (!root || !hidden) continue;
+      if (!hidden) continue;
 
-      const inst = new ChipsInput(root, hidden);
-      CHIPS[dataKey] = inst;
+      const ci =
+        mode === "words"
+          ? new WordChipsInput(root, hidden)
+          : new ChipsInput(root, hidden);
 
-      inst.set(parseIdList(hidden.value));
-
-      if (dataKey === "cmd_users") {
-        BASELINES.cmd_users_csv = hidden.value;
+      if (mode === "words") {
+        const seedWords = String(hidden.value || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        ci.set(seedWords);
+      } else {
+        ci.set(parseIdList(hidden.value || ""));
       }
 
-      const form = root.closest("form");
+      CHIPS[dataKey] = ci;
+
+      if (dataKey === "cmd_users") {
+        BASELINES.cmd_users_csv = hidden.value || "";
+      }
+
+      const form = hidden.closest("form");
       if (form) {
         form.addEventListener("reset", () => {
-          setTimeout(() => {
-            if (dataKey === "cmd_users") {
-              hidden.value = BASELINES.cmd_users_csv;
-              inst.set(parseIdList(BASELINES.cmd_users_csv));
+          window.setTimeout(() => {
+            if (mode === "words") {
+              const resetWords = String(hidden.value || "")
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean);
+              ci.set(resetWords);
             } else {
-              inst.set(parseIdList(hidden.value));
+              ci.set(parseIdList(hidden.value || ""));
             }
           }, 0);
         });
@@ -1269,30 +1575,71 @@
     });
   }
 
-  function validateConfigAndToggle({ decorate = false } = {}) {
-    const btn = document.getElementById("toggle-btn");
-    const form = document.getElementById("toggle-form");
-    if (!btn || !form) return;
+function validateConfigAndToggle({ decorate = false } = {}) {
+  const btn = document.getElementById("toggle-btn");
+  const form = document.getElementById("toggle-form");
 
-    const { ok, missing } = configState();
+  // NEW: grab the global config buttons so we can safely reference them
+  const saveBtn = document.getElementById("cfg-save-btn");
+  const cancelBtn = document.getElementById("cfg-cancel-btn");
 
-    if (decorate === true) {
-      markInvalid(missing);
-    } else if (decorate === "clear") {
-      clearInvalid();
+  // Are we currently running? (Either server or client up)
+  const runningNow = !!(RUNTIME_CACHE.server || RUNTIME_CACHE.client);
+
+  // If the bot is running, hard-lock global config buttons here too,
+  // and bail before we do any "maybe enable Save" logic.
+  if (runningNow) {
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.classList.add("disabled-btn");
+      saveBtn.title = "Stop the bot to edit global configuration";
     }
-
-    const running =
-      form.action.endsWith("/stop") ||
-      btn.textContent.trim().toLowerCase() === "stop";
-
-    const blockStart = !ok && !running;
-    btn.dataset.invalid = blockStart ? "1" : "0";
-    btn.title = blockStart
-      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, and at least one Guild Mapping to start."
-      : "";
-    btn.disabled = !!toggleLocked || blockStart;
+    if (cancelBtn) {
+      cancelBtn.disabled = true;
+      cancelBtn.classList.add("disabled-btn");
+      cancelBtn.title = "Stop the bot to edit global configuration";
+    }
+    // Do NOT continue; don't let the rest of the function re-enable controls.
+    return;
   }
+
+  // Past this point, bot is NOT running. Normal start/stop validation proceeds.
+
+  if (!btn || !form) return;
+
+  const { ok, missing } = configState();
+
+  if (decorate === true) {
+    markInvalid(missing);
+  } else if (decorate === "clear") {
+    clearInvalid();
+  }
+
+  // "running" here = are we *about* to stop (Stop button showing)
+  const running =
+    form.action.endsWith("/stop") ||
+    btn.textContent.trim().toLowerCase() === "stop";
+
+  const blockStart = !ok && !running;
+  btn.dataset.invalid = blockStart ? "1" : "0";
+  btn.title = blockStart
+    ? "Provide SERVER_TOKEN, CLIENT_TOKEN, and at least one Guild Mapping to start."
+    : "";
+  btn.disabled = !!toggleLocked || blockStart;
+
+  // Also, if we're not running, allow Save/Cancel again (clear disabled state)
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.classList.remove("disabled-btn");
+    saveBtn.title = "";
+  }
+  if (cancelBtn) {
+    cancelBtn.disabled = false;
+    cancelBtn.classList.remove("disabled-btn");
+    cancelBtn.title = "";
+  }
+}
+
 
   function collectMappingForm() {
     const id = document.getElementById("map_mapping_id").value.trim() || null;
@@ -1325,6 +1672,35 @@
       settings,
     };
   }
+
+  document.querySelectorAll(".reveal-btn").forEach((btn) => {
+    btn.removeAttribute("title");
+
+    btn.addEventListener("click", () => {
+      const targetId = btn.getAttribute("data-target");
+      const input = document.getElementById(targetId);
+      if (!input) return;
+
+      const eyeOn = btn.querySelector(".icon-eye");
+      const eyeOff = btn.querySelector(".icon-eye-off");
+
+      if (input.type === "password") {
+        input.type = "text";
+        btn.setAttribute("aria-pressed", "true");
+        btn.setAttribute("aria-label", "Hide " + targetId);
+
+        if (eyeOn) eyeOn.style.display = "none";
+        if (eyeOff) eyeOff.style.display = "";
+      } else {
+        input.type = "password";
+        btn.setAttribute("aria-pressed", "false");
+        btn.setAttribute("aria-label", "Show " + targetId);
+
+        if (eyeOn) eyeOn.style.display = "";
+        if (eyeOff) eyeOff.style.display = "none";
+      }
+    });
+  });
 
   function closeMappingModal() {
     const modal = document.getElementById("mapping-modal");
@@ -1368,20 +1744,26 @@
     const hostInput = document.getElementById("map_original_guild_id");
     const cloneInput = document.getElementById("map_cloned_guild_id");
 
-    if (idInput) idInput.value = (mapping && mapping.mapping_id) || "";
-    if (nameInput) nameInput.value = (mapping && mapping.mapping_name) || "";
+    const isEdit = !!mapping;
+
+    if (idInput) idInput.value = (isEdit && mapping.mapping_id) || "";
+    if (nameInput) nameInput.value = (isEdit && mapping.mapping_name) || "";
     if (hostInput)
-      hostInput.value = (mapping && mapping.original_guild_id) || "";
+      hostInput.value = (isEdit && mapping.original_guild_id) || "";
     if (cloneInput)
-      cloneInput.value = (mapping && mapping.cloned_guild_id) || "";
+      cloneInput.value = (isEdit && mapping.cloned_guild_id) || "";
 
     document
       .querySelectorAll("#mapping-form select[id^='map_']")
       .forEach((sel) => {
         const key = sel.id.replace(/^map_/, "");
 
-        const rawVal =
-          mapping && mapping.settings ? mapping.settings[key] : undefined;
+        let rawVal;
+        if (isEdit && mapping.settings && key in mapping.settings) {
+          rawVal = mapping.settings[key];
+        } else {
+          rawVal = DEFAULT_MAPPING_SETTINGS[key];
+        }
 
         let normalized;
         if (typeof rawVal === "boolean") {
@@ -1393,10 +1775,10 @@
           } else if (lower === "false") {
             normalized = false;
           } else {
-            normalized = true;
+            normalized = !!rawVal;
           }
         } else {
-          normalized = true;
+          normalized = !!rawVal;
         }
 
         sel.value = normalized ? "True" : "False";
@@ -1407,14 +1789,12 @@
     setInert(modal, false);
     modal.classList.add("show");
     modal.setAttribute("aria-hidden", "false");
-
     document.body.classList.add("body-lock-scroll");
 
     const cancelBtn = document.getElementById("mapping-cancel-btn");
     if (cancelBtn) {
       cancelBtn.onclick = closeMappingModal;
     }
-
     const headerCloseBtn = document.getElementById("mapping-close");
     if (headerCloseBtn) {
       headerCloseBtn.onclick = closeMappingModal;
@@ -1442,7 +1822,28 @@
   window.openMappingModal = openMappingModal;
   window.closeMappingModal = closeMappingModal;
 
+  function setMappingSaveBusy(isBusy) {
+    const btn = document.getElementById("mapping-save-btn");
+    if (!btn) return;
+
+    if (isBusy) {
+      if (!btn.dataset.origLabel) {
+        btn.dataset.origLabel = btn.textContent.trim() || "Save Mapping";
+      }
+      btn.disabled = true;
+      btn.textContent = "Saving…";
+    } else {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.origLabel || "Save Mapping";
+    }
+  }
+
   async function saveMappingFromModal() {
+    if (saveMappingFromModal._busy) return;
+    saveMappingFromModal._busy = true;
+
+    setMappingSaveBusy(true);
+
     const data = collectMappingForm();
     const isEdit = !!data.mapping_id;
 
@@ -1461,20 +1862,55 @@
       settings: data.settings,
     };
 
-    const res = await fetch(url, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    let res;
+    try {
+      res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch (netErr) {
+      showToast("Network error while saving mapping.", {
+        type: "error",
+        timeout: 7000,
+      });
+
+      setMappingSaveBusy(false);
+      saveMappingFromModal._busy = false;
+      return;
+    }
 
     if (!res.ok) {
-      console.warn("save mapping failed");
+      let msg = "Failed to save mapping.";
+      try {
+        const errJson = await res.json();
+        if (errJson && errJson.error) {
+          msg = errJson.error;
+        } else if (errJson && errJson.message) {
+          msg = errJson.message;
+        }
+      } catch {}
+
+      showToast(msg, {
+        type: "error",
+        timeout: 7000,
+      });
+
+      setMappingSaveBusy(false);
+      saveMappingFromModal._busy = false;
       return;
     }
 
     await refreshGuildMappings();
     closeMappingModal();
     validateConfigAndToggle({ decorate: false });
+
+    showToast(isEdit ? "Mapping updated." : "Mapping created.", {
+      type: "success",
+    });
+
+    setMappingSaveBusy(false);
+    saveMappingFromModal._busy = false;
   }
 
   function closeConfirm() {
@@ -1494,9 +1930,9 @@
 
     document.body.classList.remove("body-lock-scroll");
 
-    if (lastFocusConfirm && typeof lastFocusConfirm.focus === "function") {
+    if (lastFocusConfirm && typeof lastFocusConfirm.blur === "function") {
       try {
-        lastFocusConfirm.focus();
+        lastFocusConfirm.blur();
       } catch {}
     }
     lastFocusConfirm = null;
@@ -1723,24 +2159,24 @@
     const listEl = document.getElementById("guild-mapping-list");
     if (!listEl) return;
 
-    listEl.innerHTML = GUILD_MAPPINGS.map((m) => {
+    const mappingCardsHtml = GUILD_MAPPINGS.map((m) => {
       const iconSrc = m.original_guild_icon_url || "/static/logo.png";
       return `
-        <div class="guild-card" data-id="${m.mapping_id}">
-          <div class="guild-card-logo">
-            <img src="${iconSrc}" alt="" class="guild-card-logo-img">
-          </div>
+      <div class="guild-card" data-id="${m.mapping_id}">
+        <div class="guild-card-logo">
+          <img src="${iconSrc}" alt="" class="guild-card-logo-img">
+        </div>
 
-          <div class="guild-card-inner">
-            <div class="guild-card-main">
-              <div class="guild-card-name">
-                <div class="guild-card-name-title" title="${escapeHtml(
-                  m.mapping_name || ""
-                )}">
-                  ${escapeHtml(m.mapping_name || "")}
-                </div>
-                <div class="guild-card-name-meta"></div>
+        <div class="guild-card-inner">
+          <div class="guild-card-main">
+            <div class="guild-card-name">
+              <div class="guild-card-name-title" title="${escapeHtml(
+                m.mapping_name || ""
+              )}">
+                ${escapeHtml(m.mapping_name || "")}
               </div>
+              <div class="guild-card-name-meta"></div>
+            </div>
 
             <div class="guild-card-actions">
               <button class="btn-icon edit-mapping-btn"
@@ -1757,18 +2193,39 @@
                 ${ICONS.filters}
               </button>
 
-              <button class="btn-icon delete-mapping-btn"
-                      data-id="${m.mapping_id}"
-                      aria-label="Delete mapping"
-                      title="Delete">
+              <button
+                class="btn-icon delete-mapping-btn"
+                type="button"
+                data-action="delete"
+                data-id="${m.mapping_id}"
+                aria-label="Delete mapping"
+                title="Delete mapping"
+              >
                 ${ICONS.trash}
               </button>
             </div>
-            </div>
           </div>
         </div>
-      `;
+      </div>
+    `;
     }).join("");
+
+    const newCardHtml = `
+    <button
+      class="guild-card guild-card--new"
+      id="new-mapping-card"
+      type="button"
+      aria-label="Add new mapping"
+      title="Add new mapping"
+    >
+      <div class="new-card-inner">
+        <div class="new-card-plus">+</div>
+        <div class="new-card-label">Add Mapping</div>
+      </div>
+    </button>
+  `;
+
+    listEl.innerHTML = mappingCardsHtml + newCardHtml;
 
     listEl.querySelectorAll(".edit-mapping-btn").forEach((btn) => {
       btn.addEventListener("click", (ev) => {
@@ -1793,6 +2250,13 @@
         confirmDeleteMapping(mapping);
       });
     });
+
+    const newCardBtn = document.getElementById("new-mapping-card");
+    if (newCardBtn) {
+      newCardBtn.addEventListener("click", () => {
+        openMappingModal();
+      });
+    }
   }
 
   async function refreshGuildMappings() {
@@ -1808,24 +2272,60 @@
     updateStartButtonOnly();
   }
 
-  async function loadFiltersIntoFormForMapping(mappingId) {
+  async function loadFiltersIntoFormForMapping(mid) {
+    const ff = document.getElementById("form-filters");
+    if (!ff) return;
+
+    const wlCats = document.getElementById("wl_categories");
+    const wlCh = document.getElementById("wl_channels");
+    const exCats = document.getElementById("ex_categories");
+    const exCh = document.getElementById("ex_channels");
+    const bw = document.getElementById("blocked_words");
+
+    wlCats.value = "";
+    wlCh.value = "";
+    exCats.value = "";
+    exCh.value = "";
+    if (bw) bw.value = "";
+
+    CHIPS.wl_categories.set([]);
+    CHIPS.wl_channels.set([]);
+    CHIPS.ex_categories.set([]);
+    CHIPS.ex_channels.set([]);
+    if (CHIPS.blocked_words) {
+      CHIPS.blocked_words.set([]);
+    }
+
+    if (!mid) return;
+
     try {
-      const res = await fetch(`/filters/${encodeURIComponent(mappingId)}`, {
-        cache: "no-store",
+      const res = await fetch(`/filters/${encodeURIComponent(mid)}`, {
+        method: "GET",
         credentials: "same-origin",
       });
-      if (!res.ok) {
-        console.warn("failed to load filters for", mappingId, res.status);
-        return;
-      }
+      if (!res.ok) throw new Error("bad");
+
       const data = await res.json();
 
-      CHIPS["wl_categories"]?.set(data.whitelist?.category ?? []);
-      CHIPS["wl_channels"]?.set(data.whitelist?.channel ?? []);
-      CHIPS["ex_categories"]?.set(data.exclude?.category ?? []);
-      CHIPS["ex_channels"]?.set(data.exclude?.channel ?? []);
+      if (data && typeof data === "object") {
+        if (Array.isArray(data.wl_categories)) {
+          CHIPS.wl_categories.set(data.wl_categories);
+        }
+        if (Array.isArray(data.wl_channels)) {
+          CHIPS.wl_channels.set(data.wl_channels);
+        }
+        if (Array.isArray(data.ex_categories)) {
+          CHIPS.ex_categories.set(data.ex_categories);
+        }
+        if (Array.isArray(data.ex_channels)) {
+          CHIPS.ex_channels.set(data.ex_channels);
+        }
+        if (Array.isArray(data.blocked_words) && CHIPS.blocked_words) {
+          CHIPS.blocked_words.set(data.blocked_words);
+        }
+      }
     } catch (err) {
-      console.warn("Failed loading scoped filters", err);
+      console.warn("Failed to load filters", err);
     }
   }
 

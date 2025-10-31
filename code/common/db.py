@@ -1,6 +1,6 @@
 # =============================================================================
 #  Copycord
-#  Copyright (C) 2025 github.com/Copycord
+#  Copyright (C) 2021 github.com/Copycord
 #
 #  This source code is released under the GNU Affero General Public License
 #  version 3.0. A copy of the license is available at:
@@ -2275,11 +2275,47 @@ class DBManager:
 
     def delete_guild_mapping(self, mapping_id: str) -> None:
         """
-        Permanently remove a mapping row.
+        Hard-delete a mapping AND all data tied to that mapping's
+        (original_guild_id, cloned_guild_id) pair across the DB.
         """
+
+        m = self.get_mapping_by_id(mapping_id)
+        if not m:
+            return
+
+        ogid = int(m["original_guild_id"] or 0)
+        cgid = int(m["cloned_guild_id"] or 0)
+
+        tables_to_clean = [
+            "category_mappings",
+            "channel_mappings",
+            "threads",
+            "role_mappings",
+            "emoji_mappings",
+            "sticker_mappings",
+            "messages",
+            "filters",
+            "blocked_keywords",
+            "backfill_runs",
+        ]
+
         with self.conn:
+            for tbl in tables_to_clean:
+                try:
+                    self.conn.execute(
+                        f"""
+                        DELETE FROM {tbl}
+                        WHERE original_guild_id = ?
+                        AND cloned_guild_id   = ?
+                        """,
+                        (ogid, cgid),
+                    )
+                except sqlite3.OperationalError:
+                    pass
+
             self.conn.execute(
-                "DELETE FROM guild_mappings WHERE mapping_id = ?", (mapping_id,)
+                "DELETE FROM guild_mappings WHERE mapping_id = ?",
+                (mapping_id,),
             )
 
     def get_mapping_by_original(self, original_guild_id: int) -> dict | None:
@@ -2296,21 +2332,22 @@ class DBManager:
             d["settings"] = {}
         return d
 
-    def get_mapping_by_clone(self, cloned_guild_id: int) -> Optional[dict]:
+    def get_mapping_by_clone(self, cloned_guild_id: int) -> dict | None:
         row = self.conn.execute(
-            "SELECT * FROM guild_mappings WHERE cloned_guild_id = ?",
+            "SELECT * FROM guild_mappings WHERE cloned_guild_id = ? LIMIT 1",
             (int(cloned_guild_id),),
         ).fetchone()
+
         if not row:
             return None
-        cols = [
-            c[1] for c in self.conn.execute("PRAGMA table_info(guild_mappings)")
-        ].fetchall()
-        d = dict(zip(cols, row))
+
+        d = {k: row[k] for k in row.keys()}
+
         try:
             d["settings"] = json.loads(d.get("settings") or "{}")
         except Exception:
             d["settings"] = {}
+
         return d
 
     def list_guild_mappings(self) -> List[dict]:
@@ -2837,44 +2874,88 @@ class DBManager:
         return False, "none"
 
     def get_filters_for_mapping(self, mapping_id: str) -> dict:
-        m = self.get_mapping_by_id(mapping_id)
-        if not m:
+        """
+        Return all filter data for a mapping:
+        {
+            "whitelist": {
+                "category": [catId, ...],
+                "channel": [chanId, ...],
+            },
+            "exclude": {
+                "category": [catId, ...],
+                "channel": [chanId, ...],
+            },
+            "blocked_words": ["foo", "bar", ...],
+        }
+        """
+        mapping_row = self.get_mapping_by_id(mapping_id)
+        if not mapping_row:
             return {
                 "whitelist": {"category": [], "channel": []},
                 "exclude": {"category": [], "channel": []},
+                "blocked_words": [],
             }
 
-        ogid = int(m["original_guild_id"] or 0)
-        cgid = int(m["cloned_guild_id"] or 0)
+        host_gid = int(mapping_row["original_guild_id"])
+        clone_gid = int(mapping_row["cloned_guild_id"])
 
-        rows = self.conn.execute(
+        wl_cats: list[str] = []
+        wl_chans: list[str] = []
+        ex_cats: list[str] = []
+        ex_chans: list[str] = []
+
+        cur = self.conn.cursor()
+
+        cur.execute(
             """
             SELECT kind, scope, obj_id
             FROM filters
-            WHERE original_guild_id = ?
-            AND cloned_guild_id   = ?
+            WHERE original_guild_id=? AND cloned_guild_id=?
             """,
-            (ogid, cgid),
-        ).fetchall()
+            (host_gid, clone_gid),
+        )
 
-        wl_cat, wl_ch, ex_cat, ex_ch = [], [], [], []
+        for row in cur.fetchall():
+            kind = (row["kind"] or "").strip().lower()
+            scope = (row["scope"] or "").strip().lower()
+            obj_id = str(row["obj_id"])
 
-        for r in rows:
-            k = r["kind"]
-            sc = r["scope"]
-            oid = str(r["obj_id"])
-            if k == "whitelist" and sc == "category":
-                wl_cat.append(oid)
-            elif k == "whitelist" and sc == "channel":
-                wl_ch.append(oid)
-            elif k == "exclude" and sc == "category":
-                ex_cat.append(oid)
-            elif k == "exclude" and sc == "channel":
-                ex_ch.append(oid)
+            if kind == "whitelist":
+                if scope == "category":
+                    wl_cats.append(obj_id)
+                elif scope == "channel":
+                    wl_chans.append(obj_id)
+
+            elif kind == "exclude":
+                if scope == "category":
+                    ex_cats.append(obj_id)
+                elif scope == "channel":
+                    ex_chans.append(obj_id)
+
+        cur.execute(
+            """
+            SELECT keyword
+            FROM blocked_keywords
+            WHERE original_guild_id=? AND cloned_guild_id=?
+            ORDER BY keyword COLLATE NOCASE ASC
+            """,
+            (host_gid, clone_gid),
+        )
+        word_rows = cur.fetchall()
+        blocked_words = [
+            str(r["keyword"]).strip() for r in word_rows if str(r["keyword"]).strip()
+        ]
 
         return {
-            "whitelist": {"category": wl_cat, "channel": wl_ch},
-            "exclude": {"category": ex_cat, "channel": ex_ch},
+            "whitelist": {
+                "category": wl_cats,
+                "channel": wl_chans,
+            },
+            "exclude": {
+                "category": ex_cats,
+                "channel": ex_chans,
+            },
+            "blocked_words": blocked_words,
         }
 
     def replace_filters_for_mapping(
@@ -2940,3 +3021,54 @@ class DBManager:
             return row[0]
         return None
 
+    def replace_blocked_keywords_for_mapping(
+        self,
+        mapping_id: str,
+        words: list[str],
+    ) -> None:
+        """
+        Overwrite the blocked_keywords list for this mapping_id
+        (original_guild_id + cloned_guild_id pair)
+        with the provided words list.
+        """
+
+        if not mapping_id:
+            return
+
+        mapping_row = self.get_mapping_by_id(mapping_id)
+        if not mapping_row:
+            return
+
+        host_gid = int(mapping_row["original_guild_id"])
+        clone_gid = int(mapping_row["cloned_guild_id"])
+
+        cleaned: list[str] = []
+        for w in words or []:
+            w2 = (w or "").strip()
+            if not w2:
+                continue
+            if w2 not in cleaned:
+                cleaned.append(w2)
+
+        with self.conn:
+
+            self.conn.execute(
+                """
+                DELETE FROM blocked_keywords
+                WHERE original_guild_id=? AND cloned_guild_id=?
+                """,
+                (host_gid, clone_gid),
+            )
+
+            for w in cleaned:
+                self.conn.execute(
+                    """
+                    INSERT OR IGNORE INTO blocked_keywords
+                    (keyword, original_guild_id, cloned_guild_id, added_at)
+                    VALUES (
+                        ?, ?, ?,
+                        strftime('%Y-%m-%d %H:%M:%S','now')
+                    )
+                    """,
+                    (w, host_gid, clone_gid),
+                )
