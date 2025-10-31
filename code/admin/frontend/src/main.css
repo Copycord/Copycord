@@ -6535,18 +6535,6 @@ body.modal-open #bf-batchbar {
   white-space: nowrap;
 }
 
-.guild-card-name-title::before {
-  content: '';
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  min-width: 6px;
-  border-radius: 999px;
-  margin-right: 6px;
-  background: var(--accent);
-  box-shadow: none;
-}
-
 .guild-card-name-meta {
   font-size: 11px;
   line-height: 1.3;
