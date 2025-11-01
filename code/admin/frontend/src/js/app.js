@@ -2378,12 +2378,21 @@
 
       cfgCancelBtn.addEventListener("click", () => {
         cfgForm.reset();
+
+        const cmdHidden = document.getElementById("COMMAND_USERS");
+        if (cmdHidden && typeof BASELINES.cmd_users_csv === "string") {
+          cmdHidden.value = BASELINES.cmd_users_csv;
+
+          if (CHIPS.cmd_users) {
+            CHIPS.cmd_users.set(parseIdList(BASELINES.cmd_users_csv));
+          }
+        }
+
         cfgValidated = false;
         validateConfigAndToggle({ decorate: "clear" });
         setCfgButtonsVisible(false);
       });
     }
-
     updateToggleButton({ server: {}, client: {} });
 
     startStatusPoll(4000);
