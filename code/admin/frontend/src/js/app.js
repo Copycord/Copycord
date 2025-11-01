@@ -31,6 +31,67 @@
     `,
   };
 
+  let mapValidated = false;
+
+  function getMappingInputs() {
+    return {
+      name: document.getElementById("map_mapping_name"),
+      host: document.getElementById("map_original_guild_id"),
+      clone: document.getElementById("map_cloned_guild_id"),
+    };
+  }
+
+  function validateMappingFields({ decorate = true } = {}) {
+    const { name, host, clone } = getMappingInputs();
+
+    const checks = [
+      { el: name, bad: !name.value.trim() },
+      { el: host, bad: !host.value.trim() },
+      { el: clone, bad: !clone.value.trim() },
+    ];
+
+    let ok = true;
+    let firstBad = null;
+
+    for (const { el, bad } of checks) {
+      if (decorate && mapValidated) {
+        if (bad) {
+          el.classList.add("flash");
+
+          const handleAnimEnd = () => {
+            el.classList.remove("flash");
+            el.classList.remove("is-invalid");
+            el.removeEventListener("animationend", handleAnimEnd);
+          };
+          el.addEventListener("animationend", handleAnimEnd, { once: true });
+        } else {
+          el.classList.remove("flash", "is-invalid");
+        }
+      } else if (decorate && !mapValidated) {
+        el.classList.remove("flash", "is-invalid");
+      }
+
+      if (bad && ok) {
+        ok = false;
+        firstBad = el;
+      }
+    }
+
+    return { ok, firstBad };
+  }
+
+  function bindMappingFieldListeners() {
+    const { name, host, clone } = getMappingInputs();
+    [name, host, clone].forEach((el) => {
+      if (!el || el._mapValBound) return;
+      el._mapValBound = true;
+
+      el.addEventListener("input", () => {
+        el.classList.remove("flash", "is-invalid");
+      });
+    });
+  }
+
   const DEFAULT_MAPPING_SETTINGS = {
     DELETE_CHANNELS: true,
     DELETE_THREADS: true,
@@ -472,8 +533,6 @@
   function detachLockOverlay(card) {
     const overlay = card.querySelector(".guild-card-lock-overlay");
     if (overlay) overlay.remove();
-
-    // but it's harmless to leave it relative.
   }
 
   function setGlobalConfigLocked(running) {
@@ -1198,8 +1257,6 @@
     }
 
     set(list) {
-      // That should still be allowed even if locked, because it's not user editing.
-
       this.values = [];
 
       Array.from(this.root.querySelectorAll(".chip")).forEach((el) =>
@@ -1595,7 +1652,6 @@
         cancelBtn.classList.add("disabled-btn");
         cancelBtn.title = "Stop the bot to edit global configuration";
       }
-      // Do NOT continue; don't let the rest of the function re-enable controls.
       return;
     }
 
@@ -1620,7 +1676,6 @@
       : "";
     btn.disabled = !!toggleLocked || blockStart;
 
-    // Also, if we're not running, allow Save/Cancel again (clear disabled state)
     if (saveBtn) {
       saveBtn.disabled = false;
       saveBtn.classList.remove("disabled-btn");
@@ -1708,7 +1763,6 @@
       modal._outsideClickHandler = null;
     }
 
-    // blur active element if it's still inside the modal
     const active = document.activeElement;
     if (active && modal.contains(active)) {
       try {
@@ -1740,6 +1794,13 @@
     const nameInput = document.getElementById("map_mapping_name");
     const hostInput = document.getElementById("map_original_guild_id");
     const cloneInput = document.getElementById("map_cloned_guild_id");
+
+    mapValidated = false;
+    bindMappingFieldListeners();
+    [nameInput, hostInput, cloneInput].forEach((el) => {
+      if (!el) return;
+      el.classList.remove("is-invalid", "flash");
+    });
 
     const isEdit = !!mapping;
 
@@ -1839,6 +1900,22 @@
     if (saveMappingFromModal._busy) return;
     saveMappingFromModal._busy = true;
 
+    mapValidated = true;
+    const { ok, firstBad } = validateMappingFields({ decorate: true });
+    if (!ok) {
+      const active = document.activeElement;
+      if (
+        firstBad &&
+        typeof firstBad.focus === "function" &&
+        firstBad !== active
+      ) {
+        firstBad.focus();
+      }
+
+      saveMappingFromModal._busy = false;
+      return;
+    }
+
     setMappingSaveBusy(true);
 
     const data = collectMappingForm();
@@ -1913,7 +1990,6 @@
   function closeConfirm() {
     if (!cModal) return;
 
-    // blur focus if we're still inside the modal
     const active = document.activeElement;
     if (active && cModal.contains(active)) {
       try {
@@ -1964,10 +2040,6 @@
     currentFilterMapping = null;
   }
 
-  /**
-   * Open the per-mapping Sync Filters modal.
-   * @param {object} mapping - the guild mapping row (mapping_id, mapping_name, original_guild_id, cloned_guild_id, etc.)
-   */
   async function openFiltersModal(mapping) {
     const modal = document.getElementById("filters-modal");
     if (!modal) return;
@@ -1991,7 +2063,6 @@
       form.action = `/filters/${encodeURIComponent(mid)}/save`;
     }
 
-    // load this mapping's filters from server and populate chips
     await loadFiltersIntoFormForMapping(mid);
 
     if (form) {
@@ -2499,7 +2570,6 @@
 
         const btn = f.querySelector('button[type="submit"],button:not([type])');
 
-        // Block /start if required config isn't ready
         if (f.id === "toggle-form" && actionPath === "/start") {
           const { ok, missing } = configState();
           if (!ok) {
@@ -2566,7 +2636,6 @@
               if (cfgForm) {
                 BASELINES.cfg = snapshotForm(cfgForm);
 
-                // update each field's default so cfgForm.reset() goes back to this saved state
                 Array.from(cfgForm.elements).forEach((el) => {
                   if (!el || !el.tagName) return;
                   const tag = el.tagName.toUpperCase();
@@ -2584,7 +2653,6 @@
                   }
                 });
 
-                // hide Save / Cancel again, but keep their space so the card doesn't jump
                 setCfgButtonsVisible(false);
               }
 
@@ -2856,8 +2924,6 @@
         await saveMappingFromModal();
       });
     }
-
-    // We can read what's already on the page (#guild-mapping-list that was
 
     refreshGuildMappings();
   });

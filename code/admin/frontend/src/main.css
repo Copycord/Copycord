@@ -1512,7 +1512,7 @@ body {
 }
 .is-invalid {
   border-color: var(--danger) !important;
-  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.18) !important;
+  box-shadow: none;
 }
 .field-hint {
   display: block;
@@ -2068,11 +2068,9 @@ body {
   border-left-color: transparent;
   border-radius: 8px;
 
-  background: radial-gradient(circle at 0% 0%, #24173f 0%, #120a22 70%);
+  background: var(--accent);
   background-color: #1a1030;
   color: var(--text);
-
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.75), 0 2px 4px rgba(0, 0, 0, 0.9);
 
   backdrop-filter: blur(6px) saturate(140%);
   -webkit-backdrop-filter: blur(6px) saturate(140%);
@@ -2106,7 +2104,6 @@ body {
   border-bottom-left-radius: 8px;
 
   background: var(--accent);
-  box-shadow: 0 0 16px currentColor;
 }
 
 .toast .toast-msg {
@@ -2118,60 +2115,56 @@ body {
   padding-left: 12px;
 }
 
+.toast-msg {
+  white-space: pre-line;
+}
+
 .toast-info {
 }
 .toast-info .toast-bar {
   background: linear-gradient(180deg, var(--accent), #5a27c9 80%);
-  box-shadow: 0 0 16px rgba(139, 92, 246, 0.7);
 }
 
 .toast-success {
 }
 .toast-success .toast-bar {
   background: linear-gradient(180deg, var(--good), #0b8a69 80%);
-  box-shadow: 0 0 16px rgba(16, 185, 129, 0.6);
 }
 
 .toast-warning {
 }
 .toast-warning .toast-bar {
   background: linear-gradient(180deg, #f59e0b, #b45309 80%);
-  box-shadow: 0 0 16px rgba(245, 158, 11, 0.6);
 }
 
 .toast-error {
 }
 .toast-error .toast-bar {
   background: linear-gradient(180deg, #ef4444, #b91c1c 80%);
-  box-shadow: 0 0 16px rgba(239, 68, 68, 0.6);
 }
 
 .toast.info {
 }
 .toast.info .toast-bar {
   background: linear-gradient(180deg, var(--accent), #5a27c9 80%);
-  box-shadow: 0 0 16px rgba(139, 92, 246, 0.7);
 }
 
 .toast.good {
 }
 .toast.good .toast-bar {
   background: linear-gradient(180deg, var(--good), #0b8a69 80%);
-  box-shadow: 0 0 16px rgba(16, 185, 129, 0.6);
 }
 
 .toast.warn {
 }
 .toast.warn .toast-bar {
   background: linear-gradient(180deg, #f59e0b, #b45309 80%);
-  box-shadow: 0 0 16px rgba(245, 158, 11, 0.6);
 }
 
 .toast.danger {
 }
 .toast.danger .toast-bar {
   background: linear-gradient(180deg, #ef4444, #b91c1c 80%);
-  box-shadow: 0 0 16px rgba(239, 68, 68, 0.6);
 }
 
 @media (max-width: 520px) {
@@ -7473,4 +7466,44 @@ body.modal-open {
   outline: 0 !important;
   color: var(--text) !important;
   transform: translateY(-50%) !important;
+}
+
+@keyframes field-alert-shake {
+  0% {
+    transform: translateX(0);
+  }
+  20% {
+    transform: translateX(-2px);
+  }
+  40% {
+    transform: translateX(2px);
+  }
+  60% {
+    transform: translateX(-2px);
+  }
+  80% {
+    transform: translateX(1px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.field > input,
+.field > select {
+  width: 100%;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #140b26;
+  color: var(--text);
+  outline: 0;
+  transition: border 0.2s ease;
+}
+
+.field > input.flash,
+.field > select.flash {
+  border-color: var(--danger) !important;
+  animation: field-alert-shake 0.32s ease-in-out;
+  will-change: transform;
 }

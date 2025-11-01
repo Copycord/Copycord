@@ -550,7 +550,6 @@ async def _check_server_token_valid(bot_token: str) -> bool:
     url = f"{DISCORD_API_BASE}/users/@me"
     headers = {
         "Authorization": f"Bot {token}",
-        "User-Agent": "Copycord-ConfigCheck/1.0",
     }
 
     try:
@@ -572,15 +571,13 @@ async def _verify_tokens_for_save(values: dict[str, str]) -> list[str]:
     client_ok = await _check_client_token_valid(values.get("CLIENT_TOKEN", ""))
     if not client_ok:
         errs.append(
-            "CLIENT_TOKEN is invalid. "
-            "Make sure the self token is correct and still active."
+            "CLIENT_TOKEN: Discord account token is invalid."
         )
 
     server_ok = await _check_server_token_valid(values.get("SERVER_TOKEN", ""))
     if not server_ok:
         errs.append(
-            "SERVER_TOKEN is invalid. "
-            "Make sure the bot token is correct and the bot wasn't reset."
+            "SERVER_TOKEN: Discord bot token is invalid."
         )
 
     return errs
@@ -1016,7 +1013,6 @@ def _bootstrap_legacy_mapping_if_needed() -> dict:
     legacy_host_id = (db.get_config("HOST_GUILD_ID", "") or "").strip()
     legacy_clone_id = (db.get_config("CLONE_GUILD_ID", "") or "").strip()
 
-    # If either is missing we can't infer anything.
     if not legacy_host_id or not legacy_clone_id:
         return {
             "created": False,
@@ -1168,16 +1164,12 @@ async def save(request: Request):
 
     if errs:
         LOGGER.warning("POST /save invalid | errs=%s", errs)
-        return PlainTextResponse(
-            "Invalid config: " + "; ".join(errs),
-            status_code=400,
+
+        pretty_msg = "Invalid configuration:\n" + "\n".join(
+            f"{e}" for e in errs
         )
 
-    _write_env(values)
-
-    # /save didn't do it.)
-
-    return RedirectResponse("/", status_code=303)
+        return PlainTextResponse(pretty_msg, status_code=400)
 
 
 @app.post("/start")
@@ -2925,7 +2917,7 @@ async def api_create_mapping(payload: dict = Body(...)):
         return JSONResponse(
             {
                 "ok": False,
-                "error": "That HOST_GUILD_ID is already mapped. Each HOST_GUILD_ID can only be used once.",
+                "error": "That host guild is already mapped to another clone.",
                 "which": "original_guild_id",
             },
             status_code=400,
@@ -2936,7 +2928,7 @@ async def api_create_mapping(payload: dict = Body(...)):
         return JSONResponse(
             {
                 "ok": False,
-                "error": "That CLONE_GUILD_ID is already mapped. Each CLONE_GUILD_ID can only be used once.",
+                "error": "That clone guild is already mapped to another host.",
                 "which": "cloned_guild_id",
             },
             status_code=400,
@@ -2950,7 +2942,7 @@ async def api_create_mapping(payload: dict = Body(...)):
         return JSONResponse(
             {
                 "ok": False,
-                "error": "Your CLIENT_TOKEN user is not in the HOST_GUILD_ID you entered.",
+                "error": "Your Discord account is not a member of the host server. Join the host server with your account before continuing.",
                 "which": "original_guild_id",
             },
             status_code=400,
@@ -2961,7 +2953,7 @@ async def api_create_mapping(payload: dict = Body(...)):
         return JSONResponse(
             {
                 "ok": False,
-                "error": "Your SERVER_TOKEN bot is not in the CLONE_GUILD_ID you entered.",
+                "error": "Your Discord bot isn’t in the clone server. Invite the bot to that server and make sure it has the Administrator permission.",
                 "which": "cloned_guild_id",
             },
             status_code=400,
@@ -3008,7 +3000,7 @@ async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
         return JSONResponse(
             {
                 "ok": False,
-                "error": "Your client (self bot) is not in the Original Guild ID you entered.",
+                "error": "Your Discord account is not a member of the host server. Join the host server with your account before continuing.",
                 "which": "original_guild_id",
             },
             status_code=400,
@@ -3018,7 +3010,7 @@ async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
         return JSONResponse(
             {
                 "ok": False,
-                "error": "Your server bot is not in the Cloned Guild ID you entered.",
+                "error": "Your Discord bot isn’t in the clone server. Invite the bot to that server and make sure it has the Administrator permission.",
                 "which": "cloned_guild_id",
             },
             status_code=400,
