@@ -1013,7 +1013,7 @@ class ClientListener:
 
         return False
 
-    async def _resolve_forward_chain(
+    async def _resolve_forward(
         self, wrapper_msg: discord.Message, max_depth: int = 4
     ):
         """
@@ -1108,7 +1108,7 @@ class ClientListener:
         src_msg = message
 
         if looks_like_forward:
-            resolved = await self._resolve_forward_chain(message)
+            resolved = await self._resolve_forward(message)
             if resolved is not None:
                 src_msg = resolved
             else:
