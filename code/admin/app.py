@@ -98,6 +98,16 @@ def _redact_dict(d: dict) -> dict:
         return {"_redact_error": True}
 
 
+def _redact_token(tok: str) -> str:
+    """
+    Keep only the first 8 chars of a token for debug logs.
+    """
+    if not tok:
+        return "<empty>"
+    t = str(tok)
+    return t[:8] + "...len=" + str(len(t))
+
+
 class _Timer:
     def __init__(self, label: str):
         self.label = label
@@ -521,6 +531,7 @@ async def _check_client_token_valid(raw_token: str) -> bool:
     """
     token = (raw_token or "").strip()
     if not token:
+        LOGGER.debug("_check_client_token_valid | no token provided")
         return False
 
     url = f"{DISCORD_API_BASE}/users/@me"
@@ -532,9 +543,36 @@ async def _check_client_token_valid(raw_token: str) -> bool:
     try:
         async with aiohttp.ClientSession() as sess:
             async with sess.get(url, headers=headers, timeout=10) as resp:
+                ok = resp.status == 200
 
-                return resp.status == 200
-    except Exception:
+                body_preview = None
+                try:
+                    j = await resp.json()
+                    uid = j.get("id")
+                    uname = j.get("username")
+                    body_preview = {
+                        "id": uid,
+                        "username": uname,
+                        "keys": list(j.keys())[:10],
+                    }
+                except Exception:
+                    body_preview = "<non-json or parse-failed>"
+
+                LOGGER.debug(
+                    "_check_client_token_valid | status=%s ok=%s token=%s body_preview=%s",
+                    resp.status,
+                    ok,
+                    _redact_token(token),
+                    body_preview,
+                )
+
+                return ok
+    except Exception as e:
+        LOGGER.warning(
+            "_check_client_token_valid | exception=%s token=%s",
+            repr(e),
+            _redact_token(token),
+        )
         return False
 
 
@@ -545,6 +583,7 @@ async def _check_server_token_valid(bot_token: str) -> bool:
     """
     token = (bot_token or "").strip()
     if not token:
+        LOGGER.debug("_check_server_token_valid | no token provided")
         return False
 
     url = f"{DISCORD_API_BASE}/users/@me"
@@ -555,9 +594,36 @@ async def _check_server_token_valid(bot_token: str) -> bool:
     try:
         async with aiohttp.ClientSession() as sess:
             async with sess.get(url, headers=headers, timeout=10) as resp:
+                ok = resp.status == 200
 
-                return resp.status == 200
-    except Exception:
+                body_preview = None
+                try:
+                    j = await resp.json()
+                    uid = j.get("id")
+                    uname = j.get("username")
+                    body_preview = {
+                        "id": uid,
+                        "username": uname,
+                        "keys": list(j.keys())[:10],
+                    }
+                except Exception:
+                    body_preview = "<non-json or parse-failed>"
+
+                LOGGER.debug(
+                    "_check_server_token_valid | status=%s ok=%s bot_token=%s body_preview=%s",
+                    resp.status,
+                    ok,
+                    _redact_token(token),
+                    body_preview,
+                )
+
+                return ok
+    except Exception as e:
+        LOGGER.warning(
+            "_check_server_token_valid | exception=%s bot_token=%s",
+            repr(e),
+            _redact_token(token),
+        )
         return False
 
 
@@ -568,17 +634,29 @@ async def _verify_tokens_for_save(values: dict[str, str]) -> list[str]:
     """
     errs: list[str] = []
 
-    client_ok = await _check_client_token_valid(values.get("CLIENT_TOKEN", ""))
-    if not client_ok:
-        errs.append(
-            "CLIENT_TOKEN: Discord account token is invalid."
-        )
+    raw_client = values.get("CLIENT_TOKEN", "")
+    raw_server = values.get("SERVER_TOKEN", "")
 
-    server_ok = await _check_server_token_valid(values.get("SERVER_TOKEN", ""))
+    LOGGER.debug(
+        "_verify_tokens_for_save | starting client_token=%s server_token=%s",
+        _redact_token(raw_client),
+        _redact_token(raw_server),
+    )
+
+    client_ok = await _check_client_token_valid(raw_client)
+    server_ok = await _check_server_token_valid(raw_server)
+
+    LOGGER.debug(
+        "_verify_tokens_for_save | results client_ok=%s server_ok=%s",
+        client_ok,
+        server_ok,
+    )
+
+    if not client_ok:
+        errs.append("CLIENT_TOKEN: Discord account token is invalid.")
+
     if not server_ok:
-        errs.append(
-            "SERVER_TOKEN: Discord bot token is invalid."
-        )
+        errs.append("SERVER_TOKEN: Discord bot token is invalid.")
 
     return errs
 
@@ -590,6 +668,11 @@ async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
     Strategy: GET /users/@me/guilds using the user token.
     """
     if not client_token or not guild_id:
+        LOGGER.debug(
+            "_selfbot_in_guild | missing client_token or guild_id token=%s guild_id=%s",
+            _redact_token(client_token),
+            guild_id,
+        )
         return False
 
     url = f"{DISCORD_API_BASE}/users/@me/guilds"
@@ -600,19 +683,46 @@ async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
     try:
         async with aiohttp.ClientSession() as sess:
             async with sess.get(url, headers=headers, timeout=10) as resp:
-                if resp.status != 200:
-
+                status = resp.status
+                if status != 200:
+                    LOGGER.warning(
+                        "_selfbot_in_guild | discord status=%s token=%s guild_id=%s -> not_member",
+                        status,
+                        _redact_token(client_token),
+                        guild_id,
+                    )
                     return False
+
                 data = await resp.json()
-    except Exception:
+
+                wanted = str(guild_id)
+                match = False
+                guild_ids = []
+
+                for g in data:
+                    gid = str(g.get("id", ""))
+                    guild_ids.append(gid)
+                    if gid == wanted:
+                        match = True
+
+                LOGGER.debug(
+                    "_selfbot_in_guild | status=%s token=%s guild_id=%s match=%s guild_count=%s sample_ids=%s",
+                    status,
+                    _redact_token(client_token),
+                    guild_id,
+                    match,
+                    len(guild_ids),
+                    guild_ids[:10],
+                )
+                return match
+    except Exception as e:
+        LOGGER.warning(
+            "_selfbot_in_guild | exception=%s token=%s guild_id=%s",
+            repr(e),
+            _redact_token(client_token),
+            guild_id,
+        )
         return False
-
-    g_as_str = str(guild_id)
-    for g in data:
-        if str(g.get("id", "")) == g_as_str:
-            return True
-
-    return False
 
 
 async def _bot_in_guild(server_token: str, guild_id: int) -> bool:
@@ -622,6 +732,11 @@ async def _bot_in_guild(server_token: str, guild_id: int) -> bool:
     If the bot is *not* in that guild, Discord responds 403.
     """
     if not server_token or not guild_id:
+        LOGGER.debug(
+            "_bot_in_guild | missing server_token or guild_id bot=%s guild_id=%s",
+            _redact_token(server_token),
+            guild_id,
+        )
         return False
 
     url = f"{DISCORD_API_BASE}/guilds/{guild_id}?with_counts=true"
@@ -632,12 +747,38 @@ async def _bot_in_guild(server_token: str, guild_id: int) -> bool:
     try:
         async with aiohttp.ClientSession() as sess:
             async with sess.get(url, headers=headers, timeout=10) as resp:
+                status = resp.status
+                ok = status == 200
 
-                if resp.status == 200:
-                    return True
+                body_preview = None
+                try:
+                    j = await resp.json()
+                    body_preview = {
+                        "id": j.get("id"),
+                        "name": j.get("name"),
+                        "approx_member_count": j.get("approximate_member_count"),
+                        "keys": list(j.keys())[:10],
+                    }
+                except Exception:
+                    body_preview = "<non-json or parse-failed>"
 
-                return False
-    except Exception:
+                LOGGER.debug(
+                    "_bot_in_guild | status=%s ok=%s bot=%s guild_id=%s body_preview=%s",
+                    status,
+                    ok,
+                    _redact_token(server_token),
+                    guild_id,
+                    body_preview,
+                )
+
+                return ok
+    except Exception as e:
+        LOGGER.warning(
+            "_bot_in_guild | exception=%s bot=%s guild_id=%s",
+            repr(e),
+            _redact_token(server_token),
+            guild_id,
+        )
         return False
 
 
@@ -1152,24 +1293,50 @@ async def save(request: Request):
     form = await request.form()
 
     values = {k: str(form.get(k, "") or "").strip() for k in ALLOWED_ENV}
-
     LOGGER.debug("POST /save | form=%s", _redact_dict(values))
 
     errs = _validate(values)
-
-    if not errs:
-        token_errs = await _verify_tokens_for_save(values)
-        if token_errs:
-            errs.extend(token_errs)
-
     if errs:
         LOGGER.warning("POST /save invalid | errs=%s", errs)
-
-        pretty_msg = "Invalid configuration:\n" + "\n".join(
-            f"{e}" for e in errs
+        return PlainTextResponse(
+            "Invalid config: " + "; ".join(errs),
+            status_code=400,
         )
 
+    token_errs = await _verify_tokens_for_save(values)
+    if token_errs:
+        LOGGER.warning("POST /save invalid | token_errs=%s", token_errs)
+        pretty_msg = "Invalid config:\n" + "\n".join(f"- {msg}" for msg in token_errs)
         return PlainTextResponse(pretty_msg, status_code=400)
+
+    try:
+        _write_env(values)
+        LOGGER.info(
+            "Config saved successfully",
+            extra={"keys": list(values.keys())},
+        )
+    except Exception as e:
+        LOGGER.exception("Failed to persist config to DB: %s", e)
+        return PlainTextResponse(
+            "Internal error saving config.",
+            status_code=500,
+        )
+
+    try:
+        env_after = _read_env()
+        new_level = (env_after.get("LOG_LEVEL") or "INFO").upper()
+
+        os.environ["LOG_LEVEL"] = new_level
+
+        import logging as _logging
+
+        LOGGER.logger.setLevel(getattr(_logging, new_level, _logging.INFO))
+
+        LOGGER.info("LOG_LEVEL applied", extra={"LOG_LEVEL": new_level})
+    except Exception as e:
+        LOGGER.exception("Failed to apply LOG_LEVEL: %s", e)
+
+    return RedirectResponse("/", status_code=303)
 
 
 @app.post("/start")
