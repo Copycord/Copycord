@@ -950,38 +950,7 @@ class ClientListener:
 
         return False
 
-    async def _resolve_forwarded_original(self, wrapper_msg: discord.Message):
-        """
-        If `wrapper_msg` is just a forward shell with no content,
-        fetch the real source message that was forwarded.
-        """
-        ref = getattr(wrapper_msg, "reference", None)
-        if not ref:
-            return None
-
-        ch = None
-        try:
-            ch = self.bot.get_channel(int(ref.channel_id))
-        except Exception:
-            ch = None
-
-        if ch is None:
-            try:
-                ch = await self.bot.fetch_channel(int(ref.channel_id))
-            except Exception:
-                ch = None
-
-        if ch is None:
-            return None
-
-        try:
-            orig = await ch.fetch_message(int(ref.message_id))
-        except Exception:
-            orig = None
-
-        return orig
-
-    async def _resolve_forward_chain(
+    async def _resolve_forward(
         self, wrapper_msg: discord.Message, max_depth: int = 4
     ):
         """
@@ -1071,7 +1040,7 @@ class ClientListener:
         src_msg = message
 
         if looks_like_forward:
-            resolved = await self._resolve_forward_chain(message)
+            resolved = await self._resolve_forward(message)
             if resolved is not None:
                 src_msg = resolved
             else:
