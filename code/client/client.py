@@ -24,7 +24,7 @@ from discord.ext import commands
 from common.config import Config, CURRENT_VERSION
 from common.db import DBManager
 from client.sitemap import SitemapService
-from client.message_utils import MessageUtils
+from client.message_utils import MessageUtils, _resolve_forward
 from common.websockets import WebsocketManager, AdminBus
 from client.scraper import MemberScraper
 from client.helpers import ClientUiController, dump_message_debug
@@ -950,60 +950,6 @@ class ClientListener:
 
         return False
 
-    async def _resolve_forward(
-        self, wrapper_msg: discord.Message, max_depth: int = 4
-    ):
-        """
-        Try to unwrap a chain of forwarded/quoted messages until we find one
-        that actually has usable content (text OR attachments OR embeds OR stickers).
-        """
-        seen = 0
-        current = wrapper_msg
-
-        while seen < max_depth and current is not None:
-
-            has_text = bool(
-                (current.content or "").strip()
-                or (getattr(current, "system_content", "") or "").strip()
-            )
-            has_atts = bool(getattr(current, "attachments", None))
-            has_embs = bool(getattr(current, "embeds", None))
-            has_stks = bool(getattr(current, "stickers", None))
-
-            if has_text or has_atts or has_embs or has_stks:
-
-                return current
-
-            ref = getattr(current, "reference", None)
-            if not ref:
-                break
-
-            next_msg = None
-
-            ch = None
-            try:
-                ch = self.bot.get_channel(int(ref.channel_id))
-            except Exception:
-                ch = None
-
-            if ch is None:
-                try:
-                    ch = await self.bot.fetch_channel(int(ref.channel_id))
-                except Exception:
-                    ch = None
-
-            if ch is None:
-                break
-
-            try:
-                next_msg = await ch.fetch_message(int(ref.message_id))
-            except Exception:
-                next_msg = None
-
-            current = next_msg
-            seen += 1
-
-        return None
 
     async def on_message(self, message: discord.Message):
         """
@@ -1040,7 +986,7 @@ class ClientListener:
         src_msg = message
 
         if looks_like_forward:
-            resolved = await self._resolve_forward(message)
+            resolved = await _resolve_forward(self.bot, message)
             if resolved is not None:
                 src_msg = resolved
             else:

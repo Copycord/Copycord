@@ -35,6 +35,7 @@ from typing import (
 )
 from discord import ChannelType, MessageType, Object as DiscordObject
 from discord.errors import HTTPException, Forbidden
+from client.message_utils import _resolve_forward
 
 
 DictLike: TypeAlias = Dict[str, Any]
@@ -2498,70 +2499,3 @@ class AssetExportRunner:
         finally:
             await self._end(gid)
 
-
-async def _resolve_forward(bot, wrapper_msg, max_depth: int = 4):
-    """
-    Follow .reference / forward wrappers to find the original message
-    that actually has real content we can forward.
-
-    We IGNORE "has embeds only" shells, because Discord's forward/
-    quote wrappers often have an embed preview but no .content.
-    Those would serialize to empty content on our side.
-    """
-    current = wrapper_msg
-    seen = 0
-
-    while seen < max_depth and current is not None:
-        raw_txt = (getattr(current, "content", "") or "").strip()
-        sys_txt = (getattr(current, "system_content", "") or "").strip()
-
-        has_text = bool(raw_txt or sys_txt)
-        has_atts = bool(getattr(current, "attachments", None))
-        has_stks = bool(getattr(current, "stickers", None))
-
-        # Forward wrapper messages usually ONLY have embeds, and that's
-
-        if has_text or has_atts or has_stks:
-
-            return current
-
-        ref = getattr(current, "reference", None)
-        if not ref:
-            break
-
-        ch = None
-        try:
-            ch = bot.get_channel(int(ref.channel_id))
-        except Exception:
-            ch = None
-
-        if ch is None:
-            try:
-                ch = await bot.fetch_channel(int(ref.channel_id))
-            except Exception:
-                ch = None
-
-        if ch is None:
-            break
-
-        next_msg = None
-        try:
-            next_msg = await ch.fetch_message(int(ref.message_id))
-        except Exception:
-            next_msg = None
-
-        current = next_msg
-        seen += 1
-
-    if current is not None:
-        raw_txt = (getattr(current, "content", "") or "").strip()
-        sys_txt = (getattr(current, "system_content", "") or "").strip()
-        if (
-            raw_txt
-            or sys_txt
-            or getattr(current, "attachments", None)
-            or getattr(current, "stickers", None)
-        ):
-            return current
-
-    return None
