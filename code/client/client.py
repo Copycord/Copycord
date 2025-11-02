@@ -1012,7 +1012,63 @@ class ClientListener:
                     return True
 
         return False
+    
+    async def _resolve_forward_chain(self, wrapper_msg: discord.Message, max_depth: int = 4):
+        """
+        Try to unwrap a chain of forwarded/quoted messages until we find one
+        that actually has usable content.
+        """
+        seen = 0
+        current = wrapper_msg
 
+        while seen < max_depth and current is not None:
+            # Check if this message has anything worth cloning.
+            has_text = bool(
+                (current.content or "").strip()
+                or (getattr(current, "system_content", "") or "").strip()
+            )
+            has_atts = bool(getattr(current, "attachments", None))
+            has_embs = bool(getattr(current, "embeds", None))
+            has_stks = bool(getattr(current, "stickers", None))
+
+            if has_text or has_atts or has_embs or has_stks:
+                # We found a "real" message.
+                return current
+
+            # Otherwise walk the reference pointer.
+            ref = getattr(current, "reference", None)
+            if not ref:
+                break
+
+            # Try to load the referenced message.
+            next_msg = None
+
+            ch = None
+            try:
+                ch = self.bot.get_channel(int(ref.channel_id))
+            except Exception:
+                ch = None
+
+            if ch is None:
+                try:
+                    ch = await self.bot.fetch_channel(int(ref.channel_id))
+                except Exception:
+                    ch = None
+
+            if ch is None:
+                break
+
+            try:
+                next_msg = await ch.fetch_message(int(ref.message_id))
+            except Exception:
+                next_msg = None
+
+            current = next_msg
+            seen += 1
+
+        # We walked down but never found usable content
+        return None
+    
     async def on_message(self, message: discord.Message):
         """
         Handles incoming Discord messages and processes them for forwarding.
@@ -1032,33 +1088,84 @@ class ClientListener:
         if self.should_ignore(message):
             return
 
+        # -------- Step 1: detect if this is a forward "wrapper" ----------
         raw = message.content or ""
         system = getattr(message, "system_content", "") or ""
-        if not raw and system:
-            content = system
+
+        forwarded_flag_val = 0
+        try:
+            # .flags can be <MessageFlags value=16384> for forwarded shells
+            forwarded_flag_val = int(getattr(getattr(message, "flags", 0), "value", 0) or 0)
+        except Exception:
+            pass
+
+        looks_like_forward = (
+            (not raw and not system)
+            and (getattr(message, "reference", None) or (forwarded_flag_val & 16384))
+        )
+
+        # We'll call the thing we actually serialize "src_msg".
+        # By default it's just the incoming message.
+        src_msg = message
+
+        if looks_like_forward:
+            resolved = await self._resolve_forward_chain(message)
+            if resolved is not None:
+                src_msg = resolved
+            else:
+                # We could not chase the chain to anything with content/attachments/etc.
+                # So this is basically a forward-of-a-forward from a guild we can't read.
+                logger.info(
+                    "[↩️] Dropping unresolvable forward wrapper in #%s (no usable content)",
+                    getattr(message.channel, "name", "?"),
+                )
+                return
+
+        # -------- Step 2: build content/author from src_msg ----------
+        src_raw = src_msg.content or ""
+        src_sys = getattr(src_msg, "system_content", "") or ""
+
+        if not src_raw and src_sys:
+            content = src_sys
             author = "System"
         else:
-            content = raw
-            author = message.author.name
+            content = src_raw
+            author = (
+                src_msg.author.name if getattr(src_msg, "author", None) else "System"
+            )
 
+        # -------- Step 3: if STILL completely empty, bail ----------
+        no_visible_text = (content.strip() == "")
+        no_attachments = not getattr(src_msg, "attachments", None)
+        no_embeds = not getattr(src_msg, "embeds", None)
+        no_stickers = not getattr(src_msg, "stickers", None)
+
+        if no_visible_text and no_attachments and no_embeds and no_stickers:
+            logger.info(
+                "[🚫] Not forwarding empty content in #%s (even after resolve)",
+                getattr(message.channel, "name", "?"),
+            )
+            return
+
+        # -------- Step 4: serialize from src_msg (content, files, embeds, etc.) ----------
         attachments = [
             {
                 "url": att.url,
                 "filename": att.filename,
                 "size": att.size,
             }
-            for att in message.attachments
+            for att in getattr(src_msg, "attachments", [])
         ]
 
-        raw_embeds = [e.to_dict() for e in message.embeds]
-        mention_map = await self.msg.build_mention_map(message, raw_embeds)
+        raw_embeds = [e.to_dict() for e in getattr(src_msg, "embeds", [])]
+        mention_map = await self.msg.build_mention_map(src_msg, raw_embeds)
         embeds = [
-            self.msg.sanitize_embed_dict(e, message, mention_map) for e in raw_embeds
+            self.msg.sanitize_embed_dict(e, src_msg, mention_map) for e in raw_embeds
         ]
-        content = self.msg.sanitize_inline(content, message, mention_map)
+        safe_content = self.msg.sanitize_inline(content, src_msg, mention_map)
 
         components: list[dict] = []
-        for comp in message.components:
+        for comp in getattr(src_msg, "components", []):
             try:
                 components.append(comp.to_dict())
             except NotImplementedError:
@@ -1079,52 +1186,68 @@ class ClientListener:
                     row["components"].append(child_data)
                 components.append(row)
 
-        is_thread = message.channel.type in (
+        # -------- Step 5: routing info MUST come from where we SAW the message ----------
+        # We don't want src_msg.channel (that might be a different guild).
+        # We want the channel in the mapped origin guild that actually fired on_message.
+        target_chan = message.channel
+        target_guild = message.guild
+
+        is_thread = target_chan.type in (
             ChannelType.public_thread,
             ChannelType.private_thread,
         )
 
-        stickers_payload = self.msg.stickers_payload(getattr(message, "stickers", []))
+        stickers_payload = self.msg.stickers_payload(
+            getattr(src_msg, "stickers", [])
+        )
+
+        # -------- Step 6: build final payload ----------
+        data_block = {
+            "guild_id": getattr(target_guild, "id", None),
+            "message_id": getattr(src_msg, "id", None),
+            "channel_id": target_chan.id,
+            "channel_name": getattr(target_chan, "name", str(target_chan.id)),
+            "channel_type": target_chan.type.value,
+            "author": author,
+            "author_id": getattr(getattr(src_msg, "author", None), "id", None),
+            "avatar_url": (
+                str(src_msg.author.display_avatar.url)
+                if getattr(getattr(src_msg, "author", None), "display_avatar", None)
+                else None
+            ),
+            "content": safe_content,
+            "timestamp": str(getattr(src_msg, "created_at", None)),
+            "attachments": attachments,
+            "components": components,
+            "stickers": stickers_payload,
+            "embeds": embeds,
+        }
+
+        if is_thread:
+            parent = getattr(target_chan, "parent", None)
+            if parent is not None:
+                data_block.update(
+                    {
+                        "thread_parent_id": parent.id,
+                        "thread_parent_name": getattr(parent, "name", str(parent.id)),
+                        "thread_id": target_chan.id,
+                        "thread_name": getattr(target_chan, "name", str(target_chan.id)),
+                    }
+                )
 
         payload = {
             "type": "thread_message" if is_thread else "message",
-            "data": {
-                "guild_id": getattr(message.guild, "id", None),
-                "message_id": getattr(message, "id", None),
-                "channel_id": message.channel.id,
-                "channel_name": message.channel.name,
-                "channel_type": message.channel.type.value,
-                "author": author,
-                "author_id": message.author.id,
-                "avatar_url": (
-                    str(message.author.display_avatar.url)
-                    if message.author.display_avatar
-                    else None
-                ),
-                "content": content,
-                "timestamp": str(message.created_at),
-                "attachments": attachments,
-                "components": components,
-                "stickers": stickers_payload,
-                "embeds": embeds,
-                **(
-                    {
-                        "thread_parent_id": message.channel.parent.id,
-                        "thread_parent_name": message.channel.parent.name,
-                        "thread_id": message.channel.id,
-                        "thread_name": message.channel.name,
-                    }
-                    if is_thread
-                    else {}
-                ),
-            },
+            "data": data_block,
         }
+
         await self.ws.send(payload)
+
         logger.info(
             "[📩] New msg detected in #%s from %s; forwarding to server",
             message.channel.name,
             message.author.name,
         )
+
 
     def _is_meaningful_edit(
         self, before: discord.Message, after: discord.Message
