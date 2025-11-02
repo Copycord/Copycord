@@ -130,7 +130,7 @@ copycord/
 ```yaml
 services:
   admin:
-    image: ghcr.io/copycord/copycord:v2.8.2
+    image: ghcr.io/copycord/copycord:v2.8.3
     container_name: copycord-admin
     environment:
       - ROLE=admin
@@ -141,7 +141,7 @@ services:
     restart: unless-stopped
 
   server:
-    image: ghcr.io/copycord/copycord:v2.8.2
+    image: ghcr.io/copycord/copycord:v2.8.3
     container_name: copycord-server
     environment:
       - ROLE=server
@@ -152,7 +152,7 @@ services:
     restart: unless-stopped
 
   client:
-    image: ghcr.io/copycord/copycord:v2.8.2
+    image: ghcr.io/copycord/copycord:v2.8.3
     container_name: copycord-client
     environment:
       - ROLE=client
