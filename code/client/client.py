@@ -992,7 +992,7 @@ class ClientListener:
             else:
 
                 logger.info(
-                    "Dropping unresolvable forward wrapper in #%s (no usable content)",
+                    "Dropping unresolvable forwarded message in #%s (are we in the source server?)",
                     getattr(message.channel, "name", "?"),
                 )
                 return
