@@ -7,13 +7,17 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 from __future__ import annotations
 import asyncio
+import json
+import inspect
 import logging
 import time
 import uuid
 from typing import Optional, Any, Dict
 import discord
+from datetime import datetime
 from common.config import CURRENT_VERSION
 
 
@@ -363,3 +367,175 @@ async def dm_member_by_id(bot, member_id: int, message: str) -> bool:
         return False
     except Exception as e:
         return False
+
+
+def _safe_primitive(val: Any) -> Any:
+    """
+    Try to convert any random Discord model attr into something JSON-friendly.
+    """
+
+    if val is None or isinstance(val, (str, int, float, bool)):
+        return val
+
+    if isinstance(val, datetime):
+        return val.isoformat()
+
+    if hasattr(val, "id") and isinstance(getattr(val, "id"), int):
+
+        base = {"id": val.id, "_type": val.__class__.__name__}
+        if hasattr(val, "name"):
+            base["name"] = getattr(val, "name")
+        if hasattr(val, "display_name"):
+            base["display_name"] = getattr(val, "display_name")
+        return base
+
+    if hasattr(val, "url"):
+        try:
+            return str(val.url)
+        except Exception:
+            pass
+
+    if isinstance(val, dict):
+        return {str(k): _safe_primitive(v) for k, v in val.items()}
+
+    if isinstance(val, (list, tuple, set)):
+        return [_safe_primitive(x) for x in val]
+
+    if hasattr(val, "to_dict") and callable(getattr(val, "to_dict")):
+        try:
+            return val.to_dict()
+        except Exception:
+            pass
+
+    if hasattr(val, "to_json"):
+        try:
+            return val.to_json()
+        except Exception:
+            pass
+
+    if hasattr(val, "__dict__"):
+        shallow = {}
+        for k, v in vars(val).items():
+
+            if k.startswith("_"):
+                continue
+            shallow[k] = _safe_primitive(v)
+        if shallow:
+            shallow["_type"] = val.__class__.__name__
+            return shallow
+
+    try:
+        return repr(val)
+    except Exception:
+        return f"<unserializable {val.__class__.__name__}>"
+
+
+def dump_message_debug(message: "discord.Message") -> str:
+    """
+    Produce a pretty, multi-line JSON-ish string describing the full message.
+    Safe for logging. Does not include tokens.
+    """
+
+    try:
+        data = {
+            "_type": "Message",
+            "id": getattr(message, "id", None),
+            "created_at": _safe_primitive(getattr(message, "created_at", None)),
+            "edited_at": _safe_primitive(getattr(message, "edited_at", None)),
+            "type": (
+                getattr(message, "type", None).__class__.__name__
+                if getattr(message, "type", None) is not None
+                else None
+            ),
+            "author": {
+                "id": getattr(getattr(message, "author", None), "id", None),
+                "name": getattr(getattr(message, "author", None), "name", None),
+                "display_name": getattr(
+                    getattr(message, "author", None), "display_name", None
+                ),
+                "bot": getattr(getattr(message, "author", None), "bot", None),
+                "system": getattr(getattr(message, "author", None), "system", None),
+                "avatar_url": (
+                    str(getattr(message.author.display_avatar, "url", None))
+                    if getattr(message, "author", None)
+                    and getattr(message.author, "display_avatar", None)
+                    else None
+                ),
+                "_raw": _safe_primitive(getattr(message, "author", None)),
+            },
+            "channel": {
+                "id": getattr(getattr(message, "channel", None), "id", None),
+                "name": getattr(getattr(message, "channel", None), "name", None),
+                "type": (
+                    getattr(getattr(message, "channel", None), "type", None).name
+                    if getattr(getattr(message, "channel", None), "type", None)
+                    is not None
+                    else None
+                ),
+                "parent_id": (
+                    getattr(getattr(message.channel, "parent", None), "id", None)
+                    if getattr(message, "channel", None)
+                    else None
+                ),
+                "parent_name": (
+                    getattr(getattr(message.channel, "parent", None), "name", None)
+                    if getattr(message, "channel", None)
+                    else None
+                ),
+                "_raw": _safe_primitive(getattr(message, "channel", None)),
+            },
+            "guild": {
+                "id": getattr(getattr(message, "guild", None), "id", None),
+                "name": getattr(getattr(message, "guild", None), "name", None),
+                "_raw": _safe_primitive(getattr(message, "guild", None)),
+            },
+            "content": getattr(message, "content", None),
+            "system_content": getattr(message, "system_content", None),
+            "clean_content": getattr(message, "clean_content", None),
+            "reference": _safe_primitive(getattr(message, "reference", None)),
+            "reference_resolved": _safe_primitive(
+                getattr(message, "reference", None).resolved
+                if getattr(message, "reference", None)
+                and hasattr(getattr(message, "reference", None), "resolved")
+                else None
+            ),
+            "is_system": (
+                getattr(message, "is_system", None)
+                if hasattr(message, "is_system")
+                and inspect.ismethod(getattr(message, "is_system")) is False
+                else None
+            ),
+            "embeds": [_safe_primitive(e) for e in getattr(message, "embeds", [])],
+            "attachments": [
+                {
+                    "id": getattr(a, "id", None),
+                    "filename": getattr(a, "filename", None),
+                    "size": getattr(a, "size", None),
+                    "url": getattr(a, "url", None),
+                    "proxy_url": getattr(a, "proxy_url", None),
+                    "content_type": getattr(a, "content_type", None),
+                }
+                for a in getattr(message, "attachments", [])
+            ],
+            "stickers": _safe_primitive(getattr(message, "stickers", [])),
+            "components": _safe_primitive(getattr(message, "components", [])),
+            "flags": _safe_primitive(getattr(message, "flags", None)),
+            "mentions": _safe_primitive(getattr(message, "mentions", [])),
+            "role_mentions": _safe_primitive(getattr(message, "role_mentions", [])),
+            "channel_mentions": _safe_primitive(
+                getattr(message, "channel_mentions", [])
+            ),
+            "mentions_everyone": getattr(message, "mention_everyone", None),
+            "pinned": getattr(message, "pinned", None),
+            "tts": getattr(message, "tts", None),
+            "webhook_id": getattr(message, "webhook_id", None),
+            "application_id": getattr(message, "application_id", None),
+            "interaction": _safe_primitive(getattr(message, "interaction", None)),
+            "thread": _safe_primitive(getattr(message, "thread", None)),
+        }
+
+        return json.dumps(data, indent=2, sort_keys=True, default=str)
+
+    except Exception as e:
+
+        return f"<<dump_message_debug failed: {e!r}>>"
