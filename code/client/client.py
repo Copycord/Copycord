@@ -24,7 +24,7 @@ from discord.ext import commands
 from common.config import Config, CURRENT_VERSION
 from common.db import DBManager
 from client.sitemap import SitemapService
-from client.message_utils import MessageUtils
+from client.message_utils import MessageUtils, _resolve_forward
 from common.websockets import WebsocketManager, AdminBus
 from common.common_helpers import resolve_mapping_settings
 from client.scraper import MemberScraper
@@ -1013,61 +1013,6 @@ class ClientListener:
 
         return False
 
-    async def _resolve_forward(
-        self, wrapper_msg: discord.Message, max_depth: int = 4
-    ):
-        """
-        Try to unwrap a chain of forwarded/quoted messages until we find one
-        that actually has usable content.
-        """
-        seen = 0
-        current = wrapper_msg
-
-        while seen < max_depth and current is not None:
-
-            has_text = bool(
-                (current.content or "").strip()
-                or (getattr(current, "system_content", "") or "").strip()
-            )
-            has_atts = bool(getattr(current, "attachments", None))
-            has_embs = bool(getattr(current, "embeds", None))
-            has_stks = bool(getattr(current, "stickers", None))
-
-            if has_text or has_atts or has_embs or has_stks:
-
-                return current
-
-            ref = getattr(current, "reference", None)
-            if not ref:
-                break
-
-            next_msg = None
-
-            ch = None
-            try:
-                ch = self.bot.get_channel(int(ref.channel_id))
-            except Exception:
-                ch = None
-
-            if ch is None:
-                try:
-                    ch = await self.bot.fetch_channel(int(ref.channel_id))
-                except Exception:
-                    ch = None
-
-            if ch is None:
-                break
-
-            try:
-                next_msg = await ch.fetch_message(int(ref.message_id))
-            except Exception:
-                next_msg = None
-
-            current = next_msg
-            seen += 1
-
-        return None
-
     async def on_message(self, message: discord.Message):
         """
         Handles incoming Discord messages and processes them for forwarding.
@@ -1103,19 +1048,16 @@ class ClientListener:
             getattr(message, "reference", None) or (forwarded_flag_val & 16384)
         )
 
-        # We'll call the thing we actually serialize "src_msg".
-        # By default it's just the incoming message.
         src_msg = message
 
         if looks_like_forward:
-            resolved = await self._resolve_forward(message)
+            resolved = await _resolve_forward(self.bot, message)
             if resolved is not None:
                 src_msg = resolved
             else:
 
-                # So this is basically a forward-of-a-forward from a guild we can't read.
                 logger.info(
-                    "[↩️] Dropping unresolvable forward wrapper in #%s (no usable content)",
+                    "Dropping unresolvable forwarded message in #%s (are we in the server where the original was sent?)",
                     getattr(message.channel, "name", "?"),
                 )
                 return
@@ -1181,8 +1123,6 @@ class ClientListener:
                         child_data["emoji"] = emoji_data
                     row["components"].append(child_data)
                 components.append(row)
-
-        # We don't want src_msg.channel (that might be a different guild).
 
         target_chan = message.channel
         target_guild = message.guild

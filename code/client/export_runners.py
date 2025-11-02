@@ -35,6 +35,7 @@ from typing import (
 )
 from discord import ChannelType, MessageType, Object as DiscordObject
 from discord.errors import HTTPException, Forbidden
+from client.message_utils import _resolve_forward
 
 
 DictLike: TypeAlias = Dict[str, Any]
@@ -476,13 +477,69 @@ class ExportMessagesRunner:
                                 await asyncio.sleep(self.scan_sleep)
                             continue
 
+                        # referenced/original message instead. We'll detect that.
+                        looks_empty = not (
+                            (
+                                (msg.content or "")
+                                or (getattr(msg, "system_content", "") or "")
+                            ).strip()
+                        )
+
+                        has_forward_flag = False
+                        try:
+                            has_forward_flag = bool(
+                                hasattr(msg, "flags")
+                                and (int(getattr(msg.flags, "value", 0) or 0) & 16384)
+                            )
+                        except Exception:
+                            pass
+
+                        has_reference_obj = bool(getattr(msg, "reference", None))
+                        needs_unwrap = looks_empty and (
+                            has_reference_obj or has_forward_flag
+                        )
+
+                        real_msg = msg
+                        if needs_unwrap:
+                            try:
+                                unwrapped = await _resolve_forward(self.bot, msg)
+                            except Exception as e:
+                                unwrapped = None
+                                self.log.debug(
+                                    "[export] forward resolve failed id=%s: %s",
+                                    getattr(msg, "id", None),
+                                    e,
+                                )
+                            if unwrapped is not None:
+                                real_msg = unwrapped
+
+                        # After unwrap, re-check: if it's STILL totally empty (no text, embeds, files, stickers)
+                        raw_now = real_msg.content or ""
+                        system_now = getattr(real_msg, "system_content", "") or ""
+                        merged_content = (
+                            system_now if (not raw_now and system_now) else raw_now
+                        )
+
+                        has_any_text = bool(merged_content.strip())
+                        has_any_atts = bool(getattr(real_msg, "attachments", None))
+                        has_any_embs = bool(getattr(real_msg, "embeds", None))
+                        has_any_stks = bool(getattr(real_msg, "stickers", None))
+
+                        if not (
+                            has_any_text or has_any_atts or has_any_embs or has_any_stks
+                        ):
+
+                            if self.scan_sleep:
+                                await asyncio.sleep(self.scan_sleep)
+                            continue
+
                         ch_matched += 1
                         total_matched += 1
 
                         is_thread = _is_thread(ch)
                         parent = getattr(ch, "parent", None)
 
-                        serialized = self.serialize(msg)
+                        serialized = self.serialize(real_msg)
 
                         serialized["_export_ctx"] = {
                             "channel_id": getattr(ch, "id", None),
@@ -1445,73 +1502,132 @@ class BackfillEngine:
 
         async def _emit_msg(m):
             nonlocal sent, skipped, last_ping, last_log
+
             if not _is_normal(m):
                 skipped += 1
                 return
 
-            raw = m.content or ""
-            system = getattr(m, "system_content", "") or ""
-            content = system if (not raw and system) else raw
-            author_name = (
-                "System"
-                if (not raw and system)
-                else getattr(m.author, "name", "Unknown")
+            # --- capture the wrapper's context BEFORE we maybe unwrap ---
+            wrapper_channel = getattr(m, "channel", None)
+            wrapper_guild = getattr(m, "guild", None)
+
+            wrapper_guild_id = getattr(wrapper_guild, "id", None)
+            wrapper_channel_id = getattr(wrapper_channel, "id", None)
+            wrapper_channel_name = getattr(wrapper_channel, "name", None)
+            wrapper_channel_type = (
+                getattr(wrapper_channel, "type", None).value
+                if getattr(wrapper_channel, "type", None)
+                else None
             )
 
-            raw_embeds = [e.to_dict() for e in m.embeds]
-            mention_map = await self.msg.build_mention_map(m, raw_embeds)
-            embeds = [
-                self.msg.sanitize_embed_dict(e, m, mention_map) for e in raw_embeds
-            ]
-            content = self.msg.sanitize_inline(content, m, mention_map)
-            stickers_payload = self.msg.stickers_payload(getattr(m, "stickers", []))
+            wrapper_parent = getattr(wrapper_channel, "parent", None)
+            wrapper_parent_id = getattr(wrapper_parent, "id", None)
+            wrapper_parent_name = getattr(wrapper_parent, "name", None)
 
-            is_thread = getattr(m.channel, "type", None) in (
+            looks_empty = not (
+                ((m.content or "") or (getattr(m, "system_content", "") or "")).strip()
+            )
+
+            has_forward_flag = False
+            try:
+                has_forward_flag = bool(
+                    hasattr(m, "flags")
+                    and (int(getattr(m.flags, "value", 0) or 0) & 16384)
+                )
+            except Exception:
+                pass
+
+            needs_unwrap = looks_empty and (
+                getattr(m, "reference", None) or has_forward_flag
+            )
+
+            real_msg = m
+            if needs_unwrap:
+                try:
+                    unwrapped = await _resolve_forward(self.bot, m)
+                except Exception as e:
+                    unwrapped = None
+                    self.logger.debug(
+                        "[backfill] forward resolve failed id=%s: %s",
+                        getattr(m, "id", None),
+                        e,
+                    )
+                if unwrapped is not None:
+                    real_msg = unwrapped
+
+            raw_now = real_msg.content or ""
+            system_now = getattr(real_msg, "system_content", "") or ""
+            merged_content = system_now if (not raw_now and system_now) else raw_now
+
+            has_any_text = bool(merged_content.strip())
+            has_any_atts = bool(getattr(real_msg, "attachments", None))
+            has_any_embs = bool(getattr(real_msg, "embeds", None))
+            has_any_stks = bool(getattr(real_msg, "stickers", None))
+
+            if not (has_any_text or has_any_atts or has_any_embs or has_any_stks):
+                skipped += 1
+                return
+
+            author_name = (
+                "System"
+                if (not raw_now and system_now)
+                else getattr(real_msg.author, "name", "Unknown")
+            )
+
+            raw_embeds = [e.to_dict() for e in real_msg.embeds]
+            mention_map = await self.msg.build_mention_map(real_msg, raw_embeds)
+            embeds = [
+                self.msg.sanitize_embed_dict(e, real_msg, mention_map)
+                for e in raw_embeds
+            ]
+            merged_content = self.msg.sanitize_inline(
+                merged_content, real_msg, mention_map
+            )
+            stickers_payload = self.msg.stickers_payload(
+                getattr(real_msg, "stickers", [])
+            )
+
+            is_thread = getattr(wrapper_channel, "type", None) in (
                 ChannelType.public_thread,
                 ChannelType.private_thread,
             )
+
             payload = {
                 "type": "thread_message" if is_thread else "message",
                 "data": {
-                    "guild_id": getattr(m.guild, "id", None),
-                    "message_id": getattr(m, "id", None),
-                    "channel_id": m.channel.id,
-                    "channel_name": getattr(m.channel, "name", None),
-                    "channel_type": (
-                        getattr(m.channel, "type", None).value
-                        if getattr(m.channel, "type", None)
-                        else None
-                    ),
+                    "guild_id": wrapper_guild_id,
+                    "message_id": getattr(real_msg, "id", None),
+                    "channel_id": wrapper_channel_id,
+                    "channel_name": wrapper_channel_name,
+                    "channel_type": wrapper_channel_type,
                     "author": author_name,
-                    "author_id": getattr(m.author, "id", None),
+                    "author_id": getattr(real_msg.author, "id", None),
                     "avatar_url": (
-                        str(m.author.display_avatar.url)
-                        if getattr(m.author, "display_avatar", None)
+                        str(real_msg.author.display_avatar.url)
+                        if getattr(real_msg.author, "display_avatar", None)
                         else None
                     ),
-                    "content": content,
+                    "content": merged_content,
                     "attachments": [
                         {"url": a.url, "filename": a.filename, "size": a.size}
-                        for a in m.attachments
+                        for a in getattr(real_msg, "attachments", [])
                     ],
                     "stickers": stickers_payload,
                     "embeds": embeds,
                     "timestamp": (
-                        getattr(m, "created_at", None) or _dt_from_snowflake(m.id)
+                        getattr(real_msg, "created_at", None)
+                        or _dt_from_snowflake(real_msg.id)
                     )
                     .astimezone(timezone.utc)
                     .isoformat(),
                     "__backfill__": True,
+                    # thread context should still reflect where we're *sending* this,
                     **(
                         {
-                            "thread_parent_id": getattr(
-                                getattr(m.channel, "parent", None), "id", None
-                            ),
-                            "thread_parent_name": getattr(
-                                getattr(m.channel, "parent", None), "name", None
-                            ),
-                            "thread_id": getattr(m.channel, "id", None),
-                            "thread_name": getattr(m.channel, "name", None),
+                            "thread_parent_id": wrapper_parent_id,
+                            "thread_parent_name": wrapper_parent_name,
+                            "thread_id": wrapper_channel_id,
+                            "thread_name": wrapper_channel_name,
                         }
                         if is_thread
                         else {}
@@ -1528,7 +1644,10 @@ class BackfillEngine:
                 await self._safe_ws_send(
                     {
                         "type": "backfill_progress",
-                        "data": {"channel_id": original_channel_id, "sent": sent},
+                        "data": {
+                            "channel_id": original_channel_id,
+                            "sent": sent,
+                        },
                         "mapping_id": mapping_id,
                         "cloned_guild_id": cloned_guild_id,
                         "original_guild_id": original_guild_id,
@@ -1969,9 +2088,9 @@ class BackfillEngine:
             except Exception:
                 pass
             if retry_after is None:
-                retry_after = min(60.0, self.BASE_DELAY * (2 ** attempt))
+                retry_after = min(60.0, self.BASE_DELAY * (2**attempt))
             return float(retry_after) * (1.0 + random.random() * self.JITTER)
-        return self.BASE_DELAY * (2 ** attempt) * (1.0 + random.random() * self.JITTER)
+        return self.BASE_DELAY * (2**attempt) * (1.0 + random.random() * self.JITTER)
 
     async def _retry(self, desc: str, op):
         for attempt in range(self.MAX_RETRIES + 1):
@@ -1983,7 +2102,10 @@ class BackfillEngine:
                 delay = self._retry_delay_for(e, attempt)
                 self.logger.warning(
                     "[backfill] retry %s after HTTP %s attempt=%d sleep=%.2fs",
-                    desc, getattr(e, "status", "?"), attempt + 1, delay,
+                    desc,
+                    getattr(e, "status", "?"),
+                    attempt + 1,
+                    delay,
                 )
                 await asyncio.sleep(delay)
 
@@ -2152,7 +2274,8 @@ class BackfillEngine:
                     delay = self._retry_delay_for(e, 0)
                     self.logger.warning(
                         "[backfill] HTTP %s on history; sleeping %.2fs then resuming",
-                        getattr(e, "status", "?"), delay,
+                        getattr(e, "status", "?"),
+                        delay,
                     )
                     await asyncio.sleep(delay)
                     continue
