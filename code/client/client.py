@@ -1012,8 +1012,10 @@ class ClientListener:
                     return True
 
         return False
-    
-    async def _resolve_forward_chain(self, wrapper_msg: discord.Message, max_depth: int = 4):
+
+    async def _resolve_forward_chain(
+        self, wrapper_msg: discord.Message, max_depth: int = 4
+    ):
         """
         Try to unwrap a chain of forwarded/quoted messages until we find one
         that actually has usable content.
@@ -1022,7 +1024,7 @@ class ClientListener:
         current = wrapper_msg
 
         while seen < max_depth and current is not None:
-            # Check if this message has anything worth cloning.
+
             has_text = bool(
                 (current.content or "").strip()
                 or (getattr(current, "system_content", "") or "").strip()
@@ -1032,15 +1034,13 @@ class ClientListener:
             has_stks = bool(getattr(current, "stickers", None))
 
             if has_text or has_atts or has_embs or has_stks:
-                # We found a "real" message.
+
                 return current
 
-            # Otherwise walk the reference pointer.
             ref = getattr(current, "reference", None)
             if not ref:
                 break
 
-            # Try to load the referenced message.
             next_msg = None
 
             ch = None
@@ -1066,9 +1066,8 @@ class ClientListener:
             current = next_msg
             seen += 1
 
-        # We walked down but never found usable content
         return None
-    
+
     async def on_message(self, message: discord.Message):
         """
         Handles incoming Discord messages and processes them for forwarding.
@@ -1088,20 +1087,20 @@ class ClientListener:
         if self.should_ignore(message):
             return
 
-        # -------- Step 1: detect if this is a forward "wrapper" ----------
         raw = message.content or ""
         system = getattr(message, "system_content", "") or ""
 
         forwarded_flag_val = 0
         try:
-            # .flags can be <MessageFlags value=16384> for forwarded shells
-            forwarded_flag_val = int(getattr(getattr(message, "flags", 0), "value", 0) or 0)
+
+            forwarded_flag_val = int(
+                getattr(getattr(message, "flags", 0), "value", 0) or 0
+            )
         except Exception:
             pass
 
-        looks_like_forward = (
-            (not raw and not system)
-            and (getattr(message, "reference", None) or (forwarded_flag_val & 16384))
+        looks_like_forward = (not raw and not system) and (
+            getattr(message, "reference", None) or (forwarded_flag_val & 16384)
         )
 
         # We'll call the thing we actually serialize "src_msg".
@@ -1113,7 +1112,7 @@ class ClientListener:
             if resolved is not None:
                 src_msg = resolved
             else:
-                # We could not chase the chain to anything with content/attachments/etc.
+
                 # So this is basically a forward-of-a-forward from a guild we can't read.
                 logger.info(
                     "[↩️] Dropping unresolvable forward wrapper in #%s (no usable content)",
@@ -1121,7 +1120,6 @@ class ClientListener:
                 )
                 return
 
-        # -------- Step 2: build content/author from src_msg ----------
         src_raw = src_msg.content or ""
         src_sys = getattr(src_msg, "system_content", "") or ""
 
@@ -1134,8 +1132,7 @@ class ClientListener:
                 src_msg.author.name if getattr(src_msg, "author", None) else "System"
             )
 
-        # -------- Step 3: if STILL completely empty, bail ----------
-        no_visible_text = (content.strip() == "")
+        no_visible_text = content.strip() == ""
         no_attachments = not getattr(src_msg, "attachments", None)
         no_embeds = not getattr(src_msg, "embeds", None)
         no_stickers = not getattr(src_msg, "stickers", None)
@@ -1147,7 +1144,6 @@ class ClientListener:
             )
             return
 
-        # -------- Step 4: serialize from src_msg (content, files, embeds, etc.) ----------
         attachments = [
             {
                 "url": att.url,
@@ -1186,9 +1182,8 @@ class ClientListener:
                     row["components"].append(child_data)
                 components.append(row)
 
-        # -------- Step 5: routing info MUST come from where we SAW the message ----------
         # We don't want src_msg.channel (that might be a different guild).
-        # We want the channel in the mapped origin guild that actually fired on_message.
+
         target_chan = message.channel
         target_guild = message.guild
 
@@ -1197,11 +1192,8 @@ class ClientListener:
             ChannelType.private_thread,
         )
 
-        stickers_payload = self.msg.stickers_payload(
-            getattr(src_msg, "stickers", [])
-        )
+        stickers_payload = self.msg.stickers_payload(getattr(src_msg, "stickers", []))
 
-        # -------- Step 6: build final payload ----------
         data_block = {
             "guild_id": getattr(target_guild, "id", None),
             "message_id": getattr(src_msg, "id", None),
@@ -1231,7 +1223,9 @@ class ClientListener:
                         "thread_parent_id": parent.id,
                         "thread_parent_name": getattr(parent, "name", str(parent.id)),
                         "thread_id": target_chan.id,
-                        "thread_name": getattr(target_chan, "name", str(target_chan.id)),
+                        "thread_name": getattr(
+                            target_chan, "name", str(target_chan.id)
+                        ),
                     }
                 )
 
@@ -1247,7 +1241,6 @@ class ClientListener:
             message.channel.name,
             message.author.name,
         )
-
 
     def _is_meaningful_edit(
         self, before: discord.Message, after: discord.Message
@@ -2051,10 +2044,6 @@ class ClientListener:
     def run(self):
         """
         Runs the Copycord client.
-
-        This method initializes the asyncio event loop and starts the bot using the
-        provided client token from the configuration. It ensures proper shutdown
-        of the bot and cleanup of pending tasks when the event loop is closed.
         """
         logger.info("[✨] Starting Copycord Client %s", CURRENT_VERSION)
         loop = asyncio.get_event_loop()
