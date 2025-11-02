@@ -3014,6 +3014,16 @@
           },
           async () => {
             try {
+              const row = findChannelRowByOrigId(originalId);
+
+              const originalGuildId = row?.original_guild_id
+                ? String(row.original_guild_id)
+                : "";
+
+              const clonedGuildId = row?.cloned_guild_id
+                ? String(row.cloned_guild_id)
+                : "";
+
               const res = await fetch("/api/filters/blacklist", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -3021,14 +3031,20 @@
                 body: JSON.stringify({
                   scope: "channel",
                   obj_id: String(originalId),
+                  guild_id: originalGuildId,
+                  original_guild_id: originalGuildId,
+                  cloned_guild_id: clonedGuildId,
                 }),
               });
+
               const j = await res.json().catch(() => ({}));
               if (!res.ok || j?.ok === false)
                 throw new Error(j?.detail || j?.error || "failed");
+
               window.showToast("Channel added to blacklist.", {
                 type: "success",
               });
+
               await load();
             } catch {
               window.showToast("Failed to add to blacklist.", {
@@ -3106,7 +3122,9 @@
       blCat.setAttribute("aria-label", "Add category to blacklist");
       blCat.addEventListener("click", () => {
         const name = menuContext?.name ? String(menuContext.name) : "";
-        const { originalCatId } = resolveCategoryIdsByName(name);
+
+        const { originalCatId, originalGuildId, clonedGuildId } =
+          resolveCategoryIdsByName(name);
 
         if (!originalCatId) {
           window.showToast("Could not resolve category ID.", { type: "error" });
@@ -3115,6 +3133,7 @@
         }
 
         hideMenu({ restoreFocus: false });
+
         openConfirm(
           {
             title: "Add category to blacklist?",
@@ -3136,15 +3155,20 @@
                 body: JSON.stringify({
                   scope: "category",
                   obj_id: String(originalCatId),
+                  guild_id: originalGuildId ? String(originalGuildId) : "",
+                  original_guild_id: String(originalGuildId || ""),
+                  cloned_guild_id: String(clonedGuildId || ""),
                 }),
               });
+
               const j = await res.json().catch(() => ({}));
               if (!res.ok || j?.ok === false)
                 throw new Error(j?.detail || j?.error || "failed");
+
               window.showToast("Category added to blacklist.", {
                 type: "success",
               });
-            } catch {
+            } catch (err) {
               window.showToast("Failed to add to blacklist.", {
                 type: "error",
               });
@@ -3152,6 +3176,7 @@
           }
         );
       });
+
       menu.appendChild(blCat);
     }
 
@@ -3177,7 +3202,12 @@
     function resolveCategoryIdsByName(name) {
       const raw = String(name || "").trim();
       if (!raw)
-        return { originalCatId: null, clonedCatId: null, hasClone: false };
+        return {
+          originalCatId: null,
+          clonedCatId: null,
+          hasClone: false,
+          originalGuildId: null,
+        };
 
       const resolvedOriginal =
         (catOrigByEither && catOrigByEither.get(raw.toLowerCase())) || raw;
@@ -3222,11 +3252,14 @@
 
       let originalCatId = null;
       let clonedCatId = null;
+      let originalGuildId = null;
 
       for (const r of rows) {
         if (!originalCatId) originalCatId = firstId(r, origKeys);
         if (!clonedCatId) clonedCatId = firstId(r, cloneKeys);
-        if (originalCatId && clonedCatId) break;
+        if (!originalGuildId && r?.original_guild_id)
+          originalGuildId = String(r.original_guild_id);
+        if (originalCatId && clonedCatId && originalGuildId) break;
       }
 
       if (!clonedCatId) {
@@ -3248,9 +3281,37 @@
         );
       }
 
-      console.debug("cat ids for", name, { originalCatId, clonedCatId, rows });
+      let clonedGuildId = null;
 
-      return { originalCatId, clonedCatId, hasClone: !!clonedCatId };
+      for (const r of rows) {
+        if (!originalCatId) originalCatId = firstId(r, origKeys);
+        if (!clonedCatId) clonedCatId = firstId(r, cloneKeys);
+
+        if (!originalGuildId && r?.original_guild_id)
+          originalGuildId = String(r.original_guild_id);
+
+        if (!clonedGuildId && r?.cloned_guild_id)
+          clonedGuildId = String(r.cloned_guild_id);
+
+        if (originalCatId && clonedCatId && originalGuildId && clonedGuildId)
+          break;
+      }
+
+      console.debug("cat ids for", name, {
+        originalCatId,
+        clonedCatId,
+        originalGuildId,
+        rows,
+        clonedGuildId,
+      });
+
+      return {
+        originalCatId,
+        clonedCatId,
+        hasClone: !!clonedCatId,
+        originalGuildId,
+        clonedGuildId,
+      };
     }
 
     function isInteractiveInside(node) {

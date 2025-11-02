@@ -1914,27 +1914,53 @@ async def api_save_filters(mapping_id: str, request: Request):
 
 @app.post("/api/filters/blacklist", response_class=JSONResponse)
 async def api_blacklist_add(payload: dict = Body(...)):
-    try:
-        scope = str(payload.get("scope", "")).strip().lower()
-        if scope not in ("category", "channel"):
-            raise ValueError("invalid-scope")
 
-        raw_id = str(payload.get("obj_id", "")).strip()
-        if not raw_id.isdigit():
-            raise ValueError("invalid-obj_id")
-        obj_id = int(raw_id)
-    except Exception:
-        raise HTTPException(status_code=400, detail="invalid-input")
+    scope = str(payload.get("scope", "")).strip().lower()
+    if scope not in ("category", "channel"):
+        raise HTTPException(status_code=400, detail="invalid-scope")
+
+    raw_id = str(payload.get("obj_id", "")).strip()
+    if not raw_id.isdigit():
+        raise HTTPException(status_code=400, detail="invalid-id")
+    obj_id = int(raw_id)
+
+    raw_orig = str(payload.get("original_guild_id", "")).strip()
+    raw_clone = str(payload.get("cloned_guild_id", "")).strip()
+
+    original_guild_id = int(raw_orig) if raw_orig.isdigit() else None
+    cloned_guild_id = int(raw_clone) if raw_clone.isdigit() else None
 
     try:
-        db.add_filter("exclude", scope, obj_id)
-        asyncio.create_task(
-            _ws_cmd(CLIENT_AGENT_URL, {"type": "filters_reload"}, timeout=1.0)
+        db.add_filter(
+            "exclude",
+            scope,
+            obj_id,
+            original_guild_id=original_guild_id,
+            cloned_guild_id=cloned_guild_id,
         )
-        return {"ok": True, "scope": scope, "obj_id": str(obj_id)}
-
     except Exception:
         raise HTTPException(status_code=500, detail="db-failure")
+
+    msg = {
+        "type": "filters_reload",
+        "data": {
+            "original_guild_id": original_guild_id,
+            "cloned_guild_id": cloned_guild_id,
+        },
+    }
+
+    try:
+        asyncio.create_task(_ws_cmd(CLIENT_AGENT_URL, msg, timeout=1.0))
+    except Exception:
+        LOGGER.warning("filters_reload ws send failed", exc_info=True)
+
+    return {
+        "ok": True,
+        "scope": scope,
+        "obj_id": str(obj_id),
+        "original_guild_id": str(original_guild_id or ""),
+        "cloned_guild_id": str(cloned_guild_id or ""),
+    }
 
 
 def _read_env() -> Dict[str, str]:
@@ -3109,7 +3135,7 @@ async def api_create_mapping(payload: dict = Body(...)):
         return JSONResponse(
             {
                 "ok": False,
-                "error": "Your Discord account is not a member of the host server. Join the host server with your account before continuing.",
+                "error": "Your Discord account is not a member of the host server. Check your token and join the host server with your account before continuing.",
                 "which": "original_guild_id",
             },
             status_code=400,
@@ -3120,7 +3146,7 @@ async def api_create_mapping(payload: dict = Body(...)):
         return JSONResponse(
             {
                 "ok": False,
-                "error": "Your Discord bot isn’t in the clone server. Invite the bot to that server and make sure it has the Administrator permission.",
+                "error": "Your Discord bot isn’t in the clone server. Check your token and invite the bot to that server with Administrator permission.",
                 "which": "cloned_guild_id",
             },
             status_code=400,

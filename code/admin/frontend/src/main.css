@@ -7366,7 +7366,7 @@ body.modal-open {
 
 .field-token .token-input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.15);
+  box-shadow: none;
   outline: 0;
 }
 

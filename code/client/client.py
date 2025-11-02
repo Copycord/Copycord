@@ -220,10 +220,13 @@ class ClientListener:
         elif typ == "filters_reload":
             self.config._load_filters_from_db()
             logger.info("[⚙️] Filters reloaded from DB")
+
+            gid = data.get("original_guild_id")
             try:
-                self.sitemap.reload_filters_and_resend()
+                self.sitemap.reload_filters_and_resend(gid)
             except AttributeError:
                 asyncio.create_task(self.sitemap.build_and_send_all())
+
             return {"ok": True}
 
         elif typ == "clone_messages":

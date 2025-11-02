@@ -390,13 +390,13 @@ class SitemapService:
             "whitelist_enabled": whitelist_enabled,
         }
 
-    def reload_filters_and_resend(self):
+    def reload_filters_and_resend(self, guild_id: int | None):
         """
         Called when config filter sets were reloaded from DB.
         Rebuild and resend the sitemap so the server sees the new scope.
+        If guild_id is provided, only mark that guild dirty.
         """
-
-        self.schedule_sync(delay=0.2)
+        self.schedule_sync(guild_id, delay=0.2)
 
     def _is_filtered_out_view(
         self,
@@ -629,11 +629,13 @@ class SitemapService:
         )
 
         categories = sitemap.get("categories", [])
-        standalone_channels = sitemap.get("channels", [])
+        standalone_channels = sitemap.get("standalone_channels", [])
+        forum_entries = sitemap.get("forums", [])
         thread_entries = sitemap.get("threads", [])
 
         kept_categories: List[Dict[str, Any]] = []
         kept_standalones: List[Dict[str, Any]] = []
+        kept_forums: List[Dict[str, Any]] = []
         kept_threads: List[Dict[str, Any]] = []
         dropped_channels: List[Dict[str, Any]] = []
 
@@ -658,11 +660,11 @@ class SitemapService:
 
         for cat in categories:
             cat_id = int(cat["id"])
-            channels = cat.get("channels", [])
+            chan_list = cat.get("channels", [])
 
             valid_channels: List[Dict[str, Any]] = []
 
-            for ch in channels:
+            for ch in chan_list:
                 ch_id = int(ch["id"])
 
                 blacklisted = (cat_id in excluded_category_ids) or (
@@ -732,15 +734,53 @@ class SitemapService:
                     }
                 )
 
-        for th in thread_entries:
-            parent_id = int(th.get("parent_channel_id") or 0)
-            th_id = int(th["id"])
+        for fm in forum_entries:
+            fm_id = int(fm["id"])
+            parent_cat_id_raw = fm.get("category_id")
+            parent_cat_id = int(parent_cat_id_raw) if parent_cat_id_raw else None
 
             blacklisted = (
-                parent_id in excluded_channel_ids or th_id in excluded_channel_ids
-            )
+                parent_cat_id in excluded_category_ids if parent_cat_id else False
+            ) or (fm_id in excluded_channel_ids)
             whitelisted = (
-                parent_id in include_channel_ids or th_id in include_channel_ids
+                parent_cat_id in include_category_ids if parent_cat_id else False
+            ) or (fm_id in include_channel_ids)
+
+            keep_forum = True
+            if wl_on_global and not whitelisted:
+                keep_forum = False
+            if blacklisted:
+                keep_forum = False
+
+            if keep_forum:
+                kept_forums.append(fm)
+            else:
+                dropped_channels.append(
+                    {
+                        "category_id": (
+                            str(parent_cat_id) if parent_cat_id is not None else None
+                        ),
+                        "channel_id": str(fm_id),
+                        "name": fm.get("name"),
+                        "reason": _why_drop(parent_cat_id, fm_id),
+                    }
+                )
+
+        for th in thread_entries:
+
+            # We don't currently store parent_channel_id in that struct, so we
+            # can't reference it here. Let's derive a "parent_channel_id"
+
+            parent_id_raw = th.get("forum_id")
+            parent_id = int(parent_id_raw) if parent_id_raw else 0
+
+            th_id = int(th["id"])
+
+            blacklisted = (parent_id in excluded_channel_ids) or (
+                th_id in excluded_channel_ids
+            )
+            whitelisted = (parent_id in include_channel_ids) or (
+                th_id in include_channel_ids
             )
 
             keep_th = True
@@ -762,7 +802,8 @@ class SitemapService:
                 )
 
         sitemap["categories"] = kept_categories
-        sitemap["channels"] = kept_standalones
+        sitemap["standalone_channels"] = kept_standalones
+        sitemap["forums"] = kept_forums
         sitemap["threads"] = kept_threads
 
         self.logger.debug(
@@ -777,7 +818,6 @@ class SitemapService:
         )
 
         sitemap["dropped"] = dropped_channels
-
         return sitemap
 
     def _is_filtered_out(self, channel_id: int | None, category_id: int | None) -> bool:
