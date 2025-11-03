@@ -2116,7 +2116,7 @@ async def api_channels(mapping_id: str | None = Query(default=None)):
                         "is_thread": False,
                         "pin_count": 0,
                         "channel_webhook_url": c.get("channel_webhook_url") or "",
-                        "channel_type": c.get("channel_type") or "",
+                        "channel_type": (c.get("channel_type") if c.get("channel_type") is not None else ""),
                         "original_guild_id": str(c.get("original_guild_id") or ""),
                         "cloned_guild_id": str(c.get("cloned_guild_id") or ""),
                     }
@@ -2136,7 +2136,7 @@ async def api_channels(mapping_id: str | None = Query(default=None)):
             "is_thread": False,
             "pin_count": 0,
             "channel_webhook_url": ch.get("channel_webhook_url") or "",
-            "channel_type": ch.get("channel_type") or "",
+            "channel_type": (ch.get("channel_type") if ch.get("channel_type") is not None else ""),
             "original_guild_id": str(ch.get("original_guild_id") or ""),
             "cloned_guild_id": str(ch.get("cloned_guild_id") or ""),
         }

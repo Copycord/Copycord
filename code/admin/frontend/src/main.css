@@ -3335,7 +3335,7 @@ body {
 .scraper-card .field.compact .input:focus {
   outline: 0;
   border-color: var(--brand);
-  box-shadow: 0 0 0 2px var(--brand-ghost);
+  box-shadow: none;
 }
 .scraper-card .note {
   margin-top: 10px;
@@ -4617,7 +4617,7 @@ body {
 }
 .export-modal .form-field .input:focus {
   border-color: rgba(130, 160, 255, 0.6);
-  box-shadow: 0 0 0 3px rgba(130, 160, 255, 0.18);
+  box-shadow: none;
 }
 .export-modal .form-field .hint {
   display: block;
@@ -4785,7 +4785,7 @@ body {
 
 .export-modal .form-field .input:focus {
   border-color: var(--accent, #a78bfa);
-  box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.18);
+  box-shadow: none;
 }
 
 .export-modal .check input[type='checkbox'] {
@@ -5694,7 +5694,7 @@ body {
 
 .export-modal .form-field .input[type='datetime-local']:focus {
   border-color: var(--accent, #a78bfa);
-  box-shadow: 0 0 0 4px rgba(167, 139, 250, 0.18);
+  box-shadow: none;
 }
 
 .export-modal
@@ -7506,4 +7506,41 @@ body.modal-open {
   border-color: var(--danger) !important;
   animation: field-alert-shake 0.32s ease-in-out;
   will-change: transform;
+}
+
+.export-modal .att-types-modal .att-panel {
+  background: #0f0820;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  box-shadow: 0 20px 56px rgba(0, 0, 0, 0.5) !important;
+
+  position: fixed;
+  inset: 50% auto auto 50%;
+  transform: translate(-50%, -50%);
+  width: min(480px, 92vw);
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  z-index: 10001;
+  overflow: hidden;
+}
+
+.export-modal .att-types-modal .att-head {
+  display: flex;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(
+    180deg,
+    var(--card) 0%,
+    rgba(20, 10, 40, 0.45) 100%
+  );
+  color: var(--accent);
+}
+
+.export-modal .att-types-modal .att-head .att-title {
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 14px;
 }
