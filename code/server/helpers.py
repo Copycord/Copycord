@@ -1241,9 +1241,10 @@ class OnCloneJoin:
             await member.add_roles(*assignable, reason="Copycord onjoin roles")
             dt = (time.perf_counter() - t0) * 1000
             self.log.info(
-                "[🎭] Join roles: assigned roles for %s (%s): %s duration_ms=%.1f",
+                "[🎭] Join roles: assigned roles for %s (%s) in %s: %s duration_ms=%.1f",
                 member.name,
                 member.id,
+                guild.name,
                 [f"{r.id}:{r.name}" for r in assignable],
                 dt,
             )

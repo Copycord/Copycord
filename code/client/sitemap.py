@@ -38,6 +38,39 @@ class SitemapService:
         except Exception:
             return []
 
+    def _mapping_label_for_origin(
+        self, origin_guild_id: int, guild_name_fallback: str
+    ) -> str:
+        """
+        Return: "<original_guild_name> (<mapping_id>)"
+        Fallbacks:
+        - mapping_id falls back to the origin guild id
+        - original_guild_name falls back to the live guild name
+        """
+        try:
+            mappings = self.db.list_guild_mappings() or []
+        except Exception:
+            mappings = []
+
+        for m in mappings:
+            try:
+                ogid = int(m.get("original_guild_id", 0) or 0)
+            except Exception:
+                ogid = 0
+
+            if ogid == int(origin_guild_id):
+                orig_name = (m.get("original_guild_name") or "").strip()
+                if not orig_name:
+                    orig_name = guild_name_fallback
+
+                mapping_id = (m.get("mapping_id") or "").strip()
+                if not mapping_id:
+                    mapping_id = str(origin_guild_id)
+
+                return f"{orig_name} ({mapping_id})"
+
+        return f"{guild_name_fallback} ({origin_guild_id})"
+
     def _iter_mapped_guilds(self):
         """Yield discord.Guild objects for each mapped origin the bot can see."""
         ids = self._mapped_original_ids()
@@ -64,7 +97,6 @@ class SitemapService:
             except Exception:
                 pass
         else:
-            # None means "we don't know which one", so mark all mapped origins
             for gid in self._mapped_original_ids():
                 self._dirty_guild_ids.add(int(gid))
 
@@ -83,10 +115,10 @@ class SitemapService:
                 sm = await self.build_for_guild(g)
                 if sm:
                     await self.ws.send({"type": "sitemap", "data": sm})
+                    label = self._mapping_label_for_origin(g.id, g.name)
                     self.logger.info(
-                        "[📩] Sitemap sent to Server (guild=%s/%s)",
-                        g.name,
-                        g.id,
+                        "[📩] Sitemap sent for %s",
+                        label,
                     )
             except Exception as e:
                 self.logger.exception(
@@ -104,8 +136,11 @@ class SitemapService:
             sm = await self.build_for_guild(g)
             if sm:
                 await self.ws.send({"type": "sitemap", "data": sm})
+
+                label = self._mapping_label_for_origin(g.id, g.name)
                 self.logger.info(
-                    "[📩] Sitemap sent to Server (guild=%s/%s)", g.name, g.id
+                    "[📩] Sitemap sent for %s",
+                    label,
                 )
 
         for g in self._iter_mapped_guilds():
@@ -422,7 +457,6 @@ class SitemapService:
         ex_ch = bool(channel_id and channel_id in excluded_channel_ids)
         ex_cat = bool(category_id and category_id in excluded_category_ids)
 
-        # Block if whitelist mode is on and this channel/category isn't whitelisted.
         if wl_on and not (wl_ch or wl_cat):
             return True
 
@@ -767,10 +801,6 @@ class SitemapService:
                 )
 
         for th in thread_entries:
-
-            # We don't currently store parent_channel_id in that struct, so we
-            # can't reference it here. Let's derive a "parent_channel_id"
-
             parent_id_raw = th.get("forum_id")
             parent_id = int(parent_id_raw) if parent_id_raw else 0
 

@@ -1795,6 +1795,8 @@
     const hostInput = document.getElementById("map_original_guild_id");
     const cloneInput = document.getElementById("map_cloned_guild_id");
 
+    const subtleEl = document.getElementById("mapping-id-subtle");
+
     mapValidated = false;
     bindMappingFieldListeners();
     [nameInput, hostInput, cloneInput].forEach((el) => {
@@ -1810,6 +1812,16 @@
       hostInput.value = (isEdit && mapping.original_guild_id) || "";
     if (cloneInput)
       cloneInput.value = (isEdit && mapping.cloned_guild_id) || "";
+
+    if (subtleEl) {
+      if (isEdit && mapping.mapping_id) {
+        subtleEl.hidden = false;
+        subtleEl.textContent = `${mapping.mapping_id}`;
+      } else {
+        subtleEl.hidden = true;
+        subtleEl.textContent = "";
+      }
+    }
 
     document
       .querySelectorAll("#mapping-form select[id^='map_']")
@@ -1840,7 +1852,6 @@
         }
 
         sel.value = normalized ? "True" : "False";
-
         sel.dispatchEvent(new Event("change", { bubbles: true }));
       });
 

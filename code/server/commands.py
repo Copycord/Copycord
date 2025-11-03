@@ -63,13 +63,14 @@ class CloneCommands(commands.Cog):
         Global check for all commands in this cog. Only users whose ID is in set in config may execute commands.
         """
         cmd_name = ctx.command.name if ctx.command else "unknown"
+        guild_name = ctx.guild.name if ctx.guild else "Unknown"
         if ctx.user.id in self.allowed_users:
-            logger.info(f"[⚡] User {ctx.user.id} executed the '{cmd_name}' command.")
+            logger.info(f"[⚡] {ctx.user.name} ({ctx.user.id}) executed the '{cmd_name}' command in {guild_name}.")
             return True
 
         await ctx.respond("You are not authorized to use this command.", ephemeral=True)
         logger.warning(
-            f"[⚠️] Unauthorized access: user {ctx.user.id} attempted to run command '{cmd_name}'"
+            f"[⚠️] Unauthorized access: {ctx.user.name} ({ctx.user.id}) attempted to run command '{cmd_name}' in {guild_name}."
         )
         return False
 
@@ -126,7 +127,7 @@ class CloneCommands(commands.Cog):
         try:
             new_ids = self._refresh_command_guilds()
             await self.bot.sync_commands()
-            logger.info("[✅] Server slash commands synced for: %s", new_ids)
+            logger.debug("[✅] Server slash commands synced for: %s", new_ids)
         except Exception:
             logger.exception("Slash command sync failed")
 
@@ -907,6 +908,7 @@ class CloneCommands(commands.Cog):
             ),
             ephemeral=True,
         )
+
         helper._log_purge_event(
             kind=kind,
             outcome="begin",
@@ -943,13 +945,13 @@ class CloneCommands(commands.Cog):
                     if unmapped_only and _is_mapped("emojis", em.id):
                         skipped += 1
                         helper._log_purge_event(
-                            "emojis",
-                            "skipped",
-                            guild.id,
-                            ctx.user.id,
-                            em.id,
-                            em.name,
-                            "Unmapped-only mode: mapped in DB",
+                            kind="emojis",
+                            outcome="skipped",
+                            guild_id=guild.id,
+                            user_id=ctx.user.id,
+                            obj_id=em.id,
+                            name=em.name,
+                            reason="Unmapped-only mode: mapped in DB",
                         )
                         continue
                     try:
@@ -958,35 +960,35 @@ class CloneCommands(commands.Cog):
                         deleted += 1
                         deleted_ids.append(int(em.id))
                         helper._log_purge_event(
-                            "emojis",
-                            "deleted",
-                            guild.id,
-                            ctx.user.id,
-                            em.id,
-                            em.name,
-                            "Manual purge",
+                            kind="emojis",
+                            outcome="deleted",
+                            guild_id=guild.id,
+                            user_id=ctx.user.id,
+                            obj_id=em.id,
+                            name=em.name,
+                            reason="Manual purge",
                         )
                     except discord.Forbidden as e:
                         skipped += 1
                         helper._log_purge_event(
-                            "emojis",
-                            "skipped",
-                            guild.id,
-                            ctx.user.id,
-                            em.id,
-                            em.name,
-                            f"Manual purge: {e}",
+                            kind="emojis",
+                            outcome="skipped",
+                            guild_id=guild.id,
+                            user_id=ctx.user.id,
+                            obj_id=em.id,
+                            name=em.name,
+                            reason=f"Manual purge: {e}",
                         )
                     except Exception as e:
                         failed += 1
                         helper._log_purge_event(
-                            "emojis",
-                            "failed",
-                            guild.id,
-                            ctx.user.id,
-                            em.id,
-                            em.name,
-                            f"Manual purge: {e}",
+                            kind="emojis",
+                            outcome="failed",
+                            guild_id=guild.id,
+                            user_id=ctx.user.id,
+                            obj_id=em.id,
+                            name=em.name,
+                            reason=f"Manual purge: {e}",
                         )
 
                 if unmapped_only:
@@ -1012,13 +1014,13 @@ class CloneCommands(commands.Cog):
                     if unmapped_only and _is_mapped("stickers", st.id):
                         skipped += 1
                         helper._log_purge_event(
-                            "stickers",
-                            "skipped",
-                            guild.id,
-                            ctx.user.id,
-                            st.id,
-                            st.name,
-                            "Unmapped-only mode: mapped in DB",
+                            kind="stickers",
+                            outcome="skipped",
+                            guild_id=guild.id,
+                            user_id=ctx.user.id,
+                            obj_id=st.id,
+                            name=st.name,
+                            reason="Unmapped-only mode: mapped in DB",
                         )
                         continue
                     try:
@@ -1027,35 +1029,35 @@ class CloneCommands(commands.Cog):
                         deleted += 1
                         deleted_ids.append(int(st.id))
                         helper._log_purge_event(
-                            "stickers",
-                            "deleted",
-                            guild.id,
-                            ctx.user.id,
-                            st.id,
-                            st.name,
-                            "Manual purge",
+                            kind="stickers",
+                            outcome="deleted",
+                            guild_id=guild.id,
+                            user_id=ctx.user.id,
+                            obj_id=st.id,
+                            name=st.name,
+                            reason="Manual purge",
                         )
                     except discord.Forbidden as e:
                         skipped += 1
                         helper._log_purge_event(
-                            "stickers",
-                            "skipped",
-                            guild.id,
-                            ctx.user.id,
-                            st.id,
-                            st.name,
-                            f"Manual purge: {e}",
+                            kind="stickers",
+                            outcome="skipped",
+                            guild_id=guild.id,
+                            user_id=ctx.user.id,
+                            obj_id=st.id,
+                            name=st.name,
+                            reason=f"Manual purge: {e}",
                         )
                     except Exception as e:
                         failed += 1
                         helper._log_purge_event(
-                            "stickers",
-                            "failed",
-                            guild.id,
-                            ctx.user.id,
-                            st.id,
-                            st.name,
-                            f"Manual purge: {e}",
+                            kind="stickers",
+                            outcome="failed",
+                            guild_id=guild.id,
+                            user_id=ctx.user.id,
+                            obj_id=st.id,
+                            name=st.name,
+                            reason=f"Manual purge: {e}",
                         )
 
                 if unmapped_only:
@@ -1101,13 +1103,13 @@ class CloneCommands(commands.Cog):
                     if unmapped_only and _is_mapped("roles", role.id):
                         skipped += 1
                         helper._log_purge_event(
-                            "roles",
-                            "skipped",
-                            guild.id,
-                            ctx.user.id,
-                            role.id,
-                            role.name,
-                            "Unmapped-only mode: mapped in DB",
+                            kind="roles",
+                            outcome="skipped",
+                            guild_id=guild.id,
+                            user_id=ctx.user.id,
+                            obj_id=role.id,
+                            name=role.name,
+                            reason="Unmapped-only mode: mapped in DB",
                         )
                         continue
                     try:
@@ -1116,35 +1118,35 @@ class CloneCommands(commands.Cog):
                         deleted += 1
                         deleted_ids.append(int(role.id))
                         helper._log_purge_event(
-                            "roles",
-                            "deleted",
-                            guild.id,
-                            ctx.user.id,
-                            role.id,
-                            role.name,
-                            "Manual purge",
+                            kind="roles",
+                            outcome="deleted",
+                            guild_id=guild.id,
+                            user_id=ctx.user.id,
+                            obj_id=role.id,
+                            name=role.name,
+                            reason="Manual purge",
                         )
                     except discord.Forbidden as e:
                         skipped += 1
                         helper._log_purge_event(
-                            "roles",
-                            "skipped",
-                            guild.id,
-                            ctx.user.id,
-                            role.id,
-                            role.name,
-                            f"Manual purge: {e}",
+                            kind="roles",
+                            outcome="skipped",
+                            guild_id=guild.id,
+                            user_id=ctx.user.id,
+                            obj_id=role.id,
+                            name=role.name,
+                            reason=f"Manual purge: {e}",
                         )
                     except Exception as e:
                         failed += 1
                         helper._log_purge_event(
-                            "roles",
-                            "failed",
-                            guild.id,
-                            ctx.user.id,
-                            role.id,
-                            role.name,
-                            f"Manual purge: {e}",
+                            kind="roles",
+                            outcome="failed",
+                            guild_id=guild.id,
+                            user_id=ctx.user.id,
+                            obj_id=role.id,
+                            name=role.name,
+                            reason=f"Manual purge: {e}",
                         )
 
                 if unmapped_only:
@@ -1180,6 +1182,7 @@ class CloneCommands(commands.Cog):
                 ephemeral=True,
                 mention_on_channel_fallback=True,
             )
+
 
     @guild_scoped_slash_command(
         name="role_block",
@@ -1715,8 +1718,8 @@ class CloneCommands(commands.Cog):
 
         dt = (time.perf_counter() - t0) * 1000
         logger.info(
-            "onjoin_sync: done guild_id=%s changed_users=%s changed_pairs=%s failed=%s duration_ms=%.1f",
-            guild.id,
+            "[🎭] Finished role sync in %s: changed_users=%s changed_pairs=%s failed=%s duration_ms=%.1f",
+            guild.name,
             changed_users,
             changed_pairs,
             failed,
@@ -1739,7 +1742,7 @@ class CloneCommands(commands.Cog):
 
         await ctx.followup.send(
             embed=discord.Embed(
-                title=("DRY RUN — " if dry_run else "") + "On-Join Role Sync Complete",
+                title=("DRY RUN — " if dry_run else "") + "Role Sync Complete",
                 description=summary,
                 color=discord.Color.green() if not dry_run else discord.Color.blurple(),
             ),

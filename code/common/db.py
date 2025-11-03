@@ -2604,6 +2604,27 @@ class DBManager:
                 (clone,),
             )
             out["filter_mappings.clone_set"] = cur.rowcount
+            
+            cur.execute(
+                """
+                UPDATE backfill_runs
+                SET original_guild_id = ?
+                WHERE (original_guild_id IS NULL OR original_guild_id = 0)
+            """,
+                (host,),
+            )
+            out["backfill_mappings.orig_set"] = cur.rowcount
+
+            
+            cur.execute(
+                """
+                UPDATE backfill_runs
+                SET cloned_guild_id = ?
+                WHERE (cloned_guild_id IS NULL OR cloned_guild_id = 0)
+            """,
+                (clone,),
+            )
+            out["backfill_mappings.clone_set"] = cur.rowcount
 
             cur.execute(
                 """

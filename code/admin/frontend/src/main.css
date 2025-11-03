@@ -6800,6 +6800,34 @@ body.modal-open #bf-batchbar {
   color: var(--accent);
 }
 
+#mapping-modal .modal-title-wrap {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+#mapping-modal .modal-title-main {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  display: flex;
+  align-items: center;
+}
+
+#mapping-modal .modal-title-subtle {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text);
+  opacity: 0.4;
+  margin-top: 3px;
+  user-select: text;
+  max-width: 220px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+
 #mapping-modal #mapping-form {
   flex: 1 1 auto;
   min-height: 0;

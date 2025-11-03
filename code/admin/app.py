@@ -1137,13 +1137,22 @@ def _bootstrap_legacy_mapping_if_needed() -> dict:
       2. Create the first row in guild_mappings using those legacy values.
       3. Wipe the legacy keys from app_config so we never do this again.
 
-    Returns a summary dict for logging.
+    We return a dict that includes:
+      - created: bool
+      - mapping_id: str | None
+      - host_guild_id / clone_guild_id
+      - host_guild_name / clone_guild_name
+      - backfill: { <table.change_key>: rowcount, ... } or {"error": "..."}
+      - cleaned_keys: [list of legacy keys we attempted to remove]
+      - skipped_reason if we didn't migrate
+      - count if we already had mappings
     """
 
     try:
         existing = db.list_guild_mappings() or []
     except Exception:
         existing = []
+
     if existing:
         return {
             "created": False,
@@ -1180,7 +1189,6 @@ def _bootstrap_legacy_mapping_if_needed() -> dict:
             clone_guild_id=clone_gid,
         )
     except Exception as e:
-
         backfill_summary = {"error": str(e)}
 
     host_name = db.get_config("HOST_GUILD_NAME", "") or ""
@@ -1222,19 +1230,23 @@ def _bootstrap_legacy_mapping_if_needed() -> dict:
     ]
     cleanup_keys.extend(list(BOOL_KEYS))
 
+    removed_keys: list[str] = []
     for k in cleanup_keys:
         try:
             db.delete_config(k)
+            removed_keys.append(k)
         except Exception:
-
             pass
 
     return {
         "created": True,
         "mapping_id": new_mapping_id,
         "host_guild_id": host_gid,
+        "host_guild_name": host_name,
         "clone_guild_id": clone_gid,
+        "cloned_guild_name": clone_name,
         "backfill": backfill_summary,
+        "cleaned_keys": removed_keys,
     }
 
 
@@ -1438,24 +1450,34 @@ async def _startup_links():
 
 @app.on_event("startup")
 async def _migrate_legacy_single_mapping():
+    """
+    Runs once on startup and (if needed) upgrades a legacy single-guild install
+    to the new multi-guild model used in Copycord v3.
+    """
     try:
         result = _bootstrap_legacy_mapping_if_needed()
+
         if result.get("created"):
-            LOGGER.info(
-                "[migrate] Bootstrapped legacy HOST/CLONE → guild_mappings row | "
-                "mapping_id=%s host=%s clone=%s backfill=%s",
+
+            LOGGER.warning(
+                "[🧙‍♂️] Copycord auto-migrated this install from legacy "
+                "single-guild mode to v3 multi-guild mode.\n"
+                " - New mapping_id=%s (%s ➜ %s)\n"
+                " - Backfilled guild IDs into legacy tables (counts below)\n"
+                " - Saved per-guild settings into guild_mappings\n"
+                " - Removed old single-guild config keys\n"
+                "Details: %s",
                 result.get("mapping_id"),
                 result.get("host_guild_id"),
                 result.get("clone_guild_id"),
                 result.get("backfill"),
             )
-        else:
-            LOGGER.debug(
-                "[migrate] No legacy bootstrap needed | %s",
-                result.get("skipped_reason"),
-            )
+
     except Exception:
-        LOGGER.exception("Legacy single-guild → multi-guild bootstrap failed")
+
+        LOGGER.exception(
+            "[migrate:v3] Legacy single-guild → multi-guild bootstrap failed"
+        )
 
 
 @app.on_event("shutdown")
@@ -2116,7 +2138,11 @@ async def api_channels(mapping_id: str | None = Query(default=None)):
                         "is_thread": False,
                         "pin_count": 0,
                         "channel_webhook_url": c.get("channel_webhook_url") or "",
-                        "channel_type": (c.get("channel_type") if c.get("channel_type") is not None else ""),
+                        "channel_type": (
+                            c.get("channel_type")
+                            if c.get("channel_type") is not None
+                            else ""
+                        ),
                         "original_guild_id": str(c.get("original_guild_id") or ""),
                         "cloned_guild_id": str(c.get("cloned_guild_id") or ""),
                     }
@@ -2136,7 +2162,9 @@ async def api_channels(mapping_id: str | None = Query(default=None)):
             "is_thread": False,
             "pin_count": 0,
             "channel_webhook_url": ch.get("channel_webhook_url") or "",
-            "channel_type": (ch.get("channel_type") if ch.get("channel_type") is not None else ""),
+            "channel_type": (
+                ch.get("channel_type") if ch.get("channel_type") is not None else ""
+            ),
             "original_guild_id": str(ch.get("original_guild_id") or ""),
             "cloned_guild_id": str(ch.get("cloned_guild_id") or ""),
         }

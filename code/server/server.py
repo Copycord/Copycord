@@ -495,6 +495,44 @@ class ServerReceiver:
         await self.bus.status(running=True, status=msg, discord={"ready": True})
 
         logger.info("[🤖] %s", msg)
+        
+        try:
+            maps = self.db.list_guild_mappings()
+            total = len(maps)
+
+            sources: list[str] = []
+            for m in maps:
+                host_name = (m.get("original_guild_name") or "").strip()
+                if not host_name:
+                    host_name = str(m.get("original_guild_id") or "").strip()
+                if host_name:
+                    sources.append(host_name)
+
+            def nice_join(names: list[str]) -> str:
+                n = len(names)
+                if n == 0:
+                    return ""
+                if n == 1:
+                    return names[0]
+                if n == 2:
+                    return f"{names[0]} and {names[1]}"
+                return f"{', '.join(names[:-1])}, and {names[-1]}"
+
+            if total == 0 or not sources:
+                logger.warning(
+                    "[⚠️] No guild mappings found. Nothing is currently set to clone."
+                )
+            else:
+                logger.info(
+                    "[🧙‍♂️] Copycord is cloning %d server%s: %s",
+                    total,
+                    "" if total == 1 else "s",
+                    nice_join(sources),
+                )
+
+        except Exception:
+            logger.exception("Failed to summarize guild_mappings on startup")
+
 
         asyncio.create_task(self.backfill.cleanup_non_primary_webhooks())
 
@@ -505,13 +543,14 @@ class ServerReceiver:
 
     async def on_member_join(self, member: discord.Member):
         g = getattr(member, "guild", None)
+        guild_name = g.name if g else "unknown"
         try:
             if not g:
                 return
 
             if not self.db.is_clone_guild_id(int(g.id)):
                 return
-            logger.info("[👤] %s (%s) has joined the server!", member.name, member.id)
+            logger.info("[👤] %s (%s) has joined %s!", member.name, member.id, guild_name)
             await self.onclonejoin.handle_member_join(member)
         except Exception:
             logger.exception(

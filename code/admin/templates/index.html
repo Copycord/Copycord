@@ -296,10 +296,10 @@
             </div>
           </div>
 
-        <div class="btns">
-          <button class="btn btn-ghost" type="submit" id="cfg-save-btn">Save</button>
-          <button type="button" class="btn btn-ghost" id="cfg-cancel-btn">Cancel</button>
-        </div>
+          <div class="btns">
+            <button class="btn btn-ghost" type="submit" id="cfg-save-btn">Save</button>
+            <button type="button" class="btn btn-ghost" id="cfg-cancel-btn">Cancel</button>
+          </div>
         </div>
       </form>
     </div>
@@ -351,7 +351,10 @@
 
       <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="mapping-title">
         <div class="modal-header">
-          <h4 id="mapping-title" class="modal-title">Clone Mapping</h4>
+          <div class="modal-title-wrap">
+            <div class="modal-title-main">Clone Mapping</div>
+            <div id="mapping-id-subtle" class="modal-title-subtle" hidden></div>
+          </div>
           <button type="button" id="mapping-close" class="icon-btn verify-close" aria-label="Close">✕</button>
         </div>
 
