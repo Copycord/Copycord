@@ -244,7 +244,7 @@ class MessageUtils:
 
 
 class Snapshot:
-    """All snapshot-related helpers, shims, and the REST fallback in one place."""
+    """All snapshot-related helpers, shims, and the REST fallback."""
 
     @staticmethod
     def _is_http_url(u: str | None) -> bool:
