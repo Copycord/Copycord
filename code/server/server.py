@@ -50,6 +50,8 @@ from server.helpers import (
     VerifyController,
     WebhookDMExporter,
     OnCloneJoin,
+    _is_image_att,
+    _calc_text_len_with_urls,
 )
 from server.permission_sync import ChannelPermissionSync
 
@@ -2957,6 +2959,44 @@ class ServerReceiver:
                     suffix = f" [{d}/{t}]" if t else f" [{d}]"
                 return
 
+        # Handle splitting messages with many image attachments
+        try:
+            atts = list(msg.get("attachments") or [])
+        except Exception:
+            atts = []
+
+        image_atts = [a for a in atts if _is_image_att(a)]
+        other_atts = [a for a in atts if not _is_image_att(a)]
+
+        if len(image_atts) > 5:
+            base_text = (msg.get("content") or "").strip()
+
+            chunks = [image_atts[i : i + 5] for i in range(0, len(image_atts), 5)]
+
+            for idx, chunk in enumerate(chunks):
+                sub = dict(msg)
+                if idx == 0:
+
+                    sub["attachments"] = chunk + other_atts
+
+                    urls = [a.get("url") for a in chunk if a.get("url")]
+                    while urls and _calc_text_len_with_urls(base_text, urls) > 2000:
+                        urls.pop()
+                        sub["attachments"] = sub["attachments"][:-1]
+                else:
+
+                    sub["content"] = ""
+                    sub["attachments"] = chunk
+                    urls = [a.get("url") for a in chunk if a.get("url")]
+                    while urls and _calc_text_len_with_urls("", urls) > 2000:
+                        urls.pop()
+                        sub["attachments"] = sub["attachments"][:-1]
+
+                await self.forward_message(sub)
+
+            return
+        
+        # Normal message forwarding path
         payload = self._build_webhook_payload(msg)
         if payload is None:
             logger.debug(
