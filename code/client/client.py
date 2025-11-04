@@ -24,7 +24,7 @@ from discord.ext import commands
 from common.config import Config, CURRENT_VERSION
 from common.db import DBManager
 from client.sitemap import SitemapService
-from client.message_utils import MessageUtils, _resolve_forward
+from client.message_utils import MessageUtils, _resolve_forward, _resolve_forward_via_snapshot
 from common.websockets import WebsocketManager, AdminBus
 from client.scraper import MemberScraper
 from client.helpers import ClientUiController, dump_message_debug
@@ -987,12 +987,14 @@ class ClientListener:
 
         if looks_like_forward:
             resolved = await _resolve_forward(self.bot, message)
+            if resolved is None:
+                resolved = await _resolve_forward_via_snapshot(self.bot, message, logger=logger)
+
             if resolved is not None:
                 src_msg = resolved
             else:
-
                 logger.info(
-                    "Dropping unresolvable forwarded message in #%s (are we in the source server?)",
+                    "Dropping unresolvable forwarded message in #%s (are we in the server where the original was sent?)",
                     getattr(message.channel, "name", "?"),
                 )
                 return

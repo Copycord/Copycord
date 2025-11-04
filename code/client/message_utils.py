@@ -225,10 +225,214 @@ class MessageUtils:
 
         return data
     
+
+class Snapshot:
+    """All snapshot-related helpers, shims, and the REST fallback."""
+
+    @staticmethod
+    def _is_http_url(u: str | None) -> bool:
+        return isinstance(u, str) and (
+            u.startswith("http://") or u.startswith("https://")
+        )
+
+    @staticmethod
+    def _default_avatar_url_from_discriminator(discriminator: str | int | None) -> str:
+        try:
+            i = int(discriminator) % 5
+        except Exception:
+            i = 0
+        return f"https://cdn.discordapp.com/embed/avatars/{i}.png"
+
+    @staticmethod
+    def _avatar_cdn_url(
+        author_id: int, avatar_hash: str | None, discriminator: str | int | None
+    ) -> str:
+        if avatar_hash:
+            ext = "gif" if str(avatar_hash).startswith("a_") else "png"
+            return f"https://cdn.discordapp.com/avatars/{author_id}/{avatar_hash}.{ext}?size=128"
+        return Snapshot._default_avatar_url_from_discriminator(discriminator)
+
+    class Avatar:
+        def __init__(self, url: str | None):
+            self.url = url
+
+    class Author:
+        def __init__(self, d: dict):
+            self.id = int(d.get("id", 0) or 0)
+            self.name = d.get("username") or d.get("name") or "Unknown"
+            self.discriminator = str(d.get("discriminator", "0"))
+            self.bot = bool(d.get("bot", False))
+
+            avatar_hash = d.get("avatar")
+            cdn = Snapshot._avatar_cdn_url(self.id, avatar_hash, self.discriminator)
+            self.avatar = Snapshot.Avatar(cdn)
+            self.display_avatar = Snapshot.Avatar(cdn)
+
+    class Attachment:
+        def __init__(self, d: dict):
+            self.id = int(d.get("id", 0) or 0)
+            self.filename = d.get("filename") or ""
+            self.url = d.get("url") or d.get("proxy_url") or ""
+            self.proxy_url = d.get("proxy_url") or ""
+            self.size = int(d.get("size", 0) or 0)
+            self.content_type = d.get("content_type")
+
+    class EmbedWrapper:
+        def __init__(self, d: dict):
+            self._d = dict(d or {})
+
+        def to_dict(self):
+            return dict(self._d)
+
+    class Message:
+        """
+        Minimal message-like object built from a REST message_snapshot.
+        Exposes attributes your pipeline already reads (content, attachments,
+        embeds with .to_dict(), stickers, author, components, channel, guild, type).
+        """
+
+        __is_snapshot__ = True
+
+        def __init__(self, d: dict, wrapper):
+            from datetime import datetime, timezone
+
+            self.id = int(d.get("id") or getattr(wrapper, "id", 0) or 0)
+
+            ts = d.get("timestamp")
+            try:
+                self.created_at = (
+                    datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(
+                        timezone.utc
+                    )
+                    if ts
+                    else getattr(wrapper, "created_at", None)
+                )
+            except Exception:
+                self.created_at = getattr(wrapper, "created_at", None)
+            self.edited_at = None
+
+            inner_author = d.get("author")
+            if inner_author:
+                self.author = Snapshot.Author(inner_author)
+            else:
+                wa = getattr(wrapper, "author", None)
+                if wa is not None:
+                    borrowed = {
+                        "id": getattr(wa, "id", 0) or 0,
+                        "username": (
+                            getattr(wa, "name", None)
+                            or getattr(wa, "global_name", None)
+                            or getattr(wa, "display_name", None)
+                            or getattr(wa, "nick", None)
+                            or getattr(wa, "username", None)
+                            or "Unknown"
+                        ),
+                        "discriminator": getattr(wa, "discriminator", "0"),
+                        "bot": bool(getattr(wa, "bot", False)),
+                        "avatar": None,
+                    }
+                    shim_author = Snapshot.Author(borrowed)
+                    try:
+                        w_url = str(
+                            getattr(getattr(wa, "display_avatar", None), "url", "")
+                            or ""
+                        )
+                        if Snapshot._is_http_url(w_url):
+                            shim_author.avatar = Snapshot.Avatar(w_url)
+                            shim_author.display_avatar = Snapshot.Avatar(w_url)
+                    except Exception:
+                        pass
+                    self.author = shim_author
+                else:
+                    self.author = Snapshot.Author({})
+
+            self.content = d.get("content") or ""
+            self.system_content = d.get("system_content") or ""
+            self.attachments = [
+                Snapshot.Attachment(a) for a in (d.get("attachments") or [])
+            ]
+            self.embeds = [Snapshot.EmbedWrapper(e) for e in (d.get("embeds") or [])]
+            self.stickers = d.get("stickers") or []
+            self.components = d.get("components") or []
+
+            self.channel = getattr(wrapper, "channel", None)
+            self.guild = getattr(wrapper, "guild", None)
+            self.type = getattr(wrapper, "type", None)
+
+        @staticmethod
+        async def resolve_via_snapshot(
+            bot, wrapper_msg, *, limit: int = 50, logger=None
+        ):
+            """
+            Fetch recent messages in the wrapper's channel and unwrap the first usable
+            `message_snapshots[].message` if reference chaining fails.
+            """
+            try:
+                chan = getattr(wrapper_msg, "channel", None)
+                chan_id = int(getattr(chan, "id", 0) or 0)
+                msg_id = int(getattr(wrapper_msg, "id", 0) or 0)
+                if not chan_id or not msg_id:
+                    return None
+
+                http = getattr(bot, "http", None)
+                token = getattr(http, "token", None)
+                if not token:
+                    if logger:
+                        logger.debug(
+                            "[forward-snapshot] no token on bot.http; skipping fallback"
+                        )
+                    return None
+
+                import aiohttp
+
+                url = f"https://discord.com/api/v9/channels/{chan_id}/messages?limit={int(limit)}"
+                headers = {"Authorization": token}
+
+                async with aiohttp.ClientSession() as sess:
+                    async with sess.get(url, headers=headers) as resp:
+                        if resp.status != 200:
+                            if logger:
+                                logger.debug(
+                                    "[forward-snapshot] GET %s -> %s", url, resp.status
+                                )
+                            return None
+                        data = await resp.json()
+
+                target = None
+                for m in data or []:
+                    try:
+                        if int(m.get("id", 0)) == msg_id:
+                            target = m
+                            break
+                    except Exception:
+                        continue
+                if not target:
+                    return None
+
+                snaps = target.get("message_snapshots") or []
+                for s in snaps:
+                    inner = (s or {}).get("message") or {}
+                    has_text = bool(
+                        (
+                            inner.get("content") or inner.get("system_content") or ""
+                        ).strip()
+                    )
+                    has_atts = bool(inner.get("attachments"))
+                    has_stickers = bool(inner.get("stickers"))
+                    if has_text or has_atts or has_stickers:
+                        return Snapshot.Message(inner, wrapper_msg)
+
+                return None
+            except Exception as e:
+                if logger:
+                    logger.debug("[forward-snapshot] error: %r", e)
+                return None
+
+
 async def _resolve_forward(bot, wrapper_msg, max_depth: int = 4):
     """
-    Follow .reference / forward wrappers to find the original message
-    that actually has real content we can forward.
+    Follow .reference / forward wrappers to find the original message that actually
+    has real content we can forward. We ignore "embeds-only" shells.
     """
     current = wrapper_msg
     seen = 0
@@ -236,13 +440,11 @@ async def _resolve_forward(bot, wrapper_msg, max_depth: int = 4):
     while seen < max_depth and current is not None:
         raw_txt = (getattr(current, "content", "") or "").strip()
         sys_txt = (getattr(current, "system_content", "") or "").strip()
-
         has_text = bool(raw_txt or sys_txt)
         has_atts = bool(getattr(current, "attachments", None))
         has_stks = bool(getattr(current, "stickers", None))
 
         if has_text or has_atts or has_stks:
-
             return current
 
         ref = getattr(current, "reference", None)
@@ -260,7 +462,6 @@ async def _resolve_forward(bot, wrapper_msg, max_depth: int = 4):
                 ch = await bot.fetch_channel(int(ref.channel_id))
             except Exception:
                 ch = None
-
         if ch is None:
             break
 
@@ -285,3 +486,11 @@ async def _resolve_forward(bot, wrapper_msg, max_depth: int = 4):
             return current
 
     return None
+
+
+async def _resolve_forward_via_snapshot(
+    bot, wrapper_msg, *, limit: int = 50, logger=None
+):
+    return await Snapshot.Message.resolve_via_snapshot(
+        bot, wrapper_msg, limit=limit, logger=logger
+    )
