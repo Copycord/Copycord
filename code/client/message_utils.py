@@ -10,6 +10,7 @@
 from __future__ import annotations
 import re
 from typing import Dict, List, Optional
+from datetime import datetime, timezone
 import discord
 import aiohttp
 from discord import Member
@@ -295,8 +296,6 @@ class Snapshot:
         __is_snapshot__ = True
 
         def __init__(self, d: dict, wrapper):
-            from datetime import datetime, timezone
-
             self.id = int(d.get("id") or getattr(wrapper, "id", 0) or 0)
 
             ts = d.get("timestamp")
