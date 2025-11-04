@@ -522,7 +522,6 @@ class ExportMessagesRunner:
                             if unwrapped is not None:
                                 real_msg = unwrapped
 
-                        # After unwrap, re-check: if it's STILL totally empty (no text, embeds, files, stickers)
                         raw_now = real_msg.content or ""
                         system_now = getattr(real_msg, "system_content", "") or ""
                         merged_content = (
