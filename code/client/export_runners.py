@@ -35,7 +35,7 @@ from typing import (
 )
 from discord import ChannelType, MessageType, Object as DiscordObject
 from discord.errors import HTTPException, Forbidden
-from client.message_utils import _resolve_forward
+from client.message_utils import _resolve_forward, _resolve_forward_via_snapshot
 
 
 DictLike: TypeAlias = Dict[str, Any]
@@ -479,7 +479,6 @@ class ExportMessagesRunner:
 
                         resolved_msg = msg
                         try:
-                            # consider "empty shell" if there's no visible text from .content or .system_content
                             looks_empty = not (
                                 (
                                     (msg.content or "")
@@ -502,6 +501,10 @@ class ExportMessagesRunner:
                                 getattr(msg, "reference", None) or has_forward_flag
                             ):
                                 real = await _resolve_forward(self.bot, msg)
+                                if real is None:
+                                    real = await _resolve_forward_via_snapshot(
+                                        self.bot, msg, logger=self.log
+                                    )
                                 if real is not None:
                                     resolved_msg = real
                         except Exception as e:
@@ -509,7 +512,6 @@ class ExportMessagesRunner:
                                 f"[export] forward resolve failed msg={getattr(msg,'id',None)}: {e}"
                             )
 
-                        # --- NEW: after unwrap, bail out if it's STILL empty (no text/atts/embeds/stickers) ---
                         has_any_text = bool(
                             (getattr(resolved_msg, "content", "") or "").strip()
                             or (
@@ -1528,6 +1530,15 @@ class BackfillEngine:
                         getattr(m, "id", None),
                         e,
                     )
+                if unwrapped is None:
+                    try:
+                        unwrapped = await _resolve_forward_via_snapshot(self.bot, m, logger=self.logger)
+                    except Exception as e:
+                        self.logger.debug(
+                            "[backfill] snapshot fallback failed id=%s: %s",
+                            getattr(m, "id", None),
+                            e,
+                        )
                 if unwrapped is not None:
                     real_msg = unwrapped
 
