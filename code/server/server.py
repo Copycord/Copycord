@@ -51,6 +51,8 @@ from server.helpers import (
     VerifyController,
     WebhookDMExporter,
     OnCloneJoin,
+    _is_image_att,
+    _calc_text_len_with_urls,
 )
 from server.permission_sync import ChannelPermissionSync
 from server.guild_resolver import GuildResolver
@@ -495,7 +497,7 @@ class ServerReceiver:
         await self.bus.status(running=True, status=msg, discord={"ready": True})
 
         logger.info("[🤖] %s", msg)
-        
+
         try:
             maps = self.db.list_guild_mappings()
             total = len(maps)
@@ -533,7 +535,6 @@ class ServerReceiver:
         except Exception:
             logger.exception("Failed to summarize guild_mappings on startup")
 
-
         asyncio.create_task(self.backfill.cleanup_non_primary_webhooks())
 
         if not self._processor_started:
@@ -550,7 +551,9 @@ class ServerReceiver:
 
             if not self.db.is_clone_guild_id(int(g.id)):
                 return
-            logger.info("[👤] %s (%s) has joined %s!", member.name, member.id, guild_name)
+            logger.info(
+                "[👤] %s (%s) has joined %s!", member.name, member.id, guild_name
+            )
             await self.onclonejoin.handle_member_join(member)
         except Exception:
             logger.exception(
@@ -3489,6 +3492,44 @@ class ServerReceiver:
                     d, t = self.backfill.get_progress(source_id)
                     suffix = f" [{d}/{t}]" if t else f" [{d}]"
                 return
+
+        try:
+            atts = list(msg.get("attachments") or [])
+        except Exception:
+            atts = []
+
+        image_atts = [a for a in atts if _is_image_att(a)]
+        other_atts = [a for a in atts if not _is_image_att(a)]
+
+        if len(image_atts) > 5:
+            base_text = (msg.get("content") or "").strip()
+
+            chunks = [image_atts[i : i + 5] for i in range(0, len(image_atts), 5)]
+
+            for idx, chunk in enumerate(chunks):
+                sub = dict(msg)
+                if idx == 0:
+
+                    sub["attachments"] = chunk + other_atts
+
+                    urls = [a.get("url") for a in chunk if a.get("url")]
+
+                    while urls and _calc_text_len_with_urls(base_text, urls) > 2000:
+                        urls.pop()
+                        sub["attachments"] = sub["attachments"][:-1]
+                else:
+
+                    sub["content"] = ""
+                    sub["attachments"] = chunk
+
+                    urls = [a.get("url") for a in chunk if a.get("url")]
+                    while urls and _calc_text_len_with_urls("", urls) > 2000:
+                        urls.pop()
+                        sub["attachments"] = sub["attachments"][:-1]
+
+                await self.forward_message(sub)
+
+            return 
 
         payload = self._build_webhook_payload(msg)
         if payload is None:

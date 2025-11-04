@@ -1367,3 +1367,21 @@ def _safe_preview(obj) -> str:
     except Exception:
         s = str(obj)
     return s if len(s) <= 500 else (s[:500] + "…")
+
+
+# ---- Image attachment detection & text length calc ----
+_IMG_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif")
+
+def _is_image_att(att: dict) -> bool:
+    try:
+        url = (att.get("url") or "").lower()
+        fn = (att.get("filename") or "").lower()
+        return url.endswith(_IMG_EXTS) or fn.endswith(_IMG_EXTS)
+    except Exception:
+        return False
+
+def _calc_text_len_with_urls(base_text: str, urls: list[str]) -> int:
+    if not urls:
+        return len(base_text or "")
+    return len(base_text or "") + sum(1 + len(u) for u in urls)
+# -------------------------------------------------------
