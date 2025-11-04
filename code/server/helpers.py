@@ -1385,3 +1385,10 @@ def _calc_text_len_with_urls(base_text: str, urls: list[str]) -> int:
         return len(base_text or "")
     return len(base_text or "") + sum(1 + len(u) for u in urls)
 # -------------------------------------------------------
+
+def _safe_mid(msg: dict) -> int | None:
+    try:
+        mid = int(msg.get("message_id") or 0)
+        return mid if mid > 0 else None
+    except Exception:
+        return None

@@ -53,6 +53,7 @@ from server.helpers import (
     OnCloneJoin,
     _is_image_att,
     _calc_text_len_with_urls,
+    _safe_mid,
 )
 from server.permission_sync import ChannelPermissionSync
 from server.guild_resolver import GuildResolver
@@ -3493,43 +3494,50 @@ class ServerReceiver:
                     suffix = f" [{d}/{t}]" if t else f" [{d}]"
                 return
 
-        try:
-            atts = list(msg.get("attachments") or [])
-        except Exception:
-            atts = []
+        # Already-split children shouldn't be re-split
+        if not msg.get("__split_total__"):
+            try:
+                atts = list(msg.get("attachments") or [])
+            except Exception:
+                atts = []
 
-        image_atts = [a for a in atts if _is_image_att(a)]
-        other_atts = [a for a in atts if not _is_image_att(a)]
+            image_atts = [a for a in atts if _is_image_att(a)]
+            other_atts = [a for a in atts if not _is_image_att(a)]
 
-        if len(image_atts) > 5:
-            base_text = (msg.get("content") or "").strip()
+            if len(image_atts) > 5:
+                base_text = (msg.get("content") or "").strip()
+                chunks = [image_atts[i : i + 5] for i in range(0, len(image_atts), 5)]
 
-            chunks = [image_atts[i : i + 5] for i in range(0, len(image_atts), 5)]
+                for idx, chunk in enumerate(chunks):
+                    sub = dict(msg)
+                    sub["__split_seq__"] = idx
+                    sub["__split_total__"] = len(chunks)
 
-            for idx, chunk in enumerate(chunks):
-                sub = dict(msg)
-                if idx == 0:
+                    if idx == 0:
 
-                    sub["attachments"] = chunk + other_atts
+                        img_chunk = list(chunk)
+                        urls = [a.get("url") for a in img_chunk if a.get("url")]
+                        while urls and _calc_text_len_with_urls(base_text, urls) > 2000:
+                            img_chunk.pop()
+                            urls = [a.get("url") for a in img_chunk if a.get("url")]
 
-                    urls = [a.get("url") for a in chunk if a.get("url")]
+                        sub["attachments"] = img_chunk + other_atts
+                    else:
+                        sub["content"] = ""
+                        img_chunk = list(chunk)
+                        urls = [a.get("url") for a in img_chunk if a.get("url")]
+                        while urls and _calc_text_len_with_urls("", urls) > 2000:
+                            img_chunk.pop()
+                            urls = [a.get("url") for a in img_chunk if a.get("url")]
 
-                    while urls and _calc_text_len_with_urls(base_text, urls) > 2000:
-                        urls.pop()
-                        sub["attachments"] = sub["attachments"][:-1]
-                else:
+                        sub["attachments"] = img_chunk
 
-                    sub["content"] = ""
-                    sub["attachments"] = chunk
+                    if idx != len(chunks) - 1:
+                        sub["__skip_backfill_mark__"] = True
 
-                    urls = [a.get("url") for a in chunk if a.get("url")]
-                    while urls and _calc_text_len_with_urls("", urls) > 2000:
-                        urls.pop()
-                        sub["attachments"] = sub["attachments"][:-1]
+                    await self.forward_message(sub)
 
-                await self.forward_message(sub)
-
-            return 
+                return
 
         payload = self._build_webhook_payload(msg)
         if payload is None:
@@ -3698,54 +3706,58 @@ class ServerReceiver:
                             row = self.db.get_mapping_by_original(orig_mid)
                         except Exception:
                             row = None
-
-                        if orig_mid in self._pending_deletes:
-                            try:
-                                if row:
-                                    ok = await self._delete_with_row(
-                                        row, orig_mid, msg.get("channel_name")
-                                    )
-                                    if ok:
+                        is_last_chunk = not msg.get("__skip_backfill_mark__")
+                        if is_last_chunk:
+                            if orig_mid in self._pending_deletes:
+                                try:
+                                    if row:
+                                        ok = await self._delete_with_row(
+                                            row, orig_mid, msg.get("channel_name")
+                                        )
+                                        if ok:
+                                            logger.debug(
+                                                "[🧹] Applied queued delete right after initial send for orig %s",
+                                                orig_mid,
+                                            )
+                                    else:
                                         logger.debug(
-                                            "[🧹] Applied queued delete right after initial send for orig %s",
+                                            "[🕒] Pending delete found but mapping re-read failed for orig %s",
                                             orig_mid,
                                         )
-                                else:
-                                    logger.debug(
-                                        "[🕒] Pending delete found but mapping re-read failed for orig %s",
-                                        orig_mid,
-                                    )
-                            finally:
-                                self._pending_deletes.discard(orig_mid)
-                                self._latest_edit_payload.pop(orig_mid, None)
+                                finally:
+                                    self._pending_deletes.discard(orig_mid)
+                                    self._latest_edit_payload.pop(orig_mid, None)
+                                    self._inflight_events.pop(orig_mid, None)
+                            else:
+                                latest = self._latest_edit_payload.pop(orig_mid, None)
+                                if latest and row:
+                                    try:
+                                        await self._edit_with_row(row, latest, orig_mid)
+                                        logger.debug(
+                                            "[edit-coalesce] applied latest edit after initial send for orig %s",
+                                            orig_mid,
+                                        )
+                                    except Exception:
+                                        logger.debug(
+                                            "[edit-coalesce] immediate apply failed",
+                                            exc_info=True,
+                                        )
                                 self._inflight_events.pop(orig_mid, None)
-                        else:
-                            latest = self._latest_edit_payload.pop(orig_mid, None)
-                            if latest and row:
-                                try:
-                                    await self._edit_with_row(row, latest, orig_mid)
-                                    logger.debug(
-                                        "[edit-coalesce] applied latest edit after initial send for orig %s",
-                                        orig_mid,
-                                    )
-                                except Exception:
-                                    logger.debug(
-                                        "[edit-coalesce] immediate apply failed",
-                                        exc_info=True,
-                                    )
-                            self._inflight_events.pop(orig_mid, None)
                     except Exception:
                         logger.exception(
                             "upsert_message_mapping failed (normal channel)"
                         )
 
-                    if is_backfill:
-                        self.backfill.note_sent(
-                            source_id, int(msg.get("message_id") or 0) or None
-                        )
-                        self.backfill.note_checkpoint(
-                            source_id, int(msg["message_id"]), msg.get("timestamp")
-                        )
+                    if is_backfill and not msg.get("__skip_backfill_mark__"):
+                        orig_mid_val = _safe_mid(msg)
+
+                        self.backfill.note_sent(source_id, orig_mid_val)
+
+                        if orig_mid_val is not None:
+                            self.backfill.note_checkpoint(
+                                source_id, orig_mid_val, msg.get("timestamp")
+                            )
+
                         delivered, total = self.backfill.get_progress(source_id)
                         suffix = (
                             f" [{max(total - delivered, 0)} left]"
@@ -3753,19 +3765,24 @@ class ServerReceiver:
                             else f" [{delivered} sent]"
                         )
                         logger.info(
-                            "[💬] [msg-sync] Forwarded message to #%s from %s (%s)%s",
+                            "[💬] [backfill] Forwarded message to #%s from %s (%s)%s",
                             msg.get("channel_name"),
                             msg.get("author"),
                             msg.get("author_id"),
                             suffix,
                         )
                     else:
+
+                        split_meta = ""
+                        if msg.get("__split_total__"):
+                            split_meta = f" [split {msg.get('__split_seq__', 0)+1}/{msg.get('__split_total__')} (no-count)]"
                         logger.info(
-                            "[💬]%s Forwarded message to #%s from %s (%s)",
+                            "[💬]%s Forwarded message to #%s from %s (%s)%s",
                             tag,
                             msg.get("channel_name"),
                             msg.get("author"),
                             msg.get("author_id"),
+                            split_meta,
                         )
 
                     return
