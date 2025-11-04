@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional
 import discord
+import aiohttp
 from discord import Member
 
 
@@ -400,7 +401,6 @@ class Snapshot:
                         )
                     return None
 
-                import aiohttp
 
                 url = f"https://discord.com/api/v9/channels/{chan_id}/messages?limit={int(limit)}"
                 headers = {"Authorization": token}
