@@ -2959,7 +2959,6 @@ class ServerReceiver:
                     suffix = f" [{d}/{t}]" if t else f" [{d}]"
                 return
 
-        # Handle splitting messages with many image attachments
         try:
             atts = list(msg.get("attachments") or [])
         except Exception:
@@ -2968,35 +2967,40 @@ class ServerReceiver:
         image_atts = [a for a in atts if _is_image_att(a)]
         other_atts = [a for a in atts if not _is_image_att(a)]
 
-        if len(image_atts) > 5:
+        if not msg.get("__split_total__") and len(image_atts) > 5:
             base_text = (msg.get("content") or "").strip()
-
             chunks = [image_atts[i : i + 5] for i in range(0, len(image_atts), 5)]
 
             for idx, chunk in enumerate(chunks):
                 sub = dict(msg)
+
+                sub["__split_seq__"] = idx
+                sub["__split_total__"] = len(chunks)
+
                 if idx == 0:
 
-                    sub["attachments"] = chunk + other_atts
-
-                    urls = [a.get("url") for a in chunk if a.get("url")]
+                    img_chunk = list(chunk)
+                    urls = [a.get("url") for a in img_chunk if a.get("url")]
                     while urls and _calc_text_len_with_urls(base_text, urls) > 2000:
-                        urls.pop()
-                        sub["attachments"] = sub["attachments"][:-1]
+                        img_chunk.pop()
+                        urls = [a.get("url") for a in img_chunk if a.get("url")]
+                    sub["attachments"] = img_chunk + other_atts
                 else:
-
                     sub["content"] = ""
-                    sub["attachments"] = chunk
-                    urls = [a.get("url") for a in chunk if a.get("url")]
+                    img_chunk = list(chunk)
+                    urls = [a.get("url") for a in img_chunk if a.get("url")]
                     while urls and _calc_text_len_with_urls("", urls) > 2000:
-                        urls.pop()
-                        sub["attachments"] = sub["attachments"][:-1]
+                        img_chunk.pop()
+                        urls = [a.get("url") for a in img_chunk if a.get("url")]
+                    sub["attachments"] = img_chunk
+
+                if idx != len(chunks) - 1:
+                    sub["__skip_backfill_mark__"] = True
 
                 await self.forward_message(sub)
 
             return
-        
-        # Normal message forwarding path
+
         payload = self._build_webhook_payload(msg)
         if payload is None:
             logger.debug(
@@ -3160,47 +3164,50 @@ class ServerReceiver:
                         except Exception:
                             row = None
 
-                        if orig_mid in self._pending_deletes:
-                            try:
-                                if row:
-                                    ok = await self._delete_with_row(
-                                        row, orig_mid, msg.get("channel_name")
-                                    )
-                                    if ok:
+                        is_last_chunk = not msg.get("__skip_backfill_mark__")
+
+                        if is_last_chunk:
+                            if orig_mid in self._pending_deletes:
+                                try:
+                                    if row:
+                                        ok = await self._delete_with_row(
+                                            row, orig_mid, msg.get("channel_name")
+                                        )
+                                        if ok:
+                                            logger.debug(
+                                                "[🧹] Applied queued delete right after initial send for orig %s",
+                                                orig_mid,
+                                            )
+                                    else:
                                         logger.debug(
-                                            "[🧹] Applied queued delete right after initial send for orig %s",
+                                            "[🕒] Pending delete found but mapping re-read failed for orig %s",
                                             orig_mid,
                                         )
-                                else:
-                                    logger.debug(
-                                        "[🕒] Pending delete found but mapping re-read failed for orig %s",
-                                        orig_mid,
-                                    )
-                            finally:
-                                self._pending_deletes.discard(orig_mid)
-                                self._latest_edit_payload.pop(orig_mid, None)
+                                finally:
+                                    self._pending_deletes.discard(orig_mid)
+                                    self._latest_edit_payload.pop(orig_mid, None)
+                                    self._inflight_events.pop(orig_mid, None)
+                            else:
+                                latest = self._latest_edit_payload.pop(orig_mid, None)
+                                if latest and row:
+                                    try:
+                                        await self._edit_with_row(row, latest, orig_mid)
+                                        logger.debug(
+                                            "[edit-coalesce] applied latest edit after initial send for orig %s",
+                                            orig_mid,
+                                        )
+                                    except Exception:
+                                        logger.debug(
+                                            "[edit-coalesce] immediate apply failed",
+                                            exc_info=True,
+                                        )
                                 self._inflight_events.pop(orig_mid, None)
-                        else:
-                            latest = self._latest_edit_payload.pop(orig_mid, None)
-                            if latest and row:
-                                try:
-                                    await self._edit_with_row(row, latest, orig_mid)
-                                    logger.debug(
-                                        "[edit-coalesce] applied latest edit after initial send for orig %s",
-                                        orig_mid,
-                                    )
-                                except Exception:
-                                    logger.debug(
-                                        "[edit-coalesce] immediate apply failed",
-                                        exc_info=True,
-                                    )
-                            self._inflight_events.pop(orig_mid, None)
                     except Exception:
                         logger.exception(
                             "upsert_message_mapping failed (normal channel)"
                         )
 
-                    if is_backfill:
+                    if is_backfill and not msg.get("__skip_backfill_mark__"):
                         self.backfill.note_sent(
                             source_id, int(msg.get("message_id") or 0) or None
                         )
@@ -3214,13 +3221,14 @@ class ServerReceiver:
                             else f" [{delivered} sent]"
                         )
                         logger.info(
-                            "[💬] [msg-sync] Forwarded message to #%s from %s (%s)%s",
+                            "[💬] [backfill] Forwarded message to #%s from %s (%s)%s",
                             msg.get("channel_name"),
                             msg.get("author"),
                             msg.get("author_id"),
                             suffix,
                         )
                     else:
+
                         logger.info(
                             "[💬]%s Forwarded message to #%s from %s (%s)",
                             tag,
