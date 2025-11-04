@@ -35,7 +35,7 @@ from typing import (
 )
 from discord import ChannelType, MessageType, Object as DiscordObject
 from discord.errors import HTTPException, Forbidden
-from client.message_utils import _resolve_forward
+from client.message_utils import _resolve_forward, _resolve_forward_via_snapshot
 
 
 DictLike: TypeAlias = Dict[str, Any]
@@ -510,6 +510,15 @@ class ExportMessagesRunner:
                                     getattr(msg, "id", None),
                                     e,
                                 )
+                            if unwrapped is None:
+                                try:
+                                    unwrapped = await _resolve_forward_via_snapshot(self.bot, msg, logger=self.log)
+                                except Exception as e:
+                                    self.log.debug(
+                                        "[export] snapshot fallback failed id=%s: %s",
+                                        getattr(msg, "id", None),
+                                        e,
+                                    )
                             if unwrapped is not None:
                                 real_msg = unwrapped
 
@@ -1552,8 +1561,18 @@ class BackfillEngine:
                         getattr(m, "id", None),
                         e,
                     )
+                if unwrapped is None:
+                    try:
+                        unwrapped = await _resolve_forward_via_snapshot(self.bot, m, logger=self.logger)
+                    except Exception as e:
+                        self.logger.debug(
+                            "[backfill] snapshot fallback failed id=%s: %s",
+                            getattr(m, "id", None),
+                            e,
+                        )
                 if unwrapped is not None:
                     real_msg = unwrapped
+
 
             raw_now = real_msg.content or ""
             system_now = getattr(real_msg, "system_content", "") or ""

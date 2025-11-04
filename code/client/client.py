@@ -24,7 +24,7 @@ from discord.ext import commands
 from common.config import Config, CURRENT_VERSION
 from common.db import DBManager
 from client.sitemap import SitemapService
-from client.message_utils import MessageUtils, _resolve_forward
+from client.message_utils import MessageUtils, _resolve_forward, _resolve_forward_via_snapshot
 from common.websockets import WebsocketManager, AdminBus
 from common.common_helpers import resolve_mapping_settings
 from client.scraper import MemberScraper
@@ -1043,12 +1043,14 @@ class ClientListener:
 
         if looks_like_forward:
             resolved = await _resolve_forward(self.bot, message)
+            if resolved is None:
+                resolved = await _resolve_forward_via_snapshot(self.bot, message, logger=logger)
+
             if resolved is not None:
                 src_msg = resolved
             else:
-
                 logger.info(
-                    "Dropping unresolvable forwarded message in #%s (are we in the server where the original was sent?)",
+                    "Dropping unresolvable forwarded message in #%s",
                     getattr(message.channel, "name", "?"),
                 )
                 return
@@ -1526,94 +1528,94 @@ class ClientListener:
         )
 
 
-async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
-    """
-    Handle deletes for messages that weren't cached.
-    """
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
+        """
+        Handle deletes for messages that weren't cached.
+        """
 
-    g = getattr(payload, "guild", None)
+        g = getattr(payload, "guild", None)
 
-    if getattr(payload, "guild_id", None) is not None:
-        gid = int(payload.guild_id)
-    else:
-        gid = g.id if g else None
+        if getattr(payload, "guild_id", None) is not None:
+            gid = int(payload.guild_id)
+        else:
+            gid = g.id if g else None
 
-    # If we still don't know the guild or it's not one we're cloning, bail.
-    if not gid or not self._is_mapped_origin(gid):
-        return
-
-    if payload.cached_message is not None:
-        return
-
-    settings = self._settings_for_origin(gid)
-    if not settings.get("ENABLE_CLONING", True) or not settings.get(
-        "DELETE_MESSAGES", True
-    ):
-        return
-
-    channel = self.bot.get_channel(payload.channel_id)
-    if channel is None:
-        try:
-            channel = await self.bot.fetch_channel(payload.channel_id)
-        except Exception:
+        # If we still don't know the guild or it's not one we're cloning, bail.
+        if not gid or not self._is_mapped_origin(gid):
             return
 
-    if isinstance(channel, discord.Thread):
-        if not self.sitemap.in_scope_thread(channel):
-            return
-    else:
-        if not self.sitemap.in_scope_channel(channel):
+        if payload.cached_message is not None:
             return
 
-    is_thread = getattr(channel, "type", None) in (
-        ChannelType.public_thread,
-        ChannelType.private_thread,
-    )
+        settings = self._settings_for_origin(gid)
+        if not settings.get("ENABLE_CLONING", True) or not settings.get(
+            "DELETE_MESSAGES", True
+        ):
+            return
 
-    payload_out = {
-        "type": "thread_message_delete" if is_thread else "message_delete",
-        "data": {
-            "guild_id": (
-                int(payload.guild_id) if payload.guild_id is not None else None
-            ),
-            "message_id": int(payload.message_id),
-            "channel_id": int(payload.channel_id),
-            "channel_name": getattr(channel, "name", str(payload.channel_id)),
-            "channel_type": (
-                getattr(channel, "type", None).value
-                if getattr(channel, "type", None)
-                else None
-            ),
-            **(
-                {
-                    "thread_parent_id": channel.parent.id,
-                    "thread_parent_name": channel.parent.name,
-                    "thread_id": channel.id,
-                    "thread_name": channel.name,
-                }
-                if is_thread
-                else {}
-            ),
-        },
-    }
+        channel = self.bot.get_channel(payload.channel_id)
+        if channel is None:
+            try:
+                channel = await self.bot.fetch_channel(payload.channel_id)
+            except Exception:
+                return
 
-    await self.ws.send(payload_out)
+        if isinstance(channel, discord.Thread):
+            if not self.sitemap.in_scope_thread(channel):
+                return
+        else:
+            if not self.sitemap.in_scope_channel(channel):
+                return
 
-    guild_name_for_log = None
-    if g is not None:
-        guild_name_for_log = getattr(g, "name", None)
+        is_thread = getattr(channel, "type", None) in (
+            ChannelType.public_thread,
+            ChannelType.private_thread,
+        )
 
-    if guild_name_for_log is None and hasattr(channel, "guild"):
-        guild_name_for_log = getattr(channel.guild, "name", None)
+        payload_out = {
+            "type": "thread_message_delete" if is_thread else "message_delete",
+            "data": {
+                "guild_id": (
+                    int(payload.guild_id) if payload.guild_id is not None else None
+                ),
+                "message_id": int(payload.message_id),
+                "channel_id": int(payload.channel_id),
+                "channel_name": getattr(channel, "name", str(payload.channel_id)),
+                "channel_type": (
+                    getattr(channel, "type", None).value
+                    if getattr(channel, "type", None)
+                    else None
+                ),
+                **(
+                    {
+                        "thread_parent_id": channel.parent.id,
+                        "thread_parent_name": channel.parent.name,
+                        "thread_id": channel.id,
+                        "thread_name": channel.name,
+                    }
+                    if is_thread
+                    else {}
+                ),
+            },
+        }
 
-    if guild_name_for_log is None:
-        guild_name_for_log = str(gid)
+        await self.ws.send(payload_out)
 
-    logger.info(
-        "[🗑️] Forwarding message delete from %s in #%s → sent to server",
-        guild_name_for_log,
-        payload_out["data"]["channel_name"],
-    )
+        guild_name_for_log = None
+        if g is not None:
+            guild_name_for_log = getattr(g, "name", None)
+
+        if guild_name_for_log is None and hasattr(channel, "guild"):
+            guild_name_for_log = getattr(channel.guild, "name", None)
+
+        if guild_name_for_log is None:
+            guild_name_for_log = str(gid)
+
+        logger.info(
+            "[🗑️] Forwarding message delete from %s in #%s → sent to server",
+            guild_name_for_log,
+            payload_out["data"]["channel_name"],
+        )
 
     async def on_thread_delete(self, thread: discord.Thread):
         """
