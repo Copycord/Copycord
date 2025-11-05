@@ -25,13 +25,12 @@ class GuildResolver:
             ids.add(int(fallback))
         return ids
 
-    def clones_for_host(self, host_guild_id: int) -> Set[int]:
-        row = self.db.get_mapping_by_original(int(host_guild_id))
-        return (
-            {int(row["cloned_guild_id"])}
-            if row and row.get("cloned_guild_id")
-            else set()
-        )
+    def clones_for_host(self, host_guild_id: int) -> set[int]:
+        try:
+            rows = self.db.list_mappings_by_origin(int(host_guild_id)) or []
+            return {int(r["cloned_guild_id"]) for r in rows if r.get("cloned_guild_id")}
+        except Exception:
+            return set()
 
     def originals_for_clone(self, clone_guild_id: int) -> Set[int]:
         row = self.db.get_mapping_by_clone(int(clone_guild_id))

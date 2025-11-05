@@ -243,7 +243,7 @@ class EmojiManager:
                         "[⛔] Error deleting emoji: %s",
                         e,
                     )
-            self.db.delete_emoji_mapping(orig_id)
+            self.db.delete_emoji_mapping_for_clone(orig_id, cloned_guild_id=guild.id)
 
         for orig_id, info in incoming.items():
             name = info["name"]
@@ -260,7 +260,7 @@ class EmojiManager:
                     "[⚠️] Emoji %s missing in clone; will recreate",
                     mapping["original_emoji_name"],
                 )
-                self.db.delete_emoji_mapping(orig_id)
+                self.db.delete_emoji_mapping_for_clone(orig_id, cloned_guild_id=guild.id)
                 mapping = cloned = None
 
             if mapping and cloned and cloned.name != name:

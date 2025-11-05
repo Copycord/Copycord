@@ -334,7 +334,7 @@ class RoleManager:
 
                 if not delete_roles:
 
-                    self.db.delete_role_mapping(orig_id)
+                    self.db.delete_role_mapping_for_clone(orig_id, clone_id)
                     if cloned_role:
                         self._log(
                             "info",
@@ -356,7 +356,7 @@ class RoleManager:
                     or cloned_role.position >= bot_top
                 ):
 
-                    self.db.delete_role_mapping(orig_id)
+                    self.db.delete_role_mapping_for_clone(orig_id, clone_id)
                     if cloned_role:
                         self._log(
                             "info",
@@ -391,7 +391,7 @@ class RoleManager:
                         e,
                     )
                 finally:
-                    self.db.delete_role_mapping(orig_id)
+                    self.db.delete_role_mapping_for_clone(orig_id, clone_id)
 
         rows = self.db.get_all_role_mappings()
         current: dict[int, dict] = {}
@@ -446,7 +446,7 @@ class RoleManager:
                             e,
                         )
                 if mapping:
-                    self.db.delete_role_mapping(orig_id)
+                    self.db.delete_role_mapping_for_clone(orig_id, clone_id)
                 continue
 
             want_name = info["name"]

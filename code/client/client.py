@@ -186,7 +186,7 @@ class ClientListener:
 
         if typ == "mappings_reload":
             self._reload_mapped_ids()
-            asyncio.create_task(self.sitemap.build_and_send_all())
+            self.sitemap.schedule_sync(guild_id=None, delay=0.2)
             return {"ok": True, "mapped": list(self._mapped_original_ids)}
 
         elif typ == "settings_update":

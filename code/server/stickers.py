@@ -329,7 +329,7 @@ class StickerManager:
                         e,
                     )
 
-            self.db.delete_sticker_mapping(orig_id)
+            self.db.delete_sticker_mapping_for_clone(orig_id, cloned_guild_id=guild.id)
 
         for orig_id, info in incoming.items():
             name = info.get("name") or f"sticker_{orig_id}"
@@ -346,7 +346,7 @@ class StickerManager:
                         mapping["original_sticker_name"],
                     )
 
-                    self.db.delete_sticker_mapping(orig_id)
+                    self.db.delete_sticker_mapping_for_clone(orig_id, cloned_guild_id=guild.id)
                     mapping = None
 
             if mapping and cloned and mapping["original_sticker_name"] != name:

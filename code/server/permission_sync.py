@@ -330,7 +330,7 @@ class ChannelPermissionSync:
             if src_everyone_id is not None and orig_role_id == src_everyone_id:
                 clone_role_id = int(guild.default_role.id)
             else:
-                row = self.db.get_role_mapping(orig_role_id)
+                row = self.db.get_role_mapping_for_clone(orig_role_id, cloned_guild_id=int(guild.id))
                 clone_role_id = self._extract_cloned_role_id(row) or 0
                 if not clone_role_id:
                     self._log(

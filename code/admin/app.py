@@ -3133,17 +3133,6 @@ async def api_create_mapping(payload: dict = Body(...)):
 
     settings = payload.get("settings") or {}
 
-    existing_host = db.get_mapping_by_original(host_gid)
-    if existing_host:
-        return JSONResponse(
-            {
-                "ok": False,
-                "error": "That host guild is already mapped to another clone.",
-                "which": "original_guild_id",
-            },
-            status_code=400,
-        )
-
     existing_clone = db.get_mapping_by_clone(clone_gid)
     if existing_clone:
         return JSONResponse(
@@ -3192,11 +3181,10 @@ async def api_create_mapping(payload: dict = Body(...)):
             settings=settings,
         )
     except sqlite3.IntegrityError:
-
         return JSONResponse(
             {
                 "ok": False,
-                "error": "HOST_GUILD_ID and CLONE_GUILD_ID must each be unique. You can't map either ID twice.",
+                "error": "That host+clone pair already exists.",
             },
             status_code=400,
         )

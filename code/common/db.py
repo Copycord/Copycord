@@ -43,16 +43,17 @@ class DBManager:
             name="guild_mappings",
             create_sql_template="""
                 CREATE TABLE {table} (
-                    mapping_id            TEXT UNIQUE NOT NULL DEFAULT (LOWER(HEX(RANDOMBLOB(16)))),
+                    mapping_id            TEXT PRIMARY KEY, 
                     mapping_name          TEXT NOT NULL DEFAULT '',
-                    original_guild_id     INTEGER PRIMARY KEY,
+                    original_guild_id     INTEGER NOT NULL,
                     original_guild_name   TEXT,
-                    cloned_guild_id       INTEGER UNIQUE,
+                    original_guild_icon_url TEXT,
+                    cloned_guild_id       INTEGER NOT NULL,
                     cloned_guild_name     TEXT,
-                    original_guild_icon_url     TEXT,   
-                    settings              TEXT NOT NULL DEFAULT '{{}}',
+                    settings              TEXT NOT NULL DEFAULT '{}',
                     created_at            INTEGER   NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
-                    last_updated          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    last_updated          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(original_guild_id, cloned_guild_id)
                 );
             """,
             required_columns={
@@ -79,6 +80,7 @@ class DBManager:
             post_sql=[
                 "CREATE INDEX IF NOT EXISTS ix_gm_clone_guild   ON guild_mappings(cloned_guild_id);",
                 "CREATE INDEX IF NOT EXISTS ix_gm_uuid          ON guild_mappings(mapping_id);",
+                "CREATE INDEX IF NOT EXISTS ix_gm_by_orig ON guild_mappings(original_guild_id);",
             ],
         )
 
@@ -141,13 +143,14 @@ class DBManager:
             name="category_mappings",
             create_sql_template="""
                 CREATE TABLE {table} (
-                original_category_id   INTEGER PRIMARY KEY,
+                original_category_id   INTEGER NOT NULL,
                 original_category_name TEXT    NOT NULL,
-                cloned_category_id     INTEGER,
+                cloned_category_id     INTEGER UNIQUE,
                 cloned_category_name   TEXT,
                 original_guild_id      INTEGER,
                 cloned_guild_id        INTEGER,
-                last_updated           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                last_updated           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (original_category_id, cloned_guild_id)
                 );
             """,
             required_columns={
@@ -178,8 +181,8 @@ class DBManager:
         self._ensure_table(
             name="channel_mappings",
             create_sql_template="""
-            CREATE TABLE {table} (
-                original_channel_id           INTEGER PRIMARY KEY,
+                CREATE TABLE {table} (
+                original_channel_id           INTEGER NOT NULL,
                 original_channel_name         TEXT    NOT NULL,
                 cloned_channel_id             INTEGER UNIQUE,
                 clone_channel_name            TEXT,
@@ -190,11 +193,13 @@ class DBManager:
                 original_guild_id             INTEGER,
                 cloned_guild_id               INTEGER,
                 last_updated                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(original_parent_category_id)
-                    REFERENCES category_mappings(original_category_id) ON DELETE SET NULL,
+                FOREIGN KEY(original_parent_category_id, cloned_guild_id)
+                    REFERENCES category_mappings(original_category_id, cloned_guild_id)
+                    ON DELETE SET NULL,
                 FOREIGN KEY(cloned_parent_category_id)
-                    REFERENCES category_mappings(cloned_category_id)   ON DELETE SET NULL
-            );
+                    REFERENCES category_mappings(cloned_category_id) ON DELETE SET NULL,
+                PRIMARY KEY (original_channel_id, cloned_guild_id)
+                );
             """,
             required_columns={
                 "original_channel_id",
@@ -234,7 +239,7 @@ class DBManager:
             name="threads",
             create_sql_template="""
                 CREATE TABLE {table}(
-                    original_thread_id   INTEGER PRIMARY KEY,
+                    original_thread_id   INTEGER,
                     original_thread_name TEXT    NOT NULL,
                     cloned_thread_id     INTEGER,
                     forum_original_id    INTEGER,
@@ -242,8 +247,10 @@ class DBManager:
                     original_guild_id    INTEGER,
                     cloned_guild_id      INTEGER,
                     last_updated         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY(forum_original_id)
-                    REFERENCES channel_mappings(original_channel_id) ON DELETE SET NULL,
+                    PRIMARY KEY (original_thread_id, cloned_guild_id),
+                    FOREIGN KEY(forum_original_id, cloned_guild_id)
+                    REFERENCES channel_mappings(original_channel_id, cloned_guild_id)
+                    ON DELETE SET NULL,
                     FOREIGN KEY(forum_cloned_id)
                     REFERENCES channel_mappings(cloned_channel_id)   ON DELETE SET NULL
                 );
@@ -278,13 +285,14 @@ class DBManager:
             name="emoji_mappings",
             create_sql_template="""
                 CREATE TABLE {table} (
-                original_emoji_id    INTEGER PRIMARY KEY,
+                original_emoji_id    INTEGER,
                 original_emoji_name  TEXT    NOT NULL,
                 cloned_emoji_id      INTEGER UNIQUE,
                 cloned_emoji_name    TEXT    NOT NULL,
                 original_guild_id    INTEGER,
                 cloned_guild_id      INTEGER,
-                last_updated         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                last_updated         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (original_emoji_id, cloned_guild_id)
                 );
             """,
             required_columns={
@@ -315,13 +323,14 @@ class DBManager:
             name="sticker_mappings",
             create_sql_template="""
                 CREATE TABLE {table} (
-                original_sticker_id    INTEGER PRIMARY KEY,
+                original_sticker_id    INTEGER,
                 original_sticker_name  TEXT    NOT NULL,
                 cloned_sticker_id      INTEGER UNIQUE,
                 cloned_sticker_name    TEXT    NOT NULL,
                 original_guild_id      INTEGER,
                 cloned_guild_id        INTEGER,
-                last_updated           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                last_updated           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (original_sticker_id, cloned_guild_id)
                 );
             """,
             required_columns={
@@ -352,13 +361,14 @@ class DBManager:
             name="role_mappings",
             create_sql_template="""
                 CREATE TABLE {table} (
-                original_role_id    INTEGER PRIMARY KEY,
+                original_role_id    INTEGER,
                 original_role_name  TEXT    NOT NULL,
                 cloned_role_id      INTEGER UNIQUE,
                 cloned_role_name    TEXT    NOT NULL,
                 original_guild_id   INTEGER,
                 cloned_guild_id     INTEGER,
-                last_updated        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                last_updated        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (original_role_id, cloned_guild_id)
                 );
             """,
             required_columns={
@@ -539,15 +549,16 @@ class DBManager:
             name="messages",
             create_sql_template="""
                 CREATE TABLE {table} (
-                    original_message_id   INTEGER PRIMARY KEY,
-                    original_guild_id     INTEGER,
-                    original_channel_id   INTEGER,
-                    cloned_guild_id       INTEGER,
-                    cloned_channel_id     INTEGER,
-                    cloned_message_id     INTEGER,
-                    webhook_url           TEXT,
-                    created_at            INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
-                    updated_at            INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
+                original_message_id  INTEGER NOT NULL,
+                original_guild_id    INTEGER,
+                original_channel_id  INTEGER,
+                cloned_guild_id      INTEGER,
+                cloned_channel_id    INTEGER,
+                cloned_message_id    INTEGER,
+                webhook_url          TEXT,
+                created_at           INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+                updated_at           INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+                PRIMARY KEY (original_message_id, cloned_guild_id)
                 );
             """,
             required_columns={
@@ -681,7 +692,7 @@ class DBManager:
         exists = self._table_exists(name)
 
         if not exists:
-            self.conn.execute(create_sql_template.format(table=name))
+            self.conn.execute(create_sql_template.replace("{table}", name))
             for stmt in post_sql:
                 self.conn.execute(stmt)
             return
@@ -710,7 +721,7 @@ class DBManager:
             else:
                 self.conn.execute("BEGIN;")
 
-            self.conn.execute(create_sql_template.format(table=temp))
+            self.conn.execute(create_sql_template.replace("{table}", temp))
 
             new_cols = list(copy_map.keys())
             select_exprs = []
@@ -825,33 +836,37 @@ class DBManager:
         original_guild_id: int | None = None,
         cloned_guild_id: int | None = None,
     ):
+        cgid = int(cloned_guild_id) if cloned_guild_id is not None else None
+
         with self.lock, self.conn:
             row = self.conn.execute(
-                "SELECT cloned_category_id FROM category_mappings WHERE original_category_id=?",
-                (orig_id,),
+                "SELECT cloned_category_id FROM category_mappings "
+                "WHERE original_category_id=? AND cloned_guild_id=?",
+                (orig_id, cgid),
             ).fetchone()
             old_clone = row["cloned_category_id"] if row else None
 
-            will_change_to_new = (
-                row is not None and clone_id is not None and old_clone != clone_id
-            )
+            # If moving this clone's category to a new clone category id, clear parent links in THIS clone
+            will_change_to_new = (row is not None and clone_id is not None and old_clone != clone_id)
             if will_change_to_new and old_clone is not None:
                 self.conn.execute(
-                    "UPDATE channel_mappings SET cloned_parent_category_id=NULL "
-                    "WHERE cloned_parent_category_id=?",
-                    (old_clone,),
+                    "UPDATE channel_mappings "
+                    "SET cloned_parent_category_id=NULL "
+                    "WHERE cloned_parent_category_id=? AND cloned_guild_id=?",
+                    (old_clone, cgid),
                 )
 
-            clearing_parent = (
-                row is not None and old_clone is not None and clone_id is None
-            )
+            # If clearing the parent for THIS clone, clear only rows in THIS clone
+            clearing_parent = (row is not None and old_clone is not None and clone_id is None)
             if clearing_parent:
                 self.conn.execute(
-                    "UPDATE channel_mappings SET cloned_parent_category_id=NULL "
-                    "WHERE cloned_parent_category_id=?",
-                    (old_clone,),
+                    "UPDATE channel_mappings "
+                    "SET cloned_parent_category_id=NULL "
+                    "WHERE cloned_parent_category_id=? AND cloned_guild_id=?",
+                    (old_clone, cgid),
                 )
 
+            # Upsert the mapping for (orig_id, cloned_guild_id)
             self.conn.execute(
                 """
                 INSERT INTO category_mappings (
@@ -863,7 +878,7 @@ class DBManager:
                     cloned_guild_id
                 )
                 VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(original_category_id) DO UPDATE SET
+                ON CONFLICT(original_category_id, cloned_guild_id) DO UPDATE SET
                     original_category_name = excluded.original_category_name,
                     cloned_category_id     = excluded.cloned_category_id,
                     cloned_category_name   = CASE
@@ -880,18 +895,21 @@ class DBManager:
                     clone_id,
                     clone_name,
                     int(original_guild_id) if original_guild_id is not None else None,
-                    int(cloned_guild_id) if cloned_guild_id is not None else None,
+                    cgid,
                 ),
             )
 
+            # Propagate the new parent ONLY inside THIS clone
             if clone_id is not None:
                 self.conn.execute(
-                    "UPDATE channel_mappings SET cloned_parent_category_id=? "
-                    "WHERE original_parent_category_id=?",
-                    (clone_id, orig_id),
+                    "UPDATE channel_mappings "
+                    "SET cloned_parent_category_id=? "
+                    "WHERE original_parent_category_id=? AND cloned_guild_id=?",
+                    (clone_id, orig_id, cgid),
                 )
 
             self.conn.commit()
+
 
     def delete_category_mapping(self, orig_id: int):
         with self.lock, self.conn:
@@ -1016,7 +1034,7 @@ class DBManager:
                 cloned_guild_id
             )
             VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(original_thread_id) DO UPDATE SET
+            ON CONFLICT(original_thread_id, cloned_guild_id) DO UPDATE SET
                 original_thread_name = excluded.original_thread_name,
                 cloned_thread_id     = excluded.cloned_thread_id,
                 forum_original_id    = excluded.forum_original_id,
@@ -1075,9 +1093,21 @@ class DBManager:
                 cloned_guild_id
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(original_channel_id) DO UPDATE SET
+            ON CONFLICT(original_channel_id, cloned_guild_id) DO UPDATE SET
                 original_channel_name       = excluded.original_channel_name,
-                cloned_channel_id           = excluded.cloned_channel_id,
+                -- Only adopt the incoming cloned_channel_id if it's NULL (no change) OR
+                -- if that id is not used by any other row:
+                cloned_channel_id = CASE
+                    WHEN excluded.cloned_channel_id IS NULL THEN channel_mappings.cloned_channel_id
+                    WHEN NOT EXISTS (
+                        SELECT 1 FROM channel_mappings AS cm
+                        WHERE cm.cloned_channel_id = excluded.cloned_channel_id
+                        AND (cm.original_channel_id != channel_mappings.original_channel_id
+                            OR cm.cloned_guild_id   != channel_mappings.cloned_guild_id)
+                    )
+                    THEN excluded.cloned_channel_id
+                    ELSE channel_mappings.cloned_channel_id
+                END,
                 channel_webhook_url         = excluded.channel_webhook_url,
                 original_parent_category_id = excluded.original_parent_category_id,
                 cloned_parent_category_id   = excluded.cloned_parent_category_id,
@@ -1092,16 +1122,8 @@ class DBManager:
                 original_channel_name,
                 int(cloned_channel_id) if cloned_channel_id is not None else None,
                 channel_webhook_url,
-                (
-                    int(original_parent_category_id)
-                    if original_parent_category_id is not None
-                    else None
-                ),
-                (
-                    int(cloned_parent_category_id)
-                    if cloned_parent_category_id is not None
-                    else None
-                ),
+                int(original_parent_category_id) if original_parent_category_id is not None else None,
+                int(cloned_parent_category_id) if cloned_parent_category_id is not None else None,
                 int(channel_type),
                 (clone_name.strip() if isinstance(clone_name, str) else None),
                 int(original_guild_id) if original_guild_id is not None else None,
@@ -1220,12 +1242,12 @@ class DBManager:
         self,
         orig_id: int,
         orig_name: str,
-        clone_id: int,
-        clone_name: str,
+        clone_id: int | None,
+        clone_name: str | None,
         *,
         original_guild_id: int | None = None,
         cloned_guild_id: int | None = None,
-    ):
+    ) -> None:
         self.conn.execute(
             """
             INSERT INTO emoji_mappings (
@@ -1237,7 +1259,7 @@ class DBManager:
                 cloned_guild_id
             )
             VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(original_emoji_id) DO UPDATE SET
+            ON CONFLICT(original_emoji_id, cloned_guild_id) DO UPDATE SET
                 original_emoji_name = excluded.original_emoji_name,
                 cloned_emoji_id     = excluded.cloned_emoji_id,
                 cloned_emoji_name   = excluded.cloned_emoji_name,
@@ -1245,23 +1267,13 @@ class DBManager:
                 cloned_guild_id     = COALESCE(excluded.cloned_guild_id,   emoji_mappings.cloned_guild_id)
             """,
             (
-                orig_id,
+                int(orig_id),
                 orig_name,
-                clone_id,
+                int(clone_id) if clone_id is not None else None,
                 clone_name,
                 int(original_guild_id) if original_guild_id is not None else None,
                 int(cloned_guild_id) if cloned_guild_id is not None else None,
             ),
-        )
-        self.conn.commit()
-
-    def delete_emoji_mapping(self, orig_id: int):
-        """
-        Deletes a mapping from the emoji_mappings table in the database based on the given original emoji ID.
-        """
-        self.conn.execute(
-            "DELETE FROM emoji_mappings WHERE original_emoji_id = ?",
-            (orig_id,),
         )
         self.conn.commit()
 
@@ -1448,12 +1460,12 @@ class DBManager:
         self,
         orig_id: int,
         orig_name: str,
-        clone_id: int,
-        clone_name: str,
+        clone_id: int | None,
+        clone_name: str | None,
         *,
         original_guild_id: int | None = None,
         cloned_guild_id: int | None = None,
-    ):
+    ) -> None:
         self.conn.execute(
             """
             INSERT INTO sticker_mappings (
@@ -1465,7 +1477,7 @@ class DBManager:
                 cloned_guild_id
             )
             VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(original_sticker_id) DO UPDATE SET
+            ON CONFLICT(original_sticker_id, cloned_guild_id) DO UPDATE SET
                 original_sticker_name = excluded.original_sticker_name,
                 cloned_sticker_id     = excluded.cloned_sticker_id,
                 cloned_sticker_name   = excluded.cloned_sticker_name,
@@ -1473,9 +1485,9 @@ class DBManager:
                 cloned_guild_id       = COALESCE(excluded.cloned_guild_id,   sticker_mappings.cloned_guild_id)
             """,
             (
-                orig_id,
+                int(orig_id),
                 orig_name,
-                clone_id,
+                int(clone_id) if clone_id is not None else None,
                 clone_name,
                 int(original_guild_id) if original_guild_id is not None else None,
                 int(cloned_guild_id) if cloned_guild_id is not None else None,
@@ -1496,12 +1508,12 @@ class DBManager:
         self,
         orig_id: int,
         orig_name: str,
-        clone_id: Optional[int],
-        clone_name: Optional[str],
+        clone_id: int | None,
+        clone_name: str | None,
         *,
         original_guild_id: int | None = None,
         cloned_guild_id: int | None = None,
-    ):
+    ) -> None:
         self.conn.execute(
             """
             INSERT INTO role_mappings (
@@ -1513,7 +1525,7 @@ class DBManager:
                 cloned_guild_id
             )
             VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(original_role_id) DO UPDATE SET
+            ON CONFLICT(original_role_id, cloned_guild_id) DO UPDATE SET
                 original_role_name = excluded.original_role_name,
                 cloned_role_id     = excluded.cloned_role_id,
                 cloned_role_name   = excluded.cloned_role_name,
@@ -1521,9 +1533,9 @@ class DBManager:
                 cloned_guild_id    = COALESCE(excluded.cloned_guild_id,   role_mappings.cloned_guild_id)
             """,
             (
-                orig_id,
+                int(orig_id),
                 orig_name,
-                clone_id,
+                int(clone_id) if clone_id is not None else None,
                 clone_name,
                 int(original_guild_id) if original_guild_id is not None else None,
                 int(cloned_guild_id) if cloned_guild_id is not None else None,
@@ -1906,7 +1918,7 @@ class DBManager:
                     updated_at
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
-                ON CONFLICT(original_message_id) DO UPDATE SET
+                ON CONFLICT(original_message_id, cloned_guild_id) DO UPDATE SET
                     -- never overwrite with NULL; keep existing when excluded is NULL
                     original_guild_id   = COALESCE(excluded.original_guild_id, messages.original_guild_id),
                     original_channel_id = COALESCE(excluded.original_channel_id, messages.original_channel_id),
@@ -1933,6 +1945,24 @@ class DBManager:
         return self.conn.execute(
             "SELECT * FROM messages WHERE cloned_message_id = ?",
             (int(cloned_message_id),),
+        ).fetchone()
+        
+    def get_message_mappings_for_original(self, original_message_id: int):
+        """
+        Return ALL message-mapping rows for this original message id (one per clone).
+        """
+        return self.conn.execute(
+            "SELECT * FROM messages WHERE original_message_id = ? ORDER BY cloned_guild_id",
+            (int(original_message_id),),
+        ).fetchall()
+
+    def get_message_mapping_pair(self, original_message_id: int, cloned_guild_id: int):
+        """
+        Return the single mapping row for (original_message_id, cloned_guild_id).
+        """
+        return self.conn.execute(
+            "SELECT * FROM messages WHERE original_message_id = ? AND cloned_guild_id = ? LIMIT 1",
+            (int(original_message_id), int(cloned_guild_id)),
         ).fetchone()
 
     def delete_old_messages(self, older_than_seconds: int = 7 * 24 * 3600) -> int:
@@ -2393,13 +2423,21 @@ class DBManager:
 
     def get_all_original_guild_ids(self) -> list[int]:
         rows = self.conn.execute(
-            "SELECT original_guild_id FROM guild_mappings"
+            """
+            SELECT DISTINCT original_guild_id
+            FROM guild_mappings
+            WHERE original_guild_id IS NOT NULL AND original_guild_id != 0
+            """
         ).fetchall()
         return [int(r[0]) for r in rows]
 
     def get_all_clone_guild_ids(self) -> list[int]:
         rows = self.conn.execute(
-            "SELECT cloned_guild_id FROM guild_mappings"
+            """
+            SELECT DISTINCT cloned_guild_id
+            FROM guild_mappings
+            WHERE cloned_guild_id IS NOT NULL AND cloned_guild_id != 0
+            """
         ).fetchall()
         return [int(r[0]) for r in rows]
 
@@ -3093,3 +3131,182 @@ class DBManager:
                     """,
                     (w, host_gid, clone_gid),
                 )
+
+
+    # ----- listing clones per host -----
+    def get_clone_guild_ids_for_origin(self, original_guild_id: int) -> list[int]:
+        rows = self.conn.execute(
+            "SELECT cloned_guild_id FROM guild_mappings WHERE original_guild_id=?",
+            (int(original_guild_id),),
+        ).fetchall()
+        return [int(r["cloned_guild_id"]) for r in rows if r["cloned_guild_id"] is not None]
+
+    def list_mappings_by_origin(self, original_guild_id: int):
+        return self.conn.execute(
+            "SELECT * FROM guild_mappings WHERE original_guild_id=?",
+            (int(original_guild_id),),
+        ).fetchall()
+        
+    def get_mapping_by_id(self, mapping_id: str):
+        return self.conn.execute(
+            "SELECT * FROM guild_mappings WHERE mapping_id = ? LIMIT 1",
+            (str(mapping_id),),
+        ).fetchone()
+
+    def get_mapping_by_original_and_clone(self, original_guild_id: int, cloned_guild_id: int):
+        return self.conn.execute(
+            "SELECT * FROM guild_mappings WHERE original_guild_id = ? AND cloned_guild_id = ? LIMIT 1",
+            (int(original_guild_id), int(cloned_guild_id)),
+        ).fetchone()
+
+
+    # ----- channel lookups for fan-out -----
+    def get_channel_mappings_for_original(self, original_channel_id: int):
+        return self.conn.execute(
+            "SELECT * FROM channel_mappings WHERE original_channel_id=? ORDER BY cloned_guild_id",
+            (int(original_channel_id),),
+        ).fetchall()
+        
+    def get_thread_mapping_by_original_and_clone(self, original_thread_id: int, cloned_guild_id: int) -> sqlite3.Row | None:
+        return self.conn.execute(
+            "SELECT * FROM threads WHERE original_thread_id = ? AND cloned_guild_id = ? LIMIT 1",
+            (int(original_thread_id), int(cloned_guild_id))
+        ).fetchone()
+
+    def get_channel_mapping_by_original_and_clone(self, original_channel_id: int, cloned_guild_id: int):
+        return self.conn.execute(
+            "SELECT * FROM channel_mappings WHERE original_channel_id=? AND cloned_guild_id=? LIMIT 1",
+            (int(original_channel_id), int(cloned_guild_id)),
+        ).fetchone()
+
+    # ----- precise deletes so we don't clobber other clones -----
+    def delete_channel_mapping_pair(self, original_channel_id: int, cloned_guild_id: int):
+        with self.lock, self.conn:
+            self.conn.execute(
+                "DELETE FROM channel_mappings WHERE original_channel_id=? AND cloned_guild_id=?",
+                (int(original_channel_id), int(cloned_guild_id)),
+            )
+
+    def get_thread_mappings_for_original(self, original_thread_id: int) -> list[dict]:
+        cur = self.conn.execute(
+            """
+            SELECT *
+            FROM threads
+            WHERE original_thread_id = ?
+            ORDER BY cloned_guild_id, cloned_thread_id
+            """,
+            (int(original_thread_id),),
+        )
+        rows = cur.fetchall() or []
+        return [dict(r) for r in rows]
+    
+    def get_thread_mapping_pair(self, original_thread_id: int, cloned_guild_id: int) -> sqlite3.Row | None:
+        """
+        Return the single row for (original_thread_id, cloned_guild_id).
+        """
+        return self.conn.execute(
+            "SELECT * FROM threads WHERE original_thread_id = ? AND cloned_guild_id = ? LIMIT 1",
+            (int(original_thread_id), int(cloned_guild_id)),
+        ).fetchone()
+
+    def delete_forum_thread_mapping_for_clone(self, original_thread_id: int, cloned_guild_id: int) -> None:
+        with self.lock, self.conn:
+            self.conn.execute(
+                """
+                DELETE FROM threads
+                WHERE original_thread_id = ? AND cloned_guild_id = ?
+                """,
+                (int(original_thread_id), int(cloned_guild_id)),
+            )
+            self.conn.commit()
+
+    def delete_category_mapping_pair(self, original_category_id: int, cloned_guild_id: int):
+        with self.lock, self.conn:
+            self.conn.execute(
+                "DELETE FROM category_mappings WHERE original_category_id=? AND cloned_guild_id=?",
+                (int(original_category_id), int(cloned_guild_id)),
+            )
+
+    def delete_message_mapping_pair(self, original_message_id: int, cloned_guild_id: int) -> int:
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                "DELETE FROM messages WHERE original_message_id=? AND cloned_guild_id=?",
+                (int(original_message_id), int(cloned_guild_id)),
+            )
+            return cur.rowcount or 0
+        
+    # ----- EMOJIS -----
+    def get_emoji_mapping_for_clone(self, original_id: int, cloned_guild_id: int):
+        return self.conn.execute(
+            "SELECT * FROM emoji_mappings WHERE original_emoji_id = ? AND cloned_guild_id = ? LIMIT 1",
+            (int(original_id), int(cloned_guild_id)),
+        ).fetchone()
+
+    def get_emoji_mappings_for_original(self, original_id: int) -> list:
+        return self.conn.execute(
+            "SELECT * FROM emoji_mappings WHERE original_emoji_id = ? ORDER BY cloned_guild_id",
+            (int(original_id),),
+        ).fetchall()
+
+    def delete_emoji_mapping_for_clone(self, original_id: int, cloned_guild_id: int) -> None:
+        self.conn.execute(
+            "DELETE FROM emoji_mappings WHERE original_emoji_id = ? AND cloned_guild_id = ?",
+            (int(original_id), int(cloned_guild_id)),
+        )
+        self.conn.commit()
+
+    # (Optionally keep this for “delete all clones of this emoji”)
+    def delete_emoji_mapping(self, original_id: int) -> None:
+        self.conn.execute(
+            "DELETE FROM emoji_mappings WHERE original_emoji_id = ?",
+            (int(original_id),),
+        )
+        self.conn.commit()
+
+
+    # ----- STICKERS -----
+    def get_sticker_mapping_for_clone(self, original_id: int, cloned_guild_id: int):
+        return self.conn.execute(
+            "SELECT * FROM sticker_mappings WHERE original_sticker_id = ? AND cloned_guild_id = ? LIMIT 1",
+            (int(original_id), int(cloned_guild_id)),
+        ).fetchone()
+
+    def get_sticker_mappings_for_original(self, original_id: int) -> list:
+        return self.conn.execute(
+            "SELECT * FROM sticker_mappings WHERE original_sticker_id = ? ORDER BY cloned_guild_id",
+            (int(original_id),),
+        ).fetchall()
+
+    def delete_sticker_mapping_for_clone(self, original_id: int, cloned_guild_id: int) -> None:
+        self.conn.execute(
+            "DELETE FROM sticker_mappings WHERE original_sticker_id = ? AND cloned_guild_id = ?",
+            (int(original_id), int(cloned_guild_id)),
+        )
+        self.conn.commit()
+
+
+    # ----- ROLES -----
+    def get_role_mapping_for_clone(self, original_id: int, cloned_guild_id: int):
+        return self.conn.execute(
+            "SELECT * FROM role_mappings WHERE original_role_id = ? AND cloned_guild_id = ? LIMIT 1",
+            (int(original_id), int(cloned_guild_id)),
+        ).fetchone()
+
+    def get_role_mappings_for_original(self, original_id: int) -> list:
+        return self.conn.execute(
+            "SELECT * FROM role_mappings WHERE original_role_id = ? ORDER BY cloned_guild_id",
+            (int(original_id),),
+        ).fetchall()
+
+    def delete_role_mapping_for_clone(self, original_id: int, cloned_guild_id: int) -> None:
+        self.conn.execute(
+            "DELETE FROM role_mappings WHERE original_role_id = ? AND cloned_guild_id = ?",
+            (int(original_id), int(cloned_guild_id)),
+        )
+        self.conn.commit()
+
+    def get_category_mapping_by_original_and_clone(self, original_category_id: int, cloned_guild_id: int):
+        return self.conn.execute(
+            "SELECT * FROM category_mappings WHERE original_category_id = ? AND cloned_guild_id = ? LIMIT 1",
+            (int(original_category_id), int(cloned_guild_id)),
+        ).fetchone()

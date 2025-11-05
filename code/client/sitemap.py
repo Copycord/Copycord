@@ -26,50 +26,70 @@ class SitemapService:
         self._debounce_task = None
         self._dirty_guild_ids: Set[int] = set()
         self._dirty_lock = asyncio.Lock()
+        self._send_lock = asyncio.Lock()
 
     def _pick_guild(self) -> Optional[discord.Guild]:
         return self.bot.guilds[0] if self.bot.guilds else None
 
     def _mapped_original_ids(self) -> list[int]:
-        """All original (host) guild IDs from guild_mappings."""
+        """All original (host) guild IDs from guild_mappings (unique)."""
         try:
-
-            return list(self.db.get_all_original_guild_ids())
+            ids = list(self.db.get_all_original_guild_ids())
+            # Deduplicate defensively in case callers change over time
+            # while preserving first-seen order.
+            seen = {}
+            for i in ids:
+                seen.setdefault(int(i), True)
+            return list(seen.keys())
         except Exception:
             return []
+        
+    def _cancel_pending_debounce(self) -> None:
+        try:
+            if self._debounce_task and not self._debounce_task.done():
+                self._debounce_task.cancel()
+        except Exception:
+            pass
+        self._debounce_task = None
 
-    def _mapping_label_for_origin(
-        self, origin_guild_id: int, guild_name_fallback: str
+    def _mapping_label(
+        self,
+        origin_guild_id: int,
+        guild_name_fallback: str,
+        cloned_guild_id: int | None = None,
     ) -> str:
-        """
-        Return: "<original_guild_name> (<mapping_id>)"
-        Fallbacks:
-        - mapping_id falls back to the origin guild id
-        - original_guild_name falls back to the live guild name
-        """
         try:
             mappings = self.db.list_guild_mappings() or []
         except Exception:
             mappings = []
 
+        # Prefer exact (origin, clone) match when clone is known
+        if cloned_guild_id is not None:
+            for m in mappings:
+                try:
+                    ogid = int(m.get("original_guild_id", 0) or 0)
+                    cgid = int(m.get("cloned_guild_id", 0) or 0)
+                except Exception:
+                    continue
+                if ogid == int(origin_guild_id) and cgid == int(cloned_guild_id):
+                    mapping_id = (m.get("mapping_id") or "").strip() or str(origin_guild_id)
+                    name = (m.get("original_guild_name") or "").strip() or guild_name_fallback
+                    return f"{name} ({mapping_id})"
+
+        # Fallback: any row for this origin
         for m in mappings:
             try:
                 ogid = int(m.get("original_guild_id", 0) or 0)
             except Exception:
                 ogid = 0
-
             if ogid == int(origin_guild_id):
-                orig_name = (m.get("original_guild_name") or "").strip()
-                if not orig_name:
-                    orig_name = guild_name_fallback
+                mapping_id = (m.get("mapping_id") or "").strip() or str(origin_guild_id)
+                name = (m.get("original_guild_name") or "").strip() or guild_name_fallback
+                return f"{name} ({mapping_id})"
 
-                mapping_id = (m.get("mapping_id") or "").strip()
-                if not mapping_id:
-                    mapping_id = str(origin_guild_id)
-
-                return f"{orig_name} ({mapping_id})"
-
+        # Last resort
         return f"{guild_name_fallback} ({origin_guild_id})"
+
 
     def _iter_mapped_guilds(self):
         """Yield discord.Guild objects for each mapped origin the bot can see."""
@@ -106,20 +126,25 @@ class SitemapService:
     async def _build_and_send_selected(self, origin_ids: list[int]) -> None:
         """
         Build/send sitemap for just the given original guild ids.
+        Fans out to each configured clone for the origin (legacy-compatible).
         """
         for ogid in origin_ids:
             g = self.bot.get_guild(int(ogid))
             if not g:
                 continue
             try:
-                sm = await self.build_for_guild(g)
-                if sm:
-                    await self.ws.send({"type": "sitemap", "data": sm})
-                    label = self._mapping_label_for_origin(g.id, g.name)
-                    self.logger.info(
-                        "[📩] Sitemap sent for %s",
-                        label,
-                    )
+                clones = self.db.get_clone_guild_ids_for_origin(int(g.id)) or [None]
+                for cg in clones:
+                    if cg is None:
+                        # Legacy single-clone behavior
+                        sm = await self.build_for_guild(g)
+                    else:
+                        sm = await self.build_for_guild_and_clone(g, int(cg))
+
+                    if sm:
+                        await self.ws.send({"type": "sitemap", "data": sm})
+                        label = self._mapping_label(g.id, g.name, int(cg) if cg is not None else None)
+                        self.logger.info("[📩] Sitemap sent for %s -> clone %s", label, cg or "(legacy)")
             except Exception as e:
                 self.logger.exception(
                     "[sitemap] failed to send for guild %s (%s): %s",
@@ -128,29 +153,29 @@ class SitemapService:
                     e,
                 )
 
+
     async def build_and_send_all(self) -> None:
-        """Build and send a sitemap for each mapped host guild."""
-        sent = 0
+        async with self._send_lock:
+            self._cancel_pending_debounce()
+            self._dirty_guild_ids.clear()
+            sent = 0
+            for g in self._iter_mapped_guilds():
+                try:
+                    clones = self.db.get_clone_guild_ids_for_origin(int(g.id)) or [None]
+                    for cg in clones:
+                        if cg is None:
+                            # Legacy single-clone behavior
+                            sm = await self.build_for_guild(g)
+                        else:
+                            sm = await self.build_for_guild_and_clone(g, int(cg))
+                        if sm:
+                            await self.ws.send({"type": "sitemap", "data": sm})
+                            label = self._mapping_label(g.id, g.name, int(cg) if cg is not None else None)
+                            self.logger.info("[📩] Sitemap sent for %s -> clone %s", label, cg or "(legacy)")
+                            sent += 1
+                except Exception as e:
+                    self.logger.exception("[sitemap] failed for guild %s (%s): %s", g.name, g.id, e)
 
-        async def _send_one(g: "discord.Guild"):
-            sm = await self.build_for_guild(g)
-            if sm:
-                await self.ws.send({"type": "sitemap", "data": sm})
-
-                label = self._mapping_label_for_origin(g.id, g.name)
-                self.logger.info(
-                    "[📩] Sitemap sent for %s",
-                    label,
-                )
-
-        for g in self._iter_mapped_guilds():
-            try:
-                await _send_one(g)
-                sent += 1
-            except Exception as e:
-                self.logger.exception(
-                    "[sitemap] failed to send for guild %s (%s): %s", g.name, g.id, e
-                )
 
     async def build_for_guild(self, guild: "discord.Guild") -> Dict:
         """Build the raw sitemap for a specific guild, then filter it per config."""
@@ -376,6 +401,28 @@ class SitemapService:
 
         sitemap = self._filter_sitemap(sitemap, filter_view)
         return sitemap
+
+    async def build_for_guild_and_clone(self, guild: "discord.Guild", cloned_guild_id: int) -> Dict:
+        # IMPORTANT: resolve settings with cloned_guild_id so per-clone filters/flags apply
+        settings = resolve_mapping_settings(self.db, self.config,
+                                            original_guild_id=guild.id,
+                                            cloned_guild_id=int(cloned_guild_id))
+
+        # Reuse your existing build_for_guild body, but:
+        #  - use the 'settings' computed above
+        #  - apply filters/blocked keywords from DB scoped to (origin, clone) as needed
+        #  - at the end, add these tags so the server knows who this sitemap is for:
+        sm = await self.build_for_guild(guild)  # you can also inline your build to avoid double work
+        if not sm:
+            return sm
+        sm["target"] = {
+            "original_guild_id": int(guild.id),
+            "cloned_guild_id": int(cloned_guild_id),
+            # Optionally attach mapping_id for logging/display:
+            # "mapping_id": <lookup from db>,
+        }
+        return sm
+
 
     async def build(self) -> Dict:
         """(Legacy) Build for a single guild using _pick_guild()."""
@@ -604,7 +651,8 @@ class SitemapService:
             if not dirty:
                 dirty = list(self._mapped_original_ids())
 
-            await self._build_and_send_selected(dirty)
+            async with self._send_lock:
+                await self._build_and_send_selected(dirty)
 
         finally:
             self._debounce_task = None
