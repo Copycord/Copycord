@@ -1253,7 +1253,9 @@ class ClientListener:
         if payload.cached_message is not None:
             return
 
-        if not self.config.ENABLE_CLONING or not self.config.EDIT_MESSAGES:
+        if not self.config.ENABLE_CLONING:
+            return
+        if not self.config.EDIT_MESSAGES:
             return
 
         if (
@@ -1435,7 +1437,9 @@ class ClientListener:
         if payload.cached_message is not None:
             return
 
-        if not self.config.ENABLE_CLONING or not self.config.DELETE_MESSAGES:
+        if not self.config.ENABLE_CLONING:
+            return
+        if not self.config.DELETE_MESSAGES:
             return
 
         if (
