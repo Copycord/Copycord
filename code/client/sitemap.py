@@ -123,6 +123,44 @@ class SitemapService:
         if self._debounce_task is None:
             self._debounce_task = asyncio.create_task(self._debounced(delay))
 
+    def _build_filter_view_for_mapping(
+        self,
+        origin_guild_id: int,
+        cloned_guild_id: int | None,
+    ) -> Dict[str, object]:
+        """
+        Build filter view for a specific (origin, clone) mapping.
+        Merges global rows + origin-only rows + (origin,clone) rows with proper precedence.
+        """
+        f = self.db.get_filters(
+            original_guild_id=int(origin_guild_id),
+            cloned_guild_id=(
+                int(cloned_guild_id) if cloned_guild_id is not None else None
+            ),
+        )
+
+        def _to_int_set(xs):
+            out = set()
+            for x in xs or []:
+                try:
+                    out.add(int(x))
+                except Exception:
+                    pass
+            return out
+
+        include_category_ids = _to_int_set(f["whitelist"]["category"])
+        include_channel_ids = _to_int_set(f["whitelist"]["channel"])
+        excluded_category_ids = _to_int_set(f["exclude"]["category"])
+        excluded_channel_ids = _to_int_set(f["exclude"]["channel"])
+
+        return {
+            "include_category_ids": include_category_ids,
+            "include_channel_ids": include_channel_ids,
+            "excluded_category_ids": excluded_category_ids,
+            "excluded_channel_ids": excluded_channel_ids,
+            "whitelist_enabled": bool(include_category_ids or include_channel_ids),
+        }
+
     async def _build_and_send_selected(self, origin_ids: list[int]) -> None:
         """
         Build/send sitemap for just the given original guild ids.
@@ -147,9 +185,10 @@ class SitemapService:
                             g.id, g.name, int(cg) if cg is not None else None
                         )
                         self.logger.info(
-                            "[📩] Sitemap sent for %s -> clone %s",
+                            "[📩] Sitemap sent for %s -> clone %s: %s",
                             label,
                             cg or "(legacy)",
+                            sm,
                         )
             except Exception as e:
                 self.logger.exception(
@@ -179,9 +218,10 @@ class SitemapService:
                                 g.id, g.name, int(cg) if cg is not None else None
                             )
                             self.logger.info(
-                                "[📩] Sitemap sent for %s -> clone %s",
+                                "[📩] Sitemap sent for %s -> clone %s: %s",
                                 label,
                                 cg or "(legacy)",
+                                sm,
                             )
                             sent += 1
                 except Exception as e:
@@ -189,7 +229,9 @@ class SitemapService:
                         "[sitemap] failed for guild %s (%s): %s", g.name, g.id, e
                     )
 
-    async def build_for_guild(self, guild: "discord.Guild") -> Dict:
+    async def build_for_guild(
+        self, guild: "discord.Guild", cloned_guild_id: int | None = None
+    ) -> Dict:
         """Build the raw sitemap for a specific guild, then filter it per config."""
         if not guild:
             self.logger.warning("[⛔] No accessible guild found to build a sitemap.")
@@ -390,7 +432,12 @@ class SitemapService:
                 }
             )
 
-        filter_view = self._build_filter_view_for_guild(int(guild.id))
+        if cloned_guild_id is not None:
+            filter_view = self._build_filter_view_for_mapping(
+                int(guild.id), int(cloned_guild_id)
+            )
+        else:
+            filter_view = self._build_filter_view_for_guild(int(guild.id))
 
         sitemap = self._filter_sitemap(sitemap, filter_view)
         return sitemap
@@ -398,7 +445,7 @@ class SitemapService:
     async def build_for_guild_and_clone(
         self, guild: "discord.Guild", cloned_guild_id: int
     ) -> Dict:
-        sm = await self.build_for_guild(guild)
+        sm = await self.build_for_guild(guild, cloned_guild_id=int(cloned_guild_id))
         if not sm:
             return sm
         sm["target"] = {
@@ -430,29 +477,28 @@ class SitemapService:
         return await self.build_for_guild(guild)
 
     def _build_filter_view_for_guild(self, origin_guild_id: int) -> Dict[str, object]:
-        """
-        Build a 'filter view' for a specific source/original guild.
+        f = self.db.get_filters(original_guild_id=int(origin_guild_id))
 
-        This merges:
-        - global filters (NULL/NULL rows)
-        - filters scoped to this origin_guild_id
-        and returns sets plus whitelist_enabled just like Config.
-        """
-        f = self.db.get_filters(original_guild_id=origin_guild_id)
+        def _to_int_set(xs):
+            out = set()
+            for x in xs or []:
+                try:
+                    out.add(int(x))
+                except Exception:
+                    pass
+            return out
 
-        include_category_ids = set(f["whitelist"]["category"])
-        include_channel_ids = set(f["whitelist"]["channel"])
-        excluded_category_ids = set(f["exclude"]["category"])
-        excluded_channel_ids = set(f["exclude"]["channel"])
-
-        whitelist_enabled = bool(include_category_ids or include_channel_ids)
+        include_category_ids = _to_int_set(f["whitelist"]["category"])
+        include_channel_ids = _to_int_set(f["whitelist"]["channel"])
+        excluded_category_ids = _to_int_set(f["exclude"]["category"])
+        excluded_channel_ids = _to_int_set(f["exclude"]["channel"])
 
         return {
             "include_category_ids": include_category_ids,
             "include_channel_ids": include_channel_ids,
             "excluded_category_ids": excluded_category_ids,
             "excluded_channel_ids": excluded_channel_ids,
-            "whitelist_enabled": whitelist_enabled,
+            "whitelist_enabled": bool(include_category_ids or include_channel_ids),
         }
 
     def reload_filters_and_resend(self, guild_id: int | None):
@@ -498,21 +544,25 @@ class SitemapService:
 
         return False
 
-    def in_scope_channel(self, ch) -> bool:
+    def in_scope_channel(self, ch, cloned_guild_id: int | None = None) -> bool:
         """
-        True if this channel/category/thread should be visible for ITS ORIGIN
-        GUILD'S sitemap. This now respects per-guild / per-mapping filters,
-        not the legacy global self.config lists.
+        True if this channel/category/thread should be visible for its ORIGIN guild
+        *and* (optionally) a specific clone mapping when cloned_guild_id is provided.
         """
         try:
-
             g = getattr(ch, "guild", None)
             if g is None and isinstance(ch, discord.Thread):
                 parent = getattr(ch, "parent", None)
                 g = getattr(parent, "guild", None)
 
             origin_gid = int(getattr(g, "id", 0) or 0)
-            view = self._build_filter_view_for_guild(origin_gid)
+
+            if cloned_guild_id is not None:
+                view = self._build_filter_view_for_mapping(
+                    origin_gid, int(cloned_guild_id)
+                )
+            else:
+                view = self._build_filter_view_for_guild(origin_gid)
 
             if isinstance(ch, discord.CategoryChannel):
                 return not self._is_filtered_out_view(
@@ -539,7 +589,6 @@ class SitemapService:
                 view,
             )
         except Exception:
-
             return True
 
     def _serialize_role_overwrites(self, obj: discord.abc.GuildChannel) -> list[dict]:
@@ -572,9 +621,12 @@ class SitemapService:
 
         return out
 
-    def in_scope_thread(self, thr: discord.Thread) -> bool:
+    def in_scope_thread(
+        self, thr: discord.Thread, cloned_guild_id: int | None = None
+    ) -> bool:
         """
-        True if this thread's parent channel is allowed for that origin guild.
+        True if this thread's parent channel is allowed for its origin guild,
+        using per-mapping filters when a clone is specified.
         """
         try:
             parent = getattr(thr, "parent", None)
@@ -583,7 +635,13 @@ class SitemapService:
 
             g = getattr(parent, "guild", None)
             origin_gid = int(getattr(g, "id", 0) or 0)
-            view = self._build_filter_view_for_guild(origin_gid)
+
+            if cloned_guild_id is not None:
+                view = self._build_filter_view_for_mapping(
+                    origin_gid, int(cloned_guild_id)
+                )
+            else:
+                view = self._build_filter_view_for_guild(origin_gid)
 
             cat_id = getattr(parent, "category_id", None)
             return not self._is_filtered_out_view(
@@ -758,22 +816,36 @@ class SitemapService:
                     )
 
             if valid_channels:
-                kept_categories.append(
-                    {
-                        **cat,
-                        "channels": valid_channels,
-                    }
-                )
+                kept_categories.append({**cat, "channels": valid_channels})
             else:
+                # FIX: keep the category shell (so server won't delete it) unless the category
 
-                dropped_channels.append(
-                    {
-                        "category_id": str(cat_id),
-                        "channel_id": None,
-                        "name": cat.get("name"),
-                        "reason": _why_drop(cat_id, None),
-                    }
+                cat_excluded = cat_id in excluded_category_ids
+                cat_whitelisted = (
+                    (cat_id in include_category_ids) if wl_on_global else True
                 )
+
+                if cat_excluded or not cat_whitelisted:
+
+                    dropped_channels.append(
+                        {
+                            "category_id": str(cat_id),
+                            "channel_id": None,
+                            "name": cat.get("name"),
+                            "reason": _why_drop(cat_id, None),
+                        }
+                    )
+                else:
+                    # Keep empty shell; record why children aren't present for observability
+                    kept_categories.append({**cat, "channels": []})
+                    dropped_channels.append(
+                        {
+                            "category_id": str(cat_id),
+                            "channel_id": None,
+                            "name": cat.get("name"),
+                            "reason": "children-filtered",
+                        }
+                    )
 
         for ch in standalone_channels:
             ch_id = int(ch["id"])
@@ -805,10 +877,10 @@ class SitemapService:
             parent_cat_id = int(parent_cat_id_raw) if parent_cat_id_raw else None
 
             blacklisted = (
-                parent_cat_id in excluded_category_ids if parent_cat_id else False
+                (parent_cat_id in excluded_category_ids) if parent_cat_id else False
             ) or (fm_id in excluded_channel_ids)
             whitelisted = (
-                parent_cat_id in include_category_ids if parent_cat_id else False
+                (parent_cat_id in include_category_ids) if parent_cat_id else False
             ) or (fm_id in include_channel_ids)
 
             keep_forum = True
@@ -834,7 +906,6 @@ class SitemapService:
         for th in thread_entries:
             parent_id_raw = th.get("forum_id")
             parent_id = int(parent_id_raw) if parent_id_raw else 0
-
             th_id = int(th["id"])
 
             blacklisted = (parent_id in excluded_channel_ids) or (

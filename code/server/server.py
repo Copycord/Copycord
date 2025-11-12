@@ -1708,10 +1708,10 @@ class ServerReceiver:
                     if cat_created:
                         parts.append(f"Created {cat_created} categories")
 
-                    parts += await self._sync_community(guild, sitemap)
                     parts += await self._sync_categories(guild, sitemap)
                     parts += await self._sync_forums(guild, sitemap)
                     parts += await self._sync_channels(guild, sitemap)
+                    parts += await self._sync_community(guild, sitemap)
 
                     moved = await self._handle_master_channel_moves(
                         guild,
@@ -1751,12 +1751,13 @@ class ServerReceiver:
     async def _sync_community(self, guild: discord.Guild, sitemap: Dict) -> List[str]:
         """
         Enable/disable Community mode and set rules/public updates channels
-        for THIS clone guild only.
+        for THIS clone guild only. Preflight-checks current IDs via HTTP and
+        only patches when there's a real delta. Avoids 'X→X' spam.
         """
         parts: List[str] = []
 
         community = sitemap.get("community") or {}
-        want = bool(community.get("enabled"))
+        want_enabled = bool(community.get("enabled"))
 
         def _int(v):
             try:
@@ -1765,18 +1766,14 @@ class ServerReceiver:
             except Exception:
                 return None
 
-        rules_id = _int(community.get("rules_channel_id"))
-        updates_id = _int(community.get("public_updates_channel_id"))
-
-        curr_enabled = "COMMUNITY" in (getattr(guild, "features", None) or [])
-        curr_rules = getattr(guild, "rules_channel", None)
-        curr_updates = getattr(guild, "public_updates_channel", None)
+        want_rules_orig = _int(community.get("rules_channel_id"))
+        want_updates_orig = _int(community.get("public_updates_channel_id"))
 
         me = guild.me or guild.get_member(self.bot.user.id)
         gp = getattr(me, "guild_permissions", None)
         if not gp or not (gp.administrator or gp.manage_guild):
             logger.warning(
-                "[⚠️] Community sync skipped for guild %s: bot lacks Manage Guild/Administrator.",
+                "[⚠️] Community sync skipped for guild %s: missing Manage Guild/Administrator.",
                 guild.id,
             )
             return parts
@@ -1799,71 +1796,96 @@ class ServerReceiver:
                 row = dict(row)
             return row
 
-        if curr_enabled == want:
-            if want and rules_id and updates_id:
-                rm = _map_for_clone(rules_id)
-                um = _map_for_clone(updates_id)
-                if rm and um:
-                    rc = guild.get_channel(int(rm["cloned_channel_id"]))
-                    uc = guild.get_channel(int(um["cloned_channel_id"]))
-                    if rc and uc and curr_rules == rc and curr_updates == uc:
-                        return parts
-            else:
-                return parts
+        rc_row = _map_for_clone(want_rules_orig) if want_rules_orig else None
+        uc_row = _map_for_clone(want_updates_orig) if want_updates_orig else None
 
-        if curr_enabled and not want:
-            try:
-                await self.ratelimit.acquire_for_guild(
-                    ActionType.EDIT_CHANNEL, guild.id
-                )
-                await guild.edit(community=False)
-                parts.append("[⚙️] Disabled Community mode")
-                logger.info("[⚙️] Community mode disabled for guild %s", guild.id)
-            except Exception as e:
-                logger.warning(
-                    "[⚠️] Failed disabling Community mode for guild %s: %s", guild.id, e
-                )
+        want_rules_clone_id = int(rc_row["cloned_channel_id"]) if rc_row else None
+        want_updates_clone_id = int(uc_row["cloned_channel_id"]) if uc_row else None
+
+        if want_enabled and not (want_rules_clone_id and want_updates_clone_id):
+            logger.warning(
+                "[⚠️] Community sync skipped for guild %s: missing per-clone channel mapping.",
+                guild.id,
+            )
             return parts
 
-        if want and rules_id and updates_id:
-            rm = _map_for_clone(rules_id)
-            um = _map_for_clone(updates_id)
-            if not (rm and um):
-                logger.warning(
-                    "[⚠️] Community sync skipped for guild %s: missing per-clone channel mapping.",
-                    guild.id,
-                )
-                return parts
+        rc = guild.get_channel(want_rules_clone_id) if want_rules_clone_id else None
+        uc = guild.get_channel(want_updates_clone_id) if want_updates_clone_id else None
+        if want_enabled and (not rc or not uc):
+            logger.warning(
+                "[⚠️] Community sync skipped for guild %s: target channels not found (rules=%s updates=%s).",
+                guild.id,
+                getattr(rc, "id", None),
+                getattr(uc, "id", None),
+            )
+            return parts
 
-            rc = guild.get_channel(int(rm["cloned_channel_id"]))
-            uc = guild.get_channel(int(um["cloned_channel_id"]))
-            if not rc or not uc:
-                logger.warning(
-                    "[⚠️] Community sync skipped for guild %s: target clone channels not found (rc=%s uc=%s).",
-                    guild.id,
-                    getattr(rc, "id", None),
-                    getattr(uc, "id", None),
+        async def _fetch_comm_ids_via_http(
+            gid: int,
+        ) -> tuple[int | None, int | None, bool]:
+            """
+            Returns (rules_id, updates_id, community_enabled) from HTTP payload.
+            """
+            try:
+                data = await self.bot.http.get_guild(int(gid), with_counts=False)
+                rid = data.get("rules_channel_id")
+                uid = data.get("public_updates_channel_id")
+                features = set(data.get("features") or [])
+                return (
+                    int(rid) if rid else None,
+                    int(uid) if uid else None,
+                    ("COMMUNITY" in features),
                 )
-                return parts
+            except Exception:
+                try:
+                    g2 = await self.bot.fetch_guild(int(gid))
+                    r = getattr(getattr(g2, "rules_channel", None), "id", None)
+                    u = getattr(getattr(g2, "public_updates_channel", None), "id", None)
+                    enabled = "COMMUNITY" in (getattr(g2, "features", None) or [])
+                    return (int(r) if r else None, int(u) if u else None, bool(enabled))
+                except Exception:
+                    return (None, None, False)
 
-            allowed_types = {
-                discord.ChannelType.text,
-                getattr(discord.ChannelType, "news", discord.ChannelType.text),
-            }
-            if rc.type not in allowed_types or uc.type not in allowed_types:
-                logger.warning(
-                    "[⚠️] Community sync skipped for guild %s: invalid channel types (rules=%s updates=%s).",
-                    guild.id,
-                    rc.type,
-                    uc.type,
-                )
-                return parts
+        async def _verify(
+            gid: int,
+            want_r: int | None,
+            want_u: int | None,
+            want_enabled_: bool,
+            attempts: int = 3,
+            base_delay: float = 0.3,
+        ) -> tuple[bool, int | None, int | None, bool]:
+            last_r = last_u = None
+            last_enabled = False
+            for i in range(attempts):
+                if i:
+                    await asyncio.sleep(base_delay * (i + 1))
+                r, u, en = await _fetch_comm_ids_via_http(gid)
+                last_r, last_u, last_enabled = r, u, en
+                if (
+                    (en == want_enabled_)
+                    and (want_r is None or r == want_r)
+                    and (want_u is None or u == want_u)
+                ):
+                    return True, r, u, en
+            return False, last_r, last_u, last_enabled
 
+        ok0, curr_r0, curr_u0, curr_enabled0 = await _verify(
+            guild.id,
+            want_rules_clone_id,
+            want_updates_clone_id,
+            want_enabled,
+            attempts=2,
+            base_delay=0.2,
+        )
+        if ok0:
+
+            return parts
+
+        async def _ensure_prereqs():
             try:
                 await self.ratelimit.acquire_for_guild(
                     ActionType.EDIT_CHANNEL, guild.id
                 )
-
                 await guild.edit(
                     verification_level=getattr(discord.VerificationLevel, "medium"),
                     explicit_content_filter=getattr(
@@ -1874,72 +1896,80 @@ class ServerReceiver:
                     ),
                 )
             except Exception as e:
-
                 logger.debug(
                     "[ℹ️] Prereq tune-up for guild %s raised %r; continuing.",
                     guild.id,
                     e,
                 )
 
-            changes = []
-            if not curr_enabled:
-                changes.append("enabled")
-            if curr_rules != rc:
-                changes.append(f"rules {getattr(curr_rules,'id','None')}→{rc.id}")
-            if curr_updates != uc:
-                changes.append(f"updates {getattr(curr_updates,'id','None')}→{uc.id}")
+        await _ensure_prereqs()
 
-            async def _enable_with_channels():
+        patch_kwargs = {}
+        if curr_enabled0 != want_enabled:
+            patch_kwargs["community"] = want_enabled
+        if want_enabled:
+            if curr_r0 != want_rules_clone_id:
+                patch_kwargs["rules_channel"] = rc
+            if curr_u0 != want_updates_clone_id:
+                patch_kwargs["public_updates_channel"] = uc
+        else:
+
+            if curr_r0 is not None:
+                patch_kwargs["rules_channel"] = None
+            if curr_u0 is not None:
+                patch_kwargs["public_updates_channel"] = None
+
+        if not patch_kwargs:
+            return parts
+
+        try:
+            await self.ratelimit.acquire_for_guild(ActionType.EDIT_CHANNEL, guild.id)
+            await guild.edit(**patch_kwargs)
+        except Exception as e:
+            logger.debug(
+                "[ℹ️] Minimal guild.edit failed for %s: %r (will try targeted fallbacks)",
+                guild.id,
+                e,
+            )
+
+        ok1, curr_r1, curr_u1, curr_enabled1 = await _verify(
+            guild.id, want_rules_clone_id, want_updates_clone_id, want_enabled
+        )
+
+        if not ok1 and want_enabled:
+
+            try:
                 await self.ratelimit.acquire_for_guild(
                     ActionType.EDIT_CHANNEL, guild.id
                 )
-                if not curr_enabled:
-
-                    return await guild.edit(
-                        community=True, rules_channel=rc, public_updates_channel=uc
-                    )
-                else:
-
-                    return await guild.edit(rules_channel=rc, public_updates_channel=uc)
-
+                await guild.edit(rules_channel=None, public_updates_channel=None)
+            except Exception:
+                pass
             try:
-                await _enable_with_channels()
-                parts.append("Updated Community mode")
-                logger.info(
-                    "[⚙️] Community settings changed: %s",
-                    ", ".join(changes) or "no delta",
+                await self.ratelimit.acquire_for_guild(
+                    ActionType.EDIT_CHANNEL, guild.id
                 )
-            except discord.Forbidden as e:
-
-                code = getattr(e, "code", None)
-                text = getattr(e, "text", "")
-                if code == 150011 or ("verification" in (text or "").lower()):
-                    logger.warning(
-                        "[⚠️] Community enable blocked for guild %s: verification/content prerequisites not met. "
-                        "Ensure verification ≥ Medium, explicit content filter = All Members, default notifications = Only Mentions.",
-                        guild.id,
-                    )
-                else:
-                    logger.warning(
-                        "[⚠️] Forbidden editing Community settings for guild %s (code=%s, text=%s).",
-                        guild.id,
-                        code,
-                        text,
-                    )
-            except discord.HTTPException as e:
-                logger.warning(
-                    "[⚠️] HTTP error editing Community settings for guild %s (status=%s, code=%s, text=%s).",
-                    guild.id,
-                    getattr(e, "status", None),
-                    getattr(e, "code", None),
-                    getattr(e, "text", None),
+                await guild.edit(
+                    community=True, rules_channel=rc, public_updates_channel=uc
                 )
             except Exception as e:
-                logger.warning(
-                    "[⚠️] Failed editing Community settings for guild %s: %s",
-                    guild.id,
-                    e,
-                )
+                logger.warning("[⚠️] Clear→set failed for guild %s: %s", guild.id, e)
+            ok1, curr_r1, curr_u1, curr_enabled1 = await _verify(
+                guild.id, want_rules_clone_id, want_updates_clone_id, want_enabled
+            )
+
+        changed_bits = []
+
+        if curr_enabled0 != curr_enabled1:
+            changed_bits.append("enabled" if curr_enabled1 else "disabled")
+        if want_enabled:
+            if curr_r0 != curr_r1 and curr_r1 == want_rules_clone_id:
+                changed_bits.append(f"rules {curr_r0}→{curr_r1}")
+            if curr_u0 != curr_u1 and curr_u1 == want_updates_clone_id:
+                changed_bits.append(f"updates {curr_u0}→{curr_u1}")
+
+        if changed_bits:
+            parts.append("Updated Community channels: " + ", ".join(changed_bits))
 
         return parts
 
@@ -2925,24 +2955,86 @@ class ServerReceiver:
         self, guild: discord.Guild, sitemap: Dict
     ) -> int:
         """
-        Remove categories that no longer exist on the host for THIS clone guild only.
+        For THIS clone guild only:
+        - Remove categories that no longer exist on the host OR are blacklisted / filtered out
+        for this clone's mapping.
+        - If DELETE_CHANNELS is true for this clone, delete all cloned child channels and then
+        the cloned category itself.
+        - ALWAYS delete channel mappings (and the category mapping) for this clone when a
+        category is out-of-scope (blacklisted/filtered/removed) for this clone.
         """
 
         self._load_mappings()
 
-        valid_ids = {int(c["id"]) for c in (sitemap.get("categories") or [])}
+        valid_ids: set[int] = {int(c["id"]) for c in (sitemap.get("categories") or [])}
         removed = 0
 
-        # IMPORTANT: look only at this clone's view of the world
+        def _build_filter_view_for_mapping(
+            origin_guild_id: int, cloned_guild_id: int
+        ) -> dict:
+            f = self.db.get_filters(
+                original_guild_id=int(origin_guild_id),
+                cloned_guild_id=int(cloned_guild_id),
+            ) or {
+                "whitelist": {"category": [], "channel": []},
+                "exclude": {"category": [], "channel": []},
+            }
+
+            def _to_int_set(xs):
+                out = set()
+                for x in xs or []:
+                    try:
+                        out.add(int(x))
+                    except Exception:
+                        pass
+                return out
+
+            include_category_ids = _to_int_set(
+                (f.get("whitelist") or {}).get("category")
+            )
+            include_channel_ids = _to_int_set((f.get("whitelist") or {}).get("channel"))
+            excluded_category_ids = _to_int_set(
+                (f.get("exclude") or {}).get("category")
+            )
+            excluded_channel_ids = _to_int_set((f.get("exclude") or {}).get("channel"))
+
+            return {
+                "include_category_ids": include_category_ids,
+                "include_channel_ids": include_channel_ids,
+                "excluded_category_ids": excluded_category_ids,
+                "excluded_channel_ids": excluded_channel_ids,
+                "whitelist_enabled": bool(include_category_ids or include_channel_ids),
+            }
+
+        def _category_is_blacklisted_for_clone(cat_id: int, view: dict) -> bool:
+
+            include_category_ids = view["include_category_ids"]
+            include_channel_ids = view["include_channel_ids"]
+            excluded_category_ids = view["excluded_category_ids"]
+            excluded_channel_ids = view["excluded_channel_ids"]
+            wl_on = bool(view["whitelist_enabled"])
+
+            wl_cat = cat_id in include_category_ids
+            ex_cat = cat_id in excluded_category_ids
+
+            if wl_on and not wl_cat:
+                return True
+
+            # doesn't apply to a pure category check)
+            if ex_cat:
+                return True
+            return False
+
+        # ----- look only at THIS clone's map -----
         per_all = getattr(self, "cat_map_by_clone", {}) or {}
         per_clone = dict(per_all.get(int(guild.id), {}) or {})
 
         for orig_id_key, raw_row in list(per_clone.items()):
             row = self._rowdict(raw_row)
+
             try:
                 orig_id = int(orig_id_key)
             except Exception:
-
                 try:
                     orig_id = int(row.get("original_category_id"))
                 except Exception:
@@ -2950,36 +3042,136 @@ class ServerReceiver:
 
             if int(row.get("cloned_guild_id") or 0) != int(guild.id):
                 continue
-            if int(orig_id) in valid_ids:
-                continue
 
-            ch = guild.get_channel(int(row.get("cloned_category_id") or 0))
+            in_sitemap = int(orig_id) in valid_ids
+
+            try:
+                origin_gid = int(row.get("original_guild_id") or 0)
+            except Exception:
+                origin_gid = 0
 
             settings = (
                 resolve_mapping_settings(
                     self.db,
                     self.config,
-                    original_guild_id=int(row.get("original_guild_id") or 0),
-                    cloned_guild_id=int(row.get("cloned_guild_id") or guild.id),
+                    original_guild_id=origin_gid,
+                    cloned_guild_id=int(guild.id),
                 )
                 or {}
             )
             delete_channels = bool(settings.get("DELETE_CHANNELS", False))
 
-            if ch and delete_channels:
-                await self.ratelimit.acquire_for_guild(
-                    ActionType.DELETE_CHANNEL, guild.id
+            filter_view = _build_filter_view_for_mapping(origin_gid, int(guild.id))
+            is_blacklisted = _category_is_blacklisted_for_clone(
+                int(orig_id), filter_view
+            )
+
+            # If it's neither in the sitemap (filtered out or removed) nor whitelisted, we treat it as out-of-scope
+            out_of_scope = (not in_sitemap) or is_blacklisted
+            if not out_of_scope:
+                continue
+
+            clone_cat_id = int(row.get("cloned_category_id") or 0)
+            clone_cat = guild.get_channel(clone_cat_id) if clone_cat_id else None
+
+            if clone_cat and delete_channels:
+                try:
+
+                    for ch in list(getattr(clone_cat, "channels", []) or []):
+                        try:
+                            await self.ratelimit.acquire_for_guild(
+                                ActionType.DELETE_CHANNEL, guild.id
+                            )
+                            await ch.delete()
+                            logger.info(
+                                "[🗑️] Deleted channel %s in blacklisted/removed category %s",
+                                getattr(ch, "name", ch.id),
+                                getattr(clone_cat, "name", clone_cat.id),
+                            )
+                        except Exception:
+                            logger.debug(
+                                "Failed to delete channel %s under category %s",
+                                getattr(ch, "id", "?"),
+                                getattr(clone_cat, "id", "?"),
+                                exc_info=True,
+                            )
+                except Exception:
+                    logger.debug(
+                        "Iterating child channels failed for category %s",
+                        clone_cat_id,
+                        exc_info=True,
+                    )
+
+            if clone_cat:
+                try:
+                    await self.ratelimit.acquire_for_guild(
+                        ActionType.DELETE_CHANNEL, guild.id
+                    )
+                    await clone_cat.delete()
+                    logger.info(
+                        "[🗑️] Deleted category %s (id=%s) for clone %s",
+                        getattr(clone_cat, "name", clone_cat_id),
+                        clone_cat_id,
+                        guild.id,
+                    )
+                except Exception:
+                    logger.debug(
+                        "Failed to delete category %s", clone_cat_id, exc_info=True
+                    )
+
+            try:
+                cur = self.db.conn.execute(
+                    """
+                    SELECT original_channel_id
+                    FROM channel_mappings
+                    WHERE original_parent_category_id = ? AND cloned_guild_id = ?
+                    """,
+                    (int(orig_id), int(guild.id)),
                 )
-                await ch.delete()
-                logger.info("[🗑️] Deleted category %s", getattr(ch, "name", ch.id))
+                rows = cur.fetchall() or []
+            except Exception:
+                rows = []
+
+            for r in rows:
+                try:
+                    ocid = int(
+                        r["original_channel_id"] if isinstance(r, dict) else r[0]
+                    )
+                except Exception:
+                    continue
+                try:
+
+                    self.db.delete_channel_mapping_pair(int(ocid), int(guild.id))
+                except Exception:
+
+                    with contextlib.suppress(Exception):
+                        self.db.delete_channel_mapping(int(ocid))
+
+                try:
+                    self.chan_map_by_clone.setdefault(int(guild.id), {}).pop(
+                        int(ocid), None
+                    )
+                except Exception:
+                    pass
+                try:
+                    self.chan_map.pop(int(ocid), None)
+                except Exception:
+                    pass
 
             try:
                 self.db.delete_category_mapping_pair(int(orig_id), int(guild.id))
             except Exception:
-                self.db.delete_category_mapping(int(orig_id))
+                with contextlib.suppress(Exception):
+                    self.db.delete_category_mapping(int(orig_id))
 
-            per_all.setdefault(int(guild.id), {}).pop(int(orig_id), None)
-            self.cat_map.pop(int(orig_id), None)
+            try:
+                per_all.setdefault(int(guild.id), {}).pop(int(orig_id), None)
+            except Exception:
+                pass
+            try:
+                self.cat_map.pop(int(orig_id), None)
+            except Exception:
+                pass
 
             removed += 1
 

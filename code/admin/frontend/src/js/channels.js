@@ -3089,6 +3089,14 @@
                 ? String(row.cloned_guild_id)
                 : "";
 
+              const mid = currentMappingId();
+              if (!mid) {
+                window.showToast("Select a mapping first.", {
+                  type: "warning",
+                });
+                return;
+              }
+
               const res = await fetch("/api/filters/blacklist", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -3096,9 +3104,9 @@
                 body: JSON.stringify({
                   scope: "channel",
                   obj_id: String(originalId),
-                  guild_id: originalGuildId,
-                  original_guild_id: originalGuildId,
-                  cloned_guild_id: clonedGuildId,
+                  mapping_id: String(mid),
+                  original_guild_id: String(originalGuildId || ""),
+                  cloned_guild_id: String(clonedGuildId || ""),
                 }),
               });
 
@@ -3213,6 +3221,14 @@
           },
           async () => {
             try {
+              const mid = currentMappingId();
+              if (!mid) {
+                window.showToast("Select a mapping first.", {
+                  type: "warning",
+                });
+                return;
+              }
+
               const res = await fetch("/api/filters/blacklist", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -3220,7 +3236,7 @@
                 body: JSON.stringify({
                   scope: "category",
                   obj_id: String(originalCatId),
-                  guild_id: originalGuildId ? String(originalGuildId) : "",
+                  mapping_id: String(mid),
                   original_guild_id: String(originalGuildId || ""),
                   cloned_guild_id: String(clonedGuildId || ""),
                 }),

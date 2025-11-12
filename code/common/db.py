@@ -1568,18 +1568,6 @@ class DBManager:
         original_guild_id: int | None = None,
         cloned_guild_id: int | None = None,
     ) -> dict:
-        """
-        Returns {
-          'whitelist': {'category': set[int], 'channel': set[int]},
-          'exclude':   {'category': set[int], 'channel': set[int]}
-        }
-
-        Behavior:
-        - If neither original_guild_id nor cloned_guild_id is provided:
-            return ONLY the global filters (rows where both guild columns are NULL).
-        - If a guild is provided:
-            return UNION(global rows + rows scoped to that guild).
-        """
         out = {
             "whitelist": {"category": set(), "channel": set()},
             "exclude": {"category": set(), "channel": set()},
@@ -1600,33 +1588,35 @@ class DBManager:
             row_clone = row["cloned_guild_id"]
 
             if want_origin is None and want_clone is None:
-
                 if row_orig is not None or row_clone is not None:
                     continue
-            else:
-                matched = False
+                matched = True
 
-                if row_orig is None and row_clone is None:
-                    matched = True
-
-                if (
-                    not matched
-                    and want_origin is not None
-                    and row_orig is not None
+            elif want_origin is not None and want_clone is None:
+                matched = (row_orig is None and row_clone is None) or (
+                    row_orig is not None
                     and int(row_orig) == want_origin
-                ):
-                    matched = True
+                    and row_clone is None
+                )
 
-                if (
-                    not matched
-                    and want_clone is not None
-                    and row_clone is not None
-                    and int(row_clone) == want_clone
-                ):
-                    matched = True
+            else:
+                matched = (
+                    (row_orig is None and row_clone is None)
+                    or (
+                        row_orig is not None
+                        and int(row_orig) == want_origin
+                        and row_clone is None
+                    )
+                    or (
+                        row_orig is not None
+                        and row_clone is not None
+                        and int(row_orig) == want_origin
+                        and int(row_clone) == want_clone
+                    )
+                )
 
-                if not matched:
-                    continue
+            if not matched:
+                continue
 
             out[row["kind"]][row["scope"]].add(int(row["obj_id"]))
 
@@ -3356,3 +3346,126 @@ class DBManager:
             "SELECT * FROM category_mappings WHERE original_category_id = ? AND cloned_guild_id = ? LIMIT 1",
             (int(original_category_id), int(cloned_guild_id)),
         ).fetchone()
+
+    def get_category_mapping_for_clone(
+        self, original_category_id: int, cloned_guild_id: int
+    ) -> Optional[sqlite3.Row]:
+        """
+        Return the row from category_mappings for this (original_category_id, cloned_guild_id),
+        or None if not mapped for this clone.
+        """
+        with self.lock, self.conn:
+            return self.conn.execute(
+                """
+                SELECT *
+                FROM category_mappings
+                WHERE original_category_id=? AND cloned_guild_id=?
+                LIMIT 1
+                """,
+                (int(original_category_id), int(cloned_guild_id)),
+            ).fetchone()
+
+    def iter_child_channel_mappings_for_clone_category(
+        self, original_category_id: int, cloned_guild_id: int
+    ) -> list[sqlite3.Row]:
+        """
+        All channel_mappings in THIS clone whose original parent is the given category.
+        """
+        with self.lock, self.conn:
+            rows = self.conn.execute(
+                """
+                SELECT *
+                FROM channel_mappings
+                WHERE original_parent_category_id=? AND cloned_guild_id=?
+                """,
+                (int(original_category_id), int(cloned_guild_id)),
+            ).fetchall()
+            return list(rows)
+
+    def delete_channel_mapping_for_clone(
+        self, original_channel_id: int, cloned_guild_id: int
+    ) -> Optional[int]:
+        """
+        Delete the mapping row for (original_channel_id, cloned_guild_id).
+        Returns the cloned_channel_id if one existed (so caller can delete it in Discord).
+        """
+        with self.lock, self.conn:
+            row = self.conn.execute(
+                """
+                SELECT cloned_channel_id
+                FROM channel_mappings
+                WHERE original_channel_id=? AND cloned_guild_id=?
+                LIMIT 1
+                """,
+                (int(original_channel_id), int(cloned_guild_id)),
+            ).fetchone()
+            cloned_id = (
+                int(row["cloned_channel_id"])
+                if row and row["cloned_channel_id"] is not None
+                else None
+            )
+
+            self.conn.execute(
+                "DELETE FROM channel_mappings WHERE original_channel_id=? AND cloned_guild_id=?",
+                (int(original_channel_id), int(cloned_guild_id)),
+            )
+            return cloned_id
+
+    def reparent_children_to_root_for_clone(
+        self, original_category_id: int, cloned_guild_id: int
+    ) -> int:
+        """
+        Set cloned_parent_category_id = NULL for all channels under the given category
+        but only inside THIS cloned guild.
+        Returns the number of rows affected.
+        """
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                """
+                UPDATE channel_mappings
+                SET cloned_parent_category_id=NULL
+                WHERE original_parent_category_id=? AND cloned_guild_id=?
+                """,
+                (int(original_category_id), int(cloned_guild_id)),
+            )
+            return cur.rowcount or 0
+
+    def delete_category_mapping_pair(
+        self, original_category_id: int, cloned_guild_id: int
+    ) -> dict:
+        """
+        Delete exactly one category mapping pair for THIS clone.
+        Returns {'original_category_id': ..., 'cloned_category_id': ...} with cloned id (or None).
+        Does NOT touch children (callers decide whether to delete or reparent children).
+        """
+        with self.lock, self.conn:
+            row = self.conn.execute(
+                """
+                SELECT original_category_id, cloned_category_id
+                FROM category_mappings
+                WHERE original_category_id=? AND cloned_guild_id=?
+                LIMIT 1
+                """,
+                (int(original_category_id), int(cloned_guild_id)),
+            ).fetchone()
+
+            if not row:
+                return {
+                    "original_category_id": int(original_category_id),
+                    "cloned_category_id": None,
+                }
+
+            cloned_cat_id = (
+                int(row["cloned_category_id"])
+                if row["cloned_category_id"] is not None
+                else None
+            )
+
+            self.conn.execute(
+                "DELETE FROM category_mappings WHERE original_category_id=? AND cloned_guild_id=?",
+                (int(original_category_id), int(cloned_guild_id)),
+            )
+            return {
+                "original_category_id": int(original_category_id),
+                "cloned_category_id": cloned_cat_id,
+            }
