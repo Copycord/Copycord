@@ -53,6 +53,7 @@ from fastapi.responses import (
     StreamingResponse,
     JSONResponse,
     FileResponse,
+    HTMLResponse,
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -73,6 +74,8 @@ import aiohttp
 
 GITHUB_REPO = os.getenv("GITHUB_REPO", "Copycord/Copycord")
 RELEASE_POLL_SECONDS = int(os.getenv("RELEASE_POLL_SECONDS", "1800"))
+ADMIN_PASSWORD = os.getenv("PASSWORD", "").strip()
+ADMIN_COOKIE_NAME = "cc_admin_pw"
 
 
 def _set_ws_context(route: str, ws: WebSocket):
@@ -264,7 +267,44 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class PasswordGuardMiddleware(BaseHTTPMiddleware):
+    """
+    Very simple 'one password for everything' gate.
+
+    - If PASSWORD is not set, it does nothing.
+    - If PASSWORD is set:
+        * /login and /health (and static assets) are always allowed
+        * every other request must have the correct cookie set,
+          otherwise you get redirected to /login (for GET/HEAD)
+          or a 401 for other methods.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+
+        if not ADMIN_PASSWORD:
+            return await call_next(request)
+
+        path = request.url.path or "/"
+
+        if (
+            path.startswith("/login")
+            or path.startswith("/health")
+            or path.startswith("/static")
+        ):
+            return await call_next(request)
+
+        if request.cookies.get(ADMIN_COOKIE_NAME) == ADMIN_PASSWORD:
+            return await call_next(request)
+
+        if request.method in ("GET", "HEAD"):
+            return RedirectResponse(url="/login")
+        return PlainTextResponse(
+            "Unauthorized", status_code=status.HTTP_401_UNAUTHORIZED
+        )
+
+
 app.add_middleware(RequestContextMiddleware)
+app.add_middleware(PasswordGuardMiddleware)
 
 
 class ConnCloseOnShutdownASGI:
@@ -780,6 +820,58 @@ async def _bot_in_guild(server_token: str, guild_id: int) -> bool:
             guild_id,
         )
         return False
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+
+    if not ADMIN_PASSWORD:
+        return RedirectResponse("/", status_code=status.HTTP_302_FOUND)
+
+    if request.cookies.get(ADMIN_COOKIE_NAME) == ADMIN_PASSWORD:
+        return RedirectResponse("/", status_code=status.HTTP_302_FOUND)
+
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "version": CURRENT_VERSION,
+            "error": None,
+        },
+    )
+
+
+@app.post("/login", response_class=HTMLResponse)
+async def login_submit(
+    request: Request,
+    password: str = Form(...),
+):
+    if not ADMIN_PASSWORD:
+        return RedirectResponse("/", status_code=status.HTTP_302_FOUND)
+
+    if password == ADMIN_PASSWORD:
+
+        resp = RedirectResponse("/", status_code=status.HTTP_302_FOUND)
+        secure = request.url.scheme == "https"
+        resp.set_cookie(
+            ADMIN_COOKIE_NAME,
+            ADMIN_PASSWORD,
+            httponly=True,
+            samesite="lax",
+            max_age=60 * 60 * 12,
+            secure=secure,
+        )
+        return resp
+
+    return templates.TemplateResponse(
+        "login.html",
+        {
+            "request": request,
+            "version": CURRENT_VERSION,
+            "error": "Incorrect password. Please try again.",
+        },
+        status_code=status.HTTP_401_UNAUTHORIZED,
+    )
 
 
 @app.websocket("/bus")

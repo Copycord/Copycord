@@ -7572,3 +7572,139 @@ body.modal-open {
   font-weight: 600;
   font-size: 14px;
 }
+
+body.login-page {
+  padding-top: 0 !important;
+  padding-bottom: 0 !important;
+
+  display: flex !important;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+
+  min-height: 100vh;
+  height: 100%;
+  background: var(--page-bg) !important;
+}
+
+.login-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  padding: 20px;
+}
+
+.login-logo {
+  width: 86px;
+  height: 86px;
+  margin-bottom: 18px;
+  user-select: none;
+  pointer-events: none;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 26px 24px 22px;
+
+  border-radius: 14px;
+  background: var(--card);
+  border: 1px solid var(--border);
+
+  backdrop-filter: blur(14px);
+
+  box-shadow: 0 18px 30px rgba(0, 0, 0, 0.55);
+
+  color: var(--text);
+}
+
+.login-title {
+  margin: 0;
+  margin-bottom: 4px;
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.login-subtitle {
+  margin: 0 0 20px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.login-error {
+  margin-bottom: 14px;
+  padding: 8px 10px;
+  border-radius: 10px;
+
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  color: #fecaca;
+  font-size: 0.85rem;
+}
+
+.login-form {
+  width: 100%;
+}
+
+.login-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.83rem;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.login-input {
+  width: 100%;
+  padding: 10px 12px;
+
+  border-radius: 10px;
+  border: 1px solid var(--border);
+
+  background: var(--bg-3);
+  color: var(--text);
+
+  outline: none;
+  font-size: 0.95rem;
+
+  transition: 0.15s ease border-color, 0.15s ease background-color;
+}
+
+.login-input:focus {
+  border-color: var(--primary);
+  background-color: var(--bg-2);
+}
+
+.login-button {
+  margin-top: 16px;
+  width: 100%;
+  padding: 10px 0;
+
+  border: none;
+  border-radius: 9999px;
+
+  cursor: pointer;
+
+  background: var(--primary);
+  color: white;
+  font-size: 0.95rem;
+  font-weight: 600;
+
+  transition: 0.15s ease background-color, 0.15s ease transform,
+    0.15s ease box-shadow;
+
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.45);
+}
+
+.login-button:hover {
+  background: var(--primary-600);
+  box-shadow: 0 12px 22px rgba(0, 0, 0, 0.5);
+}
+
+.login-button:active {
+  background: var(--primary-700);
+  transform: translateY(1px);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.45);
+}

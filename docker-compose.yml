@@ -4,6 +4,7 @@ services:
     container_name: copycord-admin
     environment:
       - ROLE=admin
+      # - PASSWORD=copycordisthebest
     ports:
       - "8080:8080"
     volumes:
