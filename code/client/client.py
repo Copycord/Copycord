@@ -1,6 +1,6 @@
 # =============================================================================
 #  Copycord
-#  Copyright (C) 2025 github.com/Copycord
+#  Copyright (C) 2021 github.com/Copycord
 #
 #  This source code is released under the GNU Affero General Public License
 #  version 3.0. A copy of the license is available at:
@@ -24,9 +24,12 @@ from discord.ext import commands
 from common.config import Config, CURRENT_VERSION
 from common.db import DBManager
 from client.sitemap import SitemapService
-from client.message_utils import MessageUtils, _resolve_forward, _resolve_forward_via_snapshot
+from client.message_utils import (
+    MessageUtils,
+    _resolve_forward,
+    _resolve_forward_via_snapshot,
+)
 from common.websockets import WebsocketManager, AdminBus
-from common.common_helpers import resolve_mapping_settings
 from client.scraper import MemberScraper
 from client.helpers import ClientUiController
 from client.export_runners import (
@@ -154,13 +157,6 @@ class ClientListener:
             loop.add_signal_handler(
                 sig, lambda s=sig: asyncio.create_task(self.bot.close())
             )
-
-    def _settings_for_origin(self, guild_id: int | None) -> dict:
-        if not guild_id:
-            return self.config.default_mapping_settings()
-        return resolve_mapping_settings(
-            self.db, self.config, original_guild_id=int(guild_id)
-        )
 
     def _is_mapped_origin(self, guild_id: int | None) -> bool:
         try:
@@ -811,17 +807,6 @@ class ClientListener:
 
         self._reload_mapped_ids()
 
-        mapped_origins = set(self._mapped_original_ids)
-
-        active_enabled_origin_ids = []
-        for g in self.bot.guilds:
-            if g.id in mapped_origins:
-                s = self._settings_for_origin(g.id)
-                if s.get("ENABLE_CLONING", True):
-                    active_enabled_origin_ids.append(g.id)
-
-        has_active_enabled_origins = bool(active_enabled_origin_ids)
-
         asyncio.create_task(self.config.setup_release_watcher(self, should_dm=False))
         self.ui_controller.start()
 
@@ -834,11 +819,8 @@ class ClientListener:
         )
         logger.info("[🤖] %s", msg)
 
-        if has_active_enabled_origins:
-            if self._sync_task is None:
-                self._sync_task = asyncio.create_task(self.periodic_sync_loop())
-        else:
-            logger.info("[🔕] No guild mapped with cloning enabled; " "skipping sync.")
+        if self._sync_task is None:
+            self._sync_task = asyncio.create_task(self.periodic_sync_loop())
 
         if self._ws_task is None:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
@@ -909,8 +891,6 @@ class ClientListener:
 
         g = getattr(message, "guild", None)
         if not g or not self._is_mapped_origin(g.id):
-            return True
-        if not self._settings_for_origin(g.id).get("ENABLE_CLONING", True):
             return True
 
         if message.channel.type in (ChannelType.voice, ChannelType.stage_voice):
@@ -1015,11 +995,6 @@ class ClientListener:
 
         await self.maybe_send_announcement(message)
 
-        settings = self._settings_for_origin(g.id)
-
-        if not settings.get("ENABLE_CLONING", True):
-            return
-
         if self.should_ignore(message):
             return
 
@@ -1044,7 +1019,9 @@ class ClientListener:
         if looks_like_forward:
             resolved = await _resolve_forward(self.bot, message)
             if resolved is None:
-                resolved = await _resolve_forward_via_snapshot(self.bot, message, logger=logger)
+                resolved = await _resolve_forward_via_snapshot(
+                    self.bot, message, logger=logger
+                )
 
             if resolved is not None:
                 src_msg = resolved
@@ -1204,14 +1181,6 @@ class ClientListener:
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
 
-        settings = self._settings_for_origin(g.id)
-
-        if not settings.get("ENABLE_CLONING", True):
-            return
-
-        if not settings.get("EDIT_MESSAGES", True):
-            return
-
         if self.should_ignore(after):
             return
 
@@ -1325,14 +1294,6 @@ class ClientListener:
 
         # will cover it. Raw handler should only forward stuff we don't have cached.
         if payload.cached_message is not None:
-            return
-
-        settings = self._settings_for_origin(gid)
-
-        if not settings.get("ENABLE_CLONING", True):
-            return
-
-        if not settings.get("EDIT_MESSAGES", True):
             return
 
         channel = self.bot.get_channel(payload.channel_id)
@@ -1483,14 +1444,6 @@ class ClientListener:
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
 
-        settings = self._settings_for_origin(g.id)
-
-        if not settings.get("ENABLE_CLONING", True):
-            return
-
-        if not settings.get("DELETE_MESSAGES", True):
-            return
-
         if self.should_ignore(message):
             return
 
@@ -1527,7 +1480,6 @@ class ClientListener:
             payload["data"]["channel_name"],
         )
 
-
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
         """
         Handle deletes for messages that weren't cached.
@@ -1545,12 +1497,6 @@ class ClientListener:
             return
 
         if payload.cached_message is not None:
-            return
-
-        settings = self._settings_for_origin(gid)
-        if not settings.get("ENABLE_CLONING", True) or not settings.get(
-            "DELETE_MESSAGES", True
-        ):
             return
 
         channel = self.bot.get_channel(payload.channel_id)
@@ -1627,9 +1573,6 @@ class ClientListener:
         g = getattr(thread, "guild", None)
         if not g or not self._is_mapped_origin(g.id):
             return
-        settings = self._settings_for_origin(g.id)
-        if not settings.get("ENABLE_CLONING", True):
-            return
 
         if not self.sitemap.in_scope_thread(thread):
             logger.debug(
@@ -1651,11 +1594,6 @@ class ClientListener:
         """
         g = getattr(before, "guild", None)
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
-            return
-
-        settings = self._settings_for_origin(getattr(g, "id", None))
-
-        if not settings.get("ENABLE_CLONING", True):
             return
 
         if not (
@@ -1694,11 +1632,6 @@ class ClientListener:
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
 
-        settings = self._settings_for_origin(getattr(g, "id", None))
-
-        if not settings.get("ENABLE_CLONING", True):
-            return
-
         if not self.sitemap.in_scope_channel(channel):
             logger.debug(
                 "Ignored create for filtered-out channel/category %s",
@@ -1716,16 +1649,13 @@ class ClientListener:
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
 
-        settings = self._settings_for_origin(channel.guild.id)
-
-        if settings.get("ENABLE_CLONING", True):
-            if not self.sitemap.in_scope_channel(channel):
-                logger.debug(
-                    "Ignored delete for filtered-out channel/category %s",
-                    getattr(channel, "id", None),
-                )
-                return
-            self.schedule_sync(guild_id=g.id)
+        if not self.sitemap.in_scope_channel(channel):
+            logger.debug(
+                "Ignored delete for filtered-out channel/category %s",
+                getattr(channel, "id", None),
+            )
+            return
+        self.schedule_sync(guild_id=g.id)
 
     async def on_guild_channel_update(self, before, after):
         """
@@ -1739,9 +1669,6 @@ class ClientListener:
 
         if not g or not self._is_mapped_origin(g.id):
             return
-        settings = self._settings_for_origin(g.id)
-        if not settings.get("ENABLE_CLONING", True):
-            return
 
         perms_changed = False
         try:
@@ -1751,11 +1678,7 @@ class ClientListener:
         except Exception:
             perms_changed = False
 
-        if (
-            settings.get("MIRROR_ROLE_PERMISSIONS", False)
-            and settings.get("CLONE_ROLES", False)
-            and perms_changed
-        ):
+        if perms_changed:
             self.schedule_sync(guild_id=g.id)
             return
 
@@ -1787,14 +1710,6 @@ class ClientListener:
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
 
-        settings = self._settings_for_origin(getattr(g, "id", None))
-
-        if not settings.get("ENABLE_CLONING", True):
-            return
-
-        if not settings.get("CLONE_ROLES", True):
-            return
-
         logger.debug("[roles] create: %s (%d) → scheduling sitemap", role.name, role.id)
         self.schedule_sync(guild_id=g.id)
 
@@ -1804,14 +1719,6 @@ class ClientListener:
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
 
-        settings = self._settings_for_origin(getattr(g, "id", None))
-
-        if not settings.get("ENABLE_CLONING", True):
-            return
-
-        if not settings.get("CLONE_ROLES", True):
-            return
-
         logger.debug("[roles] delete: %s (%d) → scheduling sitemap", role.name, role.id)
         self.schedule_sync(guild_id=g.id)
 
@@ -1819,14 +1726,6 @@ class ClientListener:
         g = getattr(before, "guild", None)
 
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
-            return
-
-        settings = self._settings_for_origin(getattr(g, "id", None))
-
-        if not settings.get("ENABLE_CLONING", True):
-            return
-
-        if not settings.get("CLONE_ROLES", True):
             return
 
         if not self.sitemap.role_change_is_relevant(before, after):
@@ -1899,18 +1798,12 @@ class ClientListener:
     async def on_guild_emojis_update(self, guild, before, after):
         if not self._is_mapped_origin(guild.id):
             return
-        if resolve_mapping_settings(
-            self.db, self.config, original_guild_id=guild.id
-        ).get("CLONE_EMOJI", True):
-            self.schedule_sync(guild_id=g.id)
+        self.schedule_sync(guild_id=g.id)
 
     async def on_guild_stickers_update(self, guild, before, after):
         if not self._is_mapped_origin(guild.id):
             return
-        if resolve_mapping_settings(
-            self.db, self.config, original_guild_id=guild.id
-        ).get("CLONE_STICKER", True):
-            self.schedule_sync(guild_id=g.id)
+        self.schedule_sync(guild_id=g.id)
 
     def _guild_row_from_obj(self, g: discord.Guild) -> dict:
         try:

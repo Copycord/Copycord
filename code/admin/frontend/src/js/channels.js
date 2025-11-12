@@ -20,6 +20,11 @@
   const delAllBtn = document.getElementById("orph-delall");
   const pendingDeletes = new Set();
   const LAST_DELETED_SIG_KEY = "verify:last_deleted_sig";
+  const LAST_DELETED_SIG_KEY_BASE = "verify:last_deleted_sig";
+  const currentMappingId = () => String(mappingSel?.value || "");
+
+  const deletedSigKey = (mid = currentMappingId()) =>
+    `${LAST_DELETED_SIG_KEY_BASE}:${mid}`;
   const RECENT_DELETE_WINDOW_MS = 8000;
   const cancelledThisSession = new Set();
   document.documentElement.classList.remove("boot");
@@ -981,7 +986,7 @@
     back?.removeAttribute?.("hidden");
     document.body.classList.add("modal-open");
 
-    custChannel = ch;
+    let custChannel = ch;
 
     const initial =
       ch.clone_channel_name && ch.clone_channel_name.trim()
@@ -999,13 +1004,12 @@
       custChannel = null;
     }
 
-    [btnClose].forEach((b) => {
-      if (b)
-        b.onclick = (e) => {
-          e?.preventDefault?.();
-          close();
-        };
-    });
+    if (btnClose) {
+      btnClose.onclick = (e) => {
+        e?.preventDefault?.();
+        close();
+      };
+    }
     back.onclick = (e) => {
       if (e.target === back) close();
     };
@@ -1022,10 +1026,22 @@
 
     btnSave.onclick = async (e) => {
       e.preventDefault();
+
+      const cgid = String(custChannel?.cloned_guild_id || "");
+      if (!cgid || !cgid.trim()) {
+        window.showToast("Missing cloned guild id for this channel.", {
+          type: "error",
+        });
+        return;
+      }
+
+      const raw = String(name.value || "");
       const body = {
-        original_channel_id: custChannel.original_channel_id,
-        clone_channel_name: String(name.value || ""),
+        original_channel_id: String(custChannel.original_channel_id),
+        cloned_guild_id: cgid,
+        clone_channel_name: raw.trim() || null,
       };
+
       try {
         const res = await fetch("/api/channels/customize", {
           method: "POST",
@@ -1059,8 +1075,9 @@
   }
 
   function openCustomizeCategoryDialog(
-    categoryName,
-    originalCategoryId = null
+    categoryNameOrObj,
+    originalCategoryId = null,
+    clonedGuildId = null
   ) {
     hideMenuForModal();
     dismissTransientUI();
@@ -1078,10 +1095,49 @@
     document.body.classList.add("modal-open");
 
     titleEl.textContent = `Customize`;
+
+    let catObj = null;
+    let categoryName = categoryNameOrObj;
+    if (categoryNameOrObj && typeof categoryNameOrObj === "object") {
+      catObj = categoryNameOrObj;
+      categoryName =
+        catObj.original_category_name || catObj.category_name || "";
+      originalCategoryId =
+        Number(catObj.original_category_id || originalCategoryId || 0) || null;
+      clonedGuildId =
+        Number(catObj.cloned_guild_id || clonedGuildId || 0) || null;
+    }
+
     const resolvedOrig =
-      catOrigByEither.get(String(categoryName).toLowerCase()) || categoryName;
-    const pinned = catPinByOrig.get(resolvedOrig);
-    const initial = pinned && pinned.trim() ? pinned : resolvedOrig;
+      (typeof categoryName === "string" &&
+        window.catOrigByEither?.get(String(categoryName).toLowerCase())) ||
+      originalCategoryId ||
+      categoryName;
+
+    let cgid = Number(clonedGuildId || 0);
+    if (!cgid) {
+      cgid =
+        Number(catObj?.cloned_guild_id || 0) ||
+        Number(window.catCgidByOrig?.get(String(resolvedOrig)) || 0) ||
+        (function () {
+          const pool = window.channelsData || window.items || [];
+          const hit = pool.find(
+            (it) =>
+              String(it.original_category_id || "") === String(resolvedOrig) ||
+              String(it.category_name || "").toLowerCase() ===
+                String(categoryName || "").toLowerCase()
+          );
+          return Number(hit?.cloned_guild_id || 0);
+        })();
+    }
+
+    const pinned = window.catPinByOrig?.get(resolvedOrig);
+    const initial =
+      pinned && String(pinned).trim()
+        ? pinned
+        : typeof resolvedOrig === "string"
+        ? resolvedOrig
+        : categoryName || "";
     nameInp.value = initial;
 
     function close() {
@@ -1100,7 +1156,6 @@
     back.onclick = (e) => {
       if (e.target === back) close();
     };
-
     document.addEventListener(
       "keydown",
       function onEsc(e) {
@@ -1115,16 +1170,26 @@
     btnSave.onclick = async (e) => {
       e.preventDefault();
 
+      if (!cgid) {
+        window.showToast("Missing cloned guild id for this category.", {
+          type: "error",
+        });
+        return;
+      }
+      const ocidNum = Number(resolvedOrig);
+      if (!ocidNum || Number.isNaN(ocidNum)) {
+        window.showToast("Unable to resolve the original category id.", {
+          type: "error",
+        });
+        return;
+      }
+
       const raw = String(nameInp.value || "").trim();
-      const body = originalCategoryId
-        ? {
-            original_category_id: Number(originalCategoryId),
-            custom_category_name: raw,
-          }
-        : {
-            category_name: String(categoryName),
-            custom_category_name: raw,
-          };
+      const body = {
+        original_category_id: ocidNum,
+        cloned_guild_id: cgid,
+        custom_category_name: raw || null,
+      };
 
       try {
         const res = await fetch("/api/categories/customize", {
@@ -3695,7 +3760,7 @@
       },
       () => {
         markPending(catId);
-        sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
+        sessionStorage.removeItem(deletedSigKey());
         sendVerify({ action: "delete_one", kind: "category", id: catId });
       }
     );
@@ -3719,9 +3784,12 @@
       }
       hideMenu({ restoreFocus: false });
       openCustomizeDialog({
-        original_channel_id: ch.original_channel_id,
+        original_channel_id: String(ch.original_channel_id),
         original_channel_name: ch.original_channel_name,
         clone_channel_name: ch.clone_channel_name || null,
+        cloned_guild_id: String(ch.cloned_guild_id || ""),
+        cloned_channel_id: String(ch.cloned_channel_id || ""),
+        original_guild_id: String(ch.original_guild_id || ""),
       });
       return;
     }
@@ -3786,7 +3854,7 @@
         },
         () => {
           markPending(selId);
-          sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
+          sessionStorage.removeItem(deletedSigKey());
           sendVerify({ action: "delete_one", kind: "channel", id: selId });
         }
       );
@@ -3820,7 +3888,7 @@
         },
         () => {
           markPending(catId);
-          sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
+          sessionStorage.removeItem(deletedSigKey());
           sendVerify({ action: "delete_one", kind: "category", id: catId });
         }
       );
@@ -3871,7 +3939,7 @@
       },
       () => {
         ids.forEach((id) => markPending(id));
-        sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
+        sessionStorage.removeItem(deletedSigKey());
         bulkDeleteInFlight = true;
         showBusyOverlay(
           `Deleting ${catCount} categor${
@@ -3905,7 +3973,7 @@
       },
       () => {
         ids.forEach((id) => markPending(id));
-        sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
+        sessionStorage.removeItem(deletedSigKey());
         bulkDeleteInFlight = true;
         showBusyOverlay(
           `Deleting ${catCount} categor${
@@ -4695,7 +4763,7 @@
                         <button class="kill" aria-label="Delete category ${c.name}">Delete</button>`;
       pill.querySelector(".kill").onclick = () => {
         markPending(c.id);
-        sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
+        sessionStorage.removeItem(deletedSigKey());
         sendVerify({ action: "delete_one", kind: "category", id: c.id });
       };
       vCats.appendChild(pill);
@@ -4723,7 +4791,7 @@
           },
           () => {
             markPending(ch.id);
-            sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
+            sessionStorage.removeItem(deletedSigKey());
             sendVerify({ action: "delete_one", kind: "channel", id: ch.id });
           }
         );

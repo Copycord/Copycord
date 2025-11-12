@@ -847,7 +847,9 @@ class DBManager:
             old_clone = row["cloned_category_id"] if row else None
 
             # If moving this clone's category to a new clone category id, clear parent links in THIS clone
-            will_change_to_new = (row is not None and clone_id is not None and old_clone != clone_id)
+            will_change_to_new = (
+                row is not None and clone_id is not None and old_clone != clone_id
+            )
             if will_change_to_new and old_clone is not None:
                 self.conn.execute(
                     "UPDATE channel_mappings "
@@ -856,8 +858,9 @@ class DBManager:
                     (old_clone, cgid),
                 )
 
-            # If clearing the parent for THIS clone, clear only rows in THIS clone
-            clearing_parent = (row is not None and old_clone is not None and clone_id is None)
+            clearing_parent = (
+                row is not None and old_clone is not None and clone_id is None
+            )
             if clearing_parent:
                 self.conn.execute(
                     "UPDATE channel_mappings "
@@ -866,7 +869,6 @@ class DBManager:
                     (old_clone, cgid),
                 )
 
-            # Upsert the mapping for (orig_id, cloned_guild_id)
             self.conn.execute(
                 """
                 INSERT INTO category_mappings (
@@ -899,7 +901,6 @@ class DBManager:
                 ),
             )
 
-            # Propagate the new parent ONLY inside THIS clone
             if clone_id is not None:
                 self.conn.execute(
                     "UPDATE channel_mappings "
@@ -909,7 +910,6 @@ class DBManager:
                 )
 
             self.conn.commit()
-
 
     def delete_category_mapping(self, orig_id: int):
         with self.lock, self.conn:
@@ -1122,8 +1122,16 @@ class DBManager:
                 original_channel_name,
                 int(cloned_channel_id) if cloned_channel_id is not None else None,
                 channel_webhook_url,
-                int(original_parent_category_id) if original_parent_category_id is not None else None,
-                int(cloned_parent_category_id) if cloned_parent_category_id is not None else None,
+                (
+                    int(original_parent_category_id)
+                    if original_parent_category_id is not None
+                    else None
+                ),
+                (
+                    int(cloned_parent_category_id)
+                    if cloned_parent_category_id is not None
+                    else None
+                ),
                 int(channel_type),
                 (clone_name.strip() if isinstance(clone_name, str) else None),
                 int(original_guild_id) if original_guild_id is not None else None,
@@ -1781,24 +1789,35 @@ class DBManager:
         ).fetchone()
         return row[0] if row else None
 
-    def get_clone_channel_name(self, original_channel_id: int) -> str | None:
+    def get_clone_channel_name(
+        self, original_channel_id: int, cloned_guild_id: int
+    ) -> str | None:
         row = self.conn.execute(
-            "SELECT clone_channel_name FROM channel_mappings WHERE original_channel_id = ?",
-            (int(original_channel_id),),
+            """
+            SELECT clone_channel_name
+            FROM channel_mappings
+            WHERE original_channel_id = ? AND cloned_guild_id = ?
+            """,
+            (int(original_channel_id), int(cloned_guild_id)),
         ).fetchone()
-
         return row[0] if row else None
 
     def set_channel_clone_name(
-        self, original_channel_id: int, clone_name: str | None
+        self, original_channel_id: int, cloned_guild_id: int, clone_name: str | None
     ) -> None:
-        """
-        Directly set clone_channel_name to a value or NULL (no COALESCE here).
-        """
         with self.conn as con:
             con.execute(
-                "UPDATE channel_mappings SET clone_channel_name = :name WHERE original_channel_id = :ocid",
-                {"name": clone_name, "ocid": int(original_channel_id)},
+                """
+                UPDATE channel_mappings
+                SET clone_channel_name = :name
+                WHERE original_channel_id = :ocid
+                AND cloned_guild_id     = :cgid
+                """,
+                {
+                    "name": clone_name,
+                    "ocid": int(original_channel_id),
+                    "cgid": int(cloned_guild_id),
+                },
             )
 
     def get_original_category_name(self, original_category_id: int) -> str | None:
@@ -1808,23 +1827,35 @@ class DBManager:
         ).fetchone()
         return row[0] if row else None
 
-    def get_clone_category_name(self, original_category_id: int) -> str | None:
+    def get_clone_category_name(
+        self, original_category_id: int, cloned_guild_id: int
+    ) -> str | None:
         row = self.conn.execute(
-            "SELECT cloned_category_name FROM category_mappings WHERE original_category_id = ?",
-            (int(original_category_id),),
+            """
+            SELECT cloned_category_name
+            FROM category_mappings
+            WHERE original_category_id = ? AND cloned_guild_id = ?
+            """,
+            (int(original_category_id), int(cloned_guild_id)),
         ).fetchone()
         return row[0] if row else None
 
     def set_category_clone_name(
-        self, original_category_id: int, clone_name: str | None
+        self, original_category_id: int, cloned_guild_id: int, clone_name: str | None
     ) -> None:
-        """
-        Directly set cloned_category_name to a value or NULL (no COALESCE here).
-        """
         with self.conn as con:
             con.execute(
-                "UPDATE category_mappings SET cloned_category_name = :name WHERE original_category_id = :ocid",
-                {"name": clone_name, "ocid": int(original_category_id)},
+                """
+                UPDATE category_mappings
+                SET cloned_category_name = :name
+                WHERE original_category_id = :ocid
+                AND cloned_guild_id       = :cgid
+                """,
+                {
+                    "name": clone_name,
+                    "ocid": int(original_category_id),
+                    "cgid": int(cloned_guild_id),
+                },
             )
 
     def resolve_original_category_id_by_name(self, name: str) -> int | None:
@@ -1946,7 +1977,7 @@ class DBManager:
             "SELECT * FROM messages WHERE cloned_message_id = ?",
             (int(cloned_message_id),),
         ).fetchone()
-        
+
     def get_message_mappings_for_original(self, original_message_id: int):
         """
         Return ALL message-mapping rows for this original message id (one per clone).
@@ -2642,7 +2673,7 @@ class DBManager:
                 (clone,),
             )
             out["filter_mappings.clone_set"] = cur.rowcount
-            
+
             cur.execute(
                 """
                 UPDATE backfill_runs
@@ -2653,7 +2684,6 @@ class DBManager:
             )
             out["backfill_mappings.orig_set"] = cur.rowcount
 
-            
             cur.execute(
                 """
                 UPDATE backfill_runs
@@ -3132,55 +3162,61 @@ class DBManager:
                     (w, host_gid, clone_gid),
                 )
 
-
-    # ----- listing clones per host -----
     def get_clone_guild_ids_for_origin(self, original_guild_id: int) -> list[int]:
         rows = self.conn.execute(
             "SELECT cloned_guild_id FROM guild_mappings WHERE original_guild_id=?",
             (int(original_guild_id),),
         ).fetchall()
-        return [int(r["cloned_guild_id"]) for r in rows if r["cloned_guild_id"] is not None]
+        return [
+            int(r["cloned_guild_id"]) for r in rows if r["cloned_guild_id"] is not None
+        ]
 
     def list_mappings_by_origin(self, original_guild_id: int):
         return self.conn.execute(
             "SELECT * FROM guild_mappings WHERE original_guild_id=?",
             (int(original_guild_id),),
         ).fetchall()
-        
+
     def get_mapping_by_id(self, mapping_id: str):
         return self.conn.execute(
             "SELECT * FROM guild_mappings WHERE mapping_id = ? LIMIT 1",
             (str(mapping_id),),
         ).fetchone()
 
-    def get_mapping_by_original_and_clone(self, original_guild_id: int, cloned_guild_id: int):
+    def get_mapping_by_original_and_clone(
+        self, original_guild_id: int, cloned_guild_id: int
+    ):
         return self.conn.execute(
             "SELECT * FROM guild_mappings WHERE original_guild_id = ? AND cloned_guild_id = ? LIMIT 1",
             (int(original_guild_id), int(cloned_guild_id)),
         ).fetchone()
 
-
-    # ----- channel lookups for fan-out -----
     def get_channel_mappings_for_original(self, original_channel_id: int):
         return self.conn.execute(
             "SELECT * FROM channel_mappings WHERE original_channel_id=? ORDER BY cloned_guild_id",
             (int(original_channel_id),),
         ).fetchall()
-        
-    def get_thread_mapping_by_original_and_clone(self, original_thread_id: int, cloned_guild_id: int) -> sqlite3.Row | None:
+
+    def get_thread_mapping_by_original_and_clone(
+        self, original_thread_id: int, cloned_guild_id: int
+    ) -> sqlite3.Row | None:
         return self.conn.execute(
             "SELECT * FROM threads WHERE original_thread_id = ? AND cloned_guild_id = ? LIMIT 1",
-            (int(original_thread_id), int(cloned_guild_id))
+            (int(original_thread_id), int(cloned_guild_id)),
         ).fetchone()
 
-    def get_channel_mapping_by_original_and_clone(self, original_channel_id: int, cloned_guild_id: int):
+    def get_channel_mapping_by_original_and_clone(
+        self, original_channel_id: int, cloned_guild_id: int
+    ):
         return self.conn.execute(
             "SELECT * FROM channel_mappings WHERE original_channel_id=? AND cloned_guild_id=? LIMIT 1",
             (int(original_channel_id), int(cloned_guild_id)),
         ).fetchone()
 
     # ----- precise deletes so we don't clobber other clones -----
-    def delete_channel_mapping_pair(self, original_channel_id: int, cloned_guild_id: int):
+    def delete_channel_mapping_pair(
+        self, original_channel_id: int, cloned_guild_id: int
+    ):
         with self.lock, self.conn:
             self.conn.execute(
                 "DELETE FROM channel_mappings WHERE original_channel_id=? AND cloned_guild_id=?",
@@ -3199,8 +3235,10 @@ class DBManager:
         )
         rows = cur.fetchall() or []
         return [dict(r) for r in rows]
-    
-    def get_thread_mapping_pair(self, original_thread_id: int, cloned_guild_id: int) -> sqlite3.Row | None:
+
+    def get_thread_mapping_pair(
+        self, original_thread_id: int, cloned_guild_id: int
+    ) -> sqlite3.Row | None:
         """
         Return the single row for (original_thread_id, cloned_guild_id).
         """
@@ -3209,7 +3247,9 @@ class DBManager:
             (int(original_thread_id), int(cloned_guild_id)),
         ).fetchone()
 
-    def delete_forum_thread_mapping_for_clone(self, original_thread_id: int, cloned_guild_id: int) -> None:
+    def delete_forum_thread_mapping_for_clone(
+        self, original_thread_id: int, cloned_guild_id: int
+    ) -> None:
         with self.lock, self.conn:
             self.conn.execute(
                 """
@@ -3220,22 +3260,25 @@ class DBManager:
             )
             self.conn.commit()
 
-    def delete_category_mapping_pair(self, original_category_id: int, cloned_guild_id: int):
+    def delete_category_mapping_pair(
+        self, original_category_id: int, cloned_guild_id: int
+    ):
         with self.lock, self.conn:
             self.conn.execute(
                 "DELETE FROM category_mappings WHERE original_category_id=? AND cloned_guild_id=?",
                 (int(original_category_id), int(cloned_guild_id)),
             )
 
-    def delete_message_mapping_pair(self, original_message_id: int, cloned_guild_id: int) -> int:
+    def delete_message_mapping_pair(
+        self, original_message_id: int, cloned_guild_id: int
+    ) -> int:
         with self.lock, self.conn:
             cur = self.conn.execute(
                 "DELETE FROM messages WHERE original_message_id=? AND cloned_guild_id=?",
                 (int(original_message_id), int(cloned_guild_id)),
             )
             return cur.rowcount or 0
-        
-    # ----- EMOJIS -----
+
     def get_emoji_mapping_for_clone(self, original_id: int, cloned_guild_id: int):
         return self.conn.execute(
             "SELECT * FROM emoji_mappings WHERE original_emoji_id = ? AND cloned_guild_id = ? LIMIT 1",
@@ -3248,14 +3291,15 @@ class DBManager:
             (int(original_id),),
         ).fetchall()
 
-    def delete_emoji_mapping_for_clone(self, original_id: int, cloned_guild_id: int) -> None:
+    def delete_emoji_mapping_for_clone(
+        self, original_id: int, cloned_guild_id: int
+    ) -> None:
         self.conn.execute(
             "DELETE FROM emoji_mappings WHERE original_emoji_id = ? AND cloned_guild_id = ?",
             (int(original_id), int(cloned_guild_id)),
         )
         self.conn.commit()
 
-    # (Optionally keep this for “delete all clones of this emoji”)
     def delete_emoji_mapping(self, original_id: int) -> None:
         self.conn.execute(
             "DELETE FROM emoji_mappings WHERE original_emoji_id = ?",
@@ -3263,8 +3307,6 @@ class DBManager:
         )
         self.conn.commit()
 
-
-    # ----- STICKERS -----
     def get_sticker_mapping_for_clone(self, original_id: int, cloned_guild_id: int):
         return self.conn.execute(
             "SELECT * FROM sticker_mappings WHERE original_sticker_id = ? AND cloned_guild_id = ? LIMIT 1",
@@ -3277,15 +3319,15 @@ class DBManager:
             (int(original_id),),
         ).fetchall()
 
-    def delete_sticker_mapping_for_clone(self, original_id: int, cloned_guild_id: int) -> None:
+    def delete_sticker_mapping_for_clone(
+        self, original_id: int, cloned_guild_id: int
+    ) -> None:
         self.conn.execute(
             "DELETE FROM sticker_mappings WHERE original_sticker_id = ? AND cloned_guild_id = ?",
             (int(original_id), int(cloned_guild_id)),
         )
         self.conn.commit()
 
-
-    # ----- ROLES -----
     def get_role_mapping_for_clone(self, original_id: int, cloned_guild_id: int):
         return self.conn.execute(
             "SELECT * FROM role_mappings WHERE original_role_id = ? AND cloned_guild_id = ? LIMIT 1",
@@ -3298,14 +3340,18 @@ class DBManager:
             (int(original_id),),
         ).fetchall()
 
-    def delete_role_mapping_for_clone(self, original_id: int, cloned_guild_id: int) -> None:
+    def delete_role_mapping_for_clone(
+        self, original_id: int, cloned_guild_id: int
+    ) -> None:
         self.conn.execute(
             "DELETE FROM role_mappings WHERE original_role_id = ? AND cloned_guild_id = ?",
             (int(original_id), int(cloned_guild_id)),
         )
         self.conn.commit()
 
-    def get_category_mapping_by_original_and_clone(self, original_category_id: int, cloned_guild_id: int):
+    def get_category_mapping_by_original_and_clone(
+        self, original_category_id: int, cloned_guild_id: int
+    ):
         return self.conn.execute(
             "SELECT * FROM category_mappings WHERE original_category_id = ? AND cloned_guild_id = ? LIMIT 1",
             (int(original_category_id), int(cloned_guild_id)),

@@ -1,6 +1,6 @@
 # =============================================================================
 #  Copycord
-#  Copyright (C) 2025 github.com/Copycord
+#  Copyright (C) 2021 github.com/Copycord
 #
 #  This source code is released under the GNU Affero General Public License
 #  version 3.0. A copy of the license is available at:
@@ -164,7 +164,7 @@ class ServerReceiver:
         self.cat_map: dict[int, dict] = {}
         self.chan_map: dict[int, dict] = {}
         self.chan_map_by_clone: dict[int, dict[int, dict]] = {}
-        self.cat_map_by_clone:  dict[int, dict[int, dict]] = {}
+        self.cat_map_by_clone: dict[int, dict[int, dict]] = {}
         self._unmapped_warned: set[int] = set()
         self._unmapped_threads_warned: set[int] = set()
         self._webhooks: dict[str, Webhook] = {}
@@ -251,19 +251,107 @@ class ServerReceiver:
 
     def _target_clone_gid_for_origin(self, host_guild_id: int | None) -> int | None:
         return self.guild_resolver.resolve_target_clone(host_guild_id=host_guild_id)
-    
+
     def _rowdict(self, row):
         """sqlite3.Row → dict; dict stays dict; None stays None."""
         if row is None:
             return None
         return row if isinstance(row, dict) else dict(row)
-    
+
+    async def _get_mappings_with_retry(
+        self,
+        original_message_id: int,
+        *,
+        attempts: int = 5,
+        base_delay: float = 0.08,
+        max_delay: float = 0.8,
+        jitter: float = 0.25,
+        log_prefix: str = "map-wait",
+    ) -> list[dict]:
+        """
+        Poll the DB for *all* message->clone mappings for a given original message id.
+        Returns a list of plain dict rows (possibly empty).
+        """
+        try:
+            mid = int(original_message_id)
+        except Exception:
+            return []
+
+        delay = float(base_delay)
+        for i in range(max(1, int(attempts))):
+            try:
+                rows = self.db.get_message_mappings_for_original(mid) or []
+            except Exception:
+                rows = []
+
+            if rows:
+
+                return [r if isinstance(r, dict) else dict(r) for r in rows]
+
+            if i < attempts - 1:
+
+                try:
+                    import random as _rnd
+
+                    j = (2.0 * _rnd.random() - 1.0) * float(jitter)
+                except Exception:
+                    j = 0.0
+                await asyncio.sleep(max(0.0, delay + j))
+                delay = min(delay * 1.6, max_delay)
+
+        logger.debug(
+            "[%s] No mappings found for orig_mid=%s after %s attempts",
+            log_prefix,
+            mid,
+            attempts,
+        )
+        return []
+
     def _get_webhook_gate(self, gid: int) -> asyncio.Lock:
         lock = self._webhook_gate_by_clone.get(int(gid))
         if lock is None:
             lock = asyncio.Lock()
             self._webhook_gate_by_clone[int(gid)] = lock
         return lock
+
+    @contextlib.contextmanager
+    def _clone_log_label(self, clone_gid: int):
+        """
+        Temporarily set the log prefix to the clone mapping's label (e.g. 'Server B').
+        Always resets after the wrapped block.
+        """
+        try:
+            label = self._label_for_clone_gid(int(clone_gid))
+        except Exception:
+            label = f"guild:{clone_gid}"
+        token = logctx.guild_name.set(label)
+        try:
+            yield
+        finally:
+            logctx.guild_name.reset(token)
+
+    def _label_for_clone_gid(self, clone_gid: int) -> str:
+        """
+        Prefer mapping_name for the clone; fall back to the clone guild's Discord name;
+        last resort: 'guild:<id>'.
+        """
+        try:
+            row = self.db.get_mapping_by_clone(int(clone_gid))
+            if row:
+                nm = (row.get("mapping_name") or "").strip()
+                if nm:
+                    return nm
+        except Exception:
+            pass
+
+        try:
+            g = self.bot.get_guild(int(clone_gid))
+            if g and getattr(g, "name", None):
+                return g.name.strip()
+        except Exception:
+            pass
+
+        return f"guild:{clone_gid}"
 
     def _resolve_guild_label(self, typ: str, data: dict) -> str | None:
         """
@@ -273,7 +361,6 @@ class ServerReceiver:
         gid = 0
         label = ""
 
-        # 1) For sitemaps, try target cloned guild FIRST (multi-clone aware)
         if typ == "sitemap":
             ginfo = (data or {}).get("guild") or {}
             tgt = (data or {}).get("target") or {}
@@ -289,14 +376,13 @@ class ServerReceiver:
             except Exception:
                 host_gid = 0
 
-            # Prefer mapping_name from clone mapping if we have a clone id
             if clone_gid:
                 with contextlib.suppress(Exception):
                     mrow_clone = self.db.get_mapping_by_clone(clone_gid)
                     if mrow_clone:
                         nm = (mrow_clone.get("mapping_name") or "").strip()
                         if nm:
-                            self._host_name_cache[host_gid or clone_gid] = nm  # cache for subsequent lines
+                            self._host_name_cache[host_gid or clone_gid] = nm
                             return nm
                         # fall back to cloned guild's actual Discord name
                         cg = self.bot.get_guild(clone_gid)
@@ -306,7 +392,6 @@ class ServerReceiver:
                                 self._host_name_cache[host_gid or clone_gid] = nm2
                                 return nm2
 
-            # No clone mapping/name → fall back to origin mapping_name / discord name
             gid = host_gid
             name = (ginfo.get("name") or "").strip()
 
@@ -331,7 +416,6 @@ class ServerReceiver:
 
             return f"guild:{gid}" if gid else None
 
-        # 2) Non-sitemap: preserve previous behavior (try original, then clone, then cache, then discord)
         raw_gid = (data or {}).get("guild_id")
         try:
             gid = int(raw_gid or 0)
@@ -427,10 +511,10 @@ class ServerReceiver:
         - Coalesces per-clone for a short "idle gap" so near-simultaneous sitemaps batch together.
         - Never waits longer than MAX_COALESCE_TOTAL to avoid head-of-line blocking.
         - Keeps only the newest sitemap PER clone (older same-clone items are dropped).
-        - Launches one sync per clone IN PARALLEL and logs full tracebacks.
+        - Launches one sync per clone IMMEDIATELY (fire-and-forget) and logs full tracebacks.
         """
-        IDLE_GAP = 0.25          # seconds of "quiet" to close the batch
-        MAX_COALESCE_TOTAL = 2.0 # absolute cap per batch
+        IDLE_GAP = 0.25
+        MAX_COALESCE_TOTAL = 2.0
 
         while True:
             task_id, display_id, sitemap = await q.get()
@@ -443,12 +527,10 @@ class ServerReceiver:
                 latest_by_clone: dict[int, tuple[str, str, dict]] = {}
                 dropped = 0
 
-                # seed with the first item
-                first_tgt = (sitemap.get("target") or {})
+                first_tgt = sitemap.get("target") or {}
                 first_cg = int(first_tgt.get("cloned_guild_id") or 0)
                 latest_by_clone[first_cg] = (task_id, display_id, sitemap)
 
-                # adaptive coalescing: wait for quiet OR until max cap
                 loop = asyncio.get_running_loop()
                 deadline = loop.time() + MAX_COALESCE_TOTAL
                 while True:
@@ -458,45 +540,70 @@ class ServerReceiver:
                     try:
                         t2, d2, sm2 = await asyncio.wait_for(q.get(), timeout=timeout)
                         q.task_done()
-                        tgt = (sm2.get("target") or {})
+                        tgt = sm2.get("target") or {}
                         cg = int(tgt.get("cloned_guild_id") or 0)
-                        latest_by_clone[cg] = (t2, d2, sm2)  # newest per clone
+                        latest_by_clone[cg] = (t2, d2, sm2)
                         dropped += 1
                     except asyncio.TimeoutError:
                         break
 
                 if dropped:
-                    logger.debug("Dropped %d outdated sitemap(s); processing latest per clone", dropped)
+                    logger.debug(
+                        "Dropped %d outdated sitemap(s); processing latest per clone",
+                        dropped,
+                    )
 
-                # run each clone's sync in parallel
                 items = list(latest_by_clone.values())
-                items.sort(key=lambda t: int((t[2].get("target") or {}).get("cloned_guild_id") or 0))
+                items.sort(
+                    key=lambda t: int(
+                        (t[2].get("target") or {}).get("cloned_guild_id") or 0
+                    )
+                )
 
-                tasks = [asyncio.create_task(self.sync_structure(tid, sm)) for tid, _, sm in items]
-                ctx   = [(did, int((sm.get("target") or {}).get("cloned_guild_id") or 0)) for _, did, sm in items]
+                def _on_done(fut: asyncio.Future, _did: str, _cgid: int):
 
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                for (disp, cgid), res in zip(ctx, results):
-                    if isinstance(res, asyncio.CancelledError):
-                        raise res
-                    if isinstance(res, Exception):
-                        logger.error(
-                            "Error processing sitemap %s for clone %s",
-                            disp,
-                            cgid,
-                            exc_info=(type(res), res, res.__traceback__),
-                        )
-                    else:
-                        logger.info("[✅] [%s] Sync task complete for clone:%s: %s", disp, cgid, res)
+                    disp_token = logctx.sync_display_id.set(_did)
+                    try:
+                        with self._clone_log_label(int(_cgid)):
+                            try:
+                                res = fut.result()
+                            except asyncio.CancelledError:
+                                logger.info(
+                                    "[🗑️] Canceled sync task %s cloning disabled", _did
+                                )
+                            except Exception as e:
+                                logger.error(
+                                    "Error processing sitemap %s for clone %s",
+                                    _did,
+                                    _cgid,
+                                    exc_info=(type(e), e, e.__traceback__),
+                                )
+                            else:
+                                if isinstance(res, str) and res.upper().startswith(
+                                    "CANCELED"
+                                ):
+                                    logger.info(
+                                        "[🗑️] Canceled sync task %s cloning disabled",
+                                        _did,
+                                    )
+                                else:
+                                    logger.info(
+                                        "[✅] Sync task %s complete: %s", _did, res
+                                    )
+                    finally:
+                        logctx.sync_display_id.reset(disp_token)
+
+                for tid, did, sm in items:
+                    cgid = int((sm.get("target") or {}).get("cloned_guild_id") or 0)
+                    task = asyncio.create_task(self.sync_structure(tid, sm))
+                    task.add_done_callback(
+                        lambda fut, _did=did, _cgid=cgid: _on_done(fut, _did, _cgid)
+                    )
 
             finally:
                 if token:
                     logctx.guild_name.reset(token)
                 q.task_done()
-
-
-
-
 
     def _get_sync_lock(self, clone_guild_id: int) -> asyncio.Lock:
         lock = self._guild_sync_locks.get(int(clone_guild_id))
@@ -733,19 +840,24 @@ class ServerReceiver:
         Works with multiple clones per host by using per-clone caches and DB fallback.
         """
         try:
-            # ignore deletes in origin/host guilds
+
             if not self.db.is_clone_guild_id(channel.guild.id):
-                logger.info("[🛑] Ignoring delete of channel %s in non-clone guild %s",
-                            channel.id, channel.guild.id)
+                logger.info(
+                    "[🛑] Ignoring delete of channel %s in non-clone guild %s",
+                    channel.id,
+                    channel.guild.id,
+                )
                 return
         except AttributeError:
             return
 
-        # if a sync is already in progress for THIS clone, skip the request
         lock = self._guild_sync_locks.get(int(channel.guild.id))
         if lock and lock.locked():
-            logger.debug("[🛑] g=%s sync in progress — ignoring sitemap request for deleted channel %s",
-                        channel.guild.id, channel.id)
+            logger.debug(
+                "[🛑] g=%s sync in progress — ignoring sitemap request for deleted channel %s",
+                channel.guild.id,
+                channel.id,
+            )
             return
 
         is_category = (
@@ -754,7 +866,7 @@ class ServerReceiver:
         )
 
         if is_category:
-            # -------- categories: per-clone cache, then DB fallback --------
+
             per_cat = getattr(self, "cat_map_by_clone", {}) or {}
             per_cat = per_cat.get(int(channel.guild.id), {}) or {}
 
@@ -762,7 +874,7 @@ class ServerReceiver:
             hit_row = None
 
             for orig_cat_id, row in list(per_cat.items()):
-                # normalize row to dict for .get(...)
+
                 if not isinstance(row, dict):
                     row = dict(row)
                     per_cat[int(orig_cat_id)] = row
@@ -772,7 +884,7 @@ class ServerReceiver:
                     break
 
             if hit_src_cat_id is None or hit_row is None:
-                # DB fallback: find mapping by cloned id in THIS clone
+
                 dbrow = self.db.conn.execute(
                     "SELECT * FROM category_mappings WHERE cloned_category_id=? AND cloned_guild_id=? LIMIT 1",
                     (int(channel.id), int(channel.guild.id)),
@@ -782,32 +894,43 @@ class ServerReceiver:
                         dbrow = {k: dbrow[k] for k in dbrow.keys()}
                     hit_src_cat_id = int(dbrow.get("original_category_id") or 0)
                     hit_row = dbrow
-                    # refresh per-clone cache entry so future lookups work
-                    self.cat_map_by_clone.setdefault(int(channel.guild.id), {})[hit_src_cat_id] = dbrow
+
+                    self.cat_map_by_clone.setdefault(int(channel.guild.id), {})[
+                        hit_src_cat_id
+                    ] = dbrow
 
             if hit_src_cat_id is None or hit_row is None:
                 return
 
-            # drop from per-clone cache (and legacy flat cache if present)
-            self.cat_map_by_clone.get(int(channel.guild.id), {}).pop(hit_src_cat_id, None)
+            self.cat_map_by_clone.get(int(channel.guild.id), {}).pop(
+                hit_src_cat_id, None
+            )
             if hasattr(self, "cat_map") and self.cat_map:
                 self.cat_map.pop(hit_src_cat_id, None)
 
             host_guild_id = hit_row.get("original_guild_id")
             if not host_guild_id:
-                logger.info("[⚠️] No original_guild_id for deleted category clone_g=%s chan=%s",
-                            channel.guild.id, channel.id)
+                logger.info(
+                    "[⚠️] No original_guild_id for deleted category clone_g=%s chan=%s",
+                    channel.guild.id,
+                    channel.id,
+                )
                 return
 
             logger.warning(
                 "[🧹] Cloned category deleted in clone_g=%s: clone_cat=%s name=%s (src_cat=%s host_g=%s). Requesting sitemap.",
-                channel.guild.id, channel.id, getattr(channel, "name", "?"), hit_src_cat_id, host_guild_id,
+                channel.guild.id,
+                channel.id,
+                getattr(channel, "name", "?"),
+                hit_src_cat_id,
+                host_guild_id,
             )
 
-            await self.bot.ws_manager.send({"type": "sitemap_request", "data": {"guild_id": str(host_guild_id)}})
+            await self.bot.ws_manager.send(
+                {"type": "sitemap_request", "data": {"guild_id": str(host_guild_id)}}
+            )
             return
 
-        # ---------------- channels: per-clone cache, then DB fallback ----------------
         per_chan = getattr(self, "chan_map_by_clone", {}) or {}
         per_chan = per_chan.get(int(channel.guild.id), {}) or {}
 
@@ -824,7 +947,7 @@ class ServerReceiver:
                 break
 
         if hit_src_id is None or hit_row is None:
-            # DB fallback: find mapping by cloned id in THIS clone
+
             dbrow = self.db.conn.execute(
                 "SELECT * FROM channel_mappings WHERE cloned_channel_id=? AND cloned_guild_id=? LIMIT 1",
                 (int(channel.id), int(channel.guild.id)),
@@ -834,35 +957,44 @@ class ServerReceiver:
                     dbrow = {k: dbrow[k] for k in dbrow.keys()}
                 hit_src_id = int(dbrow.get("original_channel_id") or 0)
                 hit_row = dbrow
-                # refresh per-clone cache
-                self.chan_map_by_clone.setdefault(int(channel.guild.id), {})[hit_src_id] = dbrow
+
+                self.chan_map_by_clone.setdefault(int(channel.guild.id), {})[
+                    hit_src_id
+                ] = dbrow
 
         if hit_src_id is None or hit_row is None:
             return
 
-        # invalidate any per-channel rotation state
         try:
             self.backfill.invalidate_rotation(int(channel.id))
         except Exception:
             pass
 
-        # drop from per-clone (and optional legacy) caches
         self.chan_map_by_clone.get(int(channel.guild.id), {}).pop(hit_src_id, None)
         if hasattr(self, "chan_map") and self.chan_map:
             self.chan_map.pop(hit_src_id, None)
 
         host_guild_id = hit_row.get("original_guild_id")
         if not host_guild_id:
-            logger.debug("[⚠️] No original_guild_id for deleted channel clone_g=%s chan=%s",
-                        channel.guild.id, channel.id)
+            logger.debug(
+                "[⚠️] No original_guild_id for deleted channel clone_g=%s chan=%s",
+                channel.guild.id,
+                channel.id,
+            )
             return
 
         logger.warning(
             "[🧹] Cloned channel deleted in clone_g=%s: clone_chan=%s name=%s (src_chan=%s host_g=%s). Requesting sitemap.",
-            channel.guild.id, channel.id, getattr(channel, "name", "?"), hit_src_id, host_guild_id,
+            channel.guild.id,
+            channel.id,
+            getattr(channel, "name", "?"),
+            hit_src_id,
+            host_guild_id,
         )
 
-        await self.bot.ws_manager.send({"type": "sitemap_request", "data": {"guild_id": str(host_guild_id)}})
+        await self.bot.ws_manager.send(
+            {"type": "sitemap_request", "data": {"guild_id": str(host_guild_id)}}
+        )
 
     async def _verify_listen_loop(self):
         """
@@ -1041,7 +1173,10 @@ class ServerReceiver:
 
                 if parent_id and parent_id in self._active_backfills:
                     self._bf_event_buffer.setdefault(parent_id, []).append((typ, data))
-                    logger.debug("[bf] Buffered thread_delete for parent #%s (backfill active)", parent_id)
+                    logger.debug(
+                        "[bf] Buffered thread_delete for parent #%s (backfill active)",
+                        parent_id,
+                    )
                     return
 
                 asyncio.create_task(self.handle_thread_delete(data))
@@ -1346,62 +1481,108 @@ class ServerReceiver:
         except Exception as e:
             logger.exception("Unexpected error in handle_announce: %s", e)
 
-    def _load_mappings(self):
-        # Build per-origin lists (not flattened single rows)
-        self.chan_map_list: dict[int, list[dict]] = {}
-        self.cat_map_list: dict[int, list[dict]] = {}
-        self.chan_map_by_clone: dict[int, dict[int, dict]] = {}
+    def _load_mappings(self) -> None:
+        """
+        Refresh in-memory caches from DB. Safe to call anytime.
+        Builds both flat (legacy) and per-clone caches; runtime logic should
+        prefer the per-clone maps.
+        """
+
+        self.chan_map = {}
+        self.chan_map_by_clone = {}
+
+        try:
+            rows = self.db.get_all_channel_mappings()
+        except Exception:
+            logger.debug("get_all_channel_mappings failed", exc_info=True)
+            rows = []
+
+        for r in rows:
+            rr = dict(r)
+
+            for k in (
+                "original_channel_id",
+                "cloned_channel_id",
+                "original_parent_category_id",
+                "cloned_parent_category_id",
+                "original_guild_id",
+                "cloned_guild_id",
+                "channel_type",
+            ):
+                if rr.get(k) is not None:
+                    try:
+                        rr[k] = int(rr[k])
+                    except Exception:
+                        pass
+
+            ocid = rr.get("original_channel_id")
+            cg = rr.get("cloned_guild_id") or 0
+
+            self.chan_map_by_clone.setdefault(int(cg), {})[int(ocid)] = rr
+
+            self.chan_map[int(ocid)] = rr
+
+        self.cat_map = {}
         self.cat_map_by_clone = {}
-        for orig_id, row in (self.cat_map or {}).items():
-            cgid = int((row or {}).get("cloned_guild_id") or 0)
-            if not cgid:
-                continue
-            self.cat_map_by_clone.setdefault(cgid, {})[int(orig_id)] = dict(row)
 
-        rows = self.db.get_all_channel_mappings()  # existing helper
-        for r in rows:
-            orig_ch = int(r["original_channel_id"])
-            clone_gid = int(r["cloned_guild_id"] or 0)
-            self.chan_map_list.setdefault(orig_ch, []).append(r)
-            if clone_gid:
-                self.chan_map_by_clone.setdefault(clone_gid, {})[orig_ch] = r
+        try:
+            cats = self.db.get_all_category_mappings()
+        except Exception:
+            logger.debug("get_all_category_mappings failed", exc_info=True)
+            cats = []
 
-        rows = self.db.get_all_category_mappings()
-        for r in rows:
-            orig_cat = int(r["original_category_id"])
-            clone_gid = int(r["cloned_guild_id"] or 0)
-            self.cat_map_list.setdefault(orig_cat, []).append(r)
-            if clone_gid:
-                pass
+        for r in cats:
+            rr = dict(r)
+            for k in (
+                "original_category_id",
+                "cloned_category_id",
+                "original_guild_id",
+                "cloned_guild_id",
+            ):
+                if rr.get(k) is not None:
+                    try:
+                        rr[k] = int(rr[k])
+                    except Exception:
+                        pass
 
+            ocid = rr.get("original_category_id")
+            cg = rr.get("cloned_guild_id") or 0
 
+            self.cat_map[int(ocid)] = rr
+            self.cat_map_by_clone.setdefault(int(cg), {})[int(ocid)] = rr
 
     def _purge_stale_mappings(self, guild: discord.Guild) -> int:
         removed = 0
         per = self.chan_map_by_clone.get(int(guild.id)) or {}
 
         for orig_id, row in list(per.items()):
-            # Normalize sqlite3.Row → dict so .get works consistently
+
             if not isinstance(row, dict):
                 row = dict(row)
-                per[int(orig_id)] = row  # keep cache consistent
+                per[int(orig_id)] = row
 
             clone_cid = int(row.get("cloned_channel_id") or 0)
             if not clone_cid:
                 continue
             if guild.get_channel(clone_cid):
-                continue  # still valid in THIS clone
+                continue
 
-            # Log exactly like before, but with extra context for this clone
-            logger.info("[🗑️] Purging channel mapping pair origin=%s clone_guild=%s cloned_channel=%s",
-                        int(orig_id), int(guild.id), clone_cid)
+            logger.debug(
+                "[🗑️] Purging channel mapping pair origin=%s clone_guild=%s cloned_channel=%s",
+                int(orig_id),
+                int(guild.id),
+                clone_cid,
+            )
 
             # stale only for THIS clone; delete the pair and remove from this clone's cache
             try:
                 self.db.delete_channel_mapping_pair(int(orig_id), int(guild.id))
             except Exception:
-                logger.exception("Failed to delete stale mapping pair for orig=%s clone=%s",
-                                orig_id, guild.id)
+                logger.exception(
+                    "Failed to delete stale mapping pair for orig=%s clone=%s",
+                    orig_id,
+                    guild.id,
+                )
 
             per.pop(int(orig_id), None)
             removed += 1
@@ -1410,14 +1591,10 @@ class ServerReceiver:
 
     async def sync_structure(self, task_id: int, sitemap: Dict) -> str:
         """
-        Synchronizes the structure of a Discord guild based on the provided sitemap.
-        - Uses explicit target clone from sitemap["target"]["cloned_guild_id"] when provided.
-        - Falls back to the default mapping for the host guild when not provided.
-        - Resolves settings in the context of (host, clone) so per-clone settings apply.
+        Synchronizes the structure of a clone based on the provided sitemap.
         """
         logger.debug(f"Sync Task #{task_id}: Processing sitemap {sitemap}")
 
-        # --- Resolve host + (optional) explicit clone from sitemap ---
         host_guild_id_raw = (sitemap.get("guild") or {}).get("id")
         host_guild_id = int(host_guild_id_raw) if host_guild_id_raw else None
 
@@ -1429,13 +1606,29 @@ class ServerReceiver:
             except Exception:
                 explicit_clone_gid = None
 
-        # Fallback to prior behavior if no explicit clone is provided.
-        target_clone_gid = explicit_clone_gid or self._target_clone_gid_for_origin(host_guild_id)
+        target_clone_gid = explicit_clone_gid or self._target_clone_gid_for_origin(
+            host_guild_id
+        )
 
-        # keep identity enrichment
+        settings = resolve_mapping_settings(
+            self.db,
+            self.config,
+            original_guild_id=host_guild_id,
+            cloned_guild_id=int(target_clone_gid),
+        )
+
+        logging.debug(
+            f"[sync] Resolved settings for host_g={host_guild_id} clone_g={target_clone_gid}: {settings}"
+        )
+
+        if not settings.get("ENABLE_CLONING", True):
+            logger.debug(
+                "[🗑️] Cloning disabled for clone_g=%s; canceling task.", target_clone_gid
+            )
+            return "CANCELED: cloning disabled"
+
         self._maybe_enrich_mapping_identity_from_sitemap(sitemap)
 
-        # --- Log context setup ---
         try:
             host_gid_int = int(host_guild_id) if host_guild_id else 0
         except Exception:
@@ -1468,85 +1661,83 @@ class ServerReceiver:
                     )
                     return "Error: clone guild missing"
 
-                # IMPORTANT: resolve settings in clone context so per-clone overrides apply
-                # Make sure your resolve_mapping_settings supports cloned_guild_id.
-                settings = resolve_mapping_settings(
-                    self.db,
-                    self.config,
-                    original_guild_id=host_guild_id,
-                    cloned_guild_id=int(target_clone_gid),
-                )
-
                 bg_jobs: list[str] = []
 
-                # refresh mappings before using them
                 self._load_mappings()
 
-                # hand off stickers sitemap (used later by sticker sync kickoff)
-                self.stickers.set_last_sitemap(
-                    clone_guild_id=int(target_clone_gid),
-                    stickers=sitemap.get("stickers"),
-                    host_guild_id=host_guild_id,
-                )
-
-                if settings.get("CLONE_EMOJI", True):
-                    self.emojis.kickoff_sync(
-                        sitemap.get("emojis", []),
-                        host_guild_id,
-                        target_clone_guild_id=int(target_clone_gid),
-                    )
-                    bg_jobs.append("emoji")
-
-                if settings.get("CLONE_STICKER", True):
-                    self.stickers.kickoff_sync(target_clone_guild_id=int(target_clone_gid))
-                    bg_jobs.append("sticker")
-
-                roles_handle = None
-                if settings.get("CLONE_ROLES", True):
-                    roles_handle = self.roles.kickoff_sync(
-                        sitemap.get("roles", []),
+                with self._clone_log_label(int(target_clone_gid)):
+                    self.stickers.set_last_sitemap(
+                        clone_guild_id=int(target_clone_gid),
+                        stickers=sitemap.get("stickers"),
                         host_guild_id=host_guild_id,
-                        target_clone_guild_id=int(target_clone_gid),
-                        delete_roles=settings.get("DELETE_ROLES", False),
-                        mirror_permissions=settings.get("MIRROR_ROLE_PERMISSIONS", False),
                     )
-                    bg_jobs.append("roles")
 
-                # Repairs + cleanup before main sync
-                cat_created, ch_reparented = await self._repair_deleted_categories(guild, sitemap)
-                self._purge_stale_mappings(guild)
+                    if settings.get("CLONE_EMOJI", True):
+                        self.emojis.kickoff_sync(
+                            sitemap.get("emojis", []),
+                            host_guild_id,
+                            target_clone_guild_id=int(target_clone_gid),
+                        )
+                        bg_jobs.append("emoji")
 
-                parts: List[str] = []
-                if cat_created:
-                    parts.append(f"Created {cat_created} categories")
-                if ch_reparented:
-                    parts.append(f"Reparented {ch_reparented} channels")
+                    if settings.get("CLONE_STICKER", True):
+                        self.stickers.kickoff_sync(
+                            target_clone_guild_id=int(target_clone_gid)
+                        )
+                        bg_jobs.append("sticker")
 
-                # Main structure sync
-                parts += await self._sync_community(guild, sitemap)
-                parts += await self._sync_categories(guild, sitemap)
-                parts += await self._sync_forums(guild, sitemap)
-                parts += await self._sync_channels(guild, sitemap)
+                    roles_handle = None
+                    if settings.get("CLONE_ROLES", True):
+                        roles_handle = self.roles.kickoff_sync(
+                            sitemap.get("roles", []),
+                            host_guild_id=host_guild_id,
+                            target_clone_guild_id=int(target_clone_gid),
+                            delete_roles=settings.get("DELETE_ROLES", False),
+                            mirror_permissions=settings.get(
+                                "MIRROR_ROLE_PERMISSIONS", False
+                            ),
+                        )
+                        bg_jobs.append("roles")
 
-                moved = await self._handle_master_channel_moves(
-                    guild, self._parse_sitemap(sitemap), host_guild_id
-                )
-                if moved:
-                    parts.append(f"Reparented {moved} channels")
-
-                parts += await self._sync_threads(guild, sitemap)
-
-                # refresh mappings again in case structure changes affected them
-                self._load_mappings()
-
-                if settings.get("MIRROR_ROLE_PERMISSIONS", False) and settings.get("CLONE_ROLES", False):
-                    self.perms.schedule_after_role_sync(
-                        roles_manager=self.roles,
-                        roles_handle_or_none=roles_handle,
-                        guild=guild,
-                        sitemap=sitemap,
+                    cat_created, ch_repaired, repaired_ids = (
+                        await self._repair_deleted_categories(guild, sitemap)
                     )
-                    bg_jobs.append("channel-perms")
+                    self._purge_stale_mappings(guild)
+
+                    parts: List[str] = []
+                    if cat_created:
+                        parts.append(f"Created {cat_created} categories")
+
+                    parts += await self._sync_community(guild, sitemap)
+                    parts += await self._sync_categories(guild, sitemap)
+                    parts += await self._sync_forums(guild, sitemap)
+                    parts += await self._sync_channels(guild, sitemap)
+
+                    moved = await self._handle_master_channel_moves(
+                        guild,
+                        self._parse_sitemap(sitemap),
+                        host_guild_id,
+                        skip_channel_ids=repaired_ids,
+                    )
+
+                    total_reparented = int(ch_repaired or 0) + int(moved or 0)
+                    if total_reparented:
+                        parts.append(f"Reparented {total_reparented} channels")
+
+                    parts += await self._sync_threads(guild, sitemap)
+
+                    self._load_mappings()
+
+                    if settings.get("MIRROR_ROLE_PERMISSIONS", False) and settings.get(
+                        "CLONE_ROLES", False
+                    ):
+                        self.perms.schedule_after_role_sync(
+                            roles_manager=self.roles,
+                            roles_handle_or_none=roles_handle,
+                            guild=guild,
+                            sitemap=sitemap,
+                        )
+                        bg_jobs.append("channel-perms")
 
             main_summary = "; ".join(parts) if parts else "No structure changes needed"
 
@@ -1557,35 +1748,69 @@ class ServerReceiver:
             logctx.sync_host_name.reset(_host_token)
             logctx.sync_display_id.reset(_id_token)
 
-
-    async def _sync_community(self, guild: Guild, sitemap: Dict) -> List[str]:
+    async def _sync_community(self, guild: discord.Guild, sitemap: Dict) -> List[str]:
         """
-        Enable/disable Community mode and set rules/updates channels only when they differ.
+        Enable/disable Community mode and set rules/public updates channels
+        for THIS clone guild only.
         """
-        comm = sitemap.get("community", {})
-        want = bool(comm.get("enabled"))
         parts: List[str] = []
 
-        curr_enabled = "COMMUNITY" in guild.features
-        curr_rules = guild.rules_channel
-        curr_updates = guild.public_updates_channel
+        community = sitemap.get("community") or {}
+        want = bool(community.get("enabled"))
 
-        rules_id = comm.get("rules_channel_id")
-        updates_id = comm.get("public_updates_channel_id")
+        def _int(v):
+            try:
+                i = int(v or 0)
+                return i or None
+            except Exception:
+                return None
 
-        if want == curr_enabled:
-            if want:
-                rm = self.chan_map.get(rules_id)
-                um = self.chan_map.get(updates_id)
+        rules_id = _int(community.get("rules_channel_id"))
+        updates_id = _int(community.get("public_updates_channel_id"))
+
+        curr_enabled = "COMMUNITY" in (getattr(guild, "features", None) or [])
+        curr_rules = getattr(guild, "rules_channel", None)
+        curr_updates = getattr(guild, "public_updates_channel", None)
+
+        me = guild.me or guild.get_member(self.bot.user.id)
+        gp = getattr(me, "guild_permissions", None)
+        if not gp or not (gp.administrator or gp.manage_guild):
+            logger.warning(
+                "[⚠️] Community sync skipped for guild %s: bot lacks Manage Guild/Administrator.",
+                guild.id,
+            )
+            return parts
+
+        def _map_for_clone(orig_id: int | None):
+            if not orig_id:
+                return None
+            per = (getattr(self, "chan_map_by_clone", {}) or {}).get(
+                int(guild.id), {}
+            ) or {}
+            row = per.get(int(orig_id))
+            if not row and hasattr(self, "db"):
+                try:
+                    row = self.db.get_channel_mapping_for_clone(
+                        int(orig_id), int(guild.id)
+                    )
+                except Exception:
+                    row = None
+            if row and not isinstance(row, dict):
+                row = dict(row)
+            return row
+
+        if curr_enabled == want:
+            if want and rules_id and updates_id:
+                rm = _map_for_clone(rules_id)
+                um = _map_for_clone(updates_id)
                 if rm and um:
-                    rc = guild.get_channel(rm["cloned_channel_id"])
-                    uc = guild.get_channel(um["cloned_channel_id"])
+                    rc = guild.get_channel(int(rm["cloned_channel_id"]))
+                    uc = guild.get_channel(int(um["cloned_channel_id"]))
                     if rc and uc and curr_rules == rc and curr_updates == uc:
                         return parts
             else:
                 return parts
 
-        # Case 1: We want community disabled and it's currently enabled → disable it.
         if curr_enabled and not want:
             try:
                 await self.ratelimit.acquire_for_guild(
@@ -1593,180 +1818,295 @@ class ServerReceiver:
                 )
                 await guild.edit(community=False)
                 parts.append("[⚙️] Disabled Community mode")
-
                 logger.info("[⚙️] Community mode disabled for guild %s", guild.id)
-
             except Exception as e:
                 logger.warning(
-                    "[⚠️] Failed disabling Community mode for guild %s: %s",
+                    "[⚠️] Failed disabling Community mode for guild %s: %s", guild.id, e
+                )
+            return parts
+
+        if want and rules_id and updates_id:
+            rm = _map_for_clone(rules_id)
+            um = _map_for_clone(updates_id)
+            if not (rm and um):
+                logger.warning(
+                    "[⚠️] Community sync skipped for guild %s: missing per-clone channel mapping.",
+                    guild.id,
+                )
+                return parts
+
+            rc = guild.get_channel(int(rm["cloned_channel_id"]))
+            uc = guild.get_channel(int(um["cloned_channel_id"]))
+            if not rc or not uc:
+                logger.warning(
+                    "[⚠️] Community sync skipped for guild %s: target clone channels not found (rc=%s uc=%s).",
+                    guild.id,
+                    getattr(rc, "id", None),
+                    getattr(uc, "id", None),
+                )
+                return parts
+
+            allowed_types = {
+                discord.ChannelType.text,
+                getattr(discord.ChannelType, "news", discord.ChannelType.text),
+            }
+            if rc.type not in allowed_types or uc.type not in allowed_types:
+                logger.warning(
+                    "[⚠️] Community sync skipped for guild %s: invalid channel types (rules=%s updates=%s).",
+                    guild.id,
+                    rc.type,
+                    uc.type,
+                )
+                return parts
+
+            try:
+                await self.ratelimit.acquire_for_guild(
+                    ActionType.EDIT_CHANNEL, guild.id
+                )
+
+                await guild.edit(
+                    verification_level=getattr(discord.VerificationLevel, "medium"),
+                    explicit_content_filter=getattr(
+                        discord.ContentFilter, "all_members"
+                    ),
+                    default_notifications=getattr(
+                        discord.NotificationLevel, "only_mentions"
+                    ),
+                )
+            except Exception as e:
+
+                logger.debug(
+                    "[ℹ️] Prereq tune-up for guild %s raised %r; continuing.",
                     guild.id,
                     e,
                 )
 
-            return parts
+            changes = []
+            if not curr_enabled:
+                changes.append("enabled")
+            if curr_rules != rc:
+                changes.append(f"rules {getattr(curr_rules,'id','None')}→{rc.id}")
+            if curr_updates != uc:
+                changes.append(f"updates {getattr(curr_updates,'id','None')}→{uc.id}")
 
-        if want and rules_id and updates_id:
-            rm = self.chan_map.get(rules_id)
-            um = self.chan_map.get(updates_id)
-            if rm and um:
-                rc = guild.get_channel(rm["cloned_channel_id"])
-                uc = guild.get_channel(um["cloned_channel_id"])
-
-                # If either channel is missing in the clone guild, we can't safely edit
-
-                if not rc or not uc:
-                    logger.warning(
-                        "[⚠️] Community sync skipped for guild %s: "
-                        "rules/updates clone channel missing (rc=%s uc=%s wanted=%s).",
-                        guild.id,
-                        getattr(rc, "id", None),
-                        getattr(uc, "id", None),
-                        want,
-                    )
-
-                    return parts
-
-                edit_kwargs = {
-                    "community": True,
-                    "rules_channel": rc,
-                    "public_updates_channel": uc,
-                }
-
-                changes = []
+            async def _enable_with_channels():
+                await self.ratelimit.acquire_for_guild(
+                    ActionType.EDIT_CHANNEL, guild.id
+                )
                 if not curr_enabled:
-                    changes.append("enabled")
-                if curr_rules != rc:
-                    changes.append(
-                        "rules {}→{}".format(
-                            getattr(curr_rules, "id", "None"),
-                            getattr(rc, "id", "None"),
-                        )
-                    )
-                if curr_updates != uc:
-                    changes.append(
-                        "updates {}→{}".format(
-                            getattr(curr_updates, "id", "None"),
-                            getattr(uc, "id", "None"),
-                        )
-                    )
 
-                try:
-                    await self.ratelimit.acquire_for_guild(
-                        ActionType.EDIT_CHANNEL, guild.id
+                    return await guild.edit(
+                        community=True, rules_channel=rc, public_updates_channel=uc
                     )
-                    await guild.edit(**edit_kwargs)
-                    parts.append("Updated Community mode")
-                    logger.info(
-                        "[⚙️] Community settings changed: %s",
-                        ", ".join(changes),
-                    )
-                except discord.Forbidden as e:
+                else:
 
-                    if (
-                        "150011" in getattr(e, "text", "")
-                        or getattr(e, "code", None) == 150011
-                    ):
-                        logger.warning(
-                            "[⚠️] Cannot enable Community mode automatically for guild %s: "
-                            "missing permission or prerequisite setup.",
-                            guild.id,
-                        )
+                    return await guild.edit(rules_channel=rc, public_updates_channel=uc)
 
-                    else:
-                        logger.warning(
-                            "[⚠️] Failed editing Community settings for guild %s: %s",
-                            guild.id,
-                            e,
-                        )
-                except Exception as e:
+            try:
+                await _enable_with_channels()
+                parts.append("Updated Community mode")
+                logger.info(
+                    "[⚙️] Community settings changed: %s",
+                    ", ".join(changes) or "no delta",
+                )
+            except discord.Forbidden as e:
+
+                code = getattr(e, "code", None)
+                text = getattr(e, "text", "")
+                if code == 150011 or ("verification" in (text or "").lower()):
                     logger.warning(
-                        "[⚠️] Failed editing Community settings for guild %s: %s",
+                        "[⚠️] Community enable blocked for guild %s: verification/content prerequisites not met. "
+                        "Ensure verification ≥ Medium, explicit content filter = All Members, default notifications = Only Mentions.",
                         guild.id,
-                        e,
                     )
+                else:
+                    logger.warning(
+                        "[⚠️] Forbidden editing Community settings for guild %s (code=%s, text=%s).",
+                        guild.id,
+                        code,
+                        text,
+                    )
+            except discord.HTTPException as e:
+                logger.warning(
+                    "[⚠️] HTTP error editing Community settings for guild %s (status=%s, code=%s, text=%s).",
+                    guild.id,
+                    getattr(e, "status", None),
+                    getattr(e, "code", None),
+                    getattr(e, "text", None),
+                )
+            except Exception as e:
+                logger.warning(
+                    "[⚠️] Failed editing Community settings for guild %s: %s",
+                    guild.id,
+                    e,
+                )
 
         return parts
 
     async def _repair_deleted_categories(
-        self, guild: discord.Guild, sitemap: Dict
-    ) -> Tuple[int, int]:
+        self, guild: discord.Guild, sitemap: dict
+    ) -> tuple[int, int, set[int]]:
         """
-        Repairs deleted categories in a the clone guild by recreating missing categories
-        and reparenting channels to the newly created categories.
+        For THIS clone guild only:
+        - Ensure every upstream category has a mapped clone category present here.
+        - If a category is created/found, ensure only THIS clone's channels that belong to that upstream
+            category are parented correctly (skip if already correct).
         """
         created = 0
         reparented = 0
+        repaired_ids: set[int] = set()
 
-        host_guild_id = (sitemap.get("guild") or {}).get("id")
+        upstream_cats = {int(c["id"]): c for c in (sitemap.get("categories") or [])}
+        host_guild_id = int((sitemap.get("guild") or {}).get("id") or 0)
 
-        wanted = {c["id"] for c in sitemap.get("categories", [])}
-        name_for = {c["id"]: c["name"] for c in sitemap.get("categories", [])}
+        per_cat = (self.cat_map_by_clone or {}).get(int(guild.id), {}) or {}
+        per_chan = (self.chan_map_by_clone or {}).get(int(guild.id), {}) or {}
 
-        for cat_row in self.db.get_all_category_mappings():
-            orig_cat_id = cat_row["original_category_id"]
-            if orig_cat_id not in wanted:
-                continue
+        if not per_cat or not per_chan:
 
-            if not guild.get_channel(cat_row["cloned_category_id"]):
-                new_cat, did_create = await self._ensure_category(
-                    guild, orig_cat_id, name_for[orig_cat_id], host_guild_id
+            with contextlib.suppress(Exception):
+                self._load_mappings()
+                per_cat = (self.cat_map_by_clone or {}).get(int(guild.id), {}) or {}
+                per_chan = (self.chan_map_by_clone or {}).get(int(guild.id), {}) or {}
+
+        for orig_cat_id, upstream in upstream_cats.items():
+            upstream_name = (upstream.get("name") or "").strip()
+
+            mapping = per_cat.get(int(orig_cat_id))
+            if mapping is None:
+
+                row = self.db.get_category_mapping_by_original_and_clone(
+                    int(orig_cat_id), int(guild.id)
                 )
-                if did_create:
-                    created += 1
+                if row and not isinstance(row, dict):
+                    row = dict(row)
+                if row:
+                    mapping = row
+                    self.cat_map_by_clone.setdefault(int(guild.id), {})[
+                        int(orig_cat_id)
+                    ] = mapping
 
-                self.db.upsert_category_mapping(
-                    orig_id=orig_cat_id,
-                    orig_name=name_for[orig_cat_id],
-                    clone_id=new_cat.id,
-                    original_guild_id=host_guild_id,
-                    cloned_guild_id=guild.id,
-                )
+            clone_cat_id = int((mapping or {}).get("cloned_category_id") or 0)
+            cat_obj = guild.get_channel(clone_cat_id) if clone_cat_id else None
 
-                for ch_orig_id, ch_row in self.chan_map.items():
-                    if ch_row["original_parent_category_id"] != orig_cat_id:
+            if not cat_obj:
+
+                cat_obj = discord.utils.get(guild.categories, name=upstream_name)
+
+                if not cat_obj:
+
+                    try:
+                        await self.ratelimit.acquire_for_guild(
+                            ActionType.CREATE_CHANNEL, guild.id
+                        )
+                        cat_obj = await guild.create_category(
+                            upstream_name or "Category"
+                        )
+                        created += 1
+                        logger.info(
+                            "[repair:category-created] guild=%s(%d) orig_cat=%d name=%r new_id=%d",
+                            guild.name,
+                            guild.id,
+                            orig_cat_id,
+                            upstream_name,
+                            int(cat_obj.id),
+                        )
+                    except Exception:
+                        logger.warning(
+                            "[repair:category-create-failed] guild=%s(%d) orig_cat=%d name=%r",
+                            guild.name,
+                            guild.id,
+                            orig_cat_id,
+                            upstream_name,
+                            exc_info=True,
+                        )
+                        continue  # can't repair this one; move on
+
+                try:
+                    self.db.upsert_category_mapping(
+                        orig_id=int(orig_cat_id),
+                        orig_name=upstream_name or (cat_obj.name or "Category"),
+                        clone_id=int(cat_obj.id),
+                        clone_name=(mapping or {}).get("clone_category_name"),
+                        original_guild_id=int(host_guild_id),
+                        cloned_guild_id=int(guild.id),
+                    )
+                finally:
+                    m = {
+                        "original_category_id": int(orig_cat_id),
+                        "cloned_category_id": int(cat_obj.id),
+                        "original_guild_id": int(host_guild_id),
+                        "cloned_guild_id": int(guild.id),
+                        "clone_category_name": (mapping or {}).get(
+                            "clone_category_name"
+                        ),
+                    }
+                    self.cat_map_by_clone.setdefault(int(guild.id), {})[
+                        int(orig_cat_id)
+                    ] = m
+
+            # Now ensure THIS clone's channels whose upstream parent is orig_cat_id are parented.
+            cat_id_for_this_clone = int(cat_obj.id)
+            for ch_orig_id, ch_map in list(per_chan.items()):
+                try:
+                    if int(ch_map.get("original_parent_category_id") or 0) != int(
+                        orig_cat_id
+                    ):
+                        continue
+                    ch = guild.get_channel(int(ch_map.get("cloned_channel_id") or 0))
+                    if not ch:
                         continue
 
-                    ch = guild.get_channel(ch_row["cloned_channel_id"])
-                    ctype = (
-                        int(ch.type.value) if ch
-                        else int(ch_row.get("channel_type") or ChannelType.text.value)
+                    actual_parent_id = int(ch.category.id) if ch.category else None
+                    if actual_parent_id == cat_id_for_this_clone:
+                        logger.debug(
+                            "[repair:skip:already-correct] guild=%s(%d) ch_id=%d parent=%s",
+                            guild.name,
+                            guild.id,
+                            int(ch.id),
+                            str(actual_parent_id),
+                        )
+                        continue
+
+                    await self.ratelimit.acquire_for_guild(
+                        ActionType.EDIT_CHANNEL, guild.id
+                    )
+                    await ch.edit(category=cat_obj)
+                    reparented += 1
+                    repaired_ids.add(int(ch.id))
+                    logger.info(
+                        "[repair:reparent] guild=%s(%d) ch_id=%d → cat_id=%d(%r)",
+                        guild.name,
+                        guild.id,
+                        int(ch.id),
+                        int(cat_obj.id),
+                        cat_obj.name,
                     )
 
-                    # Only carry over the cloned_channel_id if it belongs to THIS clone guild.
-                    safe_clone_id = None
-                    if ch and int(getattr(ch.guild, "id", 0)) == int(guild.id):
-                        safe_clone_id = int(ch.id)
-
-                    self.db.upsert_channel_mapping(
-                        ch_orig_id,
-                        ch_row["original_channel_name"],
-                        safe_clone_id,  # <- may be None if channel id belongs to a different clone
-                        ch_row["channel_webhook_url"],
-                        ch_row["original_parent_category_id"],
-                        new_cat.id,
-                        ctype,
-                        original_guild_id=host_guild_id,
-                        cloned_guild_id=guild.id,
-                    )
-
-                    self.chan_map[ch_orig_id]["cloned_parent_category_id"] = new_cat.id
-
-                    ch = guild.get_channel(ch_row["cloned_channel_id"])
-                    if ch:
-                        await self.ratelimit.acquire_for_guild(
-                            ActionType.EDIT_CHANNEL, guild.id
+                    try:
+                        self.db.upsert_channel_mapping(
+                            int(ch_orig_id),
+                            ch_map.get("original_channel_name"),
+                            int(ch.id),
+                            ch_map.get("channel_webhook_url"),
+                            int(orig_cat_id),
+                            int(cat_id_for_this_clone),
+                            (
+                                int(ch.type.value)
+                                if hasattr(ch.type, "value")
+                                else int(ch.type)
+                            ),
+                            original_guild_id=int(host_guild_id),
+                            cloned_guild_id=int(guild.id),
+                            clone_name=(ch_map.get("clone_channel_name") or None),
                         )
-                        await ch.edit(category=new_cat)
-                        logger.info(
-                            "[✏️] Reparented channel '%s' (ID %d) → category '%s' (ID %d)",
-                            ch.name,
-                            ch.id,
-                            new_cat.name,
-                            new_cat.id,
-                        )
-                        reparented += 1
+                    finally:
+                        ch_map["cloned_parent_category_id"] = int(cat_id_for_this_clone)
 
-        return created, reparented
+                except Exception:
+                    logger.debug("[repair] channel reparent error", exc_info=True)
+
+        return created, reparented, repaired_ids
 
     async def _sync_categories(self, guild: Guild, sitemap: Dict) -> List[str]:
         """
@@ -1796,130 +2136,178 @@ class ServerReceiver:
     async def _sync_forums(self, guild: Guild, sitemap: Dict) -> List[str]:
         """
         Ensure forum channels exist and are mapped for THIS clone guild only.
+        - Creates forum channels as needed.
+        - Ensures a webhook exists and is STORED in channel_mappings.
+        - Keeps per-clone and global caches in sync.
         """
         parts: List[str] = []
         host_guild_id = int((sitemap.get("guild") or {}).get("id") or 0)
 
-        # always refresh caches before using them
         self._load_mappings()
 
-        forums = [c for c in (sitemap.get("channels") or []) if int(c.get("type", -1)) == ChannelType.forum.value]
+        forums = list(sitemap.get("forums") or [])
         if not forums:
             return parts
 
-        # per-clone mapping view
-        per_clone = (getattr(self, "chan_map_by_clone", {}) or {}).setdefault(int(guild.id), {})
+        def _cat_name_from_sitemap(cat_id: int | None) -> str | None:
+            if not cat_id:
+                return None
+            for cat in sitemap.get("categories") or []:
+                try:
+                    if int(cat.get("id") or 0) == int(cat_id):
+                        return cat.get("name")
+                except Exception:
+                    continue
+            return None
+
+        per_clone = (getattr(self, "chan_map_by_clone", {}) or {}).setdefault(
+            int(guild.id), {}
+        )
 
         created = 0
         renamed = 0
 
-        for f in forums:
-            orig_id   = int(f["id"])
-            name      = f.get("name") or "forum"
-            parent_id = f.get("parent_id")
-            parent_nm = f.get("parent_name")
+        async def _ensure_forum_webhook_url(
+            orig_id: int,
+            name: str,
+            ch: discord.ForumChannel,
+            parent_id: int | None,
+            cloned_parent_id: int | None,
+            existing_url: str | None,
+        ) -> str | None:
+            url = existing_url
+            if not url:
 
-            # resolve existing mapping for THIS (origin, clone) pair
+                wh = await self._create_webhook_safely(
+                    ch, "Copycord", await self._get_default_avatar_bytes()
+                )
+                if wh and getattr(wh, "id", None) and getattr(wh, "token", None):
+                    url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
+                else:
+                    url = None
+
+            self.db.upsert_channel_mapping(
+                original_channel_id=orig_id,
+                original_channel_name=name,
+                cloned_channel_id=int(ch.id),
+                channel_webhook_url=url,
+                original_parent_category_id=int(parent_id) if parent_id else None,
+                cloned_parent_category_id=cloned_parent_id,
+                channel_type=ChannelType.forum.value,
+                original_guild_id=host_guild_id,
+                cloned_guild_id=int(guild.id),
+            )
+
+            entry = {
+                "original_channel_id": orig_id,
+                "original_channel_name": name,
+                "cloned_channel_id": int(ch.id),
+                "channel_webhook_url": url,
+                "original_parent_category_id": int(parent_id) if parent_id else None,
+                "cloned_parent_category_id": cloned_parent_id,
+                "channel_type": ChannelType.forum.value,
+                "original_guild_id": host_guild_id,
+                "cloned_guild_id": int(guild.id),
+            }
+            per_clone[orig_id] = dict(entry)
+
+            self.chan_map[orig_id] = dict(entry)
+            return url
+
+        for f in forums:
+            orig_id = int(f["id"])
+            name = f.get("name") or "forum"
+            parent_id = int(f.get("category_id") or 0) or None
+            parent_nm = _cat_name_from_sitemap(parent_id) or "Text Channels"
+
             row = per_clone.get(orig_id)
             if row is None:
-                row = self.db.get_channel_mapping_by_original_and_clone(orig_id, int(guild.id))
+                row = self.db.get_channel_mapping_by_original_and_clone(
+                    orig_id, int(guild.id)
+                )
             row = self._rowdict(row)
 
-            clone_id = int(row["cloned_channel_id"]) if row and row.get("cloned_channel_id") else 0
+            clone_id = (
+                int(row["cloned_channel_id"])
+                if row and row.get("cloned_channel_id")
+                else 0
+            )
             ch = guild.get_channel(clone_id) if clone_id else None
 
-            # ensure parent category exists in THIS clone
             if parent_id:
-                cat, _ = await self._ensure_category(guild, int(parent_id), parent_nm or "Text Channels", host_guild_id)
+                cat, _ = await self._ensure_category(
+                    guild, int(parent_id), parent_nm, host_guild_id
+                )
                 cloned_parent_id = int(getattr(cat, "id", 0)) or None
             else:
                 cloned_parent_id = None
 
             if not ch:
-                # need to create forum in THIS clone
-                await self.ratelimit.acquire_for_guild(ActionType.CREATE_CHANNEL, guild.id)
-                overwrites = None
-                try:
-                    ch = await guild.create_forum(name=name, category=guild.get_channel(cloned_parent_id) if cloned_parent_id else None, overwrites=overwrites)
-                except TypeError:
-                    # older discord.py-self signature fallbacks
-                    ch = await guild.create_forum(name=name, category=guild.get_channel(cloned_parent_id) if cloned_parent_id else None)
+
+                await self.ratelimit.acquire_for_guild(
+                    ActionType.CREATE_CHANNEL, guild.id
+                )
+                ch = await guild.create_forum_channel(
+                    name=name,
+                    category=(
+                        guild.get_channel(cloned_parent_id)
+                        if cloned_parent_id
+                        else None
+                    ),
+                )
                 logger.info("[➕] Created forum channel '%s' #%d", name, ch.id)
                 created += 1
 
-                # write/update mapping for THIS pair
-                self.db.upsert_channel_mapping(
-                    original_channel_id=orig_id,
-                    original_channel_name=name,
-                    cloned_channel_id=int(ch.id),
-                    channel_webhook_url=None,
-                    original_parent_category_id=int(parent_id) if parent_id else None,
-                    cloned_parent_category_id=cloned_parent_id,
-                    channel_type=ChannelType.forum.value,
-                    original_guild_id=host_guild_id,
-                    cloned_guild_id=int(guild.id),
+                await _ensure_forum_webhook_url(
+                    orig_id=orig_id,
+                    name=name,
+                    ch=ch,
+                    parent_id=parent_id,
+                    cloned_parent_id=cloned_parent_id,
+                    existing_url=None,
                 )
-
-                # update caches with a plain dict
-                entry = {
-                    "original_channel_id": orig_id,
-                    "original_channel_name": name,
-                    "cloned_channel_id": int(ch.id),
-                    "channel_webhook_url": None,
-                    "original_parent_category_id": int(parent_id) if parent_id else None,
-                    "cloned_parent_category_id": cloned_parent_id,
-                    "channel_type": ChannelType.forum.value,
-                    "original_guild_id": host_guild_id,
-                    "cloned_guild_id": int(guild.id),
-                }
-                per_clone[orig_id] = dict(entry)
-                self.chan_map[orig_id] = dict(entry)
 
             else:
-                # rename if needed
+
                 if (ch.name or "") != name:
-                    await self.ratelimit.acquire_for_guild(ActionType.EDIT_CHANNEL, guild.id)
+                    await self.ratelimit.acquire_for_guild(
+                        ActionType.EDIT_CHANNEL, guild.id
+                    )
                     await ch.edit(name=name)
                     renamed += 1
-                    logger.info("[✏️] Renamed forum #%d: %s → %s", ch.id, ch.name, name)
+                    logger.info("[✏️] Renamed forum #%d to %s", ch.id, name)
 
-                # ensure parent matches
-                want_parent = guild.get_channel(cloned_parent_id) if cloned_parent_id else None
-                if want_parent and getattr(ch, "category_id", None) != cloned_parent_id:
-                    await self.ratelimit.acquire_for_guild(ActionType.EDIT_CHANNEL, guild.id)
-                    await ch.edit(category=want_parent)
-                    logger.info("[📁] Moved forum #%d under category #%d", ch.id, cloned_parent_id)
-
-                # keep DB/caches fresh (coerce row → dict, update)
-                self.db.upsert_channel_mapping(
-                    original_channel_id=orig_id,
-                    original_channel_name=name,
-                    cloned_channel_id=int(ch.id),
-                    channel_webhook_url=(row or {}).get("channel_webhook_url"),
-                    original_parent_category_id=int(parent_id) if parent_id else None,
-                    cloned_parent_category_id=cloned_parent_id,
-                    channel_type=ChannelType.forum.value,
-                    original_guild_id=host_guild_id,
-                    cloned_guild_id=int(guild.id),
+                want_parent = (
+                    guild.get_channel(cloned_parent_id) if cloned_parent_id else None
                 )
-                entry = {
-                    "original_channel_id": orig_id,
-                    "original_channel_name": name,
-                    "cloned_channel_id": int(ch.id),
-                    "channel_webhook_url": (row or {}).get("channel_webhook_url"),
-                    "original_parent_category_id": int(parent_id) if parent_id else None,
-                    "cloned_parent_category_id": cloned_parent_id,
-                    "channel_type": ChannelType.forum.value,
-                    "original_guild_id": host_guild_id,
-                    "cloned_guild_id": int(guild.id),
-                }
-                per_clone[orig_id] = dict(entry)
-                self.chan_map[orig_id] = dict(entry)
+                if want_parent and getattr(ch, "category_id", None) != cloned_parent_id:
+                    await self.ratelimit.acquire_for_guild(
+                        ActionType.EDIT_CHANNEL, guild.id
+                    )
+                    await ch.edit(category=want_parent)
+                    logger.info(
+                        "[📁] Moved forum #%d under category #%d",
+                        ch.id,
+                        cloned_parent_id,
+                    )
+
+                await _ensure_forum_webhook_url(
+                    orig_id=orig_id,
+                    name=name,
+                    ch=ch,
+                    parent_id=parent_id,
+                    cloned_parent_id=cloned_parent_id,
+                    existing_url=(row or {}).get("channel_webhook_url"),
+                )
 
         if created:
-            parts.append(f"Created {created} forum channel{'s' if created != 1 else ''}")
+            parts.append(
+                f"Created {created} forum channel{'s' if created != 1 else ''}"
+            )
         if renamed:
-            parts.append(f"Renamed {renamed} forum channel{'s' if renamed != 1 else ''}")
+            parts.append(
+                f"Renamed {renamed} forum channel{'s' if renamed != 1 else ''}"
+            )
         return parts
 
     async def _sync_channels(self, guild: Guild, sitemap: Dict) -> List[str]:
@@ -1949,16 +2337,22 @@ class ServerReceiver:
                 item["type"],
             )
 
-            # ---- per-clone cache + DB fallback, then normalize row ----
             per = self.chan_map_by_clone.setdefault(int(guild.id), {})
-            mrow = per.get(int(orig)) or self.db.get_channel_mapping_by_original_and_clone(int(orig), int(guild.id))
+            mrow = per.get(
+                int(orig)
+            ) or self.db.get_channel_mapping_by_original_and_clone(
+                int(orig), int(guild.id)
+            )
             if mrow is not None and not isinstance(mrow, dict):
                 mrow = dict(mrow)
-                per[int(orig)] = mrow  # keep cache consistent
+                per[int(orig)] = mrow
 
-            is_new = not (mrow and mrow.get("cloned_channel_id") and guild.get_channel(int(mrow["cloned_channel_id"])))
+            is_new = not (
+                mrow
+                and mrow.get("cloned_channel_id")
+                and guild.get_channel(int(mrow["cloned_channel_id"]))
+            )
 
-            # Ensure channel + webhook for THIS clone
             _, clone_id, _ = await self._ensure_channel_and_webhook(
                 host_guild_id, guild, orig, name, pid, pname, ctype
             )
@@ -1969,15 +2363,19 @@ class ServerReceiver:
             if not ch:
                 continue
 
-            # ---- convert to Announcement if needed (clone-scoped, uses mrow) ----
             if ctype == ChannelType.news.value:
                 if "NEWS" in guild.features and ch.type != ChannelType.news:
-                    await self.ratelimit.acquire_for_guild(ActionType.EDIT_CHANNEL, guild.id)
+                    await self.ratelimit.acquire_for_guild(
+                        ActionType.EDIT_CHANNEL, guild.id
+                    )
                     await ch.edit(type=ChannelType.news)
                     converted += 1
-                    logger.info("[✏️] Converted channel '%s' (ID %d) to Announcement", ch.name, ch.id)
+                    logger.info(
+                        "[✏️] Converted channel '%s' (ID %d) to Announcement",
+                        ch.name,
+                        ch.id,
+                    )
 
-                    # Refresh mrow from cache (it now exists for sure) and upsert with NEWS type
                     mrow = per.get(int(orig)) or mrow or {}
                     if not isinstance(mrow, dict):
                         mrow = dict(mrow)
@@ -1992,23 +2390,29 @@ class ServerReceiver:
                         ChannelType.news.value,
                         original_guild_id=host_guild_id,
                         cloned_guild_id=guild.id,
+                        clone_name=mrow.get("clone_channel_name") or None,
                     )
-                    # keep per-clone cache in sync
+
                     per[int(orig)] = {
                         "original_channel_id": int(orig),
-                        "original_channel_name": mrow.get("original_channel_name", name),
+                        "original_channel_name": mrow.get(
+                            "original_channel_name", name
+                        ),
                         "cloned_channel_id": int(ch.id),
                         "channel_webhook_url": mrow.get("channel_webhook_url"),
-                        "original_parent_category_id": mrow.get("original_parent_category_id"),
-                        "cloned_parent_category_id": mrow.get("cloned_parent_category_id"),
+                        "original_parent_category_id": mrow.get(
+                            "original_parent_category_id"
+                        ),
+                        "cloned_parent_category_id": mrow.get(
+                            "cloned_parent_category_id"
+                        ),
                         "channel_type": ChannelType.news.value,
                         "original_guild_id": host_guild_id,
                         "cloned_guild_id": guild.id,
+                        "clone_channel_name": mrow.get("clone_channel_name") or None,
                     }
-                    # (optional compat) update legacy flat cache if you still read it elsewhere
                     self.chan_map[int(orig)] = dict(per[int(orig)])
 
-            # Rename to match sitemap
             did_rename, _reason = await self._maybe_rename_channel(ch, name, orig)
             if did_rename:
                 renamed += 1
@@ -2021,7 +2425,6 @@ class ServerReceiver:
             parts.append(f"Renamed {renamed} channels")
 
         return parts
-
 
     async def _sync_threads(self, guild: Guild, sitemap: Dict) -> List[str]:
         """
@@ -2444,37 +2847,44 @@ class ServerReceiver:
         orig_source_id: int,
     ) -> tuple[bool, str]:
         """
-        Ensure the cloned channel's name is correct given:
-        - upstream_name: the current name from the host/server (client sitemap)
-        - clone "pin": channel_mappings.clone_channel_name
-
-        Rules:
-        - If a pin (clone_channel_name) exists:
-            * If the live clone name != pin, rename to the pin.
-            * Always persist the latest upstream name into DB (mapping), but keep the pin.
-        - If no pin:
-            * If live clone name != upstream_name, rename to upstream_name.
-
-        Returns:
-        (did_rename, reason)
-            reason ∈ {"pinned_enforced","match_upstream","skipped_already_ok","skipped_error"}
+        Enforce per-clone pinned name (channel_mappings.clone_channel_name);
+        otherwise match upstream.
         """
         try:
+            per_clone = (self.chan_map_by_clone or {}).get(int(ch.guild.id), {}) or {}
+            mapping = per_clone.get(int(orig_source_id))
 
-            mapping = self.chan_map.get(orig_source_id)
-            if mapping is None:
-                with contextlib.suppress(Exception):
-                    self._load_mappings()
-                    mapping = self.chan_map.get(orig_source_id)
+            if mapping is None or "clone_channel_name" not in mapping:
+                dbrow = self.db.get_channel_mapping_by_original_and_clone(
+                    int(orig_source_id), int(ch.guild.id)
+                )
+                if dbrow:
+                    mapping = dict(dbrow)
+                    for k in (
+                        "original_channel_id",
+                        "cloned_channel_id",
+                        "original_parent_category_id",
+                        "cloned_parent_category_id",
+                        "original_guild_id",
+                        "cloned_guild_id",
+                        "channel_type",
+                    ):
+                        if mapping.get(k) is not None:
+                            try:
+                                mapping[k] = int(mapping[k])
+                            except Exception:
+                                pass
+                    self.chan_map_by_clone.setdefault(int(ch.guild.id), {})[
+                        int(orig_source_id)
+                    ] = mapping
 
-            pinned_name_raw = (mapping or {}).get("clone_channel_name") or ""
-            pinned_name = pinned_name_raw.strip()
+            pinned_name = ((mapping or {}).get("clone_channel_name") or "").strip()
             has_pin = bool(pinned_name)
 
             if mapping is not None:
                 try:
                     self.db.upsert_channel_mapping(
-                        orig_source_id,
+                        int(orig_source_id),
                         upstream_name,
                         mapping.get("cloned_channel_id"),
                         mapping.get("channel_webhook_url"),
@@ -2485,72 +2895,54 @@ class ServerReceiver:
                         original_guild_id=mapping.get("original_guild_id"),
                         cloned_guild_id=mapping.get("cloned_guild_id"),
                     )
-
                     mapping["original_channel_name"] = upstream_name
                     if has_pin:
                         mapping["clone_channel_name"] = pinned_name
                 except Exception:
                     logger.debug("[rename] mapping upsert failed", exc_info=True)
 
-            if has_pin:
-
-                if ch.name != pinned_name:
-                    old = ch.name
-                    await self.ratelimit.acquire_for_guild(
-                        ActionType.EDIT_CHANNEL, ch.guild.id
-                    )
-                    await ch.edit(name=pinned_name)
-                    logger.info(
-                        "[📌] Enforced pinned name on #%d: %r → %r",
-                        ch.id,
-                        old,
-                        pinned_name,
-                    )
-                    return True, "pinned_enforced"
+            target = (pinned_name or upstream_name).strip()
+            if (ch.name or "").strip() == target:
                 return False, "skipped_already_ok"
 
-            if ch.name != upstream_name:
-                old = ch.name
-                await self.ratelimit.acquire_for_guild(
-                    ActionType.EDIT_CHANNEL, ch.guild.id
-                )
-                await ch.edit(name=upstream_name)
+            await self.ratelimit.acquire_for_guild(ActionType.EDIT_CHANNEL, ch.guild.id)
+            await ch.edit(name=target)
+
+            if has_pin:
                 logger.info(
-                    "[✏️] Renamed channel #%d: %r → %r",
-                    ch.id,
-                    old,
-                    upstream_name,
+                    "[📌] Enforced pinned name on #%d: %r → %r", ch.id, ch.name, target
                 )
+                return True, "pinned_enforced"
+            else:
+                logger.info("[✏️] Renamed channel #%d: %r → %r", ch.id, ch.name, target)
                 return True, "match_upstream"
 
-            return False, "skipped_already_ok"
-
         except Exception:
-            logger.debug(
-                "[rename] _maybe_apply_pinned_or_upstream_name error", exc_info=True
-            )
+            logger.debug("[rename] _maybe_rename_channel error", exc_info=True)
             return False, "skipped_error"
 
-    async def _handle_removed_categories(self, guild: discord.Guild, sitemap: Dict) -> int:
+    async def _handle_removed_categories(
+        self, guild: discord.Guild, sitemap: Dict
+    ) -> int:
         """
         Remove categories that no longer exist on the host for THIS clone guild only.
         """
-        # fresh caches
+
         self._load_mappings()
 
         valid_ids = {int(c["id"]) for c in (sitemap.get("categories") or [])}
         removed = 0
 
         # IMPORTANT: look only at this clone's view of the world
-        per_all = (getattr(self, "cat_map_by_clone", {}) or {})
-        per_clone = dict(per_all.get(int(guild.id), {}) or {})  # shallow copy
+        per_all = getattr(self, "cat_map_by_clone", {}) or {}
+        per_clone = dict(per_all.get(int(guild.id), {}) or {})
 
         for orig_id_key, raw_row in list(per_clone.items()):
             row = self._rowdict(raw_row)
             try:
                 orig_id = int(orig_id_key)
             except Exception:
-                # if the key was stringy, try row field
+
                 try:
                     orig_id = int(row.get("original_category_id"))
                 except Exception:
@@ -2563,36 +2955,35 @@ class ServerReceiver:
 
             ch = guild.get_channel(int(row.get("cloned_category_id") or 0))
 
-            # Resolve per-mapping settings for THIS (host, clone) pair
             settings = (
                 resolve_mapping_settings(
                     self.db,
                     self.config,
                     original_guild_id=int(row.get("original_guild_id") or 0),
                     cloned_guild_id=int(row.get("cloned_guild_id") or guild.id),
-                ) or {}
+                )
+                or {}
             )
             delete_channels = bool(settings.get("DELETE_CHANNELS", False))
 
             if ch and delete_channels:
-                await self.ratelimit.acquire_for_guild(ActionType.DELETE_CHANNEL, guild.id)
+                await self.ratelimit.acquire_for_guild(
+                    ActionType.DELETE_CHANNEL, guild.id
+                )
                 await ch.delete()
                 logger.info("[🗑️] Deleted category %s", getattr(ch, "name", ch.id))
 
-            # Delete mapping ONLY for this clone (pair delete)
             try:
                 self.db.delete_category_mapping_pair(int(orig_id), int(guild.id))
             except Exception:
                 self.db.delete_category_mapping(int(orig_id))
 
-            # Drop from both the per-clone cache and any flat cache copy
             per_all.setdefault(int(guild.id), {}).pop(int(orig_id), None)
             self.cat_map.pop(int(orig_id), None)
 
             removed += 1
 
         return removed
-    
 
     def _protected_channel_ids(self, guild: discord.Guild) -> set[int]:
         ids = set()
@@ -2602,20 +2993,22 @@ class ServerReceiver:
                 ids.add(ch.id)
         return ids
 
-    async def _handle_removed_channels(self, guild: discord.Guild, incoming: List[Dict]) -> int:
+    async def _handle_removed_channels(
+        self, guild: discord.Guild, incoming: List[Dict]
+    ) -> int:
         """
         Delete cloned channels not present on the host, for THIS clone guild only.
         Always removes the (origin, clone) mapping row for this guild when host no longer has it.
         """
-        # fresh caches
+
         self._load_mappings()
 
         valid_ids = {int(c["id"]) for c in (incoming or [])}
         removed = 0
         protected = self._protected_channel_ids(guild)
 
-        per_all = (getattr(self, "chan_map_by_clone", {}) or {})
-        per_clone = dict(per_all.get(int(guild.id), {}) or {})  # shallow copy
+        per_all = getattr(self, "chan_map_by_clone", {}) or {}
+        per_clone = dict(per_all.get(int(guild.id), {}) or {})
 
         for orig_id_key, raw_row in list(per_clone.items()):
             row = self._rowdict(raw_row)
@@ -2635,14 +3028,14 @@ class ServerReceiver:
             clone_id = int(row.get("cloned_channel_id") or 0)
             ch = guild.get_channel(clone_id)
 
-            # Per-mapping settings for THIS (host, clone) pair
             settings = (
                 resolve_mapping_settings(
                     self.db,
                     self.config,
                     original_guild_id=int(row.get("original_guild_id") or 0),
                     cloned_guild_id=int(row.get("cloned_guild_id") or guild.id),
-                ) or {}
+                )
+                or {}
             )
             delete_channels = bool(settings.get("DELETE_CHANNELS", False))
 
@@ -2650,31 +3043,39 @@ class ServerReceiver:
                 if ch.id in protected:
                     logger.info(
                         "[🛡️] Skipping deletion of protected channel #%s (%d).",
-                        ch.name, ch.id
+                        ch.name,
+                        ch.id,
                     )
                 else:
-                    await self.ratelimit.acquire_for_guild(ActionType.DELETE_CHANNEL, guild.id)
+                    await self.ratelimit.acquire_for_guild(
+                        ActionType.DELETE_CHANNEL, guild.id
+                    )
                     try:
                         await ch.delete()
                         logger.info("[🗑️] Deleted channel #%s (%d)", ch.name, ch.id)
                     except discord.HTTPException as e:
-                        if getattr(e, "code", None) == 50074 or "required for community" in str(e):
+                        if getattr(
+                            e, "code", None
+                        ) == 50074 or "required for community" in str(e):
                             logger.info(
                                 "[🛡️] API blocked deletion of #%s (%d): protected. Dropping mapping only.",
-                                getattr(ch, "name", "?"), ch.id
+                                getattr(ch, "name", "?"),
+                                ch.id,
                             )
                         else:
-                            logger.warning("[⚠️] Failed to delete channel #%d: %s", ch.id, e)
+                            logger.warning(
+                                "[⚠️] Failed to delete channel #%d: %s", ch.id, e
+                            )
             elif not ch:
-                logger.info("[🗑️] Cloned channel #%d not found; removing mapping", clone_id)
+                logger.info(
+                    "[🗑️] Cloned channel #%d not found; removing mapping", clone_id
+                )
 
-            # Delete mapping ONLY for this clone (pair delete)
             try:
                 self.db.delete_channel_mapping_pair(int(orig_id), int(guild.id))
             except Exception:
                 self.db.delete_channel_mapping(int(orig_id))
 
-            # Remove from caches
             per_all.setdefault(int(guild.id), {}).pop(int(orig_id), None)
             self.chan_map.pop(int(orig_id), None)
 
@@ -2682,82 +3083,68 @@ class ServerReceiver:
 
         return removed
 
-
-
     async def _maybe_rename_category(
         self,
         cat: discord.CategoryChannel,
-        upstream_name: str,
-        orig_cat_id: int,
-        host_guild_id: Optional[int],
+        *,
+        host_guild_id: int,
+        original_category_id: int,
+        upstream_name: str | None,
     ) -> tuple[bool, str]:
-        """
-        Apply a pinned name (if any) for this category; otherwise match upstream.
-        """
         try:
-
-            mapping = self.cat_map.get(orig_cat_id)
+            per_clone = (self.cat_map_by_clone or {}).get(int(cat.guild.id), {}) or {}
+            mapping = per_clone.get(int(original_category_id))
             if mapping is None:
-                with contextlib.suppress(Exception):
-                    self._load_mappings()
-                    mapping = self.cat_map.get(orig_cat_id)
+                mapping = self.db.get_category_mapping_by_original_and_clone(
+                    int(original_category_id), int(cat.guild.id)
+                )
+                if mapping and not isinstance(mapping, dict):
+                    mapping = dict(mapping)
+                if mapping:
+                    self.cat_map_by_clone.setdefault(int(cat.guild.id), {})[
+                        int(original_category_id)
+                    ] = mapping
 
-            pinned_raw = (mapping or {}).get("cloned_category_name") or ""
-            pinned_name = pinned_raw.strip()
-            has_pin = bool(pinned_name)
+            pinned = ((mapping or {}).get("clone_category_name") or "").strip()
+            desired = pinned or (upstream_name or "").strip()
+            current = (getattr(cat, "name", "") or "").strip()
 
-            if mapping is not None:
-                try:
-                    self.db.upsert_category_mapping(
-                        orig_id=orig_cat_id,
-                        orig_name=upstream_name,
-                        clone_id=int(mapping.get("cloned_category_id") or cat.id),
-                        clone_name=pinned_name if has_pin else None,
-                        original_guild_id=host_guild_id,
-                        cloned_guild_id=cat.guild.id,
-                    )
-                    mapping["original_category_name"] = upstream_name
-                    if has_pin:
-                        mapping["cloned_category_name"] = pinned_name
-                except Exception:
-                    logger.debug(
-                        "[rename] category mapping upsert failed", exc_info=True
-                    )
+            if not desired or current == desired:
+                return False, "skipped_already_ok"
 
-            desired = pinned_name if has_pin else upstream_name
-            if cat.name == desired:
-                return (False, "skipped_already_ok")
-
-            old = cat.name
             await self.ratelimit.acquire_for_guild(
                 ActionType.EDIT_CHANNEL, cat.guild.id
             )
-            await cat.edit(name=desired)
+            await cat.edit(
+                name=desired, reason="Copycord: apply pinned/or upstream category name"
+            )
+            logger.info("[📌] Renamed category %r → %r", current, desired)
 
-            if has_pin:
-
-                logger.info(
-                    "[📌] Enforced pinned category name on %d: %r → %r",
-                    cat.id,
-                    old,
-                    desired,
+            try:
+                self.db.upsert_category_mapping(
+                    orig_id=int(original_category_id),
+                    orig_name=(upstream_name or cat.name or "").strip(),
+                    clone_id=int(cat.id),
+                    clone_name=(pinned or None),
+                    original_guild_id=int(host_guild_id),
+                    cloned_guild_id=int(cat.guild.id),
                 )
+            except Exception:
+                logger.debug("[rename] category upsert failed", exc_info=True)
 
-                return (True, "pinned_enforced")
-            else:
-                logger.info(
-                    "[✏️] Renamed category %d: %r → %r",
-                    cat.id,
-                    old,
-                    desired,
-                )
-                return (True, "match_upstream")
+            return True, ("pinned_enforced" if pinned else "match_upstream")
 
         except Exception:
-            logger.debug("[rename] _maybe_rename_category error", exc_info=True)
-            return (False, "skipped_error")
+            logger.debug(
+                "_maybe_rename_category failed for cat=%s",
+                getattr(cat, "id", "?"),
+                exc_info=True,
+            )
+            return False, "skipped_error"
 
-    async def _handle_renamed_categories(self, guild: discord.Guild, sitemap: Dict) -> int:
+    async def _handle_renamed_categories(
+        self, guild: discord.Guild, sitemap: Dict
+    ) -> int:
         """Rename categories in THIS clone to match upstream (or pinned)."""
         renamed = 0
         desired = {c["id"]: c["name"] for c in sitemap.get("categories", [])}
@@ -2775,7 +3162,12 @@ class ServerReceiver:
             if not clone_cat:
                 continue
 
-            did, _ = await self._maybe_rename_category(clone_cat, upstream_name, orig_id, host_guild_id)
+            did, _ = await self._maybe_rename_category(
+                clone_cat,
+                host_guild_id=host_guild_id,
+                original_category_id=orig_id,
+                upstream_name=upstream_name,
+            )
             if did:
                 renamed += 1
         return renamed
@@ -2792,12 +3184,10 @@ class ServerReceiver:
         Returns (category_obj, did_create).
         """
 
-        # --- ensure persistent per-clone cache exists ---
         if not hasattr(self, "cat_map_by_clone") or self.cat_map_by_clone is None:
             self.cat_map_by_clone = {}
         per_clone = self.cat_map_by_clone.setdefault(int(guild.id), {})
 
-        # 1) try per-clone cache (normalize if sqlite3.Row)
         row = per_clone.get(int(original_id))
         if row is not None and not isinstance(row, dict):
             row = dict(row)
@@ -2810,14 +3200,15 @@ class ServerReceiver:
                 if cat:
                     return cat, False
 
-        # 2) DB fallback: get mapping for (original_id, cloned_guild_id)
         try:
-            dbrow = self.db.get_category_mapping_by_original_and_clone(int(original_id), int(guild.id))
+            dbrow = self.db.get_category_mapping_by_original_and_clone(
+                int(original_id), int(guild.id)
+            )
         except Exception:
             dbrow = None
 
         if dbrow:
-            # normalize sqlite3.Row -> dict before .get(...)
+
             if not isinstance(dbrow, dict):
                 dbrow = {k: dbrow[k] for k in dbrow.keys()}
             clone_id = int(dbrow.get("cloned_category_id") or 0)
@@ -2827,19 +3218,19 @@ class ServerReceiver:
                     entry = {
                         "original_category_id": int(original_id),
                         "cloned_category_id": clone_id,
-                        "original_category_name": dbrow.get("original_category_name") or name,
+                        "original_category_name": dbrow.get("original_category_name")
+                        or name,
                         "cloned_category_name": dbrow.get("cloned_category_name"),
                         "original_guild_id": int(dbrow.get("original_guild_id") or 0),
                         "cloned_guild_id": int(guild.id),
                     }
                     per_clone[int(original_id)] = entry
-                    # keep legacy global cache in sync (compat)
+
                     if not hasattr(self, "cat_map") or self.cat_map is None:
                         self.cat_map = {}
                     self.cat_map[int(original_id)] = dict(entry)
                     return cat, False
 
-        # 3) not found or stale -> create in THIS clone
         await self.ratelimit.acquire_for_guild(ActionType.CREATE_CHANNEL, guild.id)
         cat = await guild.create_category(name)
         logger.info("[➕] Created category '%s' #%d", name, cat.id)
@@ -2867,13 +3258,14 @@ class ServerReceiver:
         self.cat_map[int(original_id)] = dict(entry)
         return cat, True
 
-
     async def _create_webhook_safely(self, ch, name, avatar_bytes):
         if self._shutting_down:
             return
-        gate = self._get_webhook_gate(int(ch.guild.id))  # per-clone gate
+        gate = self._get_webhook_gate(int(ch.guild.id))
         async with gate:
-            await self.ratelimit.acquire_for_guild(ActionType.WEBHOOK_CREATE, ch.guild.id)
+            await self.ratelimit.acquire_for_guild(
+                ActionType.WEBHOOK_CREATE, ch.guild.id
+            )
             try:
                 await self._get_default_avatar_bytes()
             except Exception:
@@ -2895,25 +3287,27 @@ class ServerReceiver:
         channel_type: int,
     ) -> Tuple[int, int, str]:
         if self._shutting_down:
-            return  # type: ignore[return-value]
+            return
 
         category = None
         if parent_id is not None:
-            category, _ = await self._ensure_category(guild, parent_id, parent_name, host_guild_id)
+            category, _ = await self._ensure_category(
+                guild, parent_id, parent_name, host_guild_id
+            )
 
-        # ---- clone-scoped cache & precise DB lookup ----
         per = self.chan_map_by_clone.setdefault(int(guild.id), {})
         row = per.get(int(original_id))
         if not row:
             try:
-                row = self.db.get_channel_mapping_by_original_and_clone(int(original_id), int(guild.id))
+                row = self.db.get_channel_mapping_by_original_and_clone(
+                    int(original_id), int(guild.id)
+                )
             except Exception:
                 row = None
 
-        # NEW: normalize sqlite3.Row -> dict so .get(...) works
         if row is not None and not isinstance(row, dict):
             row = dict(row)
-            per[int(original_id)] = row  # keep cache consistent
+            per[int(original_id)] = row
 
         if row:
             clone_id = int(row.get("cloned_channel_id") or 0)
@@ -2934,7 +3328,9 @@ class ServerReceiver:
                         int(parent_id) if parent_id is not None else None,
                         int(category.id) if category else None,
                         int(channel_type),
-                        original_guild_id=int(host_guild_id) if host_guild_id is not None else None,
+                        original_guild_id=(
+                            int(host_guild_id) if host_guild_id is not None else None
+                        ),
                         cloned_guild_id=int(guild.id),
                     )
 
@@ -2943,28 +3339,37 @@ class ServerReceiver:
                     "original_channel_name": original_name,
                     "cloned_channel_id": int(clone_id),
                     "channel_webhook_url": wh_url,
-                    "original_parent_category_id": int(parent_id) if parent_id is not None else None,
+                    "original_parent_category_id": (
+                        int(parent_id) if parent_id is not None else None
+                    ),
                     "cloned_parent_category_id": int(category.id) if category else None,
                     "channel_type": int(channel_type),
-                    "original_guild_id": int(host_guild_id) if host_guild_id is not None else None,
+                    "original_guild_id": (
+                        int(host_guild_id) if host_guild_id is not None else None
+                    ),
                     "cloned_guild_id": int(guild.id),
                 }
-                self._schedule_flush(chan_ids={int(original_id)}, thread_parent_ids={int(original_id)})
+                self._schedule_flush(
+                    chan_ids={int(original_id)}, thread_parent_ids={int(original_id)}
+                )
                 self._unmapped_warned.discard(int(original_id))
                 return int(original_id), int(clone_id), str(wh_url)
 
-            # stale just for THIS clone
             try:
                 self.db.delete_channel_mapping_pair(int(original_id), int(guild.id))
             except Exception:
-                self.log.exception("Failed to delete stale mapping pair for orig=%s clone=%s",
-                                original_id, guild.id)
+                self.log.exception(
+                    "Failed to delete stale mapping pair for orig=%s clone=%s",
+                    original_id,
+                    guild.id,
+                )
             per.pop(int(original_id), None)
 
-        # ---- create in THIS clone ----
         kind = "news" if int(channel_type) == discord.ChannelType.news.value else "text"
         ch = await self._create_channel(guild, kind, original_name, category)
-        wh = await self._create_webhook_safely(ch, "Copycord", await self._get_default_avatar_bytes())
+        wh = await self._create_webhook_safely(
+            ch, "Copycord", await self._get_default_avatar_bytes()
+        )
         url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
 
         self.db.upsert_channel_mapping(
@@ -2984,60 +3389,107 @@ class ServerReceiver:
             "original_channel_name": original_name,
             "cloned_channel_id": int(ch.id),
             "channel_webhook_url": url,
-            "original_parent_category_id": int(parent_id) if parent_id is not None else None,
+            "original_parent_category_id": (
+                int(parent_id) if parent_id is not None else None
+            ),
             "cloned_parent_category_id": int(category.id) if category else None,
             "channel_type": int(channel_type),
-            "original_guild_id": int(host_guild_id) if host_guild_id is not None else None,
+            "original_guild_id": (
+                int(host_guild_id) if host_guild_id is not None else None
+            ),
             "cloned_guild_id": int(guild.id),
         }
-        self._schedule_flush(chan_ids={int(original_id)}, thread_parent_ids={int(original_id)})
+        self._schedule_flush(
+            chan_ids={int(original_id)}, thread_parent_ids={int(original_id)}
+        )
         self._unmapped_warned.discard(int(original_id))
         return int(original_id), int(ch.id), str(url)
-
-
 
     async def _handle_master_channel_moves(
         self,
         guild: discord.Guild,
-        incoming: List[Dict],
+        incoming: list[dict],
         host_guild_id: int | None,
+        *,
+        skip_channel_ids: set[int] | None = None,
     ) -> bool:
         """
-        Re-parent cloned channels whenever the upstream parent (from sitemap) differs
-        from what’s live in Discord. Updates DB mapping so future syncs keep the new parent.
+        Re-parent cloned channels for THIS clone guild only, when upstream parent differs.
+        Updates DB mapping for THIS clone so future syncs keep the new parent.
         """
         moved = 0
+        skip_channel_ids = skip_channel_ids or set()
+        host_guild_id = int(host_guild_id or 0)
+
+        per_chan = (self.chan_map_by_clone or {}).get(int(guild.id), {}) or {}
+        per_cat = (self.cat_map_by_clone or {}).get(int(guild.id), {}) or {}
+
+        if not per_chan or not per_cat:
+            import contextlib
+
+            with contextlib.suppress(Exception):
+                self._load_mappings()
+                per_chan = (self.chan_map_by_clone or {}).get(int(guild.id), {}) or {}
+                per_cat = (self.cat_map_by_clone or {}).get(int(guild.id), {}) or {}
 
         for item in incoming:
-            orig_id = item["id"]
-            row = self.chan_map.get(orig_id)
+            orig_id = int(item["id"])
+            row = per_chan.get(orig_id)
+            if not row:
+                r = self.db.get_channel_mapping_by_original_and_clone(
+                    orig_id, int(guild.id)
+                )
+                if r and not isinstance(r, dict):
+                    r = dict(r)
+                if r:
+                    row = r
+                    per_chan[orig_id] = row
             if not row:
                 continue
 
-            clone_id = row["cloned_channel_id"]
-            ch = guild.get_channel(clone_id)
+            clone_id = int(row.get("cloned_channel_id") or 0)
+            ch = guild.get_channel(clone_id) if clone_id else None
             if not ch:
                 continue
 
-            upstream_parent = item["parent_id"]
-            if upstream_parent is None:
-                desired_parent = None
-                desired_parent_clone_id = None
-            else:
-                cat_row = self.cat_map.get(upstream_parent)
-                desired_parent_clone_id = (
-                    cat_row["cloned_category_id"] if cat_row else None
-                )
-                desired_parent = (
-                    guild.get_channel(desired_parent_clone_id)
-                    if desired_parent_clone_id
-                    else None
-                )
+            if int(ch.id) in skip_channel_ids:
+                continue
 
-            actual_parent = ch.category
-            actual_parent_id = actual_parent.id if actual_parent else None
+            upstream_parent = item.get("parent_id", None)
+            upstream_parent_id = (
+                int(upstream_parent) if upstream_parent is not None else None
+            )
 
-            if actual_parent_id == desired_parent_clone_id:
+            cat_row = None
+            if upstream_parent_id is not None:
+                cat_row = per_cat.get(upstream_parent_id)
+                if cat_row is None:
+                    cr = self.db.get_category_mapping_by_original_and_clone(
+                        upstream_parent_id, int(guild.id)
+                    )
+                    if cr and not isinstance(cr, dict):
+                        cr = dict(cr)
+                    if cr:
+                        cat_row = cr
+                        self.cat_map_by_clone.setdefault(int(guild.id), {})[
+                            upstream_parent_id
+                        ] = cr
+
+            desired_parent_clone_id = (
+                int(cat_row["cloned_category_id"]) if cat_row else None
+            )
+            desired_parent = (
+                guild.get_channel(desired_parent_clone_id)
+                if desired_parent_clone_id
+                else None
+            )
+
+            actual_parent_id = int(ch.category.id) if ch.category else None
+            actual_parent_name = getattr(ch.category, "name", None)
+
+            if actual_parent_id == (
+                desired_parent_clone_id if desired_parent_clone_id is not None else None
+            ):
                 continue
 
             try:
@@ -3046,40 +3498,61 @@ class ServerReceiver:
                 )
                 await ch.edit(category=desired_parent)
                 moved += 1
-                old_name = actual_parent.name if actual_parent else "standalone"
-                new_name = desired_parent.name if desired_parent else "standalone"
+                old_name = actual_parent_name or "standalone"
+                new_name = getattr(desired_parent, "name", None) or "standalone"
                 logger.info(
-                    "[✏️] Reparented channel '%s' (ID %d) from '%s' → '%s'",
-                    ch.name,
-                    clone_id,
+                    "[reparent:done] guild=%s(%d) ch=%r id=%d from %r → %r",
+                    guild.name,
+                    int(guild.id),
+                    getattr(ch, "name", "?"),
+                    int(ch.id),
                     old_name,
                     new_name,
                 )
-            except Exception as e:
+            except Exception:
                 logger.warning(
-                    "[⚠️] Failed to reparent channel '%s' (ID %d): %s",
-                    ch.name,
-                    clone_id,
-                    e,
+                    "[reparent:failed] guild=%s(%d) ch=%r id=%d (desired_parent=%s)",
+                    guild.name,
+                    int(guild.id),
+                    getattr(ch, "name", "?"),
+                    int(ch.id),
+                    str(desired_parent_clone_id),
+                    exc_info=True,
                 )
-
                 continue
-            ctype = ch.type.value if ch else None
 
-            self.db.upsert_channel_mapping(
-                orig_id,
-                row["original_channel_name"],
-                clone_id,
-                row["channel_webhook_url"],
-                upstream_parent,
-                desired_parent_clone_id,
-                ctype,
-                original_guild_id=host_guild_id,
-                cloned_guild_id=guild.id,
+            # Persist only THIS clone's parent ids (None-safe)
+            ctype = (
+                int(getattr(ch.type, "value", 0))
+                if hasattr(ch.type, "value")
+                else int(ch.type)
             )
-            self.chan_map[orig_id][
-                "cloned_parent_category_id"
-            ] = desired_parent_clone_id
+            try:
+                self.db.upsert_channel_mapping(
+                    int(orig_id),
+                    row.get("original_channel_name"),
+                    int(ch.id),
+                    row.get("channel_webhook_url"),
+                    int(upstream_parent_id) if upstream_parent_id is not None else None,
+                    (
+                        int(desired_parent_clone_id)
+                        if desired_parent_clone_id is not None
+                        else None
+                    ),
+                    ctype,
+                    original_guild_id=host_guild_id,
+                    cloned_guild_id=int(guild.id),
+                    clone_name=(row.get("clone_channel_name") or None),
+                )
+            finally:
+                row["original_parent_category_id"] = (
+                    int(upstream_parent_id) if upstream_parent_id is not None else None
+                )
+                row["cloned_parent_category_id"] = (
+                    int(desired_parent_clone_id)
+                    if desired_parent_clone_id is not None
+                    else None
+                )
 
         return moved
 
@@ -3272,8 +3745,9 @@ class ServerReceiver:
         if not orig_tid:
             return
 
-        # -------------- helpers --------------
-        async def _resolve_thread_obj(guild, thread_id: int, forum_parent_id: int | None):
+        async def _resolve_thread_obj(
+            guild, thread_id: int, forum_parent_id: int | None
+        ):
             """
             Find a discord.Thread in the clone guild, trying multiple strategies:
             1) guild.get_thread(id)
@@ -3284,7 +3758,6 @@ class ServerReceiver:
             """
             import discord
 
-            # 1) cached thread list
             try:
                 th = getattr(guild, "get_thread", None)
                 if callable(th):
@@ -3294,7 +3767,6 @@ class ServerReceiver:
             except Exception:
                 pass
 
-            # 2) channel cache (Threads are Channels in API)
             try:
                 t = guild.get_channel(thread_id)
                 if isinstance(t, discord.Thread):
@@ -3302,22 +3774,21 @@ class ServerReceiver:
             except Exception:
                 pass
 
-            # 3) direct fetch
             try:
                 t = await self.bot.fetch_channel(thread_id)
                 if isinstance(t, discord.Thread):
                     return t
             except Exception:
-                t = None  # keep going
+                t = None
 
-            # 4) if we know the forum parent, search it
             if forum_parent_id:
                 try:
-                    parent = guild.get_channel(int(forum_parent_id)) or await self.bot.fetch_channel(int(forum_parent_id))
+                    parent = guild.get_channel(
+                        int(forum_parent_id)
+                    ) or await self.bot.fetch_channel(int(forum_parent_id))
                 except Exception:
                     parent = None
 
-                # active threads
                 if parent:
                     try:
                         act = await parent.fetch_active_threads()
@@ -3326,7 +3797,7 @@ class ServerReceiver:
                                 return th
                     except Exception:
                         pass
-                    # archived threads
+
                     try:
                         arch = await parent.fetch_archived_threads(limit=50)
                         for th in arch.threads:
@@ -3337,7 +3808,6 @@ class ServerReceiver:
 
             return None
 
-        # -------------- load all clone rows --------------
         try:
             rows = self.db.get_thread_mappings_for_original(orig_tid) or []
         except Exception:
@@ -3350,19 +3820,18 @@ class ServerReceiver:
         host_gid = int(data.get("guild_id") or 0) or 0
 
         for row in rows:
-            r = self._rowdict(row)  # make sure dict() semantics
+            r = self._rowdict(row)
             try:
-                clone_gid   = int(r.get("cloned_guild_id")   or 0)
-                cloned_tid  = int(r.get("cloned_thread_id")  or 0)
-                forum_cid   = int(r.get("forum_cloned_id")   or 0) or None  # parent forum (if forum thread)
-                orig_host   = int(r.get("original_guild_id") or 0) or host_gid
+                clone_gid = int(r.get("cloned_guild_id") or 0)
+                cloned_tid = int(r.get("cloned_thread_id") or 0)
+                forum_cid = int(r.get("forum_cloned_id") or 0) or None
+                orig_host = int(r.get("original_guild_id") or 0) or host_gid
             except Exception:
                 continue
 
             if not (clone_gid and cloned_tid):
                 continue
 
-            # Per-(host, clone) settings
             try:
                 settings = resolve_mapping_settings(
                     self.db,
@@ -3374,10 +3843,14 @@ class ServerReceiver:
                 settings = self.config.default_mapping_settings()
 
             if not settings.get("ENABLE_CLONING", True):
-                logger.debug("[threads] delete: skip gid=%s (cloning disabled)", clone_gid)
+                logger.debug(
+                    "[threads] delete: skip gid=%s (cloning disabled)", clone_gid
+                )
                 continue
             if not settings.get("DELETE_THREADS", True):
-                logger.debug("[threads] delete: skip gid=%s (DELETE_THREADS disabled)", clone_gid)
+                logger.debug(
+                    "[threads] delete: skip gid=%s (DELETE_THREADS disabled)", clone_gid
+                )
                 continue
 
             g = self.bot.get_guild(clone_gid)
@@ -3389,29 +3862,42 @@ class ServerReceiver:
                 t = await _resolve_thread_obj(g, cloned_tid, forum_cid)
                 if t:
                     await t.delete()
-                    logger.info("[🗑️] Deleted cloned thread tid=%s in clone_g=%s (parent=%s)",
-                                cloned_tid, clone_gid, getattr(getattr(t, "parent", None), "id", None))
+                    logger.info(
+                        "[🗑️] Deleted cloned thread tid=%s in clone_g=%s (parent=%s)",
+                        cloned_tid,
+                        clone_gid,
+                        getattr(getattr(t, "parent", None), "id", None),
+                    )
                 else:
-                    logger.debug("[threads] delete: cloned thread not found (gid=%s tid=%s) — will drop mapping",
-                                clone_gid, cloned_tid)
+                    logger.debug(
+                        "[threads] delete: cloned thread not found (gid=%s tid=%s) — will drop mapping",
+                        clone_gid,
+                        cloned_tid,
+                    )
             except Exception as e:
-                # Permission-aware logging; common in self-bot contexts
+
                 code = getattr(e, "code", None)
                 status = getattr(e, "status", None)
                 if status == 403 or code in (50013,):
-                    logger.warning("[threads] delete: missing permissions to delete tid=%s in gid=%s: %r",
-                                cloned_tid, clone_gid, e)
+                    logger.warning(
+                        "[threads] delete: missing permissions to delete tid=%s in gid=%s: %r",
+                        cloned_tid,
+                        clone_gid,
+                        e,
+                    )
                 else:
-                    logger.warning("[threads] delete: failed to delete tid=%s in gid=%s: %r",
-                                cloned_tid, clone_gid, e)
+                    logger.warning(
+                        "[threads] delete: failed to delete tid=%s in gid=%s: %r",
+                        cloned_tid,
+                        clone_gid,
+                        e,
+                    )
 
-        # Host thread is gone → drop all rows for this original thread id
         try:
             self.db.delete_forum_thread_mapping(orig_tid)
         except Exception:
             pass
-        logger.info("[🗑️] Deleted thread mappings for original thread %s across all clones", orig_tid)
-
+        logger.debug("[🗑️] Deleted thread mappings for original thread %s", orig_tid)
 
     async def handle_thread_rename(self, data: dict):
         """
@@ -3440,12 +3926,14 @@ class ServerReceiver:
         if not rows:
             logger.warning(
                 "[⚠️] Thread renamed in #%s: %r → %r; no cloned mappings found, skipping",
-                parent_name, old_name, new_name
+                parent_name,
+                old_name,
+                new_name,
             )
             return
 
         for row in rows:
-            r = self._rowdict(row)  # <<< IMPORTANT
+            r = self._rowdict(row)
             cloned_id = int(r.get("cloned_thread_id") or 0)
             clone_gid = int(r.get("cloned_guild_id") or 0)
             if not (cloned_id and clone_gid):
@@ -3462,12 +3950,16 @@ class ServerReceiver:
                 settings = self.config.default_mapping_settings()
 
             if not settings.get("ENABLE_CLONING", True):
-                logger.debug("[threads] rename: skip gid=%s (cloning disabled)", clone_gid)
+                logger.debug(
+                    "[threads] rename: skip gid=%s (cloning disabled)", clone_gid
+                )
                 continue
 
             guild = self.bot.get_guild(clone_gid)
             if not guild:
-                logger.error("[⛔] Clone guild %s not available for thread renames", clone_gid)
+                logger.error(
+                    "[⛔] Clone guild %s not available for thread renames", clone_gid
+                )
                 continue
 
             ch = guild.get_channel(cloned_id)
@@ -3477,12 +3969,17 @@ class ServerReceiver:
                 except NotFound:
                     logger.warning(
                         "[⚠️] Thread renamed in #%s: %r → %r; not found in clone_g=%s, cannot rename",
-                        parent_name, old_name, new_name, clone_gid
+                        parent_name,
+                        old_name,
+                        new_name,
+                        clone_gid,
                     )
                     continue
 
             try:
-                await self.ratelimit.acquire_for_guild(ActionType.EDIT_CHANNEL, guild.id)
+                await self.ratelimit.acquire_for_guild(
+                    ActionType.EDIT_CHANNEL, guild.id
+                )
                 await ch.edit(name=new_name)
                 logger.info(
                     "[✏️] Renamed thread in clone_g=%s parent #%s: %r → %r",
@@ -3512,7 +4009,6 @@ class ServerReceiver:
                 )
             except Exception:
                 logger.exception("[db] upsert_forum_thread_mapping failed on rename")
-
 
     async def _enforce_thread_limit(self, guild: discord.Guild):
         """
@@ -3791,7 +4287,6 @@ class ServerReceiver:
     def _clear_bf_throttle(self, clone_id: int) -> None:
         self._bf_throttle.pop(int(clone_id), None)
 
-
     async def forward_message(self, msg: Dict):
         """
         Forwards a message to the appropriate channel webhook(s) based on the channel mapping.
@@ -3805,9 +4300,6 @@ class ServerReceiver:
         host_guild_id = int(msg.get("guild_id") or 0)
         is_backfill = bool(msg.get("__backfill__"))
 
-        # ---------------------------
-        # Helpers
-        # ---------------------------
         def _all_chan_mappings_for_origin(origin_channel_id: int) -> list[dict]:
             origin_channel_id = int(origin_channel_id)
             rows: list[dict] = []
@@ -3820,14 +4312,17 @@ class ServerReceiver:
                 r = (self.chan_map or {}).get(origin_channel_id)
                 if r:
                     rows.append(dict(r))
-            # NEW: last-resort DB read
+
             if not rows:
                 try:
-                    rows = list(self.db.get_channel_mappings_for_original(origin_channel_id) or [])
+                    rows = list(
+                        self.db.get_channel_mappings_for_original(origin_channel_id)
+                        or []
+                    )
                 except Exception:
                     rows = []
             return rows
-        
+
         def _bf_targets_for_source(source_channel_id: int) -> set[int]:
             """
             Determine which *clone channel IDs* should receive backfill messages for this source.
@@ -3838,7 +4333,6 @@ class ServerReceiver:
             """
             targets: set[int] = set()
 
-            # 1) Message-provided hints (recommended; super reliable)
             hint_many = msg.get("__bf_target_clone_cids__")
             hint_one = msg.get("__bf_target_clone_cid__")
             try:
@@ -3851,17 +4345,18 @@ class ServerReceiver:
             except Exception:
                 pass
 
-            # 2) Ask BackfillManager if it publishes active targets
             if not targets:
                 bf = getattr(self, "backfill", None)
                 try:
-                    # Prefer an explicit method if present
+
                     if hasattr(bf, "targets_for_source"):
                         maybe = bf.targets_for_source(int(source_channel_id)) or []
                         targets |= {int(x) for x in maybe}
-                    # Or a dict-like structure {source_channel_id: [clone_channel_ids]}
+
                     elif hasattr(bf, "active_targets"):
-                        maybe = (bf.active_targets or {}).get(int(source_channel_id)) or []
+                        maybe = (bf.active_targets or {}).get(
+                            int(source_channel_id)
+                        ) or []
                         targets |= {int(x) for x in maybe}
                 except Exception:
                     pass
@@ -3874,7 +4369,9 @@ class ServerReceiver:
             """
             st = self.backfill._progress.get(int(source_id)) or {}
             ident = st.get("primary_identity") or {}
-            purl = mapping_row.get("channel_webhook_url") or mapping_row.get("webhook_url")
+            purl = mapping_row.get("channel_webhook_url") or mapping_row.get(
+                "webhook_url"
+            )
             name = ident.get("name")
             avatar_url = ident.get("avatar_url")
             canonical = self.backfill._canonical_temp_name()
@@ -3885,7 +4382,10 @@ class ServerReceiver:
             _orig_mid_for_inflight = int((msg.get("message_id") or 0))
         except Exception:
             _orig_mid_for_inflight = 0
-        if _orig_mid_for_inflight and _orig_mid_for_inflight not in self._inflight_events:
+        if (
+            _orig_mid_for_inflight
+            and _orig_mid_for_inflight not in self._inflight_events
+        ):
             self._inflight_events[_orig_mid_for_inflight] = asyncio.Event()
 
         # Already-split children shouldn't be re-split
@@ -3898,7 +4398,7 @@ class ServerReceiver:
             other_atts = [a for a in atts if not _is_image_att(a)]
             if len(image_atts) > 5:
                 base_text = (msg.get("content") or "").strip()
-                chunks = [image_atts[i:i + 5] for i in range(0, len(image_atts), 5)]
+                chunks = [image_atts[i : i + 5] for i in range(0, len(image_atts), 5)]
                 for idx, chunk in enumerate(chunks):
                     sub = dict(msg)
                     sub["__split_seq__"] = idx
@@ -3925,15 +4425,20 @@ class ServerReceiver:
 
         payload = self._build_webhook_payload(msg)
         if payload is None:
-            logger.debug("No webhook payload built for #%s; skipping", msg.get("channel_name"))
+            logger.debug(
+                "No webhook payload built for #%s; skipping", msg.get("channel_name")
+            )
             return
 
-        if (not payload.get("content")
+        if (
+            not payload.get("content")
             and not payload.get("embeds")
-            and not (msg.get("stickers") or [])):
+            and not (msg.get("stickers") or [])
+        ):
             logger.info(
                 "[⚠️]%s Skipping empty message in #%s (attachments=%d stickers=%d)",
-                tag, msg.get("channel_name"),
+                tag,
+                msg.get("channel_name"),
                 len(msg.get("attachments") or []),
                 len(msg.get("stickers") or []),
             )
@@ -3945,7 +4450,9 @@ class ServerReceiver:
             except (TypeError, ValueError) as e:
                 logger.error(
                     "[⛔] Skipping message from #%s: content not JSON serializable: %s; content=%r",
-                    msg.get("channel_name"), e, payload["content"],
+                    msg.get("channel_name"),
+                    e,
+                    payload["content"],
                 )
                 return
 
@@ -3964,7 +4471,9 @@ class ServerReceiver:
                 return False
 
         async def _primary_name_changed_for_mapping(mapping_row: dict) -> bool:
-            purl = mapping_row.get("channel_webhook_url") or mapping_row.get("webhook_url")
+            purl = mapping_row.get("channel_webhook_url") or mapping_row.get(
+                "webhook_url"
+            )
             if not purl:
                 return False
             return await _primary_name_changed(purl)
@@ -4002,14 +4511,21 @@ class ServerReceiver:
                         kw_username = override_identity.get("username")
                         kw_avatar = override_identity.get("avatar_url")
                     else:
-                        kw_username = None if use_webhook_identity else payload.get("username")
-                        kw_avatar = None if use_webhook_identity else payload.get("avatar_url")
+                        kw_username = (
+                            None if use_webhook_identity else payload.get("username")
+                        )
+                        kw_avatar = (
+                            None if use_webhook_identity else payload.get("avatar_url")
+                        )
 
                     logger.debug(
                         "[send] use_webhook_identity=%s override=%s | src=%s | ch=%s | username=%r avatar_url=%r",
-                        use_webhook_identity, bool(override_identity),
-                        source_id, msg.get("channel_name"),
-                        kw_username, kw_avatar,
+                        use_webhook_identity,
+                        bool(override_identity),
+                        source_id,
+                        msg.get("channel_name"),
+                        kw_username,
+                        kw_avatar,
                     )
 
                     sent_msg = await webhook.send(
@@ -4026,7 +4542,9 @@ class ServerReceiver:
                         orig_mid = int(msg.get("message_id") or 0)
                         cloned_cid = int(mapping_row.get("cloned_channel_id"))
                         used_url = getattr(webhook, "url", None)
-                        cloned_mid = int(getattr(sent_msg, "id", 0)) if sent_msg else None
+                        cloned_mid = (
+                            int(getattr(sent_msg, "id", 0)) if sent_msg else None
+                        )
 
                         clone_gid = self._clone_gid_for_ctx(
                             host_guild_id=orig_gid or None,
@@ -4101,7 +4619,8 @@ class ServerReceiver:
                         delivered, total = self.backfill.get_progress(source_id)
                         suffix = (
                             f" [{max(total - delivered, 0)} left]"
-                            if total is not None else f" [{delivered} sent]"
+                            if total is not None
+                            else f" [{delivered} sent]"
                         )
                         logger.info(
                             "[💬] [backfill] Forwarded message to #%s (clone ch=%s) from %s (%s)%s",
@@ -4144,17 +4663,22 @@ class ServerReceiver:
                         delay = max(0.0, float(retry_after))
                         logger.warning(
                             "[⏱️]%s 429 for #%s — sleeping %.2fs then retrying",
-                            tag, msg.get("channel_name"), delay,
+                            tag,
+                            msg.get("channel_name"),
+                            delay,
                         )
                         await asyncio.sleep(delay)
                         continue
 
                     elif e.status == 404:
-                        logger.debug("Webhook %s returned 404; attempting recreate...", current_url)
-                        # Recreate webhook for THIS origin->clone pair
+                        logger.debug(
+                            "Webhook %s returned 404; attempting recreate...",
+                            current_url,
+                        )
+
                         new_url = await self._recreate_webhook(
                             source_id,
-                            int(mapping_row.get("cloned_guild_id") or 0) or None
+                            int(mapping_row.get("cloned_guild_id") or 0) or None,
                         )
                         if not new_url:
                             logger.warning(
@@ -4173,7 +4697,9 @@ class ServerReceiver:
                     else:
                         logger.error(
                             "[⛔] Failed to send to #%s (status %s): %s",
-                            msg.get("channel_name"), e.status, e.text,
+                            msg.get("channel_name"),
+                            e.status,
+                            e.text,
                         )
                         return
 
@@ -4182,7 +4708,9 @@ class ServerReceiver:
                         self.ratelimit.relax(ActionType.WEBHOOK_MESSAGE, key=rl_key)
                     logger.warning(
                         "[🌐]%s Network error sending to #%s: %s — queued for retry",
-                        tag, msg.get("channel_name"), e,
+                        tag,
+                        msg.get("channel_name"),
+                        e,
                     )
                     msg["__buffered__"] = True
                     self._pending_msgs.setdefault(source_id, []).append(msg)
@@ -4192,9 +4720,6 @@ class ServerReceiver:
                     if not released:
                         self.ratelimit.relax(ActionType.WEBHOOK_MESSAGE, key=rl_key)
 
-        # ---------------------------
-        # Forced send (clone-aware)
-        # ---------------------------
         forced_url = msg.get("__force_webhook_url__")
         if forced_url:
             rows = _all_chan_mappings_for_origin(source_id)
@@ -4217,16 +4742,45 @@ class ServerReceiver:
                 chosen = rows[0]
 
             if chosen is None:
-                logger.debug("[forward] forced_url present but no mapping rows found for src %s", source_id)
+                logger.debug(
+                    "[forward] forced_url present but no mapping rows found for src %s",
+                    source_id,
+                )
                 return
 
-            # Backfill gating and identity for the chosen clone
             sem = None
-            clone_for_gate = chosen.get("cloned_channel_id") or chosen.get("clone_channel_id")
+            clone_for_gate = chosen.get("cloned_channel_id") or chosen.get(
+                "clone_channel_id"
+            )
             if is_backfill and clone_for_gate:
-                sem = self.backfill.semaphores.setdefault(int(clone_for_gate), asyncio.Semaphore(1))
+                sem = self.backfill.semaphores.setdefault(
+                    int(clone_for_gate), asyncio.Semaphore(1)
+                )
 
-            primary_url, primary_name, primary_avatar_url, primary_customized = _cached_primary_for_mapping(chosen)
+            primary_url, primary_name, primary_avatar_url, primary_customized = (
+                _cached_primary_for_mapping(chosen)
+            )
+            try:
+                _settings_for_forced = (
+                    resolve_mapping_settings(
+                        self.db,
+                        self.config,
+                        original_guild_id=int(
+                            chosen.get("original_guild_id") or host_guild_id or 0
+                        ),
+                        cloned_guild_id=int(chosen.get("cloned_guild_id") or 0),
+                    )
+                    or {}
+                )
+            except Exception:
+                _settings_for_forced = {}
+
+            if not _settings_for_forced.get("ENABLE_CLONING", True):
+                logger.debug(
+                    "[forward] Skipping forced send for clone_g=%s (ENABLE_CLONING=False)",
+                    chosen.get("cloned_guild_id"),
+                )
+                return
             is_primary = bool(primary_url and forced_url == primary_url)
             use_webhook_identity = bool(primary_customized and is_primary)
             override = None
@@ -4239,114 +4793,156 @@ class ServerReceiver:
                     if clone_for_gate:
                         await self._bf_gate(int(clone_for_gate))
                     await _do_send(
-                        forced_url, rl_key,
+                        forced_url,
+                        rl_key,
                         mapping_row=chosen,
                         use_webhook_identity=use_webhook_identity,
                         override_identity=override,
                     )
             else:
                 await _do_send(
-                    forced_url, rl_key,
+                    forced_url,
+                    rl_key,
                     mapping_row=chosen,
                     use_webhook_identity=use_webhook_identity,
                     override_identity=override,
                 )
             return
 
-        # ---------------------------
-        # Backfill live-buffer gate
-        # ---------------------------
         if self.backfill.is_backfilling(source_id) and not is_backfill:
             msg["__buffered__"] = True
             self._pending_msgs.setdefault(source_id, []).append(msg)
-            logger.debug("[⏳] Buffered live message during backfill for #%s", source_id)
+            logger.debug(
+                "[⏳] Buffered live message during backfill for #%s", source_id
+            )
             return
 
-        # ---------------------------
-        # Collect all clone mappings and fan-out
-        # ---------------------------
         rows = _all_chan_mappings_for_origin(source_id)
+
+        limit_cids = msg.get("__limit_clone_cids__")
+        if limit_cids:
+            try:
+                _lim = {int(x) for x in (limit_cids or [])}
+                rows = [r for r in rows if int(r.get("cloned_guild_id") or 0) in _lim]
+            except Exception:
+                pass
+
         if not rows:
             self._load_mappings()
             rows = _all_chan_mappings_for_origin(source_id)
-            
+
         bf_targets: set[int] = set()
         if is_backfill:
-            bf_targets = _bf_targets_for_source(source_id)  # set of cloned_channel_id
+            bf_targets = _bf_targets_for_source(source_id)
 
         if not rows:
             async with self._warn_lock:
                 if source_id not in self._unmapped_warned:
                     logger.info(
                         "[⌛] No mapping yet for channel %s (%s); msg from %s is queued and will be sent after sync",
-                        msg.get("channel_name"), msg.get("channel_id"), msg.get("author"),
+                        msg.get("channel_name"),
+                        msg.get("channel_id"),
+                        msg.get("author"),
                     )
                     self._unmapped_warned.add(source_id)
             msg["__buffered__"] = True
             self._pending_msgs.setdefault(source_id, []).append(msg)
             return
 
-        # ---------------------------
-        # Fan-out per clone mapping
-        # ---------------------------
         for mapping in rows:
+
             try:
-                url = mapping.get("channel_webhook_url") or mapping.get("webhook_url")
-                clone_cid = mapping.get("cloned_channel_id") or mapping.get("clone_channel_id")
-                
-                if is_backfill and bf_targets and clone_cid not in bf_targets:
-                    continue
+                clone_gid = int(mapping.get("cloned_guild_id") or 0)
+            except Exception:
+                clone_gid = 0
 
-                # Stickers path per clone
-                stickers = msg.get("stickers") or []
-                if stickers:
-                    clone_gid = self._clone_gid_for_ctx(
-                        host_guild_id=host_guild_id or None,
-                        mapping_row=mapping,
+            with self._clone_log_label(clone_gid):
+                try:
+                    _settings = (
+                        resolve_mapping_settings(
+                            self.db,
+                            self.config,
+                            original_guild_id=int(
+                                mapping.get("original_guild_id") or host_guild_id or 0
+                            ),
+                            cloned_guild_id=int(mapping.get("cloned_guild_id") or 0),
+                        )
+                        or {}
                     )
-                    guild = self.bot.get_guild(int(clone_gid)) if clone_gid else None
-                    ch = (
-                        guild.get_channel(int(mapping["cloned_channel_id"]))
-                        if (guild and mapping and mapping.get("cloned_channel_id") is not None)
-                        else None
+
+                    if not _settings.get("ENABLE_CLONING", True):
+                        logger.debug(
+                            "[forward] Skipping clone %s for src #%s — ENABLE_CLONING=False",
+                            mapping.get("cloned_guild_id"),
+                            source_id,
+                        )
+                        continue
+
+                    url = mapping.get("channel_webhook_url") or mapping.get(
+                        "webhook_url"
                     )
-                    handled = await self.stickers.send_with_fallback(
-                        receiver=self,
-                        ch=ch,
-                        stickers=stickers,
-                        mapping=mapping,
-                        msg=msg,
-                        source_id=source_id,
+                    clone_cid = mapping.get("cloned_channel_id") or mapping.get(
+                        "clone_channel_id"
                     )
-                    if handled:
-                        if is_backfill:
-                            self.backfill.note_sent(source_id, int(msg.get("message_id") or 0))
-                            self.backfill.note_checkpoint(
-                                source_id, int(msg.get("message_id") or 0), msg.get("timestamp")
+
+                    if is_backfill and bf_targets and clone_cid not in bf_targets:
+                        continue
+
+                    stickers = msg.get("stickers") or []
+                    if stickers:
+                        cg = self._clone_gid_for_ctx(
+                            host_guild_id=host_guild_id or None,
+                            mapping_row=mapping,
+                        )
+                        guild = self.bot.get_guild(int(cg)) if cg else None
+                        ch = (
+                            guild.get_channel(int(mapping["cloned_channel_id"]))
+                            if (
+                                guild
+                                and mapping
+                                and mapping.get("cloned_channel_id") is not None
                             )
-                            d, t = self.backfill.get_progress(source_id)
-                            suffix = f" [{d}/{t}]" if t else f" [{d}]"
-                            logger.info(
-                                "[💬]%s Forwarded (stickers) to #%s (clone ch=%s) from %s (%s)%s",
-                                tag, msg.get("channel_name"), clone_cid,
-                                msg.get("author"), msg.get("author_id"), suffix,
-                            )
-                        continue  # next clone row
+                            else None
+                        )
+                        handled = await self.stickers.send_with_fallback(
+                            receiver=self,
+                            ch=ch,
+                            stickers=stickers,
+                            mapping=mapping,
+                            msg=msg,
+                            source_id=source_id,
+                        )
+                        if handled:
+                            if is_backfill:
+                                self.backfill.note_sent(
+                                    source_id, int(msg.get("message_id") or 0)
+                                )
+                                self.backfill.note_checkpoint(
+                                    source_id,
+                                    int(msg.get("message_id") or 0),
+                                    msg.get("timestamp"),
+                                )
+                                d, t = self.backfill.get_progress(source_id)
+                                suffix = f" [{d}/{t}]" if t else f" [{d}]"
+                                logger.info(
+                                    "[💬]%s Forwarded (stickers) to #%s (clone ch=%s) from %s (%s)%s",
+                                    tag,
+                                    msg.get("channel_name"),
+                                    clone_cid,
+                                    msg.get("author"),
+                                    msg.get("author_id"),
+                                    suffix,
+                                )
+                            continue
 
-                # No webhook? Recreate for THIS origin->clone pair or buffer
-                if mapping and not url:
-                    clone_gid = None
-                    try:
-                        clone_gid = int(mapping.get("cloned_guild_id") or 0)
-                    except Exception:
-                        pass
+                    if mapping and not url:
 
-                    if clone_gid:
                         lock = self._guild_sync_locks.get(clone_gid)
                         if lock and lock.locked():
                             logger.info(
                                 "[⌛] Sync in progress; message in #%s from %s is queued and will be sent after sync",
-                                msg.get("channel_name"), msg.get("author"),
+                                msg.get("channel_name"),
+                                msg.get("author"),
                             )
                             msg["__buffered__"] = True
                             self._pending_msgs.setdefault(source_id, []).append(msg)
@@ -4354,74 +4950,99 @@ class ServerReceiver:
 
                         logger.warning(
                             "[⚠️] Mapped channel %s has no webhook (clone ch=%s); attempting to recreate",
-                            msg.get("channel_name"), clone_cid,
+                            msg.get("channel_name"),
+                            clone_cid,
                         )
-                        url = await self._recreate_webhook(source_id, int(clone_gid))
+                        url = await self._recreate_webhook(source_id, clone_gid)
                         if not url:
                             logger.info(
                                 "[⌛] Could not recreate webhook for #%s (clone ch=%s); queued message from %s",
-                                msg.get("channel_name"), clone_cid, msg.get("author"),
+                                msg.get("channel_name"),
+                                clone_cid,
+                                msg.get("author"),
                             )
                             msg["__buffered__"] = True
                             self._pending_msgs.setdefault(source_id, []).append(msg)
                             continue
 
-                # Backfill path per clone (separate semaphores/keys)
-                if is_backfill and clone_cid:
-                    await self.backfill.ensure_temps_ready(int(clone_cid))
-                    primary_url, primary_name, primary_avatar_url, primary_customized = _cached_primary_for_mapping(mapping)
-                    sem = self.backfill.semaphores.setdefault(int(clone_cid), asyncio.Semaphore(1))
-                    async with sem:
-                        await self._bf_gate(int(clone_cid))
-                        url_to_use, _ = await self.backfill.pick_url_for_send(
-                            int(clone_cid), url, create_missing=False
+                    if is_backfill and clone_cid:
+                        await self.backfill.ensure_temps_ready(int(clone_cid))
+                        (
+                            primary_url,
+                            primary_name,
+                            primary_avatar_url,
+                            primary_customized,
+                        ) = _cached_primary_for_mapping(mapping)
+                        sem = self.backfill.semaphores.setdefault(
+                            int(clone_cid), asyncio.Semaphore(1)
                         )
-                        rl_key = f"channel:{clone_cid}"
+                        async with sem:
+                            await self._bf_gate(int(clone_cid))
+                            url_to_use, _ = await self.backfill.pick_url_for_send(
+                                int(clone_cid), url, create_missing=False
+                            )
+                            rl_key = f"channel:{clone_cid}"
 
-                        if primary_customized:
-                            is_primary = bool(primary_url and url_to_use == primary_url)
-                            if is_primary:
-                                await _do_send(
-                                    url_to_use, rl_key,
-                                    mapping_row=mapping,
-                                    use_webhook_identity=True,
-                                    override_identity=None,
+                            if primary_customized:
+                                is_primary = bool(
+                                    primary_url and url_to_use == primary_url
                                 )
+                                if is_primary:
+                                    await _do_send(
+                                        url_to_use,
+                                        rl_key,
+                                        mapping_row=mapping,
+                                        use_webhook_identity=True,
+                                        override_identity=None,
+                                    )
+                                else:
+                                    await _do_send(
+                                        url_to_use,
+                                        rl_key,
+                                        mapping_row=mapping,
+                                        use_webhook_identity=False,
+                                        override_identity={
+                                            "username": primary_name,
+                                            "avatar_url": primary_avatar_url,
+                                        },
+                                    )
                             else:
                                 await _do_send(
-                                    url_to_use, rl_key,
+                                    url_to_use,
+                                    rl_key,
                                     mapping_row=mapping,
                                     use_webhook_identity=False,
-                                    override_identity={"username": primary_name, "avatar_url": primary_avatar_url},
+                                    override_identity=None,
                                 )
-                        else:
-                            await _do_send(
-                                url_to_use, rl_key,
-                                mapping_row=mapping,
-                                use_webhook_identity=False,
-                                override_identity=None,
-                            )
+                        continue
+
+                    primary_customized = await _primary_name_changed_for_mapping(
+                        mapping
+                    )
+                    url_to_use = url
+                    rl_key = f"channel:{clone_cid or source_id}"
+                    await _do_send(
+                        url_to_use,
+                        rl_key,
+                        mapping_row=mapping,
+                        use_webhook_identity=bool(primary_customized),
+                        override_identity=None,
+                    )
+
+                except Exception:
+                    logger.exception(
+                        "[forward] Clone fan-out failed for origin ch=%s -> clone row %r",
+                        source_id,
+                        (
+                            {
+                                k: mapping.get(k)
+                                for k in ("cloned_guild_id", "cloned_channel_id")
+                            }
+                            if isinstance(mapping, dict)
+                            else mapping
+                        ),
+                    )
                     continue
-
-                # Live send per clone
-                primary_customized = await _primary_name_changed_for_mapping(mapping)
-                url_to_use = url
-                rl_key = f"channel:{clone_cid or source_id}"
-                await _do_send(
-                    url_to_use, rl_key,
-                    mapping_row=mapping,
-                    use_webhook_identity=bool(primary_customized),
-                    override_identity=None,
-                )
-
-            except Exception:
-                logger.exception(
-                    "[forward] Clone fan-out failed for origin ch=%s -> clone row %r",
-                    source_id, {k: mapping.get(k) for k in ("cloned_guild_id", "cloned_channel_id")} if isinstance(mapping, dict) else mapping,
-                )
-                # keep going for other clones
-                continue
-
 
     def _coerce_embeds(self, lst):
         result = []
@@ -4441,7 +5062,7 @@ class ServerReceiver:
                     emb.set_thumbnail(url=thumb["url"])
                 result.append(emb)
         return result
-    
+
     async def _get_message_mappings_with_retry(
         self,
         original_message_id: int,
@@ -4458,7 +5079,9 @@ class ServerReceiver:
         delay = base_delay
         for i in range(attempts):
             try:
-                rows = list(self.db.get_message_mappings_for_original(original_message_id) or [])
+                rows = list(
+                    self.db.get_message_mappings_for_original(original_message_id) or []
+                )
             except Exception:
                 rows = []
             if rows:
@@ -4468,7 +5091,12 @@ class ServerReceiver:
                 await asyncio.sleep(max(0.0, min(max_delay, delay + jd)))
                 delay = min(max_delay, delay * 2)
             else:
-                logger.debug("[%s] no rows for orig_mid=%s after %s attempts", log_prefix, original_message_id, attempts)
+                logger.debug(
+                    "[%s] no rows for orig_mid=%s after %s attempts",
+                    log_prefix,
+                    original_message_id,
+                    attempts,
+                )
         return []
 
     async def _edit_with_row(self, row, data: dict, orig_mid: int) -> bool:
@@ -4482,82 +5110,102 @@ class ServerReceiver:
         if not (cloned_mid and webhook_url):
             return False
 
+        clone_gid = int(row.get("cloned_guild_id") or 0)
+
         try:
             if self.session is None or self.session.closed:
                 self.session = aiohttp.ClientSession()
             wh = Webhook.from_url(webhook_url, session=self.session)
-            built = self._build_webhook_payload(data)
-            await wh.edit_message(
-                cloned_mid,
-                content=built.get("content"),
-                embeds=built.get("embeds"),
-                allowed_mentions=None,
-            )
-            logger.info(
-                "[✏️] Edited cloned msg %s (orig %s) in #%s",
-                cloned_mid,
-                orig_mid,
-                data.get("channel_name"),
-            )
-            return True
+            with self._clone_log_label(clone_gid):
+                built = self._build_webhook_payload(data)
+                await wh.edit_message(
+                    cloned_mid,
+                    content=built.get("content"),
+                    embeds=built.get("embeds"),
+                    allowed_mentions=None,
+                )
+                logger.info(
+                    "[✏️] Edited cloned msg %s (orig %s) in #%s",
+                    cloned_mid,
+                    orig_mid,
+                    data.get("channel_name"),
+                )
+                return True
         except Exception as e:
             logger.warning("[⚠️] Edit failed for orig %s (will resend): %s", orig_mid, e)
             return False
 
-    async def _fallback_resend_edit(self, data: dict, orig_mid: int):
-
+    async def _fallback_resend_edit(
+        self, data: dict, orig_mid: int | None = None
+    ) -> None:
+        """
+        When native webhook edit fails, resend as a new message — but ONLY to clones
+        whose mapping has EDIT_MESSAGES=True (per-clone).
+        """
         try:
-            cid = int((data or {}).get("channel_id") or 0)
+            source_id = int(data.get("channel_id") or 0)
+            host_gid = int(data.get("guild_id") or 0)
         except Exception:
-            cid = 0
-        try:
-            pid = int((data or {}).get("thread_parent_id") or 0)
-        except Exception:
-            pid = 0
-        key = pid or cid
+            return
 
-        if key and (
-            key in self._active_backfills
-            or (hasattr(self, "backfill") and self.backfill.is_backfilling(key))
-        ):
-            buf = self._bf_event_buffer.setdefault(key, [])
-
+        rows: list[dict] = []
+        by_clone = getattr(self, "chan_map_by_clone", None) or {}
+        for _cg, per_map in by_clone.items():
+            r = per_map.get(int(source_id))
+            if r:
+                rows.append(dict(r))
+        if not rows:
+            r = (self.chan_map or {}).get(int(source_id))
+            if r:
+                rows.append(dict(r))
+        if not rows:
             try:
-                mid = int((data or {}).get("message_id") or 0)
+                rows = list(
+                    self.db.get_channel_mappings_for_original(int(source_id)) or []
+                )
             except Exception:
-                mid = 0
-            if mid:
-                buf[:] = [
-                    (t, d)
-                    for (t, d) in buf
-                    if not (
-                        t in ("message_edit", "thread_message_edit")
-                        and int((d or {}).get("message_id") or 0) == mid
-                    )
-                ]
-            buf.append(("thread_message_edit" if pid else "message_edit", data))
-            logger.debug(
-                "[bf] Deferred fallback resend for edited message (orig %s) while backfill active on #%s",
-                orig_mid,
-                key,
+                rows = []
+
+        allowed: set[int] = set()
+        for r in rows:
+            try:
+                clone_gid = int(r.get("cloned_guild_id") or 0)
+                if not clone_gid:
+                    continue
+                settings = resolve_mapping_settings(
+                    self.db,
+                    self.config,
+                    original_guild_id=host_gid,
+                    cloned_guild_id=clone_gid,
+                )
+                if settings.get("ENABLE_CLONING", True) and settings.get(
+                    "EDIT_MESSAGES", True
+                ):
+                    allowed.add(clone_gid)
+            except Exception:
+                continue
+
+        if not allowed:
+            logger.info(
+                "[✏️] Fallback edit skipped for channel %s (no clones allow EDIT_MESSAGES)",
+                source_id,
             )
             return
 
-        if cid and any(
-            int((m or {}).get("message_id") or 0) == orig_mid
-            for m in self._pending_msgs.get(cid, [])
-        ):
-
-            self._latest_edit_payload[orig_mid] = data
-            logger.debug(
-                "[queue] Deferred fallback resend; orig %s still queued for #%s",
-                orig_mid,
-                cid,
+        try:
+            mid_for_log = str(
+                orig_mid if orig_mid is not None else (data.get("message_id") or "?")
             )
-            return
+            clones_str = ", ".join(str(c) for c in sorted(allowed))
+            logger.info(
+                "[✏️🔁] Edited message does not exist in the clone. Resending edited message as new."
+            )
+        except Exception:
+            pass
 
-        await self.forward_message(data)
-        logger.info("[♻️] Resent edited message as new (orig %s)", orig_mid)
+        resend = dict(data)
+        resend["__limit_clone_cids__"] = list(allowed)
+        await self.forward_message(resend)
 
     async def handle_message_edit(self, data: dict):
         """
@@ -4572,19 +5220,33 @@ class ServerReceiver:
         if not orig_mid:
             return
 
-        # Helper: perform edit for one row if settings allow
         async def _maybe_edit_for_row(row: dict, payload: dict):
+
+            if row is not None and not isinstance(row, dict):
+                row = dict(row)
+
             try:
-                # Resolve settings in (host, clone) context so per-clone overrides apply
+
                 settings = resolve_mapping_settings(
                     self.db,
                     self.config,
-                    original_guild_id=int(row.get("original_guild_id") or orig_gid or 0),
+                    original_guild_id=int(
+                        row.get("original_guild_id") or orig_gid or 0
+                    ),
                     cloned_guild_id=int(row.get("cloned_guild_id") or 0),
                 )
             except Exception:
-                # safest default = allow, but we can also choose to skip on error
-                settings = self.config.default_mapping_settings()
+
+                settings = dict(self.config.default_mapping_settings())
+                settings["EDIT_MESSAGES"] = False
+                settings["ENABLE_CLONING"] = settings.get("ENABLE_CLONING", True)
+
+            if not settings.get("ENABLE_CLONING", True):
+                logger.debug(
+                    "[✏️] Skipping edit for clone_g=%s (cloning disabled for this mapping)",
+                    row.get("cloned_guild_id"),
+                )
+                return False
 
             if not settings.get("EDIT_MESSAGES", True):
                 logger.debug(
@@ -4593,48 +5255,50 @@ class ServerReceiver:
                 )
                 return False
 
-            # do the actual edit
             return await self._edit_with_row(row, payload, orig_mid)
 
-        # First try: do we already have mappings for this original message?
         rows = []
         try:
             rows = self.db.get_message_mappings_for_original(orig_mid) or []
         except Exception:
             rows = []
 
+        rows = [dict(r) if not isinstance(r, dict) else r for r in rows]
+
         if rows:
-            # build once (payload is mostly identical across clones)
+
             payload = self._latest_edit_payload.pop(orig_mid, data)
-            # fan-out per clone, respecting per-mapping settings
+
             edited_any = False
             for r in rows:
-                ok = await _maybe_edit_for_row(r, payload)
+                cg = int((r or {}).get("cloned_guild_id") or 0)
+                with self._clone_log_label(cg):
+                    ok = await _maybe_edit_for_row(r, payload)
                 edited_any = edited_any or ok
             if not edited_any:
-                # nothing edited due to disabled settings; don't resend-as-new
-                logger.debug("[✏️] No edits performed for orig %s (all disabled or failed).", orig_mid)
+                logger.debug(
+                    "[✏️] No edits performed for orig %s (all disabled or failed).",
+                    orig_mid,
+                )
             return
 
-        # No mapping yet → handle in-flight / retry path
         ev = self._inflight_events.get(orig_mid)
         if ev and not ev.is_set():
-            # coalesce payload while waiting
+
             self._latest_edit_payload[orig_mid] = data
             try:
                 await asyncio.wait_for(ev.wait(), timeout=5.0)
             except asyncio.TimeoutError:
-                # If still no map, we *may* fallback-resend, but only to clones where EDIT_MESSAGES is True.
-                # forward_message() already respects per-clone settings for sends (identity/filters).
+
                 await self._fallback_resend_edit(data, orig_mid)
                 return
 
-            # mapping should exist now
             try:
                 rows = self.db.get_message_mappings_for_original(orig_mid) or []
             except Exception:
                 rows = []
 
+            rows = [dict(r) if not isinstance(r, dict) else r for r in rows]
             payload = self._latest_edit_payload.pop(orig_mid, data)
             if rows:
                 for r in rows:
@@ -4642,12 +5306,11 @@ class ServerReceiver:
                 self._inflight_events.pop(orig_mid, None)
                 return
 
-            # still missing - fallback
             await self._fallback_resend_edit(payload, orig_mid)
             return
 
-        # Retry polling path
-        row = await self._get_mapping_with_retry(
+        self._latest_edit_payload[orig_mid] = data
+        rows = await self._get_mappings_with_retry(
             orig_mid,
             attempts=5,
             base_delay=0.08,
@@ -4655,16 +5318,16 @@ class ServerReceiver:
             jitter=0.25,
             log_prefix="edit-wait",
         )
-        if row is not None:
-            # Some codebases return a single row here; normalize to list
-            rows = [row]
-            payload = data
+        payload = self._latest_edit_payload.pop(orig_mid, data)
+
+        if rows:
             for r in rows:
+                if not isinstance(r, dict):
+                    r = dict(r)
                 await _maybe_edit_for_row(r, payload)
             return
 
-        # Still nothing → defer to fallback resend (will fan-out via forward path)
-        await self._fallback_resend_edit(data, orig_mid)
+        await self._fallback_resend_edit(payload, orig_mid)
 
     async def forward_to_webhook(self, msg_data: dict, webhook_url: str):
         async with self.session.post(
@@ -4685,7 +5348,7 @@ class ServerReceiver:
         """
         if self._shutting_down:
             return
-        # ---------- ids & basic checks ----------
+
         try:
             parent_id = int(data.get("thread_parent_id") or 0)
             orig_tid = int(data.get("thread_id") or 0)
@@ -4712,7 +5375,6 @@ class ServerReceiver:
             left = max((t or 0) - (d or 0), 0)
             return f" [{left} left]" if t is not None else f" [{d or 0} sent]"
 
-        # ---------- build webhook payload once ----------
         payload = self._build_webhook_payload(data)
         stickers = data.get("stickers") or []
 
@@ -4730,16 +5392,19 @@ class ServerReceiver:
 
         has_custom = _has_custom(stickers)
         has_standard = _has_standard(stickers)
-        has_textish = bool(payload and (payload.get("content") or payload.get("embeds")))
+        has_textish = bool(
+            payload and (payload.get("content") or payload.get("embeds"))
+        )
         if not has_textish and not stickers:
-            logger.info("[⚠️]%s Skipping empty payload for '%s'", tag, data.get("thread_name"))
+            logger.info(
+                "[⚠️]%s Skipping empty payload for '%s'", tag, data.get("thread_name")
+            )
             return
 
-        # ---------- gather ALL clone mappings for this origin parent channel ----------
-        self._load_mappings()  # keep caches warm
+        self._load_mappings()
 
         mappings: list[dict] = []
-        # Prefer per-clone cache
+
         by_clone = getattr(self, "chan_map_by_clone", None) or {}
         for cg, per in by_clone.items():
             row = per.get(int(parent_id))
@@ -4747,16 +5412,17 @@ class ServerReceiver:
                 r = dict(row) if not isinstance(row, dict) else row.copy()
                 r["cloned_guild_id"] = int(cg)
                 mappings.append(r)
-        # DB fallback
+
         if not mappings:
             try:
-                for r in self.db.get_channel_mappings_for_original(int(parent_id)) or []:
+                for r in (
+                    self.db.get_channel_mappings_for_original(int(parent_id)) or []
+                ):
                     rr = {k: r[k] for k in r.keys()}
                     mappings.append(rr)
             except Exception:
                 pass
 
-        # If still nothing: queue and bail (unchanged behavior)
         if not mappings:
             async with self._warn_lock:
                 if orig_tid not in self._unmapped_threads_warned:
@@ -4764,14 +5430,15 @@ class ServerReceiver:
                         "[⌛] No mapping yet for thread '%s' (thread_id=%s, parent=%s); msg from %s queued until after sync",
                         data.get("thread_name", "<unnamed>"),
                         orig_tid,
-                        data.get("thread_parent_name") or data.get("channel_name") or parent_id,
+                        data.get("thread_parent_name")
+                        or data.get("channel_name")
+                        or parent_id,
                         data.get("author", "<unknown>"),
                     )
                     self._unmapped_threads_warned.add(orig_tid)
             self._pending_thread_msgs.append(data)
             return
 
-        # ---------- identity helpers (source-side, unchanged) ----------
         async def _get_primary_identity_for_source(src_parent_id: int):
             mapping = self.chan_map.get(src_parent_id) or {}
             purl = mapping.get("channel_webhook_url") or mapping.get("webhook_url")
@@ -4807,7 +5474,9 @@ class ServerReceiver:
                 return False
 
         forced_url = data.get("__force_webhook_url__")
-        primary_url, primary_name, primary_avatar_url = await _get_primary_identity_for_source(parent_id)
+        primary_url, primary_name, primary_avatar_url = (
+            await _get_primary_identity_for_source(parent_id)
+        )
         primary_customized = await _primary_name_changed_for_source(parent_id)
 
         use_webhook_identity = False
@@ -4816,13 +5485,17 @@ class ServerReceiver:
             if forced_url and primary_url and forced_url == primary_url:
                 use_webhook_identity = True
             else:
-                override_identity = {"username": primary_name, "avatar_url": primary_avatar_url}
+                override_identity = {
+                    "username": primary_name,
+                    "avatar_url": primary_avatar_url,
+                }
 
-        # ---------- small helpers reused inside the loop ----------
         def _merge_embeds_into_payload(dst_payload: dict, src_msg: dict):
             if not dst_payload:
                 return
-            dst_payload["embeds"] = (dst_payload.get("embeds") or []) + (src_msg.get("embeds") or [])
+            dst_payload["embeds"] = (dst_payload.get("embeds") or []) + (
+                src_msg.get("embeds") or []
+            )
 
         def _coerce_embeds_inplace(p: dict) -> None:
             lst = p.get("embeds")
@@ -4834,604 +5507,991 @@ class ServerReceiver:
                 if isinstance(e, discord.Embed):
                     converted.append(e)
                 elif isinstance(e, dict):
-                    emb = discord.Embed(title=e.get("title"), description=e.get("description"))
+                    emb = discord.Embed(
+                        title=e.get("title"), description=e.get("description")
+                    )
                     if isinstance(e.get("image"), dict) and e["image"].get("url"):
                         emb.set_image(url=e["image"]["url"])
-                    if isinstance(e.get("thumbnail"), dict) and e["thumbnail"].get("url"):
+                    if isinstance(e.get("thumbnail"), dict) and e["thumbnail"].get(
+                        "url"
+                    ):
                         emb.set_thumbnail(url=e["thumbnail"]["url"])
                     converted.append(emb)
             p["embeds"] = converted
 
-        # Use tuple key to allow parallel sends across clones if desired
-        # (keeps your global per-thread lock behavior scoped per clone).
-        def _thread_lock_key(tid: int, gid: int):  # noqa: E306
+        def _thread_lock_key(tid: int, gid: int):
             return (int(tid), int(gid))
 
-        # ---------- FAN-OUT: process each clone mapping ----------
         for mrow in mappings:
-            # Resolve THIS clone guild + parent
+
             try:
                 clone_gid = int(mrow.get("cloned_guild_id") or 0)
-                cloned_id = int(mrow.get("cloned_channel_id") or 0)
             except Exception:
-                clone_gid, cloned_id = 0, 0
+                clone_gid = 0
 
-            guild = self.bot.get_guild(clone_gid) if clone_gid else None
-            if not guild:
-                logger.error("[⛔] No clone guild could be resolved for thread parent=%s (clone_gid=%s)", parent_id, clone_gid)
-                continue
-
-            cloned_parent = guild.get_channel(cloned_id)
-            if not cloned_id or not cloned_parent:
-                logger.info("[⌛] Channel %s not cloned yet in clone_g=%s; queueing", cloned_id, guild.id)
-                self._pending_thread_msgs.append(data)
-                continue
-
-            # Per-clone webhook
-            if forced_url:
-                webhook_url = forced_url
-            else:
-                webhook_url = mrow.get("channel_webhook_url") or mrow.get("webhook_url") \
-                            or await self._ensure_primary_webhook_url(parent_id)
-            if not webhook_url:
-                logger.warning("[⚠️] No webhook for parent %s in clone_g=%s; queueing thread msg", parent_id, guild.id)
-                self._pending_thread_msgs.append(data)
-                continue
-
-            # Ensure a session
-            if self.session is None or self.session.closed:
-                self.session = aiohttp.ClientSession()
-
-            thread_webhook = Webhook.from_url(webhook_url, session=self.session)
-
-            # Backfill/semaphores per clone-channel
-            if is_backfill and cloned_id:
-                await self.backfill.ensure_temps_ready(int(cloned_id))
-                sem = self.backfill.semaphores.setdefault(int(cloned_id), asyncio.Semaphore(1))
-                rl_key_backfill = f"channel:{cloned_id}"
-            else:
-                sem = None
-                rl_key_backfill = webhook_url
-
-            # Clone-aware thread lookup (fixes "first row wins" bug)
-            thr_map = self.db.get_thread_mapping_by_original_and_clone(int(orig_tid), int(guild.id))
-            clone_thread: discord.Thread | None = None
-            if thr_map:
-                try:
-                    t_id = int(thr_map["cloned_thread_id"] or 0)
-                except Exception:
-                    t_id = 0
-                if t_id:
-                    try:
-                        clone_thread = guild.get_channel(t_id) or await self.bot.fetch_channel(t_id)
-                    except HTTPException as e:
-                        if e.status == 404:
-                            self.db.delete_forum_thread_mapping(int(orig_tid))
-                            thr_map = None
-                            clone_thread = None
-                        else:
-                            logger.warning("[⌛]%s Error fetching thread %s in clone_g=%s; queueing",
-                                        tag, t_id, guild.id)
-                            self._pending_thread_msgs.append(data)
-                            continue
-
-            # Per-(orig_tid, clone_gid) lock
-            lock = self._thread_locks.setdefault(_thread_lock_key(orig_tid, guild.id), asyncio.Lock())
-
-            # === inner helpers that use THIS clone's context ===
-            def _thread_mapping(thread_id: int) -> dict:
-                m = dict(mrow)
-                m["cloned_channel_id"] = int(thread_id)
-                return m
-
-            async def _send_webhook_into_thread(p: dict, *, include_text: bool, thread_obj):
-                _coerce_embeds_inplace(p)
-                try:
-                    thread_id = getattr(thread_obj, "id", None)
-                    if thread_id is None and isinstance(thread_obj, int):
-                        thread_id = thread_obj
-                except Exception:
-                    thread_id = None
-
-                kw = {
-                    "content": (p.get("content") if include_text else None),
-                    "embeds": p.get("embeds"),
-                    "thread": thread_obj,
-                    "wait": True,
-                }
-                if override_identity is not None:
-                    if override_identity.get("username"):
-                        kw["username"] = override_identity["username"]
-                    if override_identity.get("avatar_url"):
-                        kw["avatar_url"] = override_identity["avatar_url"]
-                elif not use_webhook_identity and override_identity is None:
-                    if p.get("username"):
-                        kw["username"] = p.get("username")
-                    if p.get("avatar_url"):
-                        kw["avatar_url"] = p.get("avatar_url")
-
-                wh = thread_webhook
-
-                if is_backfill:
-                    try:
-                        st = self._bf_state(int(cloned_id))
-                        now = asyncio.get_event_loop().time()
-                        wait_s = max(0.0, (st["last"] + self._bf_delay) - now)
-                    except Exception:
-                        wait_s = 0.0
-                    if wait_s > 0:
-                        logger.debug("%s [bf-gate] waiting %.3fs before send into thread_id=%s (clone_id=%s)",
-                                    tag, wait_s, thread_id, cloned_id)
-                    await self._bf_gate(int(cloned_id))
-                    logger.debug("%s [bf-gate] passed for send into thread_id=%s (clone_id=%s)",
-                                tag, thread_id, cloned_id)
-                else:
-                    logger.debug("%s [rl] acquiring WEBHOOK_MESSAGE for key=%s thread_id=%s",
-                                tag, rl_key_backfill, thread_id)
-                    await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=rl_key_backfill)
-                    logger.debug("%s [rl] acquired WEBHOOK_MESSAGE for key=%s thread_id=%s",
-                                tag, rl_key_backfill, thread_id)
+            with self._clone_log_label(clone_gid):
 
                 try:
-                    sent_msg = await wh.send(**kw)
-                except NotFound:
-                    logger.warning("%s [webhook] NotFound on send; rotating webhook and retrying (thread_id=%s, url=%s)",
-                                tag, thread_id, getattr(wh, "url", None))
-                    try:
-                        forced_url_local = data.get("__force_webhook_url__")
-                        if forced_url_local:
-                            try:
-                                self.backfill.invalidate_rotation(int(cloned_id))
-                            except Exception:
-                                pass
-                            primary = mrow.get("channel_webhook_url") or mrow.get("webhook_url")
-                            url2, _ = await self.backfill.pick_url_for_send(
-                                int(cloned_id), primary_url=primary, create_missing=True
-                            )
-                        else:
-                            url2 = await self._ensure_primary_webhook_url(parent_id)
-
-                        wh = Webhook.from_url(url2, session=self.session)
-                        logger.info("%s [webhook] retrying send with new webhook url (thread_id=%s)", tag, thread_id)
-                        sent_msg = await wh.send(**kw)
-                    except Exception:
-                        logger.exception("%s [webhook] retry failed (thread_id=%s)", tag, thread_id)
-                        raise
-
-                # map message -> clone thread message
-                try:
-                    orig_gid = int(data.get("guild_id") or 0)
-                    orig_cid = int(data.get("thread_id") or data.get("channel_id") or 0)
-                    orig_mid = int(data.get("message_id") or 0)
-                    cloned_cid = int(getattr(thread_obj, "id", 0)) if thread_obj else 0
-                    cloned_mid = int(getattr(sent_msg, "id", 0)) if sent_msg else None
-                    used_url = getattr(wh, "url", None)
-
-                    self.db.upsert_message_mapping(
-                        original_guild_id=orig_gid,
-                        original_channel_id=orig_cid,
-                        original_message_id=orig_mid,
-                        cloned_channel_id=cloned_cid,
-                        cloned_message_id=cloned_mid,
-                        webhook_url=used_url,
-                        cloned_guild_id=guild.id,
+                    _settings = (
+                        resolve_mapping_settings(
+                            self.db,
+                            self.config,
+                            original_guild_id=int(data.get("guild_id") or 0),
+                            cloned_guild_id=int(mrow.get("cloned_guild_id") or 0),
+                        )
+                        or {}
                     )
+                except Exception:
+                    _settings = {}
+
+                if not _settings.get("ENABLE_CLONING", True):
                     logger.debug(
-                        "[map] upserted thread message map orig_tid=%s→clone_tid=%s orig_mid=%s→clone_mid=%s",
-                        orig_cid, cloned_cid, orig_mid, cloned_mid,
+                        "[thread-forward] Skipping clone_g=%s for thread_id=%s — ENABLE_CLONING=False",
+                        mrow.get("cloned_guild_id"),
+                        data.get("thread_id"),
                     )
+                    continue
+
+                try:
+                    cloned_id = int(mrow.get("cloned_channel_id") or 0)
                 except Exception:
-                    logger.exception("upsert_message_mapping failed (thread)")
+                    cloned_id = 0
 
-            # ---------- per-clone critical section ----------
-            try:
-                async with lock:
-                    created = False
+                guild = self.bot.get_guild(clone_gid) if clone_gid else None
+                if not guild:
+                    logger.error(
+                        "[⛔] No clone guild could be resolved for thread parent=%s (clone_gid=%s)",
+                        parent_id,
+                        clone_gid,
+                    )
+                    continue
 
-                    # If thread mapping missing in THIS clone, create it
-                    if not thr_map:
-                        async def _try_resolve_thread_from_message(msg, tries=6, delay=0.2):
-                            t = None
-                            last_err = None
-                            for _ in range(tries):
+                cloned_parent = guild.get_channel(cloned_id)
+                if not cloned_id or not cloned_parent:
+                    logger.info(
+                        "[⌛] Channel %s not cloned yet in clone_g=%s; queueing",
+                        cloned_id,
+                        getattr(guild, "id", clone_gid),
+                    )
+                    self._pending_thread_msgs.append(data)
+                    continue
+
+                if forced_url:
+                    webhook_url = forced_url
+                else:
+                    webhook_url = mrow.get("channel_webhook_url") or mrow.get(
+                        "webhook_url"
+                    )
+                    if not webhook_url:
+                        try:
+                            primary = mrow.get("channel_webhook_url") or mrow.get(
+                                "webhook_url"
+                            )
+                            webhook_url, _ = await self.backfill.pick_url_for_send(
+                                int(cloned_id),
+                                primary_url=primary,
+                                create_missing=True,
+                            )
+                        except Exception:
+
+                            webhook_url = await self._recreate_webhook(
+                                int(parent_id), int(data.get("guild_id") or 0)
+                            )
+                if not webhook_url:
+                    logger.warning(
+                        "[⚠️] No webhook for parent %s in clone_g=%s; queueing thread msg",
+                        parent_id,
+                        guild.id,
+                    )
+                    self._pending_thread_msgs.append(data)
+                    continue
+
+                if self.session is None or self.session.closed:
+                    self.session = aiohttp.ClientSession()
+
+                thread_webhook = Webhook.from_url(webhook_url, session=self.session)
+
+                if is_backfill and cloned_id:
+                    await self.backfill.ensure_temps_ready(int(cloned_id))
+                    sem = self.backfill.semaphores.setdefault(
+                        int(cloned_id), asyncio.Semaphore(1)
+                    )
+                    rl_key_backfill = f"channel:{cloned_id}"
+                else:
+                    sem = None
+                    rl_key_backfill = webhook_url
+
+                thr_map = self.db.get_thread_mapping_by_original_and_clone(
+                    int(orig_tid), int(guild.id)
+                )
+                clone_thread: discord.Thread | None = None
+                if thr_map:
+                    try:
+                        t_id = int(thr_map["cloned_thread_id"] or 0)
+                    except Exception:
+                        t_id = 0
+                    if t_id:
+                        try:
+                            clone_thread = guild.get_channel(
+                                t_id
+                            ) or await self.bot.fetch_channel(t_id)
+                        except HTTPException as e:
+                            if e.status == 404:
+                                self.db.delete_forum_thread_mapping(int(orig_tid))
+                                thr_map = None
+                                clone_thread = None
+                            else:
+                                logger.warning(
+                                    "[⌛]%s Error fetching thread %s in clone_g=%s; queueing",
+                                    tag,
+                                    t_id,
+                                    guild.id,
+                                )
+                                self._pending_thread_msgs.append(data)
+                                continue
+
+                lock = self._thread_locks.setdefault(
+                    _thread_lock_key(orig_tid, guild.id), asyncio.Lock()
+                )
+
+                # === inner helpers that use THIS clone's context ===
+                def _thread_mapping(thread_id: int) -> dict:
+                    m = dict(mrow)
+                    m["cloned_channel_id"] = int(thread_id)
+                    return m
+
+                async def _send_webhook_into_thread(
+                    p: dict, *, include_text: bool, thread_obj
+                ):
+                    _coerce_embeds_inplace(p)
+                    try:
+                        thread_id = getattr(thread_obj, "id", None)
+                        if thread_id is None and isinstance(thread_obj, int):
+                            thread_id = thread_obj
+                    except Exception:
+                        thread_id = None
+
+                    kw = {
+                        "content": (p.get("content") if include_text else None),
+                        "embeds": p.get("embeds"),
+                        "thread": thread_obj,
+                        "wait": True,
+                    }
+                    if override_identity is not None:
+                        if override_identity.get("username"):
+                            kw["username"] = override_identity["username"]
+                        if override_identity.get("avatar_url"):
+                            kw["avatar_url"] = override_identity["avatar_url"]
+                    elif not use_webhook_identity and override_identity is None:
+                        if p.get("username"):
+                            kw["username"] = p.get("username")
+                        if p.get("avatar_url"):
+                            kw["avatar_url"] = p.get("avatar_url")
+
+                    wh = thread_webhook
+
+                    if is_backfill:
+                        try:
+                            st = self._bf_state(int(cloned_id))
+                            now = asyncio.get_event_loop().time()
+                            wait_s = max(0.0, (st["last"] + self._bf_delay) - now)
+                        except Exception:
+                            wait_s = 0.0
+                        if wait_s > 0:
+                            logger.debug(
+                                "%s [bf-gate] waiting %.3fs before send into thread_id=%s (clone_id=%s)",
+                                tag,
+                                wait_s,
+                                thread_id,
+                                cloned_id,
+                            )
+                        await self._bf_gate(int(cloned_id))
+                        logger.debug(
+                            "%s [bf-gate] passed for send into thread_id=%s (clone_id=%s)",
+                            tag,
+                            thread_id,
+                            cloned_id,
+                        )
+                    else:
+                        logger.debug(
+                            "%s [rl] acquiring WEBHOOK_MESSAGE for key=%s thread_id=%s",
+                            tag,
+                            rl_key_backfill,
+                            thread_id,
+                        )
+                        await self.ratelimit.acquire(
+                            ActionType.WEBHOOK_MESSAGE, key=rl_key_backfill
+                        )
+                        logger.debug(
+                            "%s [rl] acquired WEBHOOK_MESSAGE for key=%s thread_id=%s",
+                            tag,
+                            rl_key_backfill,
+                            thread_id,
+                        )
+
+                    try:
+                        sent_msg = await wh.send(**kw)
+                    except NotFound:
+                        logger.warning(
+                            "%s [webhook] NotFound on send; rotating webhook and retrying (thread_id=%s, url=%s)",
+                            tag,
+                            thread_id,
+                            getattr(wh, "url", None),
+                        )
+                        try:
+                            forced_url_local = data.get("__force_webhook_url__")
+                            if forced_url_local:
                                 try:
-                                    ch = getattr(msg, "channel", None)
-                                    if isinstance(ch, discord.Thread):
-                                        return ch
+                                    self.backfill.invalidate_rotation(int(cloned_id))
+                                except Exception:
+                                    pass
+                                primary = mrow.get("channel_webhook_url") or mrow.get(
+                                    "webhook_url"
+                                )
+                                url2, _ = await self.backfill.pick_url_for_send(
+                                    int(cloned_id),
+                                    primary_url=primary,
+                                    create_missing=True,
+                                )
 
-                                    ch_id = getattr(msg, "channel_id", None)
-                                    if ch_id:
-                                        t = guild.get_channel(int(ch_id)) or await self.bot.fetch_channel(int(ch_id))
-                                        if isinstance(t, discord.Thread):
-                                            return t
+                            wh = Webhook.from_url(url2, session=self.session)
+                            logger.info(
+                                "%s [webhook] retrying send with new webhook url (thread_id=%s)",
+                                tag,
+                                thread_id,
+                            )
+                            sent_msg = await wh.send(**kw)
+                        except Exception:
+                            logger.exception(
+                                "%s [webhook] retry failed (thread_id=%s)",
+                                tag,
+                                thread_id,
+                            )
+                            raise
 
-                                    j = getattr(msg, "jump_url", "") or ""
-                                    if j:
-                                        parts = j.strip("/").split("/")
-                                        if len(parts) >= 3:
-                                            maybe_cid = parts[-2]
-                                            if maybe_cid.isdigit():
-                                                t = guild.get_channel(int(maybe_cid)) or await self.bot.fetch_channel(int(maybe_cid))
-                                                if isinstance(t, discord.Thread):
-                                                    return t
+                    try:
+                        orig_gid = int(data.get("guild_id") or 0)
+                        orig_cid = int(
+                            data.get("thread_id") or data.get("channel_id") or 0
+                        )
+                        orig_mid = int(data.get("message_id") or 0)
+                        cloned_cid = (
+                            int(getattr(thread_obj, "id", 0)) if thread_obj else 0
+                        )
+                        cloned_mid = (
+                            int(getattr(sent_msg, "id", 0)) if sent_msg else None
+                        )
+                        used_url = getattr(wh, "url", None)
 
-                                    act = await cloned_parent.fetch_active_threads()
-                                    t = next((th for th in act.threads if th.name == data["thread_name"]), None)
-                                    if isinstance(t, discord.Thread):
-                                        return t
+                        self.db.upsert_message_mapping(
+                            original_guild_id=orig_gid,
+                            original_channel_id=orig_cid,
+                            original_message_id=orig_mid,
+                            cloned_channel_id=cloned_cid,
+                            cloned_message_id=cloned_mid,
+                            webhook_url=used_url,
+                            cloned_guild_id=guild.id,
+                        )
+                        logger.debug(
+                            "[map] upserted thread message map orig_tid=%s→clone_tid=%s orig_mid=%s→clone_mid=%s",
+                            orig_cid,
+                            cloned_cid,
+                            orig_mid,
+                            cloned_mid,
+                        )
+                    except Exception:
+                        logger.exception("upsert_message_mapping failed (thread)")
 
+                try:
+                    async with lock:
+                        created = False
+
+                        if not thr_map:
+
+                            async def _try_resolve_thread_from_message(
+                                msg, tries=6, delay=0.2
+                            ):
+                                t = None
+                                last_err = None
+                                for _ in range(tries):
                                     try:
-                                        arch = await cloned_parent.fetch_archived_threads(limit=50)
-                                        t = next((th for th in arch.threads if th.name == data["thread_name"]), None)
+                                        ch = getattr(msg, "channel", None)
+                                        if isinstance(ch, discord.Thread):
+                                            return ch
+
+                                        ch_id = getattr(msg, "channel_id", None)
+                                        if ch_id:
+                                            t = guild.get_channel(
+                                                int(ch_id)
+                                            ) or await self.bot.fetch_channel(
+                                                int(ch_id)
+                                            )
+                                            if isinstance(t, discord.Thread):
+                                                return t
+
+                                        j = getattr(msg, "jump_url", "") or ""
+                                        if j:
+                                            parts = j.strip("/").split("/")
+                                            if len(parts) >= 3:
+                                                maybe_cid = parts[-2]
+                                                if maybe_cid.isdigit():
+                                                    t = guild.get_channel(
+                                                        int(maybe_cid)
+                                                    ) or await self.bot.fetch_channel(
+                                                        int(maybe_cid)
+                                                    )
+                                                    if isinstance(t, discord.Thread):
+                                                        return t
+
+                                        act = await cloned_parent.fetch_active_threads()
+                                        t = next(
+                                            (
+                                                th
+                                                for th in act.threads
+                                                if th.name == data["thread_name"]
+                                            ),
+                                            None,
+                                        )
                                         if isinstance(t, discord.Thread):
                                             return t
-                                    except Exception:
-                                        pass
 
-                                except Exception as e:
-                                    last_err = e
-                                await asyncio.sleep(delay)
+                                        try:
+                                            arch = await cloned_parent.fetch_archived_threads(
+                                                limit=50
+                                            )
+                                            t = next(
+                                                (
+                                                    th
+                                                    for th in arch.threads
+                                                    if th.name == data["thread_name"]
+                                                ),
+                                                None,
+                                            )
+                                            if isinstance(t, discord.Thread):
+                                                return t
+                                        except Exception:
+                                            pass
 
-                            if last_err:
-                                logger.debug("[🧵] resolve retries exhausted with last_err=%r", last_err)
-                            return None
+                                    except Exception as e:
+                                        last_err = e
+                                    await asyncio.sleep(delay)
 
-                        async def _create_text_thread():
-                            if sem:
-                                async with sem:
+                                if last_err:
+                                    logger.debug(
+                                        "[🧵] resolve retries exhausted with last_err=%r",
+                                        last_err,
+                                    )
+                                return None
+
+                            async def _create_text_thread():
+                                if sem:
+                                    async with sem:
+                                        if is_backfill:
+                                            await self._bf_gate(int(cloned_id))
+                                        new_thread = await cloned_parent.create_thread(
+                                            name=data["thread_name"],
+                                            type=ChannelType.public_thread,
+                                            auto_archive_duration=60,
+                                        )
+                                else:
                                     if is_backfill:
                                         await self._bf_gate(int(cloned_id))
                                     new_thread = await cloned_parent.create_thread(
-                                        name=data["thread_name"], type=ChannelType.public_thread, auto_archive_duration=60
+                                        name=data["thread_name"],
+                                        type=ChannelType.public_thread,
+                                        auto_archive_duration=60,
                                     )
-                            else:
-                                if is_backfill:
-                                    await self._bf_gate(int(cloned_id))
-                                new_thread = await cloned_parent.create_thread(
-                                    name=data["thread_name"], type=ChannelType.public_thread, auto_archive_duration=60
+                                if is_backfill and hasattr(self, "backfill"):
+                                    self.backfill.add_expected_total(parent_id, 1)
+                                    self.backfill.note_sent(parent_id, None)
+                                    self.backfill.note_checkpoint(
+                                        parent_id,
+                                        int(data["message_id"]),
+                                        data.get("timestamp"),
+                                    )
+                                logger.info(
+                                    "[🧵]%s Created text thread '%s' → cloned_thread_id=%s in #%s",
+                                    tag,
+                                    data["thread_name"],
+                                    new_thread.id,
+                                    getattr(cloned_parent, "name", cloned_id),
                                 )
-                            if is_backfill and hasattr(self, "backfill"):
-                                self.backfill.add_expected_total(parent_id, 1)
-                                self.backfill.note_sent(parent_id, None)
-                                self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
-                            logger.info(
-                                "[🧵]%s Created text thread '%s' → cloned_thread_id=%s in #%s",
-                                tag, data["thread_name"], new_thread.id, getattr(cloned_parent, "name", cloned_id),
-                            )
-                            return new_thread
+                                return new_thread
 
-                        async def _create_forum_thread_and_first_post():
-                            tmp = {
-                                "content": (payload.get("content") or None),
-                                "embeds": payload.get("embeds"),
-                                "username": payload.get("username"),
-                                "avatar_url": payload.get("avatar_url"),
-                            }
+                            async def _create_forum_thread_and_first_post():
+                                tmp = {
+                                    "content": (payload.get("content") or None),
+                                    "embeds": payload.get("embeds"),
+                                    "username": payload.get("username"),
+                                    "avatar_url": payload.get("avatar_url"),
+                                }
 
-                            # sticker-first handling (preserves your flows)
-                            if stickers and has_textish:
-                                if has_custom:
-                                    data["__stickers_no_text__"] = True
-                                    data["__stickers_prefer_embeds__"] = True
-                                    await self.stickers.send_with_fallback(
-                                        receiver=self, ch=None, stickers=stickers, mapping=mrow, msg=data, source_id=orig_tid
+                                if stickers and has_textish:
+                                    if has_custom:
+                                        data["__stickers_no_text__"] = True
+                                        data["__stickers_prefer_embeds__"] = True
+                                        await self.stickers.send_with_fallback(
+                                            receiver=self,
+                                            ch=None,
+                                            stickers=stickers,
+                                            mapping=mrow,
+                                            msg=data,
+                                            source_id=orig_tid,
+                                        )
+                                        _merge_embeds_into_payload(tmp, data)
+                                    elif has_standard:
+                                        tmp["content"] = "\u200b"
+                                        tmp["embeds"] = None
+                                elif stickers and not has_textish:
+                                    if has_custom:
+                                        data["__stickers_no_text__"] = True
+                                        data["__stickers_prefer_embeds__"] = True
+                                        await self.stickers.send_with_fallback(
+                                            receiver=self,
+                                            ch=None,
+                                            stickers=stickers,
+                                            mapping=mrow,
+                                            msg=data,
+                                            source_id=orig_tid,
+                                        )
+                                        _merge_embeds_into_payload(tmp, data)
+                                    elif has_standard:
+                                        tmp["content"] = "\u200b"
+                                        tmp["embeds"] = None
+
+                                _coerce_embeds_inplace(tmp)
+
+                                if not is_backfill:
+                                    await self.ratelimit.acquire_for_guild(
+                                        ActionType.THREAD, guild.id
                                     )
-                                    _merge_embeds_into_payload(tmp, data)
-                                elif has_standard:
-                                    tmp["content"] = "\u200b"
-                                    tmp["embeds"] = None
-                            elif stickers and not has_textish:
-                                if has_custom:
-                                    data["__stickers_no_text__"] = True
-                                    data["__stickers_prefer_embeds__"] = True
-                                    await self.stickers.send_with_fallback(
-                                        receiver=self, ch=None, stickers=stickers, mapping=mrow, msg=data, source_id=orig_tid
+
+                                if sem:
+                                    async with sem:
+                                        if is_backfill:
+                                            await self._bf_gate(int(cloned_id))
+                                        uname = (
+                                            override_identity.get("username")
+                                            if override_identity
+                                            else tmp.get("username")
+                                        )
+                                        av = (
+                                            override_identity.get("avatar_url")
+                                            if override_identity
+                                            else tmp.get("avatar_url")
+                                        )
+                                        sent_msg = await thread_webhook.send(
+                                            content=(tmp.get("content") or None),
+                                            embeds=tmp.get("embeds"),
+                                            username=(
+                                                None if use_webhook_identity else uname
+                                            ),
+                                            avatar_url=(
+                                                None if use_webhook_identity else av
+                                            ),
+                                            thread_name=data["thread_name"],
+                                            wait=True,
+                                        )
+                                else:
+                                    uname = (
+                                        override_identity.get("username")
+                                        if override_identity
+                                        else tmp.get("username")
                                     )
-                                    _merge_embeds_into_payload(tmp, data)
-                                elif has_standard:
-                                    tmp["content"] = "\u200b"
-                                    tmp["embeds"] = None
-
-                            _coerce_embeds_inplace(tmp)
-
-                            # RL per guild for thread creation
-                            if not is_backfill:
-                                await self.ratelimit.acquire_for_guild(ActionType.THREAD, guild.id)
-
-                            # Create first post -> forum thread
-                            if sem:
-                                async with sem:
+                                    av = (
+                                        override_identity.get("avatar_url")
+                                        if override_identity
+                                        else tmp.get("avatar_url")
+                                    )
                                     if is_backfill:
                                         await self._bf_gate(int(cloned_id))
-                                    uname = override_identity.get("username") if override_identity else tmp.get("username")
-                                    av = override_identity.get("avatar_url") if override_identity else tmp.get("avatar_url")
                                     sent_msg = await thread_webhook.send(
                                         content=(tmp.get("content") or None),
                                         embeds=tmp.get("embeds"),
-                                        username=(None if use_webhook_identity else uname),
-                                        avatar_url=(None if use_webhook_identity else av),
+                                        username=(
+                                            None if use_webhook_identity else uname
+                                        ),
+                                        avatar_url=(
+                                            None if use_webhook_identity else av
+                                        ),
                                         thread_name=data["thread_name"],
                                         wait=True,
                                     )
-                            else:
-                                uname = override_identity.get("username") if override_identity else tmp.get("username")
-                                av = override_identity.get("avatar_url") if override_identity else tmp.get("avatar_url")
-                                if is_backfill:
-                                    await self._bf_gate(int(cloned_id))
-                                sent_msg = await thread_webhook.send(
-                                    content=(tmp.get("content") or None),
-                                    embeds=tmp.get("embeds"),
-                                    username=(None if use_webhook_identity else uname),
-                                    avatar_url=(None if use_webhook_identity else av),
-                                    thread_name=data["thread_name"],
-                                    wait=True,
+
+                                t = await _try_resolve_thread_from_message(
+                                    sent_msg, tries=6, delay=0.2
                                 )
-
-                            t = await _try_resolve_thread_from_message(sent_msg, tries=6, delay=0.2)
-                            if not t:
-                                logger.warning(
-                                    "[🧵]%s Created forum thread '%s' but couldn't resolve thread object yet; will retry later.",
-                                    tag, data["thread_name"],
-                                )
-                                if is_backfill and hasattr(self, "backfill"):
-                                    self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
-                                return None
-
-                            logger.info(
-                                "[🧵]%s Created forum thread '%s' → cloned_thread_id=%s in #%s",
-                                tag, data["thread_name"], t.id, getattr(cloned_parent, "name", cloned_id),
-                            )
-                            try:
-                                await t.edit(auto_archive_duration=60)
-                            except Exception:
-                                logger.debug("[🧵] could not set auto_archive_duration for thread_id=%s", t.id)
-                            if is_backfill and hasattr(self, "backfill"):
-                                self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
-                            return t
-
-                        meta = await self._get_webhook_meta(parent_id, webhook_url)
-                        # Create thread per channel type
-                        if isinstance(cloned_parent, ForumChannel):
-                            clone_thread = await _create_forum_thread_and_first_post()
-                            if not clone_thread:
-                                # can't proceed in this clone yet
-                                continue
-                            new_id = clone_thread.id
-
-                            # standard stickers follow-up if needed
-                            if stickers and has_standard:
-                                sent = await self.stickers.send_with_fallback(
-                                    receiver=self, ch=clone_thread, stickers=stickers,
-                                    mapping=_thread_mapping(new_id), msg=data, source_id=orig_tid
-                                )
-                                if not sent:
-                                    payload2 = self._build_webhook_payload(data)
-                                    if meta.get("custom") or use_webhook_identity:
-                                        payload2.pop("username", None)
-                                        payload2.pop("avatar_url", None)
-                                    if not has_custom:
-                                        payload2.setdefault("content", payload2.get("content"))
-                                    if sem:
-                                        async with sem:
-                                            await _send_webhook_into_thread(payload2, include_text=True, thread_obj=clone_thread)
-                                    else:
-                                        await _send_webhook_into_thread(payload2, include_text=True, thread_obj=clone_thread)
-                            created = True
-                        else:
-                            clone_thread = await _create_text_thread()
-                            new_id = clone_thread.id
-
-                            async def _send_text_thread_followup(p):
-                                if sem:
-                                    async with sem:
-                                        await _send_webhook_into_thread(p, include_text=True, thread_obj=clone_thread)
-                                        if is_backfill and hasattr(self, "backfill"):
-                                            self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                            self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
-                                            logger.info(
-                                                "[💬]%s Forwarding message to thread '%s' in #%s from %s (%s)%s",
-                                                tag, data["thread_name"], data.get("thread_parent_name"),
-                                                data["author"], data["author_id"], _bf_suffix(),
-                                            )
-                                else:
-                                    await _send_webhook_into_thread(p, include_text=True, thread_obj=clone_thread)
+                                if not t:
+                                    logger.warning(
+                                        "[🧵]%s Created forum thread '%s' but couldn't resolve thread object yet; will retry later.",
+                                        tag,
+                                        data["thread_name"],
+                                    )
                                     if is_backfill and hasattr(self, "backfill"):
-                                        self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                        self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
-                                        logger.info(
-                                            "[💬]%s Forwarding message to thread '%s' in #%s from %s (%s)%s",
-                                            tag, data["thread_name"], data.get("thread_parent_name"),
-                                            data["author"], data["author_id"], _bf_suffix(),
+                                        self.backfill.note_checkpoint(
+                                            parent_id,
+                                            int(data["message_id"]),
+                                            data.get("timestamp"),
                                         )
+                                    return None
 
-                            # sticker/text combinations for text threads
-                            if stickers and has_textish:
-                                if has_custom:
-                                    data["__stickers_no_text__"] = True
-                                    data["__stickers_prefer_embeds__"] = True
-                                    await self.stickers.send_with_fallback(
-                                        receiver=self, ch=clone_thread, stickers=stickers,
-                                        mapping=_thread_mapping(new_id), msg=data, source_id=orig_tid
+                                logger.info(
+                                    "[🧵]%s Created forum thread '%s' → cloned_thread_id=%s in #%s",
+                                    tag,
+                                    data["thread_name"],
+                                    t.id,
+                                    getattr(cloned_parent, "name", cloned_id),
+                                )
+                                try:
+                                    await t.edit(auto_archive_duration=60)
+                                except Exception:
+                                    logger.debug(
+                                        "[🧵] could not set auto_archive_duration for thread_id=%s",
+                                        t.id,
                                     )
-                                    _merge_embeds_into_payload(payload, data)
-                                    await _send_text_thread_followup(payload)
-                                elif has_standard:
-                                    data.pop("__stickers_no_text__", None)
-                                    data.pop("__stickers_prefer_embeds__", None)
+                                if is_backfill and hasattr(self, "backfill"):
+                                    self.backfill.note_checkpoint(
+                                        parent_id,
+                                        int(data["message_id"]),
+                                        data.get("timestamp"),
+                                    )
+                                return t
+
+                            meta = await self._get_webhook_meta(parent_id, webhook_url)
+
+                            if isinstance(cloned_parent, ForumChannel):
+                                clone_thread = (
+                                    await _create_forum_thread_and_first_post()
+                                )
+                                if not clone_thread:
+                                    # can't proceed in this clone yet
+                                    continue
+                                new_id = clone_thread.id
+
+                                if stickers and has_standard:
                                     sent = await self.stickers.send_with_fallback(
-                                        receiver=self, ch=clone_thread, stickers=stickers,
-                                        mapping=_thread_mapping(new_id), msg=data, source_id=orig_tid
-                                    )
-                                    if not sent:
-                                        _merge_embeds_into_payload(payload, data)
-                                        await _send_text_thread_followup(payload)
-                            elif stickers and not has_textish:
-                                if has_custom:
-                                    data["__stickers_no_text__"] = True
-                                    data["__stickers_prefer_embeds__"] = True
-                                    await self.stickers.send_with_fallback(
-                                        receiver=self, ch=clone_thread, stickers=stickers,
-                                        mapping=_thread_mapping(new_id), msg=data, source_id=orig_tid
-                                    )
-                                    payload2 = self._build_webhook_payload(data)
-                                    if meta.get("custom") or use_webhook_identity:
-                                        payload2.pop("username", None)
-                                        payload2.pop("avatar_url", None)
-                                    await _send_text_thread_followup(payload2)
-                                else:
-                                    sent = await self.stickers.send_with_fallback(
-                                        receiver=self, ch=clone_thread, stickers=stickers,
-                                        mapping=_thread_mapping(new_id), msg=data, source_id=orig_tid
+                                        receiver=self,
+                                        ch=clone_thread,
+                                        stickers=stickers,
+                                        mapping=_thread_mapping(new_id),
+                                        msg=data,
+                                        source_id=orig_tid,
                                     )
                                     if not sent:
                                         payload2 = self._build_webhook_payload(data)
                                         if meta.get("custom") or use_webhook_identity:
                                             payload2.pop("username", None)
                                             payload2.pop("avatar_url", None)
+                                        if not has_custom:
+                                            payload2.setdefault(
+                                                "content", payload2.get("content")
+                                            )
+                                        if sem:
+                                            async with sem:
+                                                await _send_webhook_into_thread(
+                                                    payload2,
+                                                    include_text=True,
+                                                    thread_obj=clone_thread,
+                                                )
+                                        else:
+                                            await _send_webhook_into_thread(
+                                                payload2,
+                                                include_text=True,
+                                                thread_obj=clone_thread,
+                                            )
+                                created = True
+                            else:
+                                clone_thread = await _create_text_thread()
+                                new_id = clone_thread.id
+
+                                async def _send_text_thread_followup(p):
+                                    if sem:
+                                        async with sem:
+                                            await _send_webhook_into_thread(
+                                                p,
+                                                include_text=True,
+                                                thread_obj=clone_thread,
+                                            )
+                                            if is_backfill and hasattr(
+                                                self, "backfill"
+                                            ):
+                                                self.backfill.note_sent(
+                                                    parent_id, int(data["message_id"])
+                                                )
+                                                self.backfill.note_checkpoint(
+                                                    parent_id,
+                                                    int(data["message_id"]),
+                                                    data.get("timestamp"),
+                                                )
+                                                logger.info(
+                                                    "[💬]%s Forwarding message to thread '%s' in #%s from %s (%s)%s",
+                                                    tag,
+                                                    data["thread_name"],
+                                                    data.get("thread_parent_name"),
+                                                    data["author"],
+                                                    data["author_id"],
+                                                    _bf_suffix(),
+                                                )
+                                    else:
+                                        await _send_webhook_into_thread(
+                                            p,
+                                            include_text=True,
+                                            thread_obj=clone_thread,
+                                        )
+                                        if is_backfill and hasattr(self, "backfill"):
+                                            self.backfill.note_sent(
+                                                parent_id, int(data["message_id"])
+                                            )
+                                            self.backfill.note_checkpoint(
+                                                parent_id,
+                                                int(data["message_id"]),
+                                                data.get("timestamp"),
+                                            )
+                                            logger.info(
+                                                "[💬]%s Forwarding message to thread '%s' in #%s from %s (%s)%s",
+                                                tag,
+                                                data["thread_name"],
+                                                data.get("thread_parent_name"),
+                                                data["author"],
+                                                data["author_id"],
+                                                _bf_suffix(),
+                                            )
+
+                                if stickers and has_textish:
+                                    if has_custom:
+                                        data["__stickers_no_text__"] = True
+                                        data["__stickers_prefer_embeds__"] = True
+                                        await self.stickers.send_with_fallback(
+                                            receiver=self,
+                                            ch=clone_thread,
+                                            stickers=stickers,
+                                            mapping=_thread_mapping(new_id),
+                                            msg=data,
+                                            source_id=orig_tid,
+                                        )
+                                        _merge_embeds_into_payload(payload, data)
+                                        await _send_text_thread_followup(payload)
+                                    elif has_standard:
+                                        data.pop("__stickers_no_text__", None)
+                                        data.pop("__stickers_prefer_embeds__", None)
+                                        sent = await self.stickers.send_with_fallback(
+                                            receiver=self,
+                                            ch=clone_thread,
+                                            stickers=stickers,
+                                            mapping=_thread_mapping(new_id),
+                                            msg=data,
+                                            source_id=orig_tid,
+                                        )
+                                        if not sent:
+                                            _merge_embeds_into_payload(payload, data)
+                                            await _send_text_thread_followup(payload)
+                                elif stickers and not has_textish:
+                                    if has_custom:
+                                        data["__stickers_no_text__"] = True
+                                        data["__stickers_prefer_embeds__"] = True
+                                        await self.stickers.send_with_fallback(
+                                            receiver=self,
+                                            ch=clone_thread,
+                                            stickers=stickers,
+                                            mapping=_thread_mapping(new_id),
+                                            msg=data,
+                                            source_id=orig_tid,
+                                        )
+                                        payload2 = self._build_webhook_payload(data)
+                                        if meta.get("custom") or use_webhook_identity:
+                                            payload2.pop("username", None)
+                                            payload2.pop("avatar_url", None)
                                         await _send_text_thread_followup(payload2)
-                            else:
-                                await _send_text_thread_followup(payload)
-
-                            created = True
-
-                        # Persist thread map FOR THIS CLONE
-                        self.db.upsert_forum_thread_mapping(
-                            orig_thread_id=int(orig_tid),
-                            orig_thread_name=data["thread_name"],
-                            clone_thread_id=int(new_id),
-                            forum_orig_id=int(parent_id),
-                            forum_clone_id=int(cloned_id),
-                            original_guild_id=int(data.get("guild_id") or 0),
-                            cloned_guild_id=int(guild.id),
-                        )
-
-                    # If already created earlier in THIS clone, send follow-ups
-                    if not created and clone_thread is not None:
-                        meta = await self._get_webhook_meta(parent_id, webhook_url)
-
-                        if stickers and not has_textish:
-                            if has_custom:
-                                data["__stickers_no_text__"] = True
-                                data["__stickers_prefer_embeds__"] = True
-                                _ = await self.stickers.send_with_fallback(
-                                    receiver=self, ch=clone_thread, stickers=stickers,
-                                    mapping=_thread_mapping(clone_thread.id), msg=data, source_id=orig_tid
-                                )
-                                payload2 = self._build_webhook_payload(data)
-                                if meta.get("custom") or use_webhook_identity:
-                                    payload2.pop("username", None)
-                                    payload2.pop("avatar_url", None)
-                                if sem:
-                                    async with sem:
-                                        await _send_webhook_into_thread(payload2, include_text=True, thread_obj=clone_thread)
-                                        if is_backfill and hasattr(self, "backfill"):
-                                            self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                            self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
+                                    else:
+                                        sent = await self.stickers.send_with_fallback(
+                                            receiver=self,
+                                            ch=clone_thread,
+                                            stickers=stickers,
+                                            mapping=_thread_mapping(new_id),
+                                            msg=data,
+                                            source_id=orig_tid,
+                                        )
+                                        if not sent:
+                                            payload2 = self._build_webhook_payload(data)
+                                            if (
+                                                meta.get("custom")
+                                                or use_webhook_identity
+                                            ):
+                                                payload2.pop("username", None)
+                                                payload2.pop("avatar_url", None)
+                                            await _send_text_thread_followup(payload2)
                                 else:
-                                    await _send_webhook_into_thread(payload2, include_text=True, thread_obj=clone_thread)
-                                    if is_backfill and hasattr(self, "backfill"):
-                                        self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                        self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
-                                continue
-                            else:
-                                sent = await self.stickers.send_with_fallback(
-                                    receiver=self, ch=clone_thread, stickers=stickers,
-                                    mapping=_thread_mapping(clone_thread.id), msg=data, source_id=orig_tid
-                                )
-                                if sent:
-                                    if is_backfill and hasattr(self, "backfill"):
-                                        self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                        self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
-                                    continue
-                                payload2 = self._build_webhook_payload(data)
-                                if meta.get("custom") or use_webhook_identity:
-                                    payload2.pop("username", None)
-                                    payload2.pop("avatar_url", None)
-                                if sem:
-                                    async with sem:
-                                        await _send_webhook_into_thread(payload2, include_text=True, thread_obj=clone_thread)
-                                        if is_backfill and hasattr(self, "backfill"):
-                                            self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                            self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
-                                else:
-                                    await _send_webhook_into_thread(payload2, include_text=True, thread_obj=clone_thread)
-                                    if is_backfill and hasattr(self, "backfill"):
-                                        self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                        self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
-                                continue
+                                    await _send_text_thread_followup(payload)
 
-                        if stickers and has_textish:
-                            if has_custom:
-                                data["__stickers_no_text__"] = True
-                                data["__stickers_prefer_embeds__"] = True
-                                _ = await self.stickers.send_with_fallback(
-                                    receiver=self, ch=clone_thread, stickers=stickers,
-                                    mapping=_thread_mapping(clone_thread.id), msg=data, source_id=orig_tid
-                                )
-                                _merge_embeds_into_payload(payload, data)
-                                if sem:
-                                    async with sem:
-                                        await _send_webhook_into_thread(payload, include_text=True, thread_obj=clone_thread)
-                                        if is_backfill and hasattr(self, "backfill"):
-                                            self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                            self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
-                                else:
-                                    await _send_webhook_into_thread(payload, include_text=True, thread_obj=clone_thread)
-                                    if is_backfill and hasattr(self, "backfill"):
-                                        self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                        self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
-                                continue
-                            elif has_standard:
-                                data.pop("__stickers_no_text__", None)
-                                data.pop("__stickers_prefer_embeds__", None)
-                                sent = await self.stickers.send_with_fallback(
-                                    receiver=self, ch=clone_thread, stickers=stickers,
-                                    mapping=_thread_mapping(clone_thread.id), msg=data, source_id=orig_tid
-                                )
-                                if sent:
-                                    if is_backfill and hasattr(self, "backfill"):
-                                        self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                        self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
-                                    continue
-                                _merge_embeds_into_payload(payload, data)
-                                if sem:
-                                    async with sem:
-                                        await _send_webhook_into_thread(payload, include_text=True, thread_obj=clone_thread)
-                                    if is_backfill and hasattr(self, "backfill"):
-                                        self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                        self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
-                                else:
-                                    await _send_webhook_into_thread(payload, include_text=True, thread_obj=clone_thread)
-                                    if is_backfill and hasattr(self, "backfill"):
-                                        self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                        self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
-                                continue
+                                created = True
 
-                        if has_textish:
-                            if sem:
-                                async with sem:
-                                    await _send_webhook_into_thread(payload, include_text=True, thread_obj=clone_thread)
-                            else:
-                                await _send_webhook_into_thread(payload, include_text=True, thread_obj=clone_thread)
-
-                            if is_backfill and hasattr(self, "backfill"):
-                                self.backfill.note_sent(parent_id, int(data["message_id"]))
-                                self.backfill.note_checkpoint(parent_id, int(data["message_id"]), data.get("timestamp"))
-
-                            logger.info(
-                                "[💬]%s Forwarding message to thread '%s' in #%s from %s (%s)%s",
-                                tag, data["thread_name"], data.get("thread_parent_name"),
-                                data["author"], data["author_id"], _bf_suffix(),
+                            self.db.upsert_forum_thread_mapping(
+                                orig_thread_id=int(orig_tid),
+                                orig_thread_name=data["thread_name"],
+                                clone_thread_id=int(new_id),
+                                forum_orig_id=int(parent_id),
+                                forum_clone_id=int(cloned_id),
+                                original_guild_id=int(data.get("guild_id") or 0),
+                                cloned_guild_id=int(guild.id),
                             )
 
-            finally:
-                # per-clone enforce
-                try:
-                    await self._enforce_thread_limit(guild)
-                except Exception:
-                    logger.exception("Error enforcing thread limit.")
+                        if not created and clone_thread is not None:
+                            meta = await self._get_webhook_meta(parent_id, webhook_url)
 
-                
+                            if stickers and not has_textish:
+                                if has_custom:
+                                    data["__stickers_no_text__"] = True
+                                    data["__stickers_prefer_embeds__"] = True
+                                    _ = await self.stickers.send_with_fallback(
+                                        receiver=self,
+                                        ch=clone_thread,
+                                        stickers=stickers,
+                                        mapping=_thread_mapping(clone_thread.id),
+                                        msg=data,
+                                        source_id=orig_tid,
+                                    )
+                                    payload2 = self._build_webhook_payload(data)
+                                    if meta.get("custom") or use_webhook_identity:
+                                        payload2.pop("username", None)
+                                        payload2.pop("avatar_url", None)
+                                    if sem:
+                                        async with sem:
+                                            await _send_webhook_into_thread(
+                                                payload2,
+                                                include_text=True,
+                                                thread_obj=clone_thread,
+                                            )
+                                            if is_backfill and hasattr(
+                                                self, "backfill"
+                                            ):
+                                                self.backfill.note_sent(
+                                                    parent_id, int(data["message_id"])
+                                                )
+                                                self.backfill.note_checkpoint(
+                                                    parent_id,
+                                                    int(data["message_id"]),
+                                                    data.get("timestamp"),
+                                                )
+                                    else:
+                                        await _send_webhook_into_thread(
+                                            payload2,
+                                            include_text=True,
+                                            thread_obj=clone_thread,
+                                        )
+                                        if is_backfill and hasattr(self, "backfill"):
+                                            self.backfill.note_sent(
+                                                parent_id, int(data["message_id"])
+                                            )
+                                            self.backfill.note_checkpoint(
+                                                parent_id,
+                                                int(data["message_id"]),
+                                                data.get("timestamp"),
+                                            )
+                                    continue
+                                else:
+                                    sent = await self.stickers.send_with_fallback(
+                                        receiver=self,
+                                        ch=clone_thread,
+                                        stickers=stickers,
+                                        mapping=_thread_mapping(clone_thread.id),
+                                        msg=data,
+                                        source_id=orig_tid,
+                                    )
+                                    if sent:
+                                        if is_backfill and hasattr(self, "backfill"):
+                                            self.backfill.note_sent(
+                                                parent_id, int(data["message_id"])
+                                            )
+                                            self.backfill.note_checkpoint(
+                                                parent_id,
+                                                int(data["message_id"]),
+                                                data.get("timestamp"),
+                                            )
+                                        continue
+                                    payload2 = self._build_webhook_payload(data)
+                                    if meta.get("custom") or use_webhook_identity:
+                                        payload2.pop("username", None)
+                                        payload2.pop("avatar_url", None)
+                                    if sem:
+                                        async with sem:
+                                            await _send_webhook_into_thread(
+                                                payload2,
+                                                include_text=True,
+                                                thread_obj=clone_thread,
+                                            )
+                                            if is_backfill and hasattr(
+                                                self, "backfill"
+                                            ):
+                                                self.backfill.note_sent(
+                                                    parent_id, int(data["message_id"])
+                                                )
+                                                self.backfill.note_checkpoint(
+                                                    parent_id,
+                                                    int(data["message_id"]),
+                                                    data.get("timestamp"),
+                                                )
+                                    else:
+                                        await _send_webhook_into_thread(
+                                            payload2,
+                                            include_text=True,
+                                            thread_obj=clone_thread,
+                                        )
+                                        if is_backfill and hasattr(self, "backfill"):
+                                            self.backfill.note_sent(
+                                                parent_id, int(data["message_id"])
+                                            )
+                                            self.backfill.note_checkpoint(
+                                                parent_id,
+                                                int(data["message_id"]),
+                                                data.get("timestamp"),
+                                            )
+                                    continue
+
+                            if stickers and has_textish:
+                                if has_custom:
+                                    data["__stickers_no_text__"] = True
+                                    data["__stickers_prefer_embeds__"] = True
+                                    _ = await self.stickers.send_with_fallback(
+                                        receiver=self,
+                                        ch=clone_thread,
+                                        stickers=stickers,
+                                        mapping=_thread_mapping(clone_thread.id),
+                                        msg=data,
+                                        source_id=orig_tid,
+                                    )
+                                    _merge_embeds_into_payload(payload, data)
+                                    if sem:
+                                        async with sem:
+                                            await _send_webhook_into_thread(
+                                                payload,
+                                                include_text=True,
+                                                thread_obj=clone_thread,
+                                            )
+                                            if is_backfill and hasattr(
+                                                self, "backfill"
+                                            ):
+                                                self.backfill.note_sent(
+                                                    parent_id, int(data["message_id"])
+                                                )
+                                                self.backfill.note_checkpoint(
+                                                    parent_id,
+                                                    int(data["message_id"]),
+                                                    data.get("timestamp"),
+                                                )
+                                    else:
+                                        await _send_webhook_into_thread(
+                                            payload,
+                                            include_text=True,
+                                            thread_obj=clone_thread,
+                                        )
+                                        if is_backfill and hasattr(self, "backfill"):
+                                            self.backfill.note_sent(
+                                                parent_id, int(data["message_id"])
+                                            )
+                                            self.backfill.note_checkpoint(
+                                                parent_id,
+                                                int(data["message_id"]),
+                                                data.get("timestamp"),
+                                            )
+                                    continue
+                                elif has_standard:
+                                    data.pop("__stickers_no_text__", None)
+                                    data.pop("__stickers_prefer_embeds__", None)
+                                    sent = await self.stickers.send_with_fallback(
+                                        receiver=self,
+                                        ch=clone_thread,
+                                        stickers=stickers,
+                                        mapping=_thread_mapping(clone_thread.id),
+                                        msg=data,
+                                        source_id=orig_tid,
+                                    )
+                                    if sent:
+                                        if is_backfill and hasattr(self, "backfill"):
+                                            self.backfill.note_sent(
+                                                parent_id, int(data["message_id"])
+                                            )
+                                            self.backfill.note_checkpoint(
+                                                parent_id,
+                                                int(data["message_id"]),
+                                                data.get("timestamp"),
+                                            )
+                                        continue
+                                    _merge_embeds_into_payload(payload, data)
+                                    if sem:
+                                        async with sem:
+                                            await _send_webhook_into_thread(
+                                                payload,
+                                                include_text=True,
+                                                thread_obj=clone_thread,
+                                            )
+                                        if is_backfill and hasattr(self, "backfill"):
+                                            self.backfill.note_sent(
+                                                parent_id, int(data["message_id"])
+                                            )
+                                            self.backfill.note_checkpoint(
+                                                parent_id,
+                                                int(data["message_id"]),
+                                                data.get("timestamp"),
+                                            )
+                                    else:
+                                        await _send_webhook_into_thread(
+                                            payload,
+                                            include_text=True,
+                                            thread_obj=clone_thread,
+                                        )
+                                        if is_backfill and hasattr(self, "backfill"):
+                                            self.backfill.note_sent(
+                                                parent_id, int(data["message_id"])
+                                            )
+                                            self.backfill.note_checkpoint(
+                                                parent_id,
+                                                int(data["message_id"]),
+                                                data.get("timestamp"),
+                                            )
+                                    continue
+
+                            if has_textish:
+                                if sem:
+                                    async with sem:
+                                        await _send_webhook_into_thread(
+                                            payload,
+                                            include_text=True,
+                                            thread_obj=clone_thread,
+                                        )
+                                else:
+                                    await _send_webhook_into_thread(
+                                        payload,
+                                        include_text=True,
+                                        thread_obj=clone_thread,
+                                    )
+
+                                if is_backfill and hasattr(self, "backfill"):
+                                    self.backfill.note_sent(
+                                        parent_id, int(data["message_id"])
+                                    )
+                                    self.backfill.note_checkpoint(
+                                        parent_id,
+                                        int(data["message_id"]),
+                                        data.get("timestamp"),
+                                    )
+
+                                logger.info(
+                                    "[💬]%s Forwarding message to thread '%s' in #%s from %s (%s)%s",
+                                    tag,
+                                    data["thread_name"],
+                                    data.get("thread_parent_name"),
+                                    data["author"],
+                                    data["author_id"],
+                                    _bf_suffix(),
+                                )
+
+                finally:
+
+                    try:
+                        await self._enforce_thread_limit(guild)
+                    except Exception:
+                        logger.exception("Error enforcing thread limit.")
+
     def _bf_pick_mapping_for_target(self, original_channel_id: int) -> dict | None:
         """
         Resolve the precise mapping row for a backfill run, preferring the
@@ -5441,28 +6501,24 @@ class ServerReceiver:
         oid = int(original_channel_id)
         st = self.backfill._progress.get(oid) or {}
 
-        # 1) Prefer explicit clone_channel_id captured at run start
         clone_cid = st.get("clone_channel_id")
         if clone_cid and hasattr(self.db, "get_channel_mapping_by_clone_id"):
             row = self.db.get_channel_mapping_by_clone_id(int(clone_cid))
             if row:
                 return dict(row)
 
-        # 2) Next prefer explicit cloned_guild_id from run meta
         clone_gid = st.get("cloned_guild_id")
         if clone_gid and hasattr(self.db, "get_channel_mapping_by_original_and_clone"):
             row = self.db.get_channel_mapping_by_original_and_clone(oid, int(clone_gid))
             if row:
                 return dict(row)
 
-        # 3) Fallback: legacy single row (may be wrong if multi-clone exists)
         if hasattr(self.db, "get_channel_mapping_by_original_id"):
             row = self.db.get_channel_mapping_by_original_id(oid)
             if row:
                 return dict(row)
 
         return None
-
 
     async def _handle_backfill_message(self, data: dict) -> None:
         if self._shutting_down:
@@ -5480,7 +6536,6 @@ class ServerReceiver:
             await self.handle_message(data)
             return
 
-        # pull target clone channel id
         clone_id = None
         for k in ("cloned_channel_id", "clone_channel_id"):
             v = row.get(k)
@@ -5491,7 +6546,6 @@ class ServerReceiver:
                 except Exception:
                     pass
 
-        # primary webhook url (for rotation base)
         primary_url = None
         for k in ("channel_webhook_url", "webhook_url", "webhook"):
             v = row.get(k)
@@ -5500,26 +6554,30 @@ class ServerReceiver:
                 break
 
         if not primary_url:
-            logger.warning("[bf] mapping found but no webhook URL | ch=%s row=%s", original_id, row)
+            logger.warning(
+                "[bf] mapping found but no webhook URL | ch=%s row=%s", original_id, row
+            )
             await self.handle_message(data)
             return
 
         # Respect existing target in progress; don't stomp it if set
         st = self.backfill._progress.get(int(original_id))
         if not st:
-            self.backfill.register_sink(original_id, user_id=None, clone_channel_id=clone_id, msg=None)
+            self.backfill.register_sink(
+                original_id, user_id=None, clone_channel_id=clone_id, msg=None
+            )
             logger.debug("[bf] sink registered | ch=%s clone=%s", original_id, clone_id)
         else:
             if clone_id and st.get("clone_channel_id") is None:
                 st["clone_channel_id"] = clone_id
-            # If st already has a different clone_id, do not overwrite it here.
 
-        # Prepare temps and rotate to a URL for THIS clone only
         try:
             if clone_id:
                 await self.backfill.ensure_temps_ready(clone_id)
         except Exception as e:
-            logger.debug("[bf] ensure_temps_ready failed | clone=%s err=%s", clone_id, e)
+            logger.debug(
+                "[bf] ensure_temps_ready failed | clone=%s err=%s", clone_id, e
+            )
 
         try:
             url, _used_pool = await self.backfill.pick_url_for_send(
@@ -5531,7 +6589,6 @@ class ServerReceiver:
             logger.warning("[bf] rotation failed, using primary | err=%s", e)
             url = primary_url
 
-        # Force a single-target send (no fan-out). Also pass the clone id.
         forced = dict(data)
         forced["__force_webhook_url__"] = url
         if clone_id is not None:
@@ -5546,7 +6603,9 @@ class ServerReceiver:
         try:
             parent_id = int(data["thread_parent_id"])
         except Exception:
-            logger.warning("[bf] bad thread_parent_id in payload: %r", data.get("thread_parent_id"))
+            logger.warning(
+                "[bf] bad thread_parent_id in payload: %r", data.get("thread_parent_id")
+            )
             return
 
         row = self._bf_pick_mapping_for_target(parent_id)
@@ -5573,24 +6632,33 @@ class ServerReceiver:
                 break
 
         if not primary_url:
-            logger.warning("[bf] mapping found but no webhook URL | parent=%s row=%s", parent_id, row)
+            logger.warning(
+                "[bf] mapping found but no webhook URL | parent=%s row=%s",
+                parent_id,
+                row,
+            )
             await self.handle_thread_message(data)
             return
 
         st = self.backfill._progress.get(int(parent_id))
         if not st:
-            self.backfill.register_sink(parent_id, user_id=None, clone_channel_id=clone_id, msg=None)
-            logger.debug("[bf] sink registered | parent=%s clone=%s", parent_id, clone_id)
+            self.backfill.register_sink(
+                parent_id, user_id=None, clone_channel_id=clone_id, msg=None
+            )
+            logger.debug(
+                "[bf] sink registered | parent=%s clone=%s", parent_id, clone_id
+            )
         else:
             if clone_id and st.get("clone_channel_id") is None:
                 st["clone_channel_id"] = clone_id
-            # Do not overwrite an existing different clone target.
 
         try:
             if clone_id:
                 await self.backfill.ensure_temps_ready(clone_id)
         except Exception as e:
-            logger.debug("[bf] ensure_temps_ready failed | clone=%s err=%s", clone_id, e)
+            logger.debug(
+                "[bf] ensure_temps_ready failed | clone=%s err=%s", clone_id, e
+            )
 
         try:
             url, _used_pool = await self.backfill.pick_url_for_send(
@@ -5608,7 +6676,6 @@ class ServerReceiver:
             forced["__force_clone_channel_id__"] = str(clone_id)
 
         await self.forward_message(forced)
-
 
     def _prune_old_messages_loop(
         self, retention_seconds: int | None = None
@@ -5687,13 +6754,16 @@ class ServerReceiver:
             if self.session is None or self.session.closed:
                 self.session = aiohttp.ClientSession()
             wh = Webhook.from_url(webhook_url, session=self.session)
-            await wh.delete_message(cloned_mid)
-            logger.info(
-                "[🗑️] Deleted cloned msg %s (orig %s) in #%s",
-                cloned_mid,
-                orig_mid,
-                channel_name,
-            )
+
+            clone_gid = int(row.get("cloned_guild_id") or 0)
+
+            with self._clone_log_label(clone_gid):
+                logger.info(
+                    "[🗑️] Deleted cloned msg %s (orig %s) in #%s",
+                    cloned_mid,
+                    orig_mid,
+                    channel_name,
+                )
         except NotFound:
 
             logger.info(
@@ -5730,7 +6800,16 @@ class ServerReceiver:
 
         channel_name = data.get("channel_name")
 
-        async def _maybe_delete_for_row(r: dict) -> bool:
+        async def _maybe_delete_for_row(r) -> bool:
+
+            try:
+                if r is None:
+                    r = {}
+                elif not isinstance(r, dict):
+                    r = dict(r)
+            except Exception:
+                r = {}
+
             try:
                 settings = resolve_mapping_settings(
                     self.db,
@@ -5739,9 +6818,24 @@ class ServerReceiver:
                     cloned_guild_id=int(r.get("cloned_guild_id") or 0),
                 )
             except Exception:
-                settings = self.config.default_mapping_settings()
+                settings = dict(self.config.default_mapping_settings())
+                settings["DELETE_MESSAGES"] = False
 
-            if not settings.get("DELETE_MESSAGES", True):
+            logger.debug(
+                "[🗑️] Delete check host_g=%s clone_g=%s settings=%s",
+                r.get("original_guild_id") or orig_gid,
+                r.get("cloned_guild_id"),
+                settings,
+            )
+
+            if not settings.get("ENABLE_CLONING", True):
+                logger.debug(
+                    "[🗑️] Skipping delete for clone_g=%s (cloning disabled for this mapping)",
+                    r.get("cloned_guild_id"),
+                )
+                return False
+
+            if not settings.get("DELETE_MESSAGES", False):
                 logger.debug(
                     "[🗑️] Skipping delete for clone_g=%s (DELETE_MESSAGES disabled for this mapping)",
                     r.get("cloned_guild_id"),
@@ -5750,7 +6844,6 @@ class ServerReceiver:
 
             return await self._delete_with_row(r, orig_mid, channel_name)
 
-        # Try to delete immediately if mappings exist
         rows = []
         try:
             rows = self.db.get_message_mappings_for_original(orig_mid) or []
@@ -5760,20 +6853,29 @@ class ServerReceiver:
         if rows:
             deleted_any = False
             for r in rows:
-                ok = await _maybe_delete_for_row(r)
+                cg = int(
+                    (dict(r) if not isinstance(r, dict) else r).get("cloned_guild_id")
+                    or 0
+                )
+                with self._clone_log_label(cg):
+                    ok = await _maybe_delete_for_row(r)
                 deleted_any = deleted_any or ok
             if not deleted_any:
-                logger.debug("[🗑️] No deletes performed for orig %s (all disabled or failed).", orig_mid)
+                logger.debug(
+                    "[🗑️] No deletes performed for orig %s (all disabled or failed).",
+                    orig_mid,
+                )
             return
 
-        # Handle in-flight waiting (mapping not ready yet)
         ev = self._inflight_events.get(orig_mid)
         if ev and not ev.is_set():
             self._pending_deletes.add(orig_mid)
             try:
                 await asyncio.wait_for(ev.wait(), timeout=7.0)
             except asyncio.TimeoutError:
-                logger.debug("[🕒] Delete queued; mapping not ready yet for orig %s", orig_mid)
+                logger.debug(
+                    "[🕒] Delete queued; mapping not ready yet for orig %s", orig_mid
+                )
                 return
 
             try:
@@ -5788,11 +6890,13 @@ class ServerReceiver:
                 self._inflight_events.pop(orig_mid, None)
                 return
 
-            logger.debug("[🕒] Delete remains queued; mapping still missing for orig %s", orig_mid)
+            logger.debug(
+                "[🕒] Delete remains queued; mapping still missing for orig %s",
+                orig_mid,
+            )
             return
 
-        # Retry polling path
-        row = await self._get_mapping_with_retry(
+        rows = await self._get_mappings_with_retry(
             orig_mid,
             attempts=5,
             base_delay=0.08,
@@ -5800,15 +6904,15 @@ class ServerReceiver:
             jitter=0.25,
             log_prefix="delete-wait",
         )
-        if row is not None:
-            rows = [row]
+        if rows:
             for r in rows:
                 await _maybe_delete_for_row(r)
             return
 
-        # Nothing known yet — keep queued as before
         self._pending_deletes.add(orig_mid)
-        logger.debug("[🕒] Delete queued with no mapping/in-flight info for orig %s", orig_mid)
+        logger.debug(
+            "[🕒] Delete queued with no mapping/in-flight info for orig %s", orig_mid
+        )
 
     def _pick_verify_guild_id(self) -> int | None:
         """
@@ -5842,9 +6946,8 @@ class ServerReceiver:
         we already have at sync time, scoped to THIS sitemap's mapping.
         """
         guild_info = sitemap.get("guild") or {}
-        target     = sitemap.get("target") or {}
+        target = sitemap.get("target") or {}
 
-        # Parse ids
         try:
             host_gid = int(guild_info.get("id") or 0)
         except (TypeError, ValueError):
@@ -5856,37 +6959,33 @@ class ServerReceiver:
         mapping_id_hint = target.get("mapping_id")
 
         if not host_gid:
-            return  # need the source guild id
+            return
 
-        # ----- fetch the correct mapping row for THIS sitemap -----
         mrow = None
         if mapping_id_hint:
             mrow = self.db.get_mapping_by_id(str(mapping_id_hint))
         if not mrow and cloned_gid:
             mrow = self.db.get_mapping_by_original_and_clone(host_gid, cloned_gid)
         if not mrow:
-            # last resort (legacy behavior) — but this is ambiguous with multi-clone
+
             mrow = self.db.get_mapping_by_original(host_gid)
         if not mrow:
             return
 
-        # Normalize sqlite3.Row -> dict for .get(...)
         if not isinstance(mrow, dict):
             try:
                 mrow = {k: mrow[k] for k in mrow.keys()}
             except Exception:
                 mrow = dict(mrow)
 
-        # Determine what is missing
-        need_orig_name  = not str(mrow.get("original_guild_name") or "").strip()
-        need_orig_icon  = not str(mrow.get("original_guild_icon_url") or "").strip()
+        need_orig_name = not str(mrow.get("original_guild_name") or "").strip()
+        need_orig_icon = not str(mrow.get("original_guild_icon_url") or "").strip()
         need_clone_name = not str(mrow.get("cloned_guild_name") or "").strip()
         if not (need_orig_name or need_orig_icon or need_clone_name):
             return
 
-        # Values we can enrich with
         sitemap_orig_name = str((guild_info.get("name") or "")).strip()
-        sitemap_icon_url  = str((guild_info.get("icon") or "")).strip()
+        sitemap_icon_url = str((guild_info.get("icon") or "")).strip()
 
         clone_gid_val = int(mrow.get("cloned_guild_id") or cloned_gid or 0)
         clone_guild_name = None
@@ -5895,10 +6994,21 @@ class ServerReceiver:
             if cg_obj:
                 clone_guild_name = getattr(cg_obj, "name", None)
 
-        # Final values (preserve existing if not enriching)
-        final_orig_name = sitemap_orig_name if (need_orig_name and sitemap_orig_name) else (mrow.get("original_guild_name") or "")
-        final_orig_icon = sitemap_icon_url  if (need_orig_icon and sitemap_icon_url)   else (mrow.get("original_guild_icon_url") or None)
-        final_clone_name = clone_guild_name if (need_clone_name and clone_guild_name) else (mrow.get("cloned_guild_name") or "")
+        final_orig_name = (
+            sitemap_orig_name
+            if (need_orig_name and sitemap_orig_name)
+            else (mrow.get("original_guild_name") or "")
+        )
+        final_orig_icon = (
+            sitemap_icon_url
+            if (need_orig_icon and sitemap_icon_url)
+            else (mrow.get("original_guild_icon_url") or None)
+        )
+        final_clone_name = (
+            clone_guild_name
+            if (need_clone_name and clone_guild_name)
+            else (mrow.get("cloned_guild_name") or "")
+        )
 
         try:
             self.db.upsert_guild_mapping(
@@ -5920,9 +7030,11 @@ class ServerReceiver:
                 final_clone_name,
             )
         except Exception:
-            logger.exception("[guild-id-meta] failed to enrich mapping for origin=%s clone=%s",
-                            host_gid, clone_gid_val)
-
+            logger.exception(
+                "[guild-id-meta] failed to enrich mapping for origin=%s clone=%s",
+                host_gid,
+                clone_gid_val,
+            )
 
     async def _shutdown(self):
         """

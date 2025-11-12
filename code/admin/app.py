@@ -2086,7 +2086,7 @@ async def api_channels(mapping_id: str | None = Query(default=None)):
             def _belongs(row: sqlite3.Row) -> bool:
                 og = str(row["original_guild_id"] or "")
                 cg = str(row["cloned_guild_id"] or "")
-                return (og == allowed_host) or (cg == allowed_clone)
+                return (og == allowed_host) and (cg == allowed_clone)
 
             raw_rows = [r for r in raw_rows if _belongs(r)]
             raw_cat_rows = [r for r in raw_cat_rows if _belongs(r)]
@@ -2125,6 +2125,8 @@ async def api_channels(mapping_id: str | None = Query(default=None)):
                     else ""
                 ),
                 "cloned_category_name": cr.get("cloned_category_name") or "",
+                "original_guild_id": str(cr.get("original_guild_id") or ""),
+                "cloned_guild_id": str(cr.get("cloned_guild_id") or ""),
                 "channels": [
                     {
                         "original_channel_id": str(c["original_channel_id"]),
@@ -2173,12 +2175,30 @@ async def api_channels(mapping_id: str | None = Query(default=None)):
     ]
 
     if uncategorized_channels:
+        uc_ogid = next(
+            (
+                str(ch.get("original_guild_id") or "")
+                for ch in uncategorized_channels
+                if ch.get("original_guild_id")
+            ),
+            "",
+        )
+        uc_cgid = next(
+            (
+                str(ch.get("cloned_guild_id") or "")
+                for ch in uncategorized_channels
+                if ch.get("cloned_guild_id")
+            ),
+            "",
+        )
         grouped_categories.append(
             {
                 "original_category_id": "",
                 "original_category_name": "Uncategorized",
                 "cloned_category_id": "",
                 "cloned_category_name": "",
+                "original_guild_id": uc_ogid,
+                "cloned_guild_id": uc_cgid,
                 "channels": uncategorized_channels,
             }
         )
@@ -2797,19 +2817,13 @@ def _discordify(s: str | None) -> str | None:
 @app.post("/api/channels/customize", response_class=JSONResponse)
 async def api_channels_customize(payload: dict = Body(...)):
     """
-    Set or clear a channel's custom clone name (Discord-safe).
-    Rules:
-      - Input is normalized to Discord format via _discordify()
-      - Empty/null or same-as-original -> store NULL
-      - Skip DB + WS nudge if nothing changes
-      - Skip WS nudge when clearing because it's same-as-original
+    Set or clear a channel's custom clone name, scoped to (original_channel_id, cloned_guild_id).
     """
     try:
         ocid = int(payload.get("original_channel_id"))
+        cgid = int(payload.get("cloned_guild_id"))
     except Exception:
-        return JSONResponse(
-            {"ok": False, "error": "invalid-original_channel_id"}, status_code=400
-        )
+        return JSONResponse({"ok": False, "error": "invalid-ids"}, status_code=400)
 
     desired = _discordify(payload.get("clone_channel_name", None))
 
@@ -2817,67 +2831,47 @@ async def api_channels_customize(payload: dict = Body(...)):
         orig = db.get_original_channel_name(ocid)
     except Exception:
         orig = None
-
-    same_as_original = False
     if desired is not None and _canon(orig) == desired:
         desired = None
-        same_as_original = True
 
     try:
-        current_raw = db.get_clone_channel_name(ocid)
+        current_raw = db.get_clone_channel_name(ocid, cgid)
     except Exception:
         current_raw = None
 
     needs_update = (desired is None and current_raw is not None) or (
         desired is not None and current_raw != desired
     )
-
     if not needs_update:
-        LOGGER.info(
-            "Customize channel | original_id=%s no change (kept=%r)", ocid, current_raw
-        )
+        LOGGER.info("Customize channel | (%s,%s) no change", ocid, cgid)
         return JSONResponse(
             {"ok": True, "changed": False, "normalized": desired is not None}
         )
 
     try:
-        db.set_channel_clone_name(ocid, desired)
-        LOGGER.info(
-            "Customize channel | original_id=%s updated to %r (orig=%r, was=%r)",
-            ocid,
-            desired,
-            orig,
-            current_raw,
-        )
+        db.set_channel_clone_name(ocid, cgid, desired)
+        LOGGER.info("Customize channel | (%s,%s) -> %r", ocid, cgid, desired)
     except Exception as e:
         LOGGER.exception("Failed to set clone_channel_name: %s", e)
         return JSONResponse({"ok": False, "error": "db-failure"}, status_code=500)
 
-    should_nudge = not (desired is None and same_as_original)
-    if should_nudge:
-        try:
-            asyncio.create_task(
-                _ws_cmd(CLIENT_AGENT_URL, {"type": "sitemap_request"}, timeout=1.0)
-            )
-        except Exception:
-            LOGGER.debug("WS sitemap_request dispatch failed", exc_info=True)
+    try:
+        asyncio.create_task(
+            _ws_cmd(CLIENT_AGENT_URL, {"type": "sitemap_request"}, timeout=1.0)
+        )
+    except Exception:
+        LOGGER.debug("WS sitemap_request dispatch failed", exc_info=True)
 
     return JSONResponse(
-        {
-            "ok": True,
-            "changed": True,
-            "nudged": should_nudge,
-            "normalized_name": desired,
-        }
+        {"ok": True, "changed": True, "nudged": True, "normalized_name": desired}
     )
 
 
 @app.post("/api/categories/customize", response_class=JSONResponse)
 async def api_categories_customize(payload: dict = Body(...)):
     """
-    Set or clear a category's custom display name.
+    Set or clear a category's custom display name, scoped to (original_category_id, cloned_guild_id).
     """
-
     import unicodedata
 
     def _norm_display(s):
@@ -2886,7 +2880,6 @@ async def api_categories_customize(payload: dict = Body(...)):
         s = unicodedata.normalize("NFKC", str(s)).strip()
         return s if s else None
 
-    ocid = None
     if "original_category_id" in payload:
         try:
             ocid = int(payload.get("original_category_id"))
@@ -2903,6 +2896,13 @@ async def api_categories_customize(payload: dict = Body(...)):
                 status_code=400,
             )
 
+    try:
+        cgid = int(payload.get("cloned_guild_id"))
+    except Exception:
+        return JSONResponse(
+            {"ok": False, "error": "invalid-cloned_guild_id"}, status_code=400
+        )
+
     desired = _norm_display(
         payload.get("custom_category_name", payload.get("clone_category_name"))
     )
@@ -2912,54 +2912,36 @@ async def api_categories_customize(payload: dict = Body(...)):
     except Exception:
         orig = None
 
-    same_as_original = False
     if desired is not None and _norm_display(orig) == _norm_display(desired):
         desired = None
-        same_as_original = True
 
     try:
-        current_raw = db.get_clone_category_name(ocid)
+        current_raw = db.get_clone_category_name(ocid, cgid)
     except Exception:
         current_raw = None
 
-    needs_update = _norm_display(current_raw) != _norm_display(desired)
-    if not needs_update:
-        LOGGER.info(
-            "Customize category | original_id=%s no change (kept=%r)", ocid, current_raw
-        )
+    if _norm_display(current_raw) == _norm_display(desired):
+        LOGGER.info("Customize category | (%s,%s) no change", ocid, cgid)
         return JSONResponse(
             {"ok": True, "changed": False, "normalized": desired is not None}
         )
 
     try:
-        db.set_category_clone_name(ocid, desired)
-        LOGGER.info(
-            "Customize category | original_id=%s updated to %r (orig=%r, was=%r)",
-            ocid,
-            desired,
-            orig,
-            current_raw,
-        )
+        db.set_category_clone_name(ocid, cgid, desired)
+        LOGGER.info("Customize category | (%s,%s) -> %r", ocid, cgid, desired)
     except Exception as e:
         LOGGER.exception("Failed to set cloned_category_name: %s", e)
         return JSONResponse({"ok": False, "error": "db-failure"}, status_code=500)
 
-    should_nudge = not (desired is None and same_as_original)
-    if should_nudge:
-        try:
-            asyncio.create_task(
-                _ws_cmd(CLIENT_AGENT_URL, {"type": "sitemap_request"}, timeout=1.0)
-            )
-        except Exception:
-            LOGGER.debug("WS sitemap_request dispatch failed", exc_info=True)
+    try:
+        asyncio.create_task(
+            _ws_cmd(CLIENT_AGENT_URL, {"type": "sitemap_request"}, timeout=1.0)
+        )
+    except Exception:
+        LOGGER.debug("WS sitemap_request dispatch failed", exc_info=True)
 
     return JSONResponse(
-        {
-            "ok": True,
-            "changed": True,
-            "nudged": should_nudge,
-            "normalized_name": desired,
-        }
+        {"ok": True, "changed": True, "nudged": True, "normalized_name": desired}
     )
 
 
