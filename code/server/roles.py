@@ -319,7 +319,7 @@ class RoleManager:
         }
 
         clone_by_id = {r.id: r for r in guild.roles}
-        blocked = {int(x) for x in self.db.get_blocked_role_ids()}
+        blocked = {int(x) for x in self.db.get_blocked_role_ids(clone_id)}
 
         can_create = len(guild.roles) < self.MAX_ROLES
         create_suppressed_logged = False

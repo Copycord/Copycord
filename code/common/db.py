@@ -535,15 +535,31 @@ class DBManager:
         )
         self.conn.commit()
 
-        c.execute(
-            """
-        CREATE TABLE IF NOT EXISTS role_blocks (
-        original_role_id INTEGER PRIMARY KEY,
-        added_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        );
-        """
+        self._ensure_table(
+            name="role_blocks",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    original_role_id  INTEGER NOT NULL,
+                    cloned_guild_id   INTEGER NOT NULL,
+                    added_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (original_role_id, cloned_guild_id)
+                );
+            """,
+            required_columns={
+                "original_role_id",
+                "cloned_guild_id",
+                "added_at",
+            },
+            copy_map={
+                "original_role_id": "original_role_id",
+                "cloned_guild_id": "NULL",
+                "added_at": "COALESCE(added_at, CURRENT_TIMESTAMP)",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_roleblocks_clone ON role_blocks(cloned_guild_id);",
+            ],
         )
-        self.conn.commit()
+
 
         self._ensure_table(
             name="messages",
@@ -1869,49 +1885,109 @@ class DBManager:
         ).fetchone()
         return int(row[0]) if row else None
 
-    def add_role_block(self, original_role_id: int) -> bool:
-        """Block this original role id from being created/updated. Returns True if newly added."""
+    def add_role_block(self, original_role_id: int, cloned_guild_id: int) -> bool:
+        """Block this original role id for a specific clone guild. Returns True if newly added."""
         with self.lock, self.conn:
             cur = self.conn.execute(
-                "INSERT OR IGNORE INTO role_blocks(original_role_id) VALUES (?)",
-                (int(original_role_id),),
+                """
+                INSERT OR IGNORE INTO role_blocks(original_role_id, cloned_guild_id)
+                VALUES (?, ?)
+                """,
+                (int(original_role_id), int(cloned_guild_id)),
             )
             return cur.rowcount > 0
 
-    def remove_role_block(self, original_role_id: int) -> bool:
-        """Remove a block. Returns True if removed."""
+    def remove_role_block(
+        self, original_role_id: int, cloned_guild_id: int | None = None
+    ) -> bool:
+        """
+        Remove a block.
+
+        If cloned_guild_id is given, remove only for that clone guild.
+        If None, remove the block for all clones of that original role.
+        Returns True if any rows were removed.
+        """
         with self.lock, self.conn:
-            cur = self.conn.execute(
-                "DELETE FROM role_blocks WHERE original_role_id = ?",
-                (int(original_role_id),),
-            )
+            if cloned_guild_id is None:
+                cur = self.conn.execute(
+                    "DELETE FROM role_blocks WHERE original_role_id = ?",
+                    (int(original_role_id),),
+                )
+            else:
+                cur = self.conn.execute(
+                    "DELETE FROM role_blocks WHERE original_role_id = ? AND cloned_guild_id = ?",
+                    (int(original_role_id), int(cloned_guild_id)),
+                )
             return cur.rowcount > 0
 
-    def is_role_blocked(self, original_role_id: int) -> bool:
-        row = self.conn.execute(
-            "SELECT 1 FROM role_blocks WHERE original_role_id = ?",
-            (int(original_role_id),),
-        ).fetchone()
+    def is_role_blocked(
+        self, original_role_id: int, cloned_guild_id: int | None = None
+    ) -> bool:
+        """
+        Check whether a role is blocked.
+
+        If cloned_guild_id is provided, the check is scoped to that clone guild.
+        If not, it checks for any block for this original role.
+        """
+        if cloned_guild_id is None:
+            row = self.conn.execute(
+                "SELECT 1 FROM role_blocks WHERE original_role_id = ?",
+                (int(original_role_id),),
+            ).fetchone()
+        else:
+            row = self.conn.execute(
+                """
+                SELECT 1
+                FROM role_blocks
+                WHERE original_role_id = ? AND cloned_guild_id = ?
+                """,
+                (int(original_role_id), int(cloned_guild_id)),
+            ).fetchone()
         return bool(row)
 
-    def get_blocked_role_ids(self) -> list[int]:
-        rows = self.conn.execute("SELECT original_role_id FROM role_blocks").fetchall()
+    def get_blocked_role_ids(self, cloned_guild_id: int | None = None) -> list[int]:
+        """
+        Return blocked original_role_id values.
+
+        If cloned_guild_id is provided, only blocks for that clone are returned.
+        """
+        if cloned_guild_id is None:
+            rows = self.conn.execute(
+                "SELECT original_role_id FROM role_blocks"
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT original_role_id FROM role_blocks WHERE cloned_guild_id = ?",
+                (int(cloned_guild_id),),
+            ).fetchall()
         return [int(r[0]) for r in rows]
 
-    def get_role_mapping_by_cloned_id(self, cloned_role_id: int):
-        return self.conn.execute(
-            "SELECT * FROM role_mappings WHERE cloned_role_id = ?",
-            (int(cloned_role_id),),
-        ).fetchone()
+    def clear_role_blocks(self, cloned_guild_id: int | None = None) -> int:
+        """
+        Delete entries from the role_blocks table.
 
-    def clear_role_blocks(self) -> int:
-        """Delete all entries from the role_blocks table. Returns number of rows removed."""
+        If cloned_guild_id is provided, only entries for that clone guild are removed.
+        Returns number of rows removed.
+        """
         with self.lock, self.conn:
-
-            cnt_row = self.conn.execute("SELECT COUNT(*) FROM role_blocks").fetchone()
-            count = int(cnt_row[0] if cnt_row else 0)
-            self.conn.execute("DELETE FROM role_blocks")
+            if cloned_guild_id is None:
+                cnt_row = self.conn.execute(
+                    "SELECT COUNT(*) FROM role_blocks"
+                ).fetchone()
+                count = int(cnt_row[0] if cnt_row else 0)
+                self.conn.execute("DELETE FROM role_blocks")
+            else:
+                cnt_row = self.conn.execute(
+                    "SELECT COUNT(*) FROM role_blocks WHERE cloned_guild_id = ?",
+                    (int(cloned_guild_id),),
+                ).fetchone()
+                count = int(cnt_row[0] if cnt_row else 0)
+                self.conn.execute(
+                    "DELETE FROM role_blocks WHERE cloned_guild_id = ?",
+                    (int(cloned_guild_id),),
+                )
             return count
+
 
     def upsert_message_mapping(
         self,
@@ -2703,6 +2779,16 @@ class DBManager:
                 (clone,),
             )
             out["role_mappings.clone_set"] = cur.rowcount
+            
+            cur.execute(
+                """
+                UPDATE role_blocks
+                SET cloned_guild_id = ?
+                WHERE (cloned_guild_id IS NULL OR cloned_guild_id = 0)
+            """,
+                (clone,),
+            )
+            out["role_blocks.clone_set"] = cur.rowcount
 
             cur.execute(
                 """
@@ -3322,6 +3408,12 @@ class DBManager:
         return self.conn.execute(
             "SELECT * FROM role_mappings WHERE original_role_id = ? AND cloned_guild_id = ? LIMIT 1",
             (int(original_id), int(cloned_guild_id)),
+        ).fetchone()
+        
+    def get_role_mapping_by_cloned_id(self, cloned_role_id: int):
+        return self.conn.execute(
+            "SELECT * FROM role_mappings WHERE cloned_role_id = ?",
+            (int(cloned_role_id),),
         ).fetchone()
 
     def get_role_mappings_for_original(self, original_id: int) -> list:

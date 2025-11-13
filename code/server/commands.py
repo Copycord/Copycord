@@ -7,6 +7,7 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 import discord
 from discord.ext import commands
 from discord import (
@@ -65,7 +66,9 @@ class CloneCommands(commands.Cog):
         cmd_name = ctx.command.name if ctx.command else "unknown"
         guild_name = ctx.guild.name if ctx.guild else "Unknown"
         if ctx.user.id in self.allowed_users:
-            logger.info(f"[⚡] {ctx.user.name} ({ctx.user.id}) executed the '{cmd_name}' command in {guild_name}.")
+            logger.info(
+                f"[⚡] {ctx.user.name} ({ctx.user.id}) executed the '{cmd_name}' command in {guild_name}."
+            )
             return True
 
         await ctx.respond("You are not authorized to use this command.", ephemeral=True)
@@ -336,9 +339,7 @@ class CloneCommands(commands.Cog):
         )
 
         if not changed:
-            return await ctx.respond(
-                f"⚠️ Couldn't toggle `{keyword}`.", ephemeral=True
-            )
+            return await ctx.respond(f"⚠️ Couldn't toggle `{keyword}`.", ephemeral=True)
 
         emoji = "✅" if action == "added" else "🗑️"
         await ctx.respond(
@@ -350,9 +351,7 @@ class CloneCommands(commands.Cog):
         await self.bot.ws_manager.send(
             {
                 "type": "settings_update",
-                "data": {
-                    "blocked_keywords_map": kw_map
-                },
+                "data": {"blocked_keywords_map": kw_map},
             }
         )
 
@@ -388,7 +387,6 @@ class CloneCommands(commands.Cog):
             f"📋 **Blocked keywords for this clone server:**\n{formatted}",
             ephemeral=True,
         )
-
 
     @guild_scoped_slash_command(
         name="announcement_trigger_add",
@@ -1183,10 +1181,9 @@ class CloneCommands(commands.Cog):
                 mention_on_channel_fallback=True,
             )
 
-
     @guild_scoped_slash_command(
         name="role_block",
-        description="Block a role from being cloned/updated. Provide either the cloned role (picker) or its ID.",
+        description=("Block a role from being cloned/updated for THIS clone guild. "),
     )
     async def role_block(
         self,
@@ -1199,10 +1196,23 @@ class CloneCommands(commands.Cog):
         ),
     ):
         """
-        Adds a role to the block list using its original_role_id from the DB.
-        If a clone exists, it is deleted and its mapping removed to enforce the block.
+        Adds a role to the block list using its original_role_id from the DB,
+        scoped to this cloned guild.
+
+        If a clone exists in this guild, it is deleted and its mapping removed
+        to enforce the block for THIS clone only.
         """
         await ctx.defer(ephemeral=True)
+
+        g = ctx.guild
+        if g is None:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Guild only",
+                    "This command can only be used inside a server.",
+                ),
+                ephemeral=True,
+            )
 
         if not role and not role_id:
             return await ctx.followup.send(
@@ -1230,11 +1240,25 @@ class CloneCommands(commands.Cog):
             )
 
         mapping = self.db.get_role_mapping_by_cloned_id(cloned_id)
-        if not mapping:
+        clone_gid = int(g.id)
+
+        def row_get(row, key, default=None):
+            try:
+                val = row[key]
+                return val if val is not None else default
+            except Exception:
+                return default
+
+        mapped_clone_gid = int(row_get(mapping, "cloned_guild_id", 0))
+
+        if not mapping or mapped_clone_gid != clone_gid:
             return await ctx.followup.send(
                 embed=self._err_embed(
                     "Mapping not found",
-                    "I couldn't find a role mapping for that cloned role. Make sure this role was created by Copycord.",
+                    (
+                        "I couldn't find a role mapping for that cloned role **in this guild**. "
+                        "Make sure this role was created by Copycord for this clone."
+                    ),
                 ),
                 ephemeral=True,
             )
@@ -1242,11 +1266,9 @@ class CloneCommands(commands.Cog):
         original_role_id = int(mapping["original_role_id"])
         original_role_name = mapping["original_role_name"]
 
-        newly_added = self.db.add_role_block(original_role_id)
+        newly_added = self.db.add_role_block(original_role_id, clone_gid)
 
-        g = ctx.guild
-        cloned_obj = g.get_role(cloned_id) if g else None
-
+        cloned_obj = g.get_role(cloned_id)
         deleted = False
         if cloned_obj:
             me = g.me if g else None
@@ -1268,20 +1290,22 @@ class CloneCommands(commands.Cog):
                         e,
                     )
 
-        self.db.delete_role_mapping(original_role_id)
+        self.db.delete_role_mapping_for_clone(original_role_id, clone_gid)
 
         if newly_added:
             title = "Role Blocked"
             desc = (
-                f"**{original_role_name}** (`orig:{original_role_id}`) is now blocked.\n"
+                f"**{original_role_name}** (`orig:{original_role_id}`) is now blocked "
+                f"for this clone guild.\n"
                 f"{'🗑️ Deleted cloned role.' if deleted else '↩️ No clone deleted (not found / not permitted).'}\n"
-                "It will be skipped during future role syncs."
+                "It will be skipped during future role syncs for this clone."
             )
             color = discord.Color.green()
         else:
             title = "Role Already Blocked"
             desc = (
-                f"**{original_role_name}** (`orig:{original_role_id}`) was already on the block list.\n"
+                f"**{original_role_name}** (`orig:{original_role_id}`) was already on "
+                f"the block list for this clone.\n"
                 f"{'🗑️ Deleted cloned role.' if deleted else '↩️ No clone deleted (not found / not permitted).'}"
             )
             color = discord.Color.blurple()
@@ -1292,22 +1316,34 @@ class CloneCommands(commands.Cog):
 
     @guild_scoped_slash_command(
         name="role_block_clear",
-        description="Clear the entire role block list (allows previously blocked roles to be synced again).",
+        description=("Clear the role block list for this clone guild "),
     )
     async def role_block_clear(self, ctx: discord.ApplicationContext):
         """
-        Clears all entries in the role block list.
+        Clears all entries in the role block list **for this cloned guild**.
+
         This does NOT recreate any roles automatically; it only removes the block entries.
-        Future role syncs may recreate those roles if they exist on the source.
+        Future role syncs for this clone may recreate those roles if they exist on the source.
         """
         await ctx.defer(ephemeral=True)
 
+        g = ctx.guild
+        if g is None:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Guild only",
+                    "This command can only be used inside a server.",
+                ),
+                ephemeral=True,
+            )
+
         try:
-            removed = self.db.clear_role_blocks()
+            removed = self.db.clear_role_blocks(g.id)
             if removed == 0:
                 return await ctx.followup.send(
                     embed=self._ok_embed(
-                        "Role Block List", "The block list is already empty."
+                        "Role Block List",
+                        "The block list for this clone guild is already empty.",
                     ),
                     ephemeral=True,
                 )
@@ -1315,8 +1351,12 @@ class CloneCommands(commands.Cog):
             await ctx.followup.send(
                 embed=self._ok_embed(
                     "Role Block List Cleared",
-                    f"Removed **{removed}** entr{'y' if removed == 1 else 'ies'} from the role block list.\n"
-                    "Previously blocked roles may be recreated on the next role sync if they still exist on the source.",
+                    (
+                        f"Removed **{removed}** entr{'y' if removed == 1 else 'ies'} "
+                        "from the role block list for this clone guild.\n"
+                        "Previously blocked roles here may be recreated on the next role "
+                        "sync if they still exist on the source."
+                    ),
                 ),
                 ephemeral=True,
             )
