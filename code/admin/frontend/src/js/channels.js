@@ -191,6 +191,7 @@
   let menuContext = null;
   let catPinByOrig = new Map();
   let catOrigByEither = new Map();
+  let catMetaByOrig = new Map();
   let inflightReady = false;
   let bfBatchCleanup = null;
 
@@ -561,39 +562,109 @@
     return document.querySelector(`.ch-card[data-cid="${orig}"]`);
   }
 
-  function rebuildCategoryPinMaps(rows) {
-    catPinByOrig = new Map();
-    catOrigByEither = new Map();
-    for (const ch of rows || []) {
-      const orig = String(
-        ch.original_category_name ??
-          ch.category_original_name ??
-          ch.category_upstream_name ??
-          ch.category_name ??
-          ""
-      ).trim();
+function rebuildCategoryPinMaps(rows) {
+  catPinByOrig = new Map();
+  catOrigByEither = new Map();
+  catMetaByOrig = new Map();
 
-      const pin = String(ch.cloned_category_name ?? "").trim();
+  for (const ch of rows || []) {
+    // --- Resolve original category name -----------------------------
+    const origName = (
+      ch.original_category_name ??
+      ch.category_original_name ??
+      ch.category_upstream_name ??
+      ch.category_name ??
+      ""
+    );
+    const orig = String(origName || "").trim();
+    if (!orig) continue;
 
-      if (orig) {
-        const oKey = orig.toLowerCase();
-        if (!catOrigByEither.has(oKey)) catOrigByEither.set(oKey, orig);
-        if (pin) catOrigByEither.set(pin.toLowerCase(), orig);
-      }
-      if (orig && pin && pin !== orig) {
-        catPinByOrig.set(orig, pin);
-      }
+    const oKey = orig.toLowerCase();
+
+    // --- Resolve cloned/pinned category name ------------------------
+    const pin = String(
+      ch.cloned_category_name ??
+        ch.category_name ??
+        ""
+    ).trim();
+
+    // --- Resolve category IDs --------------------------------------
+    const origCatId =
+      ch.original_category_id ??
+      ch.category_original_id ??
+      ch.original_parent_category_id ??
+      ch.parent_category_id ??
+      ch.category_id ??
+      null;
+
+    const clonedCatId =
+      ch.cloned_category_id ??
+      ch.cloned_parent_category_id ??
+      ch.category_cloned_id ??
+      null;
+
+    const originalGuildId =
+      ch.original_guild_id ??
+      ch.source_guild_id ??
+      null;
+
+    const clonedGuildId =
+      ch.cloned_guild_id ??
+      ch.target_guild_id ??
+      ch.host_guild_id ??
+      null;
+
+    // --- Track canonical original name mapping ---------------------
+    if (!catOrigByEither.has(oKey)) catOrigByEither.set(oKey, orig);
+    if (pin) catOrigByEither.set(pin.toLowerCase(), orig);
+
+    // --- Track pinned/custom name ----------------------------------
+    if (pin && pin !== orig) {
+      catPinByOrig.set(orig, pin);
     }
 
-    for (const [orig, pin] of pinsByOrig) {
-      if (!orig || !pin || pin === orig) continue;
-      catPinByOrig.set(orig, pin);
-      if (!catOrigByEither.has(orig.toLowerCase())) {
-        catOrigByEither.set(orig.toLowerCase(), orig);
-      }
-      catOrigByEither.set(pin.toLowerCase(), orig);
+    // --- Track meta for this original category ---------------------
+    if (!catMetaByOrig.has(orig)) {
+      catMetaByOrig.set(orig, {
+        original_category_id: null,
+        cloned_category_id: null,
+        original_guild_id: null,
+        cloned_guild_id: null,
+      });
+    }
+    const meta = catMetaByOrig.get(orig);
+    if (origCatId != null && !meta.original_category_id) {
+      meta.original_category_id = String(origCatId);
+    }
+    if (clonedCatId != null && !meta.cloned_category_id) {
+      meta.cloned_category_id = String(clonedCatId);
+    }
+    if (originalGuildId != null && !meta.original_guild_id) {
+      meta.original_guild_id = String(originalGuildId);
+    }
+    if (clonedGuildId != null && !meta.cloned_guild_id) {
+      meta.cloned_guild_id = String(clonedGuildId);
     }
   }
+
+  // Re-apply any existing pinsByOrig overrides
+  for (const [orig, pin] of pinsByOrig) {
+    if (!orig || !pin || pin === orig) continue;
+    catPinByOrig.set(orig, pin);
+    if (!catOrigByEither.has(orig.toLowerCase())) {
+      catOrigByEither.set(orig.toLowerCase(), orig);
+    }
+    catOrigByEither.set(pin.toLowerCase(), orig);
+  }
+
+  // Expose globally for other helpers
+  window.catPinByOrig = catPinByOrig;
+  window.catOrigByEither = catOrigByEither;
+  window.catMetaByOrig = catMetaByOrig;
+}
+
+
+
 
   function clearBackfillBootResidue() {
     for (const id of [...runningClones]) setCardLoading(id, false);
@@ -1074,153 +1145,253 @@
     modal.querySelector(".modal-content")?.focus?.({ preventScroll: true });
   }
 
-  function openCustomizeCategoryDialog(
-    categoryNameOrObj,
-    originalCategoryId = null,
-    clonedGuildId = null
-  ) {
-    hideMenuForModal();
-    dismissTransientUI();
-    injectCustomizeCategoryModal();
+function openCustomizeCategoryDialog(
+  categoryNameOrObj,
+  originalCategoryId = null,
+  clonedGuildId = null
+) {
+  hideMenuForModal();
+  dismissTransientUI();
+  injectCustomizeCategoryModal();
 
-    const modal = document.getElementById("customize-cat-modal");
-    const back = modal.querySelector('[data-role="backdrop"]');
-    const dlg = modal.querySelector(".modal-content");
-    const nameInp = document.getElementById("customize-cat-name");
-    const btnSave = document.getElementById("customize-cat-save");
-    const btnClose = document.getElementById("customize-cat-close");
-    const titleEl = document.getElementById("customize-cat-title");
+  const modal = document.getElementById("customize-cat-modal");
+  const back = modal.querySelector('[data-role="backdrop"]');
+  const dlg = modal.querySelector(".modal-content");
+  const nameInp = document.getElementById("customize-cat-name");
+  const btnSave = document.getElementById("customize-cat-save");
+  const btnClose = document.getElementById("customize-cat-close");
+  const titleEl = document.getElementById("customize-cat-title");
 
-    back?.removeAttribute?.("hidden");
-    document.body.classList.add("modal-open");
+  back?.removeAttribute?.("hidden");
+  document.body.classList.add("modal-open");
 
-    titleEl.textContent = `Customize`;
+  titleEl.textContent = `Customize`;
 
-    let catObj = null;
-    let categoryName = categoryNameOrObj;
-    if (categoryNameOrObj && typeof categoryNameOrObj === "object") {
-      catObj = categoryNameOrObj;
-      categoryName =
-        catObj.original_category_name || catObj.category_name || "";
-      originalCategoryId =
-        Number(catObj.original_category_id || originalCategoryId || 0) || null;
-      clonedGuildId =
-        Number(catObj.cloned_guild_id || clonedGuildId || 0) || null;
+  // ---- Resolve basic category info (name / object form) ------------------
+  let catObj = null;
+  let categoryName = categoryNameOrObj;
+  if (categoryNameOrObj && typeof categoryNameOrObj === "object") {
+    catObj = categoryNameOrObj;
+    categoryName =
+      catObj.original_category_name || catObj.category_name || "";
+    originalCategoryId =
+      catObj.original_category_id || originalCategoryId || null;
+    clonedGuildId = catObj.cloned_guild_id || clonedGuildId || null;
+  }
+
+  const rawName = String(categoryName || "").trim();
+
+  // Canonical "original" name (handles pinned/custom names)
+  const canonicalOrigName =
+    (rawName &&
+      window.catOrigByEither?.get(rawName.toLowerCase())) ||
+    rawName ||
+    "";
+
+  // ---- Start with meta map if available ------------------------------
+  let origCatId =
+    (originalCategoryId != null && String(originalCategoryId).trim()) ||
+    null;
+  let cgid =
+    (clonedGuildId != null && String(clonedGuildId).trim()) ||
+    null;
+  let originalGuildId = null;
+
+  if (canonicalOrigName && window.catMetaByOrig) {
+    const meta =
+      window.catMetaByOrig.get(canonicalOrigName) ||
+      window.catMetaByOrig.get(String(canonicalOrigName).trim());
+    if (meta) {
+      if (!origCatId && meta.original_category_id) {
+        origCatId = String(meta.original_category_id);
+      }
+      if (!cgid && meta.cloned_guild_id) {
+        cgid = String(meta.cloned_guild_id);
+      }
+      if (!originalGuildId && meta.original_guild_id) {
+        originalGuildId = String(meta.original_guild_id);
+      }
     }
+  }
 
-    const resolvedOrig =
-      (typeof categoryName === "string" &&
-        window.catOrigByEither?.get(String(categoryName).toLowerCase())) ||
-      originalCategoryId ||
-      categoryName;
+  // ---- Fallback: scan data rows if anything still missing --------------
+  if (!origCatId || !cgid) {
+    const pool =
+      (Array.isArray(window.channelsData) && window.channelsData.length
+        ? window.channelsData
+        : Array.isArray(window.items) && window.items.length
+        ? window.items
+        : Array.isArray(data)
+        ? data
+        : []);
 
-    let cgid = Number(clonedGuildId || 0);
-    if (!cgid) {
-      cgid =
-        Number(catObj?.cloned_guild_id || 0) ||
-        Number(window.catCgidByOrig?.get(String(resolvedOrig)) || 0) ||
-        (function () {
-          const pool = window.channelsData || window.items || [];
-          const hit = pool.find(
-            (it) =>
-              String(it.original_category_id || "") === String(resolvedOrig) ||
-              String(it.category_name || "").toLowerCase() ===
-                String(categoryName || "").toLowerCase()
-          );
-          return Number(hit?.cloned_guild_id || 0);
-        })();
-    }
+    const norm = (s) =>
+      String(s || "")
+        .trim()
+        .toLowerCase();
+    const want = norm(canonicalOrigName || rawName);
 
-    const pinned = window.catPinByOrig?.get(resolvedOrig);
-    const initial =
-      pinned && String(pinned).trim()
-        ? pinned
-        : typeof resolvedOrig === "string"
-        ? resolvedOrig
-        : categoryName || "";
-    nameInp.value = initial;
+    for (const row of pool) {
+      const names = [
+        row.original_category_name,
+        row.category_original_name,
+        row.category_upstream_name,
+        row.category_name,
+      ];
+      const match = names.some((n) => n && norm(n) === want);
+      if (!match) continue;
 
-    function close() {
-      blurIfInside(modal);
-      setInert(modal, true);
-      modal.setAttribute("aria-hidden", "true");
-      modal.classList.remove("show");
-      back?.setAttribute?.("hidden", "true");
-      document.body.classList.remove("modal-open");
-    }
-
-    btnClose.onclick = (e) => {
-      e?.preventDefault?.();
-      close();
-    };
-    back.onclick = (e) => {
-      if (e.target === back) close();
-    };
-    document.addEventListener(
-      "keydown",
-      function onEsc(e) {
-        if (e.key === "Escape") {
-          close();
-          document.removeEventListener("keydown", onEsc);
-        }
-      },
-      { once: true }
-    );
-
-    btnSave.onclick = async (e) => {
-      e.preventDefault();
+      if (!origCatId) {
+        const cids = [
+          row.original_category_id,
+          row.category_original_id,
+          row.parent_category_id,
+          row.category_id,
+          row.original_parent_category_id,
+        ];
+        const cid = cids.find(
+          (v) => v != null && String(v).trim() !== ""
+        );
+        if (cid != null) origCatId = String(cid);
+      }
 
       if (!cgid) {
-        window.showToast("Missing cloned guild id for this category.", {
-          type: "error",
-        });
-        return;
-      }
-      const ocidNum = Number(resolvedOrig);
-      if (!ocidNum || Number.isNaN(ocidNum)) {
-        window.showToast("Unable to resolve the original category id.", {
-          type: "error",
-        });
-        return;
-      }
-
-      const raw = String(nameInp.value || "").trim();
-      const body = {
-        original_category_id: ocidNum,
-        cloned_guild_id: cgid,
-        custom_category_name: raw || null,
-      };
-
-      try {
-        const res = await fetch("/api/categories/customize", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-          credentials: "same-origin",
-          cache: "no-store",
-        });
-        const json = await res.json().catch(() => ({}));
-        if (!res.ok || json?.ok === false) {
-          window.showToast(json?.error || "Failed to save.", { type: "error" });
-          return;
+        const cg =
+          row.cloned_guild_id ??
+          row.target_guild_id ??
+          row.host_guild_id ??
+          null;
+        if (cg != null && String(cg).trim() !== "") {
+          cgid = String(cg);
         }
-        window.showToast("Saved category customization.", { type: "success" });
-        close();
-        try {
-          await load();
-        } catch {}
-      } catch {
-        window.showToast("Network error saving customization.", {
-          type: "error",
-        });
       }
+
+      if (!originalGuildId && row.original_guild_id) {
+        originalGuildId = String(row.original_guild_id);
+      }
+
+      if (origCatId && cgid) break;
+    }
+  }
+
+  // As a last resort, also try catCgidByOrig (if present) for cloned guild id
+  if (!cgid && window.catCgidByOrig && canonicalOrigName) {
+    const maybe =
+      window.catCgidByOrig.get(canonicalOrigName) ||
+      window.catCgidByOrig.get(canonicalOrigName.toLowerCase()) ||
+      null;
+    if (maybe != null && String(maybe).trim() !== "") {
+      cgid = String(maybe);
+    }
+  }
+
+  // ---- Initial text value (pinned/custom name if present) --------------
+  const pinned =
+    window.catPinByOrig?.get(canonicalOrigName) ??
+    window.catPinByOrig?.get(rawName) ??
+    null;
+
+  const initial =
+    pinned && String(pinned).trim()
+      ? pinned
+      : canonicalOrigName || categoryName || "";
+
+  nameInp.value = initial;
+
+  // ---- Close helpers ---------------------------------------------------
+  function close() {
+    blurIfInside(modal);
+    setInert(modal, true);
+    modal.setAttribute("aria-hidden", "true");
+    modal.classList.remove("show");
+    back?.setAttribute?.("hidden", "true");
+    document.body.classList.remove("modal-open");
+  }
+
+  btnClose.onclick = (e) => {
+    e?.preventDefault?.();
+    close();
+  };
+  back.onclick = (e) => {
+    if (e.target === back) close();
+  };
+  document.addEventListener(
+    "keydown",
+    function onEsc(e) {
+      if (e.key === "Escape") {
+        close();
+        document.removeEventListener("keydown", onEsc);
+      }
+    },
+    { once: true }
+  );
+
+  // ---- Save handler ----------------------------------------------------
+  btnSave.onclick = async (e) => {
+    e.preventDefault();
+
+    if (!cgid) {
+      window.showToast("Missing cloned guild id for this category.", {
+        type: "error",
+      });
+      return;
+    }
+
+    const originalIdStr =
+      origCatId != null && String(origCatId).trim()
+        ? String(origCatId).trim()
+        : null;
+    if (!originalIdStr) {
+      window.showToast("Unable to resolve the original category id.", {
+        type: "error",
+      });
+      return;
+    }
+
+    const raw = String(nameInp.value || "").trim();
+    const body = {
+      original_category_id: originalIdStr,
+      cloned_guild_id: String(cgid),
+      custom_category_name: raw || null,
     };
 
-    setInert(modal, false);
-    modal.removeAttribute("aria-hidden");
-    modal.classList.add("show");
-    dlg?.focus?.({ preventScroll: true });
-  }
+    try {
+      const res = await fetch("/api/categories/customize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || json?.ok === false) {
+        window.showToast(json?.error || "Failed to save.", {
+          type: "error",
+        });
+        return;
+      }
+      window.showToast("Saved category customization.", {
+        type: "success",
+      });
+      close();
+      try {
+        await load();
+      } catch {}
+    } catch {
+      window.showToast("Network error saving customization.", {
+        type: "error",
+      });
+    }
+  };
+
+  setInert(modal, false);
+  modal.removeAttribute("aria-hidden");
+  modal.classList.add("show");
+  dlg?.focus?.({ preventScroll: true });
+}
+
+
+
 
   function tooltipForChannel(orig, custom) {
     if (!custom || !custom.trim() || custom === orig) return "";
@@ -3280,120 +3451,132 @@
       return null;
     }
 
-    function resolveCategoryIdsByName(name) {
-      const raw = String(name || "").trim();
-      if (!raw)
-        return {
-          originalCatId: null,
-          clonedCatId: null,
-          hasClone: false,
-          originalGuildId: null,
-        };
+function resolveCategoryIdsByName(name) {
+  const raw = String(name || "").trim();
+  if (!raw) {
+    return {
+      originalCatId: null,
+      clonedCatId: null,
+      hasClone: false,
+      originalGuildId: null,
+      clonedGuildId: null,
+    };
+  }
 
-      const resolvedOriginal =
-        (catOrigByEither && catOrigByEither.get(raw.toLowerCase())) || raw;
+  const lower = raw.toLowerCase();
+  const canonicalName =
+    (window.catOrigByEither && window.catOrigByEither.get(lower)) ||
+    raw;
 
-      const norm = (s) =>
-        String(s || "")
-          .trim()
-          .toLowerCase();
-      const wantA = norm(raw);
-      const wantB = norm(resolvedOriginal);
+  let originalCatId = null;
+  let clonedCatId = null;
+  let originalGuildId = null;
+  let clonedGuildId = null;
 
-      const rows = (data || []).filter((r) => {
-        const candidates = [
-          r?.category_name,
-          r?.original_category_name,
-          r?.category_original_name,
-          r?.category_upstream_name,
-          String(r?.category_name || "").trim()
-            ? r?.category_name
-            : UNGROUPED_LABEL,
+  // --- Prefer the meta map built in rebuildCategoryPinMaps -------------
+  if (window.catMetaByOrig && canonicalName) {
+    const meta =
+      window.catMetaByOrig.get(canonicalName) ||
+      window.catMetaByOrig.get(String(canonicalName).trim());
+    if (meta) {
+      if (meta.original_category_id) {
+        originalCatId = String(meta.original_category_id);
+      }
+      if (meta.cloned_category_id) {
+        clonedCatId = String(meta.cloned_category_id);
+      }
+      if (meta.original_guild_id) {
+        originalGuildId = String(meta.original_guild_id);
+      }
+      if (meta.cloned_guild_id) {
+        clonedGuildId = String(meta.cloned_guild_id);
+      }
+    }
+  }
+
+  // --- Fallback: scan through data rows if anything is still missing ---
+  if (!originalCatId || !clonedGuildId) {
+    const pool =
+      (Array.isArray(window.channelsData) && window.channelsData.length
+        ? window.channelsData
+        : Array.isArray(window.items) && window.items.length
+        ? window.items
+        : Array.isArray(data)
+        ? data
+        : []);
+
+    const norm = (s) =>
+      String(s || "")
+        .trim()
+        .toLowerCase();
+    const want = norm(canonicalName);
+
+    for (const r of pool) {
+      const names = [
+        r.original_category_name,
+        r.category_original_name,
+        r.category_upstream_name,
+        r.category_name,
+      ];
+      const match = names.some((n) => n && norm(n) === want);
+      if (!match) continue;
+
+      if (!originalCatId) {
+        const cids = [
+          r.original_category_id,
+          r.category_original_id,
+          r.parent_category_id,
+          r.category_id,
+          r.original_parent_category_id,
         ];
-        return candidates.some((c) => {
-          const n = norm(c);
-          return n && (n === wantA || n === wantB);
-        });
-      });
-
-      const origKeys = [
-        "original_parent_category_id",
-        "original_category_id",
-        "category_original_id",
-        "parent_category_id",
-        "category_id",
-        "category_upstream_id",
-      ];
-      const cloneKeys = [
-        "cloned_parent_category_id",
-        "cloned_category_id",
-        "category_cloned_id",
-        "parent_cloned_category_id",
-      ];
-
-      let originalCatId = null;
-      let clonedCatId = null;
-      let originalGuildId = null;
-
-      for (const r of rows) {
-        if (!originalCatId) originalCatId = firstId(r, origKeys);
-        if (!clonedCatId) clonedCatId = firstId(r, cloneKeys);
-        if (!originalGuildId && r?.original_guild_id)
-          originalGuildId = String(r.original_guild_id);
-        if (originalCatId && clonedCatId && originalGuildId) break;
+        const cid = cids.find(
+          (v) => v != null && String(v).trim() !== ""
+        );
+        if (cid != null) originalCatId = String(cid);
       }
 
       if (!clonedCatId) {
-        clonedCatId = heuristicId(
-          rows,
-          (key) =>
-            key.includes("clon") &&
-            key.includes("categor") &&
-            key.endsWith("id")
+        const ccids = [
+          r.cloned_category_id,
+          r.cloned_parent_category_id,
+          r.category_cloned_id,
+        ];
+        const ccid = ccids.find(
+          (v) => v != null && String(v).trim() !== ""
         );
-      }
-      if (!originalCatId) {
-        originalCatId = heuristicId(
-          rows,
-          (key) =>
-            !key.includes("clon") &&
-            key.includes("categor") &&
-            key.endsWith("id")
-        );
+        if (ccid != null) clonedCatId = String(ccid);
       }
 
-      let clonedGuildId = null;
-
-      for (const r of rows) {
-        if (!originalCatId) originalCatId = firstId(r, origKeys);
-        if (!clonedCatId) clonedCatId = firstId(r, cloneKeys);
-
-        if (!originalGuildId && r?.original_guild_id)
-          originalGuildId = String(r.original_guild_id);
-
-        if (!clonedGuildId && r?.cloned_guild_id)
-          clonedGuildId = String(r.cloned_guild_id);
-
-        if (originalCatId && clonedCatId && originalGuildId && clonedGuildId)
-          break;
+      if (!originalGuildId && r.original_guild_id) {
+        originalGuildId = String(r.original_guild_id);
+      }
+      if (!clonedGuildId && r.cloned_guild_id) {
+        clonedGuildId = String(r.cloned_guild_id);
       }
 
-      console.debug("cat ids for", name, {
-        originalCatId,
-        clonedCatId,
-        originalGuildId,
-        rows,
-        clonedGuildId,
-      });
-
-      return {
-        originalCatId,
-        clonedCatId,
-        hasClone: !!clonedCatId,
-        originalGuildId,
-        clonedGuildId,
-      };
+      if (originalCatId && clonedCatId && originalGuildId && clonedGuildId) {
+        break;
+      }
     }
+  }
+
+  console.debug("resolveCategoryIdsByName", name, {
+    canonicalName,
+    originalCatId,
+    clonedCatId,
+    originalGuildId,
+    clonedGuildId,
+  });
+
+  return {
+    originalCatId,
+    clonedCatId,
+    hasClone: !!clonedCatId,
+    originalGuildId,
+    clonedGuildId,
+  };
+}
+
 
     function isInteractiveInside(node) {
       return !!node?.closest?.(

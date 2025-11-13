@@ -185,10 +185,9 @@ class SitemapService:
                             g.id, g.name, int(cg) if cg is not None else None
                         )
                         self.logger.info(
-                            "[📩] Sitemap sent for %s -> clone %s: %s",
+                            "[📩] Sitemap sent for %s -> clone %s",
                             label,
                             cg or "(legacy)",
-                            sm,
                         )
             except Exception as e:
                 self.logger.exception(
@@ -196,6 +195,76 @@ class SitemapService:
                     getattr(g, "name", "?"),
                     getattr(g, "id", "?"),
                     e,
+                )
+
+
+    async def send_for_mapping_id(self, mapping_id: str) -> None:
+        """
+        Build and send a sitemap for exactly one mapping row
+        (original_guild_id + cloned_guild_id) identified by mapping_id.
+        """
+        mapping_id = (mapping_id or "").strip()
+        if not mapping_id:
+            self.logger.warning("[sitemap] send_for_mapping_id called with empty id")
+            return
+
+        try:
+            m = self.db.get_mapping_by_id(mapping_id)
+        except Exception:
+            self.logger.exception(
+                "[sitemap] get_mapping_by_id failed for %r", mapping_id
+            )
+            return
+
+        if not m:
+            self.logger.warning(
+                "[sitemap] No guild_mappings row found for mapping_id=%r", mapping_id
+            )
+            return
+
+        try:
+            ogid = int(m["original_guild_id"] or 0)
+            cgid = int(m["cloned_guild_id"] or 0)
+        except Exception:
+            self.logger.warning(
+                "[sitemap] Bad mapping row for %r: %r", mapping_id, dict(m)
+            )
+            return
+
+        g = self.bot.get_guild(ogid)
+        if not g:
+            self.logger.warning(
+                "[sitemap] Host guild %s not found in bot for mapping_id=%r",
+                ogid,
+                mapping_id,
+            )
+            return
+
+        async with self._send_lock:
+            try:
+                sitemap = await self.build_for_guild_and_clone(g, cgid)
+                if not sitemap:
+                    self.logger.info(
+                        "[sitemap] Empty sitemap for mapping_id=%r (%s -> %s)",
+                        mapping_id,
+                        ogid,
+                        cgid,
+                    )
+                    return
+
+                await self.ws.send({"type": "sitemap", "data": sitemap})
+
+                label = self._mapping_label(ogid, g.name, cgid)
+                self.logger.info(
+                    "[📩] Sent targeted sitemap for %s -> clone %s (mapping_id=%s)",
+                    label,
+                    cgid,
+                    mapping_id,
+                )
+            except Exception:
+                self.logger.exception(
+                    "[sitemap] Failed sending targeted sitemap for mapping_id=%r",
+                    mapping_id,
                 )
 
     async def build_and_send_all(self) -> None:
@@ -218,10 +287,9 @@ class SitemapService:
                                 g.id, g.name, int(cg) if cg is not None else None
                             )
                             self.logger.info(
-                                "[📩] Sitemap sent for %s -> clone %s: %s",
+                                "[📩] Sitemap sent for %s -> clone %s",
                                 label,
                                 cg or "(legacy)",
-                                sm,
                             )
                             sent += 1
                 except Exception as e:

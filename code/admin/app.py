@@ -24,6 +24,7 @@ import re
 import time
 import logging
 from typing import Dict, List, Set, Literal, Optional
+from admin.auth import init_admin_auth
 from admin.logging_setup import (
     LOGGER,
     get_logger,
@@ -74,8 +75,6 @@ import aiohttp
 
 GITHUB_REPO = os.getenv("GITHUB_REPO", "Copycord/Copycord")
 RELEASE_POLL_SECONDS = int(os.getenv("RELEASE_POLL_SECONDS", "1800"))
-ADMIN_PASSWORD = os.getenv("PASSWORD", "").strip()
-ADMIN_COOKIE_NAME = "cc_admin_pw"
 
 
 def _set_ws_context(route: str, ws: WebSocket):
@@ -133,7 +132,7 @@ def _safe(x):
         return "<unprintable>"
 
 
-APP_TITLE = "Copycord"
+APP_TITLE = f"Copycord"
 
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
@@ -226,6 +225,7 @@ templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 templates.env.globals.setdefault("links", {})
 app.include_router(links_router)
 shutdown_event = asyncio.Event()
+init_admin_auth(app, templates, DATA_DIR)
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
@@ -267,44 +267,7 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
         return response
 
 
-class PasswordGuardMiddleware(BaseHTTPMiddleware):
-    """
-    Very simple 'one password for everything' gate.
-
-    - If PASSWORD is not set, it does nothing.
-    - If PASSWORD is set:
-        * /login and /health (and static assets) are always allowed
-        * every other request must have the correct cookie set,
-          otherwise you get redirected to /login (for GET/HEAD)
-          or a 401 for other methods.
-    """
-
-    async def dispatch(self, request: Request, call_next):
-
-        if not ADMIN_PASSWORD:
-            return await call_next(request)
-
-        path = request.url.path or "/"
-
-        if (
-            path.startswith("/login")
-            or path.startswith("/health")
-            or path.startswith("/static")
-        ):
-            return await call_next(request)
-
-        if request.cookies.get(ADMIN_COOKIE_NAME) == ADMIN_PASSWORD:
-            return await call_next(request)
-
-        if request.method in ("GET", "HEAD"):
-            return RedirectResponse(url="/login")
-        return PlainTextResponse(
-            "Unauthorized", status_code=status.HTTP_401_UNAUTHORIZED
-        )
-
-
 app.add_middleware(RequestContextMiddleware)
-app.add_middleware(PasswordGuardMiddleware)
 
 
 class ConnCloseOnShutdownASGI:
@@ -820,58 +783,6 @@ async def _bot_in_guild(server_token: str, guild_id: int) -> bool:
             guild_id,
         )
         return False
-
-
-@app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
-
-    if not ADMIN_PASSWORD:
-        return RedirectResponse("/", status_code=status.HTTP_302_FOUND)
-
-    if request.cookies.get(ADMIN_COOKIE_NAME) == ADMIN_PASSWORD:
-        return RedirectResponse("/", status_code=status.HTTP_302_FOUND)
-
-    return templates.TemplateResponse(
-        "login.html",
-        {
-            "request": request,
-            "version": CURRENT_VERSION,
-            "error": None,
-        },
-    )
-
-
-@app.post("/login", response_class=HTMLResponse)
-async def login_submit(
-    request: Request,
-    password: str = Form(...),
-):
-    if not ADMIN_PASSWORD:
-        return RedirectResponse("/", status_code=status.HTTP_302_FOUND)
-
-    if password == ADMIN_PASSWORD:
-
-        resp = RedirectResponse("/", status_code=status.HTTP_302_FOUND)
-        secure = request.url.scheme == "https"
-        resp.set_cookie(
-            ADMIN_COOKIE_NAME,
-            ADMIN_PASSWORD,
-            httponly=True,
-            samesite="lax",
-            max_age=60 * 60 * 12,
-            secure=secure,
-        )
-        return resp
-
-    return templates.TemplateResponse(
-        "login.html",
-        {
-            "request": request,
-            "version": CURRENT_VERSION,
-            "error": "Incorrect password. Please try again.",
-        },
-        status_code=status.HTTP_401_UNAUTHORIZED,
-    )
 
 
 @app.websocket("/bus")
@@ -2935,21 +2846,35 @@ async def api_channels_customize(payload: dict = Body(...)):
         desired is not None and current_raw != desired
     )
     if not needs_update:
-        LOGGER.info("Customize channel | (%s,%s) no change", ocid, cgid)
         return JSONResponse(
             {"ok": True, "changed": False, "normalized": desired is not None}
         )
 
     try:
         db.set_channel_clone_name(ocid, cgid, desired)
-        LOGGER.info("Customize channel | (%s,%s) -> %r", ocid, cgid, desired)
     except Exception as e:
         LOGGER.exception("Failed to set clone_channel_name: %s", e)
         return JSONResponse({"ok": False, "error": "db-failure"}, status_code=500)
 
     try:
+        origin_gid = db.get_original_guild_id_for_channel(ocid)
+
+        mapping_id = None
+        if origin_gid is not None:
+            row = db.get_mapping_by_original_and_clone(origin_gid, cgid)
+            if row:
+                mapping_id = row["mapping_id"]
+
+        data = {"guild_id": origin_gid}
+        if mapping_id is not None:
+            data["mapping_id"] = mapping_id
+
         asyncio.create_task(
-            _ws_cmd(CLIENT_AGENT_URL, {"type": "sitemap_request"}, timeout=1.0)
+            _ws_cmd(
+                CLIENT_AGENT_URL,
+                {"type": "sitemap_request", "data": data},
+                timeout=1.0,
+            )
         )
     except Exception:
         LOGGER.debug("WS sitemap_request dispatch failed", exc_info=True)
@@ -2964,7 +2889,6 @@ async def api_categories_customize(payload: dict = Body(...)):
     """
     Set or clear a category's custom display name, scoped to (original_category_id, cloned_guild_id).
     """
-    import unicodedata
 
     def _norm_display(s):
         if s is None:
@@ -2975,7 +2899,12 @@ async def api_categories_customize(payload: dict = Body(...)):
     if "original_category_id" in payload:
         try:
             ocid = int(payload.get("original_category_id"))
-        except Exception:
+        except Exception as e:
+            LOGGER.warning(
+                "Customize category | invalid original_category_id in payload=%r: %s",
+                payload.get("original_category_id"),
+                e,
+            )
             return JSONResponse(
                 {"ok": False, "error": "invalid-original_category_id"}, status_code=400
             )
@@ -2983,25 +2912,47 @@ async def api_categories_customize(payload: dict = Body(...)):
         name = _norm_display(payload.get("category_name"))
         ocid = db.resolve_original_category_id_by_name(name) if name else None
         if not ocid:
+            LOGGER.warning(
+                "Customize category | missing/unresolvable category for name=%r, payload=%r",
+                name,
+                payload,
+            )
             return JSONResponse(
                 {"ok": False, "error": "missing-or-unresolvable-category"},
                 status_code=400,
             )
 
     try:
-        cgid = int(payload.get("cloned_guild_id"))
-    except Exception:
+        cgid_raw = payload.get("cloned_guild_id")
+        cgid = int(cgid_raw)
+    except Exception as e:
+        LOGGER.warning(
+            "Customize category | invalid cloned_guild_id in payload=%r: %s",
+            payload.get("cloned_guild_id"),
+            e,
+        )
         return JSONResponse(
             {"ok": False, "error": "invalid-cloned_guild_id"}, status_code=400
         )
 
-    desired = _norm_display(
-        payload.get("custom_category_name", payload.get("clone_category_name"))
+    desired_raw = payload.get(
+        "custom_category_name", payload.get("clone_category_name")
     )
+    desired = _norm_display(desired_raw)
 
     try:
         orig = db.get_original_category_name(ocid)
-    except Exception:
+        LOGGER.debug(
+            "Customize category | original name for ocid=%s: %r",
+            ocid,
+            orig,
+        )
+    except Exception as e:
+        LOGGER.warning(
+            "Customize category | failed to load original name for ocid=%s: %s",
+            ocid,
+            e,
+        )
         orig = None
 
     if desired is not None and _norm_display(orig) == _norm_display(desired):
@@ -3009,31 +2960,70 @@ async def api_categories_customize(payload: dict = Body(...)):
 
     try:
         current_raw = db.get_clone_category_name(ocid, cgid)
-    except Exception:
+    except Exception as e:
+        LOGGER.warning(
+            "Customize category | failed to load current cloned name for (ocid=%s, cgid=%s): %s",
+            ocid,
+            cgid,
+            e,
+        )
         current_raw = None
 
     if _norm_display(current_raw) == _norm_display(desired):
-        LOGGER.info("Customize category | (%s,%s) no change", ocid, cgid)
         return JSONResponse(
             {"ok": True, "changed": False, "normalized": desired is not None}
         )
 
     try:
         db.set_category_clone_name(ocid, cgid, desired)
-        LOGGER.info("Customize category | (%s,%s) -> %r", ocid, cgid, desired)
     except Exception as e:
-        LOGGER.exception("Failed to set cloned_category_name: %s", e)
+        LOGGER.exception(
+            "Failed to set cloned_category_name for (ocid=%s, cgid=%s): %s",
+            ocid,
+            cgid,
+            e,
+        )
         return JSONResponse({"ok": False, "error": "db-failure"}, status_code=500)
 
     try:
+        LOGGER.debug(
+            "Customize category | nudging sitemap_request via WS for (ocid=%s, cgid=%s)",
+            ocid,
+            cgid,
+        )
+
+        origin_gid = db.get_original_guild_id_for_category(ocid)
+
+        mapping_id = None
+        if origin_gid is not None:
+            row = db.get_mapping_by_original_and_clone(origin_gid, cgid)
+            if row:
+                mapping_id = row["mapping_id"]
+
+        data = {"guild_id": origin_gid}
+        if mapping_id is not None:
+            data["mapping_id"] = mapping_id
+
         asyncio.create_task(
-            _ws_cmd(CLIENT_AGENT_URL, {"type": "sitemap_request"}, timeout=1.0)
+            _ws_cmd(
+                CLIENT_AGENT_URL,
+                {"type": "sitemap_request", "data": data},
+                timeout=1.0,
+            )
         )
     except Exception:
         LOGGER.debug("WS sitemap_request dispatch failed", exc_info=True)
 
+
     return JSONResponse(
-        {"ok": True, "changed": True, "nudged": True, "normalized_name": desired}
+        {
+            "ok": True,
+            "changed": True,
+            "nudged": True,
+            "normalized_name": desired,
+            "original_category_id": ocid,
+            "cloned_guild_id": cgid,
+        }
     )
 
 

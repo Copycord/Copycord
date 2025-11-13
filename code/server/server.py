@@ -2057,7 +2057,7 @@ class ServerReceiver:
                         orig_id=int(orig_cat_id),
                         orig_name=upstream_name or (cat_obj.name or "Category"),
                         clone_id=int(cat_obj.id),
-                        clone_name=(mapping or {}).get("clone_category_name"),
+                        clone_name=(mapping or {}).get("cloned_category_name"),
                         original_guild_id=int(host_guild_id),
                         cloned_guild_id=int(guild.id),
                     )
@@ -2068,7 +2068,7 @@ class ServerReceiver:
                         "original_guild_id": int(host_guild_id),
                         "cloned_guild_id": int(guild.id),
                         "clone_category_name": (mapping or {}).get(
-                            "clone_category_name"
+                            "cloned_category_name"
                         ),
                     }
                     self.cat_map_by_clone.setdefault(int(guild.id), {})[
@@ -3297,7 +3297,7 @@ class ServerReceiver:
                         int(original_category_id)
                     ] = mapping
 
-            pinned = ((mapping or {}).get("clone_category_name") or "").strip()
+            pinned = ((mapping or {}).get("cloned_category_name") or "").strip()
             desired = pinned or (upstream_name or "").strip()
             current = (getattr(cat, "name", "") or "").strip()
 

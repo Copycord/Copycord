@@ -3469,3 +3469,20 @@ class DBManager:
                 "original_category_id": int(original_category_id),
                 "cloned_category_id": cloned_cat_id,
             }
+
+    def get_original_guild_id_for_category(self, original_category_id: int) -> int | None:
+        row = self.conn.execute(
+            "SELECT original_guild_id FROM category_mappings WHERE original_category_id=? LIMIT 1",
+            (original_category_id,)
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+    
+    def get_original_guild_id_for_channel(self, original_channel_id: int) -> int | None:
+        """
+        Resolve the original_guild_id for a given original_channel_id.
+        """
+        row = self.conn.execute(
+            "SELECT original_guild_id FROM channel_mappings WHERE original_channel_id=? LIMIT 1",
+            (int(original_channel_id),),
+        ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None

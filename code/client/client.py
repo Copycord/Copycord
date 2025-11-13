@@ -320,15 +320,37 @@ class ClientListener:
             }
 
         elif typ == "sitemap_request":
-            target_gid = None
-            try:
-                target_gid = int((data or {}).get("guild_id"))
-            except Exception:
-                target_gid = None
+                payload = data or {}
 
-            self.schedule_sync(guild_id=target_gid)
-            logger.info("[🌐] Received sitemap request for %s", target_gid or "ALL")
-            return {"ok": True}
+                target_gid = None
+                try:
+                    raw_gid = payload.get("guild_id")
+                    target_gid = int(raw_gid) if raw_gid is not None else None
+                except Exception:
+                    target_gid = None
+
+                # NEW: optional per-mapping filter
+                mapping_id = (payload.get("mapping_id") or "").strip() or None
+
+                if mapping_id:
+                    # Targeted sitemap for a single mapping row
+                    logger.info(
+                        "[🌐] Received sitemap request for mapping %r (host=%s)",
+                        mapping_id,
+                        target_gid or "ANY",
+                    )
+                    try:
+                        await self.sitemap.send_for_mapping_id(mapping_id)
+                    except Exception:
+                        logger.exception(
+                            "[🌐] Failed to send sitemap for mapping %r", mapping_id
+                        )
+                else:
+                    # Old behavior: per-host or ALL
+                    self.schedule_sync(guild_id=target_gid)
+                    logger.info("[🌐] Received sitemap request for %s", target_gid or "ALL")
+
+                return {"ok": True}
 
         elif typ == "scrape_members":
             data = data or {}

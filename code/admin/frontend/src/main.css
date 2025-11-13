@@ -4050,20 +4050,13 @@ body {
     border-color 0.18s ease, transform 0.1s ease;
   box-shadow: none;
 }
+
 #customize-cat-modal .cc-tip:hover,
 #customize-cat-modal .cc-tip:focus-visible,
 #customize-cat-modal .info-dot:hover,
 #customize-cat-modal .info-dot:focus-visible {
-  background: color-mix(in srgb, var(--brand, #7c5cff) 35%, #000);
-  border-color: color-mix(
-    in srgb,
-    var(--brand, #7c5cff) 80%,
-    rgba(255, 255, 255, 0.12)
-  );
-  box-shadow: 0 0 0 3px
-      color-mix(in srgb, var(--brand, #7c5cff) 28%, transparent),
-    0 0 16px color-mix(in srgb, var(--brand, #7c5cff) 55%, transparent),
-    inset 0 0 8px color-mix(in srgb, var(--brand, #7c5cff) 35%, transparent);
+  border-color: var(--accent);
+  box-shadow: none;
 }
 
 #customize-cat-modal .btns {
