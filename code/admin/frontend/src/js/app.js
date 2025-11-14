@@ -3,6 +3,11 @@
   let toggleLocked = false;
   const RUNTIME_CACHE = {};
   let GUILD_MAPPINGS = [];
+  let CURRENT_FILTER_PICKER = null;
+  let ROLE_BLOCKS_ALL_ROLES = [];
+  let FILTER_OBJECTS_ALL_ITEMS = [];
+  let FILTER_OBJECTS_KIND = null;
+  let FILTER_OBJECTS_CATMAP = null;
   let lastRunning = null;
   let tooltipEl = null;
   let cModal, cTitle, cBody, cBtnOk, cBtnX, cBtnCa, cBack;
@@ -1211,7 +1216,7 @@
 
     addMany(arr) {
       if (this.root.getAttribute("data-locked") === "1") {
-        return;
+        return false;
       }
 
       let changed = false;
@@ -1223,6 +1228,7 @@
         }
       }
       if (changed) this.syncHidden();
+      return changed;
     }
 
     remove(id) {
@@ -1265,7 +1271,6 @@
 
     syncHidden() {
       this.hidden.value = this.values.join(",");
-
       this.hidden.dispatchEvent(new Event("input", { bubbles: true }));
     }
 
@@ -1275,9 +1280,16 @@
       Array.from(this.root.querySelectorAll(".chip")).forEach((el) =>
         el.remove()
       );
-      this.addMany((list || []).map(String));
+
+      const cleaned = (list || []).map(String);
+      const changed = this.addMany(cleaned);
+
       if (this.entry) {
         this.entry.value = "";
+      }
+
+      if (!changed) {
+        this.syncHidden();
       }
     }
 
@@ -1363,7 +1375,7 @@
 
     addMany(arr) {
       if (this.root.getAttribute("data-locked") === "1") {
-        return;
+        return false;
       }
 
       let changed = false;
@@ -1378,6 +1390,7 @@
       if (changed) {
         this._syncHidden();
       }
+      return changed;
     }
 
     remove(word) {
@@ -1421,7 +1434,6 @@
 
     _syncHidden() {
       this.hidden.value = this.values.join(",");
-
       this.hidden.dispatchEvent(new Event("input", { bubbles: true }));
     }
 
@@ -1434,10 +1446,15 @@
       const cleaned = Array.isArray(list)
         ? list.map((x) => String(x).trim()).filter(Boolean)
         : [];
-      this.addMany(cleaned);
+
+      const changed = this.addMany(cleaned);
 
       if (this.entry) {
         this.entry.value = "";
+      }
+
+      if (!changed) {
+        this._syncHidden();
       }
     }
 
@@ -2139,6 +2156,30 @@
     }, 0);
   }
 
+  function setupRoleBlocksSearch() {
+    const input = document.getElementById("roleBlocksSearch");
+    if (!input) return;
+
+    if (input._boundForModal) return;
+    input._boundForModal = true;
+
+    input.addEventListener("input", () => {
+      const q = input.value.trim().toLowerCase();
+
+      if (!Array.isArray(ROLE_BLOCKS_ALL_ROLES)) return;
+
+      const filtered = !q
+        ? ROLE_BLOCKS_ALL_ROLES
+        : ROLE_BLOCKS_ALL_ROLES.filter((role) => {
+            const name = String(role.name || "").toLowerCase();
+            const idStr = String(role.id || "");
+            return name.includes(q) || idStr.includes(q);
+          });
+
+      renderRoleBlocksTable(filtered);
+    });
+  }
+
   async function openRoleBlocksModal(mappingId) {
     const modal = document.getElementById("roleBlocksModal");
     const tbody = document.getElementById("roleBlocksTableBody");
@@ -2157,9 +2198,33 @@
       return;
     }
 
-    if (status) status.textContent = "Fetching roles…";
+    if (status) status.textContent = "";
+
     tbody.innerHTML =
       '<tr><td colspan="3" class="text-center small">Loading…</td></tr>';
+
+    setInert(modal, false);
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("body-lock-scroll");
+
+    const closeBtn = document.getElementById("roleBlocksCloseBtn");
+    setTimeout(() => {
+      try {
+        (closeBtn || modal).focus();
+      } catch {}
+    }, 0);
+
+    if (modal._outsideClickHandler) {
+      modal.removeEventListener("mousedown", modal._outsideClickHandler);
+    }
+    modal._outsideClickHandler = function (evt) {
+      const contentEl = modal.querySelector(".modal-content");
+      if (contentEl && !contentEl.contains(evt.target)) {
+        closeRoleBlocksModal();
+      }
+    };
+    modal.addEventListener("mousedown", modal._outsideClickHandler);
 
     if (CHIPS.blocked_roles) {
       CURRENT_BLOCKED_ROLE_IDS = new Set(CHIPS.blocked_roles.get());
@@ -2186,7 +2251,9 @@
       const payload = await res.json();
       const roles = Array.isArray(payload.roles) ? payload.roles : [];
 
+      ROLE_BLOCKS_ALL_ROLES = roles;
       renderRoleBlocksTable(roles);
+      setupRoleBlocksSearch();
 
       if (status) status.textContent = "";
     } catch (err) {
@@ -2195,13 +2262,329 @@
         '<tr><td colspan="3" class="text-center small">Failed to load roles.</td></tr>';
       if (status) status.textContent = "Failed to load roles.";
     }
+  }
+
+  async function fetchGuildTreeForMapping(mid, opts = {}) {
+    const { noCache = false } = opts;
+    const cacheKey = `filters_tree:${mid}`;
+
+    if (!noCache && RUNTIME_CACHE[cacheKey]) {
+      return RUNTIME_CACHE[cacheKey];
+    }
+
+    const res = await fetch(
+      `/api/mappings/${encodeURIComponent(mid)}/channels`,
+      {
+        method: "GET",
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      }
+    );
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch channels: ${res.status}`);
+    }
+
+    const payload = await res.json();
+    const categories = Array.isArray(payload.categories)
+      ? payload.categories
+      : [];
+    const channels = Array.isArray(payload.channels) ? payload.channels : [];
+
+    const tree = { categories, channels };
+
+    if (!noCache) {
+      RUNTIME_CACHE[cacheKey] = tree;
+    }
+
+    return tree;
+  }
+
+  function closeFilterObjectsModal() {
+    const modal = document.getElementById("filterObjectsModal");
+    const tbody = document.getElementById("filterObjectsTableBody");
+    const selectAll = document.getElementById("filterObjectsSelectAll");
+    const searchInput = document.getElementById("filterObjectsSearch");
+
+    if (!modal) return;
+
+    setInert(modal, true);
+    modal.classList.remove("show");
+    modal.setAttribute("aria-hidden", "true");
+
+    if (tbody) {
+      tbody.innerHTML = "";
+    }
+    if (selectAll) {
+      selectAll.checked = false;
+      selectAll.indeterminate = false;
+    }
+
+    if (searchInput) {
+      searchInput.value = "";
+    }
+
+    if (window.CURRENT_FILTER_PICKER && CURRENT_FILTER_PICKER.mappingId) {
+      const cacheKey = `filters_tree:${CURRENT_FILTER_PICKER.mappingId}`;
+      delete RUNTIME_CACHE[cacheKey];
+    }
+    CURRENT_FILTER_PICKER = null;
+
+    if (modal._outsideClickHandler) {
+      modal.removeEventListener("mousedown", modal._outsideClickHandler);
+      modal._outsideClickHandler = null;
+    }
+    if (modal._keyHandler) {
+      modal.removeEventListener("keydown", modal._keyHandler);
+      modal._keyHandler = null;
+    }
+
+    document.body.classList.remove("body-lock-scroll");
+  }
+
+  function buildFilterObjectsRows(items, kind, catMap) {
+    return items
+      .map((obj) => {
+        const id = String(obj.id);
+        const safeName = escapeHtml(obj.name || `ID ${id}`);
+        const checked = CURRENT_FILTER_PICKER.selected.has(id)
+          ? " checked"
+          : "";
+
+        let catCell = "";
+        if (kind === "channel") {
+          const pid = obj.parent_id ? String(obj.parent_id) : "";
+          const parentName = pid && catMap.get(pid);
+          catCell = `<td class="filter-obj-cat">
+          <span class="filter-obj-cat-text">${escapeHtml(
+            parentName || ""
+          )}</span>
+        </td>`;
+        } else {
+          catCell = `<td class="filter-obj-cat"></td>`;
+        }
+
+        return `
+        <tr data-obj-id="${id}">
+          <td class="filter-obj-select-col">
+            <label class="checkbox-inline">
+              <input
+                type="checkbox"
+                class="role-block-toggle filter-obj-toggle"
+                data-obj-id="${id}"${checked}
+              />
+            </label>
+          </td>
+          <td class="filter-obj-name-col">
+            <span class="filter-obj-name">${safeName}</span>
+          </td>
+          ${catCell}
+          <td class="filter-obj-id-col"><code>${id}</code></td>
+        </tr>
+      `;
+      })
+      .join("");
+  }
+
+  function wireFilterObjectsTableInteractions() {
+    const tbody = document.getElementById("filterObjectsTableBody");
+    const selectAll = document.getElementById("filterObjectsSelectAll");
+    if (!tbody) return;
+
+    function getCheckboxes() {
+      return Array.from(tbody.querySelectorAll(".filter-obj-toggle"));
+    }
+
+    function updateSelectAllState() {
+      if (!selectAll) return;
+      const cbs = getCheckboxes();
+      const total = cbs.length;
+      const checkedCount = cbs.filter((cb) => cb.checked).length;
+
+      if (!total) {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
+      } else if (checkedCount === 0) {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
+      } else if (checkedCount === total) {
+        selectAll.checked = true;
+        selectAll.indeterminate = false;
+      } else {
+        selectAll.checked = false;
+        selectAll.indeterminate = true;
+      }
+    }
+
+    getCheckboxes().forEach((cb) => {
+      cb.addEventListener("change", (evt) => {
+        const id = evt.target.getAttribute("data-obj-id");
+        if (!id) return;
+
+        if (evt.target.checked) {
+          CURRENT_FILTER_PICKER.selected.add(id);
+        } else {
+          CURRENT_FILTER_PICKER.selected.delete(id);
+        }
+
+        updateSelectAllState();
+      });
+    });
+
+    if (selectAll) {
+      selectAll.onchange = () => {
+        const shouldCheck = !!selectAll.checked;
+        const cbs = getCheckboxes();
+
+        cbs.forEach((cb) => {
+          cb.checked = shouldCheck;
+          const id = cb.getAttribute("data-obj-id");
+          if (!id) return;
+          if (shouldCheck) {
+            CURRENT_FILTER_PICKER.selected.add(id);
+          } else {
+            CURRENT_FILTER_PICKER.selected.delete(id);
+          }
+        });
+
+        updateSelectAllState();
+      };
+    }
+
+    tbody.querySelectorAll("tr[data-obj-id]").forEach((row) => {
+      row.addEventListener("click", (evt) => {
+        if (evt.target.closest("input[type='checkbox']")) return;
+
+        const cb = row.querySelector(".filter-obj-toggle");
+        if (!cb) return;
+
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    });
+
+    updateSelectAllState();
+  }
+
+  function setupFilterObjectsSearch() {
+    const input = document.getElementById("filterObjectsSearch");
+    if (!input) return;
+
+    if (input._boundForModal) return;
+    input._boundForModal = true;
+
+    input.addEventListener("input", () => {
+      const q = input.value.trim().toLowerCase();
+      const tbody = document.getElementById("filterObjectsTableBody");
+      if (!tbody) return;
+
+      const items = Array.isArray(FILTER_OBJECTS_ALL_ITEMS)
+        ? FILTER_OBJECTS_ALL_ITEMS
+        : [];
+      if (!items.length) return;
+
+      const filtered = !q
+        ? items
+        : items.filter((obj) => {
+            const name = String(obj.name || "").toLowerCase();
+            const idStr = String(obj.id || "");
+
+            let catName = "";
+            if (FILTER_OBJECTS_KIND === "channel" && FILTER_OBJECTS_CATMAP) {
+              const pid = obj.parent_id ? String(obj.parent_id) : "";
+              catName = String(
+                FILTER_OBJECTS_CATMAP.get(pid) || ""
+              ).toLowerCase();
+            }
+
+            return (
+              name.includes(q) ||
+              idStr.includes(q) ||
+              (catName && catName.includes(q))
+            );
+          });
+
+      tbody.innerHTML = buildFilterObjectsRows(
+        filtered,
+        FILTER_OBJECTS_KIND,
+        FILTER_OBJECTS_CATMAP || new Map()
+      );
+
+      wireFilterObjectsTableInteractions();
+    });
+  }
+
+  async function openFilterObjectsModal(mappingId, options) {
+    const modal = document.getElementById("filterObjectsModal");
+    const tbody = document.getElementById("filterObjectsTableBody");
+    const titleEl = document.getElementById("filterObjectsTitle");
+    const helpEl = document.getElementById("filterObjectsHelp");
+    const nameHeader = document.getElementById("filterObjectsNameHeader");
+    const catHeader = document.getElementById("filterObjectsCategoryHeader");
+    const selectAll = document.getElementById("filterObjectsSelectAll");
+    const table = document.getElementById("filterObjectsTable");
+
+    if (!modal || !tbody) return;
+
+    if (table) {
+      table.classList.add("role-blocks-table", "filter-objects-table");
+    }
+
+    const mid =
+      mappingId ||
+      (currentFilterMapping && currentFilterMapping.mapping_id) ||
+      document.getElementById("filters_mapping_id")?.value ||
+      "";
+
+    tbody.innerHTML =
+      '<tr><td colspan="4" class="text-center small">Loading…</td></tr>';
+
+    if (!mid) {
+      tbody.innerHTML =
+        '<tr><td colspan="4" class="text-center small">No mapping selected.</td></tr>';
+      return;
+    }
+
+    const listKey = options.listKey;
+    const kind = options.kind;
+
+    const chip = CHIPS[listKey];
+    const baseIds = chip
+      ? chip.get()
+      : parseIdList(document.getElementById(listKey)?.value || "");
+
+    CURRENT_FILTER_PICKER = {
+      mappingId: mid,
+      listKey,
+      kind,
+      selected: new Set((baseIds || []).map(String)),
+    };
+
+    if (titleEl) {
+      const prefix = listKey.startsWith("wl_") ? "Allow" : "Block";
+      const what = kind === "category" ? "Categories" : "Channels";
+      titleEl.textContent = `${prefix} ${what}`;
+    }
+    if (helpEl) {
+      if (kind === "category") {
+        helpEl.textContent = listKey.startsWith("wl_")
+          ? "Only the selected categories will be cloned (including their channels)."
+          : "The selected categories (and their channels) will not be cloned.";
+      } else {
+        helpEl.textContent = listKey.startsWith("wl_")
+          ? "Only the selected channels will be cloned."
+          : "The selected channels will not be cloned.";
+      }
+    }
+    if (catHeader) {
+      catHeader.style.display = kind === "channel" ? "" : "none";
+    }
 
     setInert(modal, false);
     modal.classList.add("show");
     modal.setAttribute("aria-hidden", "false");
     document.body.classList.add("body-lock-scroll");
 
-    const closeBtn = document.getElementById("roleBlocksCloseBtn");
+    const closeBtn = document.getElementById("filterObjectsCloseBtn");
     setTimeout(() => {
       try {
         (closeBtn || modal).focus();
@@ -2214,10 +2597,57 @@
     modal._outsideClickHandler = function (evt) {
       const contentEl = modal.querySelector(".modal-content");
       if (contentEl && !contentEl.contains(evt.target)) {
-        closeRoleBlocksModal();
+        closeFilterObjectsModal();
       }
     };
     modal.addEventListener("mousedown", modal._outsideClickHandler);
+
+    if (modal._keyHandler) {
+      modal.removeEventListener("keydown", modal._keyHandler);
+    }
+    modal._keyHandler = function (evt) {
+      if (evt.key === "Escape" || evt.key === "Esc") {
+        evt.preventDefault();
+        evt.stopPropagation();
+        closeFilterObjectsModal();
+      }
+    };
+    modal.addEventListener("keydown", modal._keyHandler);
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const tree = await fetchGuildTreeForMapping(mid, { noCache: true });
+      const categories = Array.isArray(tree.categories) ? tree.categories : [];
+      const channels = Array.isArray(tree.channels) ? tree.channels : [];
+
+      const catMap = new Map();
+      for (const c of categories) {
+        const id = String(c.id);
+        catMap.set(id, c.name || `Category ${id}`);
+      }
+
+      const items = kind === "category" ? categories : channels;
+      if (!items.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center small">No ${
+          kind === "category" ? "categories" : "channels"
+        } found for this guild.</td></tr>`;
+        return;
+      }
+
+      FILTER_OBJECTS_ALL_ITEMS = items;
+      FILTER_OBJECTS_KIND = kind;
+      FILTER_OBJECTS_CATMAP = catMap;
+
+      tbody.innerHTML = buildFilterObjectsRows(items, kind, catMap);
+
+      wireFilterObjectsTableInteractions();
+      setupFilterObjectsSearch();
+    } catch (err) {
+      console.error("Error fetching guild channels/categories:", err);
+      tbody.innerHTML =
+        '<tr><td colspan="4" class="text-center small text-danger">Failed to fetch channels/categories from Discord.</td></tr>';
+    }
   }
 
   function renderRoleBlocksTable(roles) {
@@ -2260,9 +2690,9 @@
             </label>
           </td>
           <td>
-          <span class="role-pill" style="--role-color: ${hex}">
-            <span class="role-pill-text">${safeName}</span>
-          </span>
+            <span class="role-pill" style="--role-color: ${hex}">
+              <span class="role-pill-text">${safeName}</span>
+            </span>
           </td>
           <td><code>${id}</code></td>
         </tr>
@@ -2304,6 +2734,18 @@
       });
     }
 
+    tbody.querySelectorAll("tr[data-role-id]").forEach((row) => {
+      row.addEventListener("click", (evt) => {
+        if (evt.target.closest("input[type='checkbox']")) return;
+
+        const cb = row.querySelector(".role-block-toggle");
+        if (!cb) return;
+
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    });
+
     updateSelectAllState();
   }
 
@@ -2342,6 +2784,11 @@
       try {
         active.blur();
       } catch {}
+    }
+
+    const searchInput = document.getElementById("roleBlocksSearch");
+    if (searchInput) {
+      searchInput.value = "";
     }
 
     setInert(modal, true);
@@ -2690,6 +3137,64 @@
     const xBtn = document.getElementById("roleBlocksCloseBtn");
     const modal = document.getElementById("roleBlocksModal");
 
+    const filterBrowseButtons = document.querySelectorAll(".filter-fetch-btn");
+    filterBrowseButtons.forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const listKey = btn.getAttribute("data-filter-target");
+        const kind = btn.getAttribute("data-filter-kind");
+        if (!listKey || !kind) return;
+
+        const mid =
+          (currentFilterMapping && currentFilterMapping.mapping_id) ||
+          document.getElementById("filters_mapping_id")?.value ||
+          "";
+        if (!mid) return;
+
+        await openFilterObjectsModal(mid, { listKey, kind });
+      });
+    });
+
+    const filterApply = document.getElementById("filterObjectsApply");
+    const filterCancel = document.getElementById("filterObjectsCancel");
+    const filterClose = document.getElementById("filterObjectsCloseBtn");
+
+    if (filterApply) {
+      filterApply.addEventListener("click", () => {
+        if (!CURRENT_FILTER_PICKER) {
+          closeFilterObjectsModal();
+          return;
+        }
+
+        const { listKey, selected } = CURRENT_FILTER_PICKER;
+        const list = Array.from(selected || []);
+
+        if (CHIPS[listKey]) {
+          CHIPS[listKey].set(list);
+        } else {
+          const hidden = document.getElementById(listKey);
+          if (hidden) {
+            hidden.value = list.join(",");
+            hidden.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+        }
+
+        closeFilterObjectsModal();
+
+        // before checking if it's dirty
+        setTimeout(() => {
+          updateFiltersDirtyForModal();
+        }, 0);
+      });
+    }
+
+    [filterCancel, filterClose].forEach((btn) => {
+      if (btn) {
+        btn.addEventListener("click", () => {
+          closeFilterObjectsModal();
+        });
+      }
+    });
+
     if (fetchBtn) {
       fetchBtn.addEventListener("click", async () => {
         const mid =
@@ -3025,6 +3530,31 @@
     document.addEventListener("keydown", (e) => {
       const fm = document.getElementById("filters-modal");
       if (e.key === "Escape" && fm && fm.classList.contains("show")) {
+        e.preventDefault();
+        closeFiltersModal();
+      }
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+
+      const rb = document.getElementById("roleBlocksModal");
+      const fm = document.getElementById("filters-modal");
+      const om = document.getElementById("filterObjectsModal");
+
+      if (rb && rb.classList.contains("show")) {
+        e.preventDefault();
+        closeRoleBlocksModal();
+        return;
+      }
+
+      if (om && om.classList.contains("show")) {
+        e.preventDefault();
+        closeFilterObjectsModal();
+        return;
+      }
+
+      if (fm && fm.classList.contains("show")) {
         e.preventDefault();
         closeFiltersModal();
       }

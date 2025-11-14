@@ -1957,6 +1957,113 @@ async def api_save_filters(mapping_id: str, request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.get("/api/mappings/{mapping_id}/channels", response_class=JSONResponse)
+async def api_mapping_channels(mapping_id: str):
+    """
+    Fetch categories + channels for the ORIGINAL guild for this mapping
+    using the Discord HTTP API and the CLIENT_TOKEN from config.
+    """
+    mapping = db.get_mapping_by_id(mapping_id)
+    if not mapping:
+        raise HTTPException(status_code=404, detail="mapping-not-found")
+
+    try:
+        orig_id = int(mapping["original_guild_id"] or 0)
+    except Exception:
+        orig_id = 0
+
+    if not orig_id:
+        raise HTTPException(status_code=400, detail="original-guild-missing")
+
+    cfg = db.get_all_config()
+    client_token = (cfg.get("CLIENT_TOKEN") or "").strip()
+    if not client_token:
+        raise HTTPException(status_code=400, detail="client-token-missing")
+
+    url = f"{DISCORD_API_BASE}/guilds/{orig_id}/channels"
+    headers = {
+        "Authorization": f"{client_token}",
+    }
+
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(url, headers=headers, timeout=10) as resp:
+                text = await resp.text()
+                if resp.status != 200:
+                    LOGGER.warning(
+                        "Discord channels fetch failed for original %s: %s %s",
+                        orig_id,
+                        resp.status,
+                        text[:300],
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail="discord-channels-fetch-failed",
+                    )
+                try:
+                    raw_channels = json.loads(text)
+                except Exception:
+                    LOGGER.exception(
+                        "Failed to decode Discord channels JSON for original %s",
+                        orig_id,
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail="discord-channels-json-error",
+                    )
+    except HTTPException:
+        raise
+    except Exception:
+        LOGGER.exception("Error while calling Discord channels endpoint")
+        raise HTTPException(status_code=502, detail="discord-channels-error")
+
+    categories: list[dict] = []
+    channels: list[dict] = []
+
+    for ch in raw_channels or []:
+        try:
+            cid = str(ch.get("id"))
+        except Exception:
+            continue
+
+        try:
+            ctype = int(ch.get("type") or 0)
+        except Exception:
+            ctype = 0
+
+        name = str(ch.get("name") or f"ID {cid}")
+        position = int(ch.get("position") or 0)
+
+        parent_id = ch.get("parent_id")
+        parent_id_str = str(parent_id) if parent_id else None
+
+        base = {
+            "id": cid,
+            "name": name,
+            "type": ctype,
+            "position": position,
+            "parent_id": parent_id_str,
+        }
+
+        if ctype == 4:
+            categories.append(base)
+        else:
+            channels.append(base)
+
+    categories.sort(key=lambda c: (c["position"], c["name"].lower()))
+    channels.sort(
+        key=lambda c: (c["parent_id"] or "", c["position"], c["name"].lower())
+    )
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "categories": categories,
+            "channels": channels,
+        }
+    )
+
+
 @app.get("/api/mappings/{mapping_id}/roles", response_class=JSONResponse)
 async def api_mapping_roles(mapping_id: str):
     mapping = db.get_mapping_by_id(mapping_id)

@@ -4121,6 +4121,12 @@ body {
   box-shadow: 0 0 0 0.25px var(--brand, #7c5cff);
 }
 
+.log-search-input:focus-visible {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 1px var(--brand-ghost-2);
+  outline: none;
+}
+
 @supports not (color-mix(in srgb, white, black)) {
   #log-modal .modal-header .log-search-input:hover,
   #log-modal .modal-header .log-search-input:focus,
@@ -7751,11 +7757,6 @@ body.login-page {
   background: var(--card-solid);
 }
 
-.role-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
 .role-table th,
 .role-table td {
   padding: 8px 10px;
@@ -8001,4 +8002,111 @@ body.login-page {
 
 #filters-modal .padded::-webkit-scrollbar-thumb:hover {
   background-color: var(--primary);
+}
+
+#filterObjectsModal .modal-content {
+  width: auto;
+  max-width: 750px;
+  margin: 40px auto;
+}
+
+#filterObjectsModal .modal-body {
+  padding: 18px 22px 22px;
+}
+
+#filterObjectsModal .role-table-wrap {
+  margin-top: 8px;
+  margin-bottom: 18px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card-solid);
+  max-height: 52vh;
+  overflow: auto;
+}
+
+#filterObjectsModal .role-table {
+  width: 100%;
+  table-layout: auto;
+  border-collapse: collapse;
+}
+
+#filterObjectsModal .role-table th,
+#filterObjectsModal .role-table td {
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+#filterObjectsModal .role-table-select-col {
+  width: 46px;
+}
+
+#filterObjectsModal .role-table th:nth-child(2),
+#filterObjectsModal .role-table td:nth-child(2) {
+  white-space: normal;
+  word-break: break-word;
+  max-width: 250px;
+  width: auto;
+  overflow-wrap: break-word;
+}
+
+#filterObjectsModal .role-table th:nth-child(3),
+#filterObjectsModal .role-table td:nth-child(3) {
+  white-space: normal;
+  word-break: break-word;
+  max-width: 200px;
+  width: auto;
+  overflow-wrap: break-word;
+}
+
+#filterObjectsModal #filterObjectsCategoryHeader[style*='display: none'] {
+  display: none !important;
+}
+
+#filterObjectsModal
+  .role-table:has(#filterObjectsCategoryHeader[style*='display: none'])
+  tbody
+  td:nth-child(3) {
+  display: none;
+  width: 0;
+  padding: 0;
+  border: none;
+}
+
+#filterObjectsModal
+  .role-table:has(#filterObjectsCategoryHeader[style*='display: none'])
+  thead
+  th:nth-child(3) {
+  display: none;
+  width: 0;
+  padding: 0;
+  border: none;
+}
+
+#filterObjectsModal .role-table th:nth-child(4),
+#filterObjectsModal .role-table td:nth-child(4) {
+  white-space: nowrap;
+  width: 1%;
+  text-align: center;
+}
+
+#filterObjectsModal .modal-footer {
+  margin-top: 12px;
+  padding: 0 22px 18px;
+  border-top: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.filters-roles-label-row .filter-fetch-btn .role-fetch-circle {
+  position: relative;
+  top: 1px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#roleBlocksTableBody tr[data-role-id],
+#filterObjectsTableBody tr[data-obj-id] {
+  cursor: pointer;
 }
