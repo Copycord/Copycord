@@ -7701,3 +7701,304 @@ body.login-page {
   transform: translateY(1px);
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.45);
 }
+
+#roleBlocksModal .modal-content {
+  width: min(640px, 94vw);
+  max-height: 80vh;
+  margin: 6vh auto;
+  border-radius: 18px;
+}
+
+#roleBlocksModal .modal-body {
+  padding: 16px 18px 18px;
+  max-height: calc(80vh - 60px);
+  overflow-y: auto;
+}
+
+.role-table-wrap {
+  margin-top: 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--card-solid);
+  max-height: 52vh;
+  overflow: auto;
+
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+
+.role-table-wrap::-webkit-scrollbar {
+  width: 8px;
+}
+
+.role-table-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.role-table-wrap::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+
+.role-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: var(--accent);
+}
+
+.role-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--card-solid);
+}
+
+.role-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.role-table th,
+.role-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+}
+
+.role-table th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.role-table td {
+  color: var(--text);
+}
+
+.role-table tr:hover td {
+  background: var(--bg-3);
+}
+
+.role-table td:first-child,
+.role-table th:first-child {
+  width: 72px;
+  text-align: center;
+}
+
+#roleBlocksModal .modal-body > p.small {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+#roleBlocksModal .modal-footer {
+  padding: 12px 18px 16px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.role-fetch-trigger,
+.role-fetch-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.role-fetch-circle {
+  position: relative;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--primary);
+  border: 1px solid var(--primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #ffffff;
+  font-size: 0;
+  margin-top: -2px;
+  margin-left: 3px;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    box-shadow 0.15s ease, transform 0.08s ease;
+}
+
+.role-fetch-circle svg {
+  width: 12px;
+  height: 12px;
+  fill: #ffffff;
+  display: block;
+  margin: 0;
+
+  transform: translateX(0.7px);
+}
+
+.role-fetch-trigger:hover .role-fetch-circle,
+.role-fetch-trigger:focus-visible .role-fetch-circle,
+.role-fetch-btn:hover .role-fetch-circle,
+.role-fetch-btn:focus-visible .role-fetch-circle {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  transform: translateY(-0.5px);
+}
+
+.role-fetch-trigger:focus-visible,
+.role-fetch-btn:focus-visible {
+  outline: none;
+}
+
+.filters-roles-status {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.8;
+}
+
+.filters-roles .filters-roles-label-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.role-color-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  margin-right: 6px;
+  border: 1px solid rgba(0, 0, 0, 0.35);
+  vertical-align: -1px;
+}
+
+.role-table input.role-block-toggle {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  display: inline-block;
+  vertical-align: middle;
+  transition: background-color 0.12s ease, border-color 0.12s ease,
+    box-shadow 0.12s ease, transform 0.05s ease;
+}
+
+.role-table input.role-block-toggle:hover {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+.role-table input.role-block-toggle:checked {
+  background-color: var(--primary);
+  border-color: var(--primary);
+}
+
+.role-table input.role-block-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(167, 139, 250, 0.9);
+}
+
+.role-table input.role-block-toggle:active {
+  transform: scale(0.96);
+}
+
+.role-pill {
+  position: relative;
+  display: inline-block;
+
+  padding: 2px 8px 2px 26px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  background: #00000040;
+  color: #fff;
+  border: 1px solid var(--role-color, #99aab5);
+  max-width: 100%;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.role-pill::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--role-color, #99aab5);
+}
+
+.role-pill-text {
+  position: relative;
+  top: -1px;
+}
+
+.chips,
+.chips.chips-compact,
+.field-chips .chips {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+
+.chips::-webkit-scrollbar,
+.chips.chips-compact::-webkit-scrollbar,
+.field-chips .chips::-webkit-scrollbar {
+  width: 8px;
+}
+
+.chips::-webkit-scrollbar-track,
+.chips.chips-compact::-webkit-scrollbar-track,
+.field-chips .chips::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chips::-webkit-scrollbar-thumb,
+.chips.chips-compact::-webkit-scrollbar-thumb,
+.field-chips .chips::-webkit-scrollbar-thumb {
+  background-color: var(--accent);
+  border-radius: 999px;
+}
+
+.chips::-webkit-scrollbar-thumb:hover,
+.chips.chips-compact::-webkit-scrollbar-thumb:hover,
+.field-chips .chips::-webkit-scrollbar-thumb:hover {
+  background-color: var(--primary);
+}
+
+.chips {
+  min-height: 38px;
+  max-height: 96px;
+  overflow-y: auto;
+}
+
+#filters-modal .padded {
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+
+#filters-modal .padded::-webkit-scrollbar {
+  width: 8px;
+}
+
+#filters-modal .padded::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#filters-modal .padded::-webkit-scrollbar-thumb {
+  background-color: var(--accent);
+  border-radius: 999px;
+}
+
+#filters-modal .padded::-webkit-scrollbar-thumb:hover {
+  background-color: var(--primary);
+}

@@ -537,6 +537,40 @@
               </div>
             </fieldset>
           </div>
+          <fieldset class="filters-col filters-roles">
+            <legend>Role Blocks</legend>
+
+            <input type="hidden" id="blocked_role_ids" name="blocked_role_ids" value="">
+
+            <div class="field field-chips mt-2">
+
+              <div class="filters-roles-label-row">
+                <label class="has-tip">
+                  <span class="label-text">Blocked roles</span>
+                </label>
+
+                <button type="button" class="role-fetch-btn" id="filters-role-refresh"
+                  aria-label="Fetch roles from Discord" title="Fetch Discord roles">
+                  <span class="role-fetch-circle">
+                    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                      <path
+                        d="M7 2a5 5 0 1 1-3.536 8.536l-1.95 1.95a.75.75 0 0 1-1.06-1.06l1.95-1.95A5 5 0 0 1 7 2zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
+                    </svg>
+                  </span>
+                </button>
+
+                <span class="filters-roles-status" id="filters-role-status" aria-live="polite"></span>
+              </div>
+
+              <div class="chips chips-compact" data-chips="blocked_roles">
+                <div class="chip-input-wrap">
+                  <input id="blocked_role_ids_input" class="chip-input" type="text" inputmode="numeric"
+                    autocomplete="off" placeholder="Add role IDs" />
+                </div>
+              </div>
+            </div>
+          </fieldset>
+
 
           <fieldset class="filters-col filters-words">
             <legend>Word Filters</legend>
@@ -577,6 +611,49 @@
       </div>
     </div>
 
+    <div id="roleBlocksModal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="roleBlocksTitle">
+        <div class="modal-header">
+          <h3 class="modal-title" id="roleBlocksTitle">Role Blocks</h3>
+          <button class="icon-btn" id="roleBlocksCloseBtn" type="button" aria-label="Close">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <p class="text-muted small">
+            Select which roles you want to block for this mapping.
+          </p>
+
+          <div class="role-table-wrap">
+            <table class="role-table">
+              <thead>
+                <tr>
+                  <th class="role-table-select-col">
+                    <label class="checkbox-inline" title="Select / deselect all roles">
+                      <input type="checkbox" id="roleBlocksSelectAll" class="role-block-toggle role-block-select-all"
+                        aria-label="Select or deselect all roles" />
+                    </label>
+                  </th>
+                  <th>Role</th>
+                  <th>ID</th>
+                </tr>
+              </thead>
+              <tbody id="roleBlocksTableBody"></tbody>
+            </table>
+          </div>
+
+          <div class="modal-footer">
+            <button class="btn btn-ghost" id="roleBlocksCancel" type="button">
+              Cancel
+            </button>
+            <button class="btn btn-primary" id="roleBlocksApply" type="button">
+              Apply
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
 
 
 

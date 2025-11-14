@@ -92,6 +92,19 @@
     });
   }
 
+  let CURRENT_BLOCKED_ROLE_IDS = new Set();
+
+  function parseBlockedRolesCsv(str) {
+    const s = (str || "").trim();
+    if (!s) return new Set();
+    return new Set(
+      s
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean)
+    );
+  }
+
   const DEFAULT_MAPPING_SETTINGS = {
     DELETE_CHANNELS: true,
     DELETE_THREADS: true,
@@ -1453,8 +1466,9 @@
       ["ex_channels", "ex_channels", "ids"],
       ["blocked_words", "blocked_words", "words"],
       ["cmd_users", "COMMAND_USERS", "ids"],
-    ];
 
+      ["blocked_roles", "blocked_role_ids", "ids"],
+    ];
     for (const [dataKey, hiddenId, mode] of defs) {
       const root = document.querySelector(`.chips[data-chips="${dataKey}"]`);
       if (!root) continue;
@@ -2125,6 +2139,223 @@
     }, 0);
   }
 
+  async function openRoleBlocksModal(mappingId) {
+    const modal = document.getElementById("roleBlocksModal");
+    const tbody = document.getElementById("roleBlocksTableBody");
+    const status = document.getElementById("filters-role-status");
+
+    if (!modal || !tbody) return;
+
+    const mid =
+      mappingId ||
+      (currentFilterMapping && currentFilterMapping.mapping_id) ||
+      document.getElementById("filters_mapping_id")?.value ||
+      "";
+
+    if (!mid) {
+      if (status) status.textContent = "No mapping selected.";
+      return;
+    }
+
+    if (status) status.textContent = "Fetching roles…";
+    tbody.innerHTML =
+      '<tr><td colspan="3" class="text-center small">Loading…</td></tr>';
+
+    if (CHIPS.blocked_roles) {
+      CURRENT_BLOCKED_ROLE_IDS = new Set(CHIPS.blocked_roles.get());
+    } else {
+      const hidden = document.getElementById("blocked_role_ids");
+      CURRENT_BLOCKED_ROLE_IDS = hidden
+        ? parseBlockedRolesCsv(hidden.value)
+        : new Set();
+    }
+
+    try {
+      const res = await fetch(
+        `/api/mappings/${encodeURIComponent(mid)}/roles`,
+        {
+          method: "GET",
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error(`Failed: ${res.status}`);
+      }
+
+      const payload = await res.json();
+      const roles = Array.isArray(payload.roles) ? payload.roles : [];
+
+      renderRoleBlocksTable(roles);
+
+      if (status) status.textContent = "";
+    } catch (err) {
+      console.error("Error fetching roles:", err);
+      tbody.innerHTML =
+        '<tr><td colspan="3" class="text-center small">Failed to load roles.</td></tr>';
+      if (status) status.textContent = "Failed to load roles.";
+    }
+
+    setInert(modal, false);
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("body-lock-scroll");
+
+    const closeBtn = document.getElementById("roleBlocksCloseBtn");
+    setTimeout(() => {
+      try {
+        (closeBtn || modal).focus();
+      } catch {}
+    }, 0);
+
+    if (modal._outsideClickHandler) {
+      modal.removeEventListener("mousedown", modal._outsideClickHandler);
+    }
+    modal._outsideClickHandler = function (evt) {
+      const contentEl = modal.querySelector(".modal-content");
+      if (contentEl && !contentEl.contains(evt.target)) {
+        closeRoleBlocksModal();
+      }
+    };
+    modal.addEventListener("mousedown", modal._outsideClickHandler);
+  }
+
+  function renderRoleBlocksTable(roles) {
+    const tbody = document.getElementById("roleBlocksTableBody");
+    const selectAll = document.getElementById("roleBlocksSelectAll");
+    if (!tbody) return;
+
+    if (selectAll) {
+      selectAll.checked = false;
+      selectAll.indeterminate = false;
+    }
+
+    if (!roles.length) {
+      tbody.innerHTML =
+        '<tr><td colspan="3" class="text-center small">No roles found for this guild.</td></tr>';
+      return;
+    }
+
+    const rows = roles
+      .map((r) => {
+        const id = String(r.id);
+        const isBlocked = CURRENT_BLOCKED_ROLE_IDS.has(id);
+        const safeName = (r.name || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+
+        const hex = (r.color_hex || "").trim() || "#99AAB5";
+
+        return `
+        <tr data-role-id="${id}">
+          <td>
+            <label class="checkbox-inline">
+              <input
+                type="checkbox"
+                class="role-block-toggle"
+                data-role-id="${id}"
+                ${isBlocked ? "checked" : ""}
+              />
+            </label>
+          </td>
+          <td>
+          <span class="role-pill" style="--role-color: ${hex}">
+            <span class="role-pill-text">${safeName}</span>
+          </span>
+          </td>
+          <td><code>${id}</code></td>
+        </tr>
+      `;
+      })
+      .join("");
+
+    tbody.innerHTML = rows;
+
+    tbody.querySelectorAll(".role-block-toggle").forEach((chk) => {
+      chk.addEventListener("change", (evt) => {
+        const rid = evt.target.getAttribute("data-role-id");
+        if (!rid) return;
+
+        if (evt.target.checked) {
+          CURRENT_BLOCKED_ROLE_IDS.add(rid);
+        } else {
+          CURRENT_BLOCKED_ROLE_IDS.delete(rid);
+        }
+
+        updateSelectAllState();
+      });
+    });
+
+    if (selectAll && !selectAll._bound) {
+      selectAll._bound = true;
+      selectAll.addEventListener("change", () => {
+        const checked = selectAll.checked;
+        const boxes = tbody.querySelectorAll(".role-block-toggle");
+        CURRENT_BLOCKED_ROLE_IDS.clear();
+
+        boxes.forEach((cb) => {
+          cb.checked = checked;
+          const rid = cb.getAttribute("data-role-id");
+          if (checked && rid) CURRENT_BLOCKED_ROLE_IDS.add(rid);
+        });
+
+        selectAll.indeterminate = false;
+      });
+    }
+
+    updateSelectAllState();
+  }
+
+  function updateSelectAllState() {
+    const tbody = document.getElementById("roleBlocksTableBody");
+    const selectAll = document.getElementById("roleBlocksSelectAll");
+    if (!tbody || !selectAll) return;
+
+    const boxes = Array.from(tbody.querySelectorAll(".role-block-toggle"));
+    if (!boxes.length) {
+      selectAll.checked = false;
+      selectAll.indeterminate = false;
+      return;
+    }
+
+    const checkedCount = boxes.filter((b) => b.checked).length;
+
+    if (checkedCount === 0) {
+      selectAll.checked = false;
+      selectAll.indeterminate = false;
+    } else if (checkedCount === boxes.length) {
+      selectAll.checked = true;
+      selectAll.indeterminate = false;
+    } else {
+      selectAll.checked = false;
+      selectAll.indeterminate = true;
+    }
+  }
+
+  function closeRoleBlocksModal() {
+    const modal = document.getElementById("roleBlocksModal");
+    if (!modal) return;
+
+    const active = document.activeElement;
+    if (active && modal.contains(active)) {
+      try {
+        active.blur();
+      } catch {}
+    }
+
+    setInert(modal, true);
+    modal.classList.remove("show");
+    modal.setAttribute("aria-hidden", "true");
+
+    const anyOtherOpen = document.querySelector(
+      "#filters-modal.show, #mapping-modal.show, #log-modal.show, #confirm-modal.show"
+    );
+    if (!anyOtherOpen) {
+      document.body.classList.remove("body-lock-scroll");
+    }
+  }
+
   window.openFiltersModal = openFiltersModal;
   window.closeFiltersModal = closeFiltersModal;
 
@@ -2360,20 +2591,21 @@
     const exCats = document.getElementById("ex_categories");
     const exCh = document.getElementById("ex_channels");
     const bw = document.getElementById("blocked_words");
+    const hiddenBlockedRoles = document.getElementById("blocked_role_ids");
 
-    wlCats.value = "";
-    wlCh.value = "";
-    exCats.value = "";
-    exCh.value = "";
+    if (wlCats) wlCats.value = "";
+    if (wlCh) wlCh.value = "";
+    if (exCats) exCats.value = "";
+    if (exCh) exCh.value = "";
     if (bw) bw.value = "";
+    if (hiddenBlockedRoles) hiddenBlockedRoles.value = "";
 
-    CHIPS.wl_categories.set([]);
-    CHIPS.wl_channels.set([]);
-    CHIPS.ex_categories.set([]);
-    CHIPS.ex_channels.set([]);
-    if (CHIPS.blocked_words) {
-      CHIPS.blocked_words.set([]);
-    }
+    if (CHIPS.wl_categories) CHIPS.wl_categories.set([]);
+    if (CHIPS.wl_channels) CHIPS.wl_channels.set([]);
+    if (CHIPS.ex_categories) CHIPS.ex_categories.set([]);
+    if (CHIPS.ex_channels) CHIPS.ex_channels.set([]);
+    if (CHIPS.blocked_words) CHIPS.blocked_words.set([]);
+    if (CHIPS.blocked_roles) CHIPS.blocked_roles.set([]);
 
     if (!mid) return;
 
@@ -2387,20 +2619,40 @@
       const data = await res.json();
 
       if (data && typeof data === "object") {
-        if (Array.isArray(data.wl_categories)) {
+        if (Array.isArray(data.wl_categories) && CHIPS.wl_categories) {
           CHIPS.wl_categories.set(data.wl_categories);
         }
-        if (Array.isArray(data.wl_channels)) {
+        if (Array.isArray(data.wl_channels) && CHIPS.wl_channels) {
           CHIPS.wl_channels.set(data.wl_channels);
         }
-        if (Array.isArray(data.ex_categories)) {
+        if (Array.isArray(data.ex_categories) && CHIPS.ex_categories) {
           CHIPS.ex_categories.set(data.ex_categories);
         }
-        if (Array.isArray(data.ex_channels)) {
+        if (Array.isArray(data.ex_channels) && CHIPS.ex_channels) {
           CHIPS.ex_channels.set(data.ex_channels);
         }
         if (Array.isArray(data.blocked_words) && CHIPS.blocked_words) {
           CHIPS.blocked_words.set(data.blocked_words);
+        }
+
+        let roleIds = [];
+        if (Array.isArray(data.blocked_role_ids)) {
+          roleIds = data.blocked_role_ids.map(String);
+        } else if (typeof data.blocked_role_ids_csv === "string") {
+          roleIds = parseIdList(data.blocked_role_ids_csv);
+        } else if (Array.isArray(data.blocked_roles)) {
+          roleIds = data.blocked_roles.map(String);
+        }
+
+        if (hiddenBlockedRoles) {
+          hiddenBlockedRoles.value = roleIds.join(",");
+
+          hiddenBlockedRoles.dispatchEvent(
+            new Event("input", { bubbles: true })
+          );
+        }
+        if (CHIPS.blocked_roles) {
+          CHIPS.blocked_roles.set(roleIds);
         }
       }
     } catch (err) {
@@ -2432,6 +2684,70 @@
       });
     });
 
+    const fetchBtn = document.getElementById("filters-role-refresh");
+    const applyBtn = document.getElementById("roleBlocksApply");
+    const cancelBtn = document.getElementById("roleBlocksCancel");
+    const xBtn = document.getElementById("roleBlocksCloseBtn");
+    const modal = document.getElementById("roleBlocksModal");
+
+    if (fetchBtn) {
+      fetchBtn.addEventListener("click", async () => {
+        const mid =
+          (currentFilterMapping && currentFilterMapping.mapping_id) ||
+          document.getElementById("filters_mapping_id")?.value ||
+          "";
+        await openRoleBlocksModal(mid);
+      });
+    }
+
+    if (applyBtn) {
+      applyBtn.addEventListener("click", () => {
+        const hidden = document.getElementById("blocked_role_ids");
+        const list = Array.from(CURRENT_BLOCKED_ROLE_IDS);
+
+        if (hidden) {
+          hidden.value = list.join(",");
+          hidden.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        if (CHIPS.blocked_roles) {
+          CHIPS.blocked_roles.set(list);
+        }
+
+        closeRoleBlocksModal();
+      });
+    }
+
+    if (cancelBtn) {
+      cancelBtn.addEventListener("click", () => {
+        const hidden = document.getElementById("blocked_role_ids");
+
+        // Reset CURRENT_BLOCKED_ROLE_IDS to match what's *actually* blocked
+        if (CHIPS.blocked_roles) {
+          CURRENT_BLOCKED_ROLE_IDS = new Set(CHIPS.blocked_roles.get());
+        } else {
+          CURRENT_BLOCKED_ROLE_IDS = hidden
+            ? parseBlockedRolesCsv(hidden.value)
+            : new Set();
+        }
+
+        closeRoleBlocksModal();
+      });
+    }
+
+    if (xBtn) {
+      xBtn.addEventListener("click", () => {
+        closeRoleBlocksModal();
+      });
+    }
+
+    if (modal) {
+      modal.addEventListener("keydown", (evt) => {
+        if (evt.key === "Escape") {
+          evt.stopPropagation();
+          closeRoleBlocksModal();
+        }
+      });
+    }
     const cfgForm = document.getElementById("cfg-form");
     const cfgSaveBtn = document.getElementById("cfg-save-btn");
     const cfgCancelBtn = document.getElementById("cfg-cancel-btn");

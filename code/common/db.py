@@ -560,7 +560,6 @@ class DBManager:
             ],
         )
 
-
         self._ensure_table(
             name="messages",
             create_sql_template="""
@@ -1988,7 +1987,6 @@ class DBManager:
                 )
             return count
 
-
     def upsert_message_mapping(
         self,
         original_guild_id: int,
@@ -2779,7 +2777,7 @@ class DBManager:
                 (clone,),
             )
             out["role_mappings.clone_set"] = cur.rowcount
-            
+
             cur.execute(
                 """
                 UPDATE role_blocks
@@ -3409,7 +3407,7 @@ class DBManager:
             "SELECT * FROM role_mappings WHERE original_role_id = ? AND cloned_guild_id = ? LIMIT 1",
             (int(original_id), int(cloned_guild_id)),
         ).fetchone()
-        
+
     def get_role_mapping_by_cloned_id(self, cloned_role_id: int):
         return self.conn.execute(
             "SELECT * FROM role_mappings WHERE cloned_role_id = ?",
@@ -3562,13 +3560,15 @@ class DBManager:
                 "cloned_category_id": cloned_cat_id,
             }
 
-    def get_original_guild_id_for_category(self, original_category_id: int) -> int | None:
+    def get_original_guild_id_for_category(
+        self, original_category_id: int
+    ) -> int | None:
         row = self.conn.execute(
             "SELECT original_guild_id FROM category_mappings WHERE original_category_id=? LIMIT 1",
-            (original_category_id,)
+            (original_category_id,),
         ).fetchone()
         return int(row[0]) if row and row[0] is not None else None
-    
+
     def get_original_guild_id_for_channel(self, original_channel_id: int) -> int | None:
         """
         Resolve the original_guild_id for a given original_channel_id.
@@ -3578,3 +3578,44 @@ class DBManager:
             (int(original_channel_id),),
         ).fetchone()
         return int(row[0]) if row and row[0] is not None else None
+
+    def replace_role_blocks_for_mapping(
+        self,
+        mapping_id: str,
+        original_role_ids: list[int],
+    ) -> int:
+        """
+        Replace the set of blocked roles for a single mapping's clone guild.
+
+        original_role_ids should be the *original* role IDs (host guild).
+        Returns the number of blocked roles after the update.
+        """
+        m = self.get_mapping_by_id(mapping_id)
+        if not m:
+            return 0
+
+        cloned_gid = int(m["cloned_guild_id"] or 0)
+        if not cloned_gid:
+            return 0
+
+        ids: set[int] = set()
+        for oid in original_role_ids:
+            try:
+                ids.add(int(oid))
+            except Exception:
+                continue
+
+        with self.conn:
+
+            self.clear_role_blocks(cloned_guild_id=cloned_gid)
+
+            for oid in sorted(ids):
+                try:
+                    self.add_role_block(
+                        original_role_id=oid, cloned_guild_id=cloned_gid
+                    )
+                except Exception:
+                    # Ignore individual failures so one bad ID doesn't kill the whole update
+                    continue
+
+        return len(ids)

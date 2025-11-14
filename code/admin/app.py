@@ -1879,6 +1879,17 @@ async def api_status_alias():
 @app.get("/filters/{mapping_id}")
 async def api_get_filters(mapping_id: str):
     filters = db.get_filters_for_mapping(mapping_id)
+
+    mapping = db.get_mapping_by_id(mapping_id)
+    blocked_role_ids: list[int] = []
+    if mapping:
+        try:
+            clone_gid = int(mapping["cloned_guild_id"] or 0)
+        except Exception:
+            clone_gid = 0
+        if clone_gid:
+            blocked_role_ids = db.get_blocked_role_ids(cloned_guild_id=clone_gid)
+
     return JSONResponse(
         {
             "wl_categories": filters["whitelist"]["category"],
@@ -1886,6 +1897,7 @@ async def api_get_filters(mapping_id: str):
             "ex_categories": filters["exclude"]["category"],
             "ex_channels": filters["exclude"]["channel"],
             "blocked_words": filters.get("blocked_words", []),
+            "blocked_role_ids": [str(x) for x in blocked_role_ids],
         }
     )
 
@@ -1921,6 +1933,9 @@ async def api_save_filters(mapping_id: str, request: Request):
 
     blocked_words = _split_csv_words(form.get("blocked_words", ""))
 
+    # NEW: original role IDs to block for this mapping's clone guild
+    blocked_role_ids = _split_csv_ids(form.get("blocked_role_ids", ""))
+
     db.replace_filters_for_mapping(
         mapping_id=mapping_id,
         wl_categories=wl_categories,
@@ -1934,7 +1949,116 @@ async def api_save_filters(mapping_id: str, request: Request):
         words=blocked_words,
     )
 
+    db.replace_role_blocks_for_mapping(
+        mapping_id=mapping_id,
+        original_role_ids=blocked_role_ids,
+    )
+
     return JSONResponse({"ok": True})
+
+
+@app.get("/api/mappings/{mapping_id}/roles", response_class=JSONResponse)
+async def api_mapping_roles(mapping_id: str):
+    mapping = db.get_mapping_by_id(mapping_id)
+    if not mapping:
+        raise HTTPException(status_code=404, detail="mapping-not-found")
+
+    try:
+        orig_id = int(mapping["original_guild_id"] or 0)
+    except Exception:
+        orig_id = 0
+
+    if not orig_id:
+        raise HTTPException(status_code=400, detail="original-guild-missing")
+
+    try:
+        clone_gid = int(mapping["cloned_guild_id"] or 0)
+    except Exception:
+        clone_gid = 0
+
+    if not clone_gid:
+        raise HTTPException(status_code=400, detail="clone-guild-missing")
+
+    cfg = db.get_all_config()
+    client_token = (cfg.get("CLIENT_TOKEN") or "").strip()
+    if not client_token:
+        raise HTTPException(status_code=400, detail="client-token-missing")
+
+    url = f"{DISCORD_API_BASE}/guilds/{orig_id}/roles"
+    headers = {
+        "Authorization": f"{client_token}",
+    }
+
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(url, headers=headers, timeout=10) as resp:
+                text = await resp.text()
+                if resp.status != 200:
+                    LOGGER.warning(
+                        "Discord roles fetch failed for original %s: %s %s",
+                        orig_id,
+                        resp.status,
+                        text[:300],
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail="discord-roles-fetch-failed",
+                    )
+                try:
+                    raw_roles = json.loads(text)
+                except Exception:
+                    LOGGER.exception(
+                        "Failed to decode Discord roles JSON for original %s", orig_id
+                    )
+                    raise HTTPException(
+                        status_code=502, detail="discord-roles-json-error"
+                    )
+    except HTTPException:
+        raise
+    except Exception:
+        LOGGER.exception("Error while calling Discord roles endpoint")
+        raise HTTPException(status_code=502, detail="discord-roles-error")
+
+    out_roles: list[dict] = []
+    for r in raw_roles or []:
+        try:
+            rid = str(r.get("id"))
+        except Exception:
+            continue
+
+        name = str(r.get("name") or "@unknown")
+
+        # 🔹 Skip @everyone (Discord's base role)
+
+        if name == "@everyone" or rid == str(orig_id):
+            continue
+
+        position = int(r.get("position") or 0)
+
+        raw_color = r.get("color", 0)
+        try:
+            color_int = int(raw_color or 0)
+        except Exception:
+            color_int = 0
+
+        color_hex = "#{:06X}".format(color_int) if color_int else None
+
+        out_roles.append(
+            {
+                "id": rid,
+                "name": name,
+                "position": position,
+                "color": color_int,
+                "color_hex": color_hex,
+            }
+        )
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "roles": out_roles,
+        }
+    )
 
 
 @app.post("/api/filters/blacklist", response_class=JSONResponse)
@@ -3013,7 +3137,6 @@ async def api_categories_customize(payload: dict = Body(...)):
         )
     except Exception:
         LOGGER.debug("WS sitemap_request dispatch failed", exc_info=True)
-
 
     return JSONResponse(
         {
