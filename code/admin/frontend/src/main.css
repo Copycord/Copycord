@@ -7576,23 +7576,40 @@ body.login-page {
   padding-top: 0 !important;
   padding-bottom: 0 !important;
 
+  /* Make body a vertical stack: header/main/footer */
   display: flex !important;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
+
+  /* Don't center here or the footer will float up */
+  align-items: stretch;
+  justify-content: flex-start;
 
   min-height: 100vh;
   height: 100%;
+  margin: 0;
+
   background: var(--page-bg) !important;
 }
 
+/* Center the login content inside the main area */
+.login-page .page-main {
+  flex: 1; /* take all available space between header/footer */
+  display: flex;
+  align-items: center;     /* vertical center */
+  justify-content: center; /* horizontal center */
+  padding: 20px;
+}
+
+/* Logo + card centered as a unit */
 .login-wrapper {
   display: flex;
   flex-direction: column;
   align-items: center;
   width: 100%;
-  padding: 20px;
+  max-width: 420px;
 }
+
+/* Your existing styles below can stay basically the same */
 
 .login-logo {
   width: 86px;
@@ -7614,7 +7631,6 @@ body.login-page {
   backdrop-filter: blur(14px);
 
   box-shadow: 0 18px 30px rgba(0, 0, 0, 0.55);
-
   color: var(--text);
 }
 
@@ -8147,4 +8163,15 @@ body.login-page {
 .reveal-btn:focus-visible {
   outline: none;
   opacity: 0.85;
+}
+
+.login-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+  box-shadow: none;
+}
+
+.login-button:disabled:hover {
+  background: var(--primary); /* keep same color on hover when disabled */
+  box-shadow: none;
 }

@@ -16,8 +16,8 @@
             <img src="/static/logo.png" alt="Copycord Logo" class="login-logo" />
 
             <div class="login-card">
-                <h1 class="login-title">Copycord Admin</h1>
-                <p class="login-subtitle">Enter the admin password to continue.</p>
+                <h1 class="login-title">Copycord</h1>
+                <p class="login-subtitle">Enter the password to continue.</p>
 
                 {% if error %}
                 <div class="login-error">
@@ -25,12 +25,12 @@
                 </div>
                 {% endif %}
 
-                <form method="post" class="login-form">
+                <form method="post" class="login-form" id="login-form">
                     <label for="password" class="login-label">Password</label>
 
                     <div class="token-wrap login-token-wrap">
                         <input id="password" name="password" type="password" autocomplete="current-password"
-                            class="login-input token-input" required autofocus />
+                            class="login-input token-input" autofocus />
 
                         <button type="button" class="reveal-btn" data-target="password" aria-pressed="false"
                             aria-label="Show password">
@@ -50,7 +50,7 @@
                         </button>
                     </div>
 
-                    <button type="submit" class="login-button">
+                    <button type="submit" class="login-button" disabled>
                         Sign in
                     </button>
                 </form>
@@ -103,27 +103,44 @@
             New Update Available
         </div>
     </footer>
+
     <script>
         (function () {
             const btn = document.querySelector('.reveal-btn[data-target="password"]');
-            if (!btn) return;
+            const form = document.getElementById('login-form');
+            const input = document.getElementById('password');
+            const submitBtn = form ? form.querySelector('.login-button') : null;
 
-            const targetId = btn.getAttribute('data-target');
-            const input = document.getElementById(targetId);
-            if (!input) return;
+            if (!input || !form || !submitBtn) return;
+            if (btn) {
+                const eyeOn = btn.querySelector('.icon-eye');
+                const eyeOff = btn.querySelector('.icon-eye-off');
 
-            const eyeOn = btn.querySelector('.icon-eye');
-            const eyeOff = btn.querySelector('.icon-eye-off');
+                btn.addEventListener('click', () => {
+                    const isHidden = input.type === 'password';
 
-            btn.addEventListener('click', () => {
-                const isHidden = input.type === 'password';
+                    input.type = isHidden ? 'text' : 'password';
+                    btn.setAttribute('aria-pressed', isHidden ? 'true' : 'false');
+                    btn.setAttribute('aria-label', isHidden ? 'Hide password' : 'Show password');
 
-                input.type = isHidden ? 'text' : 'password';
-                btn.setAttribute('aria-pressed', isHidden ? 'true' : 'false');
-                btn.setAttribute('aria-label', isHidden ? 'Hide password' : 'Show password');
+                    if (eyeOn) eyeOn.style.display = isHidden ? 'none' : '';
+                    if (eyeOff) eyeOff.style.display = isHidden ? '' : 'none';
+                });
+            }
 
-                if (eyeOn) eyeOn.style.display = isHidden ? 'none' : '';
-                if (eyeOff) eyeOff.style.display = isHidden ? '' : 'none';
+            function updateButtonState() {
+                const hasValue = input.value.trim().length > 0;
+                submitBtn.disabled = !hasValue;
+            }
+
+            updateButtonState();
+
+            input.addEventListener('input', updateButtonState);
+
+            form.addEventListener('submit', (e) => {
+                if (!input.value.trim()) {
+                    e.preventDefault();
+                }
             });
         })();
     </script>
