@@ -380,10 +380,6 @@ class Snapshot:
         async def resolve_via_snapshot(
             bot, wrapper_msg, *, limit: int = 50, logger=None
         ):
-            """
-            Fetch recent messages in the wrapper's channel and unwrap the first usable
-            `message_snapshots[].message` if reference chaining fails.
-            """
             try:
                 chan = getattr(wrapper_msg, "channel", None)
                 chan_id = int(getattr(chan, "id", 0) or 0)
@@ -399,7 +395,6 @@ class Snapshot:
                             "[forward-snapshot] no token on bot.http; skipping fallback"
                         )
                     return None
-
 
                 url = f"https://discord.com/api/v9/channels/{chan_id}/messages?limit={int(limit)}"
                 headers = {"Authorization": token}
@@ -435,7 +430,9 @@ class Snapshot:
                     )
                     has_atts = bool(inner.get("attachments"))
                     has_stickers = bool(inner.get("stickers"))
-                    if has_text or has_atts or has_stickers:
+                    has_embeds = bool(inner.get("embeds"))
+
+                    if has_text or has_atts or has_stickers or has_embeds:
                         return Snapshot.Message(inner, wrapper_msg)
 
                 return None
@@ -446,10 +443,6 @@ class Snapshot:
 
 
 async def _resolve_forward(bot, wrapper_msg, max_depth: int = 4):
-    """
-    Follow .reference / forward wrappers to find the original message that actually
-    has real content we can forward. We ignore "embeds-only" shells.
-    """
     current = wrapper_msg
     seen = 0
 
@@ -459,8 +452,9 @@ async def _resolve_forward(bot, wrapper_msg, max_depth: int = 4):
         has_text = bool(raw_txt or sys_txt)
         has_atts = bool(getattr(current, "attachments", None))
         has_stks = bool(getattr(current, "stickers", None))
+        has_embeds = bool(getattr(current, "embeds", None))
 
-        if has_text or has_atts or has_stks:
+        if has_text or has_atts or has_stks or has_embeds:
             return current
 
         ref = getattr(current, "reference", None)
@@ -493,12 +487,11 @@ async def _resolve_forward(bot, wrapper_msg, max_depth: int = 4):
     if current is not None:
         raw_txt = (getattr(current, "content", "") or "").strip()
         sys_txt = (getattr(current, "system_content", "") or "").strip()
-        if (
-            raw_txt
-            or sys_txt
-            or getattr(current, "attachments", None)
-            or getattr(current, "stickers", None)
-        ):
+        has_atts = bool(getattr(current, "attachments", None))
+        has_stks = bool(getattr(current, "stickers", None))
+        has_embeds = bool(getattr(current, "embeds", None))
+
+        if raw_txt or sys_txt or has_atts or has_stks or has_embeds:
             return current
 
     return None
