@@ -4,7 +4,7 @@ services:
     container_name: copycord-admin
     environment:
       - ROLE=admin
-      # - PASSWORD=changeme # uncomment to enable password protection for the admin panel
+      - PASSWORD=copycord # comment out to disable login page
     ports:
       - "8080:8080" # you can change this port if needed (ex: "9090:8080")
     volumes:

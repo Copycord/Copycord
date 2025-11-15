@@ -27,8 +27,28 @@
 
                 <form method="post" class="login-form">
                     <label for="password" class="login-label">Password</label>
-                    <input id="password" name="password" type="password" autocomplete="current-password"
-                        class="login-input" required autofocus />
+
+                    <div class="token-wrap login-token-wrap">
+                        <input id="password" name="password" type="password" autocomplete="current-password"
+                            class="login-input token-input" required autofocus />
+
+                        <button type="button" class="reveal-btn" data-target="password" aria-pressed="false"
+                            aria-label="Show password">
+                            <svg class="icon-eye" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none"
+                                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                                viewBox="0 0 24 24">
+                                <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" />
+                                <circle cx="12" cy="12" r="3" />
+                            </svg>
+
+                            <svg class="icon-eye-off" xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+                                fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                                stroke-linejoin="round" viewBox="0 0 24 24" style="display:none">
+                                <path
+                                    d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.4 18.4 0 0 1 5.06-5.94M9.9 9.9A3 3 0 0 0 9 12a3 3 0 0 0 3 3 3 3 0 0 0 2.1-.9M1 1l22 22" />
+                            </svg>
+                        </button>
+                    </div>
 
                     <button type="submit" class="login-button">
                         Sign in
@@ -83,6 +103,30 @@
             New Update Available
         </div>
     </footer>
+    <script>
+        (function () {
+            const btn = document.querySelector('.reveal-btn[data-target="password"]');
+            if (!btn) return;
+
+            const targetId = btn.getAttribute('data-target');
+            const input = document.getElementById(targetId);
+            if (!input) return;
+
+            const eyeOn = btn.querySelector('.icon-eye');
+            const eyeOff = btn.querySelector('.icon-eye-off');
+
+            btn.addEventListener('click', () => {
+                const isHidden = input.type === 'password';
+
+                input.type = isHidden ? 'text' : 'password';
+                btn.setAttribute('aria-pressed', isHidden ? 'true' : 'false');
+                btn.setAttribute('aria-label', isHidden ? 'Hide password' : 'Show password');
+
+                if (eyeOn) eyeOn.style.display = isHidden ? 'none' : '';
+                if (eyeOff) eyeOff.style.display = isHidden ? '' : 'none';
+            });
+        })();
+    </script>
 </body>
 
 </html>

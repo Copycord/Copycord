@@ -8110,3 +8110,41 @@ body.login-page {
 #filterObjectsTableBody tr[data-obj-id] {
   cursor: pointer;
 }
+
+.login-token-wrap {
+  position: relative;
+  display: inline-block;
+  width: 100%;
+}
+
+.login-input.token-input {
+  width: 100%;
+  padding-right: 2.5rem;
+  box-sizing: border-box;
+}
+
+.reveal-btn {
+  position: absolute;
+  top: 50%;
+  right: 0.75rem;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.reveal-btn .icon-eye,
+.reveal-btn .icon-eye-off {
+  pointer-events: none;
+}
+
+.reveal-btn:hover,
+.reveal-btn:focus-visible {
+  outline: none;
+  opacity: 0.85;
+}
