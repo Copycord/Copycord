@@ -4973,6 +4973,14 @@ class ServerReceiver:
                     chosen.get("cloned_guild_id"),
                 )
                 return
+
+            if not is_backfill and not _settings_for_forced.get("CLONE_MESSAGES", True):
+                logger.debug(
+                    "[forward] Skipping message send for clone_g=%s (CLONE_MESSAGES=False)",
+                    chosen.get("cloned_guild_id"),
+                )
+                return
+        
             is_primary = bool(primary_url and forced_url == primary_url)
             use_webhook_identity = bool(primary_customized and is_primary)
             override = None
@@ -5069,6 +5077,15 @@ class ServerReceiver:
                             source_id,
                         )
                         continue
+
+                    if not is_backfill and not _settings.get("CLONE_MESSAGES", True):
+                        logger.debug(
+                            "[forward] Skipping clone %s for src #%s — CLONE_MESSAGES=False",
+                            mapping.get("cloned_guild_id"),
+                            source_id,
+                        )
+                        continue
+
 
                     url = mapping.get("channel_webhook_url") or mapping.get(
                         "webhook_url"
@@ -5739,6 +5756,14 @@ class ServerReceiver:
                 if not _settings.get("ENABLE_CLONING", True):
                     logger.debug(
                         "[thread-forward] Skipping clone_g=%s for thread_id=%s — ENABLE_CLONING=False",
+                        mrow.get("cloned_guild_id"),
+                        data.get("thread_id"),
+                    )
+                    continue
+
+                if not is_backfill and not _settings.get("CLONE_MESSAGES", True):
+                    logger.debug(
+                        "[thread-forward] Skipping clone_g=%s for thread_id=%s — CLONE_MESSAGES=False",
                         mrow.get("cloned_guild_id"),
                         data.get("thread_id"),
                     )

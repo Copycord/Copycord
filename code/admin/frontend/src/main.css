@@ -7576,11 +7576,9 @@ body.login-page {
   padding-top: 0 !important;
   padding-bottom: 0 !important;
 
-  /* Make body a vertical stack: header/main/footer */
   display: flex !important;
   flex-direction: column;
 
-  /* Don't center here or the footer will float up */
   align-items: stretch;
   justify-content: flex-start;
 
@@ -7591,16 +7589,14 @@ body.login-page {
   background: var(--page-bg) !important;
 }
 
-/* Center the login content inside the main area */
 .login-page .page-main {
-  flex: 1; /* take all available space between header/footer */
+  flex: 1;
   display: flex;
-  align-items: center;     /* vertical center */
-  justify-content: center; /* horizontal center */
+  align-items: center;
+  justify-content: center;
   padding: 20px;
 }
 
-/* Logo + card centered as a unit */
 .login-wrapper {
   display: flex;
   flex-direction: column;
@@ -7608,8 +7604,6 @@ body.login-page {
   width: 100%;
   max-width: 420px;
 }
-
-/* Your existing styles below can stay basically the same */
 
 .login-logo {
   width: 86px;
@@ -8172,6 +8166,10 @@ body.login-page {
 }
 
 .login-button:disabled:hover {
-  background: var(--primary); /* keep same color on hover when disabled */
+  background: var(--primary);
   box-shadow: none;
+}
+
+#filters-modal #filters-role-refresh {
+  transform: translateY(-2px);
 }

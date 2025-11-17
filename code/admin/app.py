@@ -7,7 +7,6 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-
 from __future__ import annotations
 from collections import deque
 import contextlib
@@ -190,6 +189,7 @@ REQUIRED = ["SERVER_TOKEN", "CLIENT_TOKEN"]
 
 BOOL_KEYS = [
     "ENABLE_CLONING",
+    "CLONE_MESSAGES",
     "DELETE_CHANNELS",
     "DELETE_THREADS",
     "DELETE_MESSAGES",
@@ -212,6 +212,7 @@ DEFAULTS: Dict[str, str] = {
     "CLONE_ROLES": "True",
     "MIRROR_ROLE_PERMISSIONS": "False",
     "ENABLE_CLONING": "True",
+    "CLONE_MESSAGES": "True",
     "LOG_LEVEL": "INFO",
     "COMMAND_USERS": "",
     "MIRROR_CHANNEL_PERMISSIONS": "False",

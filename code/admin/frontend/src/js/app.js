@@ -112,6 +112,7 @@
 
   const DEFAULT_MAPPING_SETTINGS = {
     DELETE_CHANNELS: true,
+    CLONE_MESSAGES: true,
     DELETE_THREADS: true,
     DELETE_MESSAGES: true,
     EDIT_MESSAGES: true,
@@ -2043,7 +2044,18 @@
     cModal.classList.remove("show");
     cModal.setAttribute("aria-hidden", "true");
 
-    document.body.classList.remove("body-lock-scroll");
+    // 🔸 Only remove scroll lock if NO other modal is still open
+    const anyOtherOpen = document.querySelector(
+      "#filters-modal.show, " +
+      "#mapping-modal.show, " +
+      "#log-modal.show, " +
+      "#roleBlocksModal.show, " +
+      "#filterObjectsModal.show, " +
+      "#confirm-modal.show"
+    );
+    if (!anyOtherOpen) {
+      document.body.classList.remove("body-lock-scroll");
+    }
 
     if (lastFocusConfirm && typeof lastFocusConfirm.blur === "function") {
       try {
@@ -2055,6 +2067,7 @@
     confirmResolve = null;
     confirmReject = null;
   }
+
 
   function closeFiltersModal() {
     const modal = document.getElementById("filters-modal");
@@ -2081,6 +2094,45 @@
     lastFocusFilters = null;
     currentFilterMapping = null;
   }
+
+function filtersFormIsDirty() {
+  const form = document.getElementById("form-filters");
+  if (!form) return false;
+  return snapshotForm(form) !== FILTERS_BASELINE;
+}
+
+function maybeCloseFiltersModal() {
+  // If the confirm modal is already open, don't stack another one
+  if (cModal && cModal.classList.contains("show")) {
+    return;
+  }
+
+  const modal = document.getElementById("filters-modal");
+  if (!modal || !modal.classList.contains("show")) {
+    // Nothing open, just hard-close
+    closeFiltersModal();
+    return;
+  }
+
+  if (!filtersFormIsDirty()) {
+    // No unsaved changes, close normally
+    closeFiltersModal();
+    return;
+  }
+
+  // Unsaved changes → ask first
+  openConfirm({
+    title: "Discard unsaved filter changes?",
+    body: "You have unsaved changes to these filters. If you close now, your changes will be lost.",
+    confirmText: "Discard changes",
+    confirmClass: "btn-ghost-red",
+    showCancel: true,
+    onConfirm: () => {
+      closeFiltersModal();
+    },
+  });
+}
+
 
   async function openFiltersModal(mapping) {
     const modal = document.getElementById("filters-modal");
@@ -2120,7 +2172,7 @@
     document.body.classList.add("body-lock-scroll");
 
     const xBtn = document.getElementById("filters-close");
-    if (xBtn) xBtn.onclick = closeFiltersModal;
+    if (xBtn) xBtn.onclick = maybeCloseFiltersModal;
     if (cancelBtn) {
       cancelBtn.onclick = async () => {
         await loadFiltersIntoFormForMapping(mid);
@@ -2138,7 +2190,7 @@
     modal._outsideClickHandler = function (evt) {
       const contentEl = modal.querySelector(".modal-content");
       if (contentEl && !contentEl.contains(evt.target)) {
-        closeFiltersModal();
+        maybeCloseFiltersModal();
       }
     };
     modal.addEventListener("mousedown", modal._outsideClickHandler);
@@ -2816,6 +2868,11 @@
   }) {
     if (!cModal) return;
 
+    // 🔸 Ensure confirm modal is the last sibling so it stacks above others
+    if (cModal.parentNode) {
+      cModal.parentNode.appendChild(cModal);
+    }
+
     confirmResolve = () => {
       try {
         onConfirm && onConfirm();
@@ -2855,6 +2912,7 @@
 
     setTimeout(() => (cBtnOk || cModal).focus(), 0);
   }
+
 
   function confirmDeleteMapping(mapping) {
     if (!mapping || !mapping.mapping_id) return;
@@ -3528,14 +3586,6 @@
     }
 
     document.addEventListener("keydown", (e) => {
-      const fm = document.getElementById("filters-modal");
-      if (e.key === "Escape" && fm && fm.classList.contains("show")) {
-        e.preventDefault();
-        closeFiltersModal();
-      }
-    });
-
-    document.addEventListener("keydown", (e) => {
       if (e.key !== "Escape") return;
 
       const rb = document.getElementById("roleBlocksModal");
@@ -3556,9 +3606,11 @@
 
       if (fm && fm.classList.contains("show")) {
         e.preventDefault();
-        closeFiltersModal();
+        maybeCloseFiltersModal();
       }
     });
+
+
 
     function updateFiltersDirtyForModal() {
       const form = document.getElementById("form-filters");

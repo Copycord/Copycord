@@ -92,6 +92,7 @@ class Config:
     def default_mapping_settings(self) -> dict:
         return {
             "ENABLE_CLONING": True,
+            "CLONE_MESSAGES": True,
             "DELETE_CHANNELS": True,
             "DELETE_THREADS": True,
             "DELETE_ROLES": True,
