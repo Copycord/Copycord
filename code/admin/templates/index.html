@@ -198,7 +198,8 @@
     "HOST_GUILD_ID": "ID of the host server to mirror. Your account bot must be a member of this server.",
     "CLONE_GUILD_ID": "ID of the clone server. Your bot must be a member of this server.",
     "DELETE_ROLES": "When enabled, remove any roles in the clone that do not exist in the host.",
-    "UPDATE_ROLES": "When enabled, role properties (name, color, permissions) won't be synced.",
+    "UPDATE_ROLES": "When enabled, role properties (name, color, permissions) won't be synced after creation. You can
+    freely edit them in the clone.",
     "MIRROR_ROLE_PERMISSIONS": "When enabled, mirror role permissions from the host to the clone.",
     "EDIT_MESSAGES": "Messages that are edited in the host will be edited in the clone.",
     "DELETE_MESSAGES": "Messages that are deleted in the host will be deleted in the clone.",
@@ -598,12 +599,8 @@
               <div class="filters-roles-label-row">
                 <label class="has-tip">
                   <span class="label-text">Blocked roles</span>
-                  <button
-                    type="button"
-                    class="info-dot"
-                    aria-label="Which roles does this affect?"
-                    aria-describedby="tip-blocked_roles"
-                  ></button>
+                  <button type="button" class="info-dot" aria-label="Which roles does this affect?"
+                    aria-describedby="tip-blocked_roles"></button>
                   <span id="tip-blocked_roles" role="tooltip" class="tip-bubble">
                     List of role IDs to block from being cloned.
                   </span>
