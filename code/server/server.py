@@ -138,11 +138,6 @@ class ServerReceiver:
         self._sync_lock = asyncio.Lock()
         self._thread_locks: dict[int, asyncio.Lock] = {}
         self.max_threads = 950
-        self._m_ch = re.compile(r"<#(\d+)>")
-        self._m_msg_link = re.compile(
-            r"(https?://(?:ptb\.|canary\.)?discord(?:app)?\.com/channels/)(\d+|@me)/(\d+)/(\d+)",
-            re.IGNORECASE,
-        )
         self.bot.event(self.on_ready)
         self.bot.event(self.on_webhooks_update)
         self.bot.event(self.on_guild_channel_delete)
@@ -234,8 +229,6 @@ class ServerReceiver:
         self.MAX_GUILD_CHANNELS = 500
         self.MAX_CATEGORIES = 50
         self.MAX_CHANNELS_PER_CATEGORY = 50
-        self._EMOJI_RE = re.compile(r"<(a?):(?P<name>[^:]+):(?P<id>\d+)>")
-        self._m_role = re.compile(r"<@&(?P<id>\d+)>")
 
         async def _command_sync():
             try:
@@ -384,7 +377,6 @@ class ServerReceiver:
                         if nm:
                             self._host_name_cache[host_gid or clone_gid] = nm
                             return nm
-                        # fall back to cloned guild's actual Discord name
                         cg = self.bot.get_guild(clone_gid)
                         if cg and getattr(cg, "name", None):
                             nm2 = cg.name.strip()
@@ -1574,7 +1566,6 @@ class ServerReceiver:
                 clone_cid,
             )
 
-            # stale only for THIS clone; delete the pair and remove from this clone's cache
             try:
                 self.db.delete_channel_mapping_pair(int(orig_id), int(guild.id))
             except Exception:
@@ -2051,7 +2042,7 @@ class ServerReceiver:
                             upstream_name,
                             exc_info=True,
                         )
-                        continue  # can't repair this one; move on
+                        continue
 
                 try:
                     self.db.upsert_category_mapping(
@@ -2076,7 +2067,6 @@ class ServerReceiver:
                         int(orig_cat_id)
                     ] = m
 
-            # Now ensure THIS clone's channels whose upstream parent is orig_cat_id are parented.
             cat_id_for_this_clone = int(cat_obj.id)
             for ch_orig_id, ch_map in list(per_chan.items()):
                 try:
@@ -3021,12 +3011,10 @@ class ServerReceiver:
             if wl_on and not wl_cat:
                 return True
 
-            # doesn't apply to a pure category check)
             if ex_cat:
                 return True
             return False
 
-        # ----- look only at THIS clone's map -----
         per_all = getattr(self, "cat_map_by_clone", {}) or {}
         per_clone = dict(per_all.get(int(guild.id), {}) or {})
 
@@ -3067,7 +3055,6 @@ class ServerReceiver:
                 int(orig_id), filter_view
             )
 
-            # If it's neither in the sitemap (filtered out or removed) nor whitelisted, we treat it as out-of-scope
             out_of_scope = (not in_sitemap) or is_blacklisted
             if not out_of_scope:
                 continue
@@ -3714,7 +3701,6 @@ class ServerReceiver:
                 )
                 continue
 
-            # Persist only THIS clone's parent ids (None-safe)
             ctype = (
                 int(getattr(ch.type, "value", 0))
                 if hasattr(ch.type, "value")
@@ -4189,7 +4175,6 @@ class ServerReceiver:
                     e,
                 )
 
-            # keep each clone's row fresh
             try:
                 self.db.upsert_forum_thread_mapping(
                     orig_thread_id,
@@ -4262,69 +4247,198 @@ class ServerReceiver:
                         e,
                     )
 
-    def _sanitize_inline(self, s: str | None) -> str | None:
+    def _sanitize_inline(
+        self,
+        s: str | None,
+        *,
+        ctx_guild_id: int | None = None,
+        ctx_mapping_row: dict | None = None,
+    ) -> str | None:
+        """
+        Normalize inline content (message content, embed text, etc.).
+
+        ctx_guild_id      = original/host guild id (where the message came from)
+        ctx_mapping_row   = the specific mapping row for the clone we are targeting
+
+        With both of these, per-clone mappings (channels/roles/emojis/message links)
+        can be resolved correctly when there are multiple clones for a single host.
+        """
         if not s:
             return s
-        s = self._replace_emoji_ids(s)
-        s = self._remap_channel_mentions(s)
-        s = self._remap_role_mentions(s)
-        s = self._rewrite_message_links(s)
+
+        clone_gid = self._clone_gid_for_ctx(
+            host_guild_id=ctx_guild_id,
+            mapping_row=ctx_mapping_row,
+        )
+
+        s = self._replace_emoji_ids(
+            s,
+            cloned_guild_id=clone_gid,
+        )
+        s = self._remap_channel_mentions(
+            s,
+            cloned_guild_id=clone_gid,
+        )
+        s = self._remap_role_mentions(
+            s,
+            cloned_guild_id=clone_gid,
+        )
+        s = self._rewrite_message_links(
+            s,
+            ctx_guild_id=ctx_guild_id,
+            ctx_mapping_row=ctx_mapping_row,
+        )
         return s
 
-    def _replace_emoji_ids(self, content: str) -> str:
+    def _replace_emoji_ids(
+        self,
+        content: str,
+        *,
+        cloned_guild_id: int | None = None,
+    ) -> str:
         """
-        Replaces emoji IDs in the given content string with their corresponding cloned emoji IDs
-        based on the database mapping.
+        Replace custom emoji IDs with the clone's emoji IDs.
+
+        If cloned_guild_id is provided, we prefer the mapping in that clone.
+        Otherwise we fall back to the legacy "any mapping" behaviour.
         """
+        _emoji_re = re.compile(r"<:(\w+):(\d+)?\>")
 
-        def _repl(match: re.Match) -> str:
-            animated_flag = match.group(1) or ""
-            name = match.group("name")
-            orig_id = int(match.group("id"))
+        def repl(m: re.Match) -> str:
+            full = m.group(0)
+            name = m.group(1)
+            mid = m.group(2)
+            if not mid:
+                return full
+            try:
+                orig_id = int(mid)
+            except Exception:
+                return full
 
-            row = self.db.get_emoji_mapping(orig_id)
+            row = None
+
+            if cloned_guild_id:
+                try:
+                    row = self.db.get_emoji_mapping_for_clone(
+                        original_id=orig_id,
+                        cloned_guild_id=int(cloned_guild_id),
+                    )
+                except Exception:
+                    row = None
+
+            if row is None:
+                row = self.db.get_emoji_mapping(orig_id)
+
             if not row:
+                return full
 
-                return match.group(0)
+            if not isinstance(row, dict):
+                try:
+                    row = {k: row[k] for k in row.keys()}
+                except Exception:
+                    return full
 
-            new_id = row["cloned_emoji_id"]
-            prefix = "a" if animated_flag == "a" else ""
-            return f"<{prefix}:{name}:{new_id}>"
+            cloned_id = int(row.get("cloned_emoji_id") or orig_id)
+            return f"<:{name}:{cloned_id}>"
 
-        return self._EMOJI_RE.sub(_repl, content)
+        return _emoji_re.sub(repl, content)
 
-    def _remap_channel_mentions(self, content: str) -> str:
-        """Map host channel mentions to cloned channel mentions using chan_map."""
-        if not content:
-            return content
+    def _remap_channel_mentions(
+        self,
+        content: str,
+        *,
+        cloned_guild_id: int | None = None,
+    ) -> str:
+        """
+        Rewrite <
 
-        def repl(match: re.Match) -> str:
-            orig = int(match.group(1))
-            row = self.chan_map.get(orig)
+        If cloned_guild_id is provided, use the mapping for THAT clone; otherwise
+        fall back to the old global chan_map behaviour.
+        """
+        _m_ch = re.compile(r"<#(\d+)>")
 
-            if row and row.get("cloned_channel_id"):
-                return f"<#{row['cloned_channel_id']}>"
-            return match.group(0)
+        def repl(m: re.Match) -> str:
+            full = m.group(0)
+            raw_id = m.group(1)
+            try:
+                cid = int(raw_id)
+            except Exception:
+                return full
 
-        return self._m_ch.sub(repl, content)
+            row = None
 
-    def _remap_role_mentions(self, content: str) -> str:
-        """Map host role mentions to cloned role mentions using role_mappings."""
-        if not content:
-            return content
+            if cloned_guild_id:
+                try:
+                    per_clone_map = (
+                        self.chan_map_by_clone.get(int(cloned_guild_id)) or {}
+                    )
+                    row = per_clone_map.get(cid)
+                except Exception:
+                    row = None
 
-        def repl(match: re.Match) -> str:
-            orig_role_id = int(match.group("id"))
-            row = self.db.get_role_mapping(orig_role_id)
+            if row is None:
+                row = self.chan_map.get(cid)
 
-            if row and "cloned_role_id" in row.keys():
-                cloned_id = row["cloned_role_id"]
-                if cloned_id:
-                    return f"<@&{cloned_id}>"
+            if not row:
+                return full
 
-            return match.group(0)
+            if not isinstance(row, dict):
+                try:
+                    row = {k: row[k] for k in row.keys()}
+                except Exception:
+                    return full
 
-        return self._m_role.sub(repl, content)
+            cloned_id = int(row.get("cloned_channel_id") or cid)
+            return f"<#{cloned_id}>"
+
+        return _m_ch.sub(repl, content)
+
+    def _remap_role_mentions(
+        self,
+        content: str,
+        *,
+        cloned_guild_id: int | None = None,
+    ) -> str:
+        """
+        Rewrite <@&role_id> mentions to the appropriate cloned role id.
+        """
+        _m_role = re.compile(r"<@&(?P<id>\d+)>")
+
+        def repl(m: re.Match) -> str:
+            full = m.group(0)
+            raw_id = m.group("id")
+            try:
+                rid = int(raw_id)
+            except Exception:
+                return full
+
+            row = None
+
+            if cloned_guild_id:
+                try:
+                    row = self.db.get_role_mapping_for_clone(
+                        original_id=rid,
+                        cloned_guild_id=int(cloned_guild_id),
+                    )
+                except Exception:
+                    row = None
+
+            if row is None:
+                row = self.db.get_role_mapping(rid)
+
+            if not row:
+                return full
+
+            if not isinstance(row, dict):
+                try:
+                    row = {k: row[k] for k in row.keys()}
+                except Exception:
+                    return full
+
+            cloned_id = int(row.get("cloned_role_id") or rid)
+            return f"<@&{cloned_id}>"
+
+        return _m_role.sub(repl, content)
 
     def _rewrite_message_links(
         self,
@@ -4342,58 +4456,130 @@ class ServerReceiver:
             r"(?P<gid>\d+|@me)/(?P<cid>\d+)/(?P<mid>\d+)"
         )
 
+        def _row_to_dict(r):
+            if r is None or isinstance(r, dict):
+                return r
+            try:
+                return {k: r[k] for k in r.keys()}
+            except Exception:
+                return None
+
         def repl(m: re.Match) -> str:
             base = m.group(1)
-            gid = m.group("gid")
-            cid = int(m.group("cid"))
-            mid = int(m.group("mid"))
-
-            row = None
+            gid_str = m.group("gid")
             try:
-                row = self.db.get_mapping_by_original(mid)
+                cid = int(m.group("cid"))
+                mid = int(m.group("mid"))
             except Exception:
-                row = None
+                return m.group(0)
 
-            ch_row = None
-            if not row:
-                try:
-                    ch_row = self.db.get_channel_mapping_by_original_id(cid)
-                except Exception:
-                    ch_row = None
+            if gid_str == "@me":
+                return m.group(0)
 
+            host_gid = None
             try:
-                host_gid = (
-                    int(
-                        (row or ch_row or {}).get("original_guild_id")
-                        or (gid if gid != "@me" else 0)
-                    )
-                    or None
-                )
+                if ctx_guild_id:
+                    host_gid = int(ctx_guild_id)
+                elif gid_str != "@me":
+                    host_gid = int(gid_str)
             except Exception:
                 host_gid = None
 
-            clone_gid = self._clone_gid_for_ctx(
-                host_guild_id=host_gid, mapping_row=row or ch_row
-            ) or self._target_clone_gid_for_origin(ctx_guild_id)
+            clone_gid = None
+            if host_gid:
+                try:
+                    clone_gid = self._clone_gid_for_ctx(
+                        host_guild_id=host_gid,
+                        mapping_row=ctx_mapping_row,
+                    )
+                except Exception:
+                    clone_gid = None
+
+                if not clone_gid:
+                    try:
+                        clone_gid = self._target_clone_gid_for_origin(host_gid)
+                    except Exception:
+                        clone_gid = None
 
             if not clone_gid:
                 return m.group(0)
 
-            cloned_cid = int((row or ch_row or {}).get("cloned_channel_id") or cid)
-            cloned_mid = int((row or {}).get("cloned_message_id") or mid)
+            row = None
+            try:
+                if hasattr(self.db, "get_message_mapping_pair"):
+                    row = self.db.get_message_mapping_pair(mid, int(clone_gid))
+            except Exception:
+                row = None
 
-            return f"{base}{clone_gid}/{cloned_cid}/{cloned_mid}"
+            if row is None and hasattr(self.db, "get_mapping_by_cloned"):
+                try:
+                    src = self.db.get_mapping_by_cloned(mid)
+                except Exception:
+                    src = None
+                src = _row_to_dict(src)
+                if src:
+                    try:
+                        orig_mid = int(src.get("original_message_id") or mid)
+                    except Exception:
+                        orig_mid = mid
+                    try:
+                        row = self.db.get_message_mapping_pair(orig_mid, int(clone_gid))
+                    except Exception:
+                        row = None
+
+            row = _row_to_dict(row)
+
+            ch_row = None
+            if (row is None) or not row.get("cloned_channel_id"):
+                try:
+                    per_clone = getattr(self, "chan_map_by_clone", None) or {}
+                    per = per_clone.get(int(clone_gid)) or {}
+                    ch_row = per.get(cid)
+                except Exception:
+                    ch_row = None
+                ch_row = _row_to_dict(ch_row)
+
+            try:
+                if row:
+                    cloned_cid = int(
+                        row.get("cloned_channel_id")
+                        or (ch_row or {}).get("cloned_channel_id")
+                        or cid
+                    )
+                    cloned_mid = int(row.get("cloned_message_id") or mid)
+                elif ch_row:
+                    cloned_cid = int(ch_row.get("cloned_channel_id") or cid)
+                    cloned_mid = mid
+                else:
+
+                    cloned_cid = cid
+                    cloned_mid = mid
+            except Exception:
+
+                return m.group(0)
+
+            return f"{base}{int(clone_gid)}/{cloned_cid}/{cloned_mid}"
 
         return _link.sub(repl, content)
 
-    def _build_webhook_payload(self, msg: Dict) -> dict:
+    def _build_webhook_payload(
+        self,
+        msg: Dict,
+        *,
+        ctx_guild_id: int | None = None,
+        ctx_mapping_row: dict | None = None,
+    ) -> dict:
         """
         Constructs a webhook payload from a given message dictionary.
         Processes text, attachments, embeds, channel mentions, and stickers (as image embeds).
         Also replaces custom emoji IDs in text and embed fields.
         """
 
-        text = self._sanitize_inline(msg.get("content", "") or "")
+        text = self._sanitize_inline(
+            msg.get("content", "") or "",
+            ctx_guild_id=ctx_guild_id,
+            ctx_mapping_row=ctx_mapping_row,
+        )
 
         for att in msg.get("attachments", []) or []:
             url = att.get("url")
@@ -4419,23 +4605,46 @@ class ServerReceiver:
                 embeds.append(raw)
 
         for e in embeds:
-
             if getattr(e, "description", None):
-                e.description = self._sanitize_inline(e.description)
+                e.description = self._sanitize_inline(
+                    e.description,
+                    ctx_guild_id=ctx_guild_id,
+                    ctx_mapping_row=ctx_mapping_row,
+                )
             if getattr(e, "title", None):
-                e.title = self._sanitize_inline(e.title)
+                e.title = self._sanitize_inline(
+                    e.title,
+                    ctx_guild_id=ctx_guild_id,
+                    ctx_mapping_row=ctx_mapping_row,
+                )
 
             if getattr(e, "footer", None) and getattr(e.footer, "text", None):
-                e.footer.text = self._sanitize_inline(e.footer.text)
+                e.footer.text = self._sanitize_inline(
+                    e.footer.text,
+                    ctx_guild_id=ctx_guild_id,
+                    ctx_mapping_row=ctx_mapping_row,
+                )
 
             if getattr(e, "author", None) and getattr(e.author, "name", None):
-                e.author.name = self._sanitize_inline(e.author.name)
+                e.author.name = self._sanitize_inline(
+                    e.author.name,
+                    ctx_guild_id=ctx_guild_id,
+                    ctx_mapping_row=ctx_mapping_row,
+                )
 
             for f in getattr(e, "fields", []) or []:
                 if getattr(f, "name", None):
-                    f.name = self._sanitize_inline(f.name)
+                    f.name = self._sanitize_inline(
+                        f.name,
+                        ctx_guild_id=ctx_guild_id,
+                        ctx_mapping_row=ctx_mapping_row,
+                    )
                 if getattr(f, "value", None):
-                    f.value = self._sanitize_inline(f.value)
+                    f.value = self._sanitize_inline(
+                        f.value,
+                        ctx_guild_id=ctx_guild_id,
+                        ctx_mapping_row=ctx_mapping_row,
+                    )
 
         base = {
             "username": msg.get("author") or "Unknown",
@@ -4581,7 +4790,6 @@ class ServerReceiver:
         ):
             self._inflight_events[_orig_mid_for_inflight] = asyncio.Event()
 
-        # Already-split children shouldn't be re-split
         if not msg.get("__split_total__"):
             try:
                 atts = list(msg.get("attachments") or [])
@@ -4616,16 +4824,20 @@ class ServerReceiver:
                     await self.forward_message(sub)
                 return
 
-        payload = self._build_webhook_payload(msg)
-        if payload is None:
+        precheck_payload = self._build_webhook_payload(
+            msg,
+            ctx_guild_id=host_guild_id or None,
+            ctx_mapping_row=None,
+        )
+        if precheck_payload is None:
             logger.debug(
                 "No webhook payload built for #%s; skipping", msg.get("channel_name")
             )
             return
 
         if (
-            not payload.get("content")
-            and not payload.get("embeds")
+            not precheck_payload.get("content")
+            and not precheck_payload.get("embeds")
             and not (msg.get("stickers") or [])
         ):
             logger.info(
@@ -4637,15 +4849,15 @@ class ServerReceiver:
             )
             return
 
-        if payload.get("content"):
+        if precheck_payload.get("content"):
             try:
-                json.dumps({"content": payload["content"]})
+                json.dumps({"content": precheck_payload["content"]})
             except (TypeError, ValueError) as e:
                 logger.error(
                     "[⛔] Skipping message from #%s: content not JSON serializable: %s; content=%r",
                     msg.get("channel_name"),
                     e,
-                    payload["content"],
+                    precheck_payload["content"],
                 )
                 return
 
@@ -4677,6 +4889,7 @@ class ServerReceiver:
             *,
             mapping_row: dict,
             use_webhook_identity: bool,
+            payload: dict,
             override_identity: dict | None = None,
         ):
             """
@@ -4981,12 +5194,19 @@ class ServerReceiver:
                     chosen.get("cloned_guild_id"),
                 )
                 return
-        
+
             is_primary = bool(primary_url and forced_url == primary_url)
             use_webhook_identity = bool(primary_customized and is_primary)
             override = None
             if primary_customized and not is_primary:
                 override = {"username": primary_name, "avatar_url": primary_avatar_url}
+
+            ctx_gid = int(chosen.get("original_guild_id") or host_guild_id or 0) or None
+            payload_for_forced = self._build_webhook_payload(
+                msg,
+                ctx_guild_id=ctx_gid,
+                ctx_mapping_row=chosen,
+            )
 
             rl_key = f"channel:{clone_for_gate or source_id}"
             if sem:
@@ -4998,6 +5218,7 @@ class ServerReceiver:
                         rl_key,
                         mapping_row=chosen,
                         use_webhook_identity=use_webhook_identity,
+                        payload=payload_for_forced,
                         override_identity=override,
                     )
             else:
@@ -5006,6 +5227,7 @@ class ServerReceiver:
                     rl_key,
                     mapping_row=chosen,
                     use_webhook_identity=use_webhook_identity,
+                    payload=payload_for_forced,
                     override_identity=override,
                 )
             return
@@ -5087,6 +5309,19 @@ class ServerReceiver:
                         )
                         continue
 
+                    try:
+                        ctx_gid = (
+                            int(mapping.get("original_guild_id") or host_guild_id or 0)
+                            or None
+                        )
+                    except Exception:
+                        ctx_gid = host_guild_id or None
+
+                    payload_for_mapping = self._build_webhook_payload(
+                        msg,
+                        ctx_guild_id=ctx_gid,
+                        ctx_mapping_row=mapping,
+                    )
 
                     url = mapping.get("channel_webhook_url") or mapping.get(
                         "webhook_url"
@@ -5203,6 +5438,7 @@ class ServerReceiver:
                                         rl_key,
                                         mapping_row=mapping,
                                         use_webhook_identity=True,
+                                        payload=payload_for_mapping,
                                         override_identity=None,
                                     )
                                 else:
@@ -5211,6 +5447,7 @@ class ServerReceiver:
                                         rl_key,
                                         mapping_row=mapping,
                                         use_webhook_identity=False,
+                                        payload=payload_for_mapping,
                                         override_identity={
                                             "username": primary_name,
                                             "avatar_url": primary_avatar_url,
@@ -5222,6 +5459,7 @@ class ServerReceiver:
                                     rl_key,
                                     mapping_row=mapping,
                                     use_webhook_identity=False,
+                                    payload=payload_for_mapping,
                                     override_identity=None,
                                 )
                         continue
@@ -5236,6 +5474,7 @@ class ServerReceiver:
                         rl_key,
                         mapping_row=mapping,
                         use_webhook_identity=bool(primary_customized),
+                        payload=payload_for_mapping,
                         override_identity=None,
                     )
 
@@ -5327,7 +5566,19 @@ class ServerReceiver:
                 self.session = aiohttp.ClientSession()
             wh = Webhook.from_url(webhook_url, session=self.session)
             with self._clone_log_label(clone_gid):
-                built = self._build_webhook_payload(data)
+                try:
+                    host_gid = (
+                        int(row.get("original_guild_id") or data.get("guild_id") or 0)
+                        or None
+                    )
+                except Exception:
+                    host_gid = None
+
+                built = self._build_webhook_payload(
+                    data,
+                    ctx_guild_id=host_gid,
+                    ctx_mapping_row=row,
+                )
                 await wh.edit_message(
                     cloned_mid,
                     content=built.get("content"),
@@ -5585,7 +5836,13 @@ class ServerReceiver:
             left = max((t or 0) - (d or 0), 0)
             return f" [{left} left]" if t is not None else f" [{d or 0} sent]"
 
-        payload = self._build_webhook_payload(data)
+        host_guild_id = int(data.get("guild_id") or 0)
+
+        payload = self._build_webhook_payload(
+            data,
+            ctx_guild_id=host_guild_id or None,
+            ctx_mapping_row=None,
+        )
         stickers = data.get("stickers") or []
 
         def _is_custom_sticker(s: dict) -> bool:
@@ -5872,7 +6129,6 @@ class ServerReceiver:
                     _thread_lock_key(orig_tid, guild.id), asyncio.Lock()
                 )
 
-                # === inner helpers that use THIS clone's context ===
                 def _thread_mapping(thread_id: int) -> dict:
                     m = dict(mrow)
                     m["cloned_channel_id"] = int(thread_id)
@@ -5958,19 +6214,24 @@ class ServerReceiver:
                         )
                         try:
                             forced_url_local = data.get("__force_webhook_url__")
+                            primary = mrow.get("channel_webhook_url") or mrow.get(
+                                "webhook_url"
+                            )
+
                             if forced_url_local:
                                 try:
                                     self.backfill.invalidate_rotation(int(cloned_id))
                                 except Exception:
                                     pass
-                                primary = mrow.get("channel_webhook_url") or mrow.get(
-                                    "webhook_url"
-                                )
+
                                 url2, _ = await self.backfill.pick_url_for_send(
                                     int(cloned_id),
                                     primary_url=primary,
                                     create_missing=True,
                                 )
+                            else:
+
+                                url2 = primary or getattr(wh, "url", None)
 
                             wh = Webhook.from_url(url2, session=self.session)
                             logger.info(
@@ -6137,11 +6398,24 @@ class ServerReceiver:
                                 return new_thread
 
                             async def _create_forum_thread_and_first_post():
+                                base_payload_for_forum = (
+                                    self._build_webhook_payload(
+                                        data,
+                                        ctx_guild_id=host_guild_id or None,
+                                        ctx_mapping_row=mrow,
+                                    )
+                                    or {}
+                                )
+
                                 tmp = {
-                                    "content": (payload.get("content") or None),
-                                    "embeds": payload.get("embeds"),
-                                    "username": payload.get("username"),
-                                    "avatar_url": payload.get("avatar_url"),
+                                    "content": (
+                                        base_payload_for_forum.get("content") or None
+                                    ),
+                                    "embeds": base_payload_for_forum.get("embeds"),
+                                    "username": base_payload_for_forum.get("username"),
+                                    "avatar_url": base_payload_for_forum.get(
+                                        "avatar_url"
+                                    ),
                                 }
 
                                 if stickers and has_textish:
@@ -6282,7 +6556,6 @@ class ServerReceiver:
                                     await _create_forum_thread_and_first_post()
                                 )
                                 if not clone_thread:
-                                    # can't proceed in this clone yet
                                     continue
                                 new_id = clone_thread.id
 
@@ -6296,7 +6569,11 @@ class ServerReceiver:
                                         source_id=orig_tid,
                                     )
                                     if not sent:
-                                        payload2 = self._build_webhook_payload(data)
+                                        payload2 = self._build_webhook_payload(
+                                            data,
+                                            ctx_guild_id=host_guild_id or None,
+                                            ctx_mapping_row=_thread_mapping(new_id),
+                                        )
                                         if meta.get("custom") or use_webhook_identity:
                                             payload2.pop("username", None)
                                             payload2.pop("avatar_url", None)
@@ -6321,6 +6598,15 @@ class ServerReceiver:
                             else:
                                 clone_thread = await _create_text_thread()
                                 new_id = clone_thread.id
+
+                                payload_for_thread = (
+                                    self._build_webhook_payload(
+                                        data,
+                                        ctx_guild_id=host_guild_id or None,
+                                        ctx_mapping_row=_thread_mapping(new_id),
+                                    )
+                                    or {}
+                                )
 
                                 async def _send_text_thread_followup(p):
                                     if sem:
@@ -6387,8 +6673,12 @@ class ServerReceiver:
                                             msg=data,
                                             source_id=orig_tid,
                                         )
-                                        _merge_embeds_into_payload(payload, data)
-                                        await _send_text_thread_followup(payload)
+                                        _merge_embeds_into_payload(
+                                            payload_for_thread, data
+                                        )
+                                        await _send_text_thread_followup(
+                                            payload_for_thread
+                                        )
                                     elif has_standard:
                                         data.pop("__stickers_no_text__", None)
                                         data.pop("__stickers_prefer_embeds__", None)
@@ -6401,8 +6691,12 @@ class ServerReceiver:
                                             source_id=orig_tid,
                                         )
                                         if not sent:
-                                            _merge_embeds_into_payload(payload, data)
-                                            await _send_text_thread_followup(payload)
+                                            _merge_embeds_into_payload(
+                                                payload_for_thread, data
+                                            )
+                                            await _send_text_thread_followup(
+                                                payload_for_thread
+                                            )
                                 elif stickers and not has_textish:
                                     if has_custom:
                                         data["__stickers_no_text__"] = True
@@ -6415,7 +6709,11 @@ class ServerReceiver:
                                             msg=data,
                                             source_id=orig_tid,
                                         )
-                                        payload2 = self._build_webhook_payload(data)
+                                        payload2 = self._build_webhook_payload(
+                                            data,
+                                            ctx_guild_id=host_guild_id or None,
+                                            ctx_mapping_row=_thread_mapping(new_id),
+                                        )
                                         if meta.get("custom") or use_webhook_identity:
                                             payload2.pop("username", None)
                                             payload2.pop("avatar_url", None)
@@ -6430,7 +6728,11 @@ class ServerReceiver:
                                             source_id=orig_tid,
                                         )
                                         if not sent:
-                                            payload2 = self._build_webhook_payload(data)
+                                            payload2 = self._build_webhook_payload(
+                                                data,
+                                                ctx_guild_id=host_guild_id or None,
+                                                ctx_mapping_row=_thread_mapping(new_id),
+                                            )
                                             if (
                                                 meta.get("custom")
                                                 or use_webhook_identity
@@ -6439,7 +6741,7 @@ class ServerReceiver:
                                                 payload2.pop("avatar_url", None)
                                             await _send_text_thread_followup(payload2)
                                 else:
-                                    await _send_text_thread_followup(payload)
+                                    await _send_text_thread_followup(payload_for_thread)
 
                                 created = True
 
@@ -6456,6 +6758,15 @@ class ServerReceiver:
                         if not created and clone_thread is not None:
                             meta = await self._get_webhook_meta(parent_id, webhook_url)
 
+                            payload_for_existing = (
+                                self._build_webhook_payload(
+                                    data,
+                                    ctx_guild_id=host_guild_id or None,
+                                    ctx_mapping_row=_thread_mapping(clone_thread.id),
+                                )
+                                or {}
+                            )
+
                             if stickers and not has_textish:
                                 if has_custom:
                                     data["__stickers_no_text__"] = True
@@ -6468,7 +6779,13 @@ class ServerReceiver:
                                         msg=data,
                                         source_id=orig_tid,
                                     )
-                                    payload2 = self._build_webhook_payload(data)
+                                    payload2 = self._build_webhook_payload(
+                                        data,
+                                        ctx_guild_id=host_guild_id or None,
+                                        ctx_mapping_row=_thread_mapping(
+                                            clone_thread.id
+                                        ),
+                                    )
                                     if meta.get("custom") or use_webhook_identity:
                                         payload2.pop("username", None)
                                         payload2.pop("avatar_url", None)
@@ -6526,7 +6843,13 @@ class ServerReceiver:
                                                 data.get("timestamp"),
                                             )
                                         continue
-                                    payload2 = self._build_webhook_payload(data)
+                                    payload2 = self._build_webhook_payload(
+                                        data,
+                                        ctx_guild_id=host_guild_id or None,
+                                        ctx_mapping_row=_thread_mapping(
+                                            clone_thread.id
+                                        ),
+                                    )
                                     if meta.get("custom") or use_webhook_identity:
                                         payload2.pop("username", None)
                                         payload2.pop("avatar_url", None)
@@ -6577,11 +6900,13 @@ class ServerReceiver:
                                         msg=data,
                                         source_id=orig_tid,
                                     )
-                                    _merge_embeds_into_payload(payload, data)
+                                    _merge_embeds_into_payload(
+                                        payload_for_existing, data
+                                    )
                                     if sem:
                                         async with sem:
                                             await _send_webhook_into_thread(
-                                                payload,
+                                                payload_for_existing,
                                                 include_text=True,
                                                 thread_obj=clone_thread,
                                             )
@@ -6598,7 +6923,7 @@ class ServerReceiver:
                                                 )
                                     else:
                                         await _send_webhook_into_thread(
-                                            payload,
+                                            payload_for_existing,
                                             include_text=True,
                                             thread_obj=clone_thread,
                                         )
@@ -6634,11 +6959,13 @@ class ServerReceiver:
                                                 data.get("timestamp"),
                                             )
                                         continue
-                                    _merge_embeds_into_payload(payload, data)
+                                    _merge_embeds_into_payload(
+                                        payload_for_existing, data
+                                    )
                                     if sem:
                                         async with sem:
                                             await _send_webhook_into_thread(
-                                                payload,
+                                                payload_for_existing,
                                                 include_text=True,
                                                 thread_obj=clone_thread,
                                             )
@@ -6653,7 +6980,7 @@ class ServerReceiver:
                                             )
                                     else:
                                         await _send_webhook_into_thread(
-                                            payload,
+                                            payload_for_existing,
                                             include_text=True,
                                             thread_obj=clone_thread,
                                         )
@@ -6672,13 +6999,13 @@ class ServerReceiver:
                                 if sem:
                                     async with sem:
                                         await _send_webhook_into_thread(
-                                            payload,
+                                            payload_for_existing,
                                             include_text=True,
                                             thread_obj=clone_thread,
                                         )
                                 else:
                                     await _send_webhook_into_thread(
-                                        payload,
+                                        payload_for_existing,
                                         include_text=True,
                                         thread_obj=clone_thread,
                                     )
@@ -6778,7 +7105,6 @@ class ServerReceiver:
             await self.handle_message(data)
             return
 
-        # Respect existing target in progress; don't stomp it if set
         st = self.backfill._progress.get(int(original_id))
         if not st:
             self.backfill.register_sink(
