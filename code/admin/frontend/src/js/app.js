@@ -117,6 +117,7 @@
     DELETE_MESSAGES: true,
     EDIT_MESSAGES: true,
     DELETE_ROLES: true,
+    UPDATE_ROLES: true,
     CLONE_EMOJI: true,
     CLONE_STICKER: true,
     CLONE_ROLES: true,

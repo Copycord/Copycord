@@ -1696,6 +1696,7 @@ class ServerReceiver:
                             mirror_permissions=settings.get(
                                 "MIRROR_ROLE_PERMISSIONS", False
                             ),
+                            update_roles=settings.get("UPDATE_ROLES", True),
                         )
                         bg_jobs.append("roles")
 

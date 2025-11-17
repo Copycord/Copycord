@@ -96,6 +96,7 @@ class Config:
             "DELETE_CHANNELS": True,
             "DELETE_THREADS": True,
             "DELETE_ROLES": True,
+            "UPDATE_ROLES": True,
             "DELETE_MESSAGES": True,
             "MIRROR_CHANNEL_PERMISSIONS": False,
             "CLONE_ROLES": True,

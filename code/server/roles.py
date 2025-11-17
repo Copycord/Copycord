@@ -86,6 +86,7 @@ class RoleManager:
         validate_mapping: bool = True,
         delete_roles: bool | None = None,
         mirror_permissions: bool | None = None,
+        update_roles: bool | None = None,
     ) -> None:
         clone_gid = int(target_clone_guild_id or self.clone_guild_id)
 
@@ -126,6 +127,8 @@ class RoleManager:
             else bool(mirror_permissions)
         )
 
+        eff_update_roles = True if update_roles is None else bool(update_roles)
+
         logger.debug(
             "[🧩] Scheduling role sync task host=%s → clone=%s (delete_roles=%s mirror_perms=%s)",
             host_id_int,
@@ -142,6 +145,7 @@ class RoleManager:
                 clone_id=clone_gid,
                 delete_roles=eff_delete_roles,
                 mirror_permissions=eff_mirror_perms,
+                update_roles=eff_update_roles,
             )
         )
 
@@ -157,6 +161,7 @@ class RoleManager:
         clone_id: int,
         delete_roles: bool,
         mirror_permissions: bool,
+        update_roles: bool,
     ) -> None:
         lock = self._get_lock_for_clone(clone_id)
         async with lock:
@@ -168,6 +173,7 @@ class RoleManager:
                     clone_id=clone_id,
                     delete_roles=delete_roles,
                     mirror_permissions=mirror_permissions,
+                    update_roles=update_roles,
                 )
 
                 parts = []
@@ -289,6 +295,7 @@ class RoleManager:
         clone_id: int,
         delete_roles: bool,
         mirror_permissions: bool,
+        update_roles: bool,
     ) -> Tuple[int, int, int]:
         """
         Mirror roles (name/color/hoist/mentionable + permissions if enabled)
@@ -537,6 +544,17 @@ class RoleManager:
                 and (not cloned_role.managed)
                 and cloned_role.position < bot_top
             ):
+                
+                if not update_roles:
+                    self._log(
+                        "debug",
+                        "[🧩] UPDATE_ROLES=False for clone %s; skipping updates for role %s (%d)",
+                        clone_id,
+                        cloned_role.name,
+                        cloned_role.id,
+                    )
+                    continue
+            
                 changes: list[str] = []
 
                 if cloned_role.name != want_name:
