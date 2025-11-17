@@ -691,26 +691,15 @@ class ServerReceiver:
                 if host_name:
                     sources.append(host_name)
 
-            def nice_join(names: list[str]) -> str:
-                n = len(names)
-                if n == 0:
-                    return ""
-                if n == 1:
-                    return names[0]
-                if n == 2:
-                    return f"{names[0]} and {names[1]}"
-                return f"{', '.join(names[:-1])}, and {names[-1]}"
-
             if total == 0 or not sources:
                 logger.warning(
                     "[⚠️] No guild mappings found. Nothing is currently set to clone."
                 )
             else:
                 logger.info(
-                    "[🧙‍♂️] Copycord is cloning %d server%s: %s",
+                    "[🧙‍♂️] Copycord is cloning %d server%s",
                     total,
                     "" if total == 1 else "s",
-                    nice_join(sources),
                 )
 
         except Exception:
