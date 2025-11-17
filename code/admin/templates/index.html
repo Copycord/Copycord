@@ -312,6 +312,17 @@
         <p class="text-subtle">
           Map a source server to a target server to enable cloning for that pair
         </p>
+
+        <div class="guild-mapping-search">
+          <input
+            id="mappingSearchInput"
+            class="log-search-input"
+            type="text"
+            placeholder="Search mappings…"
+            aria-label="Search mappings"
+            autocomplete="off"
+          />
+        </div>
       </div>
 
       <div id="guild-mapping-list" class="guild-mapping-list"></div>
@@ -374,61 +385,75 @@
             <input type="text" id="map_mapping_name" name="mapping_name" maxlength="64" />
           </div>
 
-          <div class="grid">
-            <div class="field">
-              <label for="map_original_guild_id" class="has-tip">
-                <span class="label-text">HOST_GUILD_ID</span>
-                <button type="button" class="info-dot" aria-label="What is HOST_GUILD_ID?"
-                  aria-describedby="tip-HOST_GUILD_ID"></button>
-                <span id="tip-HOST_GUILD_ID" role="tooltip" class="tip-bubble">
-                  {{ FIELD_TIPS['HOST_GUILD_ID'] }}
-                </span>
-              </label>
-              <input type="text" id="map_original_guild_id" name="original_guild_id" inputmode="numeric" />
-            </div>
-
-            <div class="field">
-              <label for="map_cloned_guild_id" class="has-tip">
-                <span class="label-text">CLONE_GUILD_ID</span>
-                <button type="button" class="info-dot" aria-label="What is CLONE_GUILD_ID?"
-                  aria-describedby="tip-CLONE_GUILD_ID"></button>
-                <span id="tip-CLONE_GUILD_ID" role="tooltip" class="tip-bubble">
-                  {{ FIELD_TIPS['CLONE_GUILD_ID'] }}
-                </span>
-              </label>
-              <input type="text" id="map_cloned_guild_id" name="cloned_guild_id" inputmode="numeric" />
-            </div>
-
-            {% for k in mapping_bool_keys %}
-            <div class="field">
-              <label for="map_{{ k }}" class="has-tip">
-                <span class="label-text">{{ k }}</span>
-                {% if FIELD_TIPS.get(k) %}
-                <button type="button" class="info-dot" aria-label="What is {{ k }}?"
-                  aria-describedby="tip-{{ k }}"></button>
-                <span id="tip-{{ k }}" role="tooltip" class="tip-bubble">
-                  {{ FIELD_TIPS[k] }}
-                </span>
-                {% endif %}
-              </label>
-              <div class="select">
-                <select id="map_{{ k }}" name="{{ k }}">
-                  <option value="True">True</option>
-                  <option value="False">False</option>
-                </select>
-              </div>
-            </div>
-            {% endfor %}
+        <div class="grid">
+          <div class="field">
+            <label for="map_original_guild_id" class="has-tip">
+              <span class="label-text">HOST_GUILD_ID</span>
+              <button type="button" class="info-dot" aria-label="What is HOST_GUILD_ID?"
+                aria-describedby="tip-HOST_GUILD_ID"></button>
+              <span id="tip-HOST_GUILD_ID" role="tooltip" class="tip-bubble">
+                {{ FIELD_TIPS['HOST_GUILD_ID'] }}
+              </span>
+            </label>
+            <input type="text" id="map_original_guild_id" name="original_guild_id" inputmode="numeric" />
           </div>
 
-          <div class="btns">
-            <button class="btn btn-ghost" type="submit" id="mapping-save-btn">
-              Save Mapping
-            </button>
-            <button class="btn btn-ghost" type="button" id="mapping-cancel-btn">
-              Cancel
-            </button>
+          <div class="field">
+            <label for="map_cloned_guild_id" class="has-tip">
+              <span class="label-text">CLONE_GUILD_ID</span>
+              <button type="button" class="info-dot" aria-label="What is CLONE_GUILD_ID?"
+                aria-describedby="tip-CLONE_GUILD_ID"></button>
+              <span id="tip-CLONE_GUILD_ID" role="tooltip" class="tip-bubble">
+                {{ FIELD_TIPS['CLONE_GUILD_ID'] }}
+              </span>
+            </label>
+            <input type="text" id="map_cloned_guild_id" name="cloned_guild_id" inputmode="numeric" />
           </div>
+
+          <div class="field field-search-settings">
+            <label for="mappingSettingsSearch" class="has-tip">
+              <span class="label-text">Search Settings</span>
+            </label>
+
+            <input
+              id="mappingSettingsSearch"
+              class="log-search-input"
+              type="text"
+              placeholder="Search messages, clone_roles, etc…"
+              autocomplete="off"
+            />
+          </div>
+
+          {% for k in mapping_bool_keys %}
+          <div class="field mapping-setting-field" data-setting-key="{{ k | lower }}">
+            <label for="map_{{ k }}" class="has-tip">
+              <span class="label-text">{{ k }}</span>
+              {% if FIELD_TIPS.get(k) %}
+              <button type="button" class="info-dot" aria-label="What is {{ k }}?"
+                aria-describedby="tip-{{ k }}"></button>
+              <span id="tip-{{ k }}" role="tooltip" class="tip-bubble">
+                {{ FIELD_TIPS[k] }}
+              </span>
+              {% endif %}
+            </label>
+            <div class="select">
+              <select id="map_{{ k }}" name="{{ k }}">
+                <option value="True">True</option>
+                <option value="False">False</option>
+              </select>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="btns">
+          <button class="btn btn-ghost" type="submit" id="mapping-save-btn">
+            Save Mapping
+          </button>
+          <button class="btn btn-ghost" type="button" id="mapping-cancel-btn" hidden>
+            Cancel
+          </button>
+        </div>
         </form>
       </div>
     </div>
@@ -674,7 +699,7 @@
       <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="roleBlocksTitle">
         <div class="modal-header">
           <h3 class="modal-title" id="roleBlocksTitle">Role Blocks</h3>
-          <button class="icon-btn" id="roleBlocksCloseBtn" type="button" aria-label="Close">✕</button>
+          <button class="icon-btn verify-close" id="roleBlocksCloseBtn" type="button" aria-label="Close">✕</button>
         </div>
 
         <div class="modal-body">
@@ -709,7 +734,7 @@
             <button class="btn btn-ghost" id="roleBlocksCancel" type="button">
               Cancel
             </button>
-            <button class="btn btn-primary" id="roleBlocksApply" type="button">
+            <button class="btn btn-ghost" id="roleBlocksApply" type="button">
               Apply
             </button>
           </div>
@@ -723,7 +748,7 @@
       <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="filterObjectsTitle">
         <div class="modal-header">
           <h3 class="modal-title" id="filterObjectsTitle">Browse</h3>
-          <button class="icon-btn" id="filterObjectsCloseBtn" type="button" aria-label="Close">✕</button>
+          <button class="icon-btn verify-close" id="filterObjectsCloseBtn" type="button" aria-label="Close">✕</button>
         </div>
 
         <div class="modal-body">
@@ -759,7 +784,7 @@
             <button class="btn btn-ghost" id="filterObjectsCancel" type="button">
               Cancel
             </button>
-            <button class="btn btn-primary" id="filterObjectsApply" type="button">
+            <button class="btn btn-ghost" id="filterObjectsApply" type="button">
               Apply
             </button>
           </div>

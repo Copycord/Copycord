@@ -466,7 +466,7 @@ th {
 }
 .log-output {
   scrollbar-width: thin;
-  scrollbar-color: var(--primary-700) #140b26;
+  scrollbar-color: var(--accent) transparent;
 }
 .log-output::-webkit-scrollbar {
   width: 12px;
@@ -596,7 +596,7 @@ select.is-hidden-native {
 }
 .dd-menu {
   scrollbar-width: thin;
-  scrollbar-color: var(--primary-700) #140b26;
+  scrollbar-color: var(--accent) transparent;
 }
 .dd-menu::-webkit-scrollbar {
   width: 12px;
@@ -4750,7 +4750,7 @@ body {
 
 .export-modal .scraper-body {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.22) rgba(255, 255, 255, 0.06);
+  scrollbar-color: var(--accent) transparent;
 }
 
 .export-modal .modal-content {
@@ -4886,7 +4886,7 @@ body {
   border: 2px solid #140b26;
 }
 .export-modal .scraper-body {
-  scrollbar-color: var(--primary-700, #6d28d9) #140b26;
+  scrollbar-color: var(--accent) transparent;
 }
 
 .export-modal .visually-hidden {
@@ -6837,7 +6837,7 @@ body.modal-open #bf-batchbar {
   box-sizing: border-box;
 
   scrollbar-width: thin;
-  scrollbar-color: var(--primary-700) #140b26;
+  scrollbar-color: var(--accent) transparent;
 }
 
 #mapping-modal #mapping-form::-webkit-scrollbar {
@@ -8172,4 +8172,34 @@ body.login-page {
 
 #filters-modal #filters-role-refresh {
   transform: translateY(-2px);
+}
+
+.guild-config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.guild-config-header .text-subtle {
+  margin: 0;
+}
+
+.guild-mapping-search {
+  margin-left: auto;
+}
+
+.guild-mapping-search .log-search-input {
+  min-width: 220px;
+}
+
+#mapping-modal #mapping-form .grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+#mapping-modal #mapping-form .field-search-settings {
+  grid-column: 1 / -1;
 }

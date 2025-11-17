@@ -132,6 +132,7 @@
   let lastFocusFilters = null;
   let currentFilterMapping = null;
   let FILTERS_BASELINE = "";
+  let MAPPING_BASELINE = "";
 
   function setInert(el, on) {
     if (!el) return;
@@ -1815,6 +1816,18 @@
       } catch {}
     }
     lastFocusMapping = null;
+
+    MAPPING_BASELINE = "";
+    const cancelBtn = document.getElementById("mapping-cancel-btn");
+    if (cancelBtn) {
+      cancelBtn.hidden = true;
+    }
+
+    const settingsSearch = document.getElementById("mappingSettingsSearch");
+    if (settingsSearch) {
+      settingsSearch.value = "";
+      settingsSearch.dispatchEvent(new Event("input", { bubbles: true }));
+    }
   }
 
   function openMappingModal(mapping) {
@@ -1829,6 +1842,12 @@
     const cloneInput = document.getElementById("map_cloned_guild_id");
 
     const subtleEl = document.getElementById("mapping-id-subtle");
+
+    const searchInput = document.getElementById("mappingSettingsSearch");
+    if (searchInput) {
+      searchInput.value = "";
+    }
+    setupMappingSettingsSearch();
 
     mapValidated = false;
     bindMappingFieldListeners();
@@ -1888,19 +1907,40 @@
         sel.dispatchEvent(new Event("change", { bubbles: true }));
       });
 
+    const mappingFormEl = document.getElementById("mapping-form");
+    if (mappingFormEl) {
+      MAPPING_BASELINE = snapshotForm(mappingFormEl);
+
+      if (!mappingFormEl._mapDirtyBound) {
+        mappingFormEl._mapDirtyBound = true;
+        const handler = () => updateMappingCancelVisibility();
+        mappingFormEl.addEventListener("input", handler);
+        mappingFormEl.addEventListener("change", handler);
+      }
+    } else {
+      MAPPING_BASELINE = "";
+    }
+
+    const cancelBtn = document.getElementById("mapping-cancel-btn");
+    if (cancelBtn) {
+      cancelBtn.hidden = true;
+      cancelBtn.onclick = (e) => {
+        e.preventDefault();
+        resetMappingFormToBaseline();
+      };
+    }
+
+    const headerCloseBtn = document.getElementById("mapping-close");
+    if (headerCloseBtn) {
+      headerCloseBtn.onclick = maybeCloseMappingModal;
+    }
+
+    updateMappingCancelVisibility();
+
     setInert(modal, false);
     modal.classList.add("show");
     modal.setAttribute("aria-hidden", "false");
     document.body.classList.add("body-lock-scroll");
-
-    const cancelBtn = document.getElementById("mapping-cancel-btn");
-    if (cancelBtn) {
-      cancelBtn.onclick = closeMappingModal;
-    }
-    const headerCloseBtn = document.getElementById("mapping-close");
-    if (headerCloseBtn) {
-      headerCloseBtn.onclick = closeMappingModal;
-    }
 
     const firstField =
       nameInput || document.getElementById("mapping-save-btn") || modal;
@@ -1915,7 +1955,7 @@
     modal._outsideClickHandler = function (evt) {
       const contentEl = modal.querySelector(".modal-content");
       if (contentEl && !contentEl.contains(evt.target)) {
-        closeMappingModal();
+        maybeCloseMappingModal();
       }
     };
     modal.addEventListener("mousedown", modal._outsideClickHandler);
@@ -2045,14 +2085,13 @@
     cModal.classList.remove("show");
     cModal.setAttribute("aria-hidden", "true");
 
-    // 🔸 Only remove scroll lock if NO other modal is still open
     const anyOtherOpen = document.querySelector(
       "#filters-modal.show, " +
-      "#mapping-modal.show, " +
-      "#log-modal.show, " +
-      "#roleBlocksModal.show, " +
-      "#filterObjectsModal.show, " +
-      "#confirm-modal.show"
+        "#mapping-modal.show, " +
+        "#log-modal.show, " +
+        "#roleBlocksModal.show, " +
+        "#filterObjectsModal.show, " +
+        "#confirm-modal.show"
     );
     if (!anyOtherOpen) {
       document.body.classList.remove("body-lock-scroll");
@@ -2068,7 +2107,6 @@
     confirmResolve = null;
     confirmReject = null;
   }
-
 
   function closeFiltersModal() {
     const modal = document.getElementById("filters-modal");
@@ -2096,44 +2134,129 @@
     currentFilterMapping = null;
   }
 
-function filtersFormIsDirty() {
-  const form = document.getElementById("form-filters");
-  if (!form) return false;
-  return snapshotForm(form) !== FILTERS_BASELINE;
-}
-
-function maybeCloseFiltersModal() {
-  // If the confirm modal is already open, don't stack another one
-  if (cModal && cModal.classList.contains("show")) {
-    return;
+  function filtersFormIsDirty() {
+    const form = document.getElementById("form-filters");
+    if (!form) return false;
+    return snapshotForm(form) !== FILTERS_BASELINE;
   }
 
-  const modal = document.getElementById("filters-modal");
-  if (!modal || !modal.classList.contains("show")) {
-    // Nothing open, just hard-close
-    closeFiltersModal();
-    return;
+  function mappingFormIsDirty() {
+    const form = document.getElementById("mapping-form");
+    if (!form) return false;
+    if (!MAPPING_BASELINE) return false;
+    return snapshotForm(form) !== MAPPING_BASELINE;
   }
 
-  if (!filtersFormIsDirty()) {
-    // No unsaved changes, close normally
-    closeFiltersModal();
-    return;
+  function updateMappingCancelVisibility() {
+    const cancelBtn = document.getElementById("mapping-cancel-btn");
+    if (!cancelBtn) return;
+    cancelBtn.hidden = !mappingFormIsDirty();
   }
 
-  // Unsaved changes → ask first
-  openConfirm({
-    title: "Discard unsaved filter changes?",
-    body: "You have unsaved changes to these filters. If you close now, your changes will be lost.",
-    confirmText: "Discard changes",
-    confirmClass: "btn-ghost-red",
-    showCancel: true,
-    onConfirm: () => {
-      closeFiltersModal();
-    },
+  function maybeCloseMappingModal() {
+    const modal = document.getElementById("mapping-modal");
+    if (!modal) return;
+
+    // If it's not showing or not dirty, just close
+    if (!modal.classList.contains("show") || !mappingFormIsDirty()) {
+      closeMappingModal();
+      return;
+    }
+
+    // Don't stack confirm dialogs
+    if (cModal && cModal.classList.contains("show")) {
+      return;
+    }
+
+    openConfirm({
+      title: "Discard unsaved mapping changes?",
+      body: "You have unsaved changes to this mapping. If you close now, your changes will be lost.",
+      confirmText: "Discard changes",
+      confirmClass: "btn-ghost-red",
+      showCancel: true,
+      onConfirm: () => {
+        closeMappingModal();
+      },
+    });
+  }
+
+  function resetMappingFormToBaseline() {
+    const form = document.getElementById("mapping-form");
+    if (!form || !MAPPING_BASELINE) return;
+
+    const params = new URLSearchParams(MAPPING_BASELINE);
+
+    Array.from(form.elements).forEach((el) => {
+      const name = el.name;
+      if (!name) return;
+
+      if (el.type === "submit" || el.type === "button") return;
+
+      // Checkboxes / radios (you probably don't have any here, but safe anyway)
+      if (el.type === "checkbox" || el.type === "radio") {
+        const values = params.getAll(name);
+        el.checked = values.includes(el.value);
+        return;
+      }
+
+      const val = params.get(name);
+      el.value = val != null ? val : "";
+
+      if (el.tagName === "SELECT") {
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      } else {
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+
+    mapValidated = false;
+    const { name, host, clone } = getMappingInputs();
+    [name, host, clone].forEach((el) => {
+      if (!el) return;
+      el.classList.remove("is-invalid", "flash");
+    });
+
+    updateMappingCancelVisibility();
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+
+    const mappingModal = document.getElementById("mapping-modal");
+    if (mappingModal && mappingModal.classList.contains("show")) {
+      e.preventDefault();
+      maybeCloseMappingModal();
+    }
   });
-}
 
+  function maybeCloseFiltersModal() {
+    // If the confirm modal is already open, don't stack another one
+    if (cModal && cModal.classList.contains("show")) {
+      return;
+    }
+
+    const modal = document.getElementById("filters-modal");
+    if (!modal || !modal.classList.contains("show")) {
+      closeFiltersModal();
+      return;
+    }
+
+    if (!filtersFormIsDirty()) {
+      closeFiltersModal();
+      return;
+    }
+
+    openConfirm({
+      title: "Discard unsaved filter changes?",
+      body: "You have unsaved changes to these filters. If you close now, your changes will be lost.",
+      confirmText: "Discard changes",
+      confirmClass: "btn-ghost-red",
+      showCancel: true,
+      onConfirm: () => {
+        closeFiltersModal();
+      },
+    });
+  }
 
   async function openFiltersModal(mapping) {
     const modal = document.getElementById("filters-modal");
@@ -2391,7 +2514,17 @@ function maybeCloseFiltersModal() {
       modal._keyHandler = null;
     }
 
-    document.body.classList.remove("body-lock-scroll");
+    const anyOtherOpen = document.querySelector(
+      "#filters-modal.show, " +
+        "#mapping-modal.show, " +
+        "#log-modal.show, " +
+        "#roleBlocksModal.show, " +
+        "#confirm-modal.show"
+    );
+
+    if (!anyOtherOpen) {
+      document.body.classList.remove("body-lock-scroll");
+    }
   }
 
   function buildFilterObjectsRows(items, kind, catMap) {
@@ -2869,7 +3002,6 @@ function maybeCloseFiltersModal() {
   }) {
     if (!cModal) return;
 
-    // 🔸 Ensure confirm modal is the last sibling so it stacks above others
     if (cModal.parentNode) {
       cModal.parentNode.appendChild(cModal);
     }
@@ -2913,7 +3045,6 @@ function maybeCloseFiltersModal() {
 
     setTimeout(() => (cBtnOk || cModal).focus(), 0);
   }
-
 
   function confirmDeleteMapping(mapping) {
     if (!mapping || !mapping.mapping_id) return;
@@ -2975,71 +3106,94 @@ function maybeCloseFiltersModal() {
     const listEl = document.getElementById("guild-mapping-list");
     if (!listEl) return;
 
-    const mappingCardsHtml = GUILD_MAPPINGS.map((m) => {
-      const iconSrc = m.original_guild_icon_url || "/static/logo.png";
-      return `
-      <div class="guild-card" data-id="${m.mapping_id}">
-        <div class="guild-card-logo">
-          <img src="${iconSrc}" alt="" class="guild-card-logo-img">
-        </div>
+    const searchInput = document.getElementById("mappingSearchInput");
+    const query = searchInput ? searchInput.value.trim().toLowerCase() : "";
 
-        <div class="guild-card-inner">
-          <div class="guild-card-main">
-            <div class="guild-card-name">
-              <div class="guild-card-name-title" title="${escapeHtml(
-                m.mapping_name || ""
-              )}">
-                ${escapeHtml(m.mapping_name || "")}
+    let mappings = Array.isArray(GUILD_MAPPINGS) ? GUILD_MAPPINGS.slice() : [];
+
+    if (query) {
+      mappings = mappings.filter((m) => {
+        if (!m) return false;
+        const parts = [];
+
+        if (m.mapping_name) parts.push(m.mapping_name);
+        if (m.original_guild_name) parts.push(m.original_guild_name);
+        if (m.cloned_guild_name) parts.push(m.cloned_guild_name);
+        if (m.original_guild_id) parts.push(String(m.original_guild_id));
+        if (m.cloned_guild_id) parts.push(String(m.cloned_guild_id));
+
+        const haystack = parts.join(" ").toLowerCase();
+        return haystack.includes(query);
+      });
+    }
+
+    const mappingCardsHtml = mappings
+      .map((m) => {
+        const iconSrc = m.original_guild_icon_url || "/static/logo.png";
+        return `
+        <div class="guild-card" data-id="${m.mapping_id}">
+          <div class="guild-card-logo">
+            <img src="${iconSrc}" alt="" class="guild-card-logo-img">
+          </div>
+
+          <div class="guild-card-inner">
+            <div class="guild-card-main">
+              <div class="guild-card-name">
+                <div class="guild-card-name-title" title="${escapeHtml(
+                  m.mapping_name || ""
+                )}">
+                  ${escapeHtml(m.mapping_name || "")}
+                </div>
+                <div class="guild-card-name-meta"></div>
               </div>
-              <div class="guild-card-name-meta"></div>
-            </div>
 
-            <div class="guild-card-actions">
-              <button class="btn-icon edit-mapping-btn"
-                      data-id="${m.mapping_id}"
-                      aria-label="Edit mapping"
-                      title="Settings">
-                ${ICONS.settings}
-              </button>
+              <div class="guild-card-actions">
+                <button class="btn-icon edit-mapping-btn"
+                        data-id="${m.mapping_id}"
+                        aria-label="Edit mapping"
+                        title="Settings">
+                  ${ICONS.settings}
+                </button>
 
-              <button class="btn-icon mapping-filters-btn"
-                      data-id="${m.mapping_id}"
-                      aria-label="Filters for this mapping"
-                      title="Filters">
-                ${ICONS.filters}
-              </button>
+                <button class="btn-icon mapping-filters-btn"
+                        data-id="${m.mapping_id}"
+                        aria-label="Filters for this mapping"
+                        title="Filters">
+                  ${ICONS.filters}
+                </button>
 
-              <button
-                class="btn-icon delete-mapping-btn"
-                type="button"
-                data-action="delete"
-                data-id="${m.mapping_id}"
-                aria-label="Delete mapping"
-                title="Delete mapping"
-              >
-                ${ICONS.trash}
-              </button>
+                <button
+                  class="btn-icon delete-mapping-btn"
+                  type="button"
+                  data-action="delete"
+                  data-id="${m.mapping_id}"
+                  aria-label="Delete mapping"
+                  title="Delete mapping"
+                >
+                  ${ICONS.trash}
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    `;
-    }).join("");
+      `;
+      })
+      .join("");
 
     const newCardHtml = `
-    <button
-      class="guild-card guild-card--new"
-      id="new-mapping-card"
-      type="button"
-      aria-label="Add new mapping"
-      title="Add new mapping"
-    >
-      <div class="new-card-inner">
-        <div class="new-card-plus">+</div>
-        <div class="new-card-label">Add Mapping</div>
-      </div>
-    </button>
-  `;
+      <button
+        class="guild-card guild-card--new"
+        id="new-mapping-card"
+        type="button"
+        aria-label="Add new mapping"
+        title="Add new mapping"
+      >
+        <div class="new-card-inner">
+          <div class="new-card-plus">+</div>
+          <div class="new-card-label">Add Mapping</div>
+        </div>
+      </button>
+    `;
 
     listEl.innerHTML = mappingCardsHtml + newCardHtml;
 
@@ -3166,6 +3320,35 @@ function maybeCloseFiltersModal() {
     }
   }
 
+  function setupMappingSettingsSearch() {
+    const input = document.getElementById("mappingSettingsSearch");
+    if (!input) return;
+    if (input._bound) return;
+    input._bound = true;
+
+    function applyFilter() {
+      const q = input.value.trim().toLowerCase();
+
+      const fields = document.querySelectorAll(
+        "#mapping-form .mapping-setting-field"
+      );
+
+      fields.forEach((field) => {
+        const key = (field.dataset.settingKey || "").toLowerCase();
+        const label = (
+          field.querySelector(".label-text")?.textContent || ""
+        ).toLowerCase();
+
+        const match = !q || key.includes(q) || label.includes(q);
+        field.style.display = match ? "" : "none";
+      });
+    }
+
+    input.addEventListener("input", applyFilter);
+
+    applyFilter();
+  }
+
   document.addEventListener("DOMContentLoaded", () => {
     cModal = document.getElementById("confirm-modal");
     cTitle = document.getElementById("confirm-title");
@@ -3189,6 +3372,8 @@ function maybeCloseFiltersModal() {
         if (cfgValidated) validateField(k);
       });
     });
+
+    setupMappingSettingsSearch();
 
     const fetchBtn = document.getElementById("filters-role-refresh");
     const applyBtn = document.getElementById("roleBlocksApply");
@@ -3611,8 +3796,6 @@ function maybeCloseFiltersModal() {
       }
     });
 
-
-
     function updateFiltersDirtyForModal() {
       const form = document.getElementById("form-filters");
       const cancelBtn = document.getElementById("btn-cancel-filters");
@@ -3818,20 +4001,45 @@ function maybeCloseFiltersModal() {
         openMappingModal(null);
       });
     }
+
     if (mapClose) {
-      mapClose.addEventListener("click", () => {
-        closeMappingModal();
+      mapClose.addEventListener("click", (e) => {
+        e.preventDefault();
+        maybeCloseMappingModal();
       });
     }
+
     if (mapCancel) {
-      mapCancel.addEventListener("click", () => {
-        closeMappingModal();
+      mapCancel.addEventListener("click", (e) => {
+        e.preventDefault();
+        resetMappingFormToBaseline();
       });
     }
+
     if (mapForm) {
       mapForm.addEventListener("submit", async (e) => {
         e.preventDefault();
         await saveMappingFromModal();
+      });
+    }
+
+    const mappingSearchInput = document.getElementById("mappingSearchInput");
+    if (mappingSearchInput) {
+      let searchDebounce;
+      mappingSearchInput.addEventListener("input", () => {
+        clearTimeout(searchDebounce);
+        searchDebounce = setTimeout(() => {
+          renderGuildMappings();
+        }, 80);
+      });
+
+      mappingSearchInput.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          mappingSearchInput.value = "";
+          renderGuildMappings();
+          mappingSearchInput.blur();
+        }
       });
     }
 
