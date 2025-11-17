@@ -3102,7 +3102,7 @@
     );
   }
 
-  function renderGuildMappings() {
+function renderGuildMappings() {
     const listEl = document.getElementById("guild-mapping-list");
     if (!listEl) return;
 
@@ -3226,6 +3226,10 @@
       newCardBtn.addEventListener("click", () => {
         openMappingModal();
       });
+    }
+
+    if (lastRunning === true) {
+      setGuildCardsLocked(true);
     }
   }
 
