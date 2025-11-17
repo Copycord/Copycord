@@ -116,6 +116,7 @@
     DELETE_THREADS: true,
     DELETE_MESSAGES: true,
     EDIT_MESSAGES: true,
+    REPOSITION_CHANNELS: true,
     DELETE_ROLES: true,
     UPDATE_ROLES: true,
     CLONE_EMOJI: true,

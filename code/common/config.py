@@ -104,6 +104,7 @@ class Config:
             "CLONE_STICKER": True,
             "EDIT_MESSAGES": True,
             "MIRROR_ROLE_PERMISSIONS": False,
+            "REPOSITION_CHANNELS": True,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):

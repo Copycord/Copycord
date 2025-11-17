@@ -1976,11 +1976,22 @@ class ServerReceiver:
         upstream_cats = {int(c["id"]): c for c in (sitemap.get("categories") or [])}
         host_guild_id = int((sitemap.get("guild") or {}).get("id") or 0)
 
+        try:
+            settings = resolve_mapping_settings(
+                self.db,
+                self.config,
+                original_guild_id=host_guild_id,
+                cloned_guild_id=int(guild.id),
+            )
+        except Exception:
+            settings = self.config.default_mapping_settings()
+
+        reposition_enabled = settings.get("REPOSITION_CHANNELS", True)
+
         per_cat = (self.cat_map_by_clone or {}).get(int(guild.id), {}) or {}
         per_chan = (self.chan_map_by_clone or {}).get(int(guild.id), {}) or {}
 
         if not per_cat or not per_chan:
-
             with contextlib.suppress(Exception):
                 self._load_mappings()
                 per_cat = (self.cat_map_by_clone or {}).get(int(guild.id), {}) or {}
@@ -1991,7 +2002,6 @@ class ServerReceiver:
 
             mapping = per_cat.get(int(orig_cat_id))
             if mapping is None:
-
                 row = self.db.get_category_mapping_by_original_and_clone(
                     int(orig_cat_id), int(guild.id)
                 )
@@ -2007,11 +2017,9 @@ class ServerReceiver:
             cat_obj = guild.get_channel(clone_cat_id) if clone_cat_id else None
 
             if not cat_obj:
-
                 cat_obj = discord.utils.get(guild.categories, name=upstream_name)
 
                 if not cat_obj:
-
                     try:
                         await self.ratelimit.acquire_for_guild(
                             ActionType.CREATE_CHANNEL, guild.id
@@ -2061,6 +2069,14 @@ class ServerReceiver:
                     self.cat_map_by_clone.setdefault(int(guild.id), {})[
                         int(orig_cat_id)
                     ] = m
+
+            if not reposition_enabled:
+                logger.debug(
+                    "[repair] Skipping channel reparenting for clone_g=%s orig_cat=%d (REPOSITION_CHANNELS=False)",
+                    guild.id,
+                    orig_cat_id,
+                )
+                continue
 
             cat_id_for_this_clone = int(cat_obj.id)
             for ch_orig_id, ch_map in list(per_chan.items()):
@@ -3587,7 +3603,7 @@ class ServerReceiver:
         host_guild_id: int | None,
         *,
         skip_channel_ids: set[int] | None = None,
-    ) -> bool:
+    ) -> int:  
         """
         Re-parent cloned channels for THIS clone guild only, when upstream parent differs.
         Updates DB mapping for THIS clone so future syncs keep the new parent.
@@ -3595,6 +3611,23 @@ class ServerReceiver:
         moved = 0
         skip_channel_ids = skip_channel_ids or set()
         host_guild_id = int(host_guild_id or 0)
+
+        try:
+            settings = resolve_mapping_settings(
+                self.db,
+                self.config,
+                original_guild_id=host_guild_id,
+                cloned_guild_id=int(guild.id),
+            )
+        except Exception:
+            settings = self.config.default_mapping_settings()
+
+        if not settings.get("REPOSITION_CHANNELS", True):
+            logger.debug(
+                "[reparent] Skipping channel repositioning for clone_g=%s (REPOSITION_CHANNELS=False)",
+                guild.id,
+            )
+            return 0
 
         per_chan = (self.chan_map_by_clone or {}).get(int(guild.id), {}) or {}
         per_cat = (self.cat_map_by_clone or {}).get(int(guild.id), {}) or {}
