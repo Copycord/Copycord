@@ -1,13 +1,3 @@
-# =============================================================================
-#  Copycord
-#  Copyright (C) 2021 github.com/Copycord
-#
-#  This source code is released under the GNU Affero General Public License
-#  version 3.0. A copy of the license is available at:
-#  https://www.gnu.org/licenses/agpl-3.0.en.html
-# =============================================================================
-
-
 from datetime import datetime
 import json
 import sqlite3, threading
@@ -2412,30 +2402,42 @@ class DBManager:
         cgid = int(m["cloned_guild_id"] or 0)
 
         tables_to_clean = [
-            "category_mappings",
-            "channel_mappings",
-            "threads",
-            "role_mappings",
-            "emoji_mappings",
-            "sticker_mappings",
             "messages",
             "filters",
             "blocked_keywords",
             "backfill_runs",
+            "role_blocks",
+            "threads",
+            "channel_mappings",
+            "category_mappings",
+            "role_mappings",
+            "emoji_mappings",
+            "sticker_mappings",
         ]
 
         with self.conn:
             for tbl in tables_to_clean:
                 try:
-                    self.conn.execute(
-                        f"""
-                        DELETE FROM {tbl}
-                        WHERE original_guild_id = ?
-                        AND cloned_guild_id   = ?
-                        """,
-                        (ogid, cgid),
-                    )
+
+                    if tbl == "role_blocks":
+                        self.conn.execute(
+                            f"""
+                            DELETE FROM {tbl}
+                            WHERE cloned_guild_id = ?
+                            """,
+                            (cgid,),
+                        )
+                    else:
+                        self.conn.execute(
+                            f"""
+                            DELETE FROM {tbl}
+                            WHERE original_guild_id = ?
+                            AND cloned_guild_id   = ?
+                            """,
+                            (ogid, cgid),
+                        )
                 except sqlite3.OperationalError:
+
                     pass
 
             self.conn.execute(
