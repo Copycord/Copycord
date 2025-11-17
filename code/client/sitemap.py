@@ -462,13 +462,14 @@ class SitemapService:
         ]
 
         for forum in getattr(guild, "forums", []):
-            sitemap["forums"].append(
-                {
-                    "id": forum.id,
-                    "name": forum.name,
-                    "category_id": forum.category.id if forum.category else None,
-                }
-            )
+            entry = {
+                "id": forum.id,
+                "name": forum.name,
+                "category_id": forum.category.id if forum.category else None,
+            }
+            if include_overwrites:
+                entry["overwrites"] = self._serialize_role_overwrites(forum)
+            sitemap["forums"].append(entry)
 
         seen = {t["id"] for t in sitemap["threads"]}
         for row in self.db.get_all_threads():

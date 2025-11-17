@@ -187,6 +187,7 @@ class ChannelPermissionSync:
         changed_cat = 0
         changed_ch = 0
 
+        # Categories + their text channels
         for cat in sitemap.get("categories", []) or []:
             row = cat_map.get(int(cat["id"]))
             if not row:
@@ -221,6 +222,7 @@ class ChannelPermissionSync:
                     ):
                         changed_ch += 1
 
+        # Standalone text channels
         for ch in sitemap.get("standalone_channels", []) or []:
             crow = chan_map.get(int(ch["id"]))
             if not crow:
@@ -238,6 +240,41 @@ class ChannelPermissionSync:
                 ):
                     changed_ch += 1
 
+        for fm in sitemap.get("forums", []) or []:
+            fm_id = int(fm["id"])
+            crow = chan_map.get(fm_id)
+            if not crow:
+                self._log(
+                    "info",
+                    "[perm-sync] skip forum %s: no chan_map",
+                    fm.get("id"),
+                )
+                continue
+
+            cch = guild.get_channel(int(crow.get("cloned_channel_id") or 0))
+            if cch is None:
+                self._log(
+                    "info",
+                    "[perm-sync] skip forum %s: cloned channel not found",
+                    fm.get("id"),
+                )
+                continue
+
+            ch_type_name = getattr(getattr(cch, "type", None), "name", "")
+            if ch_type_name != "forum":
+                self._log(
+                    "info",
+                    "[perm-sync] skip forum %s: cloned channel is not a forum (%r)",
+                    fm.get("id"),
+                    type(cch),
+                )
+                continue
+
+            if await self._apply_overwrites_to_channel(
+                cch, fm.get("overwrites", []), src_everyone_id
+            ):
+                changed_ch += 1
+
         parts: List[str] = []
         if changed_cat:
             parts.append(f"{changed_cat} categories updated")
@@ -245,6 +282,7 @@ class ChannelPermissionSync:
             parts.append(f"{changed_ch} channels updated")
 
         return parts
+
 
     @staticmethod
     def _extract_cloned_role_id(row: Any) -> Optional[int]:
