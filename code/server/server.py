@@ -14,6 +14,7 @@ import asyncio
 import logging
 import random
 from typing import List, Optional, Tuple, Dict, Union, Coroutine, Any
+import unicodedata
 import aiohttp
 import discord
 import json
@@ -142,6 +143,10 @@ class ServerReceiver:
         self.bot.event(self.on_webhooks_update)
         self.bot.event(self.on_guild_channel_delete)
         self.bot.event(self.on_member_join)
+        self._blocked_keywords_cache: dict[
+            tuple[int, int], list[tuple[re.Pattern, str]]
+        ] = {}
+        self._blocked_keywords_lock = asyncio.Lock()
         self._default_avatar_bytes: Optional[bytes] = None
         self._ws_task: asyncio.Task | None = None
         self._sitemap_queues: dict[int, asyncio.Queue] = {}
@@ -642,6 +647,7 @@ class ServerReceiver:
             )
             self.verify.start()
         self._verify_task = asyncio.create_task(self._verify_listen_loop())
+        await self._load_blocked_keywords_cache()
         await self.bus.log("Boot completed")
         await self.update_status(f"{CURRENT_VERSION}")
 
@@ -5310,6 +5316,31 @@ class ServerReceiver:
                         continue
 
                     try:
+                        orig_gid = int(
+                            mapping.get("original_guild_id") or host_guild_id or 0
+                        )
+                        content_to_check = msg.get("content", "") or ""
+
+                        should_block, blocked_keyword = self._should_block_for_mapping(
+                            content_to_check,
+                            orig_gid,
+                            clone_gid,
+                        )
+
+                        if should_block:
+                            logger.info(
+                                "[❌] Blocking message %s for clone %s: keyword '%s'",
+                                msg.get("message_id"),
+                                clone_gid,
+                                blocked_keyword,
+                            )
+                            continue
+                    except Exception:
+                        logger.exception(
+                            "[forward] Keyword check failed for clone %s", clone_gid
+                        )
+
+                    try:
                         ctx_gid = (
                             int(mapping.get("original_guild_id") or host_guild_id or 0)
                             or None
@@ -6026,6 +6057,27 @@ class ServerReceiver:
                         data.get("thread_id"),
                     )
                     continue
+
+                try:
+                    content_to_check = data.get("content", "") or ""
+
+                    should_block, blocked_keyword = self._should_block_for_mapping(
+                        content_to_check,
+                        int(data.get("guild_id") or 0),
+                        clone_gid,
+                    )
+
+                    if should_block:
+                        logger.info(
+                            "[❌] Blocking thread message for clone %s: keyword '%s'",
+                            clone_gid,
+                            blocked_keyword,
+                        )
+                        continue
+                except Exception:
+                    logger.exception(
+                        "[thread] Keyword check failed for clone %s", clone_gid
+                    )
 
                 try:
                     cloned_id = int(mrow.get("cloned_channel_id") or 0)
@@ -7579,6 +7631,148 @@ class ServerReceiver:
                 host_gid,
                 clone_gid_val,
             )
+
+    async def _load_blocked_keywords_cache(self) -> None:
+        """
+        Load all blocked keywords from DB and compile regex patterns.
+        Builds cache for all (original_guild_id, cloned_guild_id) pairs.
+        Called at startup and after keyword updates.
+        """
+        async with self._blocked_keywords_lock:
+            self._blocked_keywords_cache.clear()
+
+            logger.debug("[keywords] Loading blocked keywords from database...")
+
+            try:
+
+                rows = self.db.conn.execute(
+                    """
+                    SELECT keyword, original_guild_id, cloned_guild_id
+                    FROM blocked_keywords
+                    ORDER BY original_guild_id, cloned_guild_id, keyword
+                    """
+                ).fetchall()
+            except Exception as e:
+                logger.exception("[keywords] Failed to load blocked keywords from DB")
+                return
+
+            if not rows:
+                logger.debug("[keywords] No blocked keywords found in database")
+                return
+
+            grouped: dict[tuple[int, int], list[str]] = {}
+
+            for row in rows:
+                keyword = (row["keyword"] or "").strip().lower()
+                if not keyword:
+                    continue
+
+                orig_gid = (
+                    int(row["original_guild_id"])
+                    if row["original_guild_id"] is not None
+                    else 0
+                )
+                clone_gid = (
+                    int(row["cloned_guild_id"])
+                    if row["cloned_guild_id"] is not None
+                    else 0
+                )
+
+                key = (orig_gid, clone_gid)
+                grouped.setdefault(key, []).append(keyword)
+
+            total_patterns = 0
+            failed_patterns = 0
+
+            for key, keywords in grouped.items():
+                patterns = []
+                for keyword in keywords:
+                    try:
+                        regex = re.compile(
+                            rf"(?<!\w){re.escape(keyword)}(?!\w)",
+                            re.IGNORECASE,
+                        )
+                        patterns.append((regex, keyword))
+                        total_patterns += 1
+                    except Exception as e:
+                        failed_patterns += 1
+                        logger.warning(
+                            "[keywords] Failed to compile regex for keyword '%s': %s",
+                            keyword,
+                            e,
+                        )
+
+                if patterns:
+                    self._blocked_keywords_cache[key] = patterns
+
+            logger.debug(
+                "[keywords] Loaded %d keyword patterns across %d mapping scopes (%d failed)",
+                total_patterns,
+                len(grouped),
+                failed_patterns,
+            )
+
+    def _get_blocked_patterns_for_mapping(
+        self,
+        original_guild_id: int,
+        cloned_guild_id: int,
+    ) -> list[tuple[re.Pattern, str]]:
+        """
+        Get compiled regex patterns for blocked keywords for a specific mapping.
+        Returns list of (pattern, keyword) tuples from the pre-loaded cache.
+
+        Checks three scopes in order:
+        1. Mapping-specific (original_guild_id, cloned_guild_id)
+        2. Host-level (original_guild_id, 0)
+        3. Global (0, 0)
+        """
+        patterns = []
+
+        key_mapping = (int(original_guild_id), int(cloned_guild_id))
+        patterns.extend(self._blocked_keywords_cache.get(key_mapping, []))
+
+        key_host = (int(original_guild_id), 0)
+        patterns.extend(self._blocked_keywords_cache.get(key_host, []))
+
+        key_global = (0, 0)
+        patterns.extend(self._blocked_keywords_cache.get(key_global, []))
+
+        return patterns
+
+    async def _clear_blocked_keywords_cache_async(self):
+        """
+        Reload blocked keywords cache from DB.
+        Called after keyword updates via slash commands.
+        """
+        await self._load_blocked_keywords_cache()
+
+    def _should_block_for_mapping(
+        self,
+        content: str,
+        original_guild_id: int,
+        cloned_guild_id: int,
+    ) -> tuple[bool, str | None]:
+        """
+        Check if message content should be blocked for a specific mapping.
+
+        Returns:
+            (should_block, matched_keyword)
+        """
+        if not content:
+            return False, None
+
+        normalized = unicodedata.normalize("NFKC", content)
+
+        patterns = self._get_blocked_patterns_for_mapping(
+            original_guild_id,
+            cloned_guild_id,
+        )
+
+        for pattern, keyword in patterns:
+            if pattern.search(normalized):
+                return True, keyword
+
+        return False, None
 
     async def _shutdown(self):
         """

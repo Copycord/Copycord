@@ -81,8 +81,6 @@ class ClientListener:
         self.config = Config(logger=logger)
         self.db = DBManager(self.config.DB_PATH)
         self._mapped_original_ids: set[int] = set(self.db.get_all_original_guild_ids())
-        self.blocked_keywords_map = self.db.get_blocked_keywords_by_origin()
-        self._rebuild_blocklist(self.blocked_keywords_map)
         self.start_time = datetime.now(timezone.utc)
         self.bot = commands.Bot(command_prefix="!", self_bot=True)
         self.msg = MessageUtils(self.bot)
@@ -184,18 +182,6 @@ class ClientListener:
             self._reload_mapped_ids()
             self.sitemap.schedule_sync(guild_id=None, delay=0.2)
             return {"ok": True, "mapped": list(self._mapped_original_ids)}
-
-        elif typ == "settings_update":
-            kw_map = data.get("blocked_keywords_map") or {}
-            self._rebuild_blocklist(kw_map)
-
-            total_words = sum(len(v) for v in self.blocked_keywords_map.values())
-            logger.info(
-                "[⚙️] Updated block list: %s guild scopes / %s total keywords",
-                len(self.blocked_keywords_map),
-                total_words,
-            )
-            return
 
         elif typ == "ping":
             now = datetime.now(timezone.utc)
@@ -919,34 +905,6 @@ class ClientListener:
 
             return True
 
-        content = unicodedata.normalize("NFKC", message.content or "")
-
-        g = getattr(message, "guild", None)
-        guild_id = getattr(g, "id", None)
-        guild_name = getattr(g, "name", "unknown")
-
-        patterns_to_check: list[tuple[re.Pattern, str]] = []
-
-        patterns_to_check.extend(self._blocked_patterns_map.get(0, []))
-
-        if guild_id is not None:
-            try:
-                gid_int = int(guild_id)
-                patterns_to_check.extend(self._blocked_patterns_map.get(gid_int, []))
-            except (TypeError, ValueError):
-                pass
-
-        for pat, kw in patterns_to_check:
-            if pat.search(content):
-                logger.info(
-                    "[❌] Dropping message %s in %s: blocked keyword (%s)",
-                    message.id,
-                    guild_name,
-                    kw,
-                )
-                return True
-
-        return False
 
     async def maybe_send_announcement(self, message: discord.Message) -> bool:
         content = message.content

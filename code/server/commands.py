@@ -341,18 +341,24 @@ class CloneCommands(commands.Cog):
         if not changed:
             return await ctx.respond(f"⚠️ Couldn't toggle `{keyword}`.", ephemeral=True)
 
+        try:
+            server = getattr(self.bot, "server", None)
+            if server and hasattr(server, "_clear_blocked_keywords_cache_async"):
+                await server._clear_blocked_keywords_cache_async()
+                logger.debug(
+                    "[block_add] Cleared keywords cache after %s keyword '%s' (orig=%s, clone=%s)",
+                    action,
+                    keyword,
+                    orig_id,
+                    clone_id,
+                )
+        except Exception:
+            logger.exception("[block_add] Failed to clear keywords cache")
+
         emoji = "✅" if action == "added" else "🗑️"
         await ctx.respond(
             f"{emoji} `{keyword}` {action} for this clone server.",
             ephemeral=True,
-        )
-
-        kw_map = self.db.get_blocked_keywords_by_origin()
-        await self.bot.ws_manager.send(
-            {
-                "type": "settings_update",
-                "data": {"blocked_keywords_map": kw_map},
-            }
         )
 
     @guild_scoped_slash_command(
