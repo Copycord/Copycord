@@ -16,14 +16,6 @@ from server.rate_limiter import RateLimitManager, ActionType
 logger = logging.getLogger("server.roles")
 
 
-import asyncio, logging, discord
-from typing import List, Dict, Tuple, Optional
-from server.rate_limiter import RateLimitManager, ActionType
-from server import logctx
-
-logger = logging.getLogger("server.roles")
-
-
 class RoleManager:
     def __init__(
         self,
