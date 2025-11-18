@@ -203,14 +203,26 @@ If enabled, you’ll receive a direct message with the new member’s details wh
 ```
 
 ---
-### `/purge_assets <type> <confirm>`
-**Description:** Purge all stickers, emojis, or roles.
+### `/purge_assets <type> <confirm> [unmapped_only] [cloned_only]`
+**Description:** Purge emojis, stickers, or roles from the current guild.
 
-**Usage Example:**
-```
+**Type Options:**
+- `emojis`
+- `stickers`
+- `roles`
+
+**Modes:**
+- `unmapped_only = true` — Only delete assets **not** mapped in the DB.
+- `cloned_only = true` — Only delete assets that **are mapped** (i.e., cloned assets).
+> These two options are **mutually exclusive**.
+
+**Usage Examples:**
+```text
 /purge_assets roles confirm
-```
-> **Note:** Make sure the copycord role is positioned at the top.
+/purge_assets emojis confirm unmapped_only:true
+/purge_assets stickers confirm cloned_only:true
+
+> **Note:** Make sure the copycord role is positioned at the top to remove roles.
 
 ---
 
@@ -267,4 +279,49 @@ If enabled, you’ll receive a direct message with the new member’s details wh
 **Notes:**
 - The resulting archive is saved under: `/data/assets`.
 - Inside the archive, assets are organized as:
+---
+
+### Role mention pings (`/role_mention`)
+
+Configure roles that get auto-mentioned at the top of cloned messages, per **clone** and optionally per **cloned channel**.
+
+#### `/role_mention add <role> [channel_id]`
+**Description:** Add a role to be mentioned on cloned messages.
+
+- `role` — The role in the **cloned guild** to mention.
+- `channel_id` — (Optional) **Cloned channel ID** to scope the ping.  
+  Leave empty to apply to **all channels** in this clone.
+
+**Examples:**
+```text
+/role_mention add @Alerts
+/role_mention add @RaidPing channel_id:123456789012345678
+```
+
+---
+
+#### `/role_mention remove <role> [channel_id]`
+**Description:** Remove an existing role mention configuration.
+
+- If `channel_id` is empty, removes the **global** config for that role in this clone.
+- If `channel_id` is set, removes only that **channel-scoped** config.
+
+**Examples:**
+```text
+/role_mention remove @Alerts
+/role_mention remove @RaidPing channel_id:123456789012345678
+```
+
+---
+
+#### `/role_mention list`
+**Description:** List all role mention configurations for the **current clone**.
+
+Shows each role and whether it applies to **all channels** or a specific cloned channel.
+
+**Example:**
+```text
+/role_mention list
+```
+
 ---
