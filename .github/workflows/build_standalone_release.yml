@@ -4,10 +4,7 @@ on:
   push:
     tags:
       - 'v*.*.*'
-    branches:
-      - test-standalone-release-workflow
 
-  # ⬇️ This enables the "Run workflow" button in the Actions tab
   workflow_dispatch:
 
 permissions:
@@ -20,19 +17,28 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create standalone package
+      - name: Create standalone package base
         run: |
           mkdir -p standalone-release
+          mkdir -p standalone-release/windows
+          mkdir -p standalone-release/linux-mac
+
+
           cp -r code standalone-release/
           cp LICENSE standalone-release/
           cp README.md standalone-release/
 
       - name: Create Windows setup script
         run: |
-          cat > standalone-release/setup.bat << 'EOF'
+          cat > standalone-release/windows/setup.bat << 'EOF'
           @echo off
+          setlocal
+
+          rem Go to the root of the standalone package (one level above /windows)
+          cd /d %~dp0..
+
           echo ========================================
-          echo   Copycord Standalone Setup
+          echo   Copycord Standalone Setup (Windows)
           echo ========================================
           echo.
 
@@ -58,9 +64,9 @@ jobs:
 
           echo [3/3] Installing dependencies...
           pip install --upgrade pip --quiet
-          pip install -r code/admin/requirements.txt --quiet
-          pip install -r code/client/requirements.txt --quiet
-          pip install -r code/server/requirements.txt --quiet
+          pip install -r code\admin\requirements.txt --quiet
+          pip install -r code\client\requirements.txt --quiet
+          pip install -r code\server\requirements.txt --quiet
 
           if errorlevel 1 (
               echo [ERROR] Failed to install dependencies
@@ -73,21 +79,27 @@ jobs:
           echo   Setup Complete!
           echo ========================================
           echo.
-          echo Run 'start.bat' to launch Copycord
+          echo Run 'windows\start.bat' to launch Copycord
           echo.
           pause
+          endlocal
           EOF
 
       - name: Create Windows start script
         run: |
-          cat > standalone-release/start.bat << 'EOF'
+          cat > standalone-release/windows/start.bat << 'EOF'
           @echo off
+          setlocal
+
+          rem Go to the root of the standalone package (one level above /windows)
+          cd /d %~dp0..
+
           echo Starting Copycord...
           echo.
 
           if not exist venv\Scripts\activate.bat (
               echo [ERROR] Virtual environment not found!
-              echo Please run 'setup.bat' first.
+              echo Please run 'windows\setup.bat' first.
               pause
               exit /b 1
           )
@@ -95,15 +107,15 @@ jobs:
           call venv\Scripts\activate.bat
 
           echo Starting Admin (Web UI)...
-          start "Copycord Admin" cmd /k "cd /d %~dp0 && venv\Scripts\python.exe -m uvicorn admin.app:app --host 0.0.0.0 --port 8080 --app-dir code"
+          start "Copycord Admin" cmd /k "cd /d %CD% && venv\Scripts\python.exe -m uvicorn admin.app:app --host 0.0.0.0 --port 8080 --app-dir code"
 
           timeout /t 3 /nobreak >nul
 
           echo Starting Server...
-          start "Copycord Server" cmd /k "cd /d %~dp0\code && SET PYTHONPATH=%~dp0\code && SET CONTROL_PORT=9101 && ..\venv\Scripts\python.exe control/control.py"
+          start "Copycord Server" cmd /k "cd /d %CD%\code && SET PYTHONPATH=%CD%\code && SET CONTROL_PORT=9101 && ..\venv\Scripts\python.exe control\control.py"
 
           echo Starting Client...
-          start "Copycord Client" cmd /k "cd /d %~dp0\code && SET PYTHONPATH=%~dp0\code && SET CONTROL_PORT=9102 && ..\venv\Scripts\python.exe control/control.py"
+          start "Copycord Client" cmd /k "cd /d %CD%\code && SET PYTHONPATH=%CD%\code && SET CONTROL_PORT=9102 && ..\venv\Scripts\python.exe control\control.py"
 
           echo.
           echo ========================================
@@ -115,16 +127,21 @@ jobs:
           echo Close all command windows to stop Copycord
           echo.
           pause
+          endlocal
           EOF
 
       - name: Create Linux/Mac setup script
         run: |
-          cat > standalone-release/setup.sh << 'EOF'
-          #!/bin/bash
+          cat > standalone-release/linux-mac/setup.sh << 'EOF'
+
           set -e
 
+
+          ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+          cd "$ROOT_DIR"
+
           echo "========================================"
-          echo "  Copycord Standalone Setup"
+          echo "  Copycord Standalone Setup (Linux/Mac)"
           echo "========================================"
           echo ""
 
@@ -151,30 +168,34 @@ jobs:
           echo "  Setup Complete!"
           echo "========================================"
           echo ""
-          echo "Run './start.sh' to launch Copycord"
+          echo "Run './linux-mac/start.sh' to launch Copycord"
           echo ""
           EOF
-          chmod +x standalone-release/setup.sh
+          chmod +x standalone-release/linux-mac/setup.sh
 
       - name: Create Linux/Mac start script
         run: |
-          cat > standalone-release/start.sh << 'EOF'
-          #!/bin/bash
+          cat > standalone-release/linux-mac/start.sh << 'EOF'
+
           set -e
+
+
+          ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+          cd "$ROOT_DIR"
 
           echo "Starting Copycord..."
           echo ""
 
           if [ ! -f venv/bin/activate ]; then
               echo "[ERROR] Virtual environment not found!"
-              echo "Please run './setup.sh' first."
+              echo "Please run './linux-mac/setup.sh' first."
               exit 1
           fi
 
           source venv/bin/activate
 
-          export PYTHONPATH="$(pwd)/code:${PYTHONPATH}"
-          export DATA_DIR="$(pwd)/data"
+          export PYTHONPATH="$ROOT_DIR/code:${PYTHONPATH}"
+          export DATA_DIR="$ROOT_DIR/data"
           mkdir -p "$DATA_DIR"
 
           echo "Starting Admin (Web UI)..."
@@ -213,7 +234,7 @@ jobs:
 
           wait
           EOF
-          chmod +x standalone-release/start.sh
+          chmod +x standalone-release/linux-mac/start.sh
 
       - name: Create README for standalone
         run: |
@@ -231,14 +252,18 @@ jobs:
           ------------
 
           WINDOWS USERS:
-          1. Double-click 'setup.bat' to install dependencies
-          2. Double-click 'start.bat' to run Copycord
-          3. Open http://localhost:8080 in your browser
+          1. Extract this folder somewhere (e.g., Desktop).
+          2. Open the "windows" folder.
+          3. Double-click "setup.bat" to install dependencies.
+          4. Double-click "start.bat" to run Copycord.
+          5. Open http://localhost:8080 in your browser.
 
           LINUX/MAC USERS:
-          1. Run './setup.sh' to install dependencies
-          2. Run './start.sh' to run Copycord
-          3. Open http://localhost:8080 in your browser
+          1. Extract this folder somewhere (e.g., home directory).
+          2. Open a terminal in the extracted folder.
+          3. Run: ./linux-mac/setup.sh
+          4. Then run: ./linux-mac/start.sh
+          5. Open http://localhost:8080 in your browser.
 
           CONFIGURATION:
           --------------
@@ -266,7 +291,8 @@ jobs:
           ========================================
           EOF
 
-      - name: Create zip package
+      - name: Create zip package for releases (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           cd standalone-release
           zip -r ../copycord-standalone-${{ github.ref_name }}.zip .
@@ -275,7 +301,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: copycord-standalone-${{ github.ref_name }}
-          path: copycord-standalone-${{ github.ref_name }}.zip
+          path: standalone-release
 
       - name: Upload to release
         if: startsWith(github.ref, 'refs/tags/v')
