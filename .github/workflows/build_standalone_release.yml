@@ -2,9 +2,15 @@ name: Build Standalone Release Package
 
 on:
   push:
+    # Auto-run on version tags (real releases)
     tags:
       - 'v*.*.*'
+    # Allow running automatically on main or test branch if you want
+    branches:
+      - main
+      - test-standalone-release-workflow
 
+  # Enables the "Run workflow" button in Actions tab
   workflow_dispatch:
 
 permissions:
@@ -14,10 +20,10 @@ jobs:
   build-standalone:
     runs-on: ubuntu-latest
 
-    # - it's a release tag (refs/tags/v...), OR
-    # - it's the test-standalone-release-workflow branch
+    # Only build for main, test branch, or release tags
     if: |
       startsWith(github.ref, 'refs/tags/v') ||
+      github.ref == 'refs/heads/main' ||
       github.ref == 'refs/heads/test-standalone-release-workflow'
 
     steps:
@@ -33,13 +39,14 @@ jobs:
           cp LICENSE standalone-release/
           cp README.md standalone-release/
 
+      # -------------------------
+      # Windows setup/start
+      # -------------------------
       - name: Create Windows setup script
         run: |
           cat > standalone-release/windows/setup.bat << 'EOF'
           @echo off
           setlocal
-
-          rem Go to the root of the standalone package (one level above /windows)
           cd /d %~dp0..
 
           echo ========================================
@@ -51,7 +58,6 @@ jobs:
           if errorlevel 1 (
               echo [ERROR] Python is not installed!
               echo Please install Python 3.8 or higher from https://www.python.org/
-              echo.
               pause
               exit /b 1
           )
@@ -64,28 +70,16 @@ jobs:
               exit /b 1
           )
 
-          echo [2/3] Activating virtual environment...
           call venv\Scripts\activate.bat
-
           echo [3/3] Installing dependencies...
           pip install --upgrade pip --quiet
           pip install -r code\admin\requirements.txt --quiet
           pip install -r code\client\requirements.txt --quiet
           pip install -r code\server\requirements.txt --quiet
 
-          if errorlevel 1 (
-              echo [ERROR] Failed to install dependencies
-              pause
-              exit /b 1
-          )
-
-          echo.
           echo ========================================
-          echo   Setup Complete!
+          echo   Setup Complete! Run 'windows\start.bat'
           echo ========================================
-          echo.
-          echo Run 'windows\start.bat' to launch Copycord
-          echo.
           pause
           endlocal
           EOF
@@ -95,12 +89,7 @@ jobs:
           cat > standalone-release/windows/start.bat << 'EOF'
           @echo off
           setlocal
-
-          rem Go to the root of the standalone package (one level above /windows)
           cd /d %~dp0..
-
-          echo Starting Copycord...
-          echo.
 
           if not exist venv\Scripts\activate.bat (
               echo [ERROR] Virtual environment not found!
@@ -110,203 +99,126 @@ jobs:
           )
 
           call venv\Scripts\activate.bat
+          echo Starting Copycord...
 
-          echo Starting Admin (Web UI)...
           start "Copycord Admin" cmd /k "cd /d %CD% && venv\Scripts\python.exe -m uvicorn admin.app:app --host 0.0.0.0 --port 8080 --app-dir code"
-
-          timeout /t 3 /nobreak >nul
-
-          echo Starting Server...
+          timeout /t 3 >nul
           start "Copycord Server" cmd /k "cd /d %CD%\code && SET PYTHONPATH=%CD%\code && SET CONTROL_PORT=9101 && ..\venv\Scripts\python.exe control\control.py"
-
-          echo Starting Client...
           start "Copycord Client" cmd /k "cd /d %CD%\code && SET PYTHONPATH=%CD%\code && SET CONTROL_PORT=9102 && ..\venv\Scripts\python.exe control\control.py"
 
-          echo.
-          echo ========================================
-          echo   Copycord is running!
-          echo ========================================
-          echo.
-          echo Web UI: http://localhost:8080
-          echo.
-          echo Close all command windows to stop Copycord
-          echo.
+          echo Copycord is running! Web UI: http://localhost:8080
           pause
           endlocal
           EOF
 
+      # -------------------------
+      # Linux/Mac setup/start
+      # -------------------------
       - name: Create Linux/Mac setup script
         run: |
           cat > standalone-release/linux-mac/setup.sh << 'EOF'
-
+          #!/bin/bash
           set -e
-
           ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
           cd "$ROOT_DIR"
 
           echo "========================================"
           echo "  Copycord Standalone Setup (Linux/Mac)"
           echo "========================================"
-          echo ""
 
           if ! command -v python3 &> /dev/null; then
               echo "[ERROR] Python 3 is not installed!"
-              echo "Please install Python 3.8 or higher"
               exit 1
           fi
 
-          echo "[1/3] Creating virtual environment..."
           python3 -m venv venv
-
-          echo "[2/3] Activating virtual environment..."
           source venv/bin/activate
-
-          echo "[3/3] Installing dependencies..."
           pip install --upgrade pip --quiet
           pip install -r code/admin/requirements.txt --quiet
           pip install -r code/client/requirements.txt --quiet
           pip install -r code/server/requirements.txt --quiet
 
-          echo ""
           echo "========================================"
-          echo "  Setup Complete!"
+          echo "  Setup Complete! Run './linux-mac/start.sh'"
           echo "========================================"
-          echo ""
-          echo "Run './linux-mac/start.sh' to launch Copycord"
-          echo ""
           EOF
           chmod +x standalone-release/linux-mac/setup.sh
 
       - name: Create Linux/Mac start script
         run: |
           cat > standalone-release/linux-mac/start.sh << 'EOF'
-
+          #!/bin/bash
           set -e
-
           ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
           cd "$ROOT_DIR"
 
-          echo "Starting Copycord..."
-          echo ""
-
           if [ ! -f venv/bin/activate ]; then
-              echo "[ERROR] Virtual environment not found!"
-              echo "Please run './linux-mac/setup.sh' first."
+              echo "[ERROR] Please run './linux-mac/setup.sh' first."
               exit 1
           fi
 
           source venv/bin/activate
-
-          export PYTHONPATH="$ROOT_DIR/code:${PYTHONPATH}"
+          export PYTHONPATH="$ROOT_DIR/code"
           export DATA_DIR="$ROOT_DIR/data"
           mkdir -p "$DATA_DIR"
 
-          echo "Starting Admin (Web UI)..."
+          echo "Starting Admin..."
           cd code
           uvicorn admin.app:app --host 0.0.0.0 --port 8080 > ../data/admin.log 2>&1 &
           ADMIN_PID=$!
           cd ..
 
           sleep 3
-
           echo "Starting Server..."
-          cd code
-          CONTROL_PORT=9101 python control/control.py > ../data/server.log 2>&1 &
+          cd code && CONTROL_PORT=9101 python control/control.py > ../data/server.log 2>&1 &
           SERVER_PID=$!
           cd ..
 
           echo "Starting Client..."
-          cd code
-          CONTROL_PORT=9102 python control/control.py > ../data/client.log 2>&1 &
+          cd code && CONTROL_PORT=9102 python control/control.py > ../data/client.log 2>&1 &
           CLIENT_PID=$!
           cd ..
 
-          echo ""
-          echo "========================================"
-          echo "  Copycord is running!"
-          echo "========================================"
-          echo ""
-          echo "Web UI: http://localhost:8080"
-          echo ""
-          echo "PIDs: Admin=$ADMIN_PID Server=$SERVER_PID Client=$CLIENT_PID"
-          echo "Logs: data/admin.log data/server.log data/client.log"
-          echo ""
-          echo "Press Ctrl+C to stop..."
-
-          trap "echo 'Stopping...'; kill $ADMIN_PID $SERVER_PID $CLIENT_PID 2>/dev/null; exit" INT TERM
-
+          echo "Copycord is running! Visit http://localhost:8080"
+          trap "kill $ADMIN_PID $SERVER_PID $CLIENT_PID" INT TERM
           wait
           EOF
           chmod +x standalone-release/linux-mac/start.sh
 
-      - name: Create README for standalone
+      - name: Create README-STANDALONE
         run: |
           cat > standalone-release/README-STANDALONE.txt << 'EOF'
           ========================================
             COPYCORD - STANDALONE INSTALLATION
           ========================================
 
-          REQUIREMENTS:
-          -------------
-          - Python 3.8 or higher
-          - Internet connection (for initial setup)
+          WINDOWS:
+            - Run windows\setup.bat
+            - Then windows\start.bat
 
-          QUICK START:
-          ------------
+          LINUX/MAC:
+            - Run ./linux-mac/setup.sh
+            - Then ./linux-mac/start.sh
 
-          WINDOWS USERS:
-          1. Extract this folder somewhere (e.g., Desktop).
-          2. Open the "windows" folder.
-          3. Double-click "setup.bat" to install dependencies.
-          4. Double-click "start.bat" to run Copycord.
-          5. Open http://localhost:8080 in your browser.
-
-          LINUX/MAC USERS:
-          1. Extract this folder somewhere (e.g., home directory).
-          2. Open a terminal in the extracted folder.
-          3. Run: ./linux-mac/setup.sh
-          4. Then run: ./linux-mac/start.sh
-          5. Open http://localhost:8080 in your browser.
-
-          CONFIGURATION:
-          --------------
-          Configure your Discord tokens and settings through 
-          the web UI at http://localhost:8080
-
-          Follow the setup instructions in the main README.md
-          for obtaining your Discord bot token and user token.
-
-          STOPPING COPYCORD:
-          ------------------
-          Windows: Close all command windows
-          Linux/Mac: Press Ctrl+C in the terminal
-
-          DATA STORAGE:
-          -------------
-          All data is stored in the 'data/' directory which
-          will be created automatically on first run.
-
-          DOCUMENTATION:
-          --------------
-          Full documentation: https://github.com/Copycord/Copycord
-          Discord Support: https://discord.gg/ArFdqrJHBj
-
-          ========================================
+          Web UI: http://localhost:8080
+          All data logs saved to ./data/
           EOF
 
-      - name: Create zip package for releases (tags only)
+      # Tags: create zip for GitHub release
+      - name: Create zip package (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           cd standalone-release
           zip -r ../copycord-standalone-${{ github.ref_name }}.zip .
 
+      # Artifacts: upload folder (GitHub automatically zips once)
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: copycord-standalone-${{ github.ref_name }}
           path: standalone-release
 
-      - name: Upload to release
+      - name: Upload to GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
         with:
