@@ -14,6 +14,12 @@ jobs:
   build-standalone:
     runs-on: ubuntu-latest
 
+    # - it's a release tag (refs/tags/v...), OR
+    # - it's the test-standalone-release-workflow branch
+    if: |
+      startsWith(github.ref, 'refs/tags/v') ||
+      github.ref == 'refs/heads/test-standalone-release-workflow'
+
     steps:
       - uses: actions/checkout@v4
 
@@ -22,7 +28,6 @@ jobs:
           mkdir -p standalone-release
           mkdir -p standalone-release/windows
           mkdir -p standalone-release/linux-mac
-
 
           cp -r code standalone-release/
           cp LICENSE standalone-release/
@@ -136,7 +141,6 @@ jobs:
 
           set -e
 
-
           ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
           cd "$ROOT_DIR"
 
@@ -178,7 +182,6 @@ jobs:
           cat > standalone-release/linux-mac/start.sh << 'EOF'
 
           set -e
-
 
           ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
           cd "$ROOT_DIR"
