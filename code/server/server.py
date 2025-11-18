@@ -1702,6 +1702,9 @@ class ServerReceiver:
                     parts += await self._sync_forums(guild, sitemap)
                     parts += await self._sync_channels(guild, sitemap)
                     parts += await self._sync_community(guild, sitemap)
+                    parts += await self._sync_channel_nsfw(guild, sitemap)
+                    parts += await self._sync_channel_topic(guild, sitemap)
+                    parts += await self._sync_channel_slowmode(guild, sitemap)
 
                     moved = await self._handle_master_channel_moves(
                         guild,
@@ -2142,6 +2145,317 @@ class ServerReceiver:
                     logger.debug("[repair] channel reparent error", exc_info=True)
 
         return created, reparented, repaired_ids
+
+    async def _sync_channel_nsfw(self, guild: Guild, sitemap: Dict) -> List[str]:
+        """
+        Synchronize NSFW flags for channels.
+        """
+        parts: List[str] = []
+        host_guild_id = (sitemap.get("guild") or {}).get("id")
+
+        try:
+            settings = resolve_mapping_settings(
+                self.db,
+                self.config,
+                original_guild_id=int(host_guild_id) if host_guild_id else None,
+                cloned_guild_id=int(guild.id),
+            )
+        except Exception:
+            settings = self.config.default_mapping_settings()
+
+        if not settings.get("SYNC_CHANNEL_NSFW", False):
+            logger.debug(
+                "[nsfw] SYNC_CHANNEL_NSFW disabled for clone_g=%s; skipping",
+                guild.id,
+            )
+            return parts
+
+        updated = 0
+        incoming = self._parse_sitemap(sitemap)
+
+        nsfw_map = {}
+
+        for cat in sitemap.get("categories", []):
+            for ch in cat.get("channels", []):
+                try:
+                    nsfw_map[int(ch["id"])] = bool(ch.get("nsfw", False))
+                except Exception:
+                    pass
+
+        for ch in sitemap.get("standalone_channels", []):
+            try:
+                nsfw_map[int(ch["id"])] = bool(ch.get("nsfw", False))
+            except Exception:
+                pass
+
+        for forum in sitemap.get("forums", []):
+            try:
+                nsfw_map[int(forum["id"])] = bool(forum.get("nsfw", False))
+            except Exception:
+                pass
+
+        per_clone = self.chan_map_by_clone.get(int(guild.id), {}) or {}
+
+        for orig_id, desired_nsfw in nsfw_map.items():
+            row = per_clone.get(int(orig_id))
+            if not row:
+                continue
+
+            clone_id = int(row.get("cloned_channel_id") or 0)
+            if not clone_id:
+                continue
+
+            ch = guild.get_channel(clone_id)
+            if not ch:
+                continue
+
+            if not hasattr(ch, "nsfw"):
+                continue
+
+            current_nsfw = bool(getattr(ch, "nsfw", False))
+
+            if current_nsfw != desired_nsfw:
+                try:
+                    await self.ratelimit.acquire_for_guild(
+                        ActionType.EDIT_CHANNEL, guild.id
+                    )
+                    await ch.edit(nsfw=desired_nsfw)
+                    updated += 1
+                    logger.info(
+                        "[🔞] Updated NSFW flag for channel '%s' #%d: %s → %s",
+                        ch.name,
+                        ch.id,
+                        current_nsfw,
+                        desired_nsfw,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[⚠️] Failed to update NSFW flag for channel #%d: %s",
+                        ch.id,
+                        e,
+                    )
+
+        if updated:
+            parts.append(f"Updated NSFW flag on {updated} channels")
+
+        return parts
+
+    async def _sync_channel_topic(self, guild: Guild, sitemap: Dict) -> List[str]:
+        """
+        Synchronize channel topics based on SYNC_CHANNEL_TOPIC setting.
+        """
+        parts: List[str] = []
+        host_guild_id = (sitemap.get("guild") or {}).get("id")
+
+        try:
+            settings = resolve_mapping_settings(
+                self.db,
+                self.config,
+                original_guild_id=int(host_guild_id) if host_guild_id else None,
+                cloned_guild_id=int(guild.id),
+            )
+        except Exception:
+            settings = self.config.default_mapping_settings()
+
+        if not settings.get("SYNC_CHANNEL_TOPIC", False):
+            logger.debug(
+                "[topic] SYNC_CHANNEL_TOPIC disabled for clone_g=%s; skipping",
+                guild.id,
+            )
+            return parts
+
+        updated = 0
+
+        topic_map = {}
+
+        for cat in sitemap.get("categories", []):
+            for ch in cat.get("channels", []):
+                try:
+                    topic_map[int(ch["id"])] = ch.get("topic")
+                except Exception:
+                    pass
+
+        for ch in sitemap.get("standalone_channels", []):
+            try:
+                topic_map[int(ch["id"])] = ch.get("topic")
+            except Exception:
+                pass
+
+        for forum in sitemap.get("forums", []):
+            try:
+                topic_map[int(forum["id"])] = forum.get("topic")
+            except Exception:
+                pass
+
+        per_clone = self.chan_map_by_clone.get(int(guild.id), {}) or {}
+
+        for orig_id, desired_topic in topic_map.items():
+            row = per_clone.get(int(orig_id))
+            if not row:
+                continue
+
+            clone_id = int(row.get("cloned_channel_id") or 0)
+            if not clone_id:
+                continue
+
+            ch = guild.get_channel(clone_id)
+            if not ch:
+                continue
+
+            if not hasattr(ch, "topic"):
+                continue
+
+            current_topic = getattr(ch, "topic", None)
+
+            current_normalized = current_topic if current_topic else None
+            desired_normalized = desired_topic if desired_topic else None
+
+            if current_normalized != desired_normalized:
+                try:
+                    await self.ratelimit.acquire_for_guild(
+                        ActionType.EDIT_CHANNEL, guild.id
+                    )
+                    await ch.edit(topic=desired_topic)
+                    updated += 1
+
+                    def _truncate(s, max_len=50):
+                        if not s:
+                            return "(empty)"
+                        s_str = str(s)
+                        return (
+                            s_str
+                            if len(s_str) <= max_len
+                            else s_str[: max_len - 3] + "..."
+                        )
+
+                    logger.info(
+                        "[📝] Updated topic for channel '%s' #%d: %s → %s",
+                        ch.name,
+                        ch.id,
+                        _truncate(current_topic),
+                        _truncate(desired_topic),
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[⚠️] Failed to update topic for channel #%d: %s",
+                        ch.id,
+                        e,
+                    )
+
+        if updated:
+            parts.append(f"Updated topic on {updated} channels")
+
+        return parts
+
+    async def _sync_channel_slowmode(self, guild: Guild, sitemap: Dict) -> List[str]:
+        """
+        Synchronize channel slowmode delays based on SYNC_CHANNEL_SLOWMODE setting.
+        """
+        parts: List[str] = []
+        host_guild_id = (sitemap.get("guild") or {}).get("id")
+
+        try:
+            settings = resolve_mapping_settings(
+                self.db,
+                self.config,
+                original_guild_id=int(host_guild_id) if host_guild_id else None,
+                cloned_guild_id=int(guild.id),
+            )
+        except Exception:
+            settings = self.config.default_mapping_settings()
+
+        if not settings.get("SYNC_CHANNEL_SLOWMODE", False):
+            logger.debug(
+                "[slowmode] SYNC_CHANNEL_SLOWMODE disabled for clone_g=%s; skipping",
+                guild.id,
+            )
+            return parts
+
+        updated = 0
+
+        slowmode_map = {}
+
+        for cat in sitemap.get("categories", []):
+            for ch in cat.get("channels", []):
+                try:
+                    slowmode_map[int(ch["id"])] = int(ch.get("slowmode_delay", 0))
+                except Exception:
+                    pass
+
+        for ch in sitemap.get("standalone_channels", []):
+            try:
+                slowmode_map[int(ch["id"])] = int(ch.get("slowmode_delay", 0))
+            except Exception:
+                pass
+
+        for forum in sitemap.get("forums", []):
+            try:
+                slowmode_map[int(forum["id"])] = int(forum.get("slowmode_delay", 0))
+            except Exception:
+                pass
+
+        per_clone = self.chan_map_by_clone.get(int(guild.id), {}) or {}
+
+        for orig_id, desired_delay in slowmode_map.items():
+            row = per_clone.get(int(orig_id))
+            if not row:
+                continue
+
+            clone_id = int(row.get("cloned_channel_id") or 0)
+            if not clone_id:
+                continue
+
+            ch = guild.get_channel(clone_id)
+            if not ch:
+                continue
+
+            if not hasattr(ch, "slowmode_delay"):
+                continue
+
+            current_delay = int(getattr(ch, "slowmode_delay", 0) or 0)
+
+            desired_delay = max(0, min(21600, desired_delay))
+
+            if current_delay != desired_delay:
+                try:
+                    await self.ratelimit.acquire_for_guild(
+                        ActionType.EDIT_CHANNEL, guild.id
+                    )
+                    await ch.edit(slowmode_delay=desired_delay)
+                    updated += 1
+
+                    def _format_delay(seconds):
+                        if seconds == 0:
+                            return "disabled"
+                        elif seconds < 60:
+                            return f"{seconds}s"
+                        elif seconds < 3600:
+                            mins = seconds // 60
+                            secs = seconds % 60
+                            return f"{mins}m {secs}s" if secs else f"{mins}m"
+                        else:
+                            hours = seconds // 3600
+                            mins = (seconds % 3600) // 60
+                            return f"{hours}h {mins}m" if mins else f"{hours}h"
+
+                    logger.info(
+                        "[⏱️] Updated slowmode for channel '%s' #%d: %s → %s",
+                        ch.name,
+                        ch.id,
+                        _format_delay(current_delay),
+                        _format_delay(desired_delay),
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[⚠️] Failed to update slowmode for channel #%d: %s",
+                        ch.id,
+                        e,
+                    )
+
+        if updated:
+            parts.append(f"Updated slowmode on {updated} channels")
+
+        return parts
 
     async def _sync_categories(self, guild: Guild, sitemap: Dict) -> List[str]:
         """

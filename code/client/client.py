@@ -1704,12 +1704,87 @@ class ClientListener:
                 getattr(before, "id", None),
             )
             return
+        
         name_changed = before.name != after.name
         parent_before = getattr(before, "category_id", None)
         parent_after = getattr(after, "category_id", None)
         parent_changed = parent_before != parent_after
+        
+        # Check for NSFW flag changes
+        nsfw_changed = False
+        try:
+            nsfw_before = getattr(before, "nsfw", False)
+            nsfw_after = getattr(after, "nsfw", False)
+            nsfw_changed = nsfw_before != nsfw_after
+        except Exception:
+            nsfw_changed = False
+        
+        # Check for topic changes
+        topic_changed = False
+        try:
+            topic_before = getattr(before, "topic", None)
+            topic_after = getattr(after, "topic", None)
+            # Normalize None and empty string for comparison
+            topic_before_normalized = topic_before if topic_before else None
+            topic_after_normalized = topic_after if topic_after else None
+            topic_changed = topic_before_normalized != topic_after_normalized
+        except Exception:
+            topic_changed = False
+        
+        # Check for slowmode changes
+        slowmode_changed = False
+        try:
+            slowmode_before = int(getattr(before, "slowmode_delay", 0) or 0)
+            slowmode_after = int(getattr(after, "slowmode_delay", 0) or 0)
+            slowmode_changed = slowmode_before != slowmode_after
+        except Exception:
+            slowmode_changed = False
 
-        if name_changed or parent_changed:
+        if name_changed or parent_changed or nsfw_changed or topic_changed or slowmode_changed:
+            if nsfw_changed:
+                logger.debug(
+                    "[🔞] NSFW flag changed for channel '%s' #%d: %s → %s → scheduling sitemap",
+                    after.name,
+                    after.id,
+                    getattr(before, "nsfw", False),
+                    getattr(after, "nsfw", False),
+                )
+            if topic_changed:
+                def _truncate(s, max_len=50):
+                    if not s:
+                        return "(empty)"
+                    s_str = str(s)
+                    return s_str if len(s_str) <= max_len else s_str[:max_len-3] + "..."
+                
+                logger.debug(
+                    "[📝] Topic changed for channel '%s' #%d: %s → %s → scheduling sitemap",
+                    after.name,
+                    after.id,
+                    _truncate(getattr(before, "topic", None)),
+                    _truncate(getattr(after, "topic", None)),
+                )
+            if slowmode_changed:
+                def _format_delay(seconds):
+                    if seconds == 0:
+                        return "disabled"
+                    elif seconds < 60:
+                        return f"{seconds}s"
+                    elif seconds < 3600:
+                        mins = seconds // 60
+                        secs = seconds % 60
+                        return f"{mins}m {secs}s" if secs else f"{mins}m"
+                    else:
+                        hours = seconds // 3600
+                        mins = (seconds % 3600) // 60
+                        return f"{hours}h {mins}m" if mins else f"{hours}h"
+                
+                logger.debug(
+                    "[⏱️] Slowmode changed for channel '%s' #%d: %s → %s → scheduling sitemap",
+                    after.name,
+                    after.id,
+                    _format_delay(int(getattr(before, "slowmode_delay", 0) or 0)),
+                    _format_delay(int(getattr(after, "slowmode_delay", 0) or 0)),
+                )
             self.schedule_sync(guild_id=g.id)
         else:
             logger.debug(

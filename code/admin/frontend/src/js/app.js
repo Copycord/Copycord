@@ -126,6 +126,9 @@
     MIRROR_CHANNEL_PERMISSIONS: false,
     ENABLE_CLONING: true,
     RENAME_CHANNELS: true,
+    SYNC_CHANNEL_NSFW: false,
+    SYNC_CHANNEL_TOPIC: false,
+    SYNC_CHANNEL_SLOWMODE: false,
   };
 
   let lastFocusLog = null;

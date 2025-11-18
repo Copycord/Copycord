@@ -106,6 +106,9 @@ class Config:
             "MIRROR_ROLE_PERMISSIONS": False,
             "REPOSITION_CHANNELS": True,
             "RENAME_CHANNELS": True,
+            "SYNC_CHANNEL_NSFW": False,
+            "SYNC_CHANNEL_TOPIC": False,
+            "SYNC_CHANNEL_SLOWMODE": False,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):

@@ -425,6 +425,9 @@ class SitemapService:
                             "id": ch.id,
                             "name": ch.name,
                             "type": ch.type.value,
+                            "nsfw": getattr(ch, "nsfw", False),
+                            "topic": getattr(ch, "topic", None),
+                            "slowmode_delay": getattr(ch, "slowmode_delay", 0), 
                             **(
                                 {"overwrites": self._serialize_role_overwrites(ch)}
                                 if include_overwrites
@@ -451,6 +454,9 @@ class SitemapService:
                 "id": ch.id,
                 "name": ch.name,
                 "type": ch.type.value,
+                "nsfw": getattr(ch, "nsfw", False),
+                "topic": getattr(ch, "topic", None),
+                "slowmode_delay": getattr(ch, "slowmode_delay", 0), 
                 **(
                     {"overwrites": self._serialize_role_overwrites(ch)}
                     if include_overwrites
@@ -466,6 +472,9 @@ class SitemapService:
                 "id": forum.id,
                 "name": forum.name,
                 "category_id": forum.category.id if forum.category else None,
+                "nsfw": getattr(forum, "nsfw", False),
+                "topic": getattr(forum, "topic", None),
+                "slowmode_delay": getattr(forum, "slowmode_delay", 0),
             }
             if include_overwrites:
                 entry["overwrites"] = self._serialize_role_overwrites(forum)
