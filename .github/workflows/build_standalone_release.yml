@@ -16,17 +16,35 @@ jobs:
 
     if: |
       startsWith(github.ref, 'refs/tags/v') ||
-      github.ref == 'refs/heads/main' ||
-      github.ref == 'refs/heads/test-standalone-release-workflow'
+      github.event_name == 'workflow_dispatch'
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: code/admin/frontend/package-lock.json
+
+      - name: Build admin frontend assets
+        working-directory: code/admin/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Copy built frontend into admin static
+        run: |
+          mkdir -p code/admin/static
+          cp -r code/admin/frontend/dist/* code/admin/static/
 
       - name: Create standalone package base
         run: |
           mkdir -p standalone-release
           mkdir -p standalone-release/windows
           mkdir -p standalone-release/linux-mac
+
 
           cp -r code standalone-release/
           cp LICENSE standalone-release/
@@ -80,7 +98,7 @@ jobs:
           echo   Setup Complete!
           echo ========================================
           echo.
-          echo Run 'windows\start.bat' to launch Copycord
+          echo Run "windows\start.bat" to launch Copycord
           echo.
           pause
           endlocal
@@ -105,7 +123,7 @@ jobs:
 
           if not exist venv\Scripts\activate.bat (
               echo [ERROR] Virtual environment not found!
-              echo Please run 'windows\setup.bat' first.
+              echo Please run "windows\setup.bat" first.
               pause
               exit /b 1
           )
@@ -118,7 +136,10 @@ jobs:
           start "Copycord Server" cmd /k "cd /d %CD%\code && SET PYTHONPATH=%CD%\code && SET CONTROL_PORT=9101 && ..\venv\Scripts\python.exe control\control.py"
           start "Copycord Client" cmd /k "cd /d %CD%\code && SET PYTHONPATH=%CD%\code && SET CONTROL_PORT=9102 && ..\venv\Scripts\python.exe control\control.py"
 
+          echo.
           echo Copycord is running! Web UI: http://localhost:8080
+          echo Close all windows to stop Copycord.
+          echo.
           pause
           endlocal
           EOF
@@ -169,6 +190,7 @@ jobs:
           cat > standalone-release/linux-mac/start.sh << 'EOF'
 
           set -e
+
           ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
           cd "$ROOT_DIR"
 
@@ -199,8 +221,12 @@ jobs:
           CLIENT_PID=$!
           cd ..
 
+          echo ""
           echo "Copycord is running! Visit http://localhost:8080"
-          trap "kill $ADMIN_PID $SERVER_PID $CLIENT_PID" INT TERM
+          echo "Logs are in ./data/"
+          echo ""
+
+          trap "kill $ADMIN_PID $SERVER_PID $CLIENT_PID 2>/dev/null || true; exit" INT TERM
           wait
           EOF
           chmod +x standalone-release/linux-mac/start.sh
@@ -213,15 +239,16 @@ jobs:
           ========================================
 
           WINDOWS:
-            - Run windows\setup.bat
-            - Then windows\start.bat
+            1. Run windows\setup.bat
+            2. Run windows\start.bat
+            3. Open http://localhost:8080 in your browser
 
           LINUX/MAC:
-            - Run ./linux-mac/setup.sh
-            - Then ./linux-mac/start.sh
+            1. Run ./linux-mac/setup.sh
+            2. Run ./linux-mac/start.sh
+            3. Open http://localhost:8080 in your browser
 
-          Web UI: http://localhost:8080
-          All data logs saved to ./data/
+          All data and logs are stored in the ./data directory.
           EOF
 
       - name: Create zip package (tags only)
