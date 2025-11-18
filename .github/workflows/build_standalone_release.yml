@@ -2,15 +2,9 @@ name: Build Standalone Release Package
 
 on:
   push:
-    # Auto-run on version tags (real releases)
     tags:
       - 'v*.*.*'
-    # Allow running automatically on main or test branch if you want
-    branches:
-      - main
-      - test-standalone-release-workflow
 
-  # Enables the "Run workflow" button in Actions tab
   workflow_dispatch:
 
 permissions:
@@ -20,7 +14,6 @@ jobs:
   build-standalone:
     runs-on: ubuntu-latest
 
-    # Only build for main, test branch, or release tags
     if: |
       startsWith(github.ref, 'refs/tags/v') ||
       github.ref == 'refs/heads/main' ||
@@ -39,14 +32,13 @@ jobs:
           cp LICENSE standalone-release/
           cp README.md standalone-release/
 
-      # -------------------------
-      # Windows setup/start
-      # -------------------------
       - name: Create Windows setup script
         run: |
           cat > standalone-release/windows/setup.bat << 'EOF'
           @echo off
           setlocal
+
+          rem Go to the root of the standalone package (one level above /windows)
           cd /d %~dp0..
 
           echo ========================================
@@ -58,6 +50,7 @@ jobs:
           if errorlevel 1 (
               echo [ERROR] Python is not installed!
               echo Please install Python 3.8 or higher from https://www.python.org/
+              echo.
               pause
               exit /b 1
           )
@@ -70,18 +63,37 @@ jobs:
               exit /b 1
           )
 
+          echo [2/3] Activating virtual environment...
           call venv\Scripts\activate.bat
-          echo [3/3] Installing dependencies...
-          pip install --upgrade pip --quiet
-          pip install -r code\admin\requirements.txt --quiet
-          pip install -r code\client\requirements.txt --quiet
-          pip install -r code\server\requirements.txt --quiet
 
+          echo [3/3] Installing dependencies...
+          rem Use python -m pip to avoid the pip self-upgrade error
+          python -m pip install -r code\admin\requirements.txt --quiet
+          if errorlevel 1 goto piperror
+          python -m pip install -r code\client\requirements.txt --quiet
+          if errorlevel 1 goto piperror
+          python -m pip install -r code\server\requirements.txt --quiet
+          if errorlevel 1 goto piperror
+
+          echo.
           echo ========================================
-          echo   Setup Complete! Run 'windows\start.bat'
+          echo   Setup Complete!
           echo ========================================
+          echo.
+          echo Run 'windows\start.bat' to launch Copycord
+          echo.
           pause
           endlocal
+          exit /b 0
+
+          :piperror
+          echo.
+          echo [ERROR] Failed to install one or more dependencies.
+          echo Make sure you have a working internet connection and try again.
+          echo.
+          pause
+          endlocal
+          exit /b 1
           EOF
 
       - name: Create Windows start script
@@ -111,43 +123,51 @@ jobs:
           endlocal
           EOF
 
-      # -------------------------
-      # Linux/Mac setup/start
-      # -------------------------
       - name: Create Linux/Mac setup script
         run: |
           cat > standalone-release/linux-mac/setup.sh << 'EOF'
-          #!/bin/bash
+
           set -e
+
           ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
           cd "$ROOT_DIR"
 
           echo "========================================"
           echo "  Copycord Standalone Setup (Linux/Mac)"
           echo "========================================"
+          echo ""
 
           if ! command -v python3 &> /dev/null; then
               echo "[ERROR] Python 3 is not installed!"
+              echo "Please install Python 3.8 or higher"
               exit 1
           fi
 
+          echo "[1/3] Creating virtual environment..."
           python3 -m venv venv
-          source venv/bin/activate
-          pip install --upgrade pip --quiet
-          pip install -r code/admin/requirements.txt --quiet
-          pip install -r code/client/requirements.txt --quiet
-          pip install -r code/server/requirements.txt --quiet
 
+          echo "[2/3] Activating virtual environment..."
+          source venv/bin/activate
+
+          echo "[3/3] Installing dependencies..."
+          python -m pip install -r code/admin/requirements.txt --quiet
+          python -m pip install -r code/client/requirements.txt --quiet
+          python -m pip install -r code/server/requirements.txt --quiet
+
+          echo ""
           echo "========================================"
-          echo "  Setup Complete! Run './linux-mac/start.sh'"
+          echo "  Setup Complete!"
           echo "========================================"
+          echo ""
+          echo "Run './linux-mac/start.sh' to launch Copycord"
+          echo ""
           EOF
           chmod +x standalone-release/linux-mac/setup.sh
 
       - name: Create Linux/Mac start script
         run: |
           cat > standalone-release/linux-mac/start.sh << 'EOF'
-          #!/bin/bash
+
           set -e
           ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
           cd "$ROOT_DIR"
@@ -204,14 +224,12 @@ jobs:
           All data logs saved to ./data/
           EOF
 
-      # Tags: create zip for GitHub release
       - name: Create zip package (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           cd standalone-release
           zip -r ../copycord-standalone-${{ github.ref_name }}.zip .
 
-      # Artifacts: upload folder (GitHub automatically zips once)
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:

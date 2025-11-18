@@ -5,3 +5,4 @@ python-dotenv==1.1.1
 python-multipart==0.0.20
 websockets==11.0.3
 aiohttp>=3.9,<4
+tzdata ==2024.1
