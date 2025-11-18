@@ -897,6 +897,12 @@ class CloneCommands(commands.Cog):
             required=False,
             default=False,
         ),
+        cloned_only: bool = Option(
+            bool,
+            "Only delete assets that WERE cloned (mapped in the DB)",
+            required=False,
+            default=False,
+        ),
     ):
         await ctx.defer(ephemeral=True)
 
@@ -905,6 +911,15 @@ class CloneCommands(commands.Cog):
                 embed=self._err_embed(
                     "Confirmation required",
                     "Re-run the command and type **confirm** to proceed.",
+                ),
+                ephemeral=True,
+            )
+
+        if unmapped_only and cloned_only:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Invalid mode",
+                    "You cannot use **unmapped_only** and **cloned_only** at the same time.",
                 ),
                 ephemeral=True,
             )
@@ -921,10 +936,16 @@ class CloneCommands(commands.Cog):
         deleted = skipped = failed = 0
         deleted_ids: list[int] = []
 
+        mode = (
+            "cloned_only"
+            if cloned_only
+            else "unmapped_only" if unmapped_only else "ALL"
+        )
+
         await ctx.followup.send(
             embed=self._ok_embed(
                 "Starting purge…",
-                f"Target: `{kind}`\nMode: `{'unmapped_only' if unmapped_only else 'ALL'}`\nI'll DM you when finished.",
+                f"Target: `{kind}`\n" f"Mode: `{mode}`\n" f"I'll DM you when finished.",
             ),
             ephemeral=True,
         )
@@ -934,7 +955,7 @@ class CloneCommands(commands.Cog):
             outcome="begin",
             guild_id=guild.id,
             user_id=ctx.user.id,
-            reason=f"Manual purge (mode={'unmapped_only' if unmapped_only else 'all'})",
+            reason=f"Manual purge (mode={mode})",
         )
 
         def _is_mapped(kind_name: str, cloned_id: int) -> bool:
@@ -962,6 +983,7 @@ class CloneCommands(commands.Cog):
 
             if kind == "emojis":
                 for em in list(guild.emojis):
+
                     if unmapped_only and _is_mapped("emojis", em.id):
                         skipped += 1
                         helper._log_purge_event(
@@ -974,6 +996,20 @@ class CloneCommands(commands.Cog):
                             reason="Unmapped-only mode: mapped in DB",
                         )
                         continue
+
+                    if cloned_only and not _is_mapped("emojis", em.id):
+                        skipped += 1
+                        helper._log_purge_event(
+                            kind="emojis",
+                            outcome="skipped",
+                            guild_id=guild.id,
+                            user_id=ctx.user.id,
+                            obj_id=em.id,
+                            name=em.name,
+                            reason="Cloned-only mode: not mapped in DB",
+                        )
+                        continue
+
                     try:
                         await self.ratelimit.acquire(RL_EMOJI)
                         await em.delete(reason=f"Purge by {ctx.user.id}")
@@ -986,7 +1022,7 @@ class CloneCommands(commands.Cog):
                             user_id=ctx.user.id,
                             obj_id=em.id,
                             name=em.name,
-                            reason="Manual purge",
+                            reason=f"Manual purge (mode={mode})",
                         )
                     except discord.Forbidden as e:
                         skipped += 1
@@ -1011,7 +1047,7 @@ class CloneCommands(commands.Cog):
                             reason=f"Manual purge: {e}",
                         )
 
-                if unmapped_only:
+                if unmapped_only or cloned_only:
                     if deleted_ids:
                         placeholders = ",".join("?" * len(deleted_ids))
                         self.db.conn.execute(
@@ -1043,6 +1079,20 @@ class CloneCommands(commands.Cog):
                             reason="Unmapped-only mode: mapped in DB",
                         )
                         continue
+
+                    if cloned_only and not _is_mapped("stickers", st.id):
+                        skipped += 1
+                        helper._log_purge_event(
+                            kind="stickers",
+                            outcome="skipped",
+                            guild_id=guild.id,
+                            user_id=ctx.user.id,
+                            obj_id=st.id,
+                            name=st.name,
+                            reason="Cloned-only mode: not mapped in DB",
+                        )
+                        continue
+
                     try:
                         await self.ratelimit.acquire(RL_STICKER)
                         await st.delete(reason=f"Purge by {ctx.user.id}")
@@ -1055,7 +1105,7 @@ class CloneCommands(commands.Cog):
                             user_id=ctx.user.id,
                             obj_id=st.id,
                             name=st.name,
-                            reason="Manual purge",
+                            reason=f"Manual purge (mode={mode})",
                         )
                     except discord.Forbidden as e:
                         skipped += 1
@@ -1080,7 +1130,7 @@ class CloneCommands(commands.Cog):
                             reason=f"Manual purge: {e}",
                         )
 
-                if unmapped_only:
+                if unmapped_only or cloned_only:
                     if deleted_ids:
                         placeholders = ",".join("?" * len(deleted_ids))
                         self.db.conn.execute(
@@ -1132,6 +1182,20 @@ class CloneCommands(commands.Cog):
                             reason="Unmapped-only mode: mapped in DB",
                         )
                         continue
+
+                    if cloned_only and not _is_mapped("roles", role.id):
+                        skipped += 1
+                        helper._log_purge_event(
+                            kind="roles",
+                            outcome="skipped",
+                            guild_id=guild.id,
+                            user_id=ctx.user.id,
+                            obj_id=role.id,
+                            name=role.name,
+                            reason="Cloned-only mode: not mapped in DB",
+                        )
+                        continue
+
                     try:
                         await self.ratelimit.acquire(RL_ROLE)
                         await role.delete(reason=f"Purge by {ctx.user.id}")
@@ -1144,7 +1208,7 @@ class CloneCommands(commands.Cog):
                             user_id=ctx.user.id,
                             obj_id=role.id,
                             name=role.name,
-                            reason="Manual purge",
+                            reason=f"Manual purge (mode={mode})",
                         )
                     except discord.Forbidden as e:
                         skipped += 1
@@ -1169,7 +1233,7 @@ class CloneCommands(commands.Cog):
                             reason=f"Manual purge: {e}",
                         )
 
-                if unmapped_only:
+                if unmapped_only or cloned_only:
                     if deleted_ids:
                         placeholders = ",".join("?" * len(deleted_ids))
                         self.db.conn.execute(
