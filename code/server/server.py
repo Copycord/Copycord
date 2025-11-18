@@ -5185,65 +5185,87 @@ class ServerReceiver:
                 )
                 return
 
-            sem = None
-            clone_for_gate = chosen.get("cloned_channel_id") or chosen.get(
-                "clone_channel_id"
-            )
-            if is_backfill and clone_for_gate:
-                sem = self.backfill.semaphores.setdefault(
-                    int(clone_for_gate), asyncio.Semaphore(1)
-                )
-
-            primary_url, primary_name, primary_avatar_url, primary_customized = (
-                _cached_primary_for_mapping(chosen)
-            )
             try:
-                _settings_for_forced = (
-                    resolve_mapping_settings(
-                        self.db,
-                        self.config,
-                        original_guild_id=int(
-                            chosen.get("original_guild_id") or host_guild_id or 0
-                        ),
-                        cloned_guild_id=int(chosen.get("cloned_guild_id") or 0),
-                    )
-                    or {}
-                )
+                forced_clone_gid = int(chosen.get("cloned_guild_id") or 0)
             except Exception:
-                _settings_for_forced = {}
+                forced_clone_gid = 0
 
-            if not _settings_for_forced.get("ENABLE_CLONING", True):
-                logger.debug(
-                    "[forward] Skipping forced send for clone_g=%s (ENABLE_CLONING=False)",
-                    chosen.get("cloned_guild_id"),
+            with self._clone_log_label(forced_clone_gid):
+                sem = None
+                clone_for_gate = chosen.get("cloned_channel_id") or chosen.get(
+                    "clone_channel_id"
                 )
-                return
+                if is_backfill and clone_for_gate:
+                    sem = self.backfill.semaphores.setdefault(
+                        int(clone_for_gate), asyncio.Semaphore(1)
+                    )
 
-            if not is_backfill and not _settings_for_forced.get("CLONE_MESSAGES", True):
-                logger.debug(
-                    "[forward] Skipping message send for clone_g=%s (CLONE_MESSAGES=False)",
-                    chosen.get("cloned_guild_id"),
+                primary_url, primary_name, primary_avatar_url, primary_customized = (
+                    _cached_primary_for_mapping(chosen)
                 )
-                return
+                try:
+                    _settings_for_forced = (
+                        resolve_mapping_settings(
+                            self.db,
+                            self.config,
+                            original_guild_id=int(
+                                chosen.get("original_guild_id") or host_guild_id or 0
+                            ),
+                            cloned_guild_id=int(chosen.get("cloned_guild_id") or 0),
+                        )
+                        or {}
+                    )
+                except Exception:
+                    _settings_for_forced = {}
 
-            is_primary = bool(primary_url and forced_url == primary_url)
-            use_webhook_identity = bool(primary_customized and is_primary)
-            override = None
-            if primary_customized and not is_primary:
-                override = {"username": primary_name, "avatar_url": primary_avatar_url}
+                if not _settings_for_forced.get("ENABLE_CLONING", True):
+                    logger.debug(
+                        "[forward] Skipping forced send for clone_g=%s (ENABLE_CLONING=False)",
+                        chosen.get("cloned_guild_id"),
+                    )
+                    return
 
-            ctx_gid = int(chosen.get("original_guild_id") or host_guild_id or 0) or None
-            payload_for_forced = self._build_webhook_payload(
-                msg,
-                ctx_guild_id=ctx_gid,
-                ctx_mapping_row=chosen,
-            )
+                if not is_backfill and not _settings_for_forced.get(
+                    "CLONE_MESSAGES", True
+                ):
+                    logger.debug(
+                        "[forward] Skipping message send for clone_g=%s (CLONE_MESSAGES=False)",
+                        chosen.get("cloned_guild_id"),
+                    )
+                    return
 
-            rl_key = f"channel:{clone_for_gate or source_id}"
-            if sem:
-                async with sem:
-                    if clone_for_gate:
-                        await self._bf_gate(int(clone_for_gate))
+                is_primary = bool(primary_url and forced_url == primary_url)
+                use_webhook_identity = bool(primary_customized and is_primary)
+                override = None
+                if primary_customized and not is_primary:
+                    override = {
+                        "username": primary_name,
+                        "avatar_url": primary_avatar_url,
+                    }
+
+                ctx_gid = (
+                    int(chosen.get("original_guild_id") or host_guild_id or 0) or None
+                )
+                payload_for_forced = self._build_webhook_payload(
+                    msg,
+                    ctx_guild_id=ctx_gid,
+                    ctx_mapping_row=chosen,
+                )
+
+                rl_key = f"channel:{clone_for_gate or source_id}"
+                if sem:
+                    async with sem:
+                        if clone_for_gate:
+                            await self._bf_gate(int(clone_for_gate))
+                        await _do_send(
+                            forced_url,
+                            rl_key,
+                            mapping_row=chosen,
+                            use_webhook_identity=use_webhook_identity,
+                            payload=payload_for_forced,
+                            override_identity=override,
+                        )
+                else:
                     await _do_send(
                         forced_url,
                         rl_key,
@@ -5252,15 +5274,6 @@ class ServerReceiver:
                         payload=payload_for_forced,
                         override_identity=override,
                     )
-            else:
-                await _do_send(
-                    forced_url,
-                    rl_key,
-                    mapping_row=chosen,
-                    use_webhook_identity=use_webhook_identity,
-                    payload=payload_for_forced,
-                    override_identity=override,
-                )
             return
 
         if self.backfill.is_backfilling(source_id) and not is_backfill:
@@ -5284,6 +5297,36 @@ class ServerReceiver:
         if not rows:
             self._load_mappings()
             rows = _all_chan_mappings_for_origin(source_id)
+
+        if is_backfill:
+            clone_gid_hint = msg.get("cloned_guild_id")
+            mapping_id_hint = msg.get("mapping_id")
+
+            if clone_gid_hint is not None or mapping_id_hint is not None:
+                narrowed: list[dict] = []
+
+                for r in rows:
+                    keep = False
+
+                    if clone_gid_hint is not None:
+                        try:
+                            if int(r.get("cloned_guild_id") or 0) == int(
+                                clone_gid_hint
+                            ):
+                                keep = True
+                        except Exception:
+                            pass
+
+                    if not keep and mapping_id_hint is not None:
+                        rid = r.get("id") or r.get("mapping_id")
+                        if rid is not None and str(rid) == str(mapping_id_hint):
+                            keep = True
+
+                    if keep:
+                        narrowed.append(r)
+
+                if narrowed:
+                    rows = narrowed
 
         bf_targets: set[int] = set()
         if is_backfill:
@@ -7165,33 +7208,60 @@ class ServerReceiver:
 
     def _bf_pick_mapping_for_target(self, original_channel_id: int) -> dict | None:
         """
-        Resolve the precise mapping row for a backfill run, preferring the
-        run's target clone (clone_channel_id or cloned_guild_id) over a
-        generic 'first row for this origin'.
+        Resolve the precise mapping row for a backfill run, preferring this run's
+        mapping_id / cloned_guild_id over a generic 'first row for this origin'.
+
+        Priority:
+        1) mapping_id (from guild_mappings)
+        2) (original_channel_id, cloned_guild_id)
+        3) cloned_channel_id
+        4) first row for original_channel_id
         """
         oid = int(original_channel_id)
         st = self.backfill._progress.get(oid) or {}
 
+        mapping_id = st.get("mapping_id")
+        clone_gid = st.get("cloned_guild_id")
         clone_cid = st.get("clone_channel_id")
-        if clone_cid and hasattr(self.db, "get_channel_mapping_by_clone_id"):
-            row = self.db.get_channel_mapping_by_clone_id(int(clone_cid))
+
+        if mapping_id and hasattr(self.db, "get_channel_mapping_for_mapping"):
+            try:
+                row = self.db.get_channel_mapping_for_mapping(oid, str(mapping_id))
+            except Exception:
+                row = None
             if row:
                 return dict(row)
 
-        clone_gid = st.get("cloned_guild_id")
         if clone_gid and hasattr(self.db, "get_channel_mapping_by_original_and_clone"):
-            row = self.db.get_channel_mapping_by_original_and_clone(oid, int(clone_gid))
+            try:
+                row = self.db.get_channel_mapping_by_original_and_clone(
+                    oid, int(clone_gid)
+                )
+            except Exception:
+                row = None
+            if row:
+                return dict(row)
+
+        if clone_cid and hasattr(self.db, "get_channel_mapping_by_clone_id"):
+            try:
+                row = self.db.get_channel_mapping_by_clone_id(int(clone_cid))
+            except Exception:
+                row = None
             if row:
                 return dict(row)
 
         if hasattr(self.db, "get_channel_mapping_by_original_id"):
-            row = self.db.get_channel_mapping_by_original_id(oid)
+            try:
+                row = self.db.get_channel_mapping_by_original_id(oid)
+            except Exception:
+                row = None
             if row:
                 return dict(row)
 
         return None
 
     async def _handle_backfill_message(self, data: dict) -> None:
+        logging.info("Handling backfill message: %s", data)
         if self._shutting_down:
             return
 
@@ -7200,6 +7270,28 @@ class ServerReceiver:
         except Exception:
             logger.warning("[bf] bad channel_id in payload: %r", data.get("channel_id"))
             return
+
+        cloned_gid_hint = None
+        try:
+            if data.get("cloned_guild_id") is not None:
+                cloned_gid_hint = int(data["cloned_guild_id"])
+        except Exception:
+            cloned_gid_hint = None
+
+        mapping_id_hint = data.get("mapping_id") or None
+
+        if cloned_gid_hint is not None or mapping_id_hint:
+            st = self.backfill._progress.setdefault(int(original_id), {})
+
+            if cloned_gid_hint is not None:
+                if st.get("cloned_guild_id") != cloned_gid_hint:
+                    st.pop("clone_channel_id", None)
+                st["cloned_guild_id"] = cloned_gid_hint
+
+            if mapping_id_hint is not None:
+                if st.get("mapping_id") and st.get("mapping_id") != mapping_id_hint:
+                    st.pop("clone_channel_id", None)
+                st["mapping_id"] = mapping_id_hint
 
         row = self._bf_pick_mapping_for_target(original_id)
         if not row:
@@ -7277,6 +7369,21 @@ class ServerReceiver:
                 "[bf] bad thread_parent_id in payload: %r", data.get("thread_parent_id")
             )
             return
+
+        cloned_gid_hint = None
+        try:
+            if data.get("cloned_guild_id") is not None:
+                cloned_gid_hint = int(data["cloned_guild_id"])
+        except Exception:
+            cloned_gid_hint = None
+
+        mapping_id_hint = data.get("mapping_id") or None
+        if cloned_gid_hint is not None or mapping_id_hint:
+            st = self.backfill._progress.setdefault(int(parent_id), {})
+            if cloned_gid_hint is not None:
+                st["cloned_guild_id"] = cloned_gid_hint
+            if mapping_id_hint:
+                st["mapping_id"] = mapping_id_hint
 
         row = self._bf_pick_mapping_for_target(parent_id)
         if not row:
