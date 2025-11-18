@@ -52,6 +52,12 @@ class CloneCommands(commands.Cog):
     Collection of slash commands for the Clone bot, restricted to allowed users.
     """
 
+    role_mention_group = discord.SlashCommandGroup(
+        "role_mention",
+        "Manage role mentions for cloned messages in THIS server.",
+        guild_ids=GUILD_IDS,
+    )
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.db = DBManager(config.DB_PATH)
@@ -61,21 +67,31 @@ class CloneCommands(commands.Cog):
 
     async def cog_check(self, ctx: commands.Context):
         """
-        Global check for all commands in this cog. Only users whose ID is in set in config may execute commands.
+        Global check for all commands in this cog. Only users whose ID is set in config may execute commands.
+        Also logs *once* per executed command, skipping the bare group shell for group commands.
         """
-        cmd_name = ctx.command.name if ctx.command else "unknown"
+        cmd = ctx.command
         guild_name = ctx.guild.name if ctx.guild else "Unknown"
-        if ctx.user.id in self.allowed_users:
-            logger.info(
-                f"[⚡] {ctx.user.name} ({ctx.user.id}) executed the '{cmd_name}' command in {guild_name}."
+
+        if ctx.user.id not in self.allowed_users:
+            await ctx.respond(
+                "You are not authorized to use this command.", ephemeral=True
             )
+            logger.warning(
+                f"[⚠️] Unauthorized access: {ctx.user.name} ({ctx.user.id}) attempted to run "
+                f"command '{cmd.name if cmd else 'unknown'}' in {guild_name}."
+            )
+            return False
+
+        if isinstance(cmd, discord.SlashCommandGroup):
             return True
 
-        await ctx.respond("You are not authorized to use this command.", ephemeral=True)
-        logger.warning(
-            f"[⚠️] Unauthorized access: {ctx.user.name} ({ctx.user.id}) attempted to run command '{cmd_name}' in {guild_name}."
+        cmd_name = getattr(cmd, "qualified_name", cmd.name if cmd else "unknown")
+
+        logger.info(
+            f"[⚡] {ctx.user.name} ({ctx.user.id}) executed the '{cmd_name}' command in {guild_name}."
         )
-        return False
+        return True
 
     def _refresh_command_guilds(self) -> list[int]:
         """
@@ -1887,6 +1903,267 @@ class CloneCommands(commands.Cog):
             ),
             ephemeral=True,
         )
+
+    @role_mention_group.command(
+        name="add",
+        description="Add a role to be mentioned at the top of cloned messages.",
+    )
+    async def role_mention_add(
+        self,
+        ctx: discord.ApplicationContext,
+        role: discord.Role = discord.Option(
+            discord.Role,
+            description="The role to mention in cloned messages",
+            required=True,
+        ),
+        channel_id: str = discord.Option(
+            str,
+            description="Cloned channel ID to filter (leave empty for all channels)",
+            required=False,
+            default="",
+        ),
+    ):
+        """Add a role mention for a channel or globally."""
+        await ctx.defer(ephemeral=True)
+
+        guild = ctx.guild
+        if not guild:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Guild Context",
+                    "This command must be run inside a server.",
+                ),
+                ephemeral=True,
+            )
+
+        mapping = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Mapping Found",
+                    "This server isn't mapped to a source guild.",
+                ),
+                ephemeral=True,
+            )
+
+        original_guild_id = int(mapping["original_guild_id"])
+        cloned_guild_id = int(mapping["cloned_guild_id"])
+
+        # Parse channel ID if provided - NOW IT'S CLONED CHANNEL ID
+        cloned_channel_id = None
+        if channel_id.strip():
+            try:
+                cloned_channel_id = int(channel_id.strip())
+            except ValueError:
+                return await ctx.followup.send(
+                    embed=self._err_embed(
+                        "Invalid Channel ID",
+                        f"`{channel_id}` is not a valid channel ID.",
+                    ),
+                    ephemeral=True,
+                )
+
+        if role.managed:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Managed Role",
+                    "That role is managed by an integration and cannot be mentioned.",
+                ),
+                ephemeral=True,
+            )
+
+        added = self.db.add_role_mention(
+            original_guild_id=original_guild_id,
+            cloned_guild_id=cloned_guild_id,
+            cloned_role_id=role.id,
+            cloned_channel_id=cloned_channel_id,
+        )
+
+        scope = (
+            f"channel `{cloned_channel_id}`" if cloned_channel_id else "all channels"
+        )
+
+        if added:
+            return await ctx.followup.send(
+                embed=self._ok_embed(
+                    "Role Mention Added",
+                    f"{role.mention} will be mentioned at the top of cloned messages from {scope}.",
+                    color=discord.Color.green(),
+                ),
+                ephemeral=True,
+            )
+        else:
+            return await ctx.followup.send(
+                embed=self._ok_embed(
+                    "Already Configured",
+                    f"{role.mention} is already configured for this scope.",
+                    color=discord.Color.blurple(),
+                ),
+                ephemeral=True,
+            )
+
+    @role_mention_group.command(
+        name="remove",
+        description="Remove a role mention from cloned messages.",
+    )
+    async def role_mention_remove(
+        self,
+        ctx: discord.ApplicationContext,
+        role: discord.Role = discord.Option(
+            discord.Role,
+            description="The role to stop mentioning",
+            required=True,
+        ),
+        channel_id: str = discord.Option(
+            str,
+            description="Cloned channel ID (leave empty for global)",
+            required=False,
+            default="",
+        ),
+    ):
+        """Remove a role mention."""
+        await ctx.defer(ephemeral=True)
+
+        guild = ctx.guild
+        if not guild:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Guild Context",
+                    "This command must be run inside a server.",
+                ),
+                ephemeral=True,
+            )
+
+        mapping = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Mapping Found",
+                    "This server isn't mapped to a source guild.",
+                ),
+                ephemeral=True,
+            )
+
+        original_guild_id = int(mapping["original_guild_id"])
+        cloned_guild_id = int(mapping["cloned_guild_id"])
+
+        cloned_channel_id = None
+        if channel_id.strip():
+            try:
+                cloned_channel_id = int(channel_id.strip())
+            except ValueError:
+                return await ctx.followup.send(
+                    embed=self._err_embed(
+                        "Invalid Channel ID",
+                        f"`{channel_id}` is not a valid channel ID.",
+                    ),
+                    ephemeral=True,
+                )
+
+        removed = self.db.remove_role_mention(
+            original_guild_id=original_guild_id,
+            cloned_guild_id=cloned_guild_id,
+            cloned_role_id=role.id,
+            cloned_channel_id=cloned_channel_id,
+        )
+
+        if removed:
+            scope = (
+                f"channel `{cloned_channel_id}`"
+                if cloned_channel_id
+                else "all channels"
+            )
+            return await ctx.followup.send(
+                embed=self._ok_embed(
+                    "Role Mention Removed",
+                    f"{role.mention} will no longer be mentioned for {scope}.",
+                    color=discord.Color.orange(),
+                ),
+                ephemeral=True,
+            )
+        else:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Not Found",
+                    f"No configuration found for {role.mention} in that scope.",
+                ),
+                ephemeral=True,
+            )
+
+    @role_mention_group.command(
+        name="list",
+        description="List all role mentions configured for this clone.",
+    )
+    async def role_mention_list(
+        self,
+        ctx: discord.ApplicationContext,
+    ):
+        """List all role mention configurations."""
+        await ctx.defer(ephemeral=True)
+
+        guild = ctx.guild
+        if not guild:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Guild Context",
+                    "This command must be run inside a server.",
+                ),
+                ephemeral=True,
+            )
+
+        mapping = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Mapping Found",
+                    "This server isn't mapped to a source guild.",
+                ),
+                ephemeral=True,
+            )
+
+        original_guild_id = int(mapping["original_guild_id"])
+        cloned_guild_id = int(mapping["cloned_guild_id"])
+
+        mentions = self.db.list_all_role_mentions(
+            original_guild_id=original_guild_id,
+            cloned_guild_id=cloned_guild_id,
+        )
+
+        if not mentions:
+            return await ctx.followup.send(
+                embed=self._ok_embed(
+                    "Role Mentions",
+                    "No role mentions configured yet. Use `/role_mention add` to add one.",
+                    color=discord.Color.blurple(),
+                ),
+                ephemeral=True,
+            )
+
+        lines: list[str] = []
+        for m in mentions:
+            role_id = m["cloned_role_id"]
+            chan_id = m["cloned_channel_id"]
+
+            role = guild.get_role(role_id)
+            role_display = role.mention if role else f"<@&{role_id}> (deleted)"
+
+            scope = "**all channels**"
+            if chan_id:
+                ch = guild.get_channel(chan_id)
+                if ch:
+                    scope = f"channel {ch.mention}"
+                else:
+                    scope = f"channel `{chan_id}` (deleted)"
+
+            lines.append(f"• {role_display} — {scope}")
+
+        embed = self._ok_embed(
+            "Role Mentions",
+            "\n".join(lines),
+            color=discord.Color.green(),
+        )
+
+        await ctx.followup.send(embed=embed, ephemeral=True)
 
 
 def setup(bot: commands.Bot):

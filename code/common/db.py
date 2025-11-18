@@ -1,3 +1,12 @@
+# =============================================================================
+#  Copycord
+#  Copyright (C) 2025 github.com/Copycord
+#
+#  This source code is released under the GNU Affero General Public License
+#  version 3.0. A copy of the license is available at:
+#  https://www.gnu.org/licenses/agpl-3.0.en.html
+# =============================================================================
+
 from datetime import datetime
 import json
 import sqlite3, threading
@@ -665,7 +674,7 @@ class DBManager:
                 "CREATE INDEX IF NOT EXISTS idx_bf_runs_by_orig_status ON backfill_runs(original_channel_id, status);",
             ],
         )
-        
+
         self._ensure_table(
             name="user_filters",
             create_sql_template="""
@@ -696,6 +705,39 @@ class DBManager:
                 "CREATE INDEX IF NOT EXISTS idx_user_filters_orig ON user_filters(original_guild_id);",
                 "CREATE INDEX IF NOT EXISTS idx_user_filters_clone ON user_filters(cloned_guild_id);",
                 "CREATE INDEX IF NOT EXISTS idx_user_filters_type ON user_filters(filter_type);",
+            ],
+        )
+
+        self._ensure_table(
+            name="role_mentions",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    original_guild_id   INTEGER NOT NULL,
+                    cloned_guild_id     INTEGER NOT NULL,
+                    cloned_channel_id   INTEGER,
+                    cloned_role_id      INTEGER NOT NULL,
+                    added_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (original_guild_id, cloned_guild_id, cloned_channel_id, cloned_role_id)
+                );
+            """,
+            required_columns={
+                "original_guild_id",
+                "cloned_guild_id",
+                "cloned_channel_id",
+                "cloned_role_id",
+                "added_at",
+            },
+            copy_map={
+                "original_guild_id": "original_guild_id",
+                "cloned_guild_id": "cloned_guild_id",
+                "cloned_channel_id": "cloned_channel_id",
+                "cloned_role_id": "cloned_role_id",
+                "added_at": "COALESCE(added_at, CURRENT_TIMESTAMP)",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_role_mentions_orig ON role_mentions(original_guild_id);",
+                "CREATE INDEX IF NOT EXISTS idx_role_mentions_clone ON role_mentions(cloned_guild_id);",
+                "CREATE INDEX IF NOT EXISTS idx_role_mentions_chan ON role_mentions(cloned_channel_id);",
             ],
         )
 
@@ -3655,7 +3697,6 @@ class DBManager:
 
         return len(ids)
 
-
     def get_user_filters_for_mapping(self, mapping_id: str) -> dict[str, list[int]]:
         """
         Return user filters for a mapping:
@@ -3687,7 +3728,7 @@ class DBManager:
         for row in rows:
             uid = int(row["user_id"])
             ftype = str(row["filter_type"]).strip().lower()
-            
+
             if ftype == "whitelist":
                 whitelist.append(uid)
             elif ftype == "blacklist":
@@ -3715,7 +3756,7 @@ class DBManager:
         cgid = int(m["cloned_guild_id"] or 0)
 
         with self.conn:
-            # Delete existing user filters for this mapping
+
             self.conn.execute(
                 """
                 DELETE FROM user_filters
@@ -3724,7 +3765,6 @@ class DBManager:
                 (ogid, cgid),
             )
 
-            # Insert whitelist users
             for uid in whitelist_users:
                 try:
                     user_id = int(uid)
@@ -3739,7 +3779,6 @@ class DBManager:
                 except (ValueError, TypeError):
                     continue
 
-            # Insert blacklist users
             for uid in blacklist_users:
                 try:
                     user_id = int(uid)
@@ -3763,7 +3802,7 @@ class DBManager:
         """
         Check if a user is filtered for message cloning.
         Returns (is_filtered: bool, reason: str | None)
-        
+
         Logic:
         - If whitelist exists and user NOT in it -> filtered
         - If user in blacklist -> filtered
@@ -3783,7 +3822,7 @@ class DBManager:
         has_whitelist = whitelist_count > 0
 
         if has_whitelist:
-            # Check if user is in whitelist
+
             in_whitelist = self.conn.execute(
                 """
                 SELECT 1 FROM user_filters
@@ -3799,7 +3838,6 @@ class DBManager:
             if not in_whitelist:
                 return (True, "user_not_in_whitelist")
 
-        # Check blacklist
         in_blacklist = self.conn.execute(
             """
             SELECT 1 FROM user_filters
@@ -3816,3 +3854,133 @@ class DBManager:
             return (True, "user_in_blacklist")
 
         return (False, None)
+
+    def add_role_mention(
+        self,
+        original_guild_id: int,
+        cloned_guild_id: int,
+        cloned_role_id: int,
+        cloned_channel_id: int | None = None,
+    ) -> bool:
+        """
+        Add a role mention configuration.
+        """
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                """
+                INSERT OR IGNORE INTO role_mentions
+                (original_guild_id, cloned_guild_id, cloned_channel_id, cloned_role_id, added_at)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                """,
+                (
+                    int(original_guild_id),
+                    int(cloned_guild_id),
+                    int(cloned_channel_id) if cloned_channel_id is not None else None,
+                    int(cloned_role_id),
+                ),
+            )
+            return cur.rowcount > 0
+
+    def remove_role_mention(
+        self,
+        original_guild_id: int,
+        cloned_guild_id: int,
+        cloned_role_id: int,
+        cloned_channel_id: int | None = None,
+    ) -> bool:
+        """
+        Remove a role mention configuration.
+        """
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                """
+                DELETE FROM role_mentions
+                WHERE original_guild_id = ?
+                AND cloned_guild_id = ?
+                AND cloned_role_id = ?
+                AND (
+                    (cloned_channel_id IS NULL AND ? IS NULL)
+                    OR cloned_channel_id = ?
+                )
+                """,
+                (
+                    int(original_guild_id),
+                    int(cloned_guild_id),
+                    int(cloned_role_id),
+                    int(cloned_channel_id) if cloned_channel_id is not None else None,
+                    int(cloned_channel_id) if cloned_channel_id is not None else None,
+                ),
+            )
+            return cur.rowcount > 0
+
+    def get_role_mentions(
+        self,
+        original_guild_id: int,
+        cloned_guild_id: int,
+        cloned_channel_id: int | None = None,
+    ) -> list[int]:
+        """
+        Get role mentions for a specific channel or globally in a clone guild.
+
+        """
+        if cloned_channel_id is None:
+
+            rows = self.conn.execute(
+                """
+                SELECT cloned_role_id
+                FROM role_mentions
+                WHERE original_guild_id = ?
+                AND cloned_guild_id = ?
+                AND cloned_channel_id IS NULL
+                ORDER BY added_at ASC
+                """,
+                (int(original_guild_id), int(cloned_guild_id)),
+            ).fetchall()
+        else:
+
+            rows = self.conn.execute(
+                """
+                SELECT cloned_role_id
+                FROM role_mentions
+                WHERE original_guild_id = ?
+                AND cloned_guild_id = ?
+                AND (cloned_channel_id IS NULL OR cloned_channel_id = ?)
+                ORDER BY 
+                    CASE WHEN cloned_channel_id IS NULL THEN 0 ELSE 1 END,
+                    added_at ASC
+                """,
+                (int(original_guild_id), int(cloned_guild_id), int(cloned_channel_id)),
+            ).fetchall()
+
+        return [int(r[0]) for r in rows]
+
+    def list_all_role_mentions(
+        self,
+        original_guild_id: int,
+        cloned_guild_id: int,
+    ) -> list[dict]:
+        """
+        List all role mention configurations for a mapping.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT cloned_channel_id, cloned_role_id, added_at
+            FROM role_mentions
+            WHERE original_guild_id = ?
+            AND cloned_guild_id = ?
+            ORDER BY 
+                CASE WHEN cloned_channel_id IS NULL THEN 0 ELSE 1 END,
+                cloned_channel_id,
+                added_at ASC
+            """,
+            (int(original_guild_id), int(cloned_guild_id)),
+        ).fetchall()
+
+        return [
+            {
+                "cloned_channel_id": r[0],
+                "cloned_role_id": int(r[1]),
+                "added_at": r[2],
+            }
+            for r in rows
+        ]

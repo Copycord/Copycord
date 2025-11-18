@@ -4948,12 +4948,47 @@ class ServerReceiver:
 
         return _link.sub(repl, content)
 
+    def _get_role_mentions_for_message(
+        self,
+        cloned_channel_id: int,
+        original_guild_id: int,
+        cloned_guild_id: int,
+    ) -> list[int]:
+        """
+        Get role IDs that should be mentioned for messages in this cloned channel.
+        Returns list of cloned role IDs.
+
+        Args:
+            cloned_channel_id: The channel ID in the clone guild where the message will be sent
+            original_guild_id: The source/host guild ID
+            cloned_guild_id: The clone guild ID
+
+        Returns:
+            List of role IDs (in the clone guild) that should be mentioned
+        """
+        try:
+            role_ids = self.db.get_role_mentions(
+                original_guild_id=int(original_guild_id),
+                cloned_guild_id=int(cloned_guild_id),
+                cloned_channel_id=int(cloned_channel_id),
+            )
+            return role_ids or []
+        except Exception:
+            logger.exception(
+                "[role-mentions] Failed to fetch role mentions for orig_g=%s clone_g=%s clone_ch=%s",
+                original_guild_id,
+                cloned_guild_id,
+                cloned_channel_id,
+            )
+            return []
+
     def _build_webhook_payload(
         self,
         msg: Dict,
         *,
         ctx_guild_id: int | None = None,
         ctx_mapping_row: dict | None = None,
+        prepend_roles: list[int] | None = None,
     ) -> dict:
         """
         Constructs a webhook payload from a given message dictionary.
@@ -4966,6 +5001,13 @@ class ServerReceiver:
             ctx_guild_id=ctx_guild_id,
             ctx_mapping_row=ctx_mapping_row,
         )
+
+        if prepend_roles and not msg.get("__backfill__"):
+            role_mentions = " ".join(f"<@&{rid}>" for rid in prepend_roles)
+            if text:
+                text = f"{role_mentions}\n{text}"
+            else:
+                text = role_mentions
 
         for att in msg.get("attachments", []) or []:
             url = att.get("url")
@@ -5851,10 +5893,41 @@ class ServerReceiver:
                     except Exception:
                         ctx_gid = host_guild_id or None
 
+                    role_mentions = []
+                    if not is_backfill:
+                        try:
+
+                            clone_cid = mapping.get("cloned_channel_id") or mapping.get(
+                                "clone_channel_id"
+                            )
+                            if clone_cid:
+                                role_mentions = self._get_role_mentions_for_message(
+                                    cloned_channel_id=int(clone_cid),
+                                    original_guild_id=int(ctx_gid or 0),
+                                    cloned_guild_id=int(
+                                        mapping.get("cloned_guild_id") or 0
+                                    ),
+                                )
+
+                                if role_mentions:
+                                    logger.debug(
+                                        "[role-mentions] Found %d role(s) to mention for clone_ch=%s in clone_g=%s",
+                                        len(role_mentions),
+                                        clone_cid,
+                                        mapping.get("cloned_guild_id"),
+                                    )
+                        except Exception:
+                            logger.exception(
+                                "[role-mentions] Failed to get role mentions",
+                                exc_info=True,
+                            )
+                            role_mentions = []
+
                     payload_for_mapping = self._build_webhook_payload(
                         msg,
                         ctx_guild_id=ctx_gid,
                         ctx_mapping_row=mapping,
+                        prepend_roles=role_mentions,
                     )
 
                     url = mapping.get("channel_webhook_url") or mapping.get(
@@ -6676,6 +6749,33 @@ class ServerReceiver:
                     self._pending_thread_msgs.append(data)
                     continue
 
+                role_mentions: list[int] = []
+                if not is_backfill:
+                    try:
+                        orig_gid = int(data.get("guild_id") or 0)
+                        if cloned_id:
+                            role_mentions = (
+                                self._get_role_mentions_for_message(
+                                    cloned_channel_id=int(cloned_id),
+                                    original_guild_id=orig_gid,
+                                    cloned_guild_id=clone_gid,
+                                )
+                                or []
+                            )
+                            if role_mentions:
+                                logger.debug(
+                                    "[role-mentions] Found %d role(s) to mention for thread in clone_ch=%s clone_g=%s",
+                                    len(role_mentions),
+                                    cloned_id,
+                                    clone_gid,
+                                )
+                    except Exception:
+                        logger.exception(
+                            "[role-mentions] Failed to get role mentions for thread",
+                            exc_info=True,
+                        )
+                        role_mentions = []
+
                 if forced_url:
                     webhook_url = forced_url
                 else:
@@ -7030,6 +7130,7 @@ class ServerReceiver:
                                         data,
                                         ctx_guild_id=host_guild_id or None,
                                         ctx_mapping_row=mrow,
+                                        prepend_roles=role_mentions,
                                     )
                                     or {}
                                 )
@@ -7200,6 +7301,7 @@ class ServerReceiver:
                                             data,
                                             ctx_guild_id=host_guild_id or None,
                                             ctx_mapping_row=_thread_mapping(new_id),
+                                            prepend_roles=role_mentions,
                                         )
                                         if meta.get("custom") or use_webhook_identity:
                                             payload2.pop("username", None)
@@ -7231,6 +7333,7 @@ class ServerReceiver:
                                         data,
                                         ctx_guild_id=host_guild_id or None,
                                         ctx_mapping_row=_thread_mapping(new_id),
+                                        prepend_roles=role_mentions,
                                     )
                                     or {}
                                 )
@@ -7340,6 +7443,7 @@ class ServerReceiver:
                                             data,
                                             ctx_guild_id=host_guild_id or None,
                                             ctx_mapping_row=_thread_mapping(new_id),
+                                            prepend_roles=role_mentions,
                                         )
                                         if meta.get("custom") or use_webhook_identity:
                                             payload2.pop("username", None)
@@ -7359,6 +7463,7 @@ class ServerReceiver:
                                                 data,
                                                 ctx_guild_id=host_guild_id or None,
                                                 ctx_mapping_row=_thread_mapping(new_id),
+                                                prepend_roles=role_mentions,
                                             )
                                             if (
                                                 meta.get("custom")
@@ -7390,6 +7495,7 @@ class ServerReceiver:
                                     data,
                                     ctx_guild_id=host_guild_id or None,
                                     ctx_mapping_row=_thread_mapping(clone_thread.id),
+                                    prepend_roles=role_mentions,
                                 )
                                 or {}
                             )
@@ -7412,6 +7518,7 @@ class ServerReceiver:
                                         ctx_mapping_row=_thread_mapping(
                                             clone_thread.id
                                         ),
+                                        prepend_roles=role_mentions,
                                     )
                                     if meta.get("custom") or use_webhook_identity:
                                         payload2.pop("username", None)
@@ -7476,6 +7583,7 @@ class ServerReceiver:
                                         ctx_mapping_row=_thread_mapping(
                                             clone_thread.id
                                         ),
+                                        prepend_roles=role_mentions,
                                     )
                                     if meta.get("custom") or use_webhook_identity:
                                         payload2.pop("username", None)
