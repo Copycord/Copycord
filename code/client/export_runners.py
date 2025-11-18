@@ -1638,8 +1638,9 @@ class BackfillEngine:
                     )
                     .astimezone(timezone.utc)
                     .isoformat(),
+                    "cloned_guild_id": cloned_guild_id,
+                    "mapping_id": mapping_id,
                     "__backfill__": True,
-                    # thread context should still reflect where we're *sending* this,
                     **(
                         {
                             "thread_parent_id": wrapper_parent_id,
