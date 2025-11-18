@@ -125,6 +125,7 @@
     MIRROR_ROLE_PERMISSIONS: false,
     MIRROR_CHANNEL_PERMISSIONS: false,
     ENABLE_CLONING: true,
+    RENAME_CHANNELS: true,
   };
 
   let lastFocusLog = null;

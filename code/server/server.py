@@ -2351,7 +2351,7 @@ class ServerReceiver:
         1) Deletes stale channels
         2) Creates new channels if missing
         3) Converts to Announcement if required
-        4) Renames to match sitemap
+        4) Renames to match sitemap (if RENAME_CHANNELS is enabled)
         """
         parts: List[str] = []
         incoming = self._parse_sitemap(sitemap)
@@ -2883,7 +2883,7 @@ class ServerReceiver:
     ) -> tuple[bool, str]:
         """
         Enforce per-clone pinned name (channel_mappings.clone_channel_name);
-        otherwise match upstream.
+        otherwise match upstream IF RENAME_CHANNELS is enabled.
         """
         try:
             per_clone = (self.chan_map_by_clone or {}).get(int(ch.guild.id), {}) or {}
@@ -2916,6 +2916,18 @@ class ServerReceiver:
             pinned_name = ((mapping or {}).get("clone_channel_name") or "").strip()
             has_pin = bool(pinned_name)
 
+            try:
+                settings = resolve_mapping_settings(
+                    self.db,
+                    self.config,
+                    original_guild_id=int(mapping.get("original_guild_id") or 0),
+                    cloned_guild_id=int(ch.guild.id),
+                )
+            except Exception:
+                settings = self.config.default_mapping_settings()
+
+            rename_enabled = settings.get("RENAME_CHANNELS", True)
+
             if mapping is not None:
                 try:
                     self.db.upsert_channel_mapping(
@@ -2936,20 +2948,28 @@ class ServerReceiver:
                 except Exception:
                     logger.debug("[rename] mapping upsert failed", exc_info=True)
 
-            target = (pinned_name or upstream_name).strip()
+            if has_pin:
+                target = pinned_name
+            elif rename_enabled:
+                target = upstream_name.strip()
+            else:
+                return False, "skipped_rename_disabled"
+
             if (ch.name or "").strip() == target:
                 return False, "skipped_already_ok"
+
+            old_name = ch.name
 
             await self.ratelimit.acquire_for_guild(ActionType.EDIT_CHANNEL, ch.guild.id)
             await ch.edit(name=target)
 
             if has_pin:
                 logger.info(
-                    "[📌] Enforced pinned name on #%d: %r → %r", ch.id, ch.name, target
+                    "[📌] Enforced pinned name on #%d: %r → %r", ch.id, old_name, target
                 )
                 return True, "pinned_enforced"
             else:
-                logger.info("[✏️] Renamed channel #%d: %r → %r", ch.id, ch.name, target)
+                logger.info("[✏️] Renamed channel #%d: %r → %r", ch.id, old_name, target)
                 return True, "match_upstream"
 
         except Exception:
@@ -3300,7 +3320,27 @@ class ServerReceiver:
                     ] = mapping
 
             pinned = ((mapping or {}).get("cloned_category_name") or "").strip()
-            desired = pinned or (upstream_name or "").strip()
+            has_pin = bool(pinned)
+
+            try:
+                settings = resolve_mapping_settings(
+                    self.db,
+                    self.config,
+                    original_guild_id=int(host_guild_id),
+                    cloned_guild_id=int(cat.guild.id),
+                )
+            except Exception:
+                settings = self.config.default_mapping_settings()
+
+            rename_enabled = settings.get("RENAME_CHANNELS", True)
+
+            if has_pin:
+                desired = pinned
+            elif rename_enabled and upstream_name:
+                desired = upstream_name.strip()
+            else:
+                return False, "skipped_rename_disabled"
+
             current = (getattr(cat, "name", "") or "").strip()
 
             if not desired or current == desired:
@@ -3312,6 +3352,7 @@ class ServerReceiver:
             await cat.edit(
                 name=desired, reason="Copycord: apply pinned/or upstream category name"
             )
+
             logger.info("[📌] Renamed category %r → %r", current, desired)
 
             try:
@@ -3326,7 +3367,7 @@ class ServerReceiver:
             except Exception:
                 logger.debug("[rename] category upsert failed", exc_info=True)
 
-            return True, ("pinned_enforced" if pinned else "match_upstream")
+            return True, ("pinned_enforced" if has_pin else "match_upstream")
 
         except Exception:
             logger.debug(
@@ -3339,7 +3380,7 @@ class ServerReceiver:
     async def _handle_renamed_categories(
         self, guild: discord.Guild, sitemap: Dict
     ) -> int:
-        """Rename categories in THIS clone to match upstream (or pinned)."""
+        """Rename categories in THIS clone to match upstream (or pinned) if RENAME_CHANNELS is enabled."""
         renamed = 0
         desired = {c["id"]: c["name"] for c in sitemap.get("categories", [])}
         host_guild_id = (sitemap.get("guild") or {}).get("id")
@@ -8197,25 +8238,15 @@ class ServerReceiver:
     ) -> tuple[bool, str | None]:
         """
         Check if a user should be blocked for a specific mapping.
-
-        Returns:
-            (should_block, reason)
-
-        Logic:
-        - If whitelist has entries: only whitelisted users pass
-        - If user is in blacklist: block them
-        - Otherwise: allow
         """
         if not user_id:
             return False, None
 
         filters = self._get_user_filters_for_mapping(original_guild_id, cloned_guild_id)
 
-        # If there's a whitelist, only those users pass
         if filters["whitelist"]:
             if user_id not in filters["whitelist"]:
                 return True, "user_not_in_whitelist"
-            # User is in whitelist, don't block
             return False, None
 
         if user_id in filters["blacklist"]:
@@ -8226,10 +8257,6 @@ class ServerReceiver:
     async def _shutdown(self):
         """
         Gracefully shut down the server:
-        1) stop accepting new work (WS, flags)
-        2) cancel/wait background tasks
-        3) let backfill clean up (DM summary, temp webhooks)
-        4) close HTTP session(s) and bot last
         """
         if getattr(self, "_shutting_down", False):
             return
@@ -8321,10 +8348,6 @@ class ServerReceiver:
     def run(self):
         """
         Starts the Copycord server and manages the event loop.
-        This method initializes the asyncio event loop, sets up signal handlers
-        for graceful shutdown on SIGTERM and SIGINT, and starts the bot using
-        the provided server token from the configuration. It ensures proper
-        cleanup of resources and pending tasks during shutdown.
         """
         logger.info("[✨] Starting Copycord Server %s", CURRENT_VERSION)
         loop = asyncio.get_event_loop()

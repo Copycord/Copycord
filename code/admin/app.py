@@ -196,6 +196,7 @@ BOOL_KEYS = [
     "DELETE_MESSAGES",
     "EDIT_MESSAGES",
     "REPOSITION_CHANNELS",
+    "RENAME_CHANNELS",
     "DELETE_ROLES",
     "UPDATE_ROLES",
     "CLONE_EMOJI",
@@ -221,6 +222,7 @@ DEFAULTS: Dict[str, str] = {
     "LOG_LEVEL": "INFO",
     "COMMAND_USERS": "",
     "MIRROR_CHANNEL_PERMISSIONS": "False",
+    "RENAME_CHANNELS": "True",
 }
 
 
