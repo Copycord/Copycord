@@ -665,6 +665,39 @@ class DBManager:
                 "CREATE INDEX IF NOT EXISTS idx_bf_runs_by_orig_status ON backfill_runs(original_channel_id, status);",
             ],
         )
+        
+        self._ensure_table(
+            name="user_filters",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    user_id             INTEGER NOT NULL,
+                    filter_type         TEXT NOT NULL CHECK(filter_type IN ('whitelist','blacklist')),
+                    original_guild_id   INTEGER NOT NULL,
+                    cloned_guild_id     INTEGER NOT NULL,
+                    added_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (user_id, filter_type, original_guild_id, cloned_guild_id)
+                )
+            """,
+            required_columns={
+                "user_id",
+                "filter_type",
+                "original_guild_id",
+                "cloned_guild_id",
+                "added_at",
+            },
+            copy_map={
+                "user_id": "user_id",
+                "filter_type": "filter_type",
+                "original_guild_id": "original_guild_id",
+                "cloned_guild_id": "cloned_guild_id",
+                "added_at": "COALESCE(added_at, CURRENT_TIMESTAMP)",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_user_filters_orig ON user_filters(original_guild_id);",
+                "CREATE INDEX IF NOT EXISTS idx_user_filters_clone ON user_filters(cloned_guild_id);",
+                "CREATE INDEX IF NOT EXISTS idx_user_filters_type ON user_filters(filter_type);",
+            ],
+        )
 
     def _table_exists(self, name: str) -> bool:
         row = self.conn.execute(
@@ -3621,3 +3654,165 @@ class DBManager:
                     continue
 
         return len(ids)
+
+
+    def get_user_filters_for_mapping(self, mapping_id: str) -> dict[str, list[int]]:
+        """
+        Return user filters for a mapping:
+        {
+            "whitelist": [user_id, user_id, ...],
+            "blacklist": [user_id, user_id, ...],
+        }
+        """
+        mapping_row = self.get_mapping_by_id(mapping_id)
+        if not mapping_row:
+            return {"whitelist": [], "blacklist": []}
+
+        host_gid = int(mapping_row["original_guild_id"])
+        clone_gid = int(mapping_row["cloned_guild_id"])
+
+        rows = self.conn.execute(
+            """
+            SELECT filter_type, user_id
+            FROM user_filters
+            WHERE original_guild_id = ? AND cloned_guild_id = ?
+            ORDER BY filter_type, user_id
+            """,
+            (host_gid, clone_gid),
+        ).fetchall()
+
+        whitelist: list[int] = []
+        blacklist: list[int] = []
+
+        for row in rows:
+            uid = int(row["user_id"])
+            ftype = str(row["filter_type"]).strip().lower()
+            
+            if ftype == "whitelist":
+                whitelist.append(uid)
+            elif ftype == "blacklist":
+                blacklist.append(uid)
+
+        return {
+            "whitelist": whitelist,
+            "blacklist": blacklist,
+        }
+
+    def replace_user_filters_for_mapping(
+        self,
+        mapping_id: str,
+        whitelist_users: list[int],
+        blacklist_users: list[int],
+    ) -> None:
+        """
+        Replace user filters for a mapping.
+        """
+        m = self.get_mapping_by_id(mapping_id)
+        if not m:
+            return
+
+        ogid = int(m["original_guild_id"] or 0)
+        cgid = int(m["cloned_guild_id"] or 0)
+
+        with self.conn:
+            # Delete existing user filters for this mapping
+            self.conn.execute(
+                """
+                DELETE FROM user_filters
+                WHERE original_guild_id = ? AND cloned_guild_id = ?
+                """,
+                (ogid, cgid),
+            )
+
+            # Insert whitelist users
+            for uid in whitelist_users:
+                try:
+                    user_id = int(uid)
+                    self.conn.execute(
+                        """
+                        INSERT OR IGNORE INTO user_filters
+                        (user_id, filter_type, original_guild_id, cloned_guild_id, added_at)
+                        VALUES (?, 'whitelist', ?, ?, CURRENT_TIMESTAMP)
+                        """,
+                        (user_id, ogid, cgid),
+                    )
+                except (ValueError, TypeError):
+                    continue
+
+            # Insert blacklist users
+            for uid in blacklist_users:
+                try:
+                    user_id = int(uid)
+                    self.conn.execute(
+                        """
+                        INSERT OR IGNORE INTO user_filters
+                        (user_id, filter_type, original_guild_id, cloned_guild_id, added_at)
+                        VALUES (?, 'blacklist', ?, ?, CURRENT_TIMESTAMP)
+                        """,
+                        (user_id, ogid, cgid),
+                    )
+                except (ValueError, TypeError):
+                    continue
+
+    def is_user_filtered(
+        self,
+        user_id: int,
+        original_guild_id: int,
+        cloned_guild_id: int,
+    ) -> tuple[bool, str | None]:
+        """
+        Check if a user is filtered for message cloning.
+        Returns (is_filtered: bool, reason: str | None)
+        
+        Logic:
+        - If whitelist exists and user NOT in it -> filtered
+        - If user in blacklist -> filtered
+        - Otherwise -> not filtered
+        """
+        # Check if there's a whitelist for this mapping
+        whitelist_count = self.conn.execute(
+            """
+            SELECT COUNT(*) FROM user_filters
+            WHERE filter_type = 'whitelist'
+            AND original_guild_id = ?
+            AND cloned_guild_id = ?
+            """,
+            (int(original_guild_id), int(cloned_guild_id)),
+        ).fetchone()[0]
+
+        has_whitelist = whitelist_count > 0
+
+        if has_whitelist:
+            # Check if user is in whitelist
+            in_whitelist = self.conn.execute(
+                """
+                SELECT 1 FROM user_filters
+                WHERE filter_type = 'whitelist'
+                AND user_id = ?
+                AND original_guild_id = ?
+                AND cloned_guild_id = ?
+                LIMIT 1
+                """,
+                (int(user_id), int(original_guild_id), int(cloned_guild_id)),
+            ).fetchone()
+
+            if not in_whitelist:
+                return (True, "user_not_in_whitelist")
+
+        # Check blacklist
+        in_blacklist = self.conn.execute(
+            """
+            SELECT 1 FROM user_filters
+            WHERE filter_type = 'blacklist'
+            AND user_id = ?
+            AND original_guild_id = ?
+            AND cloned_guild_id = ?
+            LIMIT 1
+            """,
+            (int(user_id), int(original_guild_id), int(cloned_guild_id)),
+        ).fetchone()
+
+        if in_blacklist:
+            return (True, "user_in_blacklist")
+
+        return (False, None)

@@ -7,6 +7,7 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 from __future__ import annotations
 from collections import deque
 import contextlib
@@ -1895,6 +1896,8 @@ async def api_get_filters(mapping_id: str):
         if clone_gid:
             blocked_role_ids = db.get_blocked_role_ids(cloned_guild_id=clone_gid)
 
+    user_filters = db.get_user_filters_for_mapping(mapping_id)
+
     return JSONResponse(
         {
             "wl_categories": filters["whitelist"]["category"],
@@ -1903,6 +1906,8 @@ async def api_get_filters(mapping_id: str):
             "ex_channels": filters["exclude"]["channel"],
             "blocked_words": filters.get("blocked_words", []),
             "blocked_role_ids": [str(x) for x in blocked_role_ids],
+            "wl_users": [str(x) for x in user_filters["whitelist"]],
+            "bl_users": [str(x) for x in user_filters["blacklist"]],
         }
     )
 
@@ -1937,9 +1942,10 @@ async def api_save_filters(mapping_id: str, request: Request):
     ex_channels = _split_csv_ids(form.get("ex_channels", ""))
 
     blocked_words = _split_csv_words(form.get("blocked_words", ""))
-
-    # NEW: original role IDs to block for this mapping's clone guild
     blocked_role_ids = _split_csv_ids(form.get("blocked_role_ids", ""))
+
+    wl_users = _split_csv_ids(form.get("wl_users", ""))
+    bl_users = _split_csv_ids(form.get("bl_users", ""))
 
     db.replace_filters_for_mapping(
         mapping_id=mapping_id,
@@ -1957,6 +1963,12 @@ async def api_save_filters(mapping_id: str, request: Request):
     db.replace_role_blocks_for_mapping(
         mapping_id=mapping_id,
         original_role_ids=blocked_role_ids,
+    )
+
+    db.replace_user_filters_for_mapping(
+        mapping_id=mapping_id,
+        whitelist_users=wl_users,
+        blacklist_users=bl_users,
     )
 
     return JSONResponse({"ok": True})

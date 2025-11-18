@@ -147,6 +147,8 @@ class ServerReceiver:
             tuple[int, int], list[tuple[re.Pattern, str]]
         ] = {}
         self._blocked_keywords_lock = asyncio.Lock()
+        self._user_filters_cache: dict[tuple[int, int], dict[str, set[int]]] = {}
+        self._user_filters_lock = asyncio.Lock()
         self._default_avatar_bytes: Optional[bytes] = None
         self._ws_task: asyncio.Task | None = None
         self._sitemap_queues: dict[int, asyncio.Queue] = {}
@@ -648,6 +650,7 @@ class ServerReceiver:
             self.verify.start()
         self._verify_task = asyncio.create_task(self._verify_listen_loop())
         await self._load_blocked_keywords_cache()
+        await self._load_user_filters_cache()
         await self.bus.log("Boot completed")
         await self.update_status(f"{CURRENT_VERSION}")
 
@@ -3603,7 +3606,7 @@ class ServerReceiver:
         host_guild_id: int | None,
         *,
         skip_channel_ids: set[int] | None = None,
-    ) -> int:  
+    ) -> int:
         """
         Re-parent cloned channels for THIS clone guild only, when upstream parent differs.
         Updates DB mapping for THIS clone so future syncs keep the new parent.
@@ -5363,6 +5366,31 @@ class ServerReceiver:
                         )
 
                     try:
+                        author_id = int(msg.get("author_id") or 0)
+                        if author_id:
+                            should_block_user, block_reason = (
+                                self._should_block_user_for_mapping(
+                                    author_id,
+                                    orig_gid,
+                                    clone_gid,
+                                )
+                            )
+
+                            if should_block_user:
+                                logger.info(
+                                    "[❌] Blocking message %s from user %s for clone %s: %s",
+                                    msg.get("message_id"),
+                                    author_id,
+                                    clone_gid,
+                                    block_reason,
+                                )
+                                continue
+                    except Exception:
+                        logger.exception(
+                            "[forward] User filter check failed for clone %s", clone_gid
+                        )
+
+                    try:
                         ctx_gid = (
                             int(mapping.get("original_guild_id") or host_guild_id or 0)
                             or None
@@ -6099,6 +6127,30 @@ class ServerReceiver:
                 except Exception:
                     logger.exception(
                         "[thread] Keyword check failed for clone %s", clone_gid
+                    )
+
+                try:
+                    author_id = int(data.get("author_id") or 0)
+                    if author_id:
+                        should_block_user, block_reason = (
+                            self._should_block_user_for_mapping(
+                                author_id,
+                                int(data.get("guild_id") or 0),
+                                clone_gid,
+                            )
+                        )
+
+                        if should_block_user:
+                            logger.info(
+                                "[❌] Blocking thread message from user %s for clone %s: %s",
+                                author_id,
+                                clone_gid,
+                                block_reason,
+                            )
+                            continue
+                except Exception:
+                    logger.exception(
+                        "[thread] User filter check failed for clone %s", clone_gid
                     )
 
                 try:
@@ -7793,6 +7845,137 @@ class ServerReceiver:
         for pattern, keyword in patterns:
             if pattern.search(normalized):
                 return True, keyword
+
+        return False, None
+
+    async def _load_user_filters_cache(self) -> None:
+        """
+        Load all user filters from DB and build cache.
+        Cache structure: {(original_gid, cloned_gid): {'blacklist': {uid, ...}, 'whitelist': {uid, ...}}}
+        """
+        async with self._user_filters_lock:
+            self._user_filters_cache.clear()
+
+            logger.debug("[user-filters] Loading user filters from database...")
+
+            try:
+                rows = self.db.conn.execute(
+                    """
+                    SELECT user_id, original_guild_id, cloned_guild_id, filter_type
+                    FROM user_filters
+                    ORDER BY original_guild_id, cloned_guild_id, filter_type
+                    """
+                ).fetchall()
+            except Exception as e:
+                logger.exception("[user-filters] Failed to load user filters from DB")
+                return
+
+            if not rows:
+                logger.debug("[user-filters] No user filters found in database")
+                return
+
+            total_count = 0
+            for row in rows:
+                try:
+                    user_id = int(row["user_id"])
+                    orig_gid = (
+                        int(row["original_guild_id"]) if row["original_guild_id"] else 0
+                    )
+                    clone_gid = (
+                        int(row["cloned_guild_id"]) if row["cloned_guild_id"] else 0
+                    )
+                    filter_type = row["filter_type"]
+
+                    key = (orig_gid, clone_gid)
+                    if key not in self._user_filters_cache:
+                        self._user_filters_cache[key] = {
+                            "blacklist": set(),
+                            "whitelist": set(),
+                        }
+
+                    self._user_filters_cache[key][filter_type].add(user_id)
+                    total_count += 1
+                except Exception as e:
+                    logger.warning("[user-filters] Failed to process filter row: %s", e)
+
+            logger.debug(
+                "[user-filters] Loaded %d user filters across %d mapping scopes",
+                total_count,
+                len(self._user_filters_cache),
+            )
+
+    def _get_user_filters_for_mapping(
+        self,
+        original_guild_id: int,
+        cloned_guild_id: int,
+    ) -> dict[str, set[int]]:
+        """
+        Get user filters for a specific mapping.
+        Returns dict with 'blacklist' and 'whitelist' sets of user IDs.
+
+        Checks three scopes in order (merging):
+        1. Mapping-specific (original_guild_id, cloned_guild_id)
+        2. Host-level (original_guild_id, 0)
+        3. Global (0, 0)
+        """
+        result = {"blacklist": set(), "whitelist": set()}
+
+        key_global = (0, 0)
+        if key_global in self._user_filters_cache:
+            result["blacklist"].update(
+                self._user_filters_cache[key_global]["blacklist"]
+            )
+            result["whitelist"].update(
+                self._user_filters_cache[key_global]["whitelist"]
+            )
+
+        key_host = (int(original_guild_id), 0)
+        if key_host in self._user_filters_cache:
+            result["blacklist"].update(self._user_filters_cache[key_host]["blacklist"])
+            result["whitelist"].update(self._user_filters_cache[key_host]["whitelist"])
+
+        key_mapping = (int(original_guild_id), int(cloned_guild_id))
+        if key_mapping in self._user_filters_cache:
+            result["blacklist"].update(
+                self._user_filters_cache[key_mapping]["blacklist"]
+            )
+            result["whitelist"].update(
+                self._user_filters_cache[key_mapping]["whitelist"]
+            )
+
+        return result
+
+    def _should_block_user_for_mapping(
+        self,
+        user_id: int,
+        original_guild_id: int,
+        cloned_guild_id: int,
+    ) -> tuple[bool, str | None]:
+        """
+        Check if a user should be blocked for a specific mapping.
+
+        Returns:
+            (should_block, reason)
+
+        Logic:
+        - If whitelist has entries: only whitelisted users pass
+        - If user is in blacklist: block them
+        - Otherwise: allow
+        """
+        if not user_id:
+            return False, None
+
+        filters = self._get_user_filters_for_mapping(original_guild_id, cloned_guild_id)
+
+        # If there's a whitelist, only those users pass
+        if filters["whitelist"]:
+            if user_id not in filters["whitelist"]:
+                return True, "user_not_in_whitelist"
+            # User is in whitelist, don't block
+            return False, None
+
+        if user_id in filters["blacklist"]:
+            return True, "user_blacklisted"
 
         return False, None
 

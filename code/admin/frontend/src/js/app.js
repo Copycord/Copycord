@@ -1487,8 +1487,9 @@
       ["ex_channels", "ex_channels", "ids"],
       ["blocked_words", "blocked_words", "words"],
       ["cmd_users", "COMMAND_USERS", "ids"],
-
       ["blocked_roles", "blocked_role_ids", "ids"],
+      ["wl_users", "wl_users", "ids"],
+      ["bl_users", "bl_users", "ids"],
     ];
     for (const [dataKey, hiddenId, mode] of defs) {
       const root = document.querySelector(`.chips[data-chips="${dataKey}"]`);
@@ -3103,7 +3104,7 @@
     );
   }
 
-function renderGuildMappings() {
+  function renderGuildMappings() {
     const listEl = document.getElementById("guild-mapping-list");
     if (!listEl) return;
 
@@ -3258,12 +3259,17 @@ function renderGuildMappings() {
     const bw = document.getElementById("blocked_words");
     const hiddenBlockedRoles = document.getElementById("blocked_role_ids");
 
+    const wlUsers = document.getElementById("wl_users");
+    const blUsers = document.getElementById("bl_users");
+
     if (wlCats) wlCats.value = "";
     if (wlCh) wlCh.value = "";
     if (exCats) exCats.value = "";
     if (exCh) exCh.value = "";
     if (bw) bw.value = "";
     if (hiddenBlockedRoles) hiddenBlockedRoles.value = "";
+    if (wlUsers) wlUsers.value = "";
+    if (blUsers) blUsers.value = "";
 
     if (CHIPS.wl_categories) CHIPS.wl_categories.set([]);
     if (CHIPS.wl_channels) CHIPS.wl_channels.set([]);
@@ -3271,6 +3277,8 @@ function renderGuildMappings() {
     if (CHIPS.ex_channels) CHIPS.ex_channels.set([]);
     if (CHIPS.blocked_words) CHIPS.blocked_words.set([]);
     if (CHIPS.blocked_roles) CHIPS.blocked_roles.set([]);
+    if (CHIPS.wl_users) CHIPS.wl_users.set([]);
+    if (CHIPS.bl_users) CHIPS.bl_users.set([]);
 
     if (!mid) return;
 
@@ -3311,13 +3319,32 @@ function renderGuildMappings() {
 
         if (hiddenBlockedRoles) {
           hiddenBlockedRoles.value = roleIds.join(",");
-
           hiddenBlockedRoles.dispatchEvent(
             new Event("input", { bubbles: true })
           );
         }
         if (CHIPS.blocked_roles) {
           CHIPS.blocked_roles.set(roleIds);
+        }
+
+        if (Array.isArray(data.wl_users)) {
+          if (wlUsers) {
+            wlUsers.value = data.wl_users.join(",");
+            wlUsers.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          if (CHIPS.wl_users) {
+            CHIPS.wl_users.set(data.wl_users);
+          }
+        }
+
+        if (Array.isArray(data.bl_users)) {
+          if (blUsers) {
+            blUsers.value = data.bl_users.join(",");
+            blUsers.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          if (CHIPS.bl_users) {
+            CHIPS.bl_users.set(data.bl_users);
+          }
         }
       }
     } catch (err) {

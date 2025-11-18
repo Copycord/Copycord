@@ -681,6 +681,53 @@
             </div>
           </fieldset>
 
+          <fieldset class="filters-col filters-users">
+            <legend>User Filters</legend>
+            
+            <div class="field">
+              <label for="wl_users_input" class="has-tip">
+                <span class="label-text">Whitelisted User IDs</span>
+                <button type="button" class="info-dot"
+                  aria-label="Only messages from these users will be cloned"
+                  aria-describedby="tip-wl_users"></button>
+                <span id="tip-wl_users" role="tooltip" class="tip-bubble">
+                  When set, ONLY messages from these user IDs will be cloned.
+                  Leave empty to clone all users (unless blacklisted).
+                </span>
+              </label>
+
+              <div class="chips" data-chips="wl_users">
+                <span class="chip-input-wrap">
+                  <input class="chip-input" id="wl_users_input" type="text" inputmode="numeric"
+                    placeholder="Add user ID(s)…" />
+                </span>
+              </div>
+
+              <input type="hidden" id="wl_users" name="wl_users" value="">
+            </div>
+
+            <div class="field">
+              <label for="bl_users_input" class="has-tip">
+                <span class="label-text">Blacklisted User IDs</span>
+                <button type="button" class="info-dot"
+                  aria-label="Messages from these users will NOT be cloned"
+                  aria-describedby="tip-bl_users"></button>
+                <span id="tip-bl_users" role="tooltip" class="tip-bubble">
+                  Messages from these user IDs will be blocked from cloning.
+                </span>
+              </label>
+
+              <div class="chips" data-chips="bl_users">
+                <span class="chip-input-wrap">
+                  <input class="chip-input" id="bl_users_input" type="text" inputmode="numeric"
+                    placeholder="Add user ID(s)…" />
+                </span>
+              </div>
+
+              <input type="hidden" id="bl_users" name="bl_users" value="">
+            </div>
+          </fieldset>
+
           <div class="btns modal-footer-row">
             <button id="filters-save-btn" type="submit" class="btn btn-ghost">
               Save Filters
