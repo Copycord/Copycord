@@ -163,10 +163,7 @@ class StickerManager:
 
         guild = self.bot.get_guild(clone_gid)
         if not guild:
-            self._log(
-                "debug",
-                "[🎟️] Clone guild unavailable; aborting"
-            )
+            self._log("debug", "[🎟️] Clone guild unavailable; aborting")
             return
 
         stickers = st["sitemap"] or []
@@ -243,15 +240,9 @@ class StickerManager:
                 )
 
             except asyncio.CancelledError:
-                self._log(
-                    "debug",
-                    "[🎟️] Sticker sync canceled before completion."
-                )
+                self._log("debug", "[🎟️] Sticker sync canceled before completion.")
             except Exception as e:
-                self._log(
-                    "exception",
-                    "[🎟️] Sticker sync failed: %s", e
-                )
+                self._log("exception", "[🎟️] Sticker sync failed: %s", e)
             finally:
 
                 t = self._tasks.get(clone_gid)
@@ -346,7 +337,9 @@ class StickerManager:
                         mapping["original_sticker_name"],
                     )
 
-                    self.db.delete_sticker_mapping_for_clone(orig_id, cloned_guild_id=guild.id)
+                    self.db.delete_sticker_mapping_for_clone(
+                        orig_id, cloned_guild_id=guild.id
+                    )
                     mapping = None
 
             if mapping and cloned and mapping["original_sticker_name"] != name:
@@ -462,7 +455,7 @@ class StickerManager:
                     skipped_limit += 1
                     self._log(
                         "info",
-                        "[🎟️] Skipped creating sticker due to clone guild sticker limit."
+                        "[🎟️] Skipped creating sticker due to clone guild sticker limit.",
                     )
 
                 else:
@@ -633,6 +626,26 @@ class StickerManager:
 
         return out
 
+    def _backfill_suffix(self, receiver, source_id: int, msg: dict) -> str:
+        """
+        Format a '[N left]' or '[N sent]' suffix for sticker logs when running
+        under backfill. This does NOT mutate progress; it just reads it.
+        """
+        try:
+            bf = getattr(receiver, "backfill", None)
+            if not bf or not msg.get("__backfill__"):
+                return ""
+
+            delivered, total = bf.get_progress(int(source_id))
+            if total is not None:
+                left = max(int(total) - int(delivered), 0)
+                return f" [{left} left]"
+            else:
+                return f" [{delivered} sent]"
+        except Exception:
+
+            return ""
+
     async def send_with_fallback(
         self,
         receiver,
@@ -656,7 +669,6 @@ class StickerManager:
             return False
 
         def _is_custom_sticker_dict(s: dict) -> bool:
-
             try:
                 if int(s.get("type", 0)) == 2:
                     return True
@@ -683,13 +695,16 @@ class StickerManager:
                 name = s.get("name") or "sticker"
                 pairs.append((name, url))
                 all_custom = all_custom and _is_custom_sticker_dict(s)
+
             if not pairs:
 
                 extra = self.lookup_original_urls(clone_gid, sts)
                 if extra:
                     pairs.extend(extra[: max(0, 3 - len(pairs))])
 
-                    all_custom = False if extra else all_custom
+                    if extra:
+                        all_custom = False
+
             return pairs, all_custom
 
         if prefer_embeds:
@@ -704,7 +719,6 @@ class StickerManager:
             return False
 
         if (not mapping) or (not ch):
-
             msg["__buffered__"] = True
             receiver._pending_msgs.setdefault(source_id, []).append(msg)
             logger.info(
@@ -715,54 +729,89 @@ class StickerManager:
             return True
 
         objs, _ = self.resolve_cloned(clone_gid, stickers)
+
+        author = msg.get("author")
+        base_content = (msg.get("content") or "").strip()
+        all_custom = all(_is_custom_sticker_dict(s) for s in (stickers or []))
+        auth_disp = author or "Unknown"
+
+        if suppress_text and all_custom and not base_content:
+            content = None
+        elif base_content:
+            content = f"From {auth_disp}: {base_content}"
+        else:
+            content = f"From {auth_disp}:"
+
         if objs:
-            author = msg.get("author")
-            base_content = (msg.get("content") or "").strip()
-            all_custom = all(_is_custom_sticker_dict(s) for s in (stickers or []))
-
-            auth_disp = author or "Unknown"
-            if suppress_text and all_custom and not base_content:
-
-                content = None
-            elif base_content:
-
-                content = f"From {auth_disp}: {base_content}"
-            else:
-
-                content = f"From {auth_disp}:"
-
+            rl_key = f"channel:{mapping.get('cloned_channel_id') or source_id}"
+            await receiver.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=rl_key)
             try:
-                await receiver.ratelimit.acquire(
-                    ActionType.WEBHOOK_MESSAGE, key=str(mapping["cloned_channel_id"])
-                )
-                await ch.send(content=content, stickers=objs[:3])
-                logger.info(
-                    "[💬] Forwarded cloned-sticker message to #%s from %s (%s)",
-                    msg.get("channel_name"),
-                    msg.get("author"),
-                    msg.get("author_id"),
-                )
+
+                await ch.send(stickers=objs, content=content)
+
+                suffix = ""
+                if msg.get("__backfill__"):
+                    suffix = self._backfill_suffix(receiver, source_id, msg)
+
+                if msg.get("__backfill__"):
+                    logger.info(
+                        "[💬] [backfill] Forwarded cloned-sticker message to #%s from %s (%s)%s",
+                        msg.get("channel_name"),
+                        msg.get("author"),
+                        msg.get("author_id"),
+                        suffix,
+                    )
+                else:
+                    logger.info(
+                        "[💬] Forwarded cloned-sticker message to #%s from %s (%s)",
+                        msg.get("channel_name"),
+                        msg.get("author"),
+                        msg.get("author_id"),
+                    )
                 return True
+
             except discord.HTTPException:
                 logger.debug(
                     "[⚠️] Cloned sticker send failed; will try standard or embed fallback."
                 )
+            finally:
+                receiver.ratelimit.relax(ActionType.WEBHOOK_MESSAGE, key=rl_key)
 
-        sent_std = await self.try_send_standard(
-            channel=ch,
-            author=msg.get("author"),
-            stickers=stickers,
-            base_content=(
-                None if suppress_text else ((msg.get("content") or "").strip() or None)
-            ),
+        base_content = (
+            None if suppress_text else ((msg.get("content") or "").strip() or None)
         )
-        if sent_std:
-            logger.info(
-                "[💬] Forwarded standard sticker message to #%s from %s (%s)",
-                msg.get("channel_name"),
-                msg.get("author"),
-                msg.get("author_id"),
+        rl_key_std = f"channel:{mapping.get('cloned_channel_id') or source_id}"
+        await receiver.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=rl_key_std)
+        try:
+            sent_std = await self.try_send_standard(
+                channel=ch,
+                author=msg.get("author"),
+                stickers=stickers,
+                base_content=base_content,
             )
+        finally:
+            receiver.ratelimit.relax(ActionType.WEBHOOK_MESSAGE, key=rl_key_std)
+
+        if sent_std:
+            suffix = ""
+            if msg.get("__backfill__"):
+                suffix = self._backfill_suffix(receiver, source_id, msg)
+
+            if msg.get("__backfill__"):
+                logger.info(
+                    "[💬] [backfill] Forwarded standard sticker message to #%s from %s (%s)%s",
+                    msg.get("channel_name"),
+                    msg.get("author"),
+                    msg.get("author_id"),
+                    suffix,
+                )
+            else:
+                logger.info(
+                    "[💬] Forwarded standard sticker message to #%s from %s (%s)",
+                    msg.get("channel_name"),
+                    msg.get("author"),
+                    msg.get("author_id"),
+                )
             return True
 
         pairs, all_custom = _collect_pairs(stickers)

@@ -12,7 +12,6 @@ import asyncio
 import contextlib
 import re
 import signal
-import unicodedata
 from datetime import datetime, timezone
 import logging
 from typing import Optional
@@ -145,6 +144,7 @@ class ClientListener:
             maxsize=int(os.getenv("BACKFILL_QUEUE_MAX", "500"))
         )
         self._bf_active: set[int] = set()
+        self._bf_active_meta: dict[int, dict] = {}
         self._bf_queued: set[int] = set()
         self._bf_worker_task: asyncio.Task | None = None
         self._bf_waiters: dict[int, asyncio.Event] = {}
@@ -266,7 +266,6 @@ class ClientListener:
         elif typ == "backfills_queue_query":
 
             try:
-
                 pending = list(getattr(self._bf_queue, "_queue", []))
             except Exception:
                 pending = []
@@ -277,13 +276,34 @@ class ClientListener:
                     cid = int(tup[0])
                 except Exception:
                     continue
-                pending_items.append(
-                    {
-                        "channel_id": str(cid),
-                        "position": idx,
-                        "state": "queued",
-                    }
-                )
+
+                meta = {}
+                if (
+                    isinstance(tup, (tuple, list))
+                    and len(tup) > 1
+                    and isinstance(tup[1], dict)
+                ):
+                    meta = tup[1] or {}
+
+                item = {
+                    "channel_id": str(cid),
+                    "position": idx,
+                    "state": "queued",
+                }
+
+                mid = meta.get("mapping_id")
+                if mid is not None:
+                    item["mapping_id"] = str(mid)
+
+                og = meta.get("original_guild_id")
+                if og is not None:
+                    item["original_guild_id"] = str(og)
+
+                cg = meta.get("cloned_guild_id")
+                if cg is not None:
+                    item["cloned_guild_id"] = str(cg)
+
+                pending_items.append(item)
 
             active_items = []
             for cid in list(self._bf_active):
@@ -291,13 +311,28 @@ class ClientListener:
                     cid_int = int(cid)
                 except Exception:
                     continue
-                active_items.append(
-                    {
-                        "channel_id": str(cid_int),
-                        "position": 0,
-                        "state": "active",
-                    }
-                )
+
+                meta = dict(self._bf_active_meta.get(cid_int) or {})
+
+                item = {
+                    "channel_id": str(cid_int),
+                    "position": 0,
+                    "state": "active",
+                }
+
+                mid = meta.get("mapping_id")
+                if mid is not None:
+                    item["mapping_id"] = str(mid)
+
+                og = meta.get("original_guild_id")
+                if og is not None:
+                    item["original_guild_id"] = str(og)
+
+                cg = meta.get("cloned_guild_id")
+                if cg is not None:
+                    item["cloned_guild_id"] = str(cg)
+
+                active_items.append(item)
 
             return {
                 "type": "backfills_queue",
@@ -306,37 +341,36 @@ class ClientListener:
             }
 
         elif typ == "sitemap_request":
-                payload = data or {}
+            payload = data or {}
 
+            target_gid = None
+            try:
+                raw_gid = payload.get("guild_id")
+                target_gid = int(raw_gid) if raw_gid is not None else None
+            except Exception:
                 target_gid = None
+
+            mapping_id = (payload.get("mapping_id") or "").strip() or None
+
+            if mapping_id:
+
+                logger.info(
+                    "[🌐] Received sitemap request for mapping %r (host=%s)",
+                    mapping_id,
+                    target_gid or "ANY",
+                )
                 try:
-                    raw_gid = payload.get("guild_id")
-                    target_gid = int(raw_gid) if raw_gid is not None else None
+                    await self.sitemap.send_for_mapping_id(mapping_id)
                 except Exception:
-                    target_gid = None
-
-                # NEW: optional per-mapping filter
-                mapping_id = (payload.get("mapping_id") or "").strip() or None
-
-                if mapping_id:
-                    # Targeted sitemap for a single mapping row
-                    logger.info(
-                        "[🌐] Received sitemap request for mapping %r (host=%s)",
-                        mapping_id,
-                        target_gid or "ANY",
+                    logger.exception(
+                        "[🌐] Failed to send sitemap for mapping %r", mapping_id
                     )
-                    try:
-                        await self.sitemap.send_for_mapping_id(mapping_id)
-                    except Exception:
-                        logger.exception(
-                            "[🌐] Failed to send sitemap for mapping %r", mapping_id
-                        )
-                else:
-                    # Old behavior: per-host or ALL
-                    self.schedule_sync(guild_id=target_gid)
-                    logger.info("[🌐] Received sitemap request for %s", target_gid or "ALL")
+            else:
 
-                return {"ok": True}
+                self.schedule_sync(guild_id=target_gid)
+                logger.info("[🌐] Received sitemap request for %s", target_gid or "ALL")
+
+            return {"ok": True}
 
         elif typ == "scrape_members":
             data = data or {}
@@ -904,7 +938,6 @@ class ClientListener:
         if message.channel.type in (ChannelType.voice, ChannelType.stage_voice):
 
             return True
-
 
     async def maybe_send_announcement(self, message: discord.Message) -> bool:
         content = message.content
@@ -1837,6 +1870,7 @@ class ClientListener:
                     continue
 
                 self._bf_active.add(chan_id)
+                self._bf_active_meta[chan_id] = dict(params or {})
 
                 await self.backfill.run_channel(chan_id, **(params or {}))
 

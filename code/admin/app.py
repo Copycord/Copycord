@@ -23,7 +23,7 @@ import tarfile, tempfile, shutil
 import re
 import time
 import logging
-from typing import Dict, List, Set, Literal, Optional
+from typing import Dict, List, Set, Literal, Optional, Any
 from admin.auth import init_admin_auth
 from admin.logging_setup import (
     LOGGER,
@@ -450,9 +450,11 @@ class BackfillLocks:
     async def try_acquire_launching(
         self, channel_id: int, cloned_guild_id: int | None
     ) -> bool:
-        key = f"{int(channel_id)}:{int(cloned_guild_id or 0)}"
+
+        key = int(channel_id)
         now = time.time()
         async with self._lock:
+
             self._launching = {
                 k: exp for k, exp in self._launching.items() if exp > now
             }
@@ -462,13 +464,13 @@ class BackfillLocks:
             return True
 
     async def promote_to_running(self, channel_id: int, cloned_guild_id: int | None):
-        key = f"{int(channel_id)}:{int(cloned_guild_id or 0)}"
+        key = int(channel_id)
         async with self._lock:
             self._launching.pop(key, None)
             self._running.add(key)
 
     async def release(self, channel_id: int, cloned_guild_id: int | None):
-        key = f"{int(channel_id)}:{int(cloned_guild_id or 0)}"
+        key = int(channel_id)
         async with self._lock:
             self._launching.pop(key, None)
             self._running.discard(key)
@@ -476,7 +478,7 @@ class BackfillLocks:
     async def status(
         self, channel_id: int, cloned_guild_id: int | None
     ) -> Literal["idle", "launching", "running"]:
-        key = f"{int(channel_id)}:{int(cloned_guild_id or 0)}"
+        key = int(channel_id)
         now = time.time()
         async with self._lock:
             if key in self._running:
@@ -2479,23 +2481,41 @@ async def api_channels(mapping_id: str | None = Query(default=None)):
 
 
 @app.get("/api/backfills/queue")
-async def api_backfills_queue():
+async def api_backfills_queue(mapping_id: Optional[str] = Query(default=None)):
     """
     Ask the client for its current backfill queue (active + queued).
-    """
 
-    res = await _ws_cmd(CLIENT_AGENT_URL, {"type": "backfills_queue_query"})
-    items = (res or {}).get("data", {}).get("items", [])
+    Optional mapping_id makes the queue clone-aware so we only see
+    entries for the currently selected mapping.
+    """
+    payload: dict[str, Any] = {"type": "backfills_queue_query"}
+    if mapping_id:
+        payload["data"] = {"mapping_id": str(mapping_id)}
+
+    res = await _ws_cmd(CLIENT_AGENT_URL, payload)
+    items = (res or {}).get("data", {}).get("items", []) or []
+
+    if mapping_id:
+        mid = str(mapping_id)
+        items = [it for it in items if str((it or {}).get("mapping_id") or "") == mid]
 
     return JSONResponse({"ok": True, "items": items})
 
 
 @app.get("/api/backfills/inflight")
-async def api_backfills_inflight():
-
+async def api_backfills_inflight(mapping_id: Optional[str] = Query(default=None)):
     res = await _ws_cmd(SERVER_AGENT_URL, {"type": "backfills_status_query"})
 
-    items = (res or {}).get("data", {}).get("items", {})
+    items = (res or {}).get("data", {}).get("items", {}) or {}
+
+    if mapping_id:
+        mid = str(mapping_id)
+        items = {
+            cid: st
+            for cid, st in items.items()
+            if str((st or {}).get("mapping_id")) == mid
+        }
+
     return JSONResponse({"ok": True, "items": items})
 
 
