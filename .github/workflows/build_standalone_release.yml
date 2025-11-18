@@ -45,7 +45,6 @@ jobs:
           mkdir -p standalone-release/windows
           mkdir -p standalone-release/linux-mac
 
-
           cp -r code standalone-release/
           cp LICENSE standalone-release/
           cp README.md standalone-release/
@@ -123,11 +122,15 @@ jobs:
           rem Go to the root of the standalone package (one level above /windows)
           cd /d %~dp0..
 
-          rem Ensure data directory exists
-          if not exist data mkdir data
+          rem Enable UTF-8 so logging emojis don't crash on Windows
+          chcp 65001 >nul
+          set PYTHONUTF8=1
+          set PYTHONIOENCODING=utf-8
 
-          rem Optional: export DATA_DIR for future Python use
-          set DATA_DIR=%CD%\data
+          rem Ensure data directory exists and set env vars
+          if not exist data mkdir data
+          set "DATA_DIR=%CD%\data"
+          set "DB_PATH=%DATA_DIR%\data.db"
 
           if not exist venv\Scripts\activate.bat (
               echo [ERROR] Virtual environment not found!
@@ -137,26 +140,31 @@ jobs:
           )
 
           call venv\Scripts\activate.bat
-          echo Starting Copycord...
 
-          rem Admin (Web UI) with logging to data\admin.log
-          start "Copycord Admin" cmd /k ^
-            "cd /d %CD% && venv\Scripts\python.exe -m uvicorn admin.app:app --host 0.0.0.0 --port 8080 --app-dir code > data\admin.log 2>&1"
+          echo Starting Copycord...
+          echo Data directory: %DATA_DIR%
+          echo DB file:        %DB_PATH%
+          echo.
+
+          rem Admin (Web UI)
+          start "Copycord Admin" cmd /k "cd /d %CD% && venv\Scripts\python.exe -m uvicorn admin.app:app --host 0.0.0.0 --port 8080 --app-dir code"
 
           rem Small delay
           timeout /t 3 >nul
 
-          rem Server with logging to data\server.log
-          start "Copycord Server" cmd /k ^
-            "cd /d %CD%\code && SET PYTHONPATH=%CD%\code && SET CONTROL_PORT=9101 && ..\venv\Scripts\python.exe control\control.py > ..\data\server.log 2>&1"
+          rem Server
+          start "Copycord Server" cmd /k "cd /d %CD%\code && SET PYTHONPATH=%CD%\code && SET DATA_DIR=%DATA_DIR% && SET DB_PATH=%DB_PATH% && SET CONTROL_PORT=9101 && ..\venv\Scripts\python.exe control\control.py"
 
-          rem Client with logging to data\client.log
-          start "Copycord Client" cmd /k ^
-            "cd /d %CD%\code && SET PYTHONPATH=%CD%\code && SET CONTROL_PORT=9102 && ..\venv\Scripts\python.exe control\control.py > ..\data\client.log 2>&1"
+          rem Client
+          start "Copycord Client" cmd /k "cd /d %CD%\code && SET PYTHONPATH=%CD%\code && SET DATA_DIR=%DATA_DIR% && SET DB_PATH=%DB_PATH% && SET CONTROL_PORT=9102 && ..\venv\Scripts\python.exe control\control.py"
 
           echo.
-          echo Copycord is running! Web UI: http://localhost:8080
-          echo Logs are in the "data" folder next to this directory.
+          echo ========================================
+          echo   Copycord is running!
+          echo ========================================
+          echo.
+          echo Web UI: http://localhost:8080
+          echo Data and DB are in the "data" folder next to this directory.
           echo.
           pause
           endlocal
@@ -215,6 +223,7 @@ jobs:
           DATA_DIR="$ROOT_DIR/data"
           mkdir -p "$DATA_DIR"
           export DATA_DIR
+          export DB_PATH="$DATA_DIR/data.db"
 
           if [ ! -f venv/bin/activate ]; then
               echo "[ERROR] Please run './linux-mac/setup.sh' first."
@@ -226,24 +235,29 @@ jobs:
 
           echo "Starting Admin..."
           cd code
-          uvicorn admin.app:app --host 0.0.0.0 --port 8080 > "$DATA_DIR/admin.log" 2>&1 &
+          uvicorn admin.app:app --host 0.0.0.0 --port 8080 &
           ADMIN_PID=$!
           cd ..
 
           sleep 3
           echo "Starting Server..."
-          cd code && CONTROL_PORT=9101 python control/control.py > "$DATA_DIR/server.log" 2>&1 &
+          cd code
+          CONTROL_PORT=9101 python control/control.py &
           SERVER_PID=$!
           cd ..
 
           echo "Starting Client..."
-          cd code && CONTROL_PORT=9102 python control/control.py > "$DATA_DIR/client.log" 2>&1 &
+          cd code
+          CONTROL_PORT=9102 python control/control.py &
           CLIENT_PID=$!
           cd ..
 
           echo ""
           echo "Copycord is running! Visit http://localhost:8080"
-          echo "Logs are in: $DATA_DIR"
+          echo "Data directory: $DATA_DIR"
+          echo "DB file:       $DB_PATH"
+          echo ""
+          echo "Press Ctrl+C to stop all processes."
           echo ""
 
           trap "kill $ADMIN_PID $SERVER_PID $CLIENT_PID 2>/dev/null || true; exit" INT TERM
