@@ -132,6 +132,11 @@ jobs:
           set "DATA_DIR=%CD%\data"
           set "DB_PATH=%DATA_DIR%\data.db"
 
+          rem Point admin at the local control servers (not Docker hostnames)
+          set "SERVER_CTRL_URL=ws://127.0.0.1:9101"
+          set "CLIENT_CTRL_URL=ws://127.0.0.1:9102"
+          set "CLIENT_AGENT_URL=ws://127.0.0.1:9103"
+
           if not exist venv\Scripts\activate.bat (
               echo [ERROR] Virtual environment not found!
               echo Please run "windows\setup.bat" first.
@@ -152,11 +157,11 @@ jobs:
           rem Small delay
           timeout /t 3 >nul
 
-          rem Server
-          start "Copycord Server" cmd /k "cd /d %CD%\code && SET PYTHONPATH=%CD%\code && SET DATA_DIR=%DATA_DIR% && SET DB_PATH=%DB_PATH% && SET CONTROL_PORT=9101 && ..\venv\Scripts\python.exe control\control.py"
+          rem Server control (ROLE=server, port 9101)
+          start "Copycord Server" cmd /k "cd /d %CD%\code && SET ROLE=server && SET PYTHONPATH=%CD%\code && SET DATA_DIR=%DATA_DIR% && SET DB_PATH=%DB_PATH% && SET CONTROL_PORT=9101 && ..\venv\Scripts\python.exe control\control.py"
 
-          rem Client
-          start "Copycord Client" cmd /k "cd /d %CD%\code && SET PYTHONPATH=%CD%\code && SET DATA_DIR=%DATA_DIR% && SET DB_PATH=%DB_PATH% && SET CONTROL_PORT=9102 && ..\venv\Scripts\python.exe control\control.py"
+          rem Client control (ROLE=client, port 9102)
+          start "Copycord Client" cmd /k "cd /d %CD%\code && SET ROLE=client && SET PYTHONPATH=%CD%\code && SET DATA_DIR=%DATA_DIR% && SET DB_PATH=%DB_PATH% && SET CONTROL_PORT=9102 && ..\venv\Scripts\python.exe control\control.py"
 
           echo.
           echo ========================================
@@ -225,6 +230,10 @@ jobs:
           export DATA_DIR
           export DB_PATH="$DATA_DIR/data.db"
 
+          export SERVER_CTRL_URL="ws://127.0.0.1:9101"
+          export CLIENT_CTRL_URL="ws://127.0.0.1:9102"
+          export CLIENT_AGENT_URL="ws://127.0.0.1:9103"
+
           if [ ! -f venv/bin/activate ]; then
               echo "[ERROR] Please run './linux-mac/setup.sh' first."
               exit 1
@@ -237,19 +246,16 @@ jobs:
           cd code
           uvicorn admin.app:app --host 0.0.0.0 --port 8080 &
           ADMIN_PID=$!
-          cd ..
 
           sleep 3
-          echo "Starting Server..."
-          cd code
-          CONTROL_PORT=9101 python control/control.py &
+          echo "Starting Server control..."
+          ROLE=server CONTROL_PORT=9101 python control/control.py &
           SERVER_PID=$!
-          cd ..
 
-          echo "Starting Client..."
-          cd code
-          CONTROL_PORT=9102 python control/control.py &
+          echo "Starting Client control..."
+          ROLE=client CONTROL_PORT=9102 python control/control.py &
           CLIENT_PID=$!
+
           cd ..
 
           echo ""
