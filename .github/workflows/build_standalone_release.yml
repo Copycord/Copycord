@@ -4,10 +4,10 @@ on:
   push:
     tags:
       - 'v*.*.*'
-
     branches:
       - test-standalone-release-workflow
 
+  # ⬇️ This enables the "Run workflow" button in the Actions tab
   workflow_dispatch:
 
 permissions:
@@ -23,11 +23,7 @@ jobs:
       - name: Create standalone package
         run: |
           mkdir -p standalone-release
-
-
           cp -r code standalone-release/
-
-
           cp LICENSE standalone-release/
           cp README.md standalone-release/
 
@@ -124,7 +120,7 @@ jobs:
       - name: Create Linux/Mac setup script
         run: |
           cat > standalone-release/setup.sh << 'EOF'
-
+          #!/bin/bash
           set -e
 
           echo "========================================"
@@ -163,7 +159,7 @@ jobs:
       - name: Create Linux/Mac start script
         run: |
           cat > standalone-release/start.sh << 'EOF'
-
+          #!/bin/bash
           set -e
 
           echo "Starting Copycord..."
