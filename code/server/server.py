@@ -4989,11 +4989,13 @@ class ServerReceiver:
         ctx_guild_id: int | None = None,
         ctx_mapping_row: dict | None = None,
         prepend_roles: list[int] | None = None,
+        target_cloned_channel_id: (
+            int | None
+        ) = None,
     ) -> dict:
         """
         Constructs a webhook payload from a given message dictionary.
-        Processes text, attachments, embeds, channel mentions, and stickers (as image embeds).
-        Also replaces custom emoji IDs in text and embed fields.
+        Now checks for channel webhook profiles first.
         """
 
         text = self._sanitize_inline(
@@ -5074,9 +5076,28 @@ class ServerReceiver:
                         ctx_mapping_row=ctx_mapping_row,
                     )
 
+        custom_username = msg.get("author") or "Unknown"
+        custom_avatar_url = msg.get("avatar_url")
+
+        if target_cloned_channel_id and ctx_mapping_row:
+            try:
+                clone_gid = int(ctx_mapping_row.get("cloned_guild_id") or 0)
+                if clone_gid:
+                    profile = self.db.get_channel_webhook_profile(
+                        cloned_channel_id=int(target_cloned_channel_id),
+                        cloned_guild_id=clone_gid,
+                    )
+                    if profile:
+                        if profile.get("webhook_name"):
+                            custom_username = profile["webhook_name"]
+                        if profile.get("webhook_avatar_url"):
+                            custom_avatar_url = profile["webhook_avatar_url"]
+            except Exception:
+                logger.debug("Failed to fetch channel webhook profile", exc_info=True)
+
         base = {
-            "username": msg.get("author") or "Unknown",
-            "avatar_url": msg.get("avatar_url"),
+            "username": custom_username,
+            "avatar_url": custom_avatar_url,
         }
 
         if len(text) > 2000:
@@ -5928,6 +5949,7 @@ class ServerReceiver:
                         ctx_guild_id=ctx_gid,
                         ctx_mapping_row=mapping,
                         prepend_roles=role_mentions,
+                        target_cloned_channel_id=int(clone_cid) if clone_cid else None,
                     )
 
                     url = mapping.get("channel_webhook_url") or mapping.get(
@@ -6847,12 +6869,39 @@ class ServerReceiver:
                         "thread": thread_obj,
                         "wait": True,
                     }
-                    if override_identity is not None:
+
+                    channel_profile_override = None
+                    if cloned_id:
+                        try:
+                            profile = self.db.get_channel_webhook_profile(
+                                cloned_channel_id=int(cloned_id),
+                                cloned_guild_id=int(guild.id),
+                            )
+                            if profile:
+                                channel_profile_override = {
+                                    "username": profile.get("webhook_name"),
+                                    "avatar_url": profile.get("webhook_avatar_url"),
+                                }
+                        except Exception:
+                            logger.debug(
+                                "Failed to fetch channel webhook profile for thread",
+                                exc_info=True,
+                            )
+
+                    if channel_profile_override:
+
+                        if channel_profile_override.get("username"):
+                            kw["username"] = channel_profile_override["username"]
+                        if channel_profile_override.get("avatar_url"):
+                            kw["avatar_url"] = channel_profile_override["avatar_url"]
+                    elif override_identity is not None:
+
                         if override_identity.get("username"):
                             kw["username"] = override_identity["username"]
                         if override_identity.get("avatar_url"):
                             kw["avatar_url"] = override_identity["avatar_url"]
-                    elif not use_webhook_identity and override_identity is None:
+                    elif not use_webhook_identity:
+
                         if p.get("username"):
                             kw["username"] = p.get("username")
                         if p.get("avatar_url"):
@@ -7131,6 +7180,9 @@ class ServerReceiver:
                                         ctx_guild_id=host_guild_id or None,
                                         ctx_mapping_row=mrow,
                                         prepend_roles=role_mentions,
+                                        target_cloned_channel_id=(
+                                            int(cloned_id) if cloned_id else None
+                                        ),
                                     )
                                     or {}
                                 )
@@ -7186,54 +7238,63 @@ class ServerReceiver:
                                         ActionType.THREAD, guild.id
                                     )
 
+                                channel_profile_override = None
+                                if cloned_id:
+                                    try:
+                                        profile = self.db.get_channel_webhook_profile(
+                                            cloned_channel_id=int(cloned_id),
+                                            cloned_guild_id=int(guild.id),
+                                        )
+                                        if profile:
+                                            channel_profile_override = {
+                                                "username": profile.get("webhook_name"),
+                                                "avatar_url": profile.get(
+                                                    "webhook_avatar_url"
+                                                ),
+                                            }
+                                    except Exception:
+                                        logger.debug(
+                                            "Failed to fetch channel webhook profile for forum thread creation",
+                                            exc_info=True,
+                                        )
+
+                                if channel_profile_override:
+                                    final_uname = channel_profile_override.get(
+                                        "username"
+                                    )
+                                    final_av = channel_profile_override.get(
+                                        "avatar_url"
+                                    )
+                                elif override_identity:
+                                    final_uname = override_identity.get("username")
+                                    final_av = override_identity.get("avatar_url")
+                                elif not use_webhook_identity:
+                                    final_uname = tmp.get("username")
+                                    final_av = tmp.get("avatar_url")
+                                else:
+                                    final_uname = None
+                                    final_av = None
+
                                 if sem:
                                     async with sem:
                                         if is_backfill:
                                             await self._bf_gate(int(cloned_id))
-                                        uname = (
-                                            override_identity.get("username")
-                                            if override_identity
-                                            else tmp.get("username")
-                                        )
-                                        av = (
-                                            override_identity.get("avatar_url")
-                                            if override_identity
-                                            else tmp.get("avatar_url")
-                                        )
                                         sent_msg = await thread_webhook.send(
                                             content=(tmp.get("content") or None),
                                             embeds=tmp.get("embeds"),
-                                            username=(
-                                                None if use_webhook_identity else uname
-                                            ),
-                                            avatar_url=(
-                                                None if use_webhook_identity else av
-                                            ),
+                                            username=final_uname,
+                                            avatar_url=final_av,
                                             thread_name=data["thread_name"],
                                             wait=True,
                                         )
                                 else:
-                                    uname = (
-                                        override_identity.get("username")
-                                        if override_identity
-                                        else tmp.get("username")
-                                    )
-                                    av = (
-                                        override_identity.get("avatar_url")
-                                        if override_identity
-                                        else tmp.get("avatar_url")
-                                    )
                                     if is_backfill:
                                         await self._bf_gate(int(cloned_id))
                                     sent_msg = await thread_webhook.send(
                                         content=(tmp.get("content") or None),
                                         embeds=tmp.get("embeds"),
-                                        username=(
-                                            None if use_webhook_identity else uname
-                                        ),
-                                        avatar_url=(
-                                            None if use_webhook_identity else av
-                                        ),
+                                        username=final_uname,
+                                        avatar_url=final_av,
                                         thread_name=data["thread_name"],
                                         wait=True,
                                     )
@@ -7941,7 +8002,6 @@ class ServerReceiver:
                 if k in OVERWRITE_KEYS:
                     base[k] = v
                 elif k not in base:
-                    # Only add other keys if the envelope doesn't already define them
                     base[k] = v
 
         forced = base

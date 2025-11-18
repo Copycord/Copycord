@@ -58,6 +58,12 @@ class CloneCommands(commands.Cog):
         guild_ids=GUILD_IDS,
     )
 
+    channel_webhook_group = discord.SlashCommandGroup(
+        "channel_webhook",
+        "Manage custom webhook identity for cloned messages in specific channels.",
+        guild_ids=GUILD_IDS,
+    )
+
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.db = DBManager(config.DB_PATH)
@@ -2013,7 +2019,6 @@ class CloneCommands(commands.Cog):
         original_guild_id = int(mapping["original_guild_id"])
         cloned_guild_id = int(mapping["cloned_guild_id"])
 
-        # Parse channel ID if provided - NOW IT'S CLONED CHANNEL ID
         cloned_channel_id = None
         if channel_id.strip():
             try:
@@ -2225,6 +2230,757 @@ class CloneCommands(commands.Cog):
             "Role Mentions",
             "\n".join(lines),
             color=discord.Color.green(),
+        )
+
+        await ctx.followup.send(embed=embed, ephemeral=True)
+
+    @channel_webhook_group.command(
+        name="set",
+        description="Set custom webhook name/avatar for ALL cloned messages in a channel.",
+    )
+    async def channel_webhook_set(
+        self,
+        ctx: discord.ApplicationContext,
+        channel: discord.TextChannel = discord.Option(
+            discord.TextChannel,
+            description="The channel to customize (must be a cloned channel)",
+            required=True,
+        ),
+        webhook_name: str = discord.Option(
+            str,
+            description="Custom name to display on ALL cloned messages in this channel",
+            required=True,
+            max_length=80,
+            min_length=1,
+        ),
+        webhook_avatar_url: str = discord.Option(
+            str,
+            description="Custom avatar URL for ALL cloned messages (optional)",
+            required=False,
+        ),
+    ):
+        """Set custom webhook identity for all messages in a channel."""
+        await ctx.defer(ephemeral=True)
+
+        guild = ctx.guild
+        if not guild:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Guild Context",
+                    "This command must be run inside a server.",
+                ),
+                ephemeral=True,
+            )
+
+        channel_mapping = self.db.get_channel_mapping_by_clone_id(channel.id)
+        if not channel_mapping:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Not a Cloned Channel",
+                    f"{channel.mention} is not a cloned channel managed by Copycord.",
+                ),
+                ephemeral=True,
+            )
+
+        mapping = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Mapping Found",
+                    "This server isn't mapped to a source guild.",
+                ),
+                ephemeral=True,
+            )
+
+        cloned_guild_id = int(mapping["cloned_guild_id"])
+
+        webhook_name = webhook_name.strip()
+        if not webhook_name:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Invalid Name",
+                    "Webhook name cannot be empty.",
+                ),
+                ephemeral=True,
+            )
+
+        final_avatar = None
+        if webhook_avatar_url:
+            webhook_avatar_url = webhook_avatar_url.strip()
+            if webhook_avatar_url:
+                if not webhook_avatar_url.startswith(("http://", "https://")):
+                    return await ctx.followup.send(
+                        embed=self._err_embed(
+                            "Invalid URL",
+                            "Avatar URL must start with http:// or https://",
+                        ),
+                        ephemeral=True,
+                    )
+                final_avatar = webhook_avatar_url
+
+        try:
+            self.db.set_channel_webhook_profile(
+                cloned_channel_id=channel.id,
+                cloned_guild_id=cloned_guild_id,
+                webhook_name=webhook_name,
+                webhook_avatar_url=final_avatar,
+            )
+        except Exception as e:
+            logger.exception("Failed to set channel webhook profile")
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Database Error",
+                    f"Failed to save webhook profile: {e}",
+                ),
+                ephemeral=True,
+            )
+
+        fields = [
+            ("Channel", channel.mention, False),
+            ("Webhook Name", f"`{webhook_name}`", True),
+        ]
+        if final_avatar:
+            fields.append(("Avatar URL", "✅ Set", True))
+        else:
+            fields.append(("Avatar URL", "❌ Not set (will use default)", True))
+
+        embed = self._ok_embed(
+            "Channel Webhook Profile Set",
+            f"All messages cloned to {channel.mention} will now use this custom webhook identity.",
+            fields=fields,
+            color=discord.Color.green(),
+        )
+
+        if final_avatar:
+            embed.set_thumbnail(url=final_avatar)
+
+        await ctx.followup.send(embed=embed, ephemeral=True)
+
+    @channel_webhook_group.command(
+        name="view",
+        description="View the custom webhook profile for a channel.",
+    )
+    async def channel_webhook_view(
+        self,
+        ctx: discord.ApplicationContext,
+        channel: discord.TextChannel = discord.Option(
+            discord.TextChannel,
+            description="The channel to view",
+            required=True,
+        ),
+    ):
+        """View custom webhook identity for a channel."""
+        await ctx.defer(ephemeral=True)
+
+        guild = ctx.guild
+        if not guild:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Guild Context",
+                    "This command must be run inside a server.",
+                ),
+                ephemeral=True,
+            )
+
+        channel_mapping = self.db.get_channel_mapping_by_clone_id(channel.id)
+        if not channel_mapping:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Not a Cloned Channel",
+                    f"{channel.mention} is not a cloned channel managed by Copycord.",
+                ),
+                ephemeral=True,
+            )
+
+        mapping = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Mapping Found",
+                    "This server isn't mapped to a source guild.",
+                ),
+                ephemeral=True,
+            )
+
+        cloned_guild_id = int(mapping["cloned_guild_id"])
+
+        profile = self.db.get_channel_webhook_profile(
+            cloned_channel_id=channel.id,
+            cloned_guild_id=cloned_guild_id,
+        )
+
+        if not profile:
+            return await ctx.followup.send(
+                embed=self._ok_embed(
+                    "No Custom Profile",
+                    f"{channel.mention} doesn't have a custom webhook profile.\n"
+                    "Messages will use the original author's name and avatar.\n\n"
+                    "Use `/channel_webhook set` to create one.",
+                    color=discord.Color.blurple(),
+                ),
+                ephemeral=True,
+            )
+
+        fields = [
+            ("Channel", channel.mention, False),
+            ("Webhook Name", f"`{profile['webhook_name']}`", True),
+        ]
+
+        if profile.get("webhook_avatar_url"):
+            avatar_url = profile["webhook_avatar_url"]
+            fields.append(
+                (
+                    "Avatar URL",
+                    (
+                        f"`{avatar_url[:50]}...`"
+                        if len(avatar_url) > 50
+                        else f"`{avatar_url}`"
+                    ),
+                    True,
+                )
+            )
+        else:
+            fields.append(("Avatar URL", "❌ Not set", True))
+
+        embed = self._ok_embed(
+            "Channel Webhook Profile",
+            f"All messages cloned to {channel.mention} use this webhook identity:",
+            fields=fields,
+            color=discord.Color.green(),
+        )
+
+        if profile.get("webhook_avatar_url"):
+            embed.set_thumbnail(url=profile["webhook_avatar_url"])
+
+        await ctx.followup.send(embed=embed, ephemeral=True)
+
+    @channel_webhook_group.command(
+        name="clear",
+        description="Remove the custom webhook profile from a channel.",
+    )
+    async def channel_webhook_clear(
+        self,
+        ctx: discord.ApplicationContext,
+        channel: discord.TextChannel = discord.Option(
+            discord.TextChannel,
+            description="The channel to clear",
+            required=True,
+        ),
+    ):
+        """Clear custom webhook identity for a channel."""
+        await ctx.defer(ephemeral=True)
+
+        guild = ctx.guild
+        if not guild:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Guild Context",
+                    "This command must be run inside a server.",
+                ),
+                ephemeral=True,
+            )
+
+        channel_mapping = self.db.get_channel_mapping_by_clone_id(channel.id)
+        if not channel_mapping:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Not a Cloned Channel",
+                    f"{channel.mention} is not a cloned channel managed by Copycord.",
+                ),
+                ephemeral=True,
+            )
+
+        mapping = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Mapping Found",
+                    "This server isn't mapped to a source guild.",
+                ),
+                ephemeral=True,
+            )
+
+        cloned_guild_id = int(mapping["cloned_guild_id"])
+
+        deleted = self.db.delete_channel_webhook_profile(
+            cloned_channel_id=channel.id,
+            cloned_guild_id=cloned_guild_id,
+        )
+
+        if deleted:
+            return await ctx.followup.send(
+                embed=self._ok_embed(
+                    "Profile Cleared",
+                    f"Custom webhook profile removed from {channel.mention}.\n"
+                    "Messages will now use the original author's name and avatar.",
+                    color=discord.Color.orange(),
+                ),
+                ephemeral=True,
+            )
+        else:
+            return await ctx.followup.send(
+                embed=self._ok_embed(
+                    "No Profile Found",
+                    f"{channel.mention} doesn't have a custom webhook profile.",
+                    color=discord.Color.blurple(),
+                ),
+                ephemeral=True,
+            )
+
+    @channel_webhook_group.command(
+        name="list",
+        description="List all channels with custom webhook profiles in this server.",
+    )
+    async def channel_webhook_list(
+        self,
+        ctx: discord.ApplicationContext,
+    ):
+        """List all channels with custom webhook profiles."""
+        await ctx.defer(ephemeral=True)
+
+        guild = ctx.guild
+        if not guild:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Guild Context",
+                    "This command must be run inside a server.",
+                ),
+                ephemeral=True,
+            )
+
+        mapping = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Mapping Found",
+                    "This server isn't mapped to a source guild.",
+                ),
+                ephemeral=True,
+            )
+
+        cloned_guild_id = int(mapping["cloned_guild_id"])
+        profiles = self.db.list_channel_webhook_profiles_for_guild(cloned_guild_id)
+
+        if not profiles:
+            return await ctx.followup.send(
+                embed=self._ok_embed(
+                    "No Custom Profiles",
+                    "No channels in this server have custom webhook profiles yet.",
+                    color=discord.Color.blurple(),
+                ),
+                ephemeral=True,
+            )
+
+        lines = []
+        for idx, profile in enumerate(profiles, 1):
+            channel_id = profile["cloned_channel_id"]
+            channel = guild.get_channel(channel_id)
+            channel_mention = (
+                channel.mention if channel else f"`#{channel_id}` (deleted)"
+            )
+
+            name = profile.get("webhook_name") or "(none)"
+            avatar = "✅" if profile.get("webhook_avatar_url") else "❌"
+
+            lines.append(
+                f"{idx}. {channel_mention}\n   Name: `{name}` | Avatar: {avatar}"
+            )
+
+        def chunk_lines(lines_list, max_length=4000):
+            chunks = []
+            current = []
+            current_len = 0
+
+            for line in lines_list:
+                line_len = len(line) + 1
+                if current_len + line_len > max_length:
+                    chunks.append("\n".join(current))
+                    current = [line]
+                    current_len = line_len
+                else:
+                    current.append(line)
+                    current_len += line_len
+
+            if current:
+                chunks.append("\n".join(current))
+
+            return chunks
+
+        description_chunks = chunk_lines(lines)
+
+        embed = self._ok_embed(
+            f"Channel Webhook Profiles ({len(profiles)})",
+            description_chunks[0],
+            color=discord.Color.green(),
+        )
+        await ctx.followup.send(embed=embed, ephemeral=True)
+
+        for chunk in description_chunks[1:]:
+            embed = self._ok_embed(
+                "Channel Webhook Profiles (continued)",
+                chunk,
+                color=discord.Color.green(),
+            )
+            await ctx.followup.send(embed=embed, ephemeral=True)
+
+    @channel_webhook_group.command(
+        name="set_all",
+        description="Set custom webhook name/avatar for ALL cloned channels in this server.",
+    )
+    async def channel_webhook_set_all(
+        self,
+        ctx: discord.ApplicationContext,
+        webhook_name: str = discord.Option(
+            str,
+            description="Custom name to display on ALL cloned messages in ALL channels",
+            required=True,
+            max_length=80,
+            min_length=1,
+        ),
+        confirm: str = discord.Option(
+            str,
+            description='Type "confirm" to apply to all channels',
+            required=True,
+        ),
+        webhook_avatar_url: str = discord.Option(
+            str,
+            description="Custom avatar URL for ALL cloned messages (optional)",
+            required=False,
+            default=None,
+        ),
+        overwrite_existing: bool = discord.Option(
+            bool,
+            description="Overwrite channels that already have a custom profile",
+            required=False,
+            default=False,
+        ),
+    ):
+        """Set custom webhook identity for all cloned channels at once."""
+        await ctx.defer(ephemeral=True)
+
+        guild = ctx.guild
+        if not guild:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Guild Context",
+                    "This command must be run inside a server.",
+                ),
+                ephemeral=True,
+            )
+
+        if confirm.strip().lower() != "confirm":
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Confirmation Required",
+                    'You must type "confirm" to apply webhook profiles to all channels.',
+                ),
+                ephemeral=True,
+            )
+
+        mapping = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Mapping Found",
+                    "This server isn't mapped to a source guild.",
+                ),
+                ephemeral=True,
+            )
+
+        cloned_guild_id = int(mapping["cloned_guild_id"])
+
+        webhook_name = webhook_name.strip()
+        if not webhook_name:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Invalid Name",
+                    "Webhook name cannot be empty.",
+                ),
+                ephemeral=True,
+            )
+
+        final_avatar = None
+        if webhook_avatar_url:
+            webhook_avatar_url = webhook_avatar_url.strip()
+            if webhook_avatar_url:
+                if not webhook_avatar_url.startswith(("http://", "https://")):
+                    return await ctx.followup.send(
+                        embed=self._err_embed(
+                            "Invalid URL",
+                            "Avatar URL must start with http:// or https://",
+                        ),
+                        ephemeral=True,
+                    )
+                final_avatar = webhook_avatar_url
+
+        try:
+
+            all_mappings = self.db.get_all_channel_mappings()
+            logger.info(
+                f"[channel_webhook_set_all] Looking for channels in clone guild {cloned_guild_id}, found {len(all_mappings)} total mappings"
+            )
+
+            cloned_channels = []
+            for mapping_row in all_mappings:
+                try:
+
+                    row_guild_id = mapping_row["cloned_guild_id"]
+
+                    if row_guild_id is None:
+                        continue
+
+                    if int(row_guild_id) != cloned_guild_id:
+                        continue
+
+                    channel_id = mapping_row["cloned_channel_id"]
+                    if not channel_id:
+                        continue
+
+                    channel_id = int(channel_id)
+
+                    channel = guild.get_channel(channel_id)
+                    if channel:
+                        cloned_channels.append((channel_id, channel.name))
+                        logger.debug(
+                            f"[channel_webhook_set_all] Found channel: {channel.name} ({channel_id})"
+                        )
+                except Exception as e:
+                    logger.debug(
+                        f"[channel_webhook_set_all] Error processing mapping row: {e}"
+                    )
+                    continue
+
+            logger.info(
+                f"[channel_webhook_set_all] Found {len(cloned_channels)} matching cloned channels"
+            )
+
+        except Exception as e:
+            logger.exception("Failed to get channel mappings")
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Database Error",
+                    f"Failed to retrieve channel mappings: {e}",
+                ),
+                ephemeral=True,
+            )
+
+        if not cloned_channels:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Cloned Channels",
+                    "No cloned channels found in this server.",
+                ),
+                ephemeral=True,
+            )
+
+        await ctx.followup.send(
+            embed=self._ok_embed(
+                "Applying Webhook Profiles...",
+                f"Processing {len(cloned_channels)} channel(s)...\n"
+                f"This may take a moment.",
+                color=discord.Color.blurple(),
+            ),
+            ephemeral=True,
+        )
+
+        applied = 0
+        skipped = 0
+        failed = 0
+        skipped_channels = []
+
+        for channel_id, channel_name in cloned_channels:
+            try:
+
+                if not overwrite_existing:
+                    existing = self.db.get_channel_webhook_profile(
+                        cloned_channel_id=channel_id,
+                        cloned_guild_id=cloned_guild_id,
+                    )
+                    if existing:
+                        skipped += 1
+                        skipped_channels.append(channel_name)
+                        continue
+
+                self.db.set_channel_webhook_profile(
+                    cloned_channel_id=channel_id,
+                    cloned_guild_id=cloned_guild_id,
+                    webhook_name=webhook_name,
+                    webhook_avatar_url=final_avatar,
+                )
+                applied += 1
+
+            except Exception as e:
+                logger.warning(
+                    f"Failed to set webhook profile for channel {channel_id} ({channel_name}): {e}"
+                )
+                failed += 1
+
+        result_fields = [
+            ("Total Channels", str(len(cloned_channels)), True),
+            ("Applied", str(applied), True),
+            ("Skipped", str(skipped), True),
+            ("Failed", str(failed), True),
+        ]
+
+        result_description = (
+            f"**Webhook Name:** `{webhook_name}`\n"
+            f"**Avatar URL:** {'✅ Set' if final_avatar else '❌ Not set'}\n\n"
+        )
+
+        if skipped > 0 and not overwrite_existing:
+            result_description += (
+                f"**{skipped} channel(s) skipped** (already had profiles).\n"
+                f"Use `overwrite_existing: True` to replace them.\n\n"
+            )
+
+            if skipped_channels:
+                preview = skipped_channels[:5]
+                preview_text = ", ".join(f"`#{name}`" for name in preview)
+                if len(skipped_channels) > 5:
+                    preview_text += f" and {len(skipped_channels) - 5} more"
+                result_description += f"Skipped: {preview_text}\n\n"
+
+        if failed > 0:
+            result_description += (
+                f"⚠️ **{failed} channel(s) failed** - check logs for details.\n\n"
+            )
+
+        result_description += "All messages cloned to these channels will now use the custom webhook identity."
+
+        color = discord.Color.green() if failed == 0 else discord.Color.orange()
+
+        embed = self._ok_embed(
+            "Webhook Profiles Applied",
+            result_description,
+            fields=result_fields,
+            color=color,
+        )
+
+        if final_avatar:
+            embed.set_thumbnail(url=final_avatar)
+
+        await ctx.followup.send(embed=embed, ephemeral=True)
+
+    @channel_webhook_group.command(
+        name="clear_all",
+        description="Remove custom webhook profiles from ALL cloned channels in this server.",
+    )
+    async def channel_webhook_clear_all(
+        self,
+        ctx: discord.ApplicationContext,
+        confirm: str = discord.Option(
+            str,
+            description='Type "confirm" to clear all channel profiles',
+            required=True,
+        ),
+    ):
+        """Clear all channel webhook profiles at once."""
+        await ctx.defer(ephemeral=True)
+
+        guild = ctx.guild
+        if not guild:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Guild Context",
+                    "This command must be run inside a server.",
+                ),
+                ephemeral=True,
+            )
+
+        if confirm.strip().lower() != "confirm":
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Confirmation Required",
+                    'You must type "confirm" to clear all webhook profiles.',
+                ),
+                ephemeral=True,
+            )
+
+        mapping = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "No Mapping Found",
+                    "This server isn't mapped to a source guild.",
+                ),
+                ephemeral=True,
+            )
+
+        cloned_guild_id = int(mapping["cloned_guild_id"])
+
+        try:
+            profiles = self.db.list_channel_webhook_profiles_for_guild(cloned_guild_id)
+        except Exception as e:
+            logger.exception("Failed to list channel webhook profiles")
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Database Error",
+                    f"Failed to retrieve profiles: {e}",
+                ),
+                ephemeral=True,
+            )
+
+        if not profiles:
+            return await ctx.followup.send(
+                embed=self._ok_embed(
+                    "No Profiles Found",
+                    "No channels in this server have custom webhook profiles.",
+                    color=discord.Color.blurple(),
+                ),
+                ephemeral=True,
+            )
+
+        await ctx.followup.send(
+            embed=self._ok_embed(
+                "Clearing Webhook Profiles...",
+                f"Processing {len(profiles)} channel(s)...",
+                color=discord.Color.blurple(),
+            ),
+            ephemeral=True,
+        )
+
+        cleared = 0
+        failed = 0
+
+        for profile in profiles:
+            try:
+                channel_id = profile["cloned_channel_id"]
+                deleted = self.db.delete_channel_webhook_profile(
+                    cloned_channel_id=channel_id,
+                    cloned_guild_id=cloned_guild_id,
+                )
+                if deleted:
+                    cleared += 1
+            except Exception as e:
+                logger.warning(
+                    f"Failed to delete webhook profile for channel {channel_id}: {e}"
+                )
+                failed += 1
+
+        result_fields = [
+            ("Total Profiles", str(len(profiles)), True),
+            ("Cleared", str(cleared), True),
+            ("Failed", str(failed), True),
+        ]
+
+        result_description = (
+            "All channel webhook profiles have been removed.\n"
+            "Messages will now use the original author's name and avatar."
+        )
+
+        if failed > 0:
+            result_description = (
+                f"⚠️ **{failed} profile(s) failed to clear** - check logs for details.\n\n"
+                f"{result_description}"
+            )
+
+        color = discord.Color.orange() if failed == 0 else discord.Color.red()
+
+        embed = self._ok_embed(
+            "Webhook Profiles Cleared",
+            result_description,
+            fields=result_fields,
+            color=color,
         )
 
         await ctx.followup.send(embed=embed, ephemeral=True)

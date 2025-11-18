@@ -325,3 +325,88 @@ Shows each role and whether it applies to **all channels** or a specific cloned 
 ```
 
 ---
+
+## Channel webhook identity (`/channel_webhook`)
+
+Customize the webhook **name** and **avatar** Copycord uses when cloning messages, either per-channel or for all cloned channels.
+
+### `/channel_webhook set <channel> <webhook_name> [webhook_avatar_url]`
+**Description:** Set a custom webhook identity for one cloned channel.
+
+- `channel` — The **cloned** text channel to customize.
+- `webhook_name` — Name shown on all cloned messages in this channel.
+- `webhook_avatar_url` — (Optional) Image URL used as avatar.
+
+**Examples:**
+```text
+/channel_webhook set #cloned-chat "Copycord Relay"
+/channel_webhook set #cloned-chat "Copycord Relay" webhook_avatar_url:https://example.com/avatar.png
+```
+
+---
+
+### `/channel_webhook view <channel>`
+**Description:** View the custom webhook profile for a channel.
+
+Shows the current webhook name and avatar (if set) for that cloned channel.
+
+**Example:**
+```text
+/channel_webhook view #cloned-chat
+```
+
+---
+
+### `/channel_webhook clear <channel>`
+**Description:** Remove the custom webhook profile from a channel.
+
+After clearing, cloned messages in that channel use the original author’s name and avatar again.
+
+**Example:**
+```text
+/channel_webhook clear #cloned-chat
+```
+
+---
+
+### `/channel_webhook list`
+**Description:** List all channels in this clone that have custom webhook profiles.
+
+Shows each channel, its webhook name, and whether a custom avatar is set.
+
+**Example:**
+```text
+/channel_webhook list
+```
+
+---
+
+### `/channel_webhook set_all <webhook_name> <confirm> [webhook_avatar_url] [overwrite_existing]`
+**Description:** Apply a webhook name/avatar to **all cloned channels** in this server.
+
+- `webhook_name` — Name used on cloned messages in all cloned channels.
+- `confirm` — Must be `confirm` to run.
+- `webhook_avatar_url` — (Optional) Avatar URL applied to all channels.
+- `overwrite_existing` — If `true`, replaces any existing per-channel profiles.
+
+**Examples:**
+```text
+/channel_webhook set_all "Copycord Relay" confirm
+/channel_webhook set_all "Copycord Relay" confirm webhook_avatar_url:https://example.com/avatar.png overwrite_existing:true
+```
+
+---
+
+### `/channel_webhook clear_all <confirm>`
+**Description:** Clear **all** channel webhook profiles in this clone.
+
+- `confirm` — Must be `confirm` to proceed.
+
+After running, all cloned messages revert to using the original author’s name and avatar.
+
+**Example:**
+```text
+/channel_webhook clear_all confirm
+```
+
+---

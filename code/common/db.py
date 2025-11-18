@@ -740,6 +740,40 @@ class DBManager:
                 "CREATE INDEX IF NOT EXISTS idx_role_mentions_chan ON role_mentions(cloned_channel_id);",
             ],
         )
+        
+        self._ensure_table(
+            name="channel_webhook_profiles",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    cloned_channel_id   INTEGER NOT NULL,
+                    cloned_guild_id     INTEGER NOT NULL,
+                    webhook_name        TEXT NOT NULL,
+                    webhook_avatar_url  TEXT,
+                    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_updated        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (cloned_channel_id, cloned_guild_id)
+                );
+            """,
+            required_columns={
+                "cloned_channel_id",
+                "cloned_guild_id",
+                "webhook_name",
+                "webhook_avatar_url",
+                "created_at",
+                "last_updated",
+            },
+            copy_map={
+                "cloned_channel_id": "cloned_channel_id",
+                "cloned_guild_id": "cloned_guild_id",
+                "webhook_name": "webhook_name",
+                "webhook_avatar_url": "webhook_avatar_url",
+                "created_at": "COALESCE(created_at, CURRENT_TIMESTAMP)",
+                "last_updated": "COALESCE(last_updated, CURRENT_TIMESTAMP)",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_channel_webhook_profiles_clone ON channel_webhook_profiles(cloned_guild_id);",
+            ],
+        )
 
     def _table_exists(self, name: str) -> bool:
         row = self.conn.execute(
@@ -3981,6 +4015,122 @@ class DBManager:
                 "cloned_channel_id": r[0],
                 "cloned_role_id": int(r[1]),
                 "added_at": r[2],
+            }
+            for r in rows
+        ]
+
+
+    def set_channel_webhook_profile(
+        self,
+        cloned_channel_id: int,
+        cloned_guild_id: int,
+        webhook_name: str,
+        webhook_avatar_url: str | None = None,
+    ) -> None:
+        """
+        Set custom webhook name and avatar for a cloned channel.
+        All messages sent to this channel will use this identity.
+        """
+        with self.lock, self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO channel_webhook_profiles
+                (cloned_channel_id, cloned_guild_id, webhook_name, webhook_avatar_url, last_updated)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(cloned_channel_id, cloned_guild_id) DO UPDATE SET
+                    webhook_name = excluded.webhook_name,
+                    webhook_avatar_url = excluded.webhook_avatar_url,
+                    last_updated = CURRENT_TIMESTAMP
+                """,
+                (
+                    int(cloned_channel_id),
+                    int(cloned_guild_id),
+                    webhook_name,
+                    webhook_avatar_url,
+                ),
+            )
+
+    def get_channel_webhook_profile(
+        self,
+        cloned_channel_id: int,
+        cloned_guild_id: int,
+    ) -> dict | None:
+        """
+        Get custom webhook profile for a cloned channel.
+        Returns dict with 'webhook_name' and 'webhook_avatar_url', or None.
+        """
+        row = self.conn.execute(
+            """
+            SELECT webhook_name, webhook_avatar_url, created_at, last_updated
+            FROM channel_webhook_profiles
+            WHERE cloned_channel_id = ?
+            AND cloned_guild_id = ?
+            LIMIT 1
+            """,
+            (int(cloned_channel_id), int(cloned_guild_id)),
+        ).fetchone()
+
+        if not row:
+            return None
+
+        return {
+            "webhook_name": row["webhook_name"],
+            "webhook_avatar_url": row["webhook_avatar_url"],
+            "created_at": row["created_at"],
+            "last_updated": row["last_updated"],
+        }
+
+    def delete_channel_webhook_profile(
+        self,
+        cloned_channel_id: int,
+        cloned_guild_id: int,
+    ) -> bool:
+        """
+        Delete custom webhook profile for a cloned channel.
+        Returns True if a row was deleted.
+        """
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                """
+                DELETE FROM channel_webhook_profiles
+                WHERE cloned_channel_id = ?
+                AND cloned_guild_id = ?
+                """,
+                (int(cloned_channel_id), int(cloned_guild_id)),
+            )
+            return cur.rowcount > 0
+
+    def list_channel_webhook_profiles_for_guild(
+        self,
+        cloned_guild_id: int,
+    ) -> list[dict]:
+        """
+        List all channel webhook profiles for a clone guild.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT 
+                cloned_channel_id,
+                cloned_guild_id,
+                webhook_name,
+                webhook_avatar_url,
+                created_at,
+                last_updated
+            FROM channel_webhook_profiles
+            WHERE cloned_guild_id = ?
+            ORDER BY last_updated DESC
+            """,
+            (int(cloned_guild_id),),
+        ).fetchall()
+
+        return [
+            {
+                "cloned_channel_id": int(r["cloned_channel_id"]),
+                "cloned_guild_id": int(r["cloned_guild_id"]),
+                "webhook_name": r["webhook_name"],
+                "webhook_avatar_url": r["webhook_avatar_url"],
+                "created_at": r["created_at"],
+                "last_updated": r["last_updated"],
             }
             for r in rows
         ]
