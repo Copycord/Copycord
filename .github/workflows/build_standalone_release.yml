@@ -140,6 +140,18 @@ jobs:
           if not defined DB_PATH  set "DB_PATH=%DATA_DIR%\data.db"
           if not defined PYTHONPATH set "PYTHONPATH=%APP_ROOT%"
 
+          if not exist "%DATA_DIR%" mkdir "%DATA_DIR%"
+
+          set "LOG_FILE=%DATA_DIR%\control-%ROLE%.log"
+
+          echo [run_control] ROLE=%ROLE% PORT=%CONTROL_PORT% > "%LOG_FILE%"
+          echo [run_control] ROOT_DIR=%ROOT_DIR% >> "%LOG_FILE%"
+          echo [run_control] CODE_DIR=%CODE_DIR% >> "%LOG_FILE%"
+          echo [run_control] APP_ROOT=%APP_ROOT% >> "%LOG_FILE%"
+          echo [run_control] DATA_DIR=%DATA_DIR% >> "%LOG_FILE%"
+          echo [run_control] DB_PATH=%DB_PATH% >> "%LOG_FILE%"
+          echo. >> "%LOG_FILE%"
+
           echo [%ROLE%] Starting control on port %CONTROL_PORT%...
           echo   ROOT_DIR=%ROOT_DIR%
           echo   CODE_DIR=%CODE_DIR%
@@ -149,7 +161,14 @@ jobs:
           echo.
 
           cd /d "%CODE_DIR%"
-          ..\venv\Scripts\python.exe control\control.py
+
+          echo [run_control] cd to "%CODE_DIR%" >> "%LOG_FILE%"
+          echo [run_control] launching control.py >> "%LOG_FILE%"
+
+          ..\venv\Scripts\python.exe control\control.py >> "%LOG_FILE%" 2>&1
+
+          echo. >> "%LOG_FILE%"
+          echo [run_control] control.py exited with errorlevel %ERRORLEVEL% >> "%LOG_FILE%"
 
           echo.
           echo [%ROLE%] control.py exited with errorlevel %ERRORLEVEL%.
@@ -303,16 +322,16 @@ jobs:
 
           echo "Starting Admin..."
           cd code
-          uvicorn admin.app:app --host 0.0.0.0 --port 8080 &
+          uvicorn admin.app:app --host 0.0.0.0 --port 8080 > "$DATA_DIR/admin.log" 2>&1 &
           ADMIN_PID=$!
 
           sleep 3
           echo "Starting Server control..."
-          ROLE=server CONTROL_PORT=9101 python control/control.py &
+          ROLE=server CONTROL_PORT=9101 python control/control.py >> "$DATA_DIR/control-server.log" 2>&1 &
           SERVER_PID=$!
 
           echo "Starting Client control..."
-          ROLE=client CONTROL_PORT=9102 python control/control.py &
+          ROLE=client CONTROL_PORT=9102 python control/control.py >> "$DATA_DIR/control-client.log" 2>&1 &
           CLIENT_PID=$!
 
           cd ..
