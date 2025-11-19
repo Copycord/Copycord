@@ -3202,7 +3202,7 @@
       </button>
     `;
 
-    listEl.innerHTML = mappingCardsHtml + newCardHtml;
+    listEl.innerHTML = newCardHtml + mappingCardsHtml;
 
     listEl.querySelectorAll(".edit-mapping-btn").forEach((btn) => {
       btn.addEventListener("click", (ev) => {

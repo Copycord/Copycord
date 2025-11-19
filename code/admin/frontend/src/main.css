@@ -6489,11 +6489,38 @@ body.modal-open #bf-batchbar {
   outline-offset: 3px;
 }
 
+#clone-card {
+  overflow: visible;
+}
+
 .guild-mapping-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 16px;
   margin-top: 16px;
+
+  max-height: 520px;
+  overflow-y: auto;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.guild-mapping-list {
+  scrollbar-color: var(--accent) transparent;
+  scrollbar-width: thin;
+}
+
+.guild-mapping-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.guild-mapping-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.guild-mapping-list::-webkit-scrollbar-thumb {
+  background-color: var(--accent);
+  border-radius: 999px;
 }
 
 .guild-card {
