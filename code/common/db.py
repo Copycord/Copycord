@@ -740,7 +740,7 @@ class DBManager:
                 "CREATE INDEX IF NOT EXISTS idx_role_mentions_chan ON role_mentions(cloned_channel_id);",
             ],
         )
-        
+
         self._ensure_table(
             name="channel_webhook_profiles",
             create_sql_template="""
@@ -2423,20 +2423,11 @@ class DBManager:
         original_guild_icon_url: str | None,
         cloned_guild_id: int,
         cloned_guild_name: str,
-        settings: Dict,
+        settings: Optional[Dict] = None,
         overwrite_identity: bool = False,
     ) -> str:
         """
         Insert or update a guild mapping row.
-
-        If overwrite_identity is False:
-        - We will NOT update original_guild_name,
-            original_guild_icon_url, or cloned_guild_name on conflict.
-            ( protects bot-learned metadata from being wiped by UI PATCH )
-
-        If overwrite_identity is True:
-        - We WILL update those 3 identity fields on conflict.
-            ( used by sitemap/backfill where we trust fresh truth )
         """
         if not mapping_id:
             mapping_id = uuid.uuid4().hex
@@ -2447,9 +2438,11 @@ class DBManager:
             "mapping_name      = excluded.mapping_name",
             "original_guild_id = excluded.original_guild_id",
             "cloned_guild_id   = excluded.cloned_guild_id",
-            "settings          = excluded.settings",
             "last_updated      = CURRENT_TIMESTAMP",
         ]
+
+        if settings is not None:
+            update_assignments.insert(3, "settings          = excluded.settings")
 
         if overwrite_identity:
             update_assignments.extend(
@@ -4018,7 +4011,6 @@ class DBManager:
             }
             for r in rows
         ]
-
 
     def set_channel_webhook_profile(
         self,

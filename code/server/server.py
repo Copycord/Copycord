@@ -4990,9 +4990,7 @@ class ServerReceiver:
         ctx_guild_id: int | None = None,
         ctx_mapping_row: dict | None = None,
         prepend_roles: list[int] | None = None,
-        target_cloned_channel_id: (
-            int | None
-        ) = None,
+        target_cloned_channel_id: int | None = None,
     ) -> dict:
         """
         Constructs a webhook payload from a given message dictionary.
@@ -8382,6 +8380,8 @@ class ServerReceiver:
         """
         Backfill identity fields in guild_mappings (names/icon URLs) using data
         we already have at sync time, scoped to THIS sitemap's mapping.
+
+        ⚠️ DOES NOT overwrite existing settings - only enriches identity metadata.
         """
         guild_info = sitemap.get("guild") or {}
         target = sitemap.get("target") or {}
@@ -8405,7 +8405,6 @@ class ServerReceiver:
         if not mrow and cloned_gid:
             mrow = self.db.get_mapping_by_original_and_clone(host_gid, cloned_gid)
         if not mrow:
-
             mrow = self.db.get_mapping_by_original(host_gid)
         if not mrow:
             return
@@ -8419,6 +8418,7 @@ class ServerReceiver:
         need_orig_name = not str(mrow.get("original_guild_name") or "").strip()
         need_orig_icon = not str(mrow.get("original_guild_icon_url") or "").strip()
         need_clone_name = not str(mrow.get("cloned_guild_name") or "").strip()
+
         if not (need_orig_name or need_orig_icon or need_clone_name):
             return
 
@@ -8448,6 +8448,15 @@ class ServerReceiver:
             else (mrow.get("cloned_guild_name") or "")
         )
 
+        existing_settings = mrow.get("settings")
+        if isinstance(existing_settings, str):
+            try:
+                existing_settings = json.loads(existing_settings)
+            except Exception:
+                existing_settings = {}
+        elif not isinstance(existing_settings, dict):
+            existing_settings = {}
+
         try:
             self.db.upsert_guild_mapping(
                 mapping_id=mrow.get("mapping_id"),
@@ -8457,11 +8466,11 @@ class ServerReceiver:
                 original_guild_icon_url=final_orig_icon,
                 cloned_guild_id=clone_gid_val or None,
                 cloned_guild_name=final_clone_name,
-                settings=mrow.get("settings") or {},
+                settings=None,
                 overwrite_identity=True,
             )
             logger.debug(
-                "[guild-id-meta] enriched mapping %s: orig_name=%r icon=%r clone_name=%r",
+                "[guild-id-meta] enriched mapping %s: orig_name=%r icon=%r clone_name=%r (settings preserved)",
                 mrow.get("mapping_id"),
                 final_orig_name,
                 final_orig_icon,
