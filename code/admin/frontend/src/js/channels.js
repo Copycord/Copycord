@@ -328,6 +328,39 @@
   let wsOut;
   let wsOutSeq = 0;
   let orph = { categories: [], channels: [] };
+
+  function sendVerify(payload) {
+    ensureIn();
+    const mappingId = mappingSel?.value || "";
+    const env = {
+      kind: "verify",
+      role: "ui",
+      payload: { mapping_id: mappingId, ...payload },
+    };
+    const json = JSON.stringify(env);
+    const sock = wsIn;
+
+    group("WS OUT → /ws/in (verify)", () => dbg({ env }));
+
+    if (sock?.readyState === WebSocket.OPEN) {
+      dbg("send → /ws/in (verify)", { bytes: json.length });
+      sock.send(json);
+    } else if (sock) {
+      sock.addEventListener(
+        "open",
+        () => {
+          if (sock.readyState === WebSocket.OPEN) {
+            dbg("WS open, sending → verify", { bytes: json.length });
+            sock.send(json);
+          }
+        },
+        { once: true }
+      );
+    } else {
+      dbg("WS IN not ready, cannot send (verify)", { env });
+    }
+  }
+
   let sortBy = "name";
   let sortDir = "asc";
   let lastDeleteAt = 0;
@@ -2072,22 +2105,6 @@
       setProgressCleanupMode(card, true);
     }
 
-    const _orig_setCloneRunning = setCloneRunning;
-    setCloneRunning = function (id, on) {
-      if (on) touchActive(id);
-      _orig_setCloneRunning.call(this, id, on);
-    };
-    const _orig_setClonePulling = setClonePulling;
-    setClonePulling = function (id, on) {
-      if (on) touchActive(id);
-      _orig_setClonePulling.call(this, id, on);
-    };
-    const _orig_setCloneCleaning = setCloneCleaning;
-    setCloneCleaning = function (id, on) {
-      if (on) touchActive(id);
-      _orig_setCloneCleaning.call(this, id, on);
-    };
-
     for (const id of [...cleaningClones]) {
       const k = String(id);
       if (isWSLeading(k)) {
@@ -2335,6 +2352,25 @@
       else card.removeAttribute("aria-busy");
     }
   }
+
+  const _orig_setCloneRunning = setCloneRunning;
+  setCloneRunning = function (id, on) {
+    if (on) touchActive(id);
+    _orig_setCloneRunning.call(this, id, on);
+  };
+
+  const _orig_setClonePulling = setClonePulling;
+  setClonePulling = function (id, on) {
+    if (on) touchActive(id);
+    _orig_setClonePulling.call(this, id, on);
+  };
+
+  const _orig_setCloneCleaning = setCloneCleaning;
+  setCloneCleaning = function (id, on) {
+    if (on) touchActive(id);
+    _orig_setCloneCleaning.call(this, id, on);
+  };
+
   function unlockBackfill(id) {
     dbg("[STATE] unlockBackfill", { id: String(id) });
 
@@ -3873,6 +3909,32 @@
         console.warn("Failed to reset backfill UI on mapping change:", err);
       }
 
+      orph = { categories: [], channels: [] };
+
+      if (vCats) vCats.innerHTML = "";
+      if (vChs) vChs.innerHTML = "";
+      if (vStatus) vStatus.textContent = "Fetching orphan channels…";
+
+      try {
+        sessionStorage.removeItem(deletedSigKey());
+      } catch (err) {
+        console.warn(
+          "Failed to reset verify signature on mapping change:",
+          err
+        );
+      }
+
+      const mid = currentMappingId();
+      if (mid) {
+        sendVerify({ action: "list" });
+      }
+
+      try {
+        render();
+      } catch (err) {
+        console.warn("Failed to re-render after mapping change:", err);
+      }
+
       load();
     });
   }
@@ -4760,10 +4822,23 @@
         if (kind === "verify") {
           dbg("[verify] event", { type: p?.type, payload: p });
           if (p.type === "orphans") {
+            const curMid = currentMappingId();
+            const payloadMid = p?.mapping_id ? String(p.mapping_id) : "";
+
+            if (curMid && payloadMid && curMid !== payloadMid) {
+              dbg("[verify] ignoring orphans for other mapping", {
+                curMid,
+                payloadMid,
+              });
+              return;
+            }
+
             orph.categories = Array.isArray(p.categories) ? p.categories : [];
             orph.channels = Array.isArray(p.channels) ? p.channels : [];
+
             renderOrphans();
             render();
+
             delAllBtn?.toggleAttribute(
               "disabled",
               !((orph.categories?.length || 0) + (orph.channels?.length || 0))
@@ -4783,9 +4858,10 @@
               const deletedSet = new Set(deletedIds.map(normId));
 
               const sig = makeDeletedSig(p.results);
-              const prevSig = sessionStorage.getItem(LAST_DELETED_SIG_KEY);
+              const sigKey = deletedSigKey();
+              const prevSig = sigKey ? sessionStorage.getItem(sigKey) : null;
               const isReplay = !!sig && sig === prevSig;
-              if (sig) sessionStorage.setItem(LAST_DELETED_SIG_KEY, sig);
+              if (sig && sigKey) sessionStorage.setItem(sigKey, sig);
 
               const batchToastSeen = new Set();
               for (const r of p.results) {
@@ -4892,38 +4968,6 @@
         dbg("WS parse failed", e);
       }
     };
-  }
-
-  function sendVerify(payload) {
-    ensureIn();
-    const mappingId = mappingSel?.value || "";
-    const env = {
-      kind: "verify",
-      role: "ui",
-      payload: { mapping_id: mappingId, ...payload },
-    };
-    const json = JSON.stringify(env);
-    const sock = wsIn;
-
-    group("WS OUT → /ws/in (verify)", () => dbg({ env }));
-
-    if (sock?.readyState === WebSocket.OPEN) {
-      dbg("send → /ws/in (verify)", { bytes: json.length });
-      sock.send(json);
-    } else if (sock) {
-      sock.addEventListener(
-        "open",
-        () => {
-          if (sock.readyState === WebSocket.OPEN) {
-            dbg("WS open, sending → verify", { bytes: json.length });
-            sock.send(json);
-          }
-        },
-        { once: true }
-      );
-    } else {
-      dbg("WS IN not ready, cannot send (verify)", { env });
-    }
   }
 
   function renderOrphans() {

@@ -346,7 +346,7 @@ class VerifyController:
         if act == "list":
             ct0 = time.perf_counter()
             cats, chs = self._compute_orphans(guild)
-            self.log.debug(
+            self.log.info(
                 "Orphans listed | req_id=%s guild=%s cats=%d chs=%d took=%.1fms",
                 req_id,
                 guild.id,
