@@ -385,22 +385,25 @@ class SitemapService:
                 for e in guild.emojis
             ],
             "stickers": stickers_payload,
-            "roles": [
-                {
-                    "id": r.id,
-                    "name": r.name,
-                    "permissions": r.permissions.value,
-                    "color": (
-                        r.color.value if hasattr(r.color, "value") else int(r.color)
-                    ),
-                    "hoist": r.hoist,
-                    "mentionable": r.mentionable,
-                    "managed": r.managed,
-                    "everyone": (r == r.guild.default_role),
-                    "position": r.position,
-                }
-                for r in guild.roles
-            ],
+            "roles": sorted(
+                [
+                    {
+                        "id": r.id,
+                        "name": r.name,
+                        "permissions": r.permissions.value,
+                        "color": (
+                            r.color.value if hasattr(r.color, "value") else int(r.color)
+                        ),
+                        "hoist": r.hoist,
+                        "mentionable": r.mentionable,
+                        "managed": r.managed,
+                        "everyone": (r == r.guild.default_role),
+                        "position": r.position,
+                    }
+                    for r in guild.roles
+                ],
+                key=lambda x: x["position"]
+            ),
             "community": {
                 "enabled": "COMMUNITY" in guild.features,
                 "rules_channel_id": (
@@ -733,7 +736,7 @@ class SitemapService:
     def role_change_is_relevant(
         self, before: discord.Role, after: discord.Role
     ) -> bool:
-        """Ignore @everyone and managed roles; ignore position changes."""
+        """Ignore @everyone and managed roles; check for meaningful changes."""
         try:
             if after.is_default() or after.managed:
                 return False
@@ -755,6 +758,8 @@ class SitemapService:
             if before.hoist != after.hoist:
                 return True
             if before.mentionable != after.mentionable:
+                return True
+            if before.position != after.position:
                 return True
         except Exception:
             return True

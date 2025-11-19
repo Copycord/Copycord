@@ -129,6 +129,7 @@
     SYNC_CHANNEL_NSFW: false,
     SYNC_CHANNEL_TOPIC: false,
     SYNC_CHANNEL_SLOWMODE: false,
+    REARRANGE_ROLES: false,
   };
 
   let lastFocusLog = null;

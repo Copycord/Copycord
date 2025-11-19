@@ -109,6 +109,7 @@ class Config:
             "SYNC_CHANNEL_NSFW": False,
             "SYNC_CHANNEL_TOPIC": False,
             "SYNC_CHANNEL_SLOWMODE": False,
+            "REARRANGE_ROLES": False,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):

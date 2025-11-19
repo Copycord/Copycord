@@ -11,7 +11,8 @@
 from __future__ import annotations
 import asyncio, logging, discord
 from typing import List, Dict, Tuple, Optional
-from server.rate_limiter import RateLimitManager, ActionType
+from server.rate_limiter import ActionType
+from server import logctx
 
 logger = logging.getLogger("server.roles")
 
@@ -79,6 +80,7 @@ class RoleManager:
         delete_roles: bool | None = None,
         mirror_permissions: bool | None = None,
         update_roles: bool | None = None,
+        rearrange_roles: bool | None = None,
     ) -> None:
         clone_gid = int(target_clone_guild_id or self.clone_guild_id)
 
@@ -121,12 +123,17 @@ class RoleManager:
 
         eff_update_roles = True if update_roles is None else bool(update_roles)
 
+        eff_rearrange_roles = (
+            False if rearrange_roles is None else bool(rearrange_roles)
+        )
+
         logger.debug(
-            "[🧩] Scheduling role sync task host=%s → clone=%s (delete_roles=%s mirror_perms=%s)",
+            "[🧩] Scheduling role sync task host=%s → clone=%s (delete_roles=%s mirror_perms=%s rearrange=%s)",
             host_id_int,
             clone_gid,
             eff_delete_roles,
             eff_mirror_perms,
+            eff_rearrange_roles,
         )
 
         task = asyncio.create_task(
@@ -138,6 +145,7 @@ class RoleManager:
                 delete_roles=eff_delete_roles,
                 mirror_permissions=eff_mirror_perms,
                 update_roles=eff_update_roles,
+                rearrange_roles=eff_rearrange_roles,
             )
         )
 
@@ -154,11 +162,12 @@ class RoleManager:
         delete_roles: bool,
         mirror_permissions: bool,
         update_roles: bool,
+        rearrange_roles: bool,
     ) -> None:
         lock = self._get_lock_for_clone(clone_id)
         async with lock:
             try:
-                deleted, updated, created = await self._sync(
+                deleted, updated, created, rearranged = await self._sync(
                     guild=guild,
                     incoming=incoming,
                     host_id=host_id,
@@ -166,6 +175,7 @@ class RoleManager:
                     delete_roles=delete_roles,
                     mirror_permissions=mirror_permissions,
                     update_roles=update_roles,
+                    rearrange_roles=rearrange_roles,
                 )
 
                 parts = []
@@ -175,6 +185,8 @@ class RoleManager:
                     parts.append(f"Updated {updated} roles")
                 if created:
                     parts.append(f"Created {created} roles")
+                if rearranged:
+                    parts.append(f"Repositioned {rearranged} roles")
 
                 if parts:
                     self._log(
@@ -195,10 +207,8 @@ class RoleManager:
             finally:
                 t = self._tasks.get(clone_id)
                 if t and t.done():
-
                     pass
                 else:
-
                     self._tasks.pop(clone_id, None)
 
     async def _recreate_missing_role(
@@ -288,6 +298,7 @@ class RoleManager:
         delete_roles: bool,
         mirror_permissions: bool,
         update_roles: bool,
+        rearrange_roles: bool,
     ) -> Tuple[int, int, int]:
         """
         Mirror roles (name/color/hoist/mentionable + permissions if enabled)
@@ -344,7 +355,7 @@ class RoleManager:
                     else:
                         self._log(
                             "info",
-                            "[🧩] Host role deleted; cloned missing, removed mapping only."
+                            "[🧩] Host role deleted; cloned missing, removed mapping only.",
                         )
                     continue
 
@@ -364,10 +375,7 @@ class RoleManager:
                             cloned_role.id,
                         )
                     else:
-                        self._log(
-                            "info",
-                            "[🧩] Cloned role missing; removed mapping."
-                        )
+                        self._log("info", "[🧩] Cloned role missing; removed mapping.")
                     continue
 
                 try:
@@ -536,7 +544,7 @@ class RoleManager:
                 and (not cloned_role.managed)
                 and cloned_role.position < bot_top
             ):
-                
+
                 if not update_roles:
                     self._log(
                         "debug",
@@ -546,7 +554,7 @@ class RoleManager:
                         cloned_role.id,
                     )
                     continue
-            
+
                 changes: list[str] = []
 
                 if cloned_role.name != want_name:
@@ -637,8 +645,21 @@ class RoleManager:
                             getattr(cloned_role, "name", "?"),
                             e,
                         )
+        rearranged = 0
+        if rearrange_roles:
+            try:
+                rearranged = await self._rearrange_roles(
+                    guild=guild,
+                    incoming=incoming,
+                    host_id=host_id,
+                    clone_id=clone_id,
+                )
+            except Exception as e:
+                self._log(
+                    "warning", "[⚠️] Role rearrangement failed: %s", e, exc_info=True
+                )
 
-        return deleted, updated, created
+        return deleted, updated, created, rearranged
 
     def _color_int(self, c) -> int:
         try:
@@ -658,3 +679,135 @@ class RoleManager:
             elif old and not new:
                 removed.append(name)
         return added, removed
+
+    async def _rearrange_roles(
+        self,
+        *,
+        guild: discord.Guild,
+        incoming: List[Dict],
+        host_id: int | None,
+        clone_id: int,
+    ) -> int:
+        """
+        Rearrange cloned roles to match the host server's role order.
+
+        Logic:
+        1. Check if bot role is the highest role
+        2. Position non-cloned roles directly under bot role
+        3. Arrange cloned roles in host order below non-cloned roles
+        4. Subtract non-cloned role positions when calculating cloned role positions
+
+        Returns:
+            Number of roles repositioned
+        """
+        me = guild.me
+        if not me:
+            self._log("warning", "[🧩] Bot member not found; cannot rearrange roles")
+            return 0
+
+        bot_role = me.top_role
+        if not bot_role:
+            self._log("warning", "[🧩] Bot has no top role; cannot rearrange roles")
+            return 0
+
+        bot_position = bot_role.position
+
+        highest_position = max(
+            (r.position for r in guild.roles if not r.is_default()), default=0
+        )
+        if bot_position < highest_position:
+            self._log(
+                "warning",
+                "[⚠️] Cannot rearrange roles: my role '%s' is not the highest role. Please position my role above all others. Skipping operation.",
+                bot_role.name,
+            )
+            return 0
+
+        rows = self.db.get_all_role_mappings()
+        cloned_role_ids = set()
+        original_to_cloned = {}
+
+        for r in rows:
+            row = dict(r)
+            if (
+                host_id is None
+                or int(row.get("original_guild_id") or 0) == int(host_id)
+            ) and int(row.get("cloned_guild_id") or 0) == int(clone_id):
+                orig_id = int(row["original_role_id"])
+                cloned_id = int(row.get("cloned_role_id") or 0)
+                if cloned_id:
+                    cloned_role_ids.add(cloned_id)
+                    original_to_cloned[orig_id] = cloned_id
+
+        non_cloned_roles = []
+        for role in guild.roles:
+            if (
+                role.id not in cloned_role_ids
+                and not role.is_default()
+                and not role.managed
+                and role.id != bot_role.id
+            ):
+                non_cloned_roles.append(role)
+
+        non_cloned_roles.sort(key=lambda r: r.position, reverse=True)
+
+        cloned_roles_ordered = []
+        for role_info in sorted(incoming, key=lambda x: x.get("position", 0)):
+            orig_id = int(role_info["id"])
+            if orig_id in original_to_cloned:
+                cloned_id = original_to_cloned[orig_id]
+                cloned_role = guild.get_role(cloned_id)
+                if (
+                    cloned_role
+                    and not cloned_role.is_default()
+                    and not cloned_role.managed
+                ):
+                    cloned_roles_ordered.append(cloned_role)
+
+        if not cloned_roles_ordered:
+            self._log("debug", "[🧩] No cloned roles to rearrange")
+            return 0
+
+        positions = {}
+
+        current_pos = bot_position - 1
+        for role in non_cloned_roles:
+            if role.position != current_pos:
+                positions[role] = current_pos
+            current_pos -= 1
+
+        for role in reversed(cloned_roles_ordered):
+            if role.position != current_pos:
+                positions[role] = current_pos
+            current_pos -= 1
+
+        if not positions:
+            self._log("debug", "[🧩] All roles already in correct positions")
+            return 0
+
+        try:
+            await self.ratelimit.acquire_for_guild(ActionType.ROLE, clone_id)
+
+            await guild.edit_role_positions(
+                positions=positions, reason="Copycord role order sync"
+            )
+
+            self._log(
+                "info",
+                "[🧩] Rearranged %d roles to match host server order",
+                len(positions),
+            )
+
+            return len(positions)
+
+        except discord.Forbidden:
+            self._log("warning", "[⚠️] Missing permissions to rearrange roles")
+            return 0
+        except discord.HTTPException as e:
+            self._log("warning", "[⚠️] Failed to rearrange roles: %s", e)
+            return 0
+        except Exception as e:
+            self._log(
+                "error", "[⚠️] Unexpected error rearranging roles: %s", e, exc_info=True
+            )
+            return 0
