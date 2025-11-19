@@ -114,6 +114,43 @@ jobs:
           exit /b 1
           EOF
 
+      - name: Create Windows control runner script
+        run: |
+          cat > standalone-release/windows/run_control.bat << 'EOF'
+          @echo off
+          setlocal
+
+          if "%~1"=="" (
+              echo Usage: run_control.bat ROLE PORT
+              exit /b 1
+          )
+
+          set "ROLE=%~1"
+          set "CONTROL_PORT=%~2"
+
+          rem Go to the standalone root (one level above /windows)
+          cd /d %~dp0..
+          rem Then into the code folder
+          cd /d "%CD%\code"
+
+          rem If APP_ROOT / DATA_DIR / DB_PATH not set, derive sane defaults
+          if not defined APP_ROOT set "APP_ROOT=%CD%"
+          if not defined DATA_DIR set "DATA_DIR=%CD%\data"
+          if not defined DB_PATH  set "DB_PATH=%DATA_DIR%\data.db"
+
+          set "PYTHONPATH=%APP_ROOT%"
+
+          echo Starting %ROLE% control on port %CONTROL_PORT%...
+          echo   APP_ROOT=%APP_ROOT%
+          echo   DATA_DIR=%DATA_DIR%
+          echo   DB_PATH =%DB_PATH%
+          echo.
+
+          ..\venv\Scripts\python.exe control\control.py
+
+          endlocal
+          EOF
+
       - name: Create Windows start script
         run: |
           cat > standalone-release/windows/start.bat << 'EOF'
@@ -164,10 +201,10 @@ jobs:
           timeout /t 3 >nul
 
           rem Server control (ROLE=server, port 9101)
-          start "Copycord Server" cmd /k "cd /d %CD%\code && set ROLE=server && set PYTHONPATH=%CD%\code && set DATA_DIR=%DATA_DIR% && set DB_PATH=%DB_PATH% && set CONTROL_PORT=9101 && set APP_ROOT=%APP_ROOT% && ..\venv\Scripts\python.exe control\control.py"
+          start "Copycord Server" cmd /k "cd /d %CD%\windows && call run_control.bat server 9101"
 
           rem Client control (ROLE=client, port 9102)
-          start "Copycord Client" cmd /k "cd /d %CD%\code && set ROLE=client && set PYTHONPATH=%CD%\code && set DATA_DIR=%DATA_DIR% && set DB_PATH=%DB_PATH% && set CONTROL_PORT=9102 && set APP_ROOT=%APP_ROOT% && ..\venv\Scripts\python.exe control\control.py"
+          start "Copycord Client" cmd /k "cd /d %CD%\windows && call run_control.bat client 9102"
 
           echo.
           echo ========================================
@@ -313,7 +350,7 @@ jobs:
           path: standalone-release
 
       - name: Upload to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags=v') == false && startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
         with:
           files: copycord-standalone-${{ github.ref_name }}.zip
