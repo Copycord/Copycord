@@ -57,7 +57,7 @@ jobs:
           setlocal
 
           rem Go to the root of the standalone package (one level above /windows)
-          cd /d %~dp0..
+          cd /d "%~dp0.."
 
           echo ========================================
           echo   Copycord Standalone Setup (Windows)
@@ -122,6 +122,7 @@ jobs:
 
           if "%~1"=="" (
               echo Usage: run_control.bat ROLE PORT
+              pause
               exit /b 1
           )
 
@@ -129,24 +130,31 @@ jobs:
           set "CONTROL_PORT=%~2"
 
           rem Go to the standalone root (one level above /windows)
-          cd /d %~dp0..
-          rem Then into the code folder
-          cd /d "%CD%\code"
+          cd /d "%~dp0.."
+          set "ROOT_DIR=%CD%"
+          set "CODE_DIR=%ROOT_DIR%\code"
 
-          rem If APP_ROOT / DATA_DIR / DB_PATH not set, derive sane defaults
-          if not defined APP_ROOT set "APP_ROOT=%CD%"
-          if not defined DATA_DIR set "DATA_DIR=%CD%\data"
+          rem Default envs if not provided by parent
+          if not defined APP_ROOT set "APP_ROOT=%CODE_DIR%"
+          if not defined DATA_DIR set "DATA_DIR=%ROOT_DIR%\data"
           if not defined DB_PATH  set "DB_PATH=%DATA_DIR%\data.db"
+          if not defined PYTHONPATH set "PYTHONPATH=%APP_ROOT%"
 
-          set "PYTHONPATH=%APP_ROOT%"
-
-          echo Starting %ROLE% control on port %CONTROL_PORT%...
+          echo [%ROLE%] Starting control on port %CONTROL_PORT%...
+          echo   ROOT_DIR=%ROOT_DIR%
+          echo   CODE_DIR=%CODE_DIR%
           echo   APP_ROOT=%APP_ROOT%
           echo   DATA_DIR=%DATA_DIR%
           echo   DB_PATH =%DB_PATH%
           echo.
 
+          cd /d "%CODE_DIR%"
           ..\venv\Scripts\python.exe control\control.py
+
+          echo.
+          echo [%ROLE%] control.py exited with errorlevel %ERRORLEVEL%.
+          echo Press any key to close this window...
+          pause >nul
 
           endlocal
           EOF
@@ -157,8 +165,11 @@ jobs:
           @echo off
           setlocal
 
-          rem Go to the root of the standalone package (one level above /windows)
-          cd /d %~dp0..
+          rem Change to the root of the standalone package (one level above /windows)
+          cd /d "%~dp0.."
+          set "ROOT_DIR=%CD%"
+          set "WIN_DIR=%ROOT_DIR%\windows"
+          set "CODE_DIR=%ROOT_DIR%\code"
 
           rem Enable UTF-8 so logging emojis don't crash on Windows
           chcp 65001 >nul
@@ -166,12 +177,13 @@ jobs:
           set PYTHONIOENCODING=utf-8
 
           rem Ensure data directory exists and set env vars
-          if not exist data mkdir data
-          set "DATA_DIR=%CD%\data"
+          if not exist "%ROOT_DIR%\data" mkdir "%ROOT_DIR%\data"
+          set "DATA_DIR=%ROOT_DIR%\data"
           set "DB_PATH=%DATA_DIR%\data.db"
 
           rem Point control/app at the local code root for standalone
-          set "APP_ROOT=%CD%\code"
+          set "APP_ROOT=%CODE_DIR%"
+          set "PYTHONPATH=%CODE_DIR%"
 
           rem Point admin at the local control servers (matches app.py env names)
           set "WS_SERVER_CTRL_URL=ws://127.0.0.1:9101"
@@ -179,32 +191,34 @@ jobs:
           rem CLIENT_AGENT_URL in app.py reads WS_CLIENT_URL
           set "WS_CLIENT_URL=ws://127.0.0.1:9103"
 
-          if not exist venv\Scripts\activate.bat (
+          if not exist "%ROOT_DIR%\venv\Scripts\activate.bat" (
               echo [ERROR] Virtual environment not found!
               echo Please run "windows\setup.bat" first.
               pause
               exit /b 1
           )
 
-          call venv\Scripts\activate.bat
+          call "%ROOT_DIR%\venv\Scripts\activate.bat"
 
           echo Starting Copycord...
-          echo Data directory: %DATA_DIR%
-          echo DB file:        %DB_PATH%
-          echo APP_ROOT:       %APP_ROOT%
+          echo ROOT_DIR:  %ROOT_DIR%
+          echo CODE_DIR:  %CODE_DIR%
+          echo DATA_DIR:  %DATA_DIR%
+          echo DB_PATH:   %DB_PATH%
+          echo APP_ROOT:  %APP_ROOT%
           echo.
 
           rem Admin (Web UI)
-          start "Copycord Admin" cmd /k "cd /d %CD% && venv\Scripts\python.exe -m uvicorn admin.app:app --host 0.0.0.0 --port 8080 --app-dir code"
+          start "Copycord Admin" cmd /k "cd /d \"%ROOT_DIR%\" && venv\Scripts\python.exe -m uvicorn admin.app:app --host 0.0.0.0 --port 8080 --app-dir code"
 
           rem Small delay to let admin boot
           timeout /t 3 >nul
 
           rem Server control (ROLE=server, port 9101)
-          start "Copycord Server" cmd /k "cd /d %CD%\windows && call run_control.bat server 9101"
+          start "Copycord Server" cmd /k "cd /d \"%WIN_DIR%\" && call run_control.bat server 9101"
 
           rem Client control (ROLE=client, port 9102)
-          start "Copycord Client" cmd /k "cd /d %CD%\windows && call run_control.bat client 9102"
+          start "Copycord Client" cmd /k "cd /d \"%WIN_DIR%\" && call run_control.bat client 9102"
 
           echo.
           echo ========================================
@@ -212,7 +226,7 @@ jobs:
           echo ========================================
           echo.
           echo Web UI: http://localhost:8080
-          echo Data and DB are in the "data" folder next to this directory.
+          echo Data and DB are in the \"data\" folder next to this directory.
           echo.
           pause
           endlocal
@@ -350,7 +364,7 @@ jobs:
           path: standalone-release
 
       - name: Upload to GitHub Release
-        if: startsWith(github.ref, 'refs/tags=v') == false && startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
         with:
           files: copycord-standalone-${{ github.ref_name }}.zip
