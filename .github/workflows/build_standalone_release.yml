@@ -129,7 +129,8 @@ jobs:
           set "ROLE=%~1"
           set "CONTROL_PORT=%~2"
 
-          rem Go to the standalone root (one level above /windows)
+          rem This script lives in ROOT\windows
+          rem Go one level up to get the standalone root
           cd /d "%~dp0.."
           set "ROOT_DIR=%CD%"
           set "CODE_DIR=%ROOT_DIR%\code"
@@ -161,10 +162,10 @@ jobs:
           echo.
 
           cd /d "%CODE_DIR%"
-
           echo [run_control] cd to "%CODE_DIR%" >> "%LOG_FILE%"
           echo [run_control] launching control.py >> "%LOG_FILE%"
 
+          rem control.py reads ROLE / CONTROL_PORT / APP_ROOT / DATA_DIR / DB_PATH
           ..\venv\Scripts\python.exe control\control.py >> "%LOG_FILE%" 2>&1
 
           echo. >> "%LOG_FILE%"
@@ -234,10 +235,10 @@ jobs:
           timeout /t 3 >nul
 
           rem Server control (ROLE=server, port 9101)
-          start "Copycord Server" cmd /k "cd /d \"%WIN_DIR%\" && call run_control.bat server 9101"
+          start "Copycord Server" "%WIN_DIR%\run_control.bat" server 9101
 
           rem Client control (ROLE=client, port 9102)
-          start "Copycord Client" cmd /k "cd /d \"%WIN_DIR%\" && call run_control.bat client 9102"
+          start "Copycord Client" "%WIN_DIR%\run_control.bat" client 9102
 
           echo.
           echo ========================================
@@ -245,7 +246,7 @@ jobs:
           echo ========================================
           echo.
           echo Web UI: http://localhost:8080
-          echo Data and DB are in the \"data\" folder next to this directory.
+          echo Data and DB are in the "data" folder next to this directory.
           echo.
           pause
           endlocal
