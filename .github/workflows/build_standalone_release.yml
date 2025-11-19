@@ -14,6 +14,7 @@ jobs:
   build-standalone:
     runs-on: ubuntu-latest
 
+    # Only run on version tags or when manually triggered
     if: |
       startsWith(github.ref, 'refs/tags/v') ||
       github.event_name == 'workflow_dispatch'
@@ -132,10 +133,13 @@ jobs:
           set "DATA_DIR=%CD%\data"
           set "DB_PATH=%DATA_DIR%\data.db"
 
+          rem Point control/app at the local code root for standalone
+          set "APP_ROOT=%CD%\code"
+
           rem Point admin at the local control servers (matches app.py env names)
           set "WS_SERVER_CTRL_URL=ws://127.0.0.1:9101"
           set "WS_CLIENT_CTRL_URL=ws://127.0.0.1:9102"
-          rem Note: CLIENT_AGENT_URL in app.py reads WS_CLIENT_URL
+          rem CLIENT_AGENT_URL in app.py reads WS_CLIENT_URL
           set "WS_CLIENT_URL=ws://127.0.0.1:9103"
 
           if not exist venv\Scripts\activate.bat (
@@ -150,34 +154,20 @@ jobs:
           echo Starting Copycord...
           echo Data directory: %DATA_DIR%
           echo DB file:        %DB_PATH%
+          echo APP_ROOT:       %APP_ROOT%
           echo.
 
           rem Admin (Web UI)
-          start "Copycord Admin" cmd /k ^
-            "cd /d %CD% && venv\Scripts\python.exe -m uvicorn admin.app:app --host 0.0.0.0 --port 8080 --app-dir code"
+          start "Copycord Admin" cmd /k "cd /d %CD% && venv\Scripts\python.exe -m uvicorn admin.app:app --host 0.0.0.0 --port 8080 --app-dir code"
 
           rem Small delay to let admin boot
           timeout /t 3 >nul
 
           rem Server control (ROLE=server, port 9101)
-          start "Copycord Server" cmd /k ^
-            "cd /d %CD%\code && ^
-             SET ROLE=server && ^
-             SET PYTHONPATH=%CD%\code && ^
-             SET DATA_DIR=%DATA_DIR% && ^
-             SET DB_PATH=%DB_PATH% && ^
-             SET CONTROL_PORT=9101 && ^
-             ..\venv\Scripts\python.exe control\control.py"
+          start "Copycord Server" cmd /k "cd /d %CD%\code && set ROLE=server && set PYTHONPATH=%CD%\code && set DATA_DIR=%DATA_DIR% && set DB_PATH=%DB_PATH% && set CONTROL_PORT=9101 && set APP_ROOT=%APP_ROOT% && ..\venv\Scripts\python.exe control\control.py"
 
           rem Client control (ROLE=client, port 9102)
-          start "Copycord Client" cmd /k ^
-            "cd /d %CD%\code && ^
-             SET ROLE=client && ^
-             SET PYTHONPATH=%CD%\code && ^
-             SET DATA_DIR=%DATA_DIR% && ^
-             SET DB_PATH=%DB_PATH% && ^
-             SET CONTROL_PORT=9102 && ^
-             ..\venv\Scripts\python.exe control\control.py"
+          start "Copycord Client" cmd /k "cd /d %CD%\code && set ROLE=client && set PYTHONPATH=%CD%\code && set DATA_DIR=%DATA_DIR% && set DB_PATH=%DB_PATH% && set CONTROL_PORT=9102 && set APP_ROOT=%APP_ROOT% && ..\venv\Scripts\python.exe control\control.py"
 
           echo.
           echo ========================================
@@ -194,7 +184,6 @@ jobs:
       - name: Create Linux/Mac setup script
         run: |
           cat > standalone-release/linux-mac/setup.sh << 'EOF'
-
           set -e
 
           ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -215,8 +204,7 @@ jobs:
           python3 -m venv venv
 
           echo "[2/3] Activating virtual environment..."
-
-          source venv/bin/activate
+          . venv/bin/activate
 
           echo "[3/3] Installing dependencies..."
           python -m pip install -r code/admin/requirements.txt --quiet
@@ -236,7 +224,6 @@ jobs:
       - name: Create Linux/Mac start script
         run: |
           cat > standalone-release/linux-mac/start.sh << 'EOF'
-
           set -e
 
           ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -247,10 +234,12 @@ jobs:
           export DATA_DIR
           export DB_PATH="$DATA_DIR/data.db"
 
+          # Point control/app at the local code root for standalone
+          export APP_ROOT="$ROOT_DIR/code"
 
+          # Point admin at the local control servers (matches app.py env names)
           export WS_SERVER_CTRL_URL="ws://127.0.0.1:9101"
           export WS_CLIENT_CTRL_URL="ws://127.0.0.1:9102"
-
           export WS_CLIENT_URL="ws://127.0.0.1:9103"
 
           if [ ! -f venv/bin/activate ]; then
@@ -258,8 +247,7 @@ jobs:
               exit 1
           fi
 
-
-          source venv/bin/activate
+          . venv/bin/activate
           export PYTHONPATH="$ROOT_DIR/code"
 
           echo "Starting Admin..."
@@ -282,6 +270,7 @@ jobs:
           echo "Copycord is running! Visit http://localhost:8080"
           echo "Data directory: $DATA_DIR"
           echo "DB file:       $DB_PATH"
+          echo "APP_ROOT:      $APP_ROOT"
           echo ""
           echo "Press Ctrl+C to stop all processes."
           echo ""
