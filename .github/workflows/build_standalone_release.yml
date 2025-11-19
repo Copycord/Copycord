@@ -53,21 +53,18 @@ jobs:
           cp README.md standalone-release/
 
       # ============================================
-      # WINDOWS SCRIPTS
+      # WINDOWS SCRIPTS - Using direct file creation
       # ============================================
       - name: Create Windows setup script
         run: |
-          cat > standalone-release/windows/setup.bat << 'EOF'
+          cat > standalone-release/windows/setup.bat <<'SETUPEOF'
           @echo off
           setlocal
-
           cd /d "%~dp0.."
-
           echo ========================================
           echo   Copycord Standalone Setup (Windows)
           echo ========================================
           echo.
-
           python --version >nul 2>&1
           if errorlevel 1 (
               echo [ERROR] Python is not installed!
@@ -76,7 +73,6 @@ jobs:
               pause
               exit /b 1
           )
-
           echo [1/4] Creating virtual environment...
           python -m venv venv
           if errorlevel 1 (
@@ -84,14 +80,11 @@ jobs:
               pause
               exit /b 1
           )
-
           echo [2/4] Activating virtual environment...
           call venv\Scripts\activate.bat
-
           echo [3/4] Upgrading pip...
           python -m pip install --upgrade pip --quiet
-
-          echo [4/4] Installing dependencies (this may take a few minutes)...
+          echo [4/4] Installing dependencies...
           python -m pip install tzdata --quiet
           python -m pip install -r code\admin\requirements.txt --quiet
           if errorlevel 1 goto piperror
@@ -99,7 +92,6 @@ jobs:
           if errorlevel 1 goto piperror
           python -m pip install -r code\server\requirements.txt --quiet
           if errorlevel 1 goto piperror
-
           echo.
           echo ========================================
           echo   Setup Complete!
@@ -110,45 +102,38 @@ jobs:
           pause
           endlocal
           exit /b 0
-
           :piperror
           echo.
           echo [ERROR] Failed to install dependencies.
-          echo Make sure you have a working internet connection.
           echo.
           pause
           endlocal
           exit /b 1
-          EOF
+          SETUPEOF
+          unix2dos standalone-release/windows/setup.bat 2>/dev/null || sed -i 's/$/\r/' standalone-release/windows/setup.bat
 
       - name: Create Windows control runner script
         run: |
-          cat > standalone-release/windows/run_control.bat << 'EOF'
+          cat > standalone-release/windows/run_control.bat <<'CONTROLEOF'
           @echo off
           setlocal
-
           if "%~1"=="" (
               echo Usage: run_control.bat ROLE PORT
               pause
               exit /b 1
           )
-
-          set "ROLE=%~1"
-          set "CONTROL_PORT=%~2"
-
-          rem This script lives in ROOT\windows, go one level up to root
+          set ROLE=%~1
+          set CONTROL_PORT=%~2
           cd /d "%~dp0.."
-          set "ROOT_DIR=%CD%"
-          set "CODE_DIR=%ROOT_DIR%\code"
-          set "DATA_DIR=%ROOT_DIR%\data"
-          set "DB_PATH=%DATA_DIR%\data.db"
-          set "APP_ROOT=%CODE_DIR%"
-          set "PYTHONPATH=%CODE_DIR%"
-          set "PYTHONUTF8=1"
-          set "PYTHONIOENCODING=utf-8"
-
+          set ROOT_DIR=%CD%
+          set CODE_DIR=%ROOT_DIR%\code
+          set DATA_DIR=%ROOT_DIR%\data
+          set DB_PATH=%DATA_DIR%\data.db
+          set APP_ROOT=%CODE_DIR%
+          set PYTHONPATH=%CODE_DIR%
+          set PYTHONUTF8=1
+          set PYTHONIOENCODING=utf-8
           if not exist "%DATA_DIR%" mkdir "%DATA_DIR%"
-
           echo =======================================
           echo   Copycord %ROLE% Control
           echo =======================================
@@ -157,59 +142,44 @@ jobs:
           echo ROOT_DIR:     %ROOT_DIR%
           echo CODE_DIR:     %CODE_DIR%
           echo DATA_DIR:     %DATA_DIR%
-          echo DB_PATH:      %DB_PATH%
-          echo PYTHONPATH:   %PYTHONPATH%
           echo =======================================
           echo.
-
           cd /d "%CODE_DIR%"
-          title Copycord %ROLE% Control
-
-          rem control.py will spawn the actual bot and tee its stdout
+          title Copycord %ROLE%
           "%ROOT_DIR%\venv\Scripts\python.exe" control\control.py
-
-          set "EXIT_CODE=%ERRORLEVEL%"
+          set EXIT_CODE=%ERRORLEVEL%
           echo.
           echo =======================================
-          echo   %ROLE% control exited with code: %EXIT_CODE%
+          echo   %ROLE% exited with code: %EXIT_CODE%
           echo =======================================
           echo.
-          echo Press any key to close this window...
+          echo Press any key to close...
           pause >nul
-
           endlocal
           exit /b %EXIT_CODE%
-          EOF
-
+          CONTROLEOF
+          unix2dos standalone-release/windows/run_control.bat 2>/dev/null || sed -i 's/$/\r/' standalone-release/windows/run_control.bat
 
       - name: Create Windows start script
         run: |
-          cat > standalone-release/windows/start.bat << 'EOF'
+          cat > standalone-release/windows/start.bat <<'STARTEOF'
           @echo off
           setlocal
-
-          rem This script lives in ROOT\windows, go one level up to root
           cd /d "%~dp0.."
-          set "ROOT_DIR=%CD%"
-          set "WIN_DIR=%ROOT_DIR%\windows"
-          set "CODE_DIR=%ROOT_DIR%\code"
-          set "DATA_DIR=%ROOT_DIR%\data"
-          set "DB_PATH=%DATA_DIR%\data.db"
-          set "APP_ROOT=%CODE_DIR%"
-          set "PYTHONPATH=%CODE_DIR%"
-
-          rem Enable UTF-8
+          set ROOT_DIR=%CD%
+          set WIN_DIR=%ROOT_DIR%\windows
+          set CODE_DIR=%ROOT_DIR%\code
+          set DATA_DIR=%ROOT_DIR%\data
+          set DB_PATH=%DATA_DIR%\data.db
+          set APP_ROOT=%CODE_DIR%
+          set PYTHONPATH=%CODE_DIR%
           chcp 65001 >nul 2>&1
-          set "PYTHONUTF8=1"
-          set "PYTHONIOENCODING=utf-8"
-
+          set PYTHONUTF8=1
+          set PYTHONIOENCODING=utf-8
           if not exist "%DATA_DIR%" mkdir "%DATA_DIR%"
-
-          rem Match admin app expectations (WS_* are what app.py reads)
-          set "WS_SERVER_CTRL_URL=ws://127.0.0.1:9101"
-          set "WS_CLIENT_CTRL_URL=ws://127.0.0.1:9102"
-          set "WS_CLIENT_URL=ws://127.0.0.1:9103"
-
+          set WS_SERVER_CTRL_URL=ws://127.0.0.1:9101
+          set WS_CLIENT_CTRL_URL=ws://127.0.0.1:9102
+          set WS_CLIENT_URL=ws://127.0.0.1:9103
           if not exist "%ROOT_DIR%\venv\Scripts\activate.bat" (
               echo ========================================
               echo   ERROR: Setup Required
@@ -221,9 +191,7 @@ jobs:
               pause
               exit /b 1
           )
-
           call "%ROOT_DIR%\venv\Scripts\activate.bat"
-
           echo ========================================
           echo   Starting Copycord
           echo ========================================
@@ -231,33 +199,14 @@ jobs:
           echo ROOT_DIR:  %ROOT_DIR%
           echo CODE_DIR:  %CODE_DIR%
           echo DATA_DIR:  %DATA_DIR%
-          echo DB_PATH:   %DB_PATH%
           echo.
-
-          rem ----------------------------------------
-          rem [1/3] Admin (Web UI) - like admin role in Docker
-          rem ----------------------------------------
-          echo [1/3] Starting Admin (Web UI)...
-          start "Copycord Admin" /D "%ROOT_DIR%" ^
-            "%ROOT_DIR%\venv\Scripts\python.exe" -m uvicorn admin.app:app --host 0.0.0.0 --port 8080 --app-dir code
-
-          rem Small delay so admin is up before control connects
+          echo [1/3] Starting Admin...
+          start "Copycord Admin" cmd /k "cd /d "%ROOT_DIR%" && venv\Scripts\python.exe -m uvicorn admin.app:app --host 0.0.0.0 --port 8080 --app-dir code"
           timeout /t 3 /nobreak >nul
-
-          rem ----------------------------------------
-          rem [2/3] Server Control (ROLE=server)
-          rem ----------------------------------------
-          echo [2/3] Starting Server Control...
-          start "Copycord Server" /D "%ROOT_DIR%" ^
-            "%WIN_DIR%\run_control.bat" server 9101
-
-          rem ----------------------------------------
-          rem [3/3] Client Control (ROLE=client)
-          rem ----------------------------------------
-          echo [3/3] Starting Client Control...
-          start "Copycord Client" /D "%ROOT_DIR%" ^
-            "%WIN_DIR%\run_control.bat" client 9102
-
+          echo [2/3] Starting Server...
+          start "Copycord Server" cmd /k "cd /d "%ROOT_DIR%" && call windows\run_control.bat server 9101"
+          echo [3/3] Starting Client...
+          start "Copycord Client" cmd /k "cd /d "%ROOT_DIR%" && call windows\run_control.bat client 9102"
           echo.
           echo ========================================
           echo   Copycord Started!
@@ -265,60 +214,43 @@ jobs:
           echo.
           echo Web UI: http://localhost:8080
           echo.
-          echo Three windows opened:
-          echo   - Copycord Admin       (Web UI)
-          echo   - Copycord Server      (bot control)
-          echo   - Copycord Client      (selfbot control)
-          echo.
-          echo Bot logs will be written by control.py to:
-          echo   %DATA_DIR%\server.out
-          echo   %DATA_DIR%\client.out
-          echo.
-          echo Close the three windows to stop everything.
+          echo Three windows opened
+          echo Logs: data\server.out and data\client.out
           echo.
           pause
           endlocal
-          EOF
-
+          STARTEOF
+          unix2dos standalone-release/windows/start.bat 2>/dev/null || sed -i 's/$/\r/' standalone-release/windows/start.bat
 
       # ============================================
       # LINUX/MAC SCRIPTS
       # ============================================
       - name: Create Linux/Mac setup script
         run: |
-          cat > standalone-release/linux-mac/setup.sh << 'EOF'
+          cat > standalone-release/linux-mac/setup.sh <<'SETUPSHEOF'
           #!/bin/bash
           set -e
-
           ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
           cd "$ROOT_DIR"
-
           echo "========================================"
           echo "  Copycord Standalone Setup (Linux/Mac)"
           echo "========================================"
           echo ""
-
           if ! command -v python3 &> /dev/null; then
               echo "[ERROR] Python 3 is not installed!"
-              echo "Please install Python 3.8 or higher"
               exit 1
           fi
-
           echo "[1/4] Creating virtual environment..."
           python3 -m venv venv
-
           echo "[2/4] Activating virtual environment..."
           source venv/bin/activate
-
           echo "[3/4] Upgrading pip..."
           python -m pip install --upgrade pip --quiet
-
-          echo "[4/4] Installing dependencies (this may take a few minutes)..."
+          echo "[4/4] Installing dependencies..."
           python -m pip install tzdata --quiet
           python -m pip install -r code/admin/requirements.txt --quiet
           python -m pip install -r code/client/requirements.txt --quiet
           python -m pip install -r code/server/requirements.txt --quiet
-
           echo ""
           echo "========================================"
           echo "  Setup Complete!"
@@ -326,21 +258,18 @@ jobs:
           echo ""
           echo "Run './linux-mac/start.sh' to launch Copycord"
           echo ""
-          EOF
+          SETUPSHEOF
           chmod +x standalone-release/linux-mac/setup.sh
 
       - name: Create Linux/Mac start script
         run: |
-          cat > standalone-release/linux-mac/start.sh << 'EOF'
+          cat > standalone-release/linux-mac/start.sh <<'STARTSHEOF'
           #!/bin/bash
           set -e
-
           ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
           cd "$ROOT_DIR"
-
           DATA_DIR="$ROOT_DIR/data"
           mkdir -p "$DATA_DIR"
-
           export DATA_DIR
           export DB_PATH="$DATA_DIR/data.db"
           export APP_ROOT="$ROOT_DIR/code"
@@ -348,81 +277,62 @@ jobs:
           export WS_SERVER_CTRL_URL="ws://127.0.0.1:9101"
           export WS_CLIENT_CTRL_URL="ws://127.0.0.1:9102"
           export WS_CLIENT_URL="ws://127.0.0.1:9103"
-
           if [ ! -f venv/bin/activate ]; then
               echo "[ERROR] Please run './linux-mac/setup.sh' first."
               exit 1
           fi
-
           source venv/bin/activate
-
           echo "========================================"
           echo "  Starting Copycord"
           echo "========================================"
           echo ""
           echo "ROOT_DIR:  $ROOT_DIR"
           echo "DATA_DIR:  $DATA_DIR"
-          echo "DB_PATH:   $DB_PATH"
           echo ""
-
-          echo "[1/3] Starting Admin (Web UI)..."
+          echo "[1/3] Starting Admin..."
           cd code
           uvicorn admin.app:app --host 0.0.0.0 --port 8080 > "$DATA_DIR/admin.log" 2>&1 &
           ADMIN_PID=$!
           cd ..
-
           sleep 3
-
           echo "[2/3] Starting Server..."
           cd code
           ROLE=server CONTROL_PORT=9101 python control/control.py > "$DATA_DIR/server.log" 2>&1 &
           SERVER_PID=$!
           cd ..
-
           echo "[3/3] Starting Client..."
           cd code
           ROLE=client CONTROL_PORT=9102 python control/control.py > "$DATA_DIR/client.log" 2>&1 &
           CLIENT_PID=$!
           cd ..
-
           echo ""
           echo "========================================"
           echo "  Copycord Started!"
           echo "========================================"
           echo ""
           echo "Web UI: http://localhost:8080"
+          echo "PIDs: Admin=$ADMIN_PID Server=$SERVER_PID Client=$CLIENT_PID"
+          echo "Logs: $DATA_DIR/*.log"
           echo ""
-          echo "PIDs:"
-          echo "  Admin:  $ADMIN_PID"
-          echo "  Server: $SERVER_PID"
-          echo "  Client: $CLIENT_PID"
+          echo "Press Ctrl+C to stop"
           echo ""
-          echo "Logs:"
-          echo "  $DATA_DIR/admin.log"
-          echo "  $DATA_DIR/server.log"
-          echo "  $DATA_DIR/client.log"
-          echo ""
-          echo "Press Ctrl+C to stop all processes"
-          echo ""
-
-          trap "echo 'Stopping...'; kill $ADMIN_PID $SERVER_PID $CLIENT_PID 2>/dev/null || true; exit" INT TERM
+          trap "kill $ADMIN_PID $SERVER_PID $CLIENT_PID 2>/dev/null || true; exit" INT TERM
           wait
-          EOF
+          STARTSHEOF
           chmod +x standalone-release/linux-mac/start.sh
 
       # ============================================
       # README
       # ============================================
-      - name: Create README-STANDALONE
+      - name: Create README
         run: |
-          cat > standalone-release/README-STANDALONE.txt << 'EOF'
+          cat > standalone-release/README-STANDALONE.txt <<'READMEEOF'
           ========================================
             COPYCORD - STANDALONE INSTALLATION
           ========================================
 
           REQUIREMENTS:
           - Python 3.8 or higher
-          - Internet connection (for initial setup)
 
           WINDOWS:
             1. Run: windows\setup.bat
@@ -434,18 +344,11 @@ jobs:
             2. Run: ./linux-mac/start.sh
             3. Open: http://localhost:8080
 
-          LOGS:
-          - data/admin.log
-          - data/server.log
-          - data/client.log
+          LOGS: data/*.out and data/*.log
 
-          DOCUMENTATION:
-          https://github.com/Copycord/Copycord
-
-          SUPPORT:
-          https://discord.gg/ArFdqrJHBj
+          DOCS: https://github.com/Copycord/Copycord
           ========================================
-          EOF
+          READMEEOF
 
       # ============================================
       # PACKAGE & UPLOAD
@@ -454,7 +357,7 @@ jobs:
         run: |
           cd standalone-release
           VERSION="${{ github.ref_name }}"
-          if [ -z "$VERSION" ] || [ "$VERSION" == "refs/heads/"* ]; then
+          if [ -z "$VERSION" ] || [[ "$VERSION" == refs/heads/* ]]; then
             VERSION="test-$(date +%Y%m%d-%H%M%S)"
           fi
           zip -r ../copycord-standalone-${VERSION}.zip .
