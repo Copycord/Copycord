@@ -327,6 +327,31 @@ class SitemapService:
             except Exception:
                 return default
 
+        def _serialize_video_quality(ch):
+            """
+            Normalize discord.VideoQualityMode → 'auto' / 'full' / None
+            so it can safely go into JSON.
+            """
+            vqm = getattr(ch, "video_quality_mode", None)
+            if not vqm:
+                return None
+
+            name = getattr(vqm, "name", None)
+            if isinstance(name, str):
+                return name.lower()
+
+            # Fallback to value if for some reason name isn't there
+            try:
+                val = int(getattr(vqm, "value", 0))
+            except Exception:
+                return None
+
+            if val == 2:
+                return "full"
+            if val == 1:
+                return "auto"
+            return None
+
         def _sticker_url(s):
             u = getattr(s, "url", None)
             if not u:
@@ -443,9 +468,12 @@ class SitemapService:
                             "id": ch.id,
                             "name": ch.name,
                             "type": ch.type.value,
+                            "nsfw": getattr(ch, "nsfw", False),
+                            "slowmode_delay": getattr(ch, "slowmode_delay", 0),
                             "bitrate": getattr(ch, "bitrate", 64000),
                             "user_limit": getattr(ch, "user_limit", 0),
                             "rtc_region": getattr(ch, "rtc_region", None),
+                            "video_quality": _serialize_video_quality(ch),
                             **(
                                 {"overwrites": self._serialize_role_overwrites(ch)}
                                 if include_overwrites
@@ -459,10 +487,13 @@ class SitemapService:
                             "id": ch.id,
                             "name": ch.name,
                             "type": ch.type.value,
+                            "nsfw": getattr(ch, "nsfw", False),
+                            "slowmode_delay": getattr(ch, "slowmode_delay", 0),
                             "bitrate": getattr(ch, "bitrate", 64000),
                             "user_limit": getattr(ch, "user_limit", 0),
                             "rtc_region": getattr(ch, "rtc_region", None),
                             "topic": getattr(ch, "topic", None),
+                            "video_quality": _serialize_video_quality(ch),
                             **(
                                 {"overwrites": self._serialize_role_overwrites(ch)}
                                 if include_overwrites
@@ -509,9 +540,12 @@ class SitemapService:
                             "id": ch.id,
                             "name": ch.name,
                             "type": ch.type.value,
+                            "nsfw": getattr(ch, "nsfw", False),
+                            "slowmode_delay": getattr(ch, "slowmode_delay", 0),
                             "bitrate": getattr(ch, "bitrate", 64000),
                             "user_limit": getattr(ch, "user_limit", 0),
                             "rtc_region": getattr(ch, "rtc_region", None),
+                            "video_quality": _serialize_video_quality(ch),
                             **(
                                 {"overwrites": self._serialize_role_overwrites(ch)}
                                 if include_overwrites
@@ -525,10 +559,13 @@ class SitemapService:
                             "id": ch.id,
                             "name": ch.name,
                             "type": ch.type.value,
+                            "nsfw": getattr(ch, "nsfw", False),
+                            "slowmode_delay": getattr(ch, "slowmode_delay", 0),
                             "bitrate": getattr(ch, "bitrate", 64000),
                             "user_limit": getattr(ch, "user_limit", 0),
                             "rtc_region": getattr(ch, "rtc_region", None),
                             "topic": getattr(ch, "topic", None),
+                            "video_quality": _serialize_video_quality(ch),
                             **(
                                 {"overwrites": self._serialize_role_overwrites(ch)}
                                 if include_overwrites

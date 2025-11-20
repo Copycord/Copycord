@@ -2142,7 +2142,7 @@ class ServerReceiver:
 
     async def _sync_channel_nsfw(self, guild: Guild, sitemap: Dict) -> List[str]:
         """
-        Synchronize NSFW flags for channels.
+        Synchronize NSFW flags for channels (text, voice, stage, forum).
         """
         parts: List[str] = []
         host_guild_id = (sitemap.get("guild") or {}).get("id")
@@ -2165,20 +2165,23 @@ class ServerReceiver:
             return parts
 
         updated = 0
-        incoming = self._parse_sitemap(sitemap)
-
-        nsfw_map = {}
+        nsfw_map: dict[int, bool] = {}
 
         for cat in sitemap.get("categories", []):
             for ch in cat.get("channels", []):
                 try:
-                    nsfw_map[int(ch["id"])] = bool(ch.get("nsfw", False))
+                    ch_type = ch.get("type", 0)
+
+                    if ch_type in (0, 2, 13):
+                        nsfw_map[int(ch["id"])] = bool(ch.get("nsfw", False))
                 except Exception:
                     pass
 
         for ch in sitemap.get("standalone_channels", []):
             try:
-                nsfw_map[int(ch["id"])] = bool(ch.get("nsfw", False))
+                ch_type = ch.get("type", 0)
+                if ch_type in (0, 2, 13):
+                    nsfw_map[int(ch["id"])] = bool(ch.get("nsfw", False))
             except Exception:
                 pass
 
@@ -2188,10 +2191,34 @@ class ServerReceiver:
             except Exception:
                 pass
 
-        per_clone = self.chan_map_by_clone.get(int(guild.id), {}) or {}
+        def _map_for_clone(orig_id: int):
+            per = (getattr(self, "chan_map_by_clone", {}) or {}).get(
+                int(guild.id), {}
+            ) or {}
+
+            row = per.get(int(orig_id))
+            if not row and hasattr(self, "db"):
+                try:
+                    row = self.db.get_channel_mapping_for_clone(
+                        int(orig_id), int(guild.id)
+                    )
+                except Exception:
+                    row = None
+
+            if row and not isinstance(row, dict):
+                try:
+                    row = {k: row[k] for k in row.keys()}
+                except Exception:
+                    row = dict(row)
+
+            if row:
+
+                self.chan_map_by_clone.setdefault(int(guild.id), {})[int(orig_id)] = row
+
+            return row
 
         for orig_id, desired_nsfw in nsfw_map.items():
-            row = per_clone.get(int(orig_id))
+            row = _map_for_clone(orig_id)
             if not row:
                 continue
 
@@ -2204,6 +2231,7 @@ class ServerReceiver:
                 continue
 
             if not hasattr(ch, "nsfw"):
+
                 continue
 
             current_nsfw = bool(getattr(ch, "nsfw", False))
@@ -2216,9 +2244,10 @@ class ServerReceiver:
                     await ch.edit(nsfw=desired_nsfw)
                     updated += 1
                     logger.info(
-                        "[🔞] Updated NSFW flag for channel '%s' #%d: %s → %s",
+                        "[🔞] Updated NSFW flag for channel '%s' #%d (type=%s): %s → %s",
                         ch.name,
                         ch.id,
+                        type(ch).__name__,
                         current_nsfw,
                         desired_nsfw,
                     )
@@ -2366,19 +2395,24 @@ class ServerReceiver:
             return parts
 
         updated = 0
-
         slowmode_map = {}
 
         for cat in sitemap.get("categories", []):
             for ch in cat.get("channels", []):
                 try:
-                    slowmode_map[int(ch["id"])] = int(ch.get("slowmode_delay", 0))
+                    ch_type = ch.get("type", 0)
+
+                    if ch_type in (0, 2, 13):
+                        slowmode_map[int(ch["id"])] = int(ch.get("slowmode_delay", 0))
                 except Exception:
                     pass
 
         for ch in sitemap.get("standalone_channels", []):
             try:
-                slowmode_map[int(ch["id"])] = int(ch.get("slowmode_delay", 0))
+                ch_type = ch.get("type", 0)
+
+                if ch_type in (0, 2, 13):
+                    slowmode_map[int(ch["id"])] = int(ch.get("slowmode_delay", 0))
             except Exception:
                 pass
 
@@ -2407,7 +2441,6 @@ class ServerReceiver:
                 continue
 
             current_delay = int(getattr(ch, "slowmode_delay", 0) or 0)
-
             desired_delay = max(0, min(21600, desired_delay))
 
             if current_delay != desired_delay:
@@ -2433,9 +2466,10 @@ class ServerReceiver:
                             return f"{hours}h {mins}m" if mins else f"{hours}h"
 
                     logger.info(
-                        "[⏱️] Updated slowmode for channel '%s' #%d: %s → %s",
+                        "[⏱️] Updated slowmode for channel '%s' #%d (type=%s): %s → %s",
                         ch.name,
                         ch.id,
+                        type(ch).__name__,
                         _format_delay(current_delay),
                         _format_delay(desired_delay),
                     )
@@ -2653,6 +2687,21 @@ class ServerReceiver:
             )
         return parts
 
+    def _parse_video_quality_mode(self, value: str | int | None):
+        try:
+            if value is None:
+                return None
+            if isinstance(value, discord.VideoQualityMode):
+                return value
+            s = str(value).lower()
+            if "full" in s or s == "2":
+                return discord.VideoQualityMode.full
+            if "auto" in s or s in ("1", "0", ""):
+                return discord.VideoQualityMode.auto
+        except Exception:
+            pass
+        return None
+
     async def _ensure_voice_channel_and_webhook(
         self,
         host_guild_id: Optional[int],
@@ -2665,6 +2714,7 @@ class ServerReceiver:
         bitrate: Optional[int] = None,
         user_limit: Optional[int] = None,
         rtc_region: Optional[str] = None,
+        video_quality: str | int | None = None,
     ) -> Tuple[int, int, str]:
         """
         Ensure a voice channel exists with webhook for its text chat.
@@ -2747,13 +2797,17 @@ class ServerReceiver:
 
         ch = await self._create_channel(guild, "voice", original_name, category)
 
-        voice_changes = {}
+        voice_changes: dict[str, object] = {}
         if bitrate is not None:
             voice_changes["bitrate"] = int(bitrate)
         if user_limit is not None:
             voice_changes["user_limit"] = int(user_limit)
         if rtc_region is not None:
             voice_changes["rtc_region"] = rtc_region
+
+        vmode = self._parse_video_quality_mode(video_quality)
+        if vmode is not None:
+            voice_changes["video_quality_mode"] = vmode
 
         if voice_changes:
             try:
@@ -2826,6 +2880,7 @@ class ServerReceiver:
         user_limit: Optional[int] = None,
         rtc_region: Optional[str] = None,
         topic: Optional[str] = None,
+        video_quality: str | int | None = None,
     ) -> Tuple[int, int, str]:
         """
         Ensure a stage channel exists with webhook for its text chat.
@@ -2927,7 +2982,7 @@ class ServerReceiver:
             )
             return None, None, None
 
-        stage_changes = {}
+        stage_changes: dict[str, object] = {}
         if bitrate is not None:
             stage_changes["bitrate"] = int(bitrate)
         if user_limit is not None:
@@ -2936,6 +2991,10 @@ class ServerReceiver:
             stage_changes["rtc_region"] = rtc_region
         if topic is not None:
             stage_changes["topic"] = topic
+
+        vmode = self._parse_video_quality_mode(video_quality)
+        if vmode is not None:
+            stage_changes["video_quality_mode"] = vmode
 
         if stage_changes:
             try:
@@ -3018,6 +3077,50 @@ class ServerReceiver:
         except Exception:
             settings = self.config.default_mapping_settings()
 
+        def _norm_video_quality(vqm) -> str:
+            """
+            Normalize a channel.video_quality_mode into 'auto' / 'full' for comparison.
+            """
+            if not vqm:
+
+                return "auto"
+
+            name = getattr(vqm, "name", None)
+            if isinstance(name, str):
+                return name.lower()
+
+            try:
+                val = int(getattr(vqm, "value", 0))
+            except Exception:
+                return "auto"
+
+            if val == 2:
+                return "full"
+            if val == 1:
+                return "auto"
+            return "auto"
+
+        def _parse_video_quality(label: str | None):
+            """
+            Map 'auto' / 'full' back to a VideoQualityMode enum for .edit().
+            """
+            if not label:
+                return discord.VideoQualityMode.auto
+            label = str(label).lower()
+            if label == "full":
+                return discord.VideoQualityMode.full
+            return discord.VideoQualityMode.auto
+
+        def _normalize_region(val) -> str:
+            """
+            Normalize rtc_region into a simple, comparable string.
+            Handles VoiceRegion enums, strings, None, etc.
+            """
+            if not val:
+                return "auto"
+            v = getattr(val, "value", val)
+            return str(v).lower()
+
         clone_voice = settings.get("CLONE_VOICE", False)
         clone_voice_properties = settings.get("CLONE_VOICE_PROPERTIES", False)
         clone_stage = settings.get("CLONE_STAGE", False)
@@ -3073,6 +3176,9 @@ class ServerReceiver:
                 bitrate = item.get("bitrate") if clone_voice_properties else None
                 user_limit = item.get("user_limit") if clone_voice_properties else None
                 rtc_region = item.get("rtc_region") if clone_voice_properties else None
+                video_quality = (
+                    item.get("video_quality") if clone_voice_properties else None
+                )
 
                 _, clone_id, _ = await self._ensure_voice_channel_and_webhook(
                     host_guild_id,
@@ -3085,6 +3191,7 @@ class ServerReceiver:
                     bitrate=bitrate,
                     user_limit=user_limit,
                     rtc_region=rtc_region,
+                    video_quality=video_quality,
                 )
 
                 if is_new:
@@ -3094,14 +3201,23 @@ class ServerReceiver:
                 if not ch:
                     continue
 
+                def _normalize_region(val) -> str:
+                    """
+                    Normalize rtc_region into a simple, comparable string.
+                    """
+                    if not val:
+                        return "auto"
+                    v = getattr(val, "value", val)
+                    return str(v).lower()
+
                 if (
                     not is_new
                     and clone_voice_properties
                     and isinstance(ch, discord.VoiceChannel)
                 ):
-                    voice_changes = {}
+                    voice_changes: dict[str, object] = {}
 
-                    if item.get("bitrate"):
+                    if item.get("bitrate") is not None:
                         desired_bitrate = int(item["bitrate"])
                         if ch.bitrate != desired_bitrate:
                             voice_changes["bitrate"] = desired_bitrate
@@ -3112,9 +3228,38 @@ class ServerReceiver:
                             voice_changes["user_limit"] = desired_limit
 
                     if item.get("rtc_region") is not None:
-                        desired_region = item["rtc_region"]
-                        if ch.rtc_region != desired_region:
-                            voice_changes["rtc_region"] = desired_region
+                        raw_desired = item["rtc_region"]
+                        desired_norm = _normalize_region(raw_desired)
+                        current_norm = _normalize_region(
+                            getattr(ch, "rtc_region", None)
+                        )
+
+                        logger.debug(
+                            "[voice-region] clone_g=%s ch='%s'(%d) current=%r norm=%s desired=%r norm=%s",
+                            guild.id,
+                            ch.name,
+                            ch.id,
+                            getattr(ch, "rtc_region", None),
+                            current_norm,
+                            raw_desired,
+                            desired_norm,
+                        )
+
+                        if current_norm != desired_norm:
+
+                            voice_changes["rtc_region"] = (
+                                None if desired_norm == "auto" else raw_desired
+                            )
+
+                    if item.get("video_quality") is not None:
+                        desired_vq = item["video_quality"] or "auto"
+                        current_vq = _norm_video_quality(
+                            getattr(ch, "video_quality_mode", None)
+                        )
+                        if current_vq != desired_vq:
+                            voice_changes["video_quality_mode"] = _parse_video_quality(
+                                desired_vq
+                            )
 
                     if voice_changes:
                         try:
@@ -3163,6 +3308,9 @@ class ServerReceiver:
                 user_limit = item.get("user_limit") if clone_stage_properties else None
                 rtc_region = item.get("rtc_region") if clone_stage_properties else None
                 topic = item.get("topic") if clone_stage_properties else None
+                video_quality = (
+                    item.get("video_quality") if clone_stage_properties else None
+                )
 
                 result = await self._ensure_stage_channel_and_webhook(
                     host_guild_id,
@@ -3176,6 +3324,7 @@ class ServerReceiver:
                     user_limit=user_limit,
                     rtc_region=rtc_region,
                     topic=topic,
+                    video_quality=video_quality,
                 )
 
                 if result is None or result == (None, None, None):
@@ -3191,14 +3340,10 @@ class ServerReceiver:
                 if not ch:
                     continue
 
-                if (
-                    not is_new
-                    and clone_stage_properties
-                    and isinstance(ch, discord.StageChannel)
-                ):
-                    stage_changes = {}
+                if not is_new and clone_stage_properties:
+                    stage_changes: dict[str, object] = {}
 
-                    if item.get("bitrate"):
+                    if item.get("bitrate") is not None:
                         desired_bitrate = int(item["bitrate"])
                         if ch.bitrate != desired_bitrate:
                             stage_changes["bitrate"] = desired_bitrate
@@ -3218,6 +3363,16 @@ class ServerReceiver:
                         current_topic = getattr(ch, "topic", None)
                         if current_topic != desired_topic:
                             stage_changes["topic"] = desired_topic
+
+                    if item.get("video_quality") is not None:
+                        desired_vq = item["video_quality"] or "auto"
+                        current_vq = _norm_video_quality(
+                            getattr(ch, "video_quality_mode", None)
+                        )
+                        if current_vq != desired_vq:
+                            stage_changes["video_quality_mode"] = _parse_video_quality(
+                                desired_vq
+                            )
 
                     if stage_changes:
                         try:
@@ -3633,11 +3788,9 @@ class ServerReceiver:
         self._flush_bg_task = asyncio.create_task(_runner())
         self._flush_bg_task.add_done_callback(self._flush_done_cb)
 
-    def _parse_sitemap(self, sitemap: Dict) -> List[Dict]:
-        """
-        Parses a sitemap dictionary and extracts channel and thread information into a list of dictionaries.
-        """
-        items: List[Dict] = []
+    def _parse_sitemap(self, sitemap: dict) -> list[dict]:
+        items = []
+
         for cat in sitemap.get("categories", []):
             for ch in cat.get("channels", []):
                 items.append(
@@ -3646,12 +3799,14 @@ class ServerReceiver:
                         "name": ch["name"],
                         "parent_id": cat["id"],
                         "parent_name": cat["name"],
-                        "type": ch.get("type", 0),
+                        "type": ch["type"],
                         "bitrate": ch.get("bitrate"),
                         "user_limit": ch.get("user_limit"),
                         "rtc_region": ch.get("rtc_region"),
+                        "video_quality": ch.get("video_quality"),
                     }
                 )
+
         for ch in sitemap.get("standalone_channels", []):
             items.append(
                 {
@@ -3659,12 +3814,14 @@ class ServerReceiver:
                     "name": ch["name"],
                     "parent_id": None,
                     "parent_name": None,
-                    "type": ch.get("type", 0),
+                    "type": ch["type"],
                     "bitrate": ch.get("bitrate"),
                     "user_limit": ch.get("user_limit"),
                     "rtc_region": ch.get("rtc_region"),
+                    "video_quality": ch.get("video_quality"),
                 }
             )
+
         for forum in sitemap.get("forums", []):
             items.append(
                 {
@@ -3673,8 +3830,13 @@ class ServerReceiver:
                     "parent_id": forum.get("category_id"),
                     "parent_name": None,
                     "type": ChannelType.forum.value,
+                    "bitrate": None,
+                    "user_limit": None,
+                    "rtc_region": None,
+                    "video_quality": None,
                 }
             )
+
         return items
 
     def _can_create_category(self, guild: discord.Guild) -> bool:
