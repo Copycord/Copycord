@@ -2776,7 +2776,6 @@ body {
   text-align: center;
   display: flex;
   flex-direction: column;
-  align-items: center;
 }
 
 .guild-card:hover {
@@ -6590,16 +6589,17 @@ body.modal-open #bf-batchbar {
   align-items: flex-start;
   justify-content: space-between;
   min-height: 38px;
-  margin-bottom: 10px;
+  margin-bottom: 0 !important;
   width: 100%;
 }
 
 .guild-card-name {
-  flex: 1 1 auto;
-  min-width: 0;
   display: flex;
-  flex-direction: column;
-  gap: 3px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  width: 100%;
 }
 
 .guild-card-name-title {
@@ -6608,7 +6608,6 @@ body.modal-open #bf-batchbar {
   -webkit-line-clamp: 2;
   overflow: hidden;
   max-width: 100%;
-
   font-size: 12px;
   font-weight: 600;
   line-height: 1.3;
@@ -6616,16 +6615,6 @@ body.modal-open #bf-batchbar {
 
   word-break: break-word;
   white-space: normal;
-}
-
-.guild-card-name-meta {
-  font-size: 11px;
-  line-height: 1.3;
-  color: var(--muted);
-  opacity: 0.8;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
 }
 
 .guild-card-actions {
@@ -8229,4 +8218,102 @@ body.login-page {
 
 #mapping-modal #mapping-form .field-search-settings {
   grid-column: 1 / -1;
+}
+
+.guild-card.is-paused {
+  background-color: rgba(148, 163, 184, 0.06);
+  border-color: rgba(148, 163, 184, 0.6);
+}
+
+.guild-card.is-paused:hover {
+  background-color: rgba(148, 163, 184, 0.1);
+  transform: none;
+}
+
+.guild-card.is-paused .guild-card-name-title,
+.guild-card.is-paused .guild-card-name-meta {
+  color: var(--muted, #9ca3af);
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.status-pill-paused {
+  background-color: rgba(248, 113, 113, 0.1);
+  border-color: rgba(248, 113, 113, 0.35);
+  color: #f97373;
+}
+
+.guild-card.is-paused .status-pill-paused {
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.5);
+}
+
+.guild-card-name-meta {
+  position: static !important;
+  margin-left: 0;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.guild-card-name {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.guild-card-name-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  word-break: break-word;
+  white-space: normal;
+  width: 100%;
+}
+
+.guild-mapping-list .guild-card {
+  text-align: left !important;
+  align-items: stretch !important;
+}
+
+.guild-mapping-list .guild-card-inner {
+  width: 100%;
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.guild-mapping-list .guild-card-main {
+  width: 100%;
+  align-items: flex-start !important;
+  margin-bottom: 0 !important;
+}
+
+.guild-card-status {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.guild-card-status .status-pill {
+  display: inline-flex;
+  align-items: center;
 }

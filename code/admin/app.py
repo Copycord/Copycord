@@ -1992,6 +1992,33 @@ async def api_save_filters(mapping_id: str, request: Request):
     return JSONResponse({"ok": True})
 
 
+@app.post("/api/guild-mappings/{mapping_id}/toggle-status", response_class=JSONResponse)
+async def api_toggle_mapping_status(mapping_id: str):
+    """
+    Toggle a mapping between 'active' and 'paused'.
+    """
+    row = db.get_mapping_by_id(mapping_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="mapping-not-found")
+
+    cur_status = (
+        row.get("status") if isinstance(row, dict) else row["status"]
+    ) or "active"
+    cur_status = str(cur_status).lower()
+
+    new_status = "paused" if cur_status == "active" else "active"
+
+    db.update_mapping_status(mapping_id, new_status)
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "mapping_id": mapping_id,
+            "status": new_status,
+        }
+    )
+
+
 @app.get("/api/mappings/{mapping_id}/channels", response_class=JSONResponse)
 async def api_mapping_channels(mapping_id: str):
     """

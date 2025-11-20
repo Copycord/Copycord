@@ -28,7 +28,16 @@ class GuildResolver:
     def clones_for_host(self, host_guild_id: int) -> set[int]:
         try:
             rows = self.db.list_mappings_by_origin(int(host_guild_id)) or []
-            return {int(r["cloned_guild_id"]) for r in rows if r.get("cloned_guild_id")}
+            active_ids: set[int] = set()
+
+            for r in rows:
+                st = str(r.get("status", "active") or "active").strip().lower()
+                if st == "paused":
+                    continue
+                if r.get("cloned_guild_id"):
+                    active_ids.add(int(r["cloned_guild_id"]))
+
+            return active_ids
         except Exception:
             return set()
 
@@ -63,9 +72,14 @@ class GuildResolver:
                 if self.is_clone(int(explicit_clone_id))
                 else None
             )
+
         if host_guild_id is not None:
+            # Prefer an active mapping
             row = self.db.get_mapping_by_original(int(host_guild_id))
             if row and row.get("cloned_guild_id"):
-                return int(row["cloned_guild_id"])
+                st = str(row.get("status", "active") or "active").strip().lower()
+                if st != "paused":
+                    return int(row["cloned_guild_id"])
+
         fallback = getattr(self.config, "CLONE_GUILD_ID", None) if self.config else None
         return int(fallback) if fallback else None

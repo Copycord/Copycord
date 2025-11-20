@@ -34,6 +34,20 @@
           d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z" />
       </svg>
     `,
+    pause: `
+      <svg viewBox="0 0 24 24" width="20" height="20"
+          fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <rect x="7" y="5" width="3.5" height="14" rx="1"></rect>
+        <rect x="13.5" y="5" width="3.5" height="14" rx="1"></rect>
+      </svg>
+    `,
+    play: `
+      <svg viewBox="0 0 24 24" width="20" height="20"
+          fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round"
+              d="M8 5.75v12.5a.75.75 0 0 0 1.137.624l8-6.25a.75.75 0 0 0 0-1.248l-8-6.25A.75.75 0 0 0 8 5.75z" />
+      </svg>
+    `,
   };
 
   let mapValidated = false;
@@ -3141,8 +3155,23 @@
     const mappingCardsHtml = mappings
       .map((m) => {
         const iconSrc = m.original_guild_icon_url || "/static/logo.png";
+
+        const statusRaw = (m.status || "active").toLowerCase();
+        const isPaused = statusRaw === "paused";
+
+        const statusIcon = isPaused ? ICONS.play : ICONS.pause;
+        const statusLabel = isPaused
+          ? "Resume cloning for this mapping"
+          : "Pause cloning for this mapping";
+
+        const statusBadgeHtml = isPaused
+          ? `<span class="status-pill status-pill-paused">Paused</span>`
+          : "";
+
         return `
-        <div class="guild-card" data-id="${m.mapping_id}">
+        <div class="guild-card ${isPaused ? "is-paused" : "is-active"}"
+            data-id="${m.mapping_id}"
+            data-status="${statusRaw}">
           <div class="guild-card-logo">
             <img src="${iconSrc}" alt="" class="guild-card-logo-img">
           </div>
@@ -3155,7 +3184,6 @@
                 )}">
                   ${escapeHtml(m.mapping_name || "")}
                 </div>
-                <div class="guild-card-name-meta"></div>
               </div>
 
               <div class="guild-card-actions">
@@ -3173,6 +3201,17 @@
                   ${ICONS.filters}
                 </button>
 
+                <button class="btn-icon mapping-status-btn ${
+                  isPaused ? "is-paused" : "is-active"
+                }"
+                        data-id="${m.mapping_id}"
+                        type="button"
+                        aria-pressed="${isPaused ? "true" : "false"}"
+                        aria-label="${statusLabel}"
+                        title="${statusLabel}">
+                  ${statusIcon}
+                </button>
+
                 <button
                   class="btn-icon delete-mapping-btn"
                   type="button"
@@ -3185,6 +3224,17 @@
                 </button>
               </div>
             </div>
+            
+            <!-- Chip goes HERE, below the main section -->
+            ${
+              statusBadgeHtml
+                ? `
+              <div class="guild-card-status">
+                ${statusBadgeHtml}
+              </div>
+            `
+                : ""
+            }
           </div>
         </div>
       `;
@@ -3221,6 +3271,61 @@
         const mapId = ev.currentTarget.getAttribute("data-id");
         const mapping = findMappingById(mapId);
         await openFiltersModal(mapping);
+      });
+    });
+
+    listEl.querySelectorAll(".mapping-status-btn").forEach((btn) => {
+      btn.addEventListener("click", async (ev) => {
+        const mapId = ev.currentTarget.getAttribute("data-id");
+        if (!mapId) return;
+
+        const thisBtn = ev.currentTarget;
+        thisBtn.disabled = true;
+
+        try {
+          const res = await fetch(
+            `/api/guild-mappings/${encodeURIComponent(mapId)}/toggle-status`,
+            {
+              method: "POST",
+              credentials: "same-origin",
+            }
+          );
+
+          if (!res.ok) {
+            let msg = `Failed to update status (${res.status})`;
+            try {
+              const errJson = await res.json();
+              if (errJson && errJson.error) msg = errJson.error;
+            } catch {}
+            showToast(msg, { type: "error", timeout: 7000 });
+            return;
+          }
+
+          const data = await res.json();
+          const newStatus = (data.status || "").toLowerCase();
+
+          const mapping = findMappingById(mapId);
+          if (mapping) {
+            mapping.status = newStatus;
+          }
+
+          renderGuildMappings();
+
+          showToast(
+            newStatus === "paused"
+              ? "Mapping paused. It will no longer clone until resumed."
+              : "Mapping resumed. Cloning is active again.",
+            { type: "success" }
+          );
+
+          validateConfigAndToggle?.({ decorate: false });
+        } catch {
+          showToast("Network error while updating mapping status.", {
+            type: "error",
+          });
+        } finally {
+          thisBtn.disabled = false;
+        }
       });
     });
 

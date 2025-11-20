@@ -51,6 +51,8 @@ class DBManager:
                     cloned_guild_id       INTEGER NOT NULL,
                     cloned_guild_name     TEXT,
                     settings              TEXT NOT NULL DEFAULT '{}',
+                    status                  TEXT NOT NULL DEFAULT 'active'
+                                            CHECK (status IN ('active','paused')),
                     created_at            INTEGER   NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
                     last_updated          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(original_guild_id, cloned_guild_id)
@@ -65,6 +67,7 @@ class DBManager:
                 "cloned_guild_id",
                 "cloned_guild_name",
                 "settings",
+                "status",
                 "created_at",
                 "last_updated",
             },
@@ -74,6 +77,7 @@ class DBManager:
                 "original_guild_name": "original_guild_name",
                 "cloned_guild_id": "cloned_guild_id",
                 "cloned_guild_name": "cloned_guild_name",
+                "status": "'active'",
                 "created_at": "created_at",
                 "last_updated": "last_updated",
             },
@@ -81,6 +85,7 @@ class DBManager:
                 "CREATE INDEX IF NOT EXISTS ix_gm_clone_guild   ON guild_mappings(cloned_guild_id);",
                 "CREATE INDEX IF NOT EXISTS ix_gm_uuid          ON guild_mappings(mapping_id);",
                 "CREATE INDEX IF NOT EXISTS ix_gm_by_orig ON guild_mappings(original_guild_id);",
+                "CREATE INDEX IF NOT EXISTS idx_gm_status      ON guild_mappings (status);",
             ],
         )
 
@@ -2595,6 +2600,7 @@ class DBManager:
                 cloned_guild_id,
                 cloned_guild_name,
                 settings,
+                status,
                 created_at,
                 last_updated
             FROM guild_mappings
@@ -2620,6 +2626,7 @@ class DBManager:
                     "cloned_guild_id": str(r["cloned_guild_id"] or ""),
                     "cloned_guild_name": r["cloned_guild_name"] or "",
                     "settings": settings_obj,
+                    "status": (r["status"] or "active"),
                 }
             )
         return out
@@ -2629,7 +2636,9 @@ class DBManager:
             """
             SELECT DISTINCT original_guild_id
             FROM guild_mappings
-            WHERE original_guild_id IS NOT NULL AND original_guild_id != 0
+            WHERE original_guild_id IS NOT NULL
+            AND original_guild_id != 0
+            AND (status IS NULL OR status = 'active')
             """
         ).fetchall()
         return [int(r[0]) for r in rows]
@@ -2639,14 +2648,21 @@ class DBManager:
             """
             SELECT DISTINCT cloned_guild_id
             FROM guild_mappings
-            WHERE cloned_guild_id IS NOT NULL AND cloned_guild_id != 0
+            WHERE cloned_guild_id IS NOT NULL
+            AND cloned_guild_id != 0
+            AND (status IS NULL OR status = 'active')
             """
         ).fetchall()
         return [int(r[0]) for r in rows]
 
     def is_clone_guild_id(self, guild_id: int) -> bool:
         row = self.conn.execute(
-            "SELECT 1 FROM guild_mappings WHERE cloned_guild_id = ?",
+            """
+            SELECT 1
+            FROM guild_mappings
+            WHERE cloned_guild_id = ?
+            AND (status IS NULL OR status = 'active')
+            """,
             (int(guild_id),),
         ).fetchone()
         return bool(row)
@@ -3346,12 +3362,17 @@ class DBManager:
 
     def get_clone_guild_ids_for_origin(self, original_guild_id: int) -> list[int]:
         rows = self.conn.execute(
-            "SELECT cloned_guild_id FROM guild_mappings WHERE original_guild_id=?",
+            """
+            SELECT DISTINCT cloned_guild_id
+            FROM guild_mappings
+            WHERE original_guild_id = ?
+            AND cloned_guild_id IS NOT NULL
+            AND cloned_guild_id != 0
+            AND (status IS NULL OR status = 'active')
+            """,
             (int(original_guild_id),),
         ).fetchall()
-        return [
-            int(r["cloned_guild_id"]) for r in rows if r["cloned_guild_id"] is not None
-        ]
+        return [int(r[0]) for r in rows]
 
     def list_mappings_by_origin(self, original_guild_id: int):
         return self.conn.execute(
@@ -4161,3 +4182,21 @@ class DBManager:
             }
             for r in rows
         ]
+
+    def update_mapping_status(self, mapping_id: str, status: str) -> None:
+        """
+        Update the status for a guild mapping.
+
+        Status is normalized to 'active' or 'paused'.
+        """
+        status_norm = "paused" if str(status).lower() == "paused" else "active"
+        with self.lock, self.conn:
+            self.conn.execute(
+                """
+                UPDATE guild_mappings
+                SET status = ?,
+                    last_updated = CURRENT_TIMESTAMP
+                WHERE mapping_id = ?
+                """,
+                (status_norm, str(mapping_id)),
+            )

@@ -631,6 +631,58 @@ class ServerReceiver:
         except Exception as e:
             logger.debug("[⚠️] Failed to update bot status: %s", e)
 
+    def _log_guild_mapping_summary(self) -> None:
+        """
+        Log how many guild mappings are active vs paused, and warn if nothing is cloning.
+        """
+        try:
+            maps = self.db.list_guild_mappings()
+            total = len(maps)
+
+            active_maps: list[dict] = []
+            paused_maps: list[dict] = []
+
+            for m in maps:
+                status = str(m.get("status") or "active").strip().lower()
+                if status == "paused":
+                    paused_maps.append(m)
+                else:
+                    active_maps.append(m)
+
+            sources: list[str] = []
+            for m in active_maps:
+                host_name = (m.get("original_guild_name") or "").strip()
+                if not host_name:
+                    host_name = str(m.get("original_guild_id") or "").strip()
+                if host_name:
+                    sources.append(host_name)
+
+            num_active = len(active_maps)
+            num_paused = len(paused_maps)
+
+            if num_active == 0:
+                if num_paused:
+                    logger.warning(
+                        "[⚠️] All %d guild mappings are paused. "
+                        "Nothing is currently set to clone.",
+                        total,
+                    )
+                else:
+                    logger.warning(
+                        "[⚠️] No guild mappings found. Nothing is currently set to clone."
+                    )
+            else:
+                logger.info(
+                    "[🧙‍♂️] Copycord is cloning %d of %d server%s (%d paused)",
+                    num_active,
+                    total,
+                    "" if total == 1 else "s",
+                    num_paused,
+                )
+
+        except Exception:
+            logger.exception("Failed to summarize guild_mappings on startup")
+
     async def on_ready(self):
         """
         Event handler that is called when the bot is ready.
@@ -682,31 +734,7 @@ class ServerReceiver:
 
         logger.info("[🤖] %s", msg)
 
-        try:
-            maps = self.db.list_guild_mappings()
-            total = len(maps)
-
-            sources: list[str] = []
-            for m in maps:
-                host_name = (m.get("original_guild_name") or "").strip()
-                if not host_name:
-                    host_name = str(m.get("original_guild_id") or "").strip()
-                if host_name:
-                    sources.append(host_name)
-
-            if total == 0 or not sources:
-                logger.warning(
-                    "[⚠️] No guild mappings found. Nothing is currently set to clone."
-                )
-            else:
-                logger.info(
-                    "[🧙‍♂️] Copycord is cloning %d server%s",
-                    total,
-                    "" if total == 1 else "s",
-                )
-
-        except Exception:
-            logger.exception("Failed to summarize guild_mappings on startup")
+        self._log_guild_mapping_summary()
 
         asyncio.create_task(self.backfill.cleanup_non_primary_webhooks())
 

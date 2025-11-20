@@ -73,8 +73,19 @@ def resolve_mapping_settings(
         if isinstance(settings, dict):
             eff.update(settings)
     except Exception:
-
         pass
+
+    try:
+        st = (
+            str(row.get("status", "active") or "active").strip().lower()
+            if row
+            else "active"
+        )
+    except Exception:
+        st = "active"
+
+    if st == "paused":
+        eff["ENABLE_CLONING"] = False
 
     if not eff.get("ENABLE_CLONING", True):
         for k in (
