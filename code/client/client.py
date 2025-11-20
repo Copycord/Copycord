@@ -935,9 +935,6 @@ class ClientListener:
         if not g or not self._is_mapped_origin(g.id):
             return True
 
-        if message.channel.type in (ChannelType.voice, ChannelType.stage_voice):
-
-            return True
 
     async def maybe_send_announcement(self, message: discord.Message) -> bool:
         content = message.content
@@ -1739,8 +1736,38 @@ class ClientListener:
             slowmode_changed = slowmode_before != slowmode_after
         except Exception:
             slowmode_changed = False
+        
+        # Check for voice channel property changes
+        voice_properties_changed = False
+        try:
+            is_voice = isinstance(after, discord.VoiceChannel)
+            if is_voice:
+                bitrate_before = getattr(before, "bitrate", 64000)
+                bitrate_after = getattr(after, "bitrate", 64000)
+                
+                user_limit_before = getattr(before, "user_limit", 0)
+                user_limit_after = getattr(after, "user_limit", 0)
+                
+                rtc_region_before = getattr(before, "rtc_region", None)
+                rtc_region_after = getattr(after, "rtc_region", None)
+                
+                voice_properties_changed = (
+                    bitrate_before != bitrate_after or
+                    user_limit_before != user_limit_after or
+                    rtc_region_before != rtc_region_after
+                )
+                
+                if voice_properties_changed:
+                    logger.debug(
+                        "[🔊] Voice properties changed for channel '%s' #%d → scheduling sitemap",
+                        after.name,
+                        after.id,
+                    )
+        except Exception:
+            voice_properties_changed = False
 
-        if name_changed or parent_changed or nsfw_changed or topic_changed or slowmode_changed:
+        if (name_changed or parent_changed or nsfw_changed or topic_changed or 
+            slowmode_changed or voice_properties_changed):
             if nsfw_changed:
                 logger.debug(
                     "[🔞] NSFW flag changed for channel '%s' #%d: %s → %s → scheduling sitemap",

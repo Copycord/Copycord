@@ -130,6 +130,8 @@
     SYNC_CHANNEL_TOPIC: false,
     SYNC_CHANNEL_SLOWMODE: false,
     REARRANGE_ROLES: false,
+    CLONE_VOICE: false,
+    CLONE_VOICE_PROPERTIES: false,
   };
 
   let lastFocusLog = null;

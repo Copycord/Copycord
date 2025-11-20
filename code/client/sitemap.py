@@ -197,7 +197,6 @@ class SitemapService:
                     e,
                 )
 
-
     async def send_for_mapping_id(self, mapping_id: str) -> None:
         """
         Build and send a sitemap for exactly one mapping row
@@ -402,7 +401,7 @@ class SitemapService:
                     }
                     for r in guild.roles
                 ],
-                key=lambda x: x["position"]
+                key=lambda x: x["position"],
             ),
             "community": {
                 "enabled": "COMMUNITY" in guild.features,
@@ -430,7 +429,7 @@ class SitemapService:
                             "type": ch.type.value,
                             "nsfw": getattr(ch, "nsfw", False),
                             "topic": getattr(ch, "topic", None),
-                            "slowmode_delay": getattr(ch, "slowmode_delay", 0), 
+                            "slowmode_delay": getattr(ch, "slowmode_delay", 0),
                             **(
                                 {"overwrites": self._serialize_role_overwrites(ch)}
                                 if include_overwrites
@@ -479,7 +478,7 @@ class SitemapService:
                             "type": ch.type.value,
                             "nsfw": getattr(ch, "nsfw", False),
                             "topic": getattr(ch, "topic", None),
-                            "slowmode_delay": getattr(ch, "slowmode_delay", 0), 
+                            "slowmode_delay": getattr(ch, "slowmode_delay", 0),
                             **(
                                 {"overwrites": self._serialize_role_overwrites(ch)}
                                 if include_overwrites
