@@ -438,6 +438,22 @@ class SitemapService:
                             ),
                         }
                     )
+                elif isinstance(ch, discord.VoiceChannel):
+                    channels.append(
+                        {
+                            "id": ch.id,
+                            "name": ch.name,
+                            "type": ch.type.value,
+                            "bitrate": getattr(ch, "bitrate", 64000),
+                            "user_limit": getattr(ch, "user_limit", 0),
+                            "rtc_region": getattr(ch, "rtc_region", None),
+                            **(
+                                {"overwrites": self._serialize_role_overwrites(ch)}
+                                if include_overwrites
+                                else {}
+                            ),
+                        }
+                    )
 
             sitemap["categories"].append(
                 {
@@ -452,23 +468,41 @@ class SitemapService:
                 }
             )
 
-        sitemap["standalone_channels"] = [
-            {
-                "id": ch.id,
-                "name": ch.name,
-                "type": ch.type.value,
-                "nsfw": getattr(ch, "nsfw", False),
-                "topic": getattr(ch, "topic", None),
-                "slowmode_delay": getattr(ch, "slowmode_delay", 0), 
-                **(
-                    {"overwrites": self._serialize_role_overwrites(ch)}
-                    if include_overwrites
-                    else {}
-                ),
-            }
-            for ch in guild.text_channels
-            if ch.category is None
-        ]
+        sitemap["standalone_channels"] = []
+        for ch in guild.channels:
+            if ch.category is None:
+                if isinstance(ch, discord.TextChannel):
+                    sitemap["standalone_channels"].append(
+                        {
+                            "id": ch.id,
+                            "name": ch.name,
+                            "type": ch.type.value,
+                            "nsfw": getattr(ch, "nsfw", False),
+                            "topic": getattr(ch, "topic", None),
+                            "slowmode_delay": getattr(ch, "slowmode_delay", 0), 
+                            **(
+                                {"overwrites": self._serialize_role_overwrites(ch)}
+                                if include_overwrites
+                                else {}
+                            ),
+                        }
+                    )
+                elif isinstance(ch, discord.VoiceChannel):
+                    sitemap["standalone_channels"].append(
+                        {
+                            "id": ch.id,
+                            "name": ch.name,
+                            "type": ch.type.value,
+                            "bitrate": getattr(ch, "bitrate", 64000),
+                            "user_limit": getattr(ch, "user_limit", 0),
+                            "rtc_region": getattr(ch, "rtc_region", None),
+                            **(
+                                {"overwrites": self._serialize_role_overwrites(ch)}
+                                if include_overwrites
+                                else {}
+                            ),
+                        }
+                    )
 
         for forum in getattr(guild, "forums", []):
             entry = {
