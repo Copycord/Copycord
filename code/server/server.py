@@ -1696,9 +1696,7 @@ class ServerReceiver:
                     parts += await self._sync_forums(guild, sitemap)
                     parts += await self._sync_channels(guild, sitemap)
                     parts += await self._sync_community(guild, sitemap)
-                    parts += await self._sync_channel_nsfw(guild, sitemap)
-                    parts += await self._sync_channel_topic(guild, sitemap)
-                    parts += await self._sync_channel_slowmode(guild, sitemap)
+                    parts += await self._sync_channel_metadata(guild, sitemap)
 
                     moved = await self._handle_master_channel_moves(
                         guild,
@@ -2140,10 +2138,18 @@ class ServerReceiver:
 
         return created, reparented, repaired_ids
 
-    async def _sync_channel_nsfw(self, guild: Guild, sitemap: Dict) -> List[str]:
+    async def _sync_channel_metadata(self, guild: Guild, sitemap: Dict) -> List[str]:
         """
-        Synchronize NSFW flags for channels (text, voice, stage, forum).
+        Synchronize all channel metadata in a single pass, after structural sync.
+
+        Uses per-mapping settings for:
+        - SYNC_CHANNEL_TOPIC
+        - SYNC_CHANNEL_NSFW
+        - SYNC_CHANNEL_SLOWMODE
+        - CLONE_VOICE / CLONE_VOICE_PROPERTIES
+        - CLONE_STAGE / CLONE_STAGE_PROPERTIES
         """
+
         parts: List[str] = []
         host_guild_id = (sitemap.get("guild") or {}).get("id")
 
@@ -2157,68 +2163,176 @@ class ServerReceiver:
         except Exception:
             settings = self.config.default_mapping_settings()
 
-        if not settings.get("SYNC_CHANNEL_NSFW", False):
+        sync_topic = settings.get("SYNC_CHANNEL_TOPIC", False)
+        sync_nsfw = settings.get("SYNC_CHANNEL_NSFW", False)
+        sync_slowmode = settings.get("SYNC_CHANNEL_SLOWMODE", False)
+
+        clone_voice = settings.get("CLONE_VOICE", False)
+        clone_voice_props = settings.get("CLONE_VOICE_PROPERTIES", False)
+        clone_stage = settings.get("CLONE_STAGE", False)
+        clone_stage_props = settings.get("CLONE_STAGE_PROPERTIES", False)
+
+        has_community = "COMMUNITY" in guild.features
+
+        if not any(
+            [
+                sync_topic,
+                sync_nsfw,
+                sync_slowmode,
+                clone_voice and clone_voice_props,
+                clone_stage and clone_stage_props and has_community,
+            ]
+        ):
             logger.debug(
-                "[nsfw] SYNC_CHANNEL_NSFW disabled for clone_g=%s; skipping",
+                "[meta] All channel metadata sync flags disabled for clone_g=%s; skipping",
                 guild.id,
             )
             return parts
 
-        updated = 0
-        nsfw_map: dict[int, bool] = {}
+        topic_map: Dict[int, Optional[str]] = {}
+        nsfw_map: Dict[int, bool] = {}
+        slowmode_map: Dict[int, int] = {}
+
+        voice_meta: Dict[int, Dict[str, object]] = {}
+        stage_meta: Dict[int, Dict[str, object]] = {}
+
+        def ingest_channel(ch: Dict):
+            try:
+                cid = int(ch["id"])
+            except Exception:
+                return
+
+            ch_type = int(ch.get("type", 0))
+
+            if sync_topic:
+                topic_map[cid] = ch.get("topic")
+
+            if sync_nsfw:
+                nsfw_map[cid] = bool(ch.get("nsfw"))
+
+            if sync_slowmode:
+                try:
+                    slowmode_map[cid] = int(ch.get("slowmode_delay", 0) or 0)
+                except Exception:
+                    slowmode_map[cid] = 0
+
+            if clone_voice and clone_voice_props and ch_type == ChannelType.voice.value:
+                voice_meta[cid] = {
+                    "bitrate": ch.get("bitrate"),
+                    "user_limit": ch.get("user_limit"),
+                    "rtc_region": ch.get("rtc_region"),
+                    "video_quality": ch.get("video_quality"),
+                }
+
+            if (
+                has_community
+                and clone_stage
+                and clone_stage_props
+                and ch_type == ChannelType.stage_voice.value
+            ):
+                stage_meta[cid] = {
+                    "bitrate": ch.get("bitrate"),
+                    "user_limit": ch.get("user_limit"),
+                    "rtc_region": ch.get("rtc_region"),
+                    "topic": ch.get("topic"),
+                    "video_quality": ch.get("video_quality"),
+                }
 
         for cat in sitemap.get("categories", []):
             for ch in cat.get("channels", []):
-                try:
-                    ch_type = ch.get("type", 0)
-
-                    if ch_type in (0, 2, 13):
-                        nsfw_map[int(ch["id"])] = bool(ch.get("nsfw", False))
-                except Exception:
-                    pass
+                ingest_channel(ch)
 
         for ch in sitemap.get("standalone_channels", []):
-            try:
-                ch_type = ch.get("type", 0)
-                if ch_type in (0, 2, 13):
-                    nsfw_map[int(ch["id"])] = bool(ch.get("nsfw", False))
-            except Exception:
-                pass
+            ingest_channel(ch)
 
         for forum in sitemap.get("forums", []):
+            ingest_channel(forum)
+
+        if not any([topic_map, nsfw_map, slowmode_map, voice_meta, stage_meta]):
+            logger.debug(
+                "[meta] No channel metadata found in sitemap for clone_g=%s; nothing to sync",
+                guild.id,
+            )
+            return parts
+
+        def _norm_video_quality(
+            vqm: Optional[discord.VideoQualityMode | int | str],
+        ) -> str:
+            """
+            Normalize any VideoQualityMode / int / string into 'auto' or 'full'.
+            """
+            if vqm is None:
+                return "auto"
+            if isinstance(vqm, discord.VideoQualityMode):
+                return "full" if vqm == discord.VideoQualityMode.full else "auto"
+            if isinstance(vqm, int):
+                return "full" if vqm == discord.VideoQualityMode.full.value else "auto"
+            s = str(vqm).lower()
+            return "full" if s in ("full", "720p", "high") else "auto"
+
+        def _parse_video_quality(
+            label: Optional[str | int | discord.VideoQualityMode],
+        ) -> discord.VideoQualityMode:
+            """
+            Map 'auto'/'full'/int/VideoQualityMode to a proper VideoQualityMode.
+            """
+            if isinstance(label, discord.VideoQualityMode):
+                return label
+            if isinstance(label, int):
+                return (
+                    discord.VideoQualityMode.full
+                    if label == discord.VideoQualityMode.full.value
+                    else discord.VideoQualityMode.auto
+                )
+
+            s = (label or "auto").lower()
+            if s in ("full", "720p", "high"):
+                return discord.VideoQualityMode.full
+            return discord.VideoQualityMode.auto
+
+        def _normalize_region(val: Any) -> str:
+            """
+            Normalize rtc_region values to lower-case strings, 'auto' if unset.
+            """
+            if val is None:
+                return "auto"
+            if isinstance(val, str):
+                s = val.strip().lower()
+                return "auto" if not s or s in ("auto", "automatic") else s
             try:
-                nsfw_map[int(forum["id"])] = bool(forum.get("nsfw", False))
+                s = str(val).strip().lower()
+                return s or "auto"
             except Exception:
-                pass
+                return "auto"
 
-        def _map_for_clone(orig_id: int):
-            per = (getattr(self, "chan_map_by_clone", {}) or {}).get(
-                int(guild.id), {}
-            ) or {}
+        per_clone = self.chan_map_by_clone.setdefault(int(guild.id), {}) or {}
 
-            row = per.get(int(orig_id))
-            if not row and hasattr(self, "db"):
-                try:
-                    row = self.db.get_channel_mapping_for_clone(
-                        int(orig_id), int(guild.id)
-                    )
-                except Exception:
-                    row = None
+        all_ids: Set[int] = (
+            set(topic_map.keys())
+            | set(nsfw_map.keys())
+            | set(slowmode_map.keys())
+            | set(voice_meta.keys())
+            | set(stage_meta.keys())
+        )
 
-            if row and not isinstance(row, dict):
-                try:
-                    row = {k: row[k] for k in row.keys()}
-                except Exception:
+        topic_updated = 0
+        nsfw_updated = 0
+        slowmode_updated = 0
+        voice_updated = 0
+        stage_updated = 0
+
+        for orig_id in all_ids:
+            row = per_clone.get(int(orig_id))
+            if not row:
+
+                row = self.db.get_channel_mapping_by_original_and_clone(
+                    int(orig_id), int(guild.id)
+                )
+                if row is not None and not isinstance(row, dict):
                     row = dict(row)
+                if row:
+                    per_clone[int(orig_id)] = row
 
-            if row:
-
-                self.chan_map_by_clone.setdefault(int(guild.id), {})[int(orig_id)] = row
-
-            return row
-
-        for orig_id, desired_nsfw in nsfw_map.items():
-            row = _map_for_clone(orig_id)
             if not row:
                 continue
 
@@ -2230,258 +2344,184 @@ class ServerReceiver:
             if not ch:
                 continue
 
-            if not hasattr(ch, "nsfw"):
+            changes: Dict[str, object] = {}
+            is_voice_ch = isinstance(ch, discord.VoiceChannel)
+            is_stage_ch = isinstance(ch, discord.StageChannel)
 
-                continue
+            if sync_topic and orig_id in topic_map and hasattr(ch, "topic"):
+                desired_topic = topic_map[orig_id]
+                current_topic = getattr(ch, "topic", None)
 
-            current_nsfw = bool(getattr(ch, "nsfw", False))
+                current_norm = current_topic if current_topic else None
+                desired_norm = desired_topic if desired_topic else None
 
-            if current_nsfw != desired_nsfw:
-                try:
-                    await self.ratelimit.acquire_for_guild(
-                        ActionType.EDIT_CHANNEL, guild.id
-                    )
-                    await ch.edit(nsfw=desired_nsfw)
-                    updated += 1
-                    logger.info(
-                        "[🔞] Updated NSFW flag for channel '%s' #%d (type=%s): %s → %s",
-                        ch.name,
-                        ch.id,
-                        type(ch).__name__,
-                        current_nsfw,
-                        desired_nsfw,
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "[⚠️] Failed to update NSFW flag for channel #%d: %s",
-                        ch.id,
-                        e,
-                    )
+                if current_norm != desired_norm:
+                    changes["topic"] = desired_topic
+                    topic_updated += 1
 
-        if updated:
-            parts.append(f"Updated NSFW flag on {updated} channels")
+            if sync_nsfw and orig_id in nsfw_map and hasattr(ch, "nsfw"):
+                desired_nsfw = bool(nsfw_map[orig_id])
+                current_nsfw = bool(getattr(ch, "nsfw", False))
 
-        return parts
+                if current_nsfw != desired_nsfw:
+                    changes["nsfw"] = desired_nsfw
+                    nsfw_updated += 1
 
-    async def _sync_channel_topic(self, guild: Guild, sitemap: Dict) -> List[str]:
-        """
-        Synchronize channel topics based on SYNC_CHANNEL_TOPIC setting.
-        """
-        parts: List[str] = []
-        host_guild_id = (sitemap.get("guild") or {}).get("id")
+            if (
+                sync_slowmode
+                and orig_id in slowmode_map
+                and hasattr(ch, "slowmode_delay")
+            ):
+                desired_delay = max(0, min(21600, int(slowmode_map[orig_id] or 0)))
+                current_delay = int(getattr(ch, "slowmode_delay", 0) or 0)
 
-        try:
-            settings = resolve_mapping_settings(
-                self.db,
-                self.config,
-                original_guild_id=int(host_guild_id) if host_guild_id else None,
-                cloned_guild_id=int(guild.id),
-            )
-        except Exception:
-            settings = self.config.default_mapping_settings()
+                if current_delay != desired_delay:
+                    changes["slowmode_delay"] = desired_delay
+                    slowmode_updated += 1
 
-        if not settings.get("SYNC_CHANNEL_TOPIC", False):
-            logger.debug(
-                "[topic] SYNC_CHANNEL_TOPIC disabled for clone_g=%s; skipping",
-                guild.id,
-            )
-            return parts
+            voice_changed_here = False
+            if (
+                clone_voice
+                and clone_voice_props
+                and is_voice_ch
+                and orig_id in voice_meta
+            ):
+                meta = voice_meta[orig_id]
 
-        updated = 0
+                if meta.get("bitrate") is not None:
+                    desired_bitrate = int(meta["bitrate"])
+                    if ch.bitrate != desired_bitrate:
+                        changes["bitrate"] = desired_bitrate
+                        voice_changed_here = True
 
-        topic_map = {}
+                if meta.get("user_limit") is not None:
+                    desired_limit = int(meta["user_limit"])
+                    if ch.user_limit != desired_limit:
+                        changes["user_limit"] = desired_limit
+                        voice_changed_here = True
 
-        for cat in sitemap.get("categories", []):
-            for ch in cat.get("channels", []):
-                try:
-                    topic_map[int(ch["id"])] = ch.get("topic")
-                except Exception:
-                    pass
+                if "rtc_region" in meta and meta["rtc_region"] is not None:
+                    raw_desired = meta["rtc_region"]
+                    desired_norm = _normalize_region(raw_desired)
+                    current_norm = _normalize_region(getattr(ch, "rtc_region", None))
 
-        for ch in sitemap.get("standalone_channels", []):
-            try:
-                topic_map[int(ch["id"])] = ch.get("topic")
-            except Exception:
-                pass
+                    if current_norm != desired_norm:
 
-        for forum in sitemap.get("forums", []):
-            try:
-                topic_map[int(forum["id"])] = forum.get("topic")
-            except Exception:
-                pass
-
-        per_clone = self.chan_map_by_clone.get(int(guild.id), {}) or {}
-
-        for orig_id, desired_topic in topic_map.items():
-            row = per_clone.get(int(orig_id))
-            if not row:
-                continue
-
-            clone_id = int(row.get("cloned_channel_id") or 0)
-            if not clone_id:
-                continue
-
-            ch = guild.get_channel(clone_id)
-            if not ch:
-                continue
-
-            if not hasattr(ch, "topic"):
-                continue
-
-            current_topic = getattr(ch, "topic", None)
-
-            current_normalized = current_topic if current_topic else None
-            desired_normalized = desired_topic if desired_topic else None
-
-            if current_normalized != desired_normalized:
-                try:
-                    await self.ratelimit.acquire_for_guild(
-                        ActionType.EDIT_CHANNEL, guild.id
-                    )
-                    await ch.edit(topic=desired_topic)
-                    updated += 1
-
-                    def _truncate(s, max_len=50):
-                        if not s:
-                            return "(empty)"
-                        s_str = str(s)
-                        return (
-                            s_str
-                            if len(s_str) <= max_len
-                            else s_str[: max_len - 3] + "..."
+                        changes["rtc_region"] = (
+                            None if desired_norm == "auto" else raw_desired
                         )
+                        voice_changed_here = True
 
+                if meta.get("video_quality") is not None:
+                    desired_vq = meta["video_quality"] or "auto"
+                    current_vq = _norm_video_quality(
+                        getattr(ch, "video_quality_mode", None)
+                    )
+                    if current_vq != desired_vq:
+                        changes["video_quality_mode"] = _parse_video_quality(desired_vq)
+                        voice_changed_here = True
+
+            if voice_changed_here:
+                voice_updated += 1
+
+            stage_changed_here = False
+            if (
+                has_community
+                and clone_stage
+                and clone_stage_props
+                and is_stage_ch
+                and orig_id in stage_meta
+            ):
+                meta = stage_meta[orig_id]
+
+                if meta.get("bitrate") is not None:
+                    desired_bitrate = int(meta["bitrate"])
+                    if ch.bitrate != desired_bitrate:
+                        changes["bitrate"] = desired_bitrate
+                        stage_changed_here = True
+
+                if meta.get("user_limit") is not None:
+                    desired_limit = int(meta["user_limit"])
+                    if ch.user_limit != desired_limit:
+                        changes["user_limit"] = desired_limit
+                        stage_changed_here = True
+
+                if "rtc_region" in meta and meta["rtc_region"] is not None:
+                    raw_desired = meta["rtc_region"]
+                    desired_norm = _normalize_region(raw_desired)
+                    current_norm = _normalize_region(getattr(ch, "rtc_region", None))
+
+                    if current_norm != desired_norm:
+                        changes["rtc_region"] = (
+                            None if desired_norm == "auto" else raw_desired
+                        )
+                        stage_changed_here = True
+
+                if meta.get("topic") is not None:
+                    desired_topic = meta["topic"]
+                    current_topic = getattr(ch, "topic", None)
+                    if current_topic != desired_topic:
+                        changes["topic"] = desired_topic
+                        stage_changed_here = True
+
+                if meta.get("video_quality") is not None:
+                    desired_vq = meta["video_quality"] or "auto"
+                    current_vq = _norm_video_quality(
+                        getattr(ch, "video_quality_mode", None)
+                    )
+                    if current_vq != desired_vq:
+                        changes["video_quality_mode"] = _parse_video_quality(desired_vq)
+                        stage_changed_here = True
+
+            if stage_changed_here:
+                stage_updated += 1
+
+            if not changes:
+                continue
+
+            try:
+                await self.ratelimit.acquire_for_guild(
+                    ActionType.EDIT_CHANNEL, guild.id
+                )
+                await ch.edit(**changes)
+
+                if is_voice_ch and voice_changed_here:
                     logger.info(
-                        "[📝] Updated topic for channel '%s' #%d: %s → %s",
+                        "[🔊] Updated voice metadata for '%s' #%d: %s",
                         ch.name,
                         ch.id,
-                        _truncate(current_topic),
-                        _truncate(desired_topic),
+                        ", ".join(f"{k}={v}" for k, v in changes.items()),
                     )
-                except Exception as e:
-                    logger.warning(
-                        "[⚠️] Failed to update topic for channel #%d: %s",
-                        ch.id,
-                        e,
-                    )
-
-        if updated:
-            parts.append(f"Updated topic on {updated} channels")
-
-        return parts
-
-    async def _sync_channel_slowmode(self, guild: Guild, sitemap: Dict) -> List[str]:
-        """
-        Synchronize channel slowmode delays based on SYNC_CHANNEL_SLOWMODE setting.
-        """
-        parts: List[str] = []
-        host_guild_id = (sitemap.get("guild") or {}).get("id")
-
-        try:
-            settings = resolve_mapping_settings(
-                self.db,
-                self.config,
-                original_guild_id=int(host_guild_id) if host_guild_id else None,
-                cloned_guild_id=int(guild.id),
-            )
-        except Exception:
-            settings = self.config.default_mapping_settings()
-
-        if not settings.get("SYNC_CHANNEL_SLOWMODE", False):
-            logger.debug(
-                "[slowmode] SYNC_CHANNEL_SLOWMODE disabled for clone_g=%s; skipping",
-                guild.id,
-            )
-            return parts
-
-        updated = 0
-        slowmode_map = {}
-
-        for cat in sitemap.get("categories", []):
-            for ch in cat.get("channels", []):
-                try:
-                    ch_type = ch.get("type", 0)
-
-                    if ch_type in (0, 2, 13):
-                        slowmode_map[int(ch["id"])] = int(ch.get("slowmode_delay", 0))
-                except Exception:
-                    pass
-
-        for ch in sitemap.get("standalone_channels", []):
-            try:
-                ch_type = ch.get("type", 0)
-
-                if ch_type in (0, 2, 13):
-                    slowmode_map[int(ch["id"])] = int(ch.get("slowmode_delay", 0))
-            except Exception:
-                pass
-
-        for forum in sitemap.get("forums", []):
-            try:
-                slowmode_map[int(forum["id"])] = int(forum.get("slowmode_delay", 0))
-            except Exception:
-                pass
-
-        per_clone = self.chan_map_by_clone.get(int(guild.id), {}) or {}
-
-        for orig_id, desired_delay in slowmode_map.items():
-            row = per_clone.get(int(orig_id))
-            if not row:
-                continue
-
-            clone_id = int(row.get("cloned_channel_id") or 0)
-            if not clone_id:
-                continue
-
-            ch = guild.get_channel(clone_id)
-            if not ch:
-                continue
-
-            if not hasattr(ch, "slowmode_delay"):
-                continue
-
-            current_delay = int(getattr(ch, "slowmode_delay", 0) or 0)
-            desired_delay = max(0, min(21600, desired_delay))
-
-            if current_delay != desired_delay:
-                try:
-                    await self.ratelimit.acquire_for_guild(
-                        ActionType.EDIT_CHANNEL, guild.id
-                    )
-                    await ch.edit(slowmode_delay=desired_delay)
-                    updated += 1
-
-                    def _format_delay(seconds):
-                        if seconds == 0:
-                            return "disabled"
-                        elif seconds < 60:
-                            return f"{seconds}s"
-                        elif seconds < 3600:
-                            mins = seconds // 60
-                            secs = seconds % 60
-                            return f"{mins}m {secs}s" if secs else f"{mins}m"
-                        else:
-                            hours = seconds // 3600
-                            mins = (seconds % 3600) // 60
-                            return f"{hours}h {mins}m" if mins else f"{hours}h"
-
+                elif is_stage_ch and stage_changed_here:
                     logger.info(
-                        "[⏱️] Updated slowmode for channel '%s' #%d (type=%s): %s → %s",
+                        "[🎭] Updated stage metadata for '%s' #%d: %s",
                         ch.name,
                         ch.id,
-                        type(ch).__name__,
-                        _format_delay(current_delay),
-                        _format_delay(desired_delay),
+                        ", ".join(f"{k}={v}" for k, v in changes.items()),
                     )
-                except Exception as e:
-                    logger.warning(
-                        "[⚠️] Failed to update slowmode for channel #%d: %s",
+                else:
+                    logger.info(
+                        "[📝] Updated channel metadata for '%s' #%d: %s",
+                        ch.name,
                         ch.id,
-                        e,
+                        ", ".join(f"{k}={v}" for k, v in changes.items()),
                     )
 
-        if updated:
-            parts.append(f"Updated slowmode on {updated} channels")
+            except Exception as e:
+                logger.warning(
+                    "[⚠️] Failed to update metadata for channel #%d: %s", ch.id, e
+                )
+
+        if nsfw_updated:
+            parts.append(f"Updated NSFW flag on {nsfw_updated} channels")
+        if topic_updated:
+            parts.append(f"Updated topic on {topic_updated} channels")
+        if slowmode_updated:
+            parts.append(f"Updated slowmode on {slowmode_updated} channels")
+        if voice_updated:
+            parts.append(f"Updated voice properties on {voice_updated} channels")
+        if stage_updated:
+            parts.append(f"Updated stage properties on {stage_updated} channels")
 
         return parts
 
@@ -3057,11 +3097,6 @@ class ServerReceiver:
     async def _sync_channels(self, guild: Guild, sitemap: Dict) -> List[str]:
         """
         Synchronizes the channels of a guild with the provided sitemap.
-        1) Deletes stale channels
-        2) Creates new channels if missing (including voice/stage channels if enabled)
-        3) Converts to Announcement if required
-        4) Renames to match sitemap (if RENAME_CHANNELS is enabled)
-        5) Updates voice/stage channel properties (if properties sync is enabled)
         """
         parts: List[str] = []
         incoming = self._parse_sitemap(sitemap)
@@ -3077,50 +3112,6 @@ class ServerReceiver:
         except Exception:
             settings = self.config.default_mapping_settings()
 
-        def _norm_video_quality(vqm) -> str:
-            """
-            Normalize a channel.video_quality_mode into 'auto' / 'full' for comparison.
-            """
-            if not vqm:
-
-                return "auto"
-
-            name = getattr(vqm, "name", None)
-            if isinstance(name, str):
-                return name.lower()
-
-            try:
-                val = int(getattr(vqm, "value", 0))
-            except Exception:
-                return "auto"
-
-            if val == 2:
-                return "full"
-            if val == 1:
-                return "auto"
-            return "auto"
-
-        def _parse_video_quality(label: str | None):
-            """
-            Map 'auto' / 'full' back to a VideoQualityMode enum for .edit().
-            """
-            if not label:
-                return discord.VideoQualityMode.auto
-            label = str(label).lower()
-            if label == "full":
-                return discord.VideoQualityMode.full
-            return discord.VideoQualityMode.auto
-
-        def _normalize_region(val) -> str:
-            """
-            Normalize rtc_region into a simple, comparable string.
-            Handles VoiceRegion enums, strings, None, etc.
-            """
-            if not val:
-                return "auto"
-            v = getattr(val, "value", val)
-            return str(v).lower()
-
         clone_voice = settings.get("CLONE_VOICE", False)
         clone_voice_properties = settings.get("CLONE_VOICE_PROPERTIES", False)
         clone_stage = settings.get("CLONE_STAGE", False)
@@ -3132,7 +3123,7 @@ class ServerReceiver:
         if rem:
             parts.append(f"Deleted {rem} channels")
 
-        created = renamed = converted = voice_updated = stage_updated = 0
+        created = renamed = converted = 0
         voice_skipped = stage_skipped = 0
 
         for item in incoming:
@@ -3201,86 +3192,6 @@ class ServerReceiver:
                 if not ch:
                     continue
 
-                def _normalize_region(val) -> str:
-                    """
-                    Normalize rtc_region into a simple, comparable string.
-                    """
-                    if not val:
-                        return "auto"
-                    v = getattr(val, "value", val)
-                    return str(v).lower()
-
-                if (
-                    not is_new
-                    and clone_voice_properties
-                    and isinstance(ch, discord.VoiceChannel)
-                ):
-                    voice_changes: dict[str, object] = {}
-
-                    if item.get("bitrate") is not None:
-                        desired_bitrate = int(item["bitrate"])
-                        if ch.bitrate != desired_bitrate:
-                            voice_changes["bitrate"] = desired_bitrate
-
-                    if item.get("user_limit") is not None:
-                        desired_limit = int(item["user_limit"])
-                        if ch.user_limit != desired_limit:
-                            voice_changes["user_limit"] = desired_limit
-
-                    if item.get("rtc_region") is not None:
-                        raw_desired = item["rtc_region"]
-                        desired_norm = _normalize_region(raw_desired)
-                        current_norm = _normalize_region(
-                            getattr(ch, "rtc_region", None)
-                        )
-
-                        logger.debug(
-                            "[voice-region] clone_g=%s ch='%s'(%d) current=%r norm=%s desired=%r norm=%s",
-                            guild.id,
-                            ch.name,
-                            ch.id,
-                            getattr(ch, "rtc_region", None),
-                            current_norm,
-                            raw_desired,
-                            desired_norm,
-                        )
-
-                        if current_norm != desired_norm:
-
-                            voice_changes["rtc_region"] = (
-                                None if desired_norm == "auto" else raw_desired
-                            )
-
-                    if item.get("video_quality") is not None:
-                        desired_vq = item["video_quality"] or "auto"
-                        current_vq = _norm_video_quality(
-                            getattr(ch, "video_quality_mode", None)
-                        )
-                        if current_vq != desired_vq:
-                            voice_changes["video_quality_mode"] = _parse_video_quality(
-                                desired_vq
-                            )
-
-                    if voice_changes:
-                        try:
-                            await self.ratelimit.acquire_for_guild(
-                                ActionType.EDIT_CHANNEL, guild.id
-                            )
-                            await ch.edit(**voice_changes)
-                            voice_updated += 1
-                            logger.info(
-                                "[🔊] Updated voice properties for '%s' #%d: %s",
-                                ch.name,
-                                ch.id,
-                                ", ".join(f"{k}={v}" for k, v in voice_changes.items()),
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                "[⚠️] Failed to update voice properties for channel #%d: %s",
-                                ch.id,
-                                e,
-                            )
-
                 did_rename, _reason = await self._maybe_rename_channel(ch, name, orig)
                 if did_rename:
                     renamed += 1
@@ -3339,60 +3250,6 @@ class ServerReceiver:
                 ch = guild.get_channel(clone_id)
                 if not ch:
                     continue
-
-                if not is_new and clone_stage_properties:
-                    stage_changes: dict[str, object] = {}
-
-                    if item.get("bitrate") is not None:
-                        desired_bitrate = int(item["bitrate"])
-                        if ch.bitrate != desired_bitrate:
-                            stage_changes["bitrate"] = desired_bitrate
-
-                    if item.get("user_limit") is not None:
-                        desired_limit = int(item["user_limit"])
-                        if ch.user_limit != desired_limit:
-                            stage_changes["user_limit"] = desired_limit
-
-                    if item.get("rtc_region") is not None:
-                        desired_region = item["rtc_region"]
-                        if ch.rtc_region != desired_region:
-                            stage_changes["rtc_region"] = desired_region
-
-                    if item.get("topic") is not None:
-                        desired_topic = item["topic"]
-                        current_topic = getattr(ch, "topic", None)
-                        if current_topic != desired_topic:
-                            stage_changes["topic"] = desired_topic
-
-                    if item.get("video_quality") is not None:
-                        desired_vq = item["video_quality"] or "auto"
-                        current_vq = _norm_video_quality(
-                            getattr(ch, "video_quality_mode", None)
-                        )
-                        if current_vq != desired_vq:
-                            stage_changes["video_quality_mode"] = _parse_video_quality(
-                                desired_vq
-                            )
-
-                    if stage_changes:
-                        try:
-                            await self.ratelimit.acquire_for_guild(
-                                ActionType.EDIT_CHANNEL, guild.id
-                            )
-                            await ch.edit(**stage_changes)
-                            stage_updated += 1
-                            logger.info(
-                                "[🎭] Updated stage properties for '%s' #%d: %s",
-                                ch.name,
-                                ch.id,
-                                ", ".join(f"{k}={v}" for k, v in stage_changes.items()),
-                            )
-                        except Exception as e:
-                            logger.warning(
-                                "[⚠️] Failed to update stage properties for channel #%d: %s",
-                                ch.id,
-                                e,
-                            )
 
                 did_rename, _reason = await self._maybe_rename_channel(ch, name, orig)
                 if did_rename:
@@ -3470,10 +3327,6 @@ class ServerReceiver:
             parts.append(f"Converted {converted} channels to Announcement")
         if renamed:
             parts.append(f"Renamed {renamed} channels")
-        if voice_updated:
-            parts.append(f"Updated voice properties on {voice_updated} channels")
-        if stage_updated:
-            parts.append(f"Updated stage properties on {stage_updated} channels")
         if voice_skipped:
             logger.debug(
                 "[🔇] Skipped %d voice channels for clone_g=%s (CLONE_VOICE=False)",
