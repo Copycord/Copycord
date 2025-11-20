@@ -12,6 +12,7 @@ import json
 import sqlite3, threading
 from typing import Dict, List, Optional
 import uuid
+import secrets
 
 
 class DBManager:
@@ -712,15 +713,17 @@ class DBManager:
             name="role_mentions",
             create_sql_template="""
                 CREATE TABLE {table} (
-                    original_guild_id   INTEGER NOT NULL,
-                    cloned_guild_id     INTEGER NOT NULL,
-                    cloned_channel_id   INTEGER,
-                    cloned_role_id      INTEGER NOT NULL,
-                    added_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (original_guild_id, cloned_guild_id, cloned_channel_id, cloned_role_id)
+                    role_mention_id    TEXT NOT NULL PRIMARY KEY,
+                    original_guild_id  INTEGER NOT NULL,
+                    cloned_guild_id    INTEGER NOT NULL,
+                    cloned_channel_id  INTEGER,
+                    cloned_role_id     INTEGER NOT NULL,
+                    added_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE (original_guild_id, cloned_guild_id, cloned_channel_id, cloned_role_id)
                 );
             """,
             required_columns={
+                "role_mention_id",
                 "original_guild_id",
                 "cloned_guild_id",
                 "cloned_channel_id",
@@ -728,6 +731,8 @@ class DBManager:
                 "added_at",
             },
             copy_map={
+                # For old rows with no ID, generate a short hex id during migration
+                "role_mention_id": "COALESCE(role_mention_id, lower(hex(randomblob(4))))",
                 "original_guild_id": "original_guild_id",
                 "cloned_guild_id": "cloned_guild_id",
                 "cloned_channel_id": "cloned_channel_id",
@@ -735,12 +740,12 @@ class DBManager:
                 "added_at": "COALESCE(added_at, CURRENT_TIMESTAMP)",
             },
             post_sql=[
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_role_mentions_unique_scope ON role_mentions(original_guild_id, cloned_guild_id, cloned_channel_id, cloned_role_id);",
                 "CREATE INDEX IF NOT EXISTS idx_role_mentions_orig ON role_mentions(original_guild_id);",
                 "CREATE INDEX IF NOT EXISTS idx_role_mentions_clone ON role_mentions(cloned_guild_id);",
                 "CREATE INDEX IF NOT EXISTS idx_role_mentions_chan ON role_mentions(cloned_channel_id);",
             ],
         )
-
         self._ensure_table(
             name="channel_webhook_profiles",
             create_sql_template="""
@@ -3891,15 +3896,20 @@ class DBManager:
     ) -> bool:
         """
         Add a role mention configuration.
+
+        Returns True if a new config was created, False if it already existed.
         """
+        cfg_id = secrets.token_hex(4)  # 8-char short ID
+
         with self.lock, self.conn:
             cur = self.conn.execute(
                 """
                 INSERT OR IGNORE INTO role_mentions
-                (original_guild_id, cloned_guild_id, cloned_channel_id, cloned_role_id, added_at)
-                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                (role_mention_id, original_guild_id, cloned_guild_id, cloned_channel_id, cloned_role_id, added_at)
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
                 """,
                 (
+                    cfg_id,
                     int(original_guild_id),
                     int(cloned_guild_id),
                     int(cloned_channel_id) if cloned_channel_id is not None else None,
@@ -3907,6 +3917,7 @@ class DBManager:
                 ),
             )
             return cur.rowcount > 0
+
 
     def remove_role_mention(
         self,
@@ -3936,6 +3947,31 @@ class DBManager:
                     int(cloned_role_id),
                     int(cloned_channel_id) if cloned_channel_id is not None else None,
                     int(cloned_channel_id) if cloned_channel_id is not None else None,
+                ),
+            )
+            return cur.rowcount > 0
+        
+    def remove_role_mention_by_id(
+        self,
+        original_guild_id: int,
+        cloned_guild_id: int,
+        role_mention_id: str,
+    ) -> bool:
+        """
+        Remove a role mention configuration by its short ID.
+        """
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                """
+                DELETE FROM role_mentions
+                WHERE original_guild_id = ?
+                AND cloned_guild_id = ?
+                AND role_mention_id = ?
+                """,
+                (
+                    int(original_guild_id),
+                    int(cloned_guild_id),
+                    str(role_mention_id),
                 ),
             )
             return cur.rowcount > 0
@@ -3991,7 +4027,7 @@ class DBManager:
         """
         rows = self.conn.execute(
             """
-            SELECT cloned_channel_id, cloned_role_id, added_at
+            SELECT role_mention_id, cloned_channel_id, cloned_role_id, added_at
             FROM role_mentions
             WHERE original_guild_id = ?
             AND cloned_guild_id = ?
@@ -4005,9 +4041,10 @@ class DBManager:
 
         return [
             {
-                "cloned_channel_id": r[0],
-                "cloned_role_id": int(r[1]),
-                "added_at": r[2],
+                "role_mention_id": r[0],
+                "cloned_channel_id": r[1],
+                "cloned_role_id": int(r[2]),
+                "added_at": r[3],
             }
             for r in rows
         ]

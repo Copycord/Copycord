@@ -2072,25 +2072,19 @@ class CloneCommands(commands.Cog):
             )
 
     @role_mention_group.command(
-        name="remove",
-        description="Remove a role mention from cloned messages.",
+        name="delete",
+        description="Delete a role mention configuration by its ID.",
     )
-    async def role_mention_remove(
+    async def role_mention_delete(
         self,
         ctx: discord.ApplicationContext,
-        role: discord.Role = discord.Option(
-            discord.Role,
-            description="The role to stop mentioning",
+        config_id: str = discord.Option(
+            str,
+            description="Config ID from /role_mention list (e.g. a1b2c3d4)",
             required=True,
         ),
-        channel_id: str = discord.Option(
-            str,
-            description="Cloned channel ID (leave empty for global)",
-            required=False,
-            default="",
-        ),
     ):
-        """Remove a role mention."""
+        """Delete a role mention by its short config ID."""
         await ctx.defer(ephemeral=True)
 
         guild = ctx.guild
@@ -2116,36 +2110,27 @@ class CloneCommands(commands.Cog):
         original_guild_id = int(mapping["original_guild_id"])
         cloned_guild_id = int(mapping["cloned_guild_id"])
 
-        cloned_channel_id = None
-        if channel_id.strip():
-            try:
-                cloned_channel_id = int(channel_id.strip())
-            except ValueError:
-                return await ctx.followup.send(
-                    embed=self._err_embed(
-                        "Invalid Channel ID",
-                        f"`{channel_id}` is not a valid channel ID.",
-                    ),
-                    ephemeral=True,
-                )
+        cfg = config_id.strip().lower()
+        if not cfg:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Invalid ID",
+                    "You must provide a valid config ID from `/role_mention list`.",
+                ),
+                ephemeral=True,
+            )
 
-        removed = self.db.remove_role_mention(
+        removed = self.db.remove_role_mention_by_id(
             original_guild_id=original_guild_id,
             cloned_guild_id=cloned_guild_id,
-            cloned_role_id=role.id,
-            cloned_channel_id=cloned_channel_id,
+            role_mention_id=cfg,
         )
 
         if removed:
-            scope = (
-                f"channel `{cloned_channel_id}`"
-                if cloned_channel_id
-                else "all channels"
-            )
             return await ctx.followup.send(
                 embed=self._ok_embed(
-                    "Role Mention Removed",
-                    f"{role.mention} will no longer be mentioned for {scope}.",
+                    "Role Mention Deleted",
+                    f"Configuration `{cfg}` has been removed.",
                     color=discord.Color.orange(),
                 ),
                 ephemeral=True,
@@ -2154,7 +2139,7 @@ class CloneCommands(commands.Cog):
             return await ctx.followup.send(
                 embed=self._err_embed(
                     "Not Found",
-                    f"No configuration found for {role.mention} in that scope.",
+                    f"No role mention configuration with ID `{cfg}` was found for this clone.",
                 ),
                 ephemeral=True,
             )
@@ -2210,6 +2195,7 @@ class CloneCommands(commands.Cog):
 
         lines: list[str] = []
         for m in mentions:
+            cfg_id = m["role_mention_id"]
             role_id = m["cloned_role_id"]
             chan_id = m["cloned_channel_id"]
 
@@ -2224,7 +2210,7 @@ class CloneCommands(commands.Cog):
                 else:
                     scope = f"channel `{chan_id}` (deleted)"
 
-            lines.append(f"• {role_display} — {scope}")
+            lines.append(f"`{cfg_id}` • {role_display} — {scope}")
 
         embed = self._ok_embed(
             "Role Mentions",
