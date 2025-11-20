@@ -99,6 +99,52 @@
     return { ok, firstBad };
   }
 
+  function triggerConfetti() {
+    const duration = 3000;
+    const animationEnd = Date.now() + duration;
+    const defaults = {
+      startVelocity: 30,
+      spread: 360,
+      ticks: 60,
+      zIndex: 99999,
+      colors: [
+        "#8b5cf6",
+        "#a78bfa",
+        "#c4b5fd",
+        "#ef4444",
+        "#f87171",
+        "#fca5a5",
+      ],
+    };
+
+    function randomInRange(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    const interval = setInterval(function () {
+      const timeLeft = animationEnd - Date.now();
+
+      if (timeLeft <= 0) {
+        return clearInterval(interval);
+      }
+
+      const particleCount = 50 * (timeLeft / duration);
+
+      confetti({
+        ...defaults,
+        particleCount,
+        origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 },
+      });
+      confetti({
+        ...defaults,
+        particleCount,
+        origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 },
+      });
+    }, 250);
+  }
+
+  window.triggerConfetti = triggerConfetti;
+
   function bindMappingFieldListeners() {
     const { name, host, clone } = getMappingInputs();
     [name, host, clone].forEach((el) => {
@@ -2091,6 +2137,10 @@
     showToast(isEdit ? "Mapping updated." : "Mapping created.", {
       type: "success",
     });
+
+    if (!isEdit) {
+      triggerConfetti();
+    }
 
     setMappingSaveBusy(false);
     saveMappingFromModal._busy = false;

@@ -8222,7 +8222,7 @@ body.login-page {
 
 .guild-card.is-paused {
   background-color: rgba(148, 163, 184, 0.06);
-  border-color: rgba(148, 163, 184, 0.6);
+  border-color: transparent;
 }
 
 .guild-card.is-paused:hover {
@@ -8230,9 +8230,26 @@ body.login-page {
   transform: none;
 }
 
+.guild-card.is-paused .guild-card-logo,
+.guild-card.is-paused .guild-card-name-title,
+.guild-card.is-paused .guild-card-name-meta {
+  opacity: 0.5;
+}
+
+.guild-card.is-paused:hover .guild-card-logo,
+.guild-card.is-paused:hover .guild-card-name-title,
+.guild-card.is-paused:hover .guild-card-name-meta {
+  opacity: 0.6;
+}
+
 .guild-card.is-paused .guild-card-name-title,
 .guild-card.is-paused .guild-card-name-meta {
   color: var(--muted, #9ca3af);
+}
+
+.guild-card.is-paused img,
+.guild-card.is-paused .guild-card-icon {
+  filter: grayscale(60%);
 }
 
 .status-pill {
