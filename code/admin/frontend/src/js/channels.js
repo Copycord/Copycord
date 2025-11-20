@@ -2551,7 +2551,7 @@
   }
 
   function chTypeLabel(t) {
-    const map = { 0: "Text", 2: "Voice", 5: "Announcements", 15: "Forum" };
+    const map = { 0: "Text", 2: "Voice", 5: "Announcements", 15: "Forum", 13: "Stage" };
     return map[t] || `Type ${t ?? "-"}`;
   }
 

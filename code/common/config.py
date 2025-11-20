@@ -112,6 +112,8 @@ class Config:
             "REARRANGE_ROLES": False,
             "CLONE_VOICE": False,
             "CLONE_VOICE_PROPERTIES": False,
+            "CLONE_STAGE": False,
+            "CLONE_STAGE_PROPERTIES": False,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):

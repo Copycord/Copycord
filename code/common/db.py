@@ -731,7 +731,6 @@ class DBManager:
                 "added_at",
             },
             copy_map={
-                # For old rows with no ID, generate a short hex id during migration
                 "role_mention_id": "COALESCE(role_mention_id, lower(hex(randomblob(4))))",
                 "original_guild_id": "original_guild_id",
                 "cloned_guild_id": "cloned_guild_id",
@@ -3899,7 +3898,7 @@ class DBManager:
 
         Returns True if a new config was created, False if it already existed.
         """
-        cfg_id = secrets.token_hex(4)  # 8-char short ID
+        cfg_id = secrets.token_hex(4)
 
         with self.lock, self.conn:
             cur = self.conn.execute(
@@ -3917,7 +3916,6 @@ class DBManager:
                 ),
             )
             return cur.rowcount > 0
-
 
     def remove_role_mention(
         self,
@@ -3950,7 +3948,7 @@ class DBManager:
                 ),
             )
             return cur.rowcount > 0
-        
+
     def remove_role_mention_by_id(
         self,
         original_guild_id: int,

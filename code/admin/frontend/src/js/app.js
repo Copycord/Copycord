@@ -132,6 +132,8 @@
     REARRANGE_ROLES: false,
     CLONE_VOICE: false,
     CLONE_VOICE_PROPERTIES: false,
+    CLONE_STAGE: false,
+    CLONE_STAGE_PROPERTIES: false,
   };
 
   let lastFocusLog = null;

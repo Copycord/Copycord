@@ -2813,14 +2813,196 @@ class ServerReceiver:
         self._unmapped_warned.discard(int(original_id))
         return int(original_id), int(ch.id), str(url)
 
+    async def _ensure_stage_channel_and_webhook(
+        self,
+        host_guild_id: Optional[int],
+        guild: discord.Guild,
+        original_id: int,
+        original_name: str,
+        parent_id: Optional[int],
+        parent_name: Optional[str],
+        channel_type: int,
+        bitrate: Optional[int] = None,
+        user_limit: Optional[int] = None,
+        rtc_region: Optional[str] = None,
+        topic: Optional[str] = None,
+    ) -> Tuple[int, int, str]:
+        """
+        Ensure a stage channel exists with webhook for its text chat.
+        Similar to voice channels but for stage channels.
+        """
+        if self._shutting_down:
+            return
+
+        if "COMMUNITY" not in guild.features:
+            logger.warning(
+                "[⚠️] Cannot create stage channel '%s' in guild %s: COMMUNITY feature not enabled",
+                original_name,
+                guild.id,
+            )
+            return None, None, None
+
+        category = None
+        if parent_id is not None:
+            category, _ = await self._ensure_category(
+                guild, parent_id, parent_name, host_guild_id
+            )
+
+        per = self.chan_map_by_clone.setdefault(int(guild.id), {})
+        row = per.get(int(original_id))
+        if not row:
+            try:
+                row = self.db.get_channel_mapping_by_original_and_clone(
+                    int(original_id), int(guild.id)
+                )
+            except Exception:
+                row = None
+
+        if row is not None and not isinstance(row, dict):
+            row = dict(row)
+            per[int(original_id)] = row
+
+        if row:
+            clone_id = int(row.get("cloned_channel_id") or 0)
+            wh_url = row.get("channel_webhook_url")
+            ch = guild.get_channel(clone_id) if clone_id else None
+
+            if ch:
+                if not wh_url:
+                    # Create webhook for stage channel's text chat
+                    wh = await self._create_webhook_safely(
+                        ch, "Copycord", await self._get_default_avatar_bytes()
+                    )
+                    wh_url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
+                    self.db.upsert_channel_mapping(
+                        int(original_id),
+                        original_name,
+                        int(clone_id),
+                        wh_url,
+                        int(parent_id) if parent_id is not None else None,
+                        int(category.id) if category else None,
+                        int(channel_type),
+                        original_guild_id=(
+                            int(host_guild_id) if host_guild_id is not None else None
+                        ),
+                        cloned_guild_id=int(guild.id),
+                    )
+
+                per[int(original_id)] = {
+                    "original_channel_id": int(original_id),
+                    "original_channel_name": original_name,
+                    "cloned_channel_id": int(clone_id),
+                    "channel_webhook_url": wh_url,
+                    "original_parent_category_id": (
+                        int(parent_id) if parent_id is not None else None
+                    ),
+                    "cloned_parent_category_id": int(category.id) if category else None,
+                    "channel_type": int(channel_type),
+                    "original_guild_id": (
+                        int(host_guild_id) if host_guild_id is not None else None
+                    ),
+                    "cloned_guild_id": int(guild.id),
+                }
+                self._schedule_flush(
+                    chan_ids={int(original_id)}, thread_parent_ids={int(original_id)}
+                )
+                self._unmapped_warned.discard(int(original_id))
+                return int(original_id), int(clone_id), str(wh_url)
+
+            try:
+                self.db.delete_channel_mapping_pair(int(original_id), int(guild.id))
+            except Exception:
+                self.db.delete_channel_mapping(int(original_id))
+            per.pop(int(original_id), None)
+
+        ch = await self._create_channel(
+            guild, "stage", original_name, category, topic=topic
+        )
+
+        if ch is None:
+            logger.warning(
+                "[⚠️] Failed to create stage channel '%s' in guild %s",
+                original_name,
+                guild.id,
+            )
+            return None, None, None
+
+        stage_changes = {}
+        if bitrate is not None:
+            stage_changes["bitrate"] = int(bitrate)
+        if user_limit is not None:
+            stage_changes["user_limit"] = int(user_limit)
+        if rtc_region is not None:
+            stage_changes["rtc_region"] = rtc_region
+        if topic is not None:
+            stage_changes["topic"] = topic
+
+        if stage_changes:
+            try:
+                await self.ratelimit.acquire_for_guild(
+                    ActionType.EDIT_CHANNEL, guild.id
+                )
+                await ch.edit(**stage_changes)
+                logger.info(
+                    "[🎭] Set stage properties for '%s' #%d: %s",
+                    original_name,
+                    ch.id,
+                    ", ".join(f"{k}={v}" for k, v in stage_changes.items()),
+                )
+            except Exception as e:
+                logger.warning(
+                    "[⚠️] Failed to set stage properties for new channel #%d: %s",
+                    ch.id,
+                    e,
+                )
+
+        # Create webhook for stage channel's text chat
+        wh = await self._create_webhook_safely(
+            ch, "Copycord", await self._get_default_avatar_bytes()
+        )
+        url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
+
+        self.db.upsert_channel_mapping(
+            int(original_id),
+            original_name,
+            int(ch.id),
+            url,
+            int(parent_id) if parent_id is not None else None,
+            int(category.id) if category else None,
+            int(channel_type),
+            original_guild_id=int(host_guild_id) if host_guild_id is not None else None,
+            cloned_guild_id=int(guild.id),
+        )
+
+        per[int(original_id)] = {
+            "original_channel_id": int(original_id),
+            "original_channel_name": original_name,
+            "cloned_channel_id": int(ch.id),
+            "channel_webhook_url": url,
+            "original_parent_category_id": (
+                int(parent_id) if parent_id is not None else None
+            ),
+            "cloned_parent_category_id": int(category.id) if category else None,
+            "channel_type": int(channel_type),
+            "original_guild_id": (
+                int(host_guild_id) if host_guild_id is not None else None
+            ),
+            "cloned_guild_id": int(guild.id),
+        }
+        self._schedule_flush(
+            chan_ids={int(original_id)}, thread_parent_ids={int(original_id)}
+        )
+        self._unmapped_warned.discard(int(original_id))
+        return int(original_id), int(ch.id), str(url)
+
     async def _sync_channels(self, guild: Guild, sitemap: Dict) -> List[str]:
         """
         Synchronizes the channels of a guild with the provided sitemap.
         1) Deletes stale channels
-        2) Creates new channels if missing (including voice channels if CLONE_VOICE is enabled)
+        2) Creates new channels if missing (including voice/stage channels if enabled)
         3) Converts to Announcement if required
         4) Renames to match sitemap (if RENAME_CHANNELS is enabled)
-        5) Updates voice channel properties (if CLONE_VOICE_PROPERTIES is enabled)
+        5) Updates voice/stage channel properties (if properties sync is enabled)
         """
         parts: List[str] = []
         incoming = self._parse_sitemap(sitemap)
@@ -2838,12 +3020,17 @@ class ServerReceiver:
 
         clone_voice = settings.get("CLONE_VOICE", False)
         clone_voice_properties = settings.get("CLONE_VOICE_PROPERTIES", False)
+        clone_stage = settings.get("CLONE_STAGE", False)
+        clone_stage_properties = settings.get("CLONE_STAGE_PROPERTIES", False)
+
+        has_community = "COMMUNITY" in guild.features
 
         rem = await self._handle_removed_channels(guild, incoming)
         if rem:
             parts.append(f"Deleted {rem} channels")
 
-        created = renamed = converted = voice_updated = voice_skipped = 0
+        created = renamed = converted = voice_updated = stage_updated = 0
+        voice_skipped = stage_skipped = 0
 
         for item in incoming:
             orig, name, pid, pname, ctype = (
@@ -2871,9 +3058,9 @@ class ServerReceiver:
             )
 
             is_voice = ctype == ChannelType.voice.value
+            is_stage = ctype == ChannelType.stage_voice.value
 
             if is_voice:
-
                 if not clone_voice:
                     voice_skipped += 1
                     logger.debug(
@@ -2953,8 +3140,110 @@ class ServerReceiver:
                 if did_rename:
                     renamed += 1
 
-            else:
+            elif is_stage:
+                if not clone_stage:
+                    stage_skipped += 1
+                    logger.debug(
+                        "[🎭] Skipping stage channel '%s' for clone_g=%s (CLONE_STAGE=False)",
+                        name,
+                        guild.id,
+                    )
+                    continue
 
+                if not has_community:
+                    stage_skipped += 1
+                    logger.warning(
+                        "[⚠️] Skipping stage channel '%s' for clone_g=%s (COMMUNITY not enabled)",
+                        name,
+                        guild.id,
+                    )
+                    continue
+
+                bitrate = item.get("bitrate") if clone_stage_properties else None
+                user_limit = item.get("user_limit") if clone_stage_properties else None
+                rtc_region = item.get("rtc_region") if clone_stage_properties else None
+                topic = item.get("topic") if clone_stage_properties else None
+
+                result = await self._ensure_stage_channel_and_webhook(
+                    host_guild_id,
+                    guild,
+                    orig,
+                    name,
+                    pid,
+                    pname,
+                    ctype,
+                    bitrate=bitrate,
+                    user_limit=user_limit,
+                    rtc_region=rtc_region,
+                    topic=topic,
+                )
+
+                if result is None or result == (None, None, None):
+                    stage_skipped += 1
+                    continue
+
+                _, clone_id, _ = result
+
+                if is_new:
+                    created += 1
+
+                ch = guild.get_channel(clone_id)
+                if not ch:
+                    continue
+
+                if (
+                    not is_new
+                    and clone_stage_properties
+                    and isinstance(ch, discord.StageChannel)
+                ):
+                    stage_changes = {}
+
+                    if item.get("bitrate"):
+                        desired_bitrate = int(item["bitrate"])
+                        if ch.bitrate != desired_bitrate:
+                            stage_changes["bitrate"] = desired_bitrate
+
+                    if item.get("user_limit") is not None:
+                        desired_limit = int(item["user_limit"])
+                        if ch.user_limit != desired_limit:
+                            stage_changes["user_limit"] = desired_limit
+
+                    if item.get("rtc_region") is not None:
+                        desired_region = item["rtc_region"]
+                        if ch.rtc_region != desired_region:
+                            stage_changes["rtc_region"] = desired_region
+
+                    if item.get("topic") is not None:
+                        desired_topic = item["topic"]
+                        current_topic = getattr(ch, "topic", None)
+                        if current_topic != desired_topic:
+                            stage_changes["topic"] = desired_topic
+
+                    if stage_changes:
+                        try:
+                            await self.ratelimit.acquire_for_guild(
+                                ActionType.EDIT_CHANNEL, guild.id
+                            )
+                            await ch.edit(**stage_changes)
+                            stage_updated += 1
+                            logger.info(
+                                "[🎭] Updated stage properties for '%s' #%d: %s",
+                                ch.name,
+                                ch.id,
+                                ", ".join(f"{k}={v}" for k, v in stage_changes.items()),
+                            )
+                        except Exception as e:
+                            logger.warning(
+                                "[⚠️] Failed to update stage properties for channel #%d: %s",
+                                ch.id,
+                                e,
+                            )
+
+                did_rename, _reason = await self._maybe_rename_channel(ch, name, orig)
+                if did_rename:
+                    renamed += 1
+
+            else:
                 _, clone_id, _ = await self._ensure_channel_and_webhook(
                     host_guild_id, guild, orig, name, pid, pname, ctype
                 )
@@ -3028,10 +3317,18 @@ class ServerReceiver:
             parts.append(f"Renamed {renamed} channels")
         if voice_updated:
             parts.append(f"Updated voice properties on {voice_updated} channels")
+        if stage_updated:
+            parts.append(f"Updated stage properties on {stage_updated} channels")
         if voice_skipped:
             logger.debug(
                 "[🔇] Skipped %d voice channels for clone_g=%s (CLONE_VOICE=False)",
                 voice_skipped,
+                guild.id,
+            )
+        if stage_skipped:
+            logger.debug(
+                "[🎭] Skipped %d stage channels for clone_g=%s (CLONE_STAGE=False or no COMMUNITY)",
+                stage_skipped,
                 guild.id,
             )
 
@@ -3405,10 +3702,15 @@ class ServerReceiver:
         )
 
     async def _create_channel(
-        self, guild: Guild, kind: str, name: str, category: CategoryChannel | None
-    ) -> Union[TextChannel, ForumChannel, discord.VoiceChannel]:
+        self,
+        guild: Guild,
+        kind: str,
+        name: str,
+        category: CategoryChannel | None,
+        topic: str | None = None,
+    ) -> Union[TextChannel, ForumChannel, discord.VoiceChannel, discord.StageChannel]:
         """
-        Create a channel of `kind` ('text'|'news'|'forum'|'voice') named `name` under
+        Create a channel of `kind` ('text'|'news'|'forum'|'voice'|'stage') named `name` under
         `category`.  If the category or guild is at capacity, it falls back to
         standalone (category=None).  Returns the created channel object.
         """
@@ -3430,6 +3732,24 @@ class ServerReceiver:
         elif kind == "voice":
             await self.ratelimit.acquire_for_guild(ActionType.CREATE_CHANNEL, guild.id)
             ch = await guild.create_voice_channel(name=name, category=category)
+        elif kind == "stage":
+            if "COMMUNITY" not in guild.features:
+                logger.warning(
+                    "[⚠️] Cannot create stage channel '%s': guild %s doesn't have COMMUNITY enabled",
+                    name,
+                    guild.id,
+                )
+                return None
+            else:
+                await self.ratelimit.acquire_for_guild(
+                    ActionType.CREATE_CHANNEL, guild.id
+                )
+
+                ch = await guild.create_stage_channel(
+                    name=name,
+                    topic=topic if topic else "Stage Channel",
+                    category=category,
+                )
         else:
             await self.ratelimit.acquire_for_guild(ActionType.CREATE_CHANNEL, guild.id)
             ch = await guild.create_text_channel(name=name, category=category)

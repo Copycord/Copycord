@@ -453,6 +453,23 @@ class SitemapService:
                             ),
                         }
                     )
+                elif isinstance(ch, discord.StageChannel):
+                    channels.append(
+                        {
+                            "id": ch.id,
+                            "name": ch.name,
+                            "type": ch.type.value,
+                            "bitrate": getattr(ch, "bitrate", 64000),
+                            "user_limit": getattr(ch, "user_limit", 0),
+                            "rtc_region": getattr(ch, "rtc_region", None),
+                            "topic": getattr(ch, "topic", None),
+                            **(
+                                {"overwrites": self._serialize_role_overwrites(ch)}
+                                if include_overwrites
+                                else {}
+                            ),
+                        }
+                    )
 
             sitemap["categories"].append(
                 {
@@ -495,6 +512,23 @@ class SitemapService:
                             "bitrate": getattr(ch, "bitrate", 64000),
                             "user_limit": getattr(ch, "user_limit", 0),
                             "rtc_region": getattr(ch, "rtc_region", None),
+                            **(
+                                {"overwrites": self._serialize_role_overwrites(ch)}
+                                if include_overwrites
+                                else {}
+                            ),
+                        }
+                    )
+                elif isinstance(ch, discord.StageChannel):
+                    sitemap["standalone_channels"].append(
+                        {
+                            "id": ch.id,
+                            "name": ch.name,
+                            "type": ch.type.value,
+                            "bitrate": getattr(ch, "bitrate", 64000),
+                            "user_limit": getattr(ch, "user_limit", 0),
+                            "rtc_region": getattr(ch, "rtc_region", None),
+                            "topic": getattr(ch, "topic", None),
                             **(
                                 {"overwrites": self._serialize_role_overwrites(ch)}
                                 if include_overwrites

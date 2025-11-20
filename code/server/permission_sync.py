@@ -187,7 +187,6 @@ class ChannelPermissionSync:
         changed_cat = 0
         changed_ch = 0
 
-        # Categories + their text channels
         for cat in sitemap.get("categories", []) or []:
             row = cat_map.get(int(cat["id"]))
             if not row:
@@ -222,7 +221,6 @@ class ChannelPermissionSync:
                     ):
                         changed_ch += 1
 
-        # Standalone text channels
         for ch in sitemap.get("standalone_channels", []) or []:
             crow = chan_map.get(int(ch["id"]))
             if not crow:
@@ -235,6 +233,52 @@ class ChannelPermissionSync:
 
             cch = guild.get_channel(int(crow.get("cloned_channel_id") or 0))
             if isinstance(cch, TextChannel):
+                if await self._apply_overwrites_to_channel(
+                    cch, ch.get("overwrites", []), src_everyone_id
+                ):
+                    changed_ch += 1
+
+        for cat in sitemap.get("categories", []) or []:
+            for ch in cat.get("channels", []) or []:
+                ch_type = ch.get("type")
+
+                if ch_type not in (2, 13):
+                    continue
+
+                crow = chan_map.get(int(ch["id"]))
+                if not crow:
+                    self._log(
+                        "info",
+                        "[perm-sync] skip voice/stage channel %s: no chan_map",
+                        ch.get("id"),
+                    )
+                    continue
+
+                cch = guild.get_channel(int(crow.get("cloned_channel_id") or 0))
+                if cch and isinstance(
+                    cch, (discord.VoiceChannel, discord.StageChannel)
+                ):
+                    if await self._apply_overwrites_to_channel(
+                        cch, ch.get("overwrites", []), src_everyone_id
+                    ):
+                        changed_ch += 1
+
+        for ch in sitemap.get("standalone_channels", []) or []:
+            ch_type = ch.get("type")
+            if ch_type not in (2, 13):
+                continue
+
+            crow = chan_map.get(int(ch["id"]))
+            if not crow:
+                self._log(
+                    "info",
+                    "[perm-sync] skip voice/stage channel %s: no chan_map (standalone)",
+                    ch.get("id"),
+                )
+                continue
+
+            cch = guild.get_channel(int(crow.get("cloned_channel_id") or 0))
+            if cch and isinstance(cch, (discord.VoiceChannel, discord.StageChannel)):
                 if await self._apply_overwrites_to_channel(
                     cch, ch.get("overwrites", []), src_everyone_id
                 ):
@@ -282,7 +326,6 @@ class ChannelPermissionSync:
             parts.append(f"{changed_ch} channels updated")
 
         return parts
-
 
     @staticmethod
     def _extract_cloned_role_id(row: Any) -> Optional[int]:
@@ -368,7 +411,9 @@ class ChannelPermissionSync:
             if src_everyone_id is not None and orig_role_id == src_everyone_id:
                 clone_role_id = int(guild.default_role.id)
             else:
-                row = self.db.get_role_mapping_for_clone(orig_role_id, cloned_guild_id=int(guild.id))
+                row = self.db.get_role_mapping_for_clone(
+                    orig_role_id, cloned_guild_id=int(guild.id)
+                )
                 clone_role_id = self._extract_cloned_role_id(row) or 0
                 if not clone_role_id:
                     self._log(
