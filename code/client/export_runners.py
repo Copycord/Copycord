@@ -512,7 +512,9 @@ class ExportMessagesRunner:
                                 )
                             if unwrapped is None:
                                 try:
-                                    unwrapped = await _resolve_forward_via_snapshot(self.bot, msg, logger=self.log)
+                                    unwrapped = await _resolve_forward_via_snapshot(
+                                        self.bot, msg, logger=self.log
+                                    )
                                 except Exception as e:
                                     self.log.debug(
                                         "[export] snapshot fallback failed id=%s: %s",
@@ -1562,7 +1564,9 @@ class BackfillEngine:
                     )
                 if unwrapped is None:
                     try:
-                        unwrapped = await _resolve_forward_via_snapshot(self.bot, m, logger=self.logger)
+                        unwrapped = await _resolve_forward_via_snapshot(
+                            self.bot, m, logger=self.logger
+                        )
                     except Exception as e:
                         self.logger.debug(
                             "[backfill] snapshot fallback failed id=%s: %s",
@@ -1571,7 +1575,6 @@ class BackfillEngine:
                         )
                 if unwrapped is not None:
                     real_msg = unwrapped
-
 
             raw_now = real_msg.content or ""
             system_now = getattr(real_msg, "system_content", "") or ""
@@ -2142,14 +2145,31 @@ class BackfillEngine:
         Rules:
         - ForumChannel: only public archived threads (no `private=`/`joined=`).
         - TextChannel: public archived, then private archived, then joined private archived.
+        - Voice / Stage / other non-threadable channels: yield nothing (no threads).
         """
         seen: set[int] = set()
+
+        has_threads_attr = getattr(parent, "threads", None) is not None
+        has_archived_attr = callable(getattr(parent, "archived_threads", None))
+
+        if not has_threads_attr and not has_archived_attr:
+            self.logger.debug(
+                "[backfill] channel has no thread API; skipping thread scan | id=%s type=%s",
+                getattr(parent, "id", None),
+                getattr(getattr(parent, "type", None), "name", None),
+            )
+            return
 
         for th in getattr(parent, "threads", None) or []:
             tid = getattr(th, "id", None)
             if th and tid is not None and tid not in seen:
                 seen.add(tid)
                 yield th
+
+        # If the channel doesn't implement archived_threads (e.g. Voice / Stage),
+
+        if not has_archived_attr:
+            return
 
         async def _drain(iter_factory, label: str):
             """
@@ -2175,7 +2195,6 @@ class BackfillEngine:
                     getattr(parent, "id", None),
                 )
             except ValueError as e:
-
                 self.logger.debug(
                     "[backfill] %s unavailable: %s | channel=%s",
                     label,
@@ -2205,6 +2224,7 @@ class BackfillEngine:
         async for th in _drain(_public_iter, "archived public"):
             yield th
 
+        # Forum channels stop here; they don't have private / joined private threads
         if getattr(parent, "type", None) == ChannelType.forum:
             return
 
@@ -2225,7 +2245,7 @@ class BackfillEngine:
             async for th in _drain(_joined_private_iter, "archived private (joined)"):
                 yield th
         except (TypeError, Forbidden):
-
+            # Either not supported or no access — that's fine
             pass
 
     async def _iter_history_resumable(
