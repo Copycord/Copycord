@@ -1742,7 +1742,7 @@ class ServerReceiver:
 
                     self._load_mappings()
 
-                    if settings.get("MIRROR_ROLE_PERMISSIONS", False) and settings.get(
+                    if settings.get("MIRROR_CHANNEL_PERMISSIONS", False) and settings.get(
                         "CLONE_ROLES", False
                     ):
                         self.perms.schedule_after_role_sync(
