@@ -95,32 +95,26 @@ class SitemapService:
         return f"{guild_name_fallback} ({origin_guild_id})"
 
     def _iter_mapped_guilds(self):
-        """Yield discord.Guild objects for each mapped origin the bot can see."""
         ids = self._mapped_original_ids()
-        if not ids:
-
-            g = self._pick_guild()
-            if g:
-                yield g
-            return
         for gid in ids:
             g = self.bot.get_guild(int(gid))
             if g:
                 yield g
 
     def schedule_sync(self, guild_id: int | None, delay: float = 1.0) -> None:
-        """
-        Mark a guild as needing a sitemap resend, and debounce the actual send.
-        guild_id may be None (fallback: send all mapped guilds once).
-        """
+        mapped = set(self._mapped_original_ids())
 
         if guild_id is not None:
-            try:
-                self._dirty_guild_ids.add(int(guild_id))
-            except Exception:
-                pass
+            gid = int(guild_id)
+            if gid not in mapped:
+                self.logger.info(
+                    "[sitemap] Ignoring sync request for unmapped origin %s",
+                    gid,
+                )
+                return
+            self._dirty_guild_ids.add(gid)
         else:
-            for gid in self._mapped_original_ids():
+            for gid in mapped:
                 self._dirty_guild_ids.add(int(gid))
 
         if self._debounce_task is None:
@@ -317,13 +311,9 @@ class SitemapService:
             self._dirty_guild_ids.clear()
 
             origin_ids = self._mapped_original_ids()
-            if not origin_ids:
-                g = self._pick_guild()
-                if g:
-                    origin_ids = [int(g.id)]
 
             if not origin_ids:
-                self.logger.info("[sitemap] No mapped guilds to send sitemaps for.")
+                self.logger.info("[⚠️] No active guild mappings to clone. Please check your configuration.")
                 return
 
             await self._build_and_send_selected(
