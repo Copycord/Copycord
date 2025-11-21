@@ -283,14 +283,28 @@ If enabled, you’ll receive a direct message with the new member’s details wh
 
 ### Role mention pings (`/role_mention`)
 
-Configure roles that get auto-mentioned at the top of cloned messages, per **clone** and optionally per **cloned channel**.
+Configure roles that get auto-mentioned at the **top of cloned messages**, per **clone** (cloned server) and optionally per **cloned channel**.
+
+These commands **must be run in the cloned server**, not the original (host) server.
+
+---
 
 #### `/role_mention add <role> [channel_id]`
-**Description:** Add a role to be mentioned on cloned messages.
+
+**Description:** Add a role to be mentioned on cloned messages for this clone.
 
 - `role` — The role in the **cloned guild** to mention.
 - `channel_id` — (Optional) **Cloned channel ID** to scope the ping.  
-  Leave empty to apply to **all channels** in this clone.
+  - Leave empty to apply to **all channels** in this clone.  
+  - Set to a specific channel ID to only ping in that cloned channel.
+
+> ⚠️ **Note:** Managed roles (created by integrations/bots) cannot be used and will be rejected.
+
+**Behavior:**
+
+- If `channel_id` is **empty**: the role will be mentioned on **all cloned messages** in this cloned server.
+- If `channel_id` is **set**: the role will only be mentioned on cloned messages in that **specific cloned channel**.
+- If you try to add a duplicate configuration for the same scope, the bot will tell you it is already configured.
 
 **Examples:**
 ```text
@@ -300,28 +314,48 @@ Configure roles that get auto-mentioned at the top of cloned messages, per **clo
 
 ---
 
-#### `/role_mention remove <role> [channel_id]`
-**Description:** Remove an existing role mention configuration.
-
-- If `channel_id` is empty, removes the **global** config for that role in this clone.
-- If `channel_id` is set, removes only that **channel-scoped** config.
-
-**Examples:**
-```text
-/role_mention remove @Alerts
-/role_mention remove @RaidPing channel_id:123456789012345678
-```
-
----
-
 #### `/role_mention list`
+
 **Description:** List all role mention configurations for the **current clone**.
 
-Shows each role and whether it applies to **all channels** or a specific cloned channel.
+For each config, the bot shows:
+
+- A **short config ID** (e.g. `a1b2c3d4`)
+- The **role** that will be mentioned
+- The **scope**:
+  - `all channels`, or
+  - a specific **cloned channel** (by mention or ID, if deleted)
+
+These config IDs are used with `/role_mention delete`.
 
 **Example:**
 ```text
 /role_mention list
+```
+
+Example output format (embed content):
+
+```text
+`a1b2c3d4` • @Alerts — all channels
+`e5f6g7h8` • @RaidPing — channel #raids
+`z9y8x7w6` • @News — channel `123456789012345678` (deleted)
+```
+
+---
+
+#### `/role_mention delete <config_id>`
+
+**Description:** Delete a role mention configuration by its **config ID**.
+
+- `config_id` — The short ID shown in `/role_mention list` (e.g. `a1b2c3d4`).
+
+This removes that specific configuration for the **current clone** only.  
+If the ID doesn’t exist for this clone, the bot will respond that it was not found.
+
+**Examples:**
+```text
+/role_mention delete a1b2c3d4
+/role_mention delete e5f6g7h8
 ```
 
 ---
