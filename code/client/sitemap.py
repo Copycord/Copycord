@@ -356,6 +356,75 @@ class SitemapService:
             except Exception:
                 return default
 
+        def _serialize_forum_default_reaction(forum) -> Optional[Dict[str, object]]:
+            """
+            Serialize the default reaction emoji on a ForumChannel (if present).
+            """
+            try:
+                em = getattr(forum, "default_reaction_emoji", None)
+            except Exception:
+                em = None
+            if not em:
+                return None
+
+            try:
+                emoji_id = getattr(em, "id", None)
+                emoji_name = getattr(em, "name", None)
+                emoji_animated = bool(getattr(em, "animated", False))
+            except Exception:
+                emoji_id = None
+                emoji_name = None
+                emoji_animated = False
+
+            if emoji_id is None and not emoji_name:
+                return None
+
+            return {
+                "id": int(emoji_id) if emoji_id else None,
+                "name": emoji_name,
+                "animated": emoji_animated,
+            }
+
+        def _serialize_forum_tags(forum) -> List[Dict[str, object]]:
+            """
+            Serialize available forum tags into a simple JSON-friendly structure.
+            """
+            tags = []
+            try:
+                available = list(getattr(forum, "available_tags", []) or [])
+            except Exception:
+                available = []
+
+            for t in available:
+                try:
+                    tag_id = getattr(t, "id", None)
+                    name = getattr(t, "name", None)
+                    moderated = bool(getattr(t, "moderated", False))
+                except Exception:
+                    continue
+
+                emoji_obj = getattr(t, "emoji", None)
+                if emoji_obj:
+                    emoji_id = getattr(emoji_obj, "id", None)
+                    emoji_name = getattr(emoji_obj, "name", None)
+                    emoji_animated = bool(getattr(emoji_obj, "animated", False))
+                else:
+                    emoji_id = None
+                    emoji_name = None
+                    emoji_animated = False
+
+                tags.append(
+                    {
+                        "id": int(tag_id) if tag_id is not None else None,
+                        "name": name,
+                        "moderated": moderated,
+                        "emoji_id": int(emoji_id) if emoji_id is not None else None,
+                        "emoji_name": emoji_name,
+                        "emoji_animated": emoji_animated,
+                    }
+                )
+            return tags
+
         def _serialize_video_quality(ch):
             """
             Normalize discord.VideoQualityMode → 'auto' / 'full' / None
@@ -679,11 +748,36 @@ class SitemapService:
         for forum in getattr(guild, "forums", []):
             entry = {
                 "id": forum.id,
+                "type": forum.type.value,
                 "name": forum.name,
                 "category_id": forum.category.id if forum.category else None,
                 "nsfw": getattr(forum, "nsfw", False),
+                "post_guidelines": getattr(forum, "topic", None),
                 "topic": getattr(forum, "topic", None),
                 "slowmode_delay": getattr(forum, "slowmode_delay", 0),
+                "message_limit_per_interval": int(
+                    getattr(forum, "default_thread_slowmode_delay", 0) or 0
+                ),
+                "default_layout": _enum_int(getattr(forum, "default_layout", None), 0),
+                "default_sort_order": _enum_int(
+                    getattr(forum, "default_sort_order", None), 0
+                ),
+                "hide_after_inactivity": getattr(
+                    forum, "default_auto_archive_duration", None
+                ),
+                "require_tag": bool(
+                    getattr(forum, "require_tag", False)
+                    or getattr(forum, "require_tags", False)
+                    or bool(
+                        getattr(
+                            getattr(forum, "flags", None),
+                            "require_tag",
+                            False,
+                        )
+                    )
+                ),
+                "default_reaction": _serialize_forum_default_reaction(forum),
+                "available_tags": _serialize_forum_tags(forum),
             }
             if include_overwrites:
                 entry["overwrites"] = self._serialize_role_overwrites(forum)

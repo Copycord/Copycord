@@ -190,15 +190,16 @@
     SYNC_CHANNEL_TOPIC: false,
     SYNC_CHANNEL_SLOWMODE: false,
     REARRANGE_ROLES: false,
-    CLONE_VOICE: false,
+    CLONE_VOICE: true,
     CLONE_VOICE_PROPERTIES: false,
-    CLONE_STAGE: false,
+    CLONE_STAGE: true,
     CLONE_STAGE_PROPERTIES: false,
     CLONE_GUILD_ICON: false,
     CLONE_GUILD_BANNER: false,
     CLONE_GUILD_SPLASH: false,
     CLONE_GUILD_DISCOVERY_SPLASH: false,
     SYNC_GUILD_DESCRIPTION: false,
+    SYNC_FORUM_PROPERTIES: false,
     
   };
 

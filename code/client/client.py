@@ -16,8 +16,7 @@ from datetime import datetime, timezone
 import logging
 from typing import Optional
 import discord
-from discord import ChannelType, MessageType
-from discord.errors import Forbidden, HTTPException
+from discord import ChannelType, ForumChannel, MessageType
 import os
 from discord.ext import commands
 from common.config import Config, CURRENT_VERSION
@@ -1342,7 +1341,6 @@ class ClientListener:
         avatar_url = None
         timestamp = None
 
-
         if msg is None:
             try:
                 msg = await channel.fetch_message(payload.message_id)
@@ -1666,11 +1664,12 @@ class ClientListener:
         This method is triggered when a guild channel is updated. It checks if the
         update occurred in the host guild and determines whether the update involves
         structural changes (such as a name change or a change in the parent category).
-        If a structural change is detected, it schedules a synchronization process.
+        If a structural or relevant metadata change is detected, it schedules a
+        synchronization process (sitemap).
         """
         g = getattr(before, "guild", None)
 
-        if not g or not self._is_mapped_origin(g.id):
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
 
         perms_changed = False
@@ -1755,6 +1754,155 @@ class ClientListener:
         except Exception:
             voice_properties_changed = False
 
+        is_forum = isinstance(after, ForumChannel) or (
+            getattr(after, "type", None) == ChannelType.forum
+        )
+
+        forum_message_limit_changed = False
+        forum_layout_changed = False
+        forum_sort_changed = False
+        forum_archive_changed = False
+        forum_require_tag_changed = False
+        forum_default_reaction_changed = False
+        forum_tags_changed = False
+
+        if is_forum:
+
+            def _enum_int(val):
+                if val is None:
+                    return None
+                try:
+                    if isinstance(val, int):
+                        return val
+                    if hasattr(val, "value"):
+                        return int(val.value)
+                    return int(val)
+                except Exception:
+                    return None
+
+            try:
+                before_msg_limit = int(
+                    getattr(before, "default_thread_slowmode_delay", 0) or 0
+                )
+                after_msg_limit = int(
+                    getattr(after, "default_thread_slowmode_delay", 0) or 0
+                )
+                forum_message_limit_changed = before_msg_limit != after_msg_limit
+            except Exception:
+                forum_message_limit_changed = False
+
+            try:
+                before_layout = _enum_int(getattr(before, "default_layout", None))
+                after_layout = _enum_int(getattr(after, "default_layout", None))
+            except Exception:
+                before_layout = after_layout = None
+
+            forum_layout_changed = (
+                before_layout is not None
+                and after_layout is not None
+                and before_layout != after_layout
+            )
+
+            try:
+                before_sort = _enum_int(getattr(before, "default_sort_order", None))
+                after_sort = _enum_int(getattr(after, "default_sort_order", None))
+            except Exception:
+                before_sort = after_sort = None
+
+            forum_sort_changed = (
+                before_sort is not None
+                and after_sort is not None
+                and before_sort != after_sort
+            )
+
+            try:
+                before_arch = int(
+                    getattr(before, "default_auto_archive_duration", 0) or 0
+                )
+                after_arch = int(
+                    getattr(after, "default_auto_archive_duration", 0) or 0
+                )
+                forum_archive_changed = before_arch != after_arch
+            except Exception:
+                forum_archive_changed = False
+
+            try:
+                flags_before = getattr(before, "flags", None)
+                flags_after = getattr(after, "flags", None)
+
+                if flags_before is not None and flags_after is not None:
+                    req_before = bool(getattr(flags_before, "require_tag", False))
+                    req_after = bool(getattr(flags_after, "require_tag", False))
+                else:
+                    req_before = bool(getattr(before, "requires_tag", False))
+                    req_after = bool(getattr(after, "requires_tag", False))
+
+                forum_require_tag_changed = req_before != req_after
+            except Exception:
+                forum_require_tag_changed = False
+
+            def _norm_forum_emoji(val):
+                if val is None:
+                    return (None, None, False)
+                if isinstance(val, (discord.Emoji, discord.PartialEmoji)):
+                    eid = getattr(val, "id", None)
+                    name = getattr(val, "name", None)
+                    animated = bool(getattr(val, "animated", False))
+                    return (eid, name, animated)
+                s = str(val) or ""
+                if not s:
+                    return (None, None, False)
+                return (None, s, False)
+
+            try:
+                before_emoji = _norm_forum_emoji(
+                    getattr(before, "default_reaction_emoji", None)
+                )
+                after_emoji = _norm_forum_emoji(
+                    getattr(after, "default_reaction_emoji", None)
+                )
+                forum_default_reaction_changed = before_emoji != after_emoji
+            except Exception:
+                forum_default_reaction_changed = False
+
+            def _norm_tag_emoji_value(val):
+                if isinstance(val, (discord.Emoji, discord.PartialEmoji)):
+                    if getattr(val, "id", None):
+                        return f"custom:{val.id}"
+                    return getattr(val, "name", "") or ""
+                return str(val or "")
+
+            def _canon_tags(tags):
+                out = []
+                for t in tags or []:
+                    name = (getattr(t, "name", "") or "").strip().lower()
+                    if not name:
+                        continue
+                    moderated = bool(getattr(t, "moderated", False))
+                    emoji_val = _norm_tag_emoji_value(getattr(t, "emoji", None))
+                    out.append((name, moderated, emoji_val))
+                out.sort()
+                return out
+
+            try:
+                before_tags_canon = _canon_tags(getattr(before, "available_tags", None))
+                after_tags_canon = _canon_tags(getattr(after, "available_tags", None))
+                forum_tags_changed = before_tags_canon != after_tags_canon
+            except Exception:
+                forum_tags_changed = False
+
+        forum_meta_changed = any(
+            [
+                forum_message_limit_changed,
+                forum_layout_changed,
+                forum_sort_changed,
+                forum_archive_changed,
+                forum_require_tag_changed,
+                forum_default_reaction_changed,
+                forum_tags_changed,
+            ]
+        )
+
         if (
             name_changed
             or parent_changed
@@ -1762,6 +1910,7 @@ class ClientListener:
             or topic_changed
             or slowmode_changed
             or voice_properties_changed
+            or forum_meta_changed
         ):
             if nsfw_changed:
                 logger.debug(
@@ -1771,6 +1920,7 @@ class ClientListener:
                     getattr(before, "nsfw", False),
                     getattr(after, "nsfw", False),
                 )
+
             if topic_changed:
 
                 def _truncate(s, max_len=50):
@@ -1782,12 +1932,13 @@ class ClientListener:
                     )
 
                 logger.debug(
-                    "[📝] Topic changed for channel '%s' #%d: %s → %s → scheduling sitemap",
+                    "[📝] Topic/post guidelines changed for channel '%s' #%d: %s → %s → scheduling sitemap",
                     after.name,
                     after.id,
                     _truncate(getattr(before, "topic", None)),
                     _truncate(getattr(after, "topic", None)),
                 )
+
             if slowmode_changed:
 
                 def _format_delay(seconds):
@@ -1811,10 +1962,29 @@ class ClientListener:
                     _format_delay(int(getattr(before, "slowmode_delay", 0) or 0)),
                     _format_delay(int(getattr(after, "slowmode_delay", 0) or 0)),
                 )
+
+            if forum_meta_changed and is_forum:
+                logger.debug(
+                    "[🧵] Forum metadata changed for '%s' #%d "
+                    "(message_limit=%s, layout=%s, sort=%s, archive=%s, "
+                    "require_tag=%s, default_reaction=%s, tags=%s) "
+                    "→ scheduling sitemap",
+                    after.name,
+                    after.id,
+                    forum_message_limit_changed,
+                    forum_layout_changed,
+                    forum_sort_changed,
+                    forum_archive_changed,
+                    forum_require_tag_changed,
+                    forum_default_reaction_changed,
+                    forum_tags_changed,
+                )
+
             self.schedule_sync(guild_id=g.id)
         else:
             logger.debug(
-                "Ignored channel update for %s: non-structural change", before.id
+                "Ignored channel update for %s: non-structural / non-forum-metadata change",
+                before.id,
             )
 
     async def on_guild_role_create(self, role: discord.Role):

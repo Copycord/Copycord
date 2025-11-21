@@ -1742,9 +1742,9 @@ class ServerReceiver:
 
                     self._load_mappings()
 
-                    if settings.get("MIRROR_CHANNEL_PERMISSIONS", False) and settings.get(
-                        "CLONE_ROLES", False
-                    ):
+                    if settings.get(
+                        "MIRROR_CHANNEL_PERMISSIONS", False
+                    ) and settings.get("CLONE_ROLES", False):
                         self.perms.schedule_after_role_sync(
                             roles_manager=self.roles,
                             roles_handle_or_none=roles_handle,
@@ -1761,289 +1761,276 @@ class ServerReceiver:
         finally:
             logctx.sync_host_name.reset(_host_token)
             logctx.sync_display_id.reset(_id_token)
-            
+
     async def _sync_guild_metadata(
-            self,
-            guild: discord.Guild,
-            sitemap: Dict,
-            settings: Dict[str, object],
-        ) -> List[str]:
-            """
-            Sync guild-level metadata for THIS clone.
+        self,
+        guild: discord.Guild,
+        sitemap: Dict,
+        settings: Dict[str, object],
+    ) -> List[str]:
+        """
+        Sync guild-level metadata for THIS clone.
 
-            Currently supported (per-mapping toggles):
-            - CLONE_GUILD_ICON
-            - CLONE_GUILD_BANNER
-            - CLONE_GUILD_SPLASH
-            - CLONE_GUILD_DISCOVERY_SPLASH
-            - SYNC_GUILD_DESCRIPTION
-            """
-            parts: List[str] = []
+        Currently supported (per-mapping toggles):
+        - CLONE_GUILD_ICON
+        - CLONE_GUILD_BANNER
+        - CLONE_GUILD_SPLASH
+        - CLONE_GUILD_DISCOVERY_SPLASH
+        - SYNC_GUILD_DESCRIPTION
+        """
+        parts: List[str] = []
 
-            gmeta = sitemap.get("guild") or {}
-            host_gid_raw = gmeta.get("id")
-            try:
-                host_gid = int(host_gid_raw) if host_gid_raw is not None else None
-            except Exception:
-                host_gid = None
+        gmeta = sitemap.get("guild") or {}
+        host_gid_raw = gmeta.get("id")
+        try:
+            host_gid = int(host_gid_raw) if host_gid_raw is not None else None
+        except Exception:
+            host_gid = None
 
-            host_guild = self.bot.get_guild(int(host_gid)) if host_gid else None
+        host_guild = self.bot.get_guild(int(host_gid)) if host_gid else None
 
-            # Permissions: need Manage Guild or Administrator
-            me = guild.me or guild.get_member(self.bot.user.id)
-            gp = getattr(me, "guild_permissions", None)
-            if not gp or not (gp.administrator or gp.manage_guild):
-                logger.warning(
-                    "[⚠️] Guild metadata sync skipped for guild %s: missing Manage Guild/Administrator.",
-                    guild.id,
-                )
-                return parts
-
-            # Helpers
-            def _normalized_hash_from_url(u: str | None) -> str | None:
-                """
-                Normalize an icon/banner/splash URL (or key) to a stable hash string:
-                strips guild id, query params, and file extension.
-                """
-                if not u:
-                    return None
-                try:
-                    # last path piece: ".../<guild_id>/<hash>.png?size=1024" -> "<hash>.png?size=1024"
-                    last = u.split("/")[-1]
-                    # drop query: "<hash>.png?size=1024" -> "<hash>.png"
-                    last = last.split("?", 1)[0]
-                    # drop extension: "<hash>.png" -> "<hash>"
-                    core = last.split(".", 1)[0]
-                    return core
-                except Exception:
-                    return None
-
-            def _asset_hash(asset) -> str | None:
-                """
-                Get a normalized hash for an Asset (or asset-like) object
-                by converting it to a URL string and normalizing it.
-                """
-                if not asset:
-                    return None
-                try:
-                    # Prefer .url if present, fallback to str(asset)
-                    u = getattr(asset, "url", None)
-                    if u is None:
-                        u = str(asset)
-                except Exception:
-                    try:
-                        u = str(asset)
-                    except Exception:
-                        return None
-                return _normalized_hash_from_url(u)
-
-            # Boost tiers for banner/splash validation
-            origin_premium_tier = int(gmeta.get("premium_tier") or 0)
-            clone_premium_tier = int(getattr(guild, "premium_tier", 0) or 0)
-
-            def _can_clone_premium_asset(kind: str) -> bool:
-                """
-                Skip banner/splash/discovery_splash if host boost tier > clone boost tier.
-                We still allow clearing if host has None.
-                """
-                if origin_premium_tier > clone_premium_tier:
-                    logger.info(
-                        "[✨] Skipping %s sync for clone guild %s: host premium_tier=%s > "
-                        "clone premium_tier=%s",
-                        kind,
-                        guild.id,
-                        origin_premium_tier,
-                        clone_premium_tier,
-                    )
-                    parts.append(
-                        f"Skipped {kind} (host boost tier {origin_premium_tier} > clone tier {clone_premium_tier})"
-                    )
-                    return False
-                return True
-
-            # Toggle flags (per mapping)
-            cfg_clone_icon = settings.get("CLONE_GUILD_ICON", False)
-            cfg_clone_banner = settings.get("CLONE_GUILD_BANNER", False)
-            cfg_clone_splash = settings.get("CLONE_GUILD_SPLASH", False)
-            cfg_clone_discovery_splash = settings.get(
-                "CLONE_GUILD_DISCOVERY_SPLASH", False
+        me = guild.me or guild.get_member(self.bot.user.id)
+        gp = getattr(me, "guild_permissions", None)
+        if not gp or not (gp.administrator or gp.manage_guild):
+            logger.warning(
+                "[⚠️] Guild metadata sync skipped for guild %s: missing Manage Guild/Administrator.",
+                guild.id,
             )
+            return parts
 
-            cfg_desc = settings.get("SYNC_GUILD_DESCRIPTION", False)
-
-            # Desired values from sitemap
-            want_desc = gmeta.get("description")
-
-            changes: Dict[str, object] = {}
-            changed_fields: list[str] = []
-
-            # === Icon ===
-            if cfg_clone_icon:
-                icon_url = gmeta.get("icon") or None
-                host_icon = getattr(host_guild, "icon", None) if host_guild else None
-                clone_icon = getattr(guild, "icon", None)
-
-                clone_hash = _asset_hash(clone_icon)
-
-                try:
-                    # No icon on host at all -> clear clone icon if present
-                    if icon_url is None and host_icon is None:
-                        if clone_icon is not None:
-                            changes["icon"] = None
-                            changed_fields.append("icon (cleared)")
-                    else:
-                        # Figure out the "host" hash, from live asset or URL
-                        host_hash = None
-                        if host_icon is not None:
-                            host_hash = _asset_hash(host_icon)
-                        elif icon_url is not None:
-                            host_hash = _normalized_hash_from_url(icon_url)
-
-                        # If we know both hashes and they match, nothing to do
-                        if host_hash is not None and clone_hash is not None and host_hash == clone_hash:
-                            pass  # already in sync
-                        else:
-                            icon_bytes = None
-
-                            # Prefer live asset if we can see the host guild
-                            if host_icon is not None:
-                                icon_bytes = await host_icon.read()
-
-                            # Fallback: fetch from CDN URL stored in sitemap
-                            if icon_bytes is None and icon_url is not None:
-                                if getattr(self, "session", None) is None or self.session.closed:
-                                    import aiohttp
-                                    self.session = aiohttp.ClientSession()
-
-                                async with self.session.get(icon_url) as resp:
-                                    resp.raise_for_status()
-                                    icon_bytes = await resp.read()
-
-                            # Apply icon if we actually got bytes
-                            if icon_bytes is not None:
-                                changes["icon"] = icon_bytes
-                                changed_fields.append("icon")
-                except Exception:
-                    logger.warning(
-                        "[⚠️] Failed syncing guild icon for clone %s",
-                        guild.id,
-                        exc_info=True,
-                    )
-
-            # === Banner ===
-            if cfg_clone_banner:
-                host_banner = getattr(host_guild, "banner", None) if host_guild else None
-                clone_banner = getattr(guild, "banner", None)
-                host_hash = _asset_hash(host_banner)
-                clone_hash = _asset_hash(clone_banner)
-
-                try:
-                    if host_banner is None:
-                        if clone_banner is not None:
-                            changes["banner"] = None
-                            changed_fields.append("banner (cleared)")
-                    else:
-                        if not _can_clone_premium_asset("banner"):
-                            # Don't attempt to set a Nitro-only banner if clone is under-boosted
-                            pass
-                        else:
-                            if host_hash is None or host_hash != clone_hash:
-                                banner_bytes = await host_banner.read()
-                                changes["banner"] = banner_bytes
-                                changed_fields.append("banner")
-                except Exception as e:
-                    logger.warning(
-                        "[⚠️] Failed syncing guild banner for clone %s: %s", guild.id, e
-                    )
-
-            # === Splash ===
-            if cfg_clone_splash:
-                host_splash = getattr(host_guild, "splash", None) if host_guild else None
-                clone_splash = getattr(guild, "splash", None)
-                host_hash = _asset_hash(host_splash)
-                clone_hash = _asset_hash(clone_splash)
-
-                try:
-                    if host_splash is None:
-                        if clone_splash is not None:
-                            changes["splash"] = None
-                            changed_fields.append("splash (cleared)")
-                    else:
-                        if not _can_clone_premium_asset("splash"):
-                            pass
-                        else:
-                            if host_hash is None or host_hash != clone_hash:
-                                splash_bytes = await host_splash.read()
-                                changes["splash"] = splash_bytes
-                                changed_fields.append("splash")
-                except Exception as e:
-                    logger.warning(
-                        "[⚠️] Failed syncing guild splash for clone %s: %s", guild.id, e
-                    )
-
-            # === Discovery splash ===
-            if cfg_clone_discovery_splash:
-                host_ds = (
-                    getattr(host_guild, "discovery_splash", None) if host_guild else None
-                )
-                clone_ds = getattr(guild, "discovery_splash", None)
-                host_hash = _asset_hash(host_ds)
-                clone_hash = _asset_hash(clone_ds)
-
-                try:
-                    if host_ds is None:
-                        if clone_ds is not None:
-                            changes["discovery_splash"] = None
-                            changed_fields.append("discovery_splash (cleared)")
-                    else:
-                        if not _can_clone_premium_asset("discovery_splash"):
-                            pass
-                        else:
-                            if host_hash is None or host_hash != clone_hash:
-                                ds_bytes = await host_ds.read()
-                                changes["discovery_splash"] = ds_bytes
-                                changed_fields.append("discovery_splash")
-                except Exception as e:
-                    logger.warning(
-                        "[⚠️] Failed syncing guild discovery_splash for clone %s: %s",
-                        guild.id,
-                        e,
-                    )
-
-            # === Description ===
-            if cfg_desc:
-                if getattr(guild, "description", None) != want_desc:
-                    changes["description"] = want_desc
-                    changed_fields.append("description")
-
-            # === Apply changes ===
-            if not changes:
-                return parts
-
+        def _normalized_hash_from_url(u: str | None) -> str | None:
+            """
+            Normalize an icon/banner/splash URL (or key) to a stable hash string:
+            strips guild id, query params, and file extension.
+            """
+            if not u:
+                return None
             try:
-                await self.ratelimit.acquire_for_guild(ActionType.EDIT_CHANNEL, guild.id)
-                await guild.edit(**changes)
+
+                last = u.split("/")[-1]
+
+                last = last.split("?", 1)[0]
+
+                core = last.split(".", 1)[0]
+                return core
+            except Exception:
+                return None
+
+        def _asset_hash(asset) -> str | None:
+            """
+            Get a normalized hash for an Asset (or asset-like) object
+            by converting it to a URL string and normalizing it.
+            """
+            if not asset:
+                return None
+            try:
+
+                u = getattr(asset, "url", None)
+                if u is None:
+                    u = str(asset)
+            except Exception:
+                try:
+                    u = str(asset)
+                except Exception:
+                    return None
+            return _normalized_hash_from_url(u)
+
+        origin_premium_tier = int(gmeta.get("premium_tier") or 0)
+        clone_premium_tier = int(getattr(guild, "premium_tier", 0) or 0)
+
+        def _can_clone_premium_asset(kind: str) -> bool:
+            """
+            Skip banner/splash/discovery_splash if host boost tier > clone boost tier.
+            We still allow clearing if host has None.
+            """
+            if origin_premium_tier > clone_premium_tier:
                 logger.info(
-                    "[🏛️] Updated guild metadata for '%s' (%d): %s",
-                    guild.name,
-                    int(guild.id),
-                    ", ".join(changed_fields),
+                    "[✨] Skipping %s sync for clone guild %s: host premium_tier=%s > "
+                    "clone premium_tier=%s",
+                    kind,
+                    guild.id,
+                    origin_premium_tier,
+                    clone_premium_tier,
                 )
                 parts.append(
-                    "Updated guild metadata: " + ", ".join(sorted(set(changed_fields)))
+                    f"Skipped {kind} (host boost tier {origin_premium_tier} > clone tier {clone_premium_tier})"
                 )
+                return False
+            return True
+
+        cfg_clone_icon = settings.get("CLONE_GUILD_ICON", False)
+        cfg_clone_banner = settings.get("CLONE_GUILD_BANNER", False)
+        cfg_clone_splash = settings.get("CLONE_GUILD_SPLASH", False)
+        cfg_clone_discovery_splash = settings.get("CLONE_GUILD_DISCOVERY_SPLASH", False)
+
+        cfg_desc = settings.get("SYNC_GUILD_DESCRIPTION", False)
+
+        want_desc = gmeta.get("description")
+
+        changes: Dict[str, object] = {}
+        changed_fields: list[str] = []
+
+        if cfg_clone_icon:
+            icon_url = gmeta.get("icon") or None
+            host_icon = getattr(host_guild, "icon", None) if host_guild else None
+            clone_icon = getattr(guild, "icon", None)
+
+            clone_hash = _asset_hash(clone_icon)
+
+            try:
+
+                if icon_url is None and host_icon is None:
+                    if clone_icon is not None:
+                        changes["icon"] = None
+                        changed_fields.append("icon (cleared)")
+                else:
+
+                    host_hash = None
+                    if host_icon is not None:
+                        host_hash = _asset_hash(host_icon)
+                    elif icon_url is not None:
+                        host_hash = _normalized_hash_from_url(icon_url)
+
+                    if (
+                        host_hash is not None
+                        and clone_hash is not None
+                        and host_hash == clone_hash
+                    ):
+                        pass
+                    else:
+                        icon_bytes = None
+
+                        if host_icon is not None:
+                            icon_bytes = await host_icon.read()
+
+                        if icon_bytes is None and icon_url is not None:
+                            if (
+                                getattr(self, "session", None) is None
+                                or self.session.closed
+                            ):
+                                import aiohttp
+
+                                self.session = aiohttp.ClientSession()
+
+                            async with self.session.get(icon_url) as resp:
+                                resp.raise_for_status()
+                                icon_bytes = await resp.read()
+
+                        if icon_bytes is not None:
+                            changes["icon"] = icon_bytes
+                            changed_fields.append("icon")
             except Exception:
                 logger.warning(
-                    "[⚠️] Failed to update guild metadata for clone guild %s",
+                    "[⚠️] Failed syncing guild icon for clone %s",
                     guild.id,
                     exc_info=True,
                 )
 
+        if cfg_clone_banner:
+            host_banner = getattr(host_guild, "banner", None) if host_guild else None
+            clone_banner = getattr(guild, "banner", None)
+            host_hash = _asset_hash(host_banner)
+            clone_hash = _asset_hash(clone_banner)
+
+            try:
+                if host_banner is None:
+                    if clone_banner is not None:
+                        changes["banner"] = None
+                        changed_fields.append("banner (cleared)")
+                else:
+                    if not _can_clone_premium_asset("banner"):
+                        # Don't attempt to set a Nitro-only banner if clone is under-boosted
+                        pass
+                    else:
+                        if host_hash is None or host_hash != clone_hash:
+                            banner_bytes = await host_banner.read()
+                            changes["banner"] = banner_bytes
+                            changed_fields.append("banner")
+            except Exception as e:
+                logger.warning(
+                    "[⚠️] Failed syncing guild banner for clone %s: %s", guild.id, e
+                )
+
+        if cfg_clone_splash:
+            host_splash = getattr(host_guild, "splash", None) if host_guild else None
+            clone_splash = getattr(guild, "splash", None)
+            host_hash = _asset_hash(host_splash)
+            clone_hash = _asset_hash(clone_splash)
+
+            try:
+                if host_splash is None:
+                    if clone_splash is not None:
+                        changes["splash"] = None
+                        changed_fields.append("splash (cleared)")
+                else:
+                    if not _can_clone_premium_asset("splash"):
+                        pass
+                    else:
+                        if host_hash is None or host_hash != clone_hash:
+                            splash_bytes = await host_splash.read()
+                            changes["splash"] = splash_bytes
+                            changed_fields.append("splash")
+            except Exception as e:
+                logger.warning(
+                    "[⚠️] Failed syncing guild splash for clone %s: %s", guild.id, e
+                )
+
+        if cfg_clone_discovery_splash:
+            host_ds = (
+                getattr(host_guild, "discovery_splash", None) if host_guild else None
+            )
+            clone_ds = getattr(guild, "discovery_splash", None)
+            host_hash = _asset_hash(host_ds)
+            clone_hash = _asset_hash(clone_ds)
+
+            try:
+                if host_ds is None:
+                    if clone_ds is not None:
+                        changes["discovery_splash"] = None
+                        changed_fields.append("discovery_splash (cleared)")
+                else:
+                    if not _can_clone_premium_asset("discovery_splash"):
+                        pass
+                    else:
+                        if host_hash is None or host_hash != clone_hash:
+                            ds_bytes = await host_ds.read()
+                            changes["discovery_splash"] = ds_bytes
+                            changed_fields.append("discovery_splash")
+            except Exception as e:
+                logger.warning(
+                    "[⚠️] Failed syncing guild discovery_splash for clone %s: %s",
+                    guild.id,
+                    e,
+                )
+
+        if cfg_desc:
+            if getattr(guild, "description", None) != want_desc:
+                changes["description"] = want_desc
+                changed_fields.append("description")
+
+        if not changes:
             return parts
 
+        try:
+            await self.ratelimit.acquire_for_guild(ActionType.EDIT_CHANNEL, guild.id)
+            await guild.edit(**changes)
+            logger.info(
+                "[🏛️] Updated guild metadata for '%s' (%d): %s",
+                guild.name,
+                int(guild.id),
+                ", ".join(changed_fields),
+            )
+            parts.append(
+                "Updated guild metadata: " + ", ".join(sorted(set(changed_fields)))
+            )
+        except Exception:
+            logger.warning(
+                "[⚠️] Failed to update guild metadata for clone guild %s",
+                guild.id,
+                exc_info=True,
+            )
 
-
-
+        return parts
 
     async def _sync_community(self, guild: discord.Guild, sitemap: Dict) -> List[str]:
         """
@@ -2460,6 +2447,7 @@ class ServerReceiver:
         - SYNC_CHANNEL_SLOWMODE
         - CLONE_VOICE / CLONE_VOICE_PROPERTIES
         - CLONE_STAGE / CLONE_STAGE_PROPERTIES
+        - SYNC_FORUM_PROPERTIES (post guidelines, message limit, layout, sort, archive, require_tag, default reaction)
         """
 
         parts: List[str] = []
@@ -2483,6 +2471,7 @@ class ServerReceiver:
         clone_voice_props = settings.get("CLONE_VOICE_PROPERTIES", False)
         clone_stage = settings.get("CLONE_STAGE", False)
         clone_stage_props = settings.get("CLONE_STAGE_PROPERTIES", False)
+        sync_forum_props = settings.get("SYNC_FORUM_PROPERTIES", False)
 
         has_community = "COMMUNITY" in guild.features
 
@@ -2493,6 +2482,7 @@ class ServerReceiver:
                 sync_slowmode,
                 clone_voice and clone_voice_props,
                 clone_stage and clone_stage_props and has_community,
+                sync_forum_props,
             ]
         ):
             logger.debug(
@@ -2507,6 +2497,7 @@ class ServerReceiver:
 
         voice_meta: Dict[int, Dict[str, object]] = {}
         stage_meta: Dict[int, Dict[str, object]] = {}
+        forum_meta: Dict[int, Dict[str, object]] = {}
 
         def ingest_channel(ch: Dict):
             try:
@@ -2550,6 +2541,42 @@ class ServerReceiver:
                     "video_quality": ch.get("video_quality"),
                 }
 
+            if sync_forum_props and ch_type == ChannelType.forum.value:
+                fm: Dict[str, object] = {}
+
+                if "post_guidelines" in ch:
+                    fm["topic"] = ch.get("post_guidelines")
+                elif "topic" in ch:
+                    fm["topic"] = ch.get("topic")
+
+                if "message_limit_per_interval" in ch:
+                    try:
+                        fm["default_thread_slowmode_delay"] = int(
+                            ch.get("message_limit_per_interval") or 0
+                        )
+                    except Exception:
+                        fm["default_thread_slowmode_delay"] = 0
+
+                if "default_layout" in ch:
+                    fm["default_layout"] = ch.get("default_layout")
+                if "default_sort_order" in ch:
+                    fm["default_sort_order"] = ch.get("default_sort_order")
+                if "hide_after_inactivity" in ch:
+                    fm["default_auto_archive_duration"] = ch.get(
+                        "hide_after_inactivity"
+                    )
+
+                if "require_tag" in ch:
+                    fm["require_tag"] = bool(ch.get("require_tag"))
+
+                if "default_reaction" in ch:
+                    fm["default_reaction"] = ch.get("default_reaction")
+                if "available_tags" in ch:
+                    fm["available_tags"] = ch.get("available_tags") or []
+
+                if fm:
+                    forum_meta[cid] = fm
+
         for cat in sitemap.get("categories", []):
             for ch in cat.get("channels", []):
                 ingest_channel(ch)
@@ -2560,7 +2587,9 @@ class ServerReceiver:
         for forum in sitemap.get("forums", []):
             ingest_channel(forum)
 
-        if not any([topic_map, nsfw_map, slowmode_map, voice_meta, stage_meta]):
+        if not any(
+            [topic_map, nsfw_map, slowmode_map, voice_meta, stage_meta, forum_meta]
+        ):
             logger.debug(
                 "[meta] No channel metadata found in sitemap for clone_g=%s; nothing to sync",
                 guild.id,
@@ -2570,9 +2599,7 @@ class ServerReceiver:
         def _norm_video_quality(
             vqm: Optional[discord.VideoQualityMode | int | str],
         ) -> str:
-            """
-            Normalize any VideoQualityMode / int / string into 'auto' or 'full'.
-            """
+            """Normalize any VideoQualityMode / int / string into 'auto' or 'full'."""
             if vqm is None:
                 return "auto"
             if isinstance(vqm, discord.VideoQualityMode):
@@ -2585,9 +2612,7 @@ class ServerReceiver:
         def _parse_video_quality(
             label: Optional[str | int | discord.VideoQualityMode],
         ) -> discord.VideoQualityMode:
-            """
-            Map 'auto'/'full'/int/VideoQualityMode to a proper VideoQualityMode.
-            """
+            """Map 'auto'/'full'/int/VideoQualityMode to a proper VideoQualityMode."""
             if isinstance(label, discord.VideoQualityMode):
                 return label
             if isinstance(label, int):
@@ -2603,9 +2628,7 @@ class ServerReceiver:
             return discord.VideoQualityMode.auto
 
         def _normalize_region(val: Any) -> str:
-            """
-            Normalize rtc_region values to lower-case strings, 'auto' if unset.
-            """
+            """Normalize rtc_region values to lower-case strings, 'auto' if unset."""
             if val is None:
                 return "auto"
             if isinstance(val, str):
@@ -2617,6 +2640,216 @@ class ServerReceiver:
             except Exception:
                 return "auto"
 
+        def _enum_int(val, default: Optional[int]) -> Optional[int]:
+            """
+            Helper: unwrap Enum/None/int into a plain int, or default.
+            Used for Forum layout/sort enums which are not JSON-serializable directly.
+            """
+            if val is None:
+                return default
+            try:
+                if isinstance(val, int):
+                    return val
+                if hasattr(val, "value"):
+                    return int(val.value)
+                return int(val)
+            except Exception:
+                return default
+
+        def _norm_forum_emoji(val: Any) -> tuple[int | None, str | None, bool]:
+            """
+            Normalize forum default reaction emoji into (id, name, animated).
+            - custom emoji → (id, name, animated)
+            - unicode emoji / plain string → (None, string, False)
+            - missing/None → (None, None, False)
+            """
+            if val is None:
+                return (None, None, False)
+
+            if isinstance(val, dict):
+                try:
+                    eid = int(val.get("id") or 0) or None
+                except Exception:
+                    eid = None
+                name = val.get("name") or None
+                animated = bool(val.get("animated", False))
+                return (eid, name, animated)
+
+            if isinstance(val, (discord.Emoji, discord.PartialEmoji)):
+                try:
+                    eid = int(val.id) if val.id is not None else None
+                except Exception:
+                    eid = None
+                name = getattr(val, "name", None)
+                animated = bool(getattr(val, "animated", False))
+                return (eid, name, animated)
+
+            s = str(val or "")
+            if not s:
+                return (None, None, False)
+
+            return (None, s, False)
+
+        def _build_forum_emoji(norm: tuple[int | None, str | None, bool]):
+            """
+            Build a value suitable for default_reaction_emoji param:
+            - custom emoji → discord.PartialEmoji
+            - unicode → string
+            - missing → None
+            """
+            eid, name, animated = norm
+            if eid:
+                return discord.PartialEmoji(
+                    id=eid, name=name or None, animated=animated
+                )
+            if name:
+                return name
+            return None
+
+        def _norm_tag_emoji_value(val: Any) -> str:
+            """Normalize ForumTag.emoji to a simple comparable string."""
+            if isinstance(val, (discord.Emoji, discord.PartialEmoji)):
+                if getattr(val, "id", None):
+                    return f"custom:{val.id}"
+                return val.name or ""
+            return str(val or "")
+
+        def _canon_host_tags(
+            tags_meta, desired_req: Optional[bool]
+        ) -> list[tuple[str, bool, str]]:
+            """
+            Canonical form of host tags for idempotence comparison.
+            We ignore IDs and only care about (name, moderated, emoji_str).
+
+            If require_tag=True but host has no unmoderated tags, we
+            include the implicit 'General' fallback in the canonical list
+            so that once we create it on the clone, future runs are stable.
+            """
+            out: list[tuple[str, bool, str]] = []
+            has_unmod = False
+
+            for tm in tags_meta or []:
+                name = (tm.get("name") or "").strip().lower()
+                if not name:
+                    continue
+                moderated = bool(tm.get("moderated", False))
+                emoji_name = tm.get("emoji_name") or ""
+                emoji_str = emoji_name or "🏷️"
+                out.append((name, moderated, emoji_str))
+                if not moderated:
+                    has_unmod = True
+
+            if desired_req and not has_unmod:
+
+                out.append(("general", False, "🏷️"))
+
+            out.sort()
+            return out
+
+        def _canon_clone_tags(tags) -> list[tuple[str, bool, str]]:
+            """
+            Canonical form of clone ForumTags for idempotence comparison.
+            """
+            out: list[tuple[str, bool, str]] = []
+            for t in tags or []:
+                name = (getattr(t, "name", "") or "").strip().lower()
+                if not name:
+                    continue
+                moderated = bool(getattr(t, "moderated", False))
+                emoji_val = _norm_tag_emoji_value(getattr(t, "emoji", None))
+                out.append((name, moderated, emoji_val))
+            out.sort()
+            return out
+
+        def _get_http_client_and_route():
+            try:
+                from discord.http import Route
+            except Exception:
+                return None, None
+
+            http_client = None
+            for owner_attr in ("client", "bot"):
+                owner = getattr(self, owner_attr, None)
+                if owner is not None:
+                    http_client = getattr(owner, "http", None)
+                    if http_client is not None:
+                        break
+
+            if http_client is None:
+                return None, None
+
+            return http_client, Route
+
+        async def _fetch_forum_layout(channel_id: int) -> Optional[int]:
+            """
+            Fetch the live default_forum_layout from Discord so we can
+            compare against the host and avoid unnecessary PATCHes.
+            """
+            http_client, Route = _get_http_client_and_route()
+            if http_client is None or Route is None:
+                logger.debug(
+                    "[meta] Cannot fetch forum layout for #%d: no http client/Route",
+                    channel_id,
+                )
+                return None
+
+            route = Route("GET", "/channels/{channel_id}", channel_id=channel_id)
+            try:
+                data = await http_client.request(route)
+            except Exception as e:
+                logger.debug(
+                    "[meta] Failed to fetch forum layout for #%d: %s",
+                    channel_id,
+                    e,
+                )
+                return None
+
+            if not isinstance(data, dict):
+                return None
+
+            raw = data.get("default_forum_layout")
+            current = _enum_int(raw, None)
+            logger.debug(
+                "[meta] Live forum layout for #%d from API: raw=%r -> %r",
+                channel_id,
+                raw,
+                current,
+            )
+            return current
+
+        async def _raw_patch_forum_layout(channel_id: int, layout_val: int) -> bool:
+            """
+            Raw PATCH for forum default layout for older py-cord versions.
+
+            Discord API expects: default_forum_layout (int)
+            """
+            http_client, Route = _get_http_client_and_route()
+            if http_client is None or Route is None:
+                logger.warning(
+                    "[meta] Cannot raw-patch forum layout for #%d: no http client/Route",
+                    channel_id,
+                )
+                return False
+
+            route = Route("PATCH", "/channels/{channel_id}", channel_id=channel_id)
+            payload = {"default_forum_layout": int(layout_val)}
+
+            try:
+                await http_client.request(route, json=payload)
+                logger.debug(
+                    "[🧵] Raw patched default_forum_layout=%s for forum #%d",
+                    layout_val,
+                    channel_id,
+                )
+                return True
+            except Exception as e:
+                logger.warning(
+                    "[meta] Raw default_forum_layout PATCH failed for forum #%d: %s",
+                    channel_id,
+                    e,
+                )
+                return False
+
         per_clone = self.chan_map_by_clone.setdefault(int(guild.id), {}) or {}
 
         all_ids: Set[int] = (
@@ -2625,6 +2858,7 @@ class ServerReceiver:
             | set(slowmode_map.keys())
             | set(voice_meta.keys())
             | set(stage_meta.keys())
+            | set(forum_meta.keys())
         )
 
         topic_updated = 0
@@ -2632,11 +2866,13 @@ class ServerReceiver:
         slowmode_updated = 0
         voice_updated = 0
         stage_updated = 0
+        forum_updated = 0
+
+        require_tag_ops: list[tuple[ForumChannel, bool]] = []
 
         for orig_id in all_ids:
             row = per_clone.get(int(orig_id))
             if not row:
-
                 row = self.db.get_channel_mapping_by_original_and_clone(
                     int(orig_id), int(guild.id)
                 )
@@ -2659,14 +2895,13 @@ class ServerReceiver:
             changes: Dict[str, object] = {}
             is_voice_ch = isinstance(ch, discord.VoiceChannel)
             is_stage_ch = isinstance(ch, discord.StageChannel)
+            is_forum_ch = isinstance(ch, ForumChannel)
 
             if sync_topic and orig_id in topic_map and hasattr(ch, "topic"):
                 desired_topic = topic_map[orig_id]
                 current_topic = getattr(ch, "topic", None)
-
                 current_norm = current_topic if current_topic else None
                 desired_norm = desired_topic if desired_topic else None
-
                 if current_norm != desired_norm:
                     changes["topic"] = desired_topic
                     topic_updated += 1
@@ -2674,7 +2909,6 @@ class ServerReceiver:
             if sync_nsfw and orig_id in nsfw_map and hasattr(ch, "nsfw"):
                 desired_nsfw = bool(nsfw_map[orig_id])
                 current_nsfw = bool(getattr(ch, "nsfw", False))
-
                 if current_nsfw != desired_nsfw:
                     changes["nsfw"] = desired_nsfw
                     nsfw_updated += 1
@@ -2683,10 +2917,10 @@ class ServerReceiver:
                 sync_slowmode
                 and orig_id in slowmode_map
                 and hasattr(ch, "slowmode_delay")
+                and not is_forum_ch
             ):
                 desired_delay = max(0, min(21600, int(slowmode_map[orig_id] or 0)))
                 current_delay = int(getattr(ch, "slowmode_delay", 0) or 0)
-
                 if current_delay != desired_delay:
                     changes["slowmode_delay"] = desired_delay
                     slowmode_updated += 1
@@ -2716,9 +2950,7 @@ class ServerReceiver:
                     raw_desired = meta["rtc_region"]
                     desired_norm = _normalize_region(raw_desired)
                     current_norm = _normalize_region(getattr(ch, "rtc_region", None))
-
                     if current_norm != desired_norm:
-
                         changes["rtc_region"] = (
                             None if desired_norm == "auto" else raw_desired
                         )
@@ -2762,7 +2994,6 @@ class ServerReceiver:
                     raw_desired = meta["rtc_region"]
                     desired_norm = _normalize_region(raw_desired)
                     current_norm = _normalize_region(getattr(ch, "rtc_region", None))
-
                     if current_norm != desired_norm:
                         changes["rtc_region"] = (
                             None if desired_norm == "auto" else raw_desired
@@ -2785,43 +3016,301 @@ class ServerReceiver:
                         changes["video_quality_mode"] = _parse_video_quality(desired_vq)
                         stage_changed_here = True
 
+            forum_changed_here = False
+            if sync_forum_props and is_forum_ch and orig_id in forum_meta:
+                meta = forum_meta[orig_id]
+
+                def _has_unmoderated_tag(tag_seq) -> bool:
+                    """Return True if any tag in the sequence is non-moderated."""
+                    for t in tag_seq or []:
+                        if not bool(getattr(t, "moderated", False)):
+                            return True
+                    return False
+
+                if meta.get("topic") is not None and hasattr(ch, "topic"):
+                    desired_topic = meta["topic"]
+                    current_topic = getattr(ch, "topic", None)
+                    if current_topic != desired_topic:
+                        changes.setdefault("topic", desired_topic)
+                        forum_changed_here = True
+
+                if "default_thread_slowmode_delay" in meta and hasattr(
+                    ch, "default_thread_slowmode_delay"
+                ):
+                    desired_msg_limit = max(
+                        0,
+                        min(21600, int(meta["default_thread_slowmode_delay"] or 0)),
+                    )
+                    current_msg_limit = int(
+                        getattr(ch, "default_thread_slowmode_delay", 0) or 0
+                    )
+                    if current_msg_limit != desired_msg_limit:
+                        changes["default_thread_slowmode_delay"] = desired_msg_limit
+                        forum_changed_here = True
+
+                if "default_layout" in meta:
+                    desired_layout = _enum_int(meta["default_layout"], None)
+                    if desired_layout is not None:
+                        current_layout: Optional[int] = None
+
+                        if hasattr(ch, "default_layout"):
+                            current_layout = _enum_int(
+                                getattr(ch, "default_layout", None),
+                                None,
+                            )
+
+                        if current_layout is None:
+                            current_layout = await _fetch_forum_layout(ch.id)
+
+                        logger.debug(
+                            "[meta] Forum layout compare for #%d (%s): host=%r clone=%r",
+                            ch.id,
+                            getattr(ch, "name", "?"),
+                            desired_layout,
+                            current_layout,
+                        )
+
+                        if current_layout != desired_layout:
+                            changes["_raw_forum_layout"] = desired_layout
+                            forum_changed_here = True
+
+                if "default_sort_order" in meta and hasattr(ch, "default_sort_order"):
+                    desired_sort = _enum_int(meta["default_sort_order"], None)
+                    current_sort = _enum_int(
+                        getattr(ch, "default_sort_order", None), None
+                    )
+                    if desired_sort is not None and current_sort != desired_sort:
+                        changes["default_sort_order"] = desired_sort
+                        forum_changed_here = True
+
+                if "default_auto_archive_duration" in meta and hasattr(
+                    ch, "default_auto_archive_duration"
+                ):
+                    desired_arch = int(meta["default_auto_archive_duration"] or 0)
+                    current_arch = int(
+                        getattr(ch, "default_auto_archive_duration", 0) or 0
+                    )
+                    if current_arch != desired_arch:
+                        changes["default_auto_archive_duration"] = desired_arch
+                        forum_changed_here = True
+
+                src_tags_meta = meta.get("available_tags") or []
+                try:
+                    clone_tags = list(getattr(ch, "available_tags", []) or [])
+                except Exception:
+                    clone_tags = []
+
+                have_require_meta = "require_tag" in meta
+                desired_req = bool(meta["require_tag"]) if have_require_meta else None
+
+                host_canon = _canon_host_tags(src_tags_meta, desired_req)
+                clone_canon = _canon_clone_tags(clone_tags)
+
+                tags_already_match = bool(src_tags_meta) and host_canon == clone_canon
+
+                desired_tags = []
+                tags_changed = False
+
+                if tags_already_match:
+
+                    desired_tags = list(clone_tags)
+                elif src_tags_meta:
+
+                    for tmeta in src_tags_meta:
+                        name = (tmeta.get("name") or "").strip()
+                        if not name:
+                            continue
+
+                        moderated = bool(tmeta.get("moderated", False))
+
+                        emoji_name = tmeta.get("emoji_name") or ""
+                        emoji_str = emoji_name or "🏷️"
+
+                        try:
+                            new_tag_obj = discord.ForumTag(
+                                name=name,
+                                emoji=emoji_str,
+                                moderated=moderated,
+                            )
+                        except Exception:
+
+                            try:
+                                new_tag_obj = discord.ForumTag(
+                                    name=name,
+                                    emoji="🏷️",
+                                    moderated=moderated,
+                                )
+                            except Exception:
+                                new_tag_obj = None
+
+                        if new_tag_obj is not None:
+                            desired_tags.append(new_tag_obj)
+
+                    tags_changed = True
+                else:
+
+                    if clone_tags:
+                        desired_tags = list(clone_tags)
+
+                if (
+                    have_require_meta
+                    and desired_req
+                    and not _has_unmoderated_tag(desired_tags)
+                ):
+                    try:
+                        existing_names = {
+                            (getattr(t, "name", "") or "").strip().lower()
+                            for t in desired_tags
+                        }
+                        if "general" not in existing_names:
+                            fallback_tag = discord.ForumTag(
+                                name="General",
+                                emoji="🏷️",
+                                moderated=False,
+                            )
+                            desired_tags.append(fallback_tag)
+                            tags_changed = True
+                    except Exception as tag_err:
+                        logger.warning(
+                            "[meta] Failed to create fallback ForumTag on #%d (%s): %s",
+                            ch.id,
+                            ch.name,
+                            tag_err,
+                        )
+
+                if tags_changed:
+                    final_tags = desired_tags[:20]
+                    changes["available_tags"] = final_tags
+                    forum_changed_here = True
+                else:
+                    final_tags = desired_tags or clone_tags
+
+                if "default_reaction" in meta:
+                    desired_norm = _norm_forum_emoji(meta["default_reaction"])
+                    current_norm = _norm_forum_emoji(
+                        getattr(ch, "default_reaction_emoji", None)
+                    )
+                    if current_norm != desired_norm:
+                        payload = _build_forum_emoji(desired_norm)
+                        if payload is not None:
+                            changes["default_reaction_emoji"] = payload
+                            forum_changed_here = True
+
+                if have_require_meta:
+                    flags = getattr(ch, "flags", None)
+                    if flags is not None:
+                        current_req = bool(getattr(flags, "require_tag", False))
+                    else:
+                        current_req = bool(getattr(ch, "requires_tag", False))
+
+                    if desired_req != current_req:
+
+                        if desired_req and not _has_unmoderated_tag(final_tags):
+                            logger.warning(
+                                "[meta] Cannot enable require_tag for forum #%d (%s): "
+                                "no non-moderated tags available after tag sync.",
+                                ch.id,
+                                ch.name,
+                            )
+                        else:
+                            require_tag_ops.append((ch, bool(desired_req)))
+                            forum_changed_here = True
+
             if stage_changed_here:
                 stage_updated += 1
+            if forum_changed_here:
+                forum_updated += 1
 
-            if not changes:
+            # Pull out raw forum layout so it doesn't get sent to ch.edit()
+            raw_forum_layout = changes.pop("_raw_forum_layout", None)
+
+            if not changes and raw_forum_layout is None:
                 continue
 
             try:
                 await self.ratelimit.acquire_for_guild(
                     ActionType.EDIT_CHANNEL, guild.id
                 )
-                await ch.edit(**changes)
+
+                if changes:
+                    await ch.edit(**changes)
+
+                if raw_forum_layout is not None and is_forum_ch:
+                    await _raw_patch_forum_layout(ch.id, int(raw_forum_layout))
+
+                log_items = list(changes.items())
+                if raw_forum_layout is not None:
+                    log_items.append(("default_forum_layout", raw_forum_layout))
+                log_str = (
+                    ", ".join(f"{k}={v}" for k, v in log_items)
+                    or "(raw default_forum_layout only)"
+                )
 
                 if is_voice_ch and voice_changed_here:
                     logger.info(
                         "[🔊] Updated voice metadata for '%s' #%d: %s",
                         ch.name,
                         ch.id,
-                        ", ".join(f"{k}={v}" for k, v in changes.items()),
+                        log_str,
                     )
                 elif is_stage_ch and stage_changed_here:
                     logger.info(
                         "[🎭] Updated stage metadata for '%s' #%d: %s",
                         ch.name,
                         ch.id,
-                        ", ".join(f"{k}={v}" for k, v in changes.items()),
+                        log_str,
+                    )
+                elif is_forum_ch and forum_changed_here:
+                    logger.info(
+                        "[🧵] Updated forum metadata for '%s' #%d: %s",
+                        ch.name,
+                        ch.id,
+                        log_str,
                     )
                 else:
                     logger.info(
                         "[📝] Updated channel metadata for '%s' #%d: %s",
                         ch.name,
                         ch.id,
-                        ", ".join(f"{k}={v}" for k, v in changes.items()),
+                        log_str,
                     )
 
             except Exception as e:
                 logger.warning(
                     "[⚠️] Failed to update metadata for channel #%d: %s", ch.id, e
+                )
+
+        for ch, desired_req in require_tag_ops:
+            try:
+                await self.ratelimit.acquire_for_guild(
+                    ActionType.EDIT_CHANNEL, guild.id
+                )
+
+                flags = getattr(ch, "flags", None)
+                flag_changes: Dict[str, object] = {}
+
+                if flags is not None and hasattr(discord, "ChannelFlags"):
+                    new_flags = discord.ChannelFlags._from_value(flags.value)
+                    new_flags.require_tag = bool(desired_req)
+                    flag_changes["flags"] = new_flags.value
+                else:
+
+                    flag_changes["require_tag"] = bool(desired_req)
+
+                await ch.edit(**flag_changes)
+                logger.info(
+                    "[🧵] Set require_tag=%s for forum '%s' #%d",
+                    desired_req,
+                    ch.name,
+                    ch.id,
+                )
+            except Exception as e:
+                logger.warning(
+                    "[meta] Failed to apply require_tag=%s for forum #%d (%s): %s",
+                    desired_req,
+                    ch.id,
+                    ch.name,
+                    e,
                 )
 
         if nsfw_updated:
@@ -2834,6 +3323,8 @@ class ServerReceiver:
             parts.append(f"Updated voice properties on {voice_updated} channels")
         if stage_updated:
             parts.append(f"Updated stage properties on {stage_updated} channels")
+        if forum_updated:
+            parts.append(f"Updated forum properties on {forum_updated} channels")
 
         return parts
 

@@ -110,15 +110,16 @@ class Config:
             "SYNC_CHANNEL_TOPIC": False,
             "SYNC_CHANNEL_SLOWMODE": False,
             "REARRANGE_ROLES": False,
-            "CLONE_VOICE": False,
+            "CLONE_VOICE": True,
             "CLONE_VOICE_PROPERTIES": False,
-            "CLONE_STAGE": False,
+            "CLONE_STAGE": True,
             "CLONE_STAGE_PROPERTIES": False,
             "CLONE_GUILD_ICON": False,
             "CLONE_GUILD_BANNER": False,
             "CLONE_GUILD_SPLASH": False,
             "CLONE_GUILD_DISCOVERY_SPLASH": False,
             "SYNC_GUILD_DESCRIPTION": False,
+            "SYNC_FORUM_PROPERTIES": False,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):
