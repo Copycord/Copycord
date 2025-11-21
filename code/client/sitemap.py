@@ -164,40 +164,82 @@ class SitemapService:
             "whitelist_enabled": bool(include_category_ids or include_channel_ids),
         }
 
-    async def _build_and_send_selected(self, origin_ids: list[int]) -> None:
+    async def _build_and_send_selected(
+        self,
+        origin_ids: list[int],
+        max_concurrency: int = 10,
+    ) -> None:
         """
         Build/send sitemap for just the given original guild ids.
         Fans out to each configured clone for the origin (legacy-compatible).
+
+        Uses a limited async concurrency so that many mappings can be sent quickly
+        without blocking on each other.
         """
+        if not origin_ids:
+            return
+
+        sem = asyncio.Semaphore(max_concurrency)
+        tasks: list[asyncio.Future] = []
+
+        async def _handle_mapping(
+            g: discord.Guild,
+            clone_id: int | None,
+        ) -> None:
+            async with sem:
+                try:
+
+                    if clone_id is None:
+                        sm = await self.build_for_guild(g)
+                    else:
+                        sm = await self.build_for_guild_and_clone(g, int(clone_id))
+
+                    if not sm:
+                        return
+
+                    await self.ws.send({"type": "sitemap", "data": sm})
+
+                    label = self._mapping_label(
+                        g.id,
+                        g.name,
+                        int(clone_id) if clone_id is not None else None,
+                    )
+                    self.logger.info(
+                        "[📩] Sitemap sent for %s",
+                        label,
+                    )
+                except Exception as e:
+                    self.logger.exception(
+                        "[sitemap] failed to send for guild %s (%s) clone %s: %s",
+                        getattr(g, "name", "?"),
+                        getattr(g, "id", "?"),
+                        clone_id,
+                        e,
+                    )
+
         for ogid in origin_ids:
             g = self.bot.get_guild(int(ogid))
             if not g:
                 continue
+
             try:
                 clones = self.db.get_clone_guild_ids_for_origin(int(g.id)) or [None]
-                for cg in clones:
-                    if cg is None:
-
-                        sm = await self.build_for_guild(g)
-                    else:
-                        sm = await self.build_for_guild_and_clone(g, int(cg))
-
-                    if sm:
-                        await self.ws.send({"type": "sitemap", "data": sm})
-                        label = self._mapping_label(
-                            g.id, g.name, int(cg) if cg is not None else None
-                        )
-                        self.logger.info(
-                            "[📩] Sitemap sent for %s",
-                            label,
-                        )
             except Exception as e:
                 self.logger.exception(
-                    "[sitemap] failed to send for guild %s (%s): %s",
+                    "[sitemap] get_clone_guild_ids_for_origin failed for guild %s (%s): %s",
                     getattr(g, "name", "?"),
                     getattr(g, "id", "?"),
                     e,
                 )
+                continue
+
+            for cg in clones:
+                clone_id = int(cg) if cg is not None else None
+                tasks.append(_handle_mapping(g, clone_id))
+
+        if tasks:
+
+            await asyncio.gather(*tasks)
 
     async def send_for_mapping_id(self, mapping_id: str) -> None:
         """
@@ -268,34 +310,26 @@ class SitemapService:
                     mapping_id,
                 )
 
-    async def build_and_send_all(self) -> None:
+    async def build_and_send_all(self, max_concurrency: int = 10) -> None:
         async with self._send_lock:
+
             self._cancel_pending_debounce()
             self._dirty_guild_ids.clear()
-            sent = 0
-            for g in self._iter_mapped_guilds():
-                try:
-                    clones = self.db.get_clone_guild_ids_for_origin(int(g.id)) or [None]
-                    for cg in clones:
-                        if cg is None:
 
-                            sm = await self.build_for_guild(g)
-                        else:
-                            sm = await self.build_for_guild_and_clone(g, int(cg))
-                        if sm:
-                            await self.ws.send({"type": "sitemap", "data": sm})
-                            label = self._mapping_label(
-                                g.id, g.name, int(cg) if cg is not None else None
-                            )
-                            self.logger.info(
-                                "[📩] Sitemap sent for %s",
-                                label,
-                            )
-                            sent += 1
-                except Exception as e:
-                    self.logger.exception(
-                        "[sitemap] failed for guild %s (%s): %s", g.name, g.id, e
-                    )
+            origin_ids = self._mapped_original_ids()
+            if not origin_ids:
+                g = self._pick_guild()
+                if g:
+                    origin_ids = [int(g.id)]
+
+            if not origin_ids:
+                self.logger.info("[sitemap] No mapped guilds to send sitemaps for.")
+                return
+
+            await self._build_and_send_selected(
+                origin_ids,
+                max_concurrency=max_concurrency,
+            )
 
     async def build_for_guild(
         self, guild: "discord.Guild", cloned_guild_id: int | None = None
@@ -438,7 +472,6 @@ class SitemapService:
             if isinstance(name, str):
                 return name.lower()
 
-            # Fallback to value if for some reason name isn't there
             try:
                 val = int(getattr(vqm, "value", 0))
             except Exception:
@@ -1229,7 +1262,6 @@ class SitemapService:
             if valid_channels:
                 kept_categories.append({**cat, "channels": valid_channels})
             else:
-                # FIX: keep the category shell (so server won't delete it) unless the category
 
                 cat_excluded = cat_id in excluded_category_ids
                 cat_whitelisted = (
@@ -1247,7 +1279,6 @@ class SitemapService:
                         }
                     )
                 else:
-                    # Keep empty shell; record why children aren't present for observability
                     kept_categories.append({**cat, "channels": []})
                     dropped_channels.append(
                         {
