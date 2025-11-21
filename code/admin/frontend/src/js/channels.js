@@ -1,6 +1,7 @@
 (() => {
   const root = document.getElementById("channels-root");
   const empty = document.getElementById("channels-empty");
+  const mappingSel = document.getElementById("mapping-select");
   const search = document.getElementById("ch-search");
   const sortSel = document.getElementById("ch-sort");
   const menu = document.getElementById("ch-menu");
@@ -19,6 +20,11 @@
   const delAllBtn = document.getElementById("orph-delall");
   const pendingDeletes = new Set();
   const LAST_DELETED_SIG_KEY = "verify:last_deleted_sig";
+  const LAST_DELETED_SIG_KEY_BASE = "verify:last_deleted_sig";
+  const currentMappingId = () => String(mappingSel?.value || "");
+
+  const deletedSigKey = (mid = currentMappingId()) =>
+    `${LAST_DELETED_SIG_KEY_BASE}:${mid}`;
   const RECENT_DELETE_WINDOW_MS = 8000;
   const cancelledThisSession = new Set();
   document.documentElement.classList.remove("boot");
@@ -185,6 +191,7 @@
   let menuContext = null;
   let catPinByOrig = new Map();
   let catOrigByEither = new Map();
+  let catMetaByOrig = new Map();
   let inflightReady = false;
   let bfBatchCleanup = null;
 
@@ -270,6 +277,7 @@
       "#ch-filter",
       "#ch-menu",
       "#bf-batchbar",
+      "#mapping-select",
     ],
 
     require: "both",
@@ -320,6 +328,39 @@
   let wsOut;
   let wsOutSeq = 0;
   let orph = { categories: [], channels: [] };
+
+  function sendVerify(payload) {
+    ensureIn();
+    const mappingId = mappingSel?.value || "";
+    const env = {
+      kind: "verify",
+      role: "ui",
+      payload: { mapping_id: mappingId, ...payload },
+    };
+    const json = JSON.stringify(env);
+    const sock = wsIn;
+
+    group("WS OUT → /ws/in (verify)", () => dbg({ env }));
+
+    if (sock?.readyState === WebSocket.OPEN) {
+      dbg("send → /ws/in (verify)", { bytes: json.length });
+      sock.send(json);
+    } else if (sock) {
+      sock.addEventListener(
+        "open",
+        () => {
+          if (sock.readyState === WebSocket.OPEN) {
+            dbg("WS open, sending → verify", { bytes: json.length });
+            sock.send(json);
+          }
+        },
+        { once: true }
+      );
+    } else {
+      dbg("WS IN not ready, cannot send (verify)", { env });
+    }
+  }
+
   let sortBy = "name";
   let sortDir = "asc";
   let lastDeleteAt = 0;
@@ -353,12 +394,19 @@
   }
 
   function resolveCidFromWS(p) {
+    const payloadMid = p?.data?.mapping_id ? String(p.data.mapping_id) : "";
+    const curMid = currentMappingId && currentMappingId();
+    if (curMid && payloadMid && curMid !== payloadMid) {
+      return null;
+    }
+
     const tid = p?.task_id && String(p.task_id);
     let cid =
       (tid && taskMap.get(tid)) ||
       p?.data?.channel_id ||
       p?.data?.original_channel_id ||
       null;
+
     if (cid != null) cid = toOriginalCid(cid);
     if (tid && cid) rememberTask(tid, cid);
     return cid;
@@ -557,24 +605,71 @@
   function rebuildCategoryPinMaps(rows) {
     catPinByOrig = new Map();
     catOrigByEither = new Map();
+    catMetaByOrig = new Map();
+
     for (const ch of rows || []) {
-      const orig = String(
+      const origName =
         ch.original_category_name ??
-          ch.category_original_name ??
-          ch.category_upstream_name ??
-          ch.category_name ??
-          ""
+        ch.category_original_name ??
+        ch.category_upstream_name ??
+        ch.category_name ??
+        "";
+      const orig = String(origName || "").trim();
+      if (!orig) continue;
+
+      const oKey = orig.toLowerCase();
+
+      const pin = String(
+        ch.cloned_category_name ?? ch.category_name ?? ""
       ).trim();
 
-      const pin = String(ch.cloned_category_name ?? "").trim();
+      const origCatId =
+        ch.original_category_id ??
+        ch.category_original_id ??
+        ch.original_parent_category_id ??
+        ch.parent_category_id ??
+        ch.category_id ??
+        null;
 
-      if (orig) {
-        const oKey = orig.toLowerCase();
-        if (!catOrigByEither.has(oKey)) catOrigByEither.set(oKey, orig);
-        if (pin) catOrigByEither.set(pin.toLowerCase(), orig);
-      }
-      if (orig && pin && pin !== orig) {
+      const clonedCatId =
+        ch.cloned_category_id ??
+        ch.cloned_parent_category_id ??
+        ch.category_cloned_id ??
+        null;
+
+      const originalGuildId =
+        ch.original_guild_id ?? ch.source_guild_id ?? null;
+
+      const clonedGuildId =
+        ch.cloned_guild_id ?? ch.target_guild_id ?? ch.host_guild_id ?? null;
+
+      if (!catOrigByEither.has(oKey)) catOrigByEither.set(oKey, orig);
+      if (pin) catOrigByEither.set(pin.toLowerCase(), orig);
+
+      if (pin && pin !== orig) {
         catPinByOrig.set(orig, pin);
+      }
+
+      if (!catMetaByOrig.has(orig)) {
+        catMetaByOrig.set(orig, {
+          original_category_id: null,
+          cloned_category_id: null,
+          original_guild_id: null,
+          cloned_guild_id: null,
+        });
+      }
+      const meta = catMetaByOrig.get(orig);
+      if (origCatId != null && !meta.original_category_id) {
+        meta.original_category_id = String(origCatId);
+      }
+      if (clonedCatId != null && !meta.cloned_category_id) {
+        meta.cloned_category_id = String(clonedCatId);
+      }
+      if (originalGuildId != null && !meta.original_guild_id) {
+        meta.original_guild_id = String(originalGuildId);
+      }
+      if (clonedGuildId != null && !meta.cloned_guild_id) {
+        meta.cloned_guild_id = String(clonedGuildId);
       }
     }
 
@@ -586,6 +681,10 @@
       }
       catOrigByEither.set(pin.toLowerCase(), orig);
     }
+
+    window.catPinByOrig = catPinByOrig;
+    window.catOrigByEither = catOrigByEither;
+    window.catMetaByOrig = catMetaByOrig;
   }
 
   function clearBackfillBootResidue() {
@@ -979,7 +1078,7 @@
     back?.removeAttribute?.("hidden");
     document.body.classList.add("modal-open");
 
-    custChannel = ch;
+    let custChannel = ch;
 
     const initial =
       ch.clone_channel_name && ch.clone_channel_name.trim()
@@ -997,13 +1096,12 @@
       custChannel = null;
     }
 
-    [btnClose].forEach((b) => {
-      if (b)
-        b.onclick = (e) => {
-          e?.preventDefault?.();
-          close();
-        };
-    });
+    if (btnClose) {
+      btnClose.onclick = (e) => {
+        e?.preventDefault?.();
+        close();
+      };
+    }
     back.onclick = (e) => {
       if (e.target === back) close();
     };
@@ -1020,10 +1118,22 @@
 
     btnSave.onclick = async (e) => {
       e.preventDefault();
+
+      const cgid = String(custChannel?.cloned_guild_id || "");
+      if (!cgid || !cgid.trim()) {
+        window.showToast("Missing cloned guild id for this channel.", {
+          type: "error",
+        });
+        return;
+      }
+
+      const raw = String(name.value || "");
       const body = {
-        original_channel_id: custChannel.original_channel_id,
-        clone_channel_name: String(name.value || ""),
+        original_channel_id: String(custChannel.original_channel_id),
+        cloned_guild_id: cgid,
+        clone_channel_name: raw.trim() || null,
       };
+
       try {
         const res = await fetch("/api/channels/customize", {
           method: "POST",
@@ -1057,8 +1167,9 @@
   }
 
   function openCustomizeCategoryDialog(
-    categoryName,
-    originalCategoryId = null
+    categoryNameOrObj,
+    originalCategoryId = null,
+    clonedGuildId = null
   ) {
     hideMenuForModal();
     dismissTransientUI();
@@ -1076,10 +1187,124 @@
     document.body.classList.add("modal-open");
 
     titleEl.textContent = `Customize`;
-    const resolvedOrig =
-      catOrigByEither.get(String(categoryName).toLowerCase()) || categoryName;
-    const pinned = catPinByOrig.get(resolvedOrig);
-    const initial = pinned && pinned.trim() ? pinned : resolvedOrig;
+
+    let catObj = null;
+    let categoryName = categoryNameOrObj;
+    if (categoryNameOrObj && typeof categoryNameOrObj === "object") {
+      catObj = categoryNameOrObj;
+      categoryName =
+        catObj.original_category_name || catObj.category_name || "";
+      originalCategoryId =
+        catObj.original_category_id || originalCategoryId || null;
+      clonedGuildId = catObj.cloned_guild_id || clonedGuildId || null;
+    }
+
+    const rawName = String(categoryName || "").trim();
+
+    const canonicalOrigName =
+      (rawName && window.catOrigByEither?.get(rawName.toLowerCase())) ||
+      rawName ||
+      "";
+
+    let origCatId =
+      (originalCategoryId != null && String(originalCategoryId).trim()) || null;
+    let cgid = (clonedGuildId != null && String(clonedGuildId).trim()) || null;
+    let originalGuildId = null;
+
+    if (canonicalOrigName && window.catMetaByOrig) {
+      const meta =
+        window.catMetaByOrig.get(canonicalOrigName) ||
+        window.catMetaByOrig.get(String(canonicalOrigName).trim());
+      if (meta) {
+        if (!origCatId && meta.original_category_id) {
+          origCatId = String(meta.original_category_id);
+        }
+        if (!cgid && meta.cloned_guild_id) {
+          cgid = String(meta.cloned_guild_id);
+        }
+        if (!originalGuildId && meta.original_guild_id) {
+          originalGuildId = String(meta.original_guild_id);
+        }
+      }
+    }
+
+    if (!origCatId || !cgid) {
+      const pool =
+        Array.isArray(window.channelsData) && window.channelsData.length
+          ? window.channelsData
+          : Array.isArray(window.items) && window.items.length
+          ? window.items
+          : Array.isArray(data)
+          ? data
+          : [];
+
+      const norm = (s) =>
+        String(s || "")
+          .trim()
+          .toLowerCase();
+      const want = norm(canonicalOrigName || rawName);
+
+      for (const row of pool) {
+        const names = [
+          row.original_category_name,
+          row.category_original_name,
+          row.category_upstream_name,
+          row.category_name,
+        ];
+        const match = names.some((n) => n && norm(n) === want);
+        if (!match) continue;
+
+        if (!origCatId) {
+          const cids = [
+            row.original_category_id,
+            row.category_original_id,
+            row.parent_category_id,
+            row.category_id,
+            row.original_parent_category_id,
+          ];
+          const cid = cids.find((v) => v != null && String(v).trim() !== "");
+          if (cid != null) origCatId = String(cid);
+        }
+
+        if (!cgid) {
+          const cg =
+            row.cloned_guild_id ??
+            row.target_guild_id ??
+            row.host_guild_id ??
+            null;
+          if (cg != null && String(cg).trim() !== "") {
+            cgid = String(cg);
+          }
+        }
+
+        if (!originalGuildId && row.original_guild_id) {
+          originalGuildId = String(row.original_guild_id);
+        }
+
+        if (origCatId && cgid) break;
+      }
+    }
+
+    if (!cgid && window.catCgidByOrig && canonicalOrigName) {
+      const maybe =
+        window.catCgidByOrig.get(canonicalOrigName) ||
+        window.catCgidByOrig.get(canonicalOrigName.toLowerCase()) ||
+        null;
+      if (maybe != null && String(maybe).trim() !== "") {
+        cgid = String(maybe);
+      }
+    }
+
+    const pinned =
+      window.catPinByOrig?.get(canonicalOrigName) ??
+      window.catPinByOrig?.get(rawName) ??
+      null;
+
+    const initial =
+      pinned && String(pinned).trim()
+        ? pinned
+        : canonicalOrigName || categoryName || "";
+
     nameInp.value = initial;
 
     function close() {
@@ -1098,7 +1323,6 @@
     back.onclick = (e) => {
       if (e.target === back) close();
     };
-
     document.addEventListener(
       "keydown",
       function onEsc(e) {
@@ -1113,16 +1337,30 @@
     btnSave.onclick = async (e) => {
       e.preventDefault();
 
+      if (!cgid) {
+        window.showToast("Missing cloned guild id for this category.", {
+          type: "error",
+        });
+        return;
+      }
+
+      const originalIdStr =
+        origCatId != null && String(origCatId).trim()
+          ? String(origCatId).trim()
+          : null;
+      if (!originalIdStr) {
+        window.showToast("Unable to resolve the original category id.", {
+          type: "error",
+        });
+        return;
+      }
+
       const raw = String(nameInp.value || "").trim();
-      const body = originalCategoryId
-        ? {
-            original_category_id: Number(originalCategoryId),
-            custom_category_name: raw,
-          }
-        : {
-            category_name: String(categoryName),
-            custom_category_name: raw,
-          };
+      const body = {
+        original_category_id: originalIdStr,
+        cloned_guild_id: String(cgid),
+        custom_category_name: raw || null,
+      };
 
       try {
         const res = await fetch("/api/categories/customize", {
@@ -1134,10 +1372,14 @@
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok || json?.ok === false) {
-          window.showToast(json?.error || "Failed to save.", { type: "error" });
+          window.showToast(json?.error || "Failed to save.", {
+            type: "error",
+          });
           return;
         }
-        window.showToast("Saved category customization.", { type: "success" });
+        window.showToast("Saved category customization.", {
+          type: "success",
+        });
         close();
         try {
           await load();
@@ -1708,7 +1950,8 @@
       announceBackfillDone._last ??= new Map();
       const lastAnnounced = announceBackfillDone._last.get(k) || 0;
       const since = Date.now() - lastAnnounced;
-      if (since < 20000) {
+
+      if (!force && since < 20000) {
         tlog("skip:recent-dedupe", { sinceMs: since });
         setCloneQueued(k, false);
         return;
@@ -1718,7 +1961,7 @@
       if (!shouldAnnounceNow()) {
         tlog("delay:boot-suppress", { bootAgeMs: age, SUPPRESS_BOOT_MS });
         setTimeout(
-          () => announceBackfillDone(k, taskId),
+          () => announceBackfillDone(k, taskId, { force }),
           SUPPRESS_BOOT_MS + 120
         );
         return;
@@ -1862,22 +2105,6 @@
       setProgressCleanupMode(card, true);
     }
 
-    const _orig_setCloneRunning = setCloneRunning;
-    setCloneRunning = function (id, on) {
-      if (on) touchActive(id);
-      _orig_setCloneRunning.call(this, id, on);
-    };
-    const _orig_setClonePulling = setClonePulling;
-    setClonePulling = function (id, on) {
-      if (on) touchActive(id);
-      _orig_setClonePulling.call(this, id, on);
-    };
-    const _orig_setCloneCleaning = setCloneCleaning;
-    setCloneCleaning = function (id, on) {
-      if (on) touchActive(id);
-      _orig_setCloneCleaning.call(this, id, on);
-    };
-
     for (const id of [...cleaningClones]) {
       const k = String(id);
       if (isWSLeading(k)) {
@@ -1945,7 +2172,12 @@
 
   async function fetchAndApplyInflight() {
     try {
-      const res = await fetch("/api/backfills/inflight", {
+      const mid = currentMappingId();
+      const url = mid
+        ? `/api/backfills/inflight?mapping_id=${encodeURIComponent(mid)}`
+        : `/api/backfills/inflight`;
+
+      const res = await fetch(url, {
         credentials: "same-origin",
         cache: "no-store",
       });
@@ -1958,7 +2190,12 @@
 
   async function fetchAndApplyQueue() {
     try {
-      const res = await fetch("/api/backfills/queue", {
+      const mid = currentMappingId();
+      const url = mid
+        ? `/api/backfills/queue?mapping_id=${encodeURIComponent(mid)}`
+        : `/api/backfills/queue`;
+
+      const res = await fetch(url, {
         credentials: "same-origin",
         cache: "no-store",
       });
@@ -2115,6 +2352,25 @@
       else card.removeAttribute("aria-busy");
     }
   }
+
+  const _orig_setCloneRunning = setCloneRunning;
+  setCloneRunning = function (id, on) {
+    if (on) touchActive(id);
+    _orig_setCloneRunning.call(this, id, on);
+  };
+
+  const _orig_setClonePulling = setClonePulling;
+  setClonePulling = function (id, on) {
+    if (on) touchActive(id);
+    _orig_setClonePulling.call(this, id, on);
+  };
+
+  const _orig_setCloneCleaning = setCloneCleaning;
+  setCloneCleaning = function (id, on) {
+    if (on) touchActive(id);
+    _orig_setCloneCleaning.call(this, id, on);
+  };
+
   function unlockBackfill(id) {
     dbg("[STATE] unlockBackfill", { id: String(id) });
 
@@ -2266,14 +2522,27 @@
 
   async function load() {
     try {
-      const chRes = await fetch("/api/channels");
+      const mid = mappingSel?.value || "";
+
+      const url = mid
+        ? `/api/channels?mapping_id=${encodeURIComponent(mid)}`
+        : `/api/channels`;
+
+      const chRes = await fetch(url, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+
       const chJson = await chRes.json();
+
       data = chJson.items || [];
       pinsByOrig = new Map();
-      data = chJson.items || [];
+
       filtered = [...data];
+
       rebuildCategoryPinMaps(data);
       render();
+
       await fetchAndApplyQueue();
       startQueuePolling();
     } catch (e) {
@@ -2282,7 +2551,7 @@
   }
 
   function chTypeLabel(t) {
-    const map = { 0: "Text", 2: "Voice", 5: "Announcements", 15: "Forum" };
+    const map = { 0: "Text", 2: "Voice", 5: "Announcements", 15: "Forum", 13: "Stage" };
     return map[t] || `Type ${t ?? "-"}`;
   }
 
@@ -2999,6 +3268,24 @@
           },
           async () => {
             try {
+              const row = findChannelRowByOrigId(originalId);
+
+              const originalGuildId = row?.original_guild_id
+                ? String(row.original_guild_id)
+                : "";
+
+              const clonedGuildId = row?.cloned_guild_id
+                ? String(row.cloned_guild_id)
+                : "";
+
+              const mid = currentMappingId();
+              if (!mid) {
+                window.showToast("Select a mapping first.", {
+                  type: "warning",
+                });
+                return;
+              }
+
               const res = await fetch("/api/filters/blacklist", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -3006,14 +3293,20 @@
                 body: JSON.stringify({
                   scope: "channel",
                   obj_id: String(originalId),
+                  mapping_id: String(mid),
+                  original_guild_id: String(originalGuildId || ""),
+                  cloned_guild_id: String(clonedGuildId || ""),
                 }),
               });
+
               const j = await res.json().catch(() => ({}));
               if (!res.ok || j?.ok === false)
                 throw new Error(j?.detail || j?.error || "failed");
+
               window.showToast("Channel added to blacklist.", {
                 type: "success",
               });
+
               await load();
             } catch {
               window.showToast("Failed to add to blacklist.", {
@@ -3091,7 +3384,9 @@
       blCat.setAttribute("aria-label", "Add category to blacklist");
       blCat.addEventListener("click", () => {
         const name = menuContext?.name ? String(menuContext.name) : "";
-        const { originalCatId } = resolveCategoryIdsByName(name);
+
+        const { originalCatId, originalGuildId, clonedGuildId } =
+          resolveCategoryIdsByName(name);
 
         if (!originalCatId) {
           window.showToast("Could not resolve category ID.", { type: "error" });
@@ -3100,6 +3395,7 @@
         }
 
         hideMenu({ restoreFocus: false });
+
         openConfirm(
           {
             title: "Add category to blacklist?",
@@ -3114,6 +3410,14 @@
           },
           async () => {
             try {
+              const mid = currentMappingId();
+              if (!mid) {
+                window.showToast("Select a mapping first.", {
+                  type: "warning",
+                });
+                return;
+              }
+
               const res = await fetch("/api/filters/blacklist", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -3121,15 +3425,20 @@
                 body: JSON.stringify({
                   scope: "category",
                   obj_id: String(originalCatId),
+                  mapping_id: String(mid),
+                  original_guild_id: String(originalGuildId || ""),
+                  cloned_guild_id: String(clonedGuildId || ""),
                 }),
               });
+
               const j = await res.json().catch(() => ({}));
               if (!res.ok || j?.ok === false)
                 throw new Error(j?.detail || j?.error || "failed");
+
               window.showToast("Category added to blacklist.", {
                 type: "success",
               });
-            } catch {
+            } catch (err) {
               window.showToast("Failed to add to blacklist.", {
                 type: "error",
               });
@@ -3137,6 +3446,7 @@
           }
         );
       });
+
       menu.appendChild(blCat);
     }
 
@@ -3161,81 +3471,128 @@
 
     function resolveCategoryIdsByName(name) {
       const raw = String(name || "").trim();
-      if (!raw)
-        return { originalCatId: null, clonedCatId: null, hasClone: false };
+      if (!raw) {
+        return {
+          originalCatId: null,
+          clonedCatId: null,
+          hasClone: false,
+          originalGuildId: null,
+          clonedGuildId: null,
+        };
+      }
 
-      const resolvedOriginal =
-        (catOrigByEither && catOrigByEither.get(raw.toLowerCase())) || raw;
-
-      const norm = (s) =>
-        String(s || "")
-          .trim()
-          .toLowerCase();
-      const wantA = norm(raw);
-      const wantB = norm(resolvedOriginal);
-
-      const rows = (data || []).filter((r) => {
-        const candidates = [
-          r?.category_name,
-          r?.original_category_name,
-          r?.category_original_name,
-          r?.category_upstream_name,
-          String(r?.category_name || "").trim()
-            ? r?.category_name
-            : UNGROUPED_LABEL,
-        ];
-        return candidates.some((c) => {
-          const n = norm(c);
-          return n && (n === wantA || n === wantB);
-        });
-      });
-
-      const origKeys = [
-        "original_parent_category_id",
-        "original_category_id",
-        "category_original_id",
-        "parent_category_id",
-        "category_id",
-        "category_upstream_id",
-      ];
-      const cloneKeys = [
-        "cloned_parent_category_id",
-        "cloned_category_id",
-        "category_cloned_id",
-        "parent_cloned_category_id",
-      ];
+      const lower = raw.toLowerCase();
+      const canonicalName =
+        (window.catOrigByEither && window.catOrigByEither.get(lower)) || raw;
 
       let originalCatId = null;
       let clonedCatId = null;
+      let originalGuildId = null;
+      let clonedGuildId = null;
 
-      for (const r of rows) {
-        if (!originalCatId) originalCatId = firstId(r, origKeys);
-        if (!clonedCatId) clonedCatId = firstId(r, cloneKeys);
-        if (originalCatId && clonedCatId) break;
+      if (window.catMetaByOrig && canonicalName) {
+        const meta =
+          window.catMetaByOrig.get(canonicalName) ||
+          window.catMetaByOrig.get(String(canonicalName).trim());
+        if (meta) {
+          if (meta.original_category_id) {
+            originalCatId = String(meta.original_category_id);
+          }
+          if (meta.cloned_category_id) {
+            clonedCatId = String(meta.cloned_category_id);
+          }
+          if (meta.original_guild_id) {
+            originalGuildId = String(meta.original_guild_id);
+          }
+          if (meta.cloned_guild_id) {
+            clonedGuildId = String(meta.cloned_guild_id);
+          }
+        }
       }
 
-      if (!clonedCatId) {
-        clonedCatId = heuristicId(
-          rows,
-          (key) =>
-            key.includes("clon") &&
-            key.includes("categor") &&
-            key.endsWith("id")
-        );
-      }
-      if (!originalCatId) {
-        originalCatId = heuristicId(
-          rows,
-          (key) =>
-            !key.includes("clon") &&
-            key.includes("categor") &&
-            key.endsWith("id")
-        );
+      if (!originalCatId || !clonedGuildId) {
+        const pool =
+          Array.isArray(window.channelsData) && window.channelsData.length
+            ? window.channelsData
+            : Array.isArray(window.items) && window.items.length
+            ? window.items
+            : Array.isArray(data)
+            ? data
+            : [];
+
+        const norm = (s) =>
+          String(s || "")
+            .trim()
+            .toLowerCase();
+        const want = norm(canonicalName);
+
+        for (const r of pool) {
+          const names = [
+            r.original_category_name,
+            r.category_original_name,
+            r.category_upstream_name,
+            r.category_name,
+          ];
+          const match = names.some((n) => n && norm(n) === want);
+          if (!match) continue;
+
+          if (!originalCatId) {
+            const cids = [
+              r.original_category_id,
+              r.category_original_id,
+              r.parent_category_id,
+              r.category_id,
+              r.original_parent_category_id,
+            ];
+            const cid = cids.find((v) => v != null && String(v).trim() !== "");
+            if (cid != null) originalCatId = String(cid);
+          }
+
+          if (!clonedCatId) {
+            const ccids = [
+              r.cloned_category_id,
+              r.cloned_parent_category_id,
+              r.category_cloned_id,
+            ];
+            const ccid = ccids.find(
+              (v) => v != null && String(v).trim() !== ""
+            );
+            if (ccid != null) clonedCatId = String(ccid);
+          }
+
+          if (!originalGuildId && r.original_guild_id) {
+            originalGuildId = String(r.original_guild_id);
+          }
+          if (!clonedGuildId && r.cloned_guild_id) {
+            clonedGuildId = String(r.cloned_guild_id);
+          }
+
+          if (
+            originalCatId &&
+            clonedCatId &&
+            originalGuildId &&
+            clonedGuildId
+          ) {
+            break;
+          }
+        }
       }
 
-      console.debug("cat ids for", name, { originalCatId, clonedCatId, rows });
+      console.debug("resolveCategoryIdsByName", name, {
+        canonicalName,
+        originalCatId,
+        clonedCatId,
+        originalGuildId,
+        clonedGuildId,
+      });
 
-      return { originalCatId, clonedCatId, hasClone: !!clonedCatId };
+      return {
+        originalCatId,
+        clonedCatId,
+        hasClone: !!clonedCatId,
+        originalGuildId,
+        clonedGuildId,
+      };
     }
 
     function isInteractiveInside(node) {
@@ -3544,6 +3901,44 @@
     filterSel.addEventListener("input", render);
   }
 
+  if (mappingSel) {
+    mappingSel.addEventListener("change", () => {
+      try {
+        resetAllCloningUI();
+      } catch (err) {
+        console.warn("Failed to reset backfill UI on mapping change:", err);
+      }
+
+      orph = { categories: [], channels: [] };
+
+      if (vCats) vCats.innerHTML = "";
+      if (vChs) vChs.innerHTML = "";
+      if (vStatus) vStatus.textContent = "Fetching orphan channels…";
+
+      try {
+        sessionStorage.removeItem(deletedSigKey());
+      } catch (err) {
+        console.warn(
+          "Failed to reset verify signature on mapping change:",
+          err
+        );
+      }
+
+      const mid = currentMappingId();
+      if (mid) {
+        sendVerify({ action: "list" });
+      }
+
+      try {
+        render();
+      } catch (err) {
+        console.warn("Failed to re-render after mapping change:", err);
+      }
+
+      load();
+    });
+  }
+
   document.addEventListener("click", (e) => {
     if (!menu.hidden && !e.target.closest("#ch-menu")) hideMenu();
   });
@@ -3610,7 +4005,7 @@
       },
       () => {
         markPending(catId);
-        sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
+        sessionStorage.removeItem(deletedSigKey());
         sendVerify({ action: "delete_one", kind: "category", id: catId });
       }
     );
@@ -3634,9 +4029,12 @@
       }
       hideMenu({ restoreFocus: false });
       openCustomizeDialog({
-        original_channel_id: ch.original_channel_id,
+        original_channel_id: String(ch.original_channel_id),
         original_channel_name: ch.original_channel_name,
         clone_channel_name: ch.clone_channel_name || null,
+        cloned_guild_id: String(ch.cloned_guild_id || ""),
+        cloned_channel_id: String(ch.cloned_channel_id || ""),
+        original_guild_id: String(ch.original_guild_id || ""),
       });
       return;
     }
@@ -3701,7 +4099,7 @@
         },
         () => {
           markPending(selId);
-          sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
+          sessionStorage.removeItem(deletedSigKey());
           sendVerify({ action: "delete_one", kind: "channel", id: selId });
         }
       );
@@ -3735,7 +4133,7 @@
         },
         () => {
           markPending(catId);
-          sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
+          sessionStorage.removeItem(deletedSigKey());
           sendVerify({ action: "delete_one", kind: "category", id: catId });
         }
       );
@@ -3786,7 +4184,7 @@
       },
       () => {
         ids.forEach((id) => markPending(id));
-        sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
+        sessionStorage.removeItem(deletedSigKey());
         bulkDeleteInFlight = true;
         showBusyOverlay(
           `Deleting ${catCount} categor${
@@ -3820,7 +4218,7 @@
       },
       () => {
         ids.forEach((id) => markPending(id));
-        sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
+        sessionStorage.removeItem(deletedSigKey());
         bulkDeleteInFlight = true;
         showBusyOverlay(
           `Deleting ${catCount} categor${
@@ -4204,8 +4602,7 @@
             t === "backfill_ack" ||
             t === "backfill_busy"
           ) {
-            let cid = backfillIdFrom(p.data) || backfillIdFrom(p);
-            cid = toOriginalCid(cid);
+            const cid = resolveCidFromWS(p);
             if (!cid) return;
             if (!shouldTrustBackfillPayload(p, cid)) return;
 
@@ -4252,8 +4649,7 @@
 
           if (t === "backfill_progress") {
             const d0 = (p && (p.data ?? p)) || {};
-            let cid = backfillIdFrom(d0) || backfillIdFrom(p);
-            cid = toOriginalCid(cid);
+            const cid = resolveCidFromWS(p);
             if (!cid) return;
             if (!shouldTrustBackfillPayload(p, cid)) return;
             if (p?.task_id) rememberTask(p.task_id, cid);
@@ -4308,18 +4704,46 @@
           }
 
           if (t === "backfill_cleanup") {
-            const d = p.data || p;
+            const d = (p && (p.data ?? p)) || {};
             let cid = backfillIdFrom(d) || backfillIdFrom(p) || d.channel_id;
             cid = toOriginalCid(cid);
             if (!cid) return;
 
-            const trusted = shouldTrustBackfillPayload(
-              { type: "backfill_cleanup", task_id: p?.task_id, data: d },
-              cid
-            );
-            if (!trusted) return;
+            const state = String(d.state || "").toLowerCase();
+            const card = document.querySelector(`.ch-card[data-cid="${cid}"]`);
 
-            if (p?.task_id && cid) rememberTask(p.task_id, cid);
+            if (state === "starting") {
+              markSeen(cid);
+              touchActive(cid);
+              setCloneCleaning(cid, true);
+              setCardLoading(cid, true, "Cleaning up");
+              setProgressCleanupMode(card, true);
+              return;
+            }
+
+            if (state === "finished") {
+              setProgressCleanupMode(card, false);
+              markSeen(cid);
+              finalizeBackfillUI(cid, {
+                announce: true,
+                taskId: p?.task_id || null,
+              });
+              return;
+            }
+
+            return;
+          }
+
+          if (t === "backfill_done") {
+            let cid =
+              backfillIdFrom(p?.data ?? p) ||
+              backfillIdFrom(p) ||
+              (p.data && p.data.channel_id) ||
+              p.channel_id;
+            cid = toOriginalCid(cid);
+            if (!cid) return;
+
+            const d = (p?.data ?? p) || {};
 
             const card = document.querySelector(`.ch-card[data-cid="${cid}"]`);
             if (d.state === "starting") {
@@ -4339,27 +4763,6 @@
               });
               return;
             }
-          }
-
-          if (t === "backfill_done") {
-            let cid =
-              backfillIdFrom(p?.data) ||
-              backfillIdFrom(p) ||
-              (p?.task_id && taskMap.get(String(p.task_id)));
-            cid = toOriginalCid(cid);
-            if (!cid) return;
-            if (!shouldTrustBackfillPayload(p, cid)) return;
-            if (p?.task_id) rememberTask(p.task_id, cid);
-
-            const card = document.querySelector(`.ch-card[data-cid="${cid}"]`);
-            markSeen(cid);
-            touchActive(cid);
-            preferWS(cid);
-
-            setCloneCleaning(cid, true);
-            setCardLoading(cid, true, "Cleaning up");
-            setProgressCleanupMode(card, true);
-            return;
           }
 
           if (t === "backfill_cancelled") {
@@ -4419,10 +4822,23 @@
         if (kind === "verify") {
           dbg("[verify] event", { type: p?.type, payload: p });
           if (p.type === "orphans") {
+            const curMid = currentMappingId();
+            const payloadMid = p?.mapping_id ? String(p.mapping_id) : "";
+
+            if (curMid && payloadMid && curMid !== payloadMid) {
+              dbg("[verify] ignoring orphans for other mapping", {
+                curMid,
+                payloadMid,
+              });
+              return;
+            }
+
             orph.categories = Array.isArray(p.categories) ? p.categories : [];
             orph.channels = Array.isArray(p.channels) ? p.channels : [];
+
             renderOrphans();
             render();
+
             delAllBtn?.toggleAttribute(
               "disabled",
               !((orph.categories?.length || 0) + (orph.channels?.length || 0))
@@ -4442,9 +4858,10 @@
               const deletedSet = new Set(deletedIds.map(normId));
 
               const sig = makeDeletedSig(p.results);
-              const prevSig = sessionStorage.getItem(LAST_DELETED_SIG_KEY);
+              const sigKey = deletedSigKey();
+              const prevSig = sigKey ? sessionStorage.getItem(sigKey) : null;
               const isReplay = !!sig && sig === prevSig;
-              if (sig) sessionStorage.setItem(LAST_DELETED_SIG_KEY, sig);
+              if (sig && sigKey) sessionStorage.setItem(sigKey, sig);
 
               const batchToastSeen = new Set();
               for (const r of p.results) {
@@ -4553,33 +4970,6 @@
     };
   }
 
-  function sendVerify(payload) {
-    ensureIn();
-    const env = { kind: "verify", role: "ui", payload };
-    const json = JSON.stringify(env);
-    const sock = wsIn;
-
-    group("WS OUT → /ws/in (verify)", () => dbg({ env }));
-
-    if (sock?.readyState === WebSocket.OPEN) {
-      dbg("send → /ws/in (verify)", { bytes: json.length });
-      sock.send(json);
-    } else if (sock) {
-      sock.addEventListener(
-        "open",
-        () => {
-          if (sock.readyState === WebSocket.OPEN) {
-            dbg("WS open, sending → verify", { bytes: json.length });
-            sock.send(json);
-          }
-        },
-        { once: true }
-      );
-    } else {
-      dbg("WS IN not ready, cannot send (verify)", { env });
-    }
-  }
-
   function renderOrphans() {
     const cats = orph.categories || [];
     const chs = orph.channels || [];
@@ -4605,7 +4995,7 @@
                         <button class="kill" aria-label="Delete category ${c.name}">Delete</button>`;
       pill.querySelector(".kill").onclick = () => {
         markPending(c.id);
-        sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
+        sessionStorage.removeItem(deletedSigKey());
         sendVerify({ action: "delete_one", kind: "category", id: c.id });
       };
       vCats.appendChild(pill);
@@ -4633,7 +5023,7 @@
           },
           () => {
             markPending(ch.id);
-            sessionStorage.removeItem(LAST_DELETED_SIG_KEY);
+            sessionStorage.removeItem(deletedSigKey());
             sendVerify({ action: "delete_one", kind: "channel", id: ch.id });
           }
         );
@@ -4957,8 +5347,10 @@
 
       setCloneLaunching(cloneId, true);
 
+      const mappingId = mappingSel?.value || "";
       const body = {
         channel_id: cloneId,
+        mapping_id: mappingId,
         mode,
         ...(mode === "since" ? { since: startOfDayIsoLocal(sinceRaw) } : {}),
         ...(mode === "last" ? { last_n: lastVal } : {}),
@@ -5047,13 +5439,13 @@
   }
 
   async function fetchResumeInfo(channelId) {
-    const url = `/api/backfills/resume-info?channel_id=${encodeURIComponent(
-      channelId
-    )}`;
-    const res = await fetch(url, {
-      credentials: "same-origin",
-      cache: "no-store",
-    });
+    const mappingId = mappingSel?.value || "";
+    const res = await fetch(
+      `/api/backfills/resume-info?channel_id=${encodeURIComponent(
+        channelId
+      )}&mapping_id=${encodeURIComponent(mappingId)}`,
+      { credentials: "same-origin", cache: "no-store" }
+    );
     const json = await res.json().catch(() => ({}));
     if (!res.ok || json?.ok === false) return null;
     return json?.data || null;
@@ -5275,7 +5667,15 @@
       startBtn.disabled = true;
 
       if (action === "new") {
-        const body = { channel_ids: ids, ...base, resume: false };
+        const mappingId = mappingSel?.value || "";
+
+        const body = {
+          channel_ids: ids,
+          mapping_id: mappingId,
+          ...base,
+          resume: false,
+        };
+
         try {
           const res = await fetch("/api/backfill/start-batch", {
             method: "POST",
@@ -5326,13 +5726,15 @@
       let started = 0,
         locked = 0,
         failed = 0;
-
+      const mappingId = mappingSel?.value || "";
       for (const cid of ids) {
         let canResume = false,
           checkpoint = null;
         try {
           const r = await fetch(
-            `/api/backfills/resume-info?channel_id=${encodeURIComponent(cid)}`,
+            `/api/backfills/resume-info?channel_id=${encodeURIComponent(
+              cid
+            )}&mapping_id=${encodeURIComponent(mappingId)}`,
             { credentials: "same-origin", cache: "no-store" }
           );
           const j = await r.json().catch(() => ({}));
@@ -5344,6 +5746,7 @@
         const body = {
           channel_id: cid,
           ...base,
+          mapping_id: mappingId,
           resume: canResume,
           ...(canResume && checkpoint ? { checkpoint } : {}),
         };
@@ -5443,10 +5846,12 @@
             "'": "&#39;",
           }[c])
       );
-
+    const mappingId = mappingSel?.value || "";
     try {
       const res = await fetch(
-        `/api/backfills/resume-info?channel_id=${encodeURIComponent(cid)}`,
+        `/api/backfills/resume-info?channel_id=${encodeURIComponent(
+          cid
+        )}&mapping_id=${encodeURIComponent(mappingId)}`,
         { credentials: "same-origin", cache: "no-store" }
       );
       const json = await res.json().catch(() => ({}));
@@ -5523,6 +5928,7 @@
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 channel_id: cid,
+                mapping_id: mappingSel?.value,
                 resume: true,
                 run_id: info?.run_id ?? undefined,
                 checkpoint: info?.checkpoint ?? null,

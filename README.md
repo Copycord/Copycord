@@ -3,19 +3,18 @@
 [![Discord](https://img.shields.io/discord/1406152440377638952?label=Discord&logo=discord&color=2E7D32&labelColor=2E7D32&logoColor=FFFFFF)](https://discord.gg/ArFdqrJHBj)
 
 
-
 _⭐️ Love Copycord? Give us a star and join the conversation in our Discord community!_
 
-# <img width="24px" src="logo/logo-christmas.png" alt="Copycord"></img> Copycord
+# <img width="24px" src="logo/logo.png" alt="Copycord"></img> Copycord
 
-Copycord is the ultimate Discord server mirroring tool. Effortlessly clone entire servers including channels, roles, emojis, and history while keeping everything in perfect sync with real-time message forwarding and structure updates. With powerful filters, custom branding options, DM and export tools, and a sleek web dashboard, Copycord gives you complete control to replicate, manage, and customize servers your way.
+Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multiple servers at once including channels, roles, emojis, and history while keeping everything in perfect sync with real-time message forwarding and structure updates. With powerful filters, custom branding options, DM and export tools, and a sleek web dashboard, Copycord gives you complete control to replicate, manage, and customize servers your way.
 
 > [!TIP]
 > **✨ Copycord Features**
 >
 > <details>
-> <summary><b>Full Server Cloning</b></summary>
-> Instantly mirror categories, channels, and message history from any target server—with the option to include roles, emojis, and stickers, all fully controlled through the web UI.
+> <summary><b>Multi-Server Cloning</b></summary>
+> Instantly mirror categories, channels, and message history from target servers—with the option to include roles, emojis, and stickers, and much more, all fully controlled through the web UI.
 > </details>
 >
 > <details>
@@ -132,18 +131,19 @@ copycord/
 ```yaml
 services:
   admin:
-    image: ghcr.io/copycord/copycord:v2.8.7
+    image: ghcr.io/copycord/copycord:v3.0.0
     container_name: copycord-admin
     environment:
       - ROLE=admin
+      - PASSWORD=copycord # change or comment out to disable login
     ports:
-      - '8080:8080'
+      - '8080:8080' # change this port if needed (ex: "9060:8080")
     volumes:
       - ./data:/data
     restart: unless-stopped
 
   server:
-    image: ghcr.io/copycord/copycord:v2.8.7
+    image: ghcr.io/copycord/copycord:v3.0.0
     container_name: copycord-server
     environment:
       - ROLE=server
@@ -154,7 +154,7 @@ services:
     restart: unless-stopped
 
   client:
-    image: ghcr.io/copycord/copycord:v2.8.7
+    image: ghcr.io/copycord/copycord:v3.0.0
     container_name: copycord-client
     environment:
       - ROLE=client
@@ -177,33 +177,46 @@ This will pull the latest images and start the web ui: http://localhost:8080
 
 ### 2. Configure Copycord via the web ui
 
-<p align="left">
-  <img src="logo/dashboard.png" alt="Dashboard" width="1000"/>
-</p>
-
 ### Configuration
 
-| Option                    | Default | Description                                                           |
-| ------------------------- | ------- | --------------------------------------------------------------------- |
-| `SERVER_TOKEN`            | none    | Your custom Discord bot token                                         |
-| `CLIENT_TOKEN`            | none    | Your personal Discord account token                                   |
-| `HOST_GUILD_ID`           | none    | The ID of the target server you want to clone                         |
-| `CLONE_GUILD_ID`          | none    | The ID of the clone guild you created                                 |
-| `COMMAND_USERS`           | none    | User IDs allowed to execute slash commands in the clone server        |
-| `EDIT_MESSAGES`           | true    | Edit cloned messages after they are edited in the host server.        |
-| `DELETE_MESSAGES`         | true    | Delete cloned messages after they are deleted in the host server.     |
-| `DELETE_CHANNELS`         | true    | Delete categories + channels when deleted in the target server        |
-| `DELETE_THREADS`          | true    | Delete threads when deleted in the target server                      |
-| `DELETE_ROLES`            | true    | Delete roles when deleted in the target server                        |
-| `CLONE_EMOJI`             | true    | Clone emojis                                                          |
-| `CLONE_STICKER`           | true    | Clone stickers                                                        |
-| `CLONE_ROLES`             | true    | Clone roles                                                           |
-| `MIRROR_ROLE_PERMISSIONS` | false   | Clone role permission settings (does not apply to channels)           |
-| `MIRROR_CHANNEL_PERMISSIONS` | false   | Mirror channel permissions from the host                           |
-| `ENABLE_CLONING`          | true    | Turn cloning on/off for the target server (listener mode if disabled) |
-| `LOG_LEVEL`               | INFO    | Level of logs to show (`INFO` / `DEBUG`)                              |
+<details>
+<summary><strong>Copycord Configuration Options (click to expand)</strong></summary>
 
-##
+<br>
+
+| Option                         | Default | Description                                                                                    |
+| ------------------------------ | ------- | ---------------------------------------------------------------------------------------------- |
+| `ENABLE_CLONING`               | true    | Master switch for cloning                                                                      |
+| `CLONE_MESSAGES`               | true    | Clone messages in real-time                                                                    |
+| `DELETE_CHANNELS`              | true    | Delete channels/categories removed in the host                                                 |
+| `DELETE_THREADS`              | true    | Delete threads removed in the host                                                             |
+| `DELETE_ROLES`                 | true    | Delete roles that no longer exist in the host                                                  |
+| `UPDATE_ROLES`                | true    | Allow updating role properties after creation                                                  |
+| `DELETE_MESSAGES`             | true    | Delete cloned messages when the host message is deleted                                        |
+| `MIRROR_CHANNEL_PERMISSIONS`   | false   | Mirror channel permissions from the host                                                       |
+| `CLONE_ROLES`                  | true    | Clone roles                                                                                    |
+| `CLONE_EMOJI`                  | true    | Clone emojis                                                                                   |
+| `CLONE_STICKER`                | true    | Clone stickers                                                                                 |
+| `EDIT_MESSAGES`               | true    | Edit cloned messages when host messages are edited                                             |
+| `MIRROR_ROLE_PERMISSIONS`      | false   | Mirror role permissions                                                                        |
+| `REPOSITION_CHANNELS`          | true    | Sync channel order                                                                             |
+| `RENAME_CHANNELS`              | true    | Sync channel renames                                                                           |
+| `SYNC_CHANNEL_NSFW`            | false   | Sync NSFW flags                                                                                |
+| `SYNC_CHANNEL_TOPIC`           | false   | Sync channel topics                                                                            |
+| `SYNC_CHANNEL_SLOWMODE`        | false   | Sync slowmode settings                                                                         |
+| `REARRANGE_ROLES`              | false   | Sync role order                                                                                |
+| `CLONE_VOICE`                  | true    | Clone voice channels                                                                           |
+| `CLONE_VOICE_PROPERTIES`       | false   | Sync voice channel bitrate & user limit                                                        |
+| `CLONE_STAGE`                  | true    | Clone stage channels                                                                           |
+| `CLONE_STAGE_PROPERTIES`       | false   | Sync stage channel properties                                                                  |
+| `CLONE_GUILD_ICON`             | false   | Sync guild icon                                                                                |
+| `CLONE_GUILD_BANNER`           | false   | Sync guild banner                                                                              |
+| `CLONE_GUILD_SPLASH`           | false   | Sync guild splash                                                                              |
+| `CLONE_GUILD_DISCOVERY_SPLASH` | false   | Sync guild discovery splash                                                                    |
+| `SYNC_GUILD_DESCRIPTION`       | false   | Sync guild description                                                                         |
+| `SYNC_FORUM_PROPERTIES`        | false   | Sync forum properties (layout, tags, guidelines, etc.)                                         |
+
+</details>
 
 ### Slash commands
 

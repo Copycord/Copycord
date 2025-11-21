@@ -286,24 +286,67 @@ class VerifyController:
     async def _handle(self, payload: dict, *, req_id: str):
         act = (payload.get("action") or "").lower()
         t0 = time.perf_counter()
-        guild = self.bot.get_guild(self.guild_id)
+
+        target_guild_id = None
+        mapping_id = str(payload.get("mapping_id") or "").strip()
+
+        if mapping_id:
+            try:
+                mrow = self.db.get_mapping_by_id(mapping_id)
+            except Exception as e:
+                mrow = None
+                self.log.warning(
+                    "verify: failed to load mapping row | req_id=%s mapping_id=%s err=%s",
+                    req_id,
+                    mapping_id,
+                    e,
+                )
+
+            if mrow:
+
+                cg = (
+                    mrow.get("cloned_guild_id")
+                    if isinstance(mrow, dict)
+                    else mrow["cloned_guild_id"]
+                )
+                if cg:
+                    try:
+                        target_guild_id = int(cg)
+                    except (TypeError, ValueError):
+                        self.log.warning(
+                            "verify: bad cloned_guild_id in mapping | req_id=%s mapping_id=%s cloned_guild_id=%r",
+                            req_id,
+                            mapping_id,
+                            cg,
+                        )
+
+        if target_guild_id is None:
+            target_guild_id = self.guild_id
+
+        guild = self.bot.get_guild(int(target_guild_id))
 
         if not guild:
             self.log.warning(
-                "Guild not found | req_id=%s guild_id=%s action=%s",
+                "Guild not found | req_id=%s guild_id=%s action=%s mapping_id=%s",
                 req_id,
-                self.guild_id,
+                target_guild_id,
                 act,
+                mapping_id,
             )
             await self._publish(
-                {"type": "orphans", "req_id": req_id, "categories": [], "channels": []}
+                {
+                    "type": "orphans",
+                    "req_id": req_id,
+                    "categories": [],
+                    "channels": [],
+                }
             )
             return
 
         if act == "list":
             ct0 = time.perf_counter()
             cats, chs = self._compute_orphans(guild)
-            self.log.debug(
+            self.log.info(
                 "Orphans listed | req_id=%s guild=%s cats=%d chs=%d took=%.1fms",
                 req_id,
                 guild.id,
@@ -331,7 +374,11 @@ class VerifyController:
             kind = (payload.get("kind") or "").lower()
             _id = int(payload.get("id") or 0)
             self.log.debug(
-                "Delete one requested | req_id=%s kind=%s id=%s", req_id, kind, _id
+                "Delete one requested | req_id=%s guild=%s kind=%s id=%s",
+                req_id,
+                guild.id,
+                kind,
+                _id,
             )
             results = await self._delete_ids(guild, [(_id, kind)], req_id=req_id)
             await self._publish(
@@ -354,7 +401,12 @@ class VerifyController:
         if act == "delete_all":
             raw_ids = payload.get("ids") or []
             ids = [int(x) for x in raw_ids if str(x).isdigit()]
-            self.log.info("Delete all requested | req_id=%s ids=%d", req_id, len(ids))
+            self.log.info(
+                "Delete all requested | req_id=%s guild=%s ids=%d",
+                req_id,
+                guild.id,
+                len(ids),
+            )
 
             kind_map = {int(c.id): "category" for c in guild.categories}
             for ch in guild.channels:
@@ -1189,9 +1241,10 @@ class OnCloneJoin:
             await member.add_roles(*assignable, reason="Copycord onjoin roles")
             dt = (time.perf_counter() - t0) * 1000
             self.log.info(
-                "[🎭] Join roles: assigned roles for %s (%s): %s duration_ms=%.1f",
+                "[🎭] Join roles: assigned roles for %s (%s) in %s: %s duration_ms=%.1f",
                 member.name,
                 member.id,
+                guild.name,
                 [f"{r.id}:{r.name}" for r in assignable],
                 dt,
             )
@@ -1315,6 +1368,7 @@ def _safe_preview(obj) -> str:
         s = str(obj)
     return s if len(s) <= 500 else (s[:500] + "…")
 
+
 # ---- Image attachment detection & text length calc ----
 _IMG_EXTS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif")
 
@@ -1331,3 +1385,10 @@ def _calc_text_len_with_urls(base_text: str, urls: list[str]) -> int:
         return len(base_text or "")
     return len(base_text or "") + sum(1 + len(u) for u in urls)
 # -------------------------------------------------------
+
+def _safe_mid(msg: dict) -> int | None:
+    try:
+        mid = int(msg.get("message_id") or 0)
+        return mid if mid > 0 else None
+    except Exception:
+        return None

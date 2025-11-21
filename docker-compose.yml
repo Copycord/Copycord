@@ -1,16 +1,17 @@
 services:
   admin:
-    image: ghcr.io/copycord/copycord:v2.8.7
+    image: ghcr.io/copycord/copycord:v3.0.0
     container_name: copycord-admin
     environment:
       - ROLE=admin
+      - PASSWORD=copycord # change or comment out to disable login page
     ports:
-      - "8080:8080"
+      - "8080:8080" # you can change this port if needed (ex: "9090:8080")
     volumes:
       - ./data:/data
 
   server:
-    image: ghcr.io/copycord/copycord:v2.8.7
+    image: ghcr.io/copycord/copycord:v3.0.0
     container_name: copycord-server
     environment:
       - ROLE=server
@@ -20,7 +21,7 @@ services:
       - admin
 
   client:
-    image: ghcr.io/copycord/copycord:v2.8.7
+    image: ghcr.io/copycord/copycord:v3.0.0
     container_name: copycord-client
     environment:
       - ROLE=client

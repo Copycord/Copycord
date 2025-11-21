@@ -477,50 +477,62 @@ class ExportMessagesRunner:
                                 await asyncio.sleep(self.scan_sleep)
                             continue
 
-                        resolved_msg = msg
-                        try:
-                            looks_empty = not (
-                                (
-                                    (msg.content or "")
-                                    or (getattr(msg, "system_content", "") or "")
-                                ).strip()
-                            )
-
-                            has_forward_flag = False
-                            try:
-                                has_forward_flag = bool(
-                                    hasattr(msg, "flags")
-                                    and (
-                                        int(getattr(msg.flags, "value", 0) or 0) & 16384
-                                    )
-                                )
-                            except Exception:
-                                pass
-
-                            if looks_empty and (
-                                getattr(msg, "reference", None) or has_forward_flag
-                            ):
-                                real = await _resolve_forward(self.bot, msg)
-                                if real is None:
-                                    real = await _resolve_forward_via_snapshot(
-                                        self.bot, msg, logger=self.log
-                                    )
-                                if real is not None:
-                                    resolved_msg = real
-                        except Exception as e:
-                            self.log.debug(
-                                f"[export] forward resolve failed msg={getattr(msg,'id',None)}: {e}"
-                            )
-
-                        has_any_text = bool(
-                            (getattr(resolved_msg, "content", "") or "").strip()
-                            or (
-                                getattr(resolved_msg, "system_content", "") or ""
+                        looks_empty = not (
+                            (
+                                (msg.content or "")
+                                or (getattr(msg, "system_content", "") or "")
                             ).strip()
                         )
-                        has_any_atts = bool(getattr(resolved_msg, "attachments", None))
-                        has_any_embs = bool(getattr(resolved_msg, "embeds", None))
-                        has_any_stks = bool(getattr(resolved_msg, "stickers", None))
+
+                        has_forward_flag = False
+                        try:
+                            has_forward_flag = bool(
+                                hasattr(msg, "flags")
+                                and (int(getattr(msg.flags, "value", 0) or 0) & 16384)
+                            )
+                        except Exception:
+                            pass
+
+                        has_reference_obj = bool(getattr(msg, "reference", None))
+                        needs_unwrap = looks_empty and (
+                            has_reference_obj or has_forward_flag
+                        )
+
+                        real_msg = msg
+                        if needs_unwrap:
+                            try:
+                                unwrapped = await _resolve_forward(self.bot, msg)
+                            except Exception as e:
+                                unwrapped = None
+                                self.log.debug(
+                                    "[export] forward resolve failed id=%s: %s",
+                                    getattr(msg, "id", None),
+                                    e,
+                                )
+                            if unwrapped is None:
+                                try:
+                                    unwrapped = await _resolve_forward_via_snapshot(
+                                        self.bot, msg, logger=self.log
+                                    )
+                                except Exception as e:
+                                    self.log.debug(
+                                        "[export] snapshot fallback failed id=%s: %s",
+                                        getattr(msg, "id", None),
+                                        e,
+                                    )
+                            if unwrapped is not None:
+                                real_msg = unwrapped
+
+                        raw_now = real_msg.content or ""
+                        system_now = getattr(real_msg, "system_content", "") or ""
+                        merged_content = (
+                            system_now if (not raw_now and system_now) else raw_now
+                        )
+
+                        has_any_text = bool(merged_content.strip())
+                        has_any_atts = bool(getattr(real_msg, "attachments", None))
+                        has_any_embs = bool(getattr(real_msg, "embeds", None))
+                        has_any_stks = bool(getattr(real_msg, "stickers", None))
 
                         if not (
                             has_any_text or has_any_atts or has_any_embs or has_any_stks
@@ -536,7 +548,7 @@ class ExportMessagesRunner:
                         is_thread = _is_thread(ch)
                         parent = getattr(ch, "parent", None)
 
-                        serialized = self.serialize(resolved_msg)
+                        serialized = self.serialize(real_msg)
 
                         serialized["_export_ctx"] = {
                             "channel_id": getattr(ch, "id", None),
@@ -1314,12 +1326,16 @@ class BackfillEngine:
         self,
         original_channel_id: int,
         *,
-        after_iso: Optional[str] = None,
-        before_iso: Optional[str] = None,
-        last_n: Optional[int] = None,
-        resume: bool = False,
-        after_id: int | str | None = None,
-    ) -> None:
+        mode="all",
+        after_iso=None,
+        before_iso=None,
+        last_n=None,
+        resume=False,
+        after_id=None,
+        mapping_id: str | None = None,
+        original_guild_id: int | None = None,
+        cloned_guild_id: int | None = None,
+    ):
         """
         Primary entry point used by client code to backfill a single channel.
         """
@@ -1385,6 +1401,9 @@ class BackfillEngine:
                     },
                     "resume": bool(resume),
                     "checkpoint_after_id": int(after_id) if after_id else None,
+                    "mapping_id": mapping_id,
+                    "cloned_guild_id": cloned_guild_id,
+                    "original_guild_id": original_guild_id,
                 },
             }
         )
@@ -1395,7 +1414,13 @@ class BackfillEngine:
                 "[backfill] ⛔ no accessible guild found for channel=%s",
                 original_channel_id,
             )
-            await self._finish_progress_only(original_channel_id, sent)
+            await self._finish_progress_only(
+                original_channel_id,
+                sent,
+                mapping_id=mapping_id,
+                original_guild_id=original_guild_id,
+                cloned_guild_id=cloned_guild_id,
+            )
             return
 
         ch = guild.get_channel(original_channel_id)
@@ -1416,7 +1441,13 @@ class BackfillEngine:
                     original_channel_id,
                     e,
                 )
-                await self._finish_progress_only(original_channel_id, sent)
+                await self._finish_progress_only(
+                    original_channel_id,
+                    sent,
+                    mapping_id=mapping_id,
+                    original_guild_id=original_guild_id,
+                    cloned_guild_id=cloned_guild_id,
+                )
                 return
         else:
             self.logger.debug(
@@ -1485,7 +1516,6 @@ class BackfillEngine:
                 skipped += 1
                 return
 
-            # --- capture the wrapper's context BEFORE we maybe unwrap ---
             wrapper_channel = getattr(m, "channel", None)
             wrapper_guild = getattr(m, "guild", None)
 
@@ -1532,7 +1562,9 @@ class BackfillEngine:
                     )
                 if unwrapped is None:
                     try:
-                        unwrapped = await _resolve_forward_via_snapshot(self.bot, m, logger=self.logger)
+                        unwrapped = await _resolve_forward_via_snapshot(
+                            self.bot, m, logger=self.logger
+                        )
                     except Exception as e:
                         self.logger.debug(
                             "[backfill] snapshot fallback failed id=%s: %s",
@@ -1607,8 +1639,9 @@ class BackfillEngine:
                     )
                     .astimezone(timezone.utc)
                     .isoformat(),
+                    "cloned_guild_id": cloned_guild_id,
+                    "mapping_id": mapping_id,
                     "__backfill__": True,
-                    # thread context should still reflect where we're *sending* this,
                     **(
                         {
                             "thread_parent_id": wrapper_parent_id,
@@ -1631,7 +1664,13 @@ class BackfillEngine:
                 await self._safe_ws_send(
                     {
                         "type": "backfill_progress",
-                        "data": {"channel_id": original_channel_id, "sent": sent},
+                        "data": {
+                            "channel_id": original_channel_id,
+                            "sent": sent,
+                        },
+                        "mapping_id": mapping_id,
+                        "cloned_guild_id": cloned_guild_id,
+                        "original_guild_id": original_guild_id,
                     }
                 )
                 last_ping = now
@@ -1745,6 +1784,9 @@ class BackfillEngine:
                     {
                         "type": "backfill_progress",
                         "data": {"channel_id": original_channel_id, "total": total},
+                        "mapping_id": mapping_id,
+                        "cloned_guild_id": cloned_guild_id,
+                        "original_guild_id": original_guild_id,
                     }
                 )
 
@@ -1827,6 +1869,9 @@ class BackfillEngine:
                             "data": {
                                 "channel_id": original_channel_id,
                                 "total": combined_total,
+                                "mapping_id": mapping_id,
+                                "cloned_guild_id": cloned_guild_id,
+                                "original_guild_id": original_guild_id,
                             },
                         }
                     )
@@ -1908,6 +1953,9 @@ class BackfillEngine:
                             "data": {
                                 "channel_id": original_channel_id,
                                 "total": combined_total,
+                                "mapping_id": mapping_id,
+                                "cloned_guild_id": cloned_guild_id,
+                                "original_guild_id": original_guild_id,
                             },
                         }
                     )
@@ -1966,7 +2014,13 @@ class BackfillEngine:
                 await self._safe_ws_send(
                     {
                         "type": "backfill_progress",
-                        "data": {"channel_id": original_channel_id, "sent": sent},
+                        "data": {
+                            "channel_id": original_channel_id,
+                            "sent": sent,
+                            "mapping_id": mapping_id,
+                            "cloned_guild_id": cloned_guild_id,
+                            "original_guild_id": original_guild_id,
+                        },
                     }
                 )
             except Exception:
@@ -1984,7 +2038,12 @@ class BackfillEngine:
             await self._safe_ws_send(
                 {
                     "type": "backfill_stream_end",
-                    "data": {"channel_id": original_channel_id},
+                    "data": {
+                        "channel_id": original_channel_id,
+                        "mapping_id": mapping_id,
+                        "cloned_guild_id": cloned_guild_id,
+                        "original_guild_id": original_guild_id,
+                    },
                 }
             )
 
@@ -2084,14 +2143,30 @@ class BackfillEngine:
         Rules:
         - ForumChannel: only public archived threads (no `private=`/`joined=`).
         - TextChannel: public archived, then private archived, then joined private archived.
+        - Voice / Stage / other non-threadable channels: yield nothing (no threads).
         """
         seen: set[int] = set()
+
+        has_threads_attr = getattr(parent, "threads", None) is not None
+        has_archived_attr = callable(getattr(parent, "archived_threads", None))
+
+        if not has_threads_attr and not has_archived_attr:
+            self.logger.debug(
+                "[backfill] channel has no thread API; skipping thread scan | id=%s type=%s",
+                getattr(parent, "id", None),
+                getattr(getattr(parent, "type", None), "name", None),
+            )
+            return
 
         for th in getattr(parent, "threads", None) or []:
             tid = getattr(th, "id", None)
             if th and tid is not None and tid not in seen:
                 seen.add(tid)
                 yield th
+
+
+        if not has_archived_attr:
+            return
 
         async def _drain(iter_factory, label: str):
             """
@@ -2117,7 +2192,6 @@ class BackfillEngine:
                     getattr(parent, "id", None),
                 )
             except ValueError as e:
-
                 self.logger.debug(
                     "[backfill] %s unavailable: %s | channel=%s",
                     label,
@@ -2167,7 +2241,6 @@ class BackfillEngine:
             async for th in _drain(_joined_private_iter, "archived private (joined)"):
                 yield th
         except (TypeError, Forbidden):
-
             pass
 
     async def _iter_history_resumable(
@@ -2242,17 +2315,40 @@ class BackfillEngine:
                     continue
                 raise
 
-    async def _finish_progress_only(self, channel_id: int, sent: int) -> None:
+    async def _finish_progress_only(
+        self,
+        original_channel_id: int,
+        sent: int,
+        *,
+        mapping_id: str | None = None,
+        original_guild_id: int | None = None,
+        cloned_guild_id: int | None = None,
+    ):
         try:
             await self._safe_ws_send(
                 {
                     "type": "backfill_progress",
-                    "data": {"channel_id": channel_id, "sent": sent},
+                    "data": {
+                        "channel_id": original_channel_id,
+                        "sent": sent,
+                        "mapping_id": mapping_id,
+                        "original_guild_id": original_guild_id,
+                        "cloned_guild_id": cloned_guild_id,
+                    },
                 }
             )
         finally:
             await self._safe_ws_send(
-                {"type": "backfill_stream_end", "data": {"channel_id": channel_id}}
+                {
+                    "type": "backfill_stream_end",
+                    "data": {
+                        "channel_id": original_channel_id,
+                        "sent": sent,
+                        "mapping_id": mapping_id,
+                        "original_guild_id": original_guild_id,
+                        "cloned_guild_id": cloned_guild_id,
+                    },
+                }
             )
 
 
@@ -2509,4 +2605,3 @@ class AssetExportRunner:
             }
         finally:
             await self._end(gid)
-

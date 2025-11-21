@@ -2,10 +2,214 @@
   let uiSock = null;
   let toggleLocked = false;
   const RUNTIME_CACHE = {};
+  let GUILD_MAPPINGS = [];
+  let CURRENT_FILTER_PICKER = null;
+  let ROLE_BLOCKS_ALL_ROLES = [];
+  let FILTER_OBJECTS_ALL_ITEMS = [];
+  let FILTER_OBJECTS_KIND = null;
+  let FILTER_OBJECTS_CATMAP = null;
+  let lastRunning = null;
+  let tooltipEl = null;
+  let cModal, cTitle, cBody, cBtnOk, cBtnX, cBtnCa, cBack;
+  let confirmResolve = null;
+  let confirmReject = null;
   const UPTIME_KEY = (role) => `cpc:uptime:${role}`;
+  const ICONS = {
+    trash: `
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+      </svg>
+    `,
+    settings: `
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+      </svg>
+    `,
+    filters: `
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z" />
+      </svg>
+    `,
+    pause: `
+      <svg viewBox="0 0 24 24" width="20" height="20"
+          fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <rect x="7" y="5" width="3.5" height="14" rx="1"></rect>
+        <rect x="13.5" y="5" width="3.5" height="14" rx="1"></rect>
+      </svg>
+    `,
+    play: `
+      <svg viewBox="0 0 24 24" width="20" height="20"
+          fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+        <path stroke-linecap="round" stroke-linejoin="round"
+              d="M8 5.75v12.5a.75.75 0 0 0 1.137.624l8-6.25a.75.75 0 0 0 0-1.248l-8-6.25A.75.75 0 0 0 8 5.75z" />
+      </svg>
+    `,
+  };
+
+  let mapValidated = false;
+
+  function getMappingInputs() {
+    return {
+      name: document.getElementById("map_mapping_name"),
+      host: document.getElementById("map_original_guild_id"),
+      clone: document.getElementById("map_cloned_guild_id"),
+    };
+  }
+
+  function validateMappingFields({ decorate = true } = {}) {
+    const { name, host, clone } = getMappingInputs();
+
+    const checks = [
+      { el: name, bad: !name.value.trim() },
+      { el: host, bad: !host.value.trim() },
+      { el: clone, bad: !clone.value.trim() },
+    ];
+
+    let ok = true;
+    let firstBad = null;
+
+    for (const { el, bad } of checks) {
+      if (decorate && mapValidated) {
+        if (bad) {
+          el.classList.add("flash");
+
+          const handleAnimEnd = () => {
+            el.classList.remove("flash");
+            el.classList.remove("is-invalid");
+            el.removeEventListener("animationend", handleAnimEnd);
+          };
+          el.addEventListener("animationend", handleAnimEnd, { once: true });
+        } else {
+          el.classList.remove("flash", "is-invalid");
+        }
+      } else if (decorate && !mapValidated) {
+        el.classList.remove("flash", "is-invalid");
+      }
+
+      if (bad && ok) {
+        ok = false;
+        firstBad = el;
+      }
+    }
+
+    return { ok, firstBad };
+  }
+
+  function triggerConfetti() {
+    const duration = 3000;
+    const animationEnd = Date.now() + duration;
+    const defaults = {
+      startVelocity: 30,
+      spread: 360,
+      ticks: 60,
+      zIndex: 99999,
+      colors: [
+        "#8b5cf6",
+        "#a78bfa",
+        "#c4b5fd",
+        "#ef4444",
+        "#f87171",
+        "#fca5a5",
+      ],
+    };
+
+    function randomInRange(min, max) {
+      return Math.random() * (max - min) + min;
+    }
+
+    const interval = setInterval(function () {
+      const timeLeft = animationEnd - Date.now();
+
+      if (timeLeft <= 0) {
+        return clearInterval(interval);
+      }
+
+      const particleCount = 50 * (timeLeft / duration);
+
+      confetti({
+        ...defaults,
+        particleCount,
+        origin: { x: randomInRange(0.1, 0.3), y: Math.random() - 0.2 },
+      });
+      confetti({
+        ...defaults,
+        particleCount,
+        origin: { x: randomInRange(0.7, 0.9), y: Math.random() - 0.2 },
+      });
+    }, 250);
+  }
+
+  window.triggerConfetti = triggerConfetti;
+
+  function bindMappingFieldListeners() {
+    const { name, host, clone } = getMappingInputs();
+    [name, host, clone].forEach((el) => {
+      if (!el || el._mapValBound) return;
+      el._mapValBound = true;
+
+      el.addEventListener("input", () => {
+        el.classList.remove("flash", "is-invalid");
+      });
+    });
+  }
+
+  let CURRENT_BLOCKED_ROLE_IDS = new Set();
+
+  function parseBlockedRolesCsv(str) {
+    const s = (str || "").trim();
+    if (!s) return new Set();
+    return new Set(
+      s
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean)
+    );
+  }
+
+  const DEFAULT_MAPPING_SETTINGS = {
+    DELETE_CHANNELS: true,
+    CLONE_MESSAGES: true,
+    DELETE_THREADS: true,
+    DELETE_MESSAGES: true,
+    EDIT_MESSAGES: true,
+    REPOSITION_CHANNELS: true,
+    DELETE_ROLES: true,
+    UPDATE_ROLES: true,
+    CLONE_EMOJI: true,
+    CLONE_STICKER: true,
+    CLONE_ROLES: true,
+    MIRROR_ROLE_PERMISSIONS: false,
+    MIRROR_CHANNEL_PERMISSIONS: false,
+    ENABLE_CLONING: true,
+    RENAME_CHANNELS: true,
+    SYNC_CHANNEL_NSFW: false,
+    SYNC_CHANNEL_TOPIC: false,
+    SYNC_CHANNEL_SLOWMODE: false,
+    REARRANGE_ROLES: false,
+    CLONE_VOICE: true,
+    CLONE_VOICE_PROPERTIES: false,
+    CLONE_STAGE: true,
+    CLONE_STAGE_PROPERTIES: false,
+    CLONE_GUILD_ICON: false,
+    CLONE_GUILD_BANNER: false,
+    CLONE_GUILD_SPLASH: false,
+    CLONE_GUILD_DISCOVERY_SPLASH: false,
+    SYNC_GUILD_DESCRIPTION: false,
+    SYNC_FORUM_PROPERTIES: false,
+    
+  };
 
   let lastFocusLog = null;
   let lastFocusConfirm = null;
+  let lastFocusMapping = null;
+  let lastFocusFilters = null;
+  let currentFilterMapping = null;
+  let FILTERS_BASELINE = "";
+  let MAPPING_BASELINE = "";
 
   function setInert(el, on) {
     if (!el) return;
@@ -40,20 +244,20 @@
   async function refreshFooterVersion() {
     const wrap = document.getElementById("footer-version");
     if (!wrap) return;
-  
+
     const link = document.getElementById("footer-version-link");
     const plain = document.getElementById("footer-version-text");
-  
+
     try {
       const res = await fetch("/version", { credentials: "same-origin" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const v = await res.json();
-  
+
       if (v.update_available) {
         if (link) {
           link.textContent = v.current || "dev";
-          link.classList.add("update-flash");  
-          link.href = v.url;              
+          link.classList.add("update-flash");
+          link.href = v.url;
           link.setAttribute("aria-label", "New update available");
         } else if (plain) {
           plain.textContent = v.current ? `Version ${v.current}` : "dev";
@@ -61,7 +265,7 @@
           plain.style.cursor = "pointer";
           plain.onclick = () => window.open(v.url, "_blank", "noopener");
         }
-  
+
         const notice = document.getElementById("update-notice");
         if (notice) {
           notice.style.display = "block";
@@ -72,7 +276,7 @@
         if (link) {
           link.textContent = v.current || "dev";
           link.classList.remove("update-flash");
-  
+
           const def = link.getAttribute("data-default-href");
           link.href =
             def ||
@@ -84,7 +288,7 @@
           plain.onclick = null;
           plain.style.cursor = "";
         }
-  
+
         const notice = document.getElementById("update-notice");
         if (notice) {
           notice.style.display = "none";
@@ -95,22 +299,29 @@
       console.debug("Footer version check failed:", err);
     }
   }
-  
 
   (function initToasts() {
     function ensureToastRoot() {
-      if (!document.getElementById("toast-root")) {
-        const div = document.createElement("div");
+      let div = document.getElementById("toast-root");
+      if (!div) {
+        div = document.createElement("div");
         div.id = "toast-root";
-        div.style.position = "fixed";
-        div.style.top = "16px";
-        div.style.right = "16px";
-        div.style.zIndex = "10000";
-        div.style.display = "flex";
-        div.style.flexDirection = "column";
-        div.style.gap = "8px";
         document.body.appendChild(div);
       }
+
+      div.classList.remove("toast-top-center");
+
+      div.classList.add("toast-root");
+
+      div.style.position = "";
+      div.style.top = "";
+      div.style.right = "";
+      div.style.left = "";
+      div.style.transform = "";
+      div.style.display = "";
+      div.style.flexDirection = "";
+      div.style.gap = "";
+      div.style.zIndex = "";
     }
 
     function clearAllToasts() {
@@ -353,6 +564,151 @@
   let uiSockTimer = null;
   let currentInterval = 4000;
 
+  function ensureTooltipEl() {
+    if (!tooltipEl) {
+      tooltipEl = document.createElement("div");
+      tooltipEl.className = "lock-tooltip";
+      tooltipEl.innerHTML = `
+      <div class="lock-tooltip-text">Stop the bot to edit server mappings</div>
+      <div class="lock-tooltip-arrow"></div>
+    `;
+      document.body.appendChild(tooltipEl);
+    }
+    return tooltipEl;
+  }
+
+  function showTooltip(x, y) {
+    const tip = ensureTooltipEl();
+
+    const offsetY = 16;
+    tip.style.left = x + "px";
+    tip.style.top = y - offsetY + "px";
+    tip.style.opacity = "1";
+  }
+
+  function hideTooltip() {
+    if (tooltipEl) {
+      tooltipEl.style.opacity = "0";
+    }
+  }
+
+  function attachLockOverlay(card) {
+    if (card.querySelector(".guild-card-lock-overlay")) return;
+
+    const cs = window.getComputedStyle(card);
+    if (cs.position === "static") {
+      card.style.position = "relative";
+    }
+
+    const overlay = document.createElement("div");
+    overlay.className = "guild-card-lock-overlay";
+
+    const kill = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    overlay.addEventListener("click", kill);
+    overlay.addEventListener("mousedown", kill);
+    overlay.addEventListener("mouseup", kill);
+    overlay.addEventListener("touchstart", kill);
+    overlay.addEventListener("touchend", kill);
+
+    overlay.addEventListener("mouseenter", (e) => {
+      showTooltip(e.clientX, e.clientY);
+    });
+
+    overlay.addEventListener("mousemove", (e) => {
+      showTooltip(e.clientX, e.clientY);
+    });
+
+    overlay.addEventListener("mouseleave", () => {
+      hideTooltip();
+    });
+
+    card.appendChild(overlay);
+  }
+
+  function detachLockOverlay(card) {
+    const overlay = card.querySelector(".guild-card-lock-overlay");
+    if (overlay) overlay.remove();
+  }
+
+  function setGlobalConfigLocked(running) {
+    const cfgForm = document.getElementById("cfg-form");
+    const saveBtn = document.getElementById("cfg-save-btn");
+    const cancelBtn = document.getElementById("cfg-cancel-btn");
+
+    if (!cfgForm) return;
+
+    if (running) {
+      cfgForm.classList.add("cfg-locked");
+    } else {
+      cfgForm.classList.remove("cfg-locked");
+    }
+
+    cfgForm
+      .querySelectorAll("input, select, textarea, button")
+      .forEach((el) => {
+        const id = el.id || "";
+        const isSave = id === "cfg-save-btn";
+        const isCancel = id === "cfg-cancel-btn";
+        const isReveal = el.classList.contains("reveal-btn");
+
+        if (isSave || isCancel) {
+          el.disabled = running;
+          el.classList.toggle("disabled-btn", running);
+          el.title = running ? "Stop the bot to edit global configuration" : "";
+          return;
+        }
+
+        if (isReveal) {
+          el.disabled = running;
+          el.classList.toggle("disabled-btn", running);
+          el.title = running ? "Stop the bot to view token values" : "";
+          return;
+        }
+
+        el.disabled = running;
+        if (running) {
+          el.classList.add("locked-field");
+        } else {
+          el.classList.remove("locked-field");
+        }
+      });
+
+    cfgForm.querySelectorAll(".dd").forEach((dd) => {
+      if (running) {
+        dd.setAttribute("data-locked", "1");
+      } else {
+        dd.removeAttribute("data-locked");
+      }
+    });
+
+    cfgForm.querySelectorAll(".chips").forEach((chipsEl) => {
+      if (running) {
+        chipsEl.setAttribute("data-locked", "1");
+        chipsEl.classList.add("locked-field");
+      } else {
+        chipsEl.removeAttribute("data-locked");
+        chipsEl.classList.remove("locked-field");
+      }
+    });
+  }
+
+  function setGuildCardsLocked(running) {
+    const cards = document.querySelectorAll("#guild-mapping-list .guild-card");
+    cards.forEach((card) => {
+      if (running) {
+        card.classList.add("locked");
+        attachLockOverlay(card);
+      } else {
+        card.classList.remove("locked");
+        detachLockOverlay(card);
+      }
+    });
+    if (!running) hideTooltip();
+  }
+
   async function fetchAndRenderStatus() {
     try {
       const res = await fetch("/api/status", { credentials: "same-origin" });
@@ -364,6 +720,10 @@
       updateToggleButton(data);
 
       const running = getCurrentRunning(data);
+
+      setGuildCardsLocked(running);
+      setGlobalConfigLocked(running);
+
       if (lastRunning === null) lastRunning = running;
 
       if (toggleLocked && running !== lastRunning) {
@@ -477,6 +837,8 @@
     setInert(modal, false);
     modal.setAttribute("aria-hidden", "false");
 
+    document.body.classList.add("body-lock-scroll");
+
     LOG_LINES = [];
     LOG_QUERY = "";
     renderLogView();
@@ -484,7 +846,6 @@
     const qInput = document.getElementById("log-search-input");
     if (qInput) {
       qInput.value = "";
-
       setTimeout(() => qInput.focus(), 0);
 
       let t;
@@ -571,6 +932,9 @@
     setInert(modal, true);
     modal.classList.remove("show");
     modal.setAttribute("aria-hidden", "true");
+
+    document.body.classList.remove("body-lock-scroll");
+
     if (lastFocusLog && typeof lastFocusLog.focus === "function") {
       try {
         lastFocusLog.focus();
@@ -787,16 +1151,16 @@
 
   function initCollapsibleCards() {
     const cards = document.querySelectorAll(".card");
-  
+
     cards.forEach((card, idx) => {
       const h = card.querySelector(":scope > h3");
       if (!h) return;
-  
+
       const titleBar = document.createElement("div");
       titleBar.className = "card-titlebar";
       h.parentNode.insertBefore(titleBar, h);
       titleBar.appendChild(h);
-  
+
       const body =
         card.querySelector(":scope > .card-body") ||
         (() => {
@@ -808,13 +1172,13 @@
           }
           return b;
         })();
-  
+
       const slug = (h.textContent || `panel-${idx}`)
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/(^-|-$)/g, "");
       body.id = body.id || `card-body-${slug}`;
-  
+
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "btn btn-ghost btn-icon card-toggle";
@@ -823,10 +1187,10 @@
       btn.setAttribute("aria-label", "Collapse panel");
       btn.innerHTML = `<span class="chev" aria-hidden="true">▾</span>`;
       titleBar.appendChild(btn);
-  
+
       const key = `cpc.collapsed.${slug}`;
       applyCollapse(card, btn, body, localStorage.getItem(key) === "1");
-  
+
       const toggle = () => {
         const nowCollapsed = !card.classList.contains("collapsed");
         applyCollapse(card, btn, body, nowCollapsed);
@@ -835,78 +1199,89 @@
       btn.addEventListener("click", toggle);
       titleBar.addEventListener("dblclick", toggle);
     });
-  
+
     function applyCollapse(card, btn, body, collapsed) {
-      // Keep the card’s layout intact
       card.classList.toggle("collapsed", collapsed);
-      // Hide only the body
+
       body.hidden = !!collapsed;
-    
-      // ARIA state
+
       btn.setAttribute("aria-expanded", collapsed ? "false" : "true");
-      btn.setAttribute("aria-label", collapsed ? "Expand panel" : "Collapse panel");
-    
-      // Belt-and-suspenders: ensure full width while collapsed too
+      btn.setAttribute(
+        "aria-label",
+        collapsed ? "Expand panel" : "Collapse panel"
+      );
+
       card.style.width = "100%";
       card.style.maxWidth = "100%";
       card.style.minWidth = "100%";
-    
-      // Notify listeners
-      const ev = new CustomEvent("card-toggled", { detail: { collapsed }, bubbles: true });
+
+      const ev = new CustomEvent("card-toggled", {
+        detail: { collapsed },
+        bubbles: true,
+      });
       card.dispatchEvent(ev);
     }
   }
 
   class ChipsInput {
-    /**
-     * @param {HTMLElement} root .chips element
-     * @param {HTMLInputElement} hidden hidden input to carry CSV to server
-     */
     constructor(root, hidden) {
       this.root = root;
-      this.entry = root.querySelector(".chip-input");
       this.hidden = hidden;
+
+      this.entry = root.querySelector(".chip-input");
+
+      this.entryWrap = this.entry
+        ? this.entry.closest(".chip-input-wrap") || this.entry
+        : null;
+
       this.values = [];
 
-      this.root.addEventListener("click", (e) => {
-        const chipEl = e.target.closest(".chip");
-        if (chipEl) {
-          const id = chipEl.dataset.id;
-          if (id) this.remove(id);
-        } else {
-          this.entry.focus();
-        }
-      });
+      if (this.entry) {
+        this.entry.addEventListener("keydown", (e) => {
+          if (this.root.getAttribute("data-locked") === "1") {
+            e.preventDefault();
+            return;
+          }
 
-      this.entry.addEventListener("keydown", (e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          this.addFromText(this.entry.value);
-          this.entry.value = "";
-        } else if (
-          e.key === "Backspace" &&
-          this.entry.value === "" &&
-          this.values.length
-        ) {
-          this.remove(this.values[this.values.length - 1]);
-        }
-      });
+          if (e.key === "Enter") {
+            e.preventDefault();
+            this.addFromText(this.entry.value);
+            this.entry.value = "";
+          } else if (
+            e.key === "Backspace" &&
+            this.entry.value === "" &&
+            this.values.length
+          ) {
+            this.remove(this.values[this.values.length - 1]);
+          }
+        });
 
-      this.entry.addEventListener("paste", (e) => {
-        const text = (e.clipboardData || navigator.clipboard).getData("text");
-        if (text) {
-          e.preventDefault();
-          this.addFromText(text);
-        }
-      });
+        this.entry.addEventListener("paste", (e) => {
+          if (this.root.getAttribute("data-locked") === "1") {
+            e.preventDefault();
+            return;
+          }
+
+          const text =
+            (e.clipboardData && e.clipboardData.getData("text")) || "";
+          if (text) {
+            e.preventDefault();
+            this.addFromText(text);
+          }
+        });
+      }
     }
 
-    /** Accept a string; split on anything non-digit; add integers */
     addFromText(text) {
+      if (this.root.getAttribute("data-locked") === "1") {
+        return;
+      }
+
       const parts = String(text)
         .split(/[^\d]+/)
         .map((s) => s.trim())
         .filter(Boolean);
+
       const ids = [];
       for (const s of parts) {
         try {
@@ -920,6 +1295,10 @@
     }
 
     addMany(arr) {
+      if (this.root.getAttribute("data-locked") === "1") {
+        return false;
+      }
+
       let changed = false;
       for (const id of arr) {
         if (!this.values.includes(id)) {
@@ -929,16 +1308,21 @@
         }
       }
       if (changed) this.syncHidden();
+      return changed;
     }
 
     remove(id) {
+      if (this.root.getAttribute("data-locked") === "1") {
+        return;
+      }
+
       const ix = this.values.indexOf(id);
       if (ix >= 0) {
         this.values.splice(ix, 1);
-        const el = this.root.querySelector(
+        const chipEl = this.root.querySelector(
           `.chip[data-id="${CSS.escape(id)}"]`
         );
-        if (el) el.remove();
+        if (chipEl) chipEl.remove();
         this.syncHidden();
       }
     }
@@ -947,23 +1331,211 @@
       const chip = document.createElement("span");
       chip.className = "chip";
       chip.dataset.id = id;
-      chip.innerHTML = `<span class="chip-text">${escapeHtml(id)}</span>`;
-      this.root.insertBefore(chip, this.entry);
+      chip.textContent = id;
+
+      chip.addEventListener("click", () => {
+        if (this.root.getAttribute("data-locked") === "1") {
+          return;
+        }
+        this.remove(id);
+      });
+
+      if (this.entryWrap && this.entryWrap.parentNode === this.root) {
+        this.root.insertBefore(chip, this.entryWrap);
+      } else if (this.entry && this.entry.parentNode === this.root) {
+        this.root.insertBefore(chip, this.entry);
+      } else {
+        this.root.appendChild(chip);
+      }
     }
 
     syncHidden() {
       this.hidden.value = this.values.join(",");
-
       this.hidden.dispatchEvent(new Event("input", { bubbles: true }));
     }
 
     set(list) {
       this.values = [];
+
       Array.from(this.root.querySelectorAll(".chip")).forEach((el) =>
         el.remove()
       );
-      this.addMany((list || []).map(String));
-      if (this.entry) this.entry.value = "";
+
+      const cleaned = (list || []).map(String);
+      const changed = this.addMany(cleaned);
+
+      if (this.entry) {
+        this.entry.value = "";
+      }
+
+      if (!changed) {
+        this.syncHidden();
+      }
+    }
+
+    get() {
+      return [...this.values];
+    }
+  }
+
+  class WordChipsInput {
+    constructor(rootEl, hiddenEl) {
+      this.root = rootEl;
+      this.hidden = hiddenEl;
+      this.values = [];
+
+      this.entryWrap = rootEl.querySelector(".chip-input-wrap") || rootEl;
+      this.entry = rootEl.querySelector(".chip-input");
+
+      this.root.addEventListener("click", (ev) => {
+        const clickedRootItself =
+          ev.target === this.root || ev.target === this.entryWrap;
+
+        if (this.root.getAttribute("data-locked") === "1") {
+          return;
+        }
+
+        if (clickedRootItself && this.entry) {
+          this.entry.focus();
+        }
+      });
+
+      if (this.entry) {
+        this.entry.addEventListener("keydown", (ev) => {
+          if (this.root.getAttribute("data-locked") === "1") {
+            ev.preventDefault();
+            return;
+          }
+
+          if (ev.key === "Enter" || ev.key === ",") {
+            ev.preventDefault();
+            this.addFromText(this.entry.value);
+            this.entry.value = "";
+            return;
+          }
+
+          if (
+            (ev.key === "Backspace" || ev.key === "Delete") &&
+            !this.entry.value
+          ) {
+            if (this.values.length) {
+              this.remove(this.values[this.values.length - 1]);
+            }
+          }
+        });
+
+        this.entry.addEventListener("paste", (ev) => {
+          if (this.root.getAttribute("data-locked") === "1") {
+            ev.preventDefault();
+            return;
+          }
+
+          const clip = ev.clipboardData?.getData("text") || "";
+          if (!clip) return;
+          ev.preventDefault();
+          this.addFromText(clip);
+          this.entry.value = "";
+        });
+      }
+    }
+
+    addFromText(text) {
+      if (this.root.getAttribute("data-locked") === "1") {
+        return;
+      }
+
+      if (!text) return;
+      const parts = String(text)
+        .split(/[,|\n]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      this.addMany(parts);
+    }
+
+    addMany(arr) {
+      if (this.root.getAttribute("data-locked") === "1") {
+        return false;
+      }
+
+      let changed = false;
+      for (const raw of arr) {
+        const word = raw.slice(0, 100);
+        if (!this.values.includes(word)) {
+          this.values.push(word);
+          this._renderChip(word);
+          changed = true;
+        }
+      }
+      if (changed) {
+        this._syncHidden();
+      }
+      return changed;
+    }
+
+    remove(word) {
+      if (this.root.getAttribute("data-locked") === "1") {
+        return;
+      }
+
+      const idx = this.values.indexOf(word);
+      if (idx !== -1) {
+        this.values.splice(idx, 1);
+      }
+
+      const sel = `.chip[data-id="${CSS.escape(word)}"]`;
+      const chipEl = this.root.querySelector(sel);
+      if (chipEl) chipEl.remove();
+
+      this._syncHidden();
+    }
+
+    _renderChip(word) {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+      chip.dataset.id = word;
+      chip.textContent = word;
+
+      chip.addEventListener("click", () => {
+        if (this.root.getAttribute("data-locked") === "1") {
+          return;
+        }
+        this.remove(word);
+      });
+
+      if (this.entryWrap && this.entryWrap.parentNode === this.root) {
+        this.root.insertBefore(chip, this.entryWrap);
+      } else if (this.entry && this.entry.parentNode === this.root) {
+        this.root.insertBefore(chip, this.entry);
+      } else {
+        this.root.appendChild(chip);
+      }
+    }
+
+    _syncHidden() {
+      this.hidden.value = this.values.join(",");
+      this.hidden.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+
+    set(list) {
+      this.values = [];
+      for (const el of Array.from(this.root.querySelectorAll(".chip"))) {
+        el.remove();
+      }
+
+      const cleaned = Array.isArray(list)
+        ? list.map((x) => String(x).trim()).filter(Boolean)
+        : [];
+
+      const changed = this.addMany(cleaned);
+
+      if (this.entry) {
+        this.entry.value = "";
+      }
+
+      if (!changed) {
+        this._syncHidden();
+      }
     }
 
     get() {
@@ -978,41 +1550,63 @@
       .filter(Boolean);
   }
 
-  const CHIPS = {};
   const BASELINES = { cmd_users_csv: "", cfg: "", filters: "" };
+  let CHIPS = Object.create(null);
 
   function initChips() {
+    CHIPS = Object.create(null);
+
     const defs = [
-      ["wl_categories", "wl_categories"],
-      ["wl_channels", "wl_channels"],
-      ["ex_categories", "ex_categories"],
-      ["ex_channels", "ex_channels"],
-      ["cmd_users", "COMMAND_USERS"],
+      ["wl_categories", "wl_categories", "ids"],
+      ["wl_channels", "wl_channels", "ids"],
+      ["ex_categories", "ex_categories", "ids"],
+      ["ex_channels", "ex_channels", "ids"],
+      ["blocked_words", "blocked_words", "words"],
+      ["cmd_users", "COMMAND_USERS", "ids"],
+      ["blocked_roles", "blocked_role_ids", "ids"],
+      ["wl_users", "wl_users", "ids"],
+      ["bl_users", "bl_users", "ids"],
     ];
-
-    for (const [dataKey, hiddenId] of defs) {
+    for (const [dataKey, hiddenId, mode] of defs) {
       const root = document.querySelector(`.chips[data-chips="${dataKey}"]`);
+      if (!root) continue;
+
       const hidden = document.getElementById(hiddenId);
-      if (!root || !hidden) continue;
+      if (!hidden) continue;
 
-      const inst = new ChipsInput(root, hidden);
-      CHIPS[dataKey] = inst;
+      const ci =
+        mode === "words"
+          ? new WordChipsInput(root, hidden)
+          : new ChipsInput(root, hidden);
 
-      inst.set(parseIdList(hidden.value));
-
-      if (dataKey === "cmd_users") {
-        BASELINES.cmd_users_csv = hidden.value;
+      if (mode === "words") {
+        const seedWords = String(hidden.value || "")
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        ci.set(seedWords);
+      } else {
+        ci.set(parseIdList(hidden.value || ""));
       }
 
-      const form = root.closest("form");
+      CHIPS[dataKey] = ci;
+
+      if (dataKey === "cmd_users") {
+        BASELINES.cmd_users_csv = hidden.value || "";
+      }
+
+      const form = hidden.closest("form");
       if (form) {
         form.addEventListener("reset", () => {
-          setTimeout(() => {
-            if (dataKey === "cmd_users") {
-              hidden.value = BASELINES.cmd_users_csv;
-              inst.set(parseIdList(BASELINES.cmd_users_csv));
+          window.setTimeout(() => {
+            if (mode === "words") {
+              const resetWords = String(hidden.value || "")
+                .split(",")
+                .map((s) => s.trim())
+                .filter(Boolean);
+              ci.set(resetWords);
             } else {
-              inst.set(parseIdList(hidden.value));
+              ci.set(parseIdList(hidden.value || ""));
             }
           }, 0);
         });
@@ -1100,23 +1694,37 @@
     return new URLSearchParams(fd).toString();
   }
 
-  const REQUIRED_KEYS = [
-    "SERVER_TOKEN",
-    "CLIENT_TOKEN",
-    "CLONE_GUILD_ID",
-  ];
+  const REQUIRED_KEYS = ["SERVER_TOKEN", "CLIENT_TOKEN"];
   let cfgValidated = false;
+
+  function setCfgButtonsVisible(show) {
+    const saveBtn = document.getElementById("cfg-save-btn");
+    const cancelBtn = document.getElementById("cfg-cancel-btn");
+    if (!saveBtn || !cancelBtn) return;
+
+    const vis = show ? "visible" : "hidden";
+
+    saveBtn.style.visibility = vis;
+    cancelBtn.style.visibility = vis;
+
+    saveBtn.disabled = !show;
+    cancelBtn.disabled = !show;
+  }
 
   function configState() {
     const get = (id) => (document.getElementById(id)?.value || "").trim();
     const vals = Object.fromEntries(REQUIRED_KEYS.map((k) => [k, get(k)]));
-    const idsOK = /^\d+$/.test(vals.CLONE_GUILD_ID);
-    const ok = !!(vals.SERVER_TOKEN && vals.CLIENT_TOKEN && idsOK);
+
+    const hasTokens = !!(vals.SERVER_TOKEN && vals.CLIENT_TOKEN);
+    const hasAtLeastOneMapping =
+      Array.isArray(GUILD_MAPPINGS) && GUILD_MAPPINGS.length > 0;
+
+    const ok = hasTokens && hasAtLeastOneMapping;
 
     const missing = [];
     if (!vals.SERVER_TOKEN) missing.push("SERVER_TOKEN");
     if (!vals.CLIENT_TOKEN) missing.push("CLIENT_TOKEN");
-    if (!/^\d+$/.test(vals.CLONE_GUILD_ID)) missing.push("CLONE_GUILD_ID");
+    if (!hasAtLeastOneMapping) missing.push("GUILD_MAPPINGS");
 
     return { ok, missing };
   }
@@ -1139,6 +1747,26 @@
   function validateConfigAndToggle({ decorate = false } = {}) {
     const btn = document.getElementById("toggle-btn");
     const form = document.getElementById("toggle-form");
+
+    const saveBtn = document.getElementById("cfg-save-btn");
+    const cancelBtn = document.getElementById("cfg-cancel-btn");
+
+    const runningNow = !!(RUNTIME_CACHE.server || RUNTIME_CACHE.client);
+
+    if (runningNow) {
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.classList.add("disabled-btn");
+        saveBtn.title = "Stop the bot to edit global configuration";
+      }
+      if (cancelBtn) {
+        cancelBtn.disabled = true;
+        cancelBtn.classList.add("disabled-btn");
+        cancelBtn.title = "Stop the bot to edit global configuration";
+      }
+      return;
+    }
+
     if (!btn || !form) return;
 
     const { ok, missing } = configState();
@@ -1152,23 +1780,1786 @@
     const running =
       form.action.endsWith("/stop") ||
       btn.textContent.trim().toLowerCase() === "stop";
+
     const blockStart = !ok && !running;
     btn.dataset.invalid = blockStart ? "1" : "0";
     btn.title = blockStart
-      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, CLONE_GUILD_ID to start."
+      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, and at least one Guild Mapping to start."
       : "";
     btn.disabled = !!toggleLocked || blockStart;
+
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.classList.remove("disabled-btn");
+      saveBtn.title = "";
+    }
+    if (cancelBtn) {
+      cancelBtn.disabled = false;
+      cancelBtn.classList.remove("disabled-btn");
+      cancelBtn.title = "";
+    }
+  }
+
+  function collectMappingForm() {
+    const id = document.getElementById("map_mapping_id").value.trim() || null;
+    const mapping_name = document
+      .getElementById("map_mapping_name")
+      .value.trim();
+
+    const original_guild_id = document
+      .getElementById("map_original_guild_id")
+      .value.trim();
+
+    const cloned_guild_id = document
+      .getElementById("map_cloned_guild_id")
+      .value.trim();
+
+    const settings = {};
+    document
+      .querySelectorAll("#mapping-form select[id^='map_']")
+      .forEach((sel) => {
+        const key = sel.id.replace(/^map_/, "");
+        const val = sel.value;
+        settings[key] = String(val).toLowerCase() === "true";
+      });
+
+    return {
+      mapping_id: id,
+      mapping_name,
+      original_guild_id,
+      cloned_guild_id,
+      settings,
+    };
+  }
+
+  document.querySelectorAll(".reveal-btn").forEach((btn) => {
+    btn.removeAttribute("title");
+
+    btn.addEventListener("click", () => {
+      const cfgForm = document.getElementById("cfg-form");
+      if (cfgForm && cfgForm.classList.contains("cfg-locked")) {
+        return;
+      }
+
+      const targetId = btn.getAttribute("data-target");
+      const input = document.getElementById(targetId);
+      if (!input) return;
+
+      const eyeOn = btn.querySelector(".icon-eye");
+      const eyeOff = btn.querySelector(".icon-eye-off");
+
+      if (input.type === "password") {
+        input.type = "text";
+        btn.setAttribute("aria-pressed", "true");
+        btn.setAttribute("aria-label", "Hide " + targetId);
+
+        if (eyeOn) eyeOn.style.display = "none";
+        if (eyeOff) eyeOff.style.display = "";
+      } else {
+        input.type = "password";
+        btn.setAttribute("aria-pressed", "false");
+        btn.setAttribute("aria-label", "Show " + targetId);
+
+        if (eyeOn) eyeOn.style.display = "";
+        if (eyeOff) eyeOff.style.display = "none";
+      }
+    });
+  });
+
+  function closeMappingModal() {
+    const modal = document.getElementById("mapping-modal");
+    if (!modal) return;
+
+    if (modal._outsideClickHandler) {
+      modal.removeEventListener("mousedown", modal._outsideClickHandler);
+      modal._outsideClickHandler = null;
+    }
+
+    const active = document.activeElement;
+    if (active && modal.contains(active)) {
+      try {
+        active.blur();
+      } catch {}
+    }
+
+    setInert(modal, true);
+    modal.classList.remove("show");
+    modal.setAttribute("aria-hidden", "true");
+
+    document.body.classList.remove("body-lock-scroll");
+
+    if (lastFocusMapping && typeof lastFocusMapping.focus === "function") {
+      try {
+        lastFocusMapping.focus();
+      } catch {}
+    }
+    lastFocusMapping = null;
+
+    MAPPING_BASELINE = "";
+    const cancelBtn = document.getElementById("mapping-cancel-btn");
+    if (cancelBtn) {
+      cancelBtn.hidden = true;
+    }
+
+    const settingsSearch = document.getElementById("mappingSettingsSearch");
+    if (settingsSearch) {
+      settingsSearch.value = "";
+      settingsSearch.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  }
+
+  function openMappingModal(mapping) {
+    const modal = document.getElementById("mapping-modal");
+    if (!modal) return;
+
+    lastFocusMapping = document.activeElement;
+
+    const idInput = document.getElementById("map_mapping_id");
+    const nameInput = document.getElementById("map_mapping_name");
+    const hostInput = document.getElementById("map_original_guild_id");
+    const cloneInput = document.getElementById("map_cloned_guild_id");
+
+    const subtleEl = document.getElementById("mapping-id-subtle");
+
+    const searchInput = document.getElementById("mappingSettingsSearch");
+    if (searchInput) {
+      searchInput.value = "";
+    }
+    setupMappingSettingsSearch();
+
+    mapValidated = false;
+    bindMappingFieldListeners();
+    [nameInput, hostInput, cloneInput].forEach((el) => {
+      if (!el) return;
+      el.classList.remove("is-invalid", "flash");
+    });
+
+    const isEdit = !!mapping;
+
+    if (idInput) idInput.value = (isEdit && mapping.mapping_id) || "";
+    if (nameInput) nameInput.value = (isEdit && mapping.mapping_name) || "";
+    if (hostInput)
+      hostInput.value = (isEdit && mapping.original_guild_id) || "";
+    if (cloneInput)
+      cloneInput.value = (isEdit && mapping.cloned_guild_id) || "";
+
+    if (subtleEl) {
+      if (isEdit && mapping.mapping_id) {
+        subtleEl.hidden = false;
+        subtleEl.textContent = `${mapping.mapping_id}`;
+      } else {
+        subtleEl.hidden = true;
+        subtleEl.textContent = "";
+      }
+    }
+
+    document
+      .querySelectorAll("#mapping-form select[id^='map_']")
+      .forEach((sel) => {
+        const key = sel.id.replace(/^map_/, "");
+
+        let rawVal;
+        if (isEdit && mapping.settings && key in mapping.settings) {
+          rawVal = mapping.settings[key];
+        } else {
+          rawVal = DEFAULT_MAPPING_SETTINGS[key];
+        }
+
+        let normalized;
+        if (typeof rawVal === "boolean") {
+          normalized = rawVal;
+        } else if (typeof rawVal === "string") {
+          const lower = rawVal.toLowerCase();
+          if (lower === "true") {
+            normalized = true;
+          } else if (lower === "false") {
+            normalized = false;
+          } else {
+            normalized = !!rawVal;
+          }
+        } else {
+          normalized = !!rawVal;
+        }
+
+        sel.value = normalized ? "True" : "False";
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+
+    const mappingFormEl = document.getElementById("mapping-form");
+    if (mappingFormEl) {
+      MAPPING_BASELINE = snapshotForm(mappingFormEl);
+
+      if (!mappingFormEl._mapDirtyBound) {
+        mappingFormEl._mapDirtyBound = true;
+        const handler = () => updateMappingCancelVisibility();
+        mappingFormEl.addEventListener("input", handler);
+        mappingFormEl.addEventListener("change", handler);
+      }
+    } else {
+      MAPPING_BASELINE = "";
+    }
+
+    const cancelBtn = document.getElementById("mapping-cancel-btn");
+    if (cancelBtn) {
+      cancelBtn.hidden = true;
+      cancelBtn.onclick = (e) => {
+        e.preventDefault();
+        resetMappingFormToBaseline();
+      };
+    }
+
+    const headerCloseBtn = document.getElementById("mapping-close");
+    if (headerCloseBtn) {
+      headerCloseBtn.onclick = maybeCloseMappingModal;
+    }
+
+    updateMappingCancelVisibility();
+
+    setInert(modal, false);
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("body-lock-scroll");
+
+    const firstField =
+      nameInput || document.getElementById("mapping-save-btn") || modal;
+    setTimeout(() => {
+      if (firstField && typeof firstField.focus === "function") {
+        try {
+          firstField.focus();
+        } catch {}
+      }
+    }, 0);
+
+    modal._outsideClickHandler = function (evt) {
+      const contentEl = modal.querySelector(".modal-content");
+      if (contentEl && !contentEl.contains(evt.target)) {
+        maybeCloseMappingModal();
+      }
+    };
+    modal.addEventListener("mousedown", modal._outsideClickHandler);
+  }
+
+  window.openMappingModal = openMappingModal;
+  window.closeMappingModal = closeMappingModal;
+
+  function setMappingSaveBusy(isBusy) {
+    const btn = document.getElementById("mapping-save-btn");
+    if (!btn) return;
+
+    if (isBusy) {
+      if (!btn.dataset.origLabel) {
+        btn.dataset.origLabel = btn.textContent.trim() || "Save Mapping";
+      }
+      btn.disabled = true;
+      btn.textContent = "Saving…";
+    } else {
+      btn.disabled = false;
+      btn.textContent = btn.dataset.origLabel || "Save Mapping";
+    }
+  }
+
+  async function saveMappingFromModal() {
+    if (saveMappingFromModal._busy) return;
+    saveMappingFromModal._busy = true;
+
+    mapValidated = true;
+    const { ok, firstBad } = validateMappingFields({ decorate: true });
+    if (!ok) {
+      const active = document.activeElement;
+      if (
+        firstBad &&
+        typeof firstBad.focus === "function" &&
+        firstBad !== active
+      ) {
+        firstBad.focus();
+      }
+
+      saveMappingFromModal._busy = false;
+      return;
+    }
+
+    setMappingSaveBusy(true);
+
+    const data = collectMappingForm();
+    const isEdit = !!data.mapping_id;
+
+    const url = isEdit
+      ? `/api/guild-mappings/${encodeURIComponent(data.mapping_id)}`
+      : "/api/guild-mappings";
+    const method = isEdit ? "PATCH" : "POST";
+
+    const payload = {
+      mapping_name: data.mapping_name,
+      original_guild_id: data.original_guild_id,
+      cloned_guild_id: data.cloned_guild_id,
+
+      original_guild_name: "",
+      cloned_guild_name: "",
+      settings: data.settings,
+    };
+
+    let res;
+    try {
+      res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch (netErr) {
+      showToast("Network error while saving mapping.", {
+        type: "error",
+        timeout: 7000,
+      });
+
+      setMappingSaveBusy(false);
+      saveMappingFromModal._busy = false;
+      return;
+    }
+
+    if (!res.ok) {
+      let msg = "Failed to save mapping.";
+      try {
+        const errJson = await res.json();
+        if (errJson && errJson.error) {
+          msg = errJson.error;
+        } else if (errJson && errJson.message) {
+          msg = errJson.message;
+        }
+      } catch {}
+
+      showToast(msg, {
+        type: "error",
+        timeout: 7000,
+      });
+
+      setMappingSaveBusy(false);
+      saveMappingFromModal._busy = false;
+      return;
+    }
+
+    await refreshGuildMappings();
+    closeMappingModal();
+    validateConfigAndToggle({ decorate: false });
+
+    showToast(isEdit ? "Mapping updated." : "Mapping created.", {
+      type: "success",
+    });
+
+    if (!isEdit) {
+      triggerConfetti();
+    }
+
+    setMappingSaveBusy(false);
+    saveMappingFromModal._busy = false;
+  }
+
+  function closeConfirm() {
+    if (!cModal) return;
+
+    const active = document.activeElement;
+    if (active && cModal.contains(active)) {
+      try {
+        active.blur();
+      } catch {}
+    }
+
+    setInert(cModal, true);
+    cModal.classList.remove("show");
+    cModal.setAttribute("aria-hidden", "true");
+
+    const anyOtherOpen = document.querySelector(
+      "#filters-modal.show, " +
+        "#mapping-modal.show, " +
+        "#log-modal.show, " +
+        "#roleBlocksModal.show, " +
+        "#filterObjectsModal.show, " +
+        "#confirm-modal.show"
+    );
+    if (!anyOtherOpen) {
+      document.body.classList.remove("body-lock-scroll");
+    }
+
+    if (lastFocusConfirm && typeof lastFocusConfirm.blur === "function") {
+      try {
+        lastFocusConfirm.blur();
+      } catch {}
+    }
+    lastFocusConfirm = null;
+
+    confirmResolve = null;
+    confirmReject = null;
+  }
+
+  function closeFiltersModal() {
+    const modal = document.getElementById("filters-modal");
+    if (!modal) return;
+
+    const active = document.activeElement;
+    if (active && modal.contains(active)) {
+      try {
+        active.blur();
+      } catch {}
+    }
+
+    setInert(modal, true);
+    modal.classList.remove("show");
+    modal.setAttribute("aria-hidden", "true");
+
+    document.body.classList.remove("body-lock-scroll");
+
+    if (lastFocusFilters && typeof lastFocusFilters.focus === "function") {
+      try {
+        lastFocusFilters.focus();
+      } catch {}
+    }
+    lastFocusFilters = null;
+    currentFilterMapping = null;
+  }
+
+  function filtersFormIsDirty() {
+    const form = document.getElementById("form-filters");
+    if (!form) return false;
+    return snapshotForm(form) !== FILTERS_BASELINE;
+  }
+
+  function mappingFormIsDirty() {
+    const form = document.getElementById("mapping-form");
+    if (!form) return false;
+    if (!MAPPING_BASELINE) return false;
+    return snapshotForm(form) !== MAPPING_BASELINE;
+  }
+
+  function updateMappingCancelVisibility() {
+    const cancelBtn = document.getElementById("mapping-cancel-btn");
+    if (!cancelBtn) return;
+    cancelBtn.hidden = !mappingFormIsDirty();
+  }
+
+  function maybeCloseMappingModal() {
+    const modal = document.getElementById("mapping-modal");
+    if (!modal) return;
+
+    // If it's not showing or not dirty, just close
+    if (!modal.classList.contains("show") || !mappingFormIsDirty()) {
+      closeMappingModal();
+      return;
+    }
+
+    // Don't stack confirm dialogs
+    if (cModal && cModal.classList.contains("show")) {
+      return;
+    }
+
+    openConfirm({
+      title: "Discard unsaved mapping changes?",
+      body: "You have unsaved changes to this mapping. If you close now, your changes will be lost.",
+      confirmText: "Discard changes",
+      confirmClass: "btn-ghost-red",
+      showCancel: true,
+      onConfirm: () => {
+        closeMappingModal();
+      },
+    });
+  }
+
+  function resetMappingFormToBaseline() {
+    const form = document.getElementById("mapping-form");
+    if (!form || !MAPPING_BASELINE) return;
+
+    const params = new URLSearchParams(MAPPING_BASELINE);
+
+    Array.from(form.elements).forEach((el) => {
+      const name = el.name;
+      if (!name) return;
+
+      if (el.type === "submit" || el.type === "button") return;
+
+      // Checkboxes / radios (you probably don't have any here, but safe anyway)
+      if (el.type === "checkbox" || el.type === "radio") {
+        const values = params.getAll(name);
+        el.checked = values.includes(el.value);
+        return;
+      }
+
+      const val = params.get(name);
+      el.value = val != null ? val : "";
+
+      if (el.tagName === "SELECT") {
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+      } else {
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+
+    mapValidated = false;
+    const { name, host, clone } = getMappingInputs();
+    [name, host, clone].forEach((el) => {
+      if (!el) return;
+      el.classList.remove("is-invalid", "flash");
+    });
+
+    updateMappingCancelVisibility();
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+
+    const mappingModal = document.getElementById("mapping-modal");
+    if (mappingModal && mappingModal.classList.contains("show")) {
+      e.preventDefault();
+      maybeCloseMappingModal();
+    }
+  });
+
+  function maybeCloseFiltersModal() {
+    // If the confirm modal is already open, don't stack another one
+    if (cModal && cModal.classList.contains("show")) {
+      return;
+    }
+
+    const modal = document.getElementById("filters-modal");
+    if (!modal || !modal.classList.contains("show")) {
+      closeFiltersModal();
+      return;
+    }
+
+    if (!filtersFormIsDirty()) {
+      closeFiltersModal();
+      return;
+    }
+
+    openConfirm({
+      title: "Discard unsaved filter changes?",
+      body: "You have unsaved changes to these filters. If you close now, your changes will be lost.",
+      confirmText: "Discard changes",
+      confirmClass: "btn-ghost-red",
+      showCancel: true,
+      onConfirm: () => {
+        closeFiltersModal();
+      },
+    });
+  }
+
+  async function openFiltersModal(mapping) {
+    const modal = document.getElementById("filters-modal");
+    if (!modal) return;
+
+    lastFocusFilters = document.activeElement;
+    currentFilterMapping = mapping || null;
+
+    const form = document.getElementById("form-filters");
+    const titleEl = document.getElementById("filters-title");
+    const mapIdInput = document.getElementById("filters_mapping_id");
+    const cancelBtn = document.getElementById("btn-cancel-filters");
+
+    const mid = mapping?.mapping_id || "";
+    if (mapIdInput) mapIdInput.value = mid;
+    if (titleEl) {
+      const niceName = mapping?.mapping_name || mid || "Filters";
+      titleEl.textContent = `Filters – ${niceName}`;
+    }
+
+    if (form) {
+      form.action = `/filters/${encodeURIComponent(mid)}/save`;
+    }
+
+    await loadFiltersIntoFormForMapping(mid);
+
+    if (form) {
+      FILTERS_BASELINE = snapshotForm(form);
+    }
+    if (cancelBtn) {
+      cancelBtn.hidden = true;
+    }
+
+    setInert(modal, false);
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("body-lock-scroll");
+
+    const xBtn = document.getElementById("filters-close");
+    if (xBtn) xBtn.onclick = maybeCloseFiltersModal;
+    if (cancelBtn) {
+      cancelBtn.onclick = async () => {
+        await loadFiltersIntoFormForMapping(mid);
+        const f2 = document.getElementById("form-filters");
+        if (f2) {
+          FILTERS_BASELINE = snapshotForm(f2);
+        }
+        cancelBtn.hidden = true;
+      };
+    }
+
+    if (modal._outsideClickHandler) {
+      modal.removeEventListener("mousedown", modal._outsideClickHandler);
+    }
+    modal._outsideClickHandler = function (evt) {
+      const contentEl = modal.querySelector(".modal-content");
+      if (contentEl && !contentEl.contains(evt.target)) {
+        maybeCloseFiltersModal();
+      }
+    };
+    modal.addEventListener("mousedown", modal._outsideClickHandler);
+
+    const firstField =
+      document.getElementById("wl_categories_input") ||
+      document.getElementById("filters-save-btn") ||
+      modal;
+    setTimeout(() => {
+      if (firstField && typeof firstField.focus === "function") {
+        try {
+          firstField.focus();
+        } catch {}
+      }
+    }, 0);
+  }
+
+  function setupRoleBlocksSearch() {
+    const input = document.getElementById("roleBlocksSearch");
+    if (!input) return;
+
+    if (input._boundForModal) return;
+    input._boundForModal = true;
+
+    input.addEventListener("input", () => {
+      const q = input.value.trim().toLowerCase();
+
+      if (!Array.isArray(ROLE_BLOCKS_ALL_ROLES)) return;
+
+      const filtered = !q
+        ? ROLE_BLOCKS_ALL_ROLES
+        : ROLE_BLOCKS_ALL_ROLES.filter((role) => {
+            const name = String(role.name || "").toLowerCase();
+            const idStr = String(role.id || "");
+            return name.includes(q) || idStr.includes(q);
+          });
+
+      renderRoleBlocksTable(filtered);
+    });
+  }
+
+  async function openRoleBlocksModal(mappingId) {
+    const modal = document.getElementById("roleBlocksModal");
+    const tbody = document.getElementById("roleBlocksTableBody");
+    const status = document.getElementById("filters-role-status");
+
+    if (!modal || !tbody) return;
+
+    const mid =
+      mappingId ||
+      (currentFilterMapping && currentFilterMapping.mapping_id) ||
+      document.getElementById("filters_mapping_id")?.value ||
+      "";
+
+    if (!mid) {
+      if (status) status.textContent = "No mapping selected.";
+      return;
+    }
+
+    if (status) status.textContent = "";
+
+    tbody.innerHTML =
+      '<tr><td colspan="3" class="text-center small">Loading…</td></tr>';
+
+    setInert(modal, false);
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("body-lock-scroll");
+
+    const closeBtn = document.getElementById("roleBlocksCloseBtn");
+    setTimeout(() => {
+      try {
+        (closeBtn || modal).focus();
+      } catch {}
+    }, 0);
+
+    if (modal._outsideClickHandler) {
+      modal.removeEventListener("mousedown", modal._outsideClickHandler);
+    }
+    modal._outsideClickHandler = function (evt) {
+      const contentEl = modal.querySelector(".modal-content");
+      if (contentEl && !contentEl.contains(evt.target)) {
+        closeRoleBlocksModal();
+      }
+    };
+    modal.addEventListener("mousedown", modal._outsideClickHandler);
+
+    if (CHIPS.blocked_roles) {
+      CURRENT_BLOCKED_ROLE_IDS = new Set(CHIPS.blocked_roles.get());
+    } else {
+      const hidden = document.getElementById("blocked_role_ids");
+      CURRENT_BLOCKED_ROLE_IDS = hidden
+        ? parseBlockedRolesCsv(hidden.value)
+        : new Set();
+    }
+
+    try {
+      const res = await fetch(
+        `/api/mappings/${encodeURIComponent(mid)}/roles`,
+        {
+          method: "GET",
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+        }
+      );
+
+      if (!res.ok) {
+        throw new Error(`Failed: ${res.status}`);
+      }
+
+      const payload = await res.json();
+      const roles = Array.isArray(payload.roles) ? payload.roles : [];
+
+      ROLE_BLOCKS_ALL_ROLES = roles;
+      renderRoleBlocksTable(roles);
+      setupRoleBlocksSearch();
+
+      if (status) status.textContent = "";
+    } catch (err) {
+      console.error("Error fetching roles:", err);
+      tbody.innerHTML =
+        '<tr><td colspan="3" class="text-center small">Failed to load roles.</td></tr>';
+      if (status) status.textContent = "Failed to load roles.";
+    }
+  }
+
+  async function fetchGuildTreeForMapping(mid, opts = {}) {
+    const { noCache = false } = opts;
+    const cacheKey = `filters_tree:${mid}`;
+
+    if (!noCache && RUNTIME_CACHE[cacheKey]) {
+      return RUNTIME_CACHE[cacheKey];
+    }
+
+    const res = await fetch(
+      `/api/mappings/${encodeURIComponent(mid)}/channels`,
+      {
+        method: "GET",
+        headers: { "X-Requested-With": "XMLHttpRequest" },
+      }
+    );
+
+    if (!res.ok) {
+      throw new Error(`Failed to fetch channels: ${res.status}`);
+    }
+
+    const payload = await res.json();
+    const categories = Array.isArray(payload.categories)
+      ? payload.categories
+      : [];
+    const channels = Array.isArray(payload.channels) ? payload.channels : [];
+
+    const tree = { categories, channels };
+
+    if (!noCache) {
+      RUNTIME_CACHE[cacheKey] = tree;
+    }
+
+    return tree;
+  }
+
+  function closeFilterObjectsModal() {
+    const modal = document.getElementById("filterObjectsModal");
+    const tbody = document.getElementById("filterObjectsTableBody");
+    const selectAll = document.getElementById("filterObjectsSelectAll");
+    const searchInput = document.getElementById("filterObjectsSearch");
+
+    if (!modal) return;
+
+    setInert(modal, true);
+    modal.classList.remove("show");
+    modal.setAttribute("aria-hidden", "true");
+
+    if (tbody) {
+      tbody.innerHTML = "";
+    }
+    if (selectAll) {
+      selectAll.checked = false;
+      selectAll.indeterminate = false;
+    }
+
+    if (searchInput) {
+      searchInput.value = "";
+    }
+
+    if (window.CURRENT_FILTER_PICKER && CURRENT_FILTER_PICKER.mappingId) {
+      const cacheKey = `filters_tree:${CURRENT_FILTER_PICKER.mappingId}`;
+      delete RUNTIME_CACHE[cacheKey];
+    }
+    CURRENT_FILTER_PICKER = null;
+
+    if (modal._outsideClickHandler) {
+      modal.removeEventListener("mousedown", modal._outsideClickHandler);
+      modal._outsideClickHandler = null;
+    }
+    if (modal._keyHandler) {
+      modal.removeEventListener("keydown", modal._keyHandler);
+      modal._keyHandler = null;
+    }
+
+    const anyOtherOpen = document.querySelector(
+      "#filters-modal.show, " +
+        "#mapping-modal.show, " +
+        "#log-modal.show, " +
+        "#roleBlocksModal.show, " +
+        "#confirm-modal.show"
+    );
+
+    if (!anyOtherOpen) {
+      document.body.classList.remove("body-lock-scroll");
+    }
+  }
+
+  function buildFilterObjectsRows(items, kind, catMap) {
+    return items
+      .map((obj) => {
+        const id = String(obj.id);
+        const safeName = escapeHtml(obj.name || `ID ${id}`);
+        const checked = CURRENT_FILTER_PICKER.selected.has(id)
+          ? " checked"
+          : "";
+
+        let catCell = "";
+        if (kind === "channel") {
+          const pid = obj.parent_id ? String(obj.parent_id) : "";
+          const parentName = pid && catMap.get(pid);
+          catCell = `<td class="filter-obj-cat">
+          <span class="filter-obj-cat-text">${escapeHtml(
+            parentName || ""
+          )}</span>
+        </td>`;
+        } else {
+          catCell = `<td class="filter-obj-cat"></td>`;
+        }
+
+        return `
+        <tr data-obj-id="${id}">
+          <td class="filter-obj-select-col">
+            <label class="checkbox-inline">
+              <input
+                type="checkbox"
+                class="role-block-toggle filter-obj-toggle"
+                data-obj-id="${id}"${checked}
+              />
+            </label>
+          </td>
+          <td class="filter-obj-name-col">
+            <span class="filter-obj-name">${safeName}</span>
+          </td>
+          ${catCell}
+          <td class="filter-obj-id-col"><code>${id}</code></td>
+        </tr>
+      `;
+      })
+      .join("");
+  }
+
+  function wireFilterObjectsTableInteractions() {
+    const tbody = document.getElementById("filterObjectsTableBody");
+    const selectAll = document.getElementById("filterObjectsSelectAll");
+    if (!tbody) return;
+
+    function getCheckboxes() {
+      return Array.from(tbody.querySelectorAll(".filter-obj-toggle"));
+    }
+
+    function updateSelectAllState() {
+      if (!selectAll) return;
+      const cbs = getCheckboxes();
+      const total = cbs.length;
+      const checkedCount = cbs.filter((cb) => cb.checked).length;
+
+      if (!total) {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
+      } else if (checkedCount === 0) {
+        selectAll.checked = false;
+        selectAll.indeterminate = false;
+      } else if (checkedCount === total) {
+        selectAll.checked = true;
+        selectAll.indeterminate = false;
+      } else {
+        selectAll.checked = false;
+        selectAll.indeterminate = true;
+      }
+    }
+
+    getCheckboxes().forEach((cb) => {
+      cb.addEventListener("change", (evt) => {
+        const id = evt.target.getAttribute("data-obj-id");
+        if (!id) return;
+
+        if (evt.target.checked) {
+          CURRENT_FILTER_PICKER.selected.add(id);
+        } else {
+          CURRENT_FILTER_PICKER.selected.delete(id);
+        }
+
+        updateSelectAllState();
+      });
+    });
+
+    if (selectAll) {
+      selectAll.onchange = () => {
+        const shouldCheck = !!selectAll.checked;
+        const cbs = getCheckboxes();
+
+        cbs.forEach((cb) => {
+          cb.checked = shouldCheck;
+          const id = cb.getAttribute("data-obj-id");
+          if (!id) return;
+          if (shouldCheck) {
+            CURRENT_FILTER_PICKER.selected.add(id);
+          } else {
+            CURRENT_FILTER_PICKER.selected.delete(id);
+          }
+        });
+
+        updateSelectAllState();
+      };
+    }
+
+    tbody.querySelectorAll("tr[data-obj-id]").forEach((row) => {
+      row.addEventListener("click", (evt) => {
+        if (evt.target.closest("input[type='checkbox']")) return;
+
+        const cb = row.querySelector(".filter-obj-toggle");
+        if (!cb) return;
+
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    });
+
+    updateSelectAllState();
+  }
+
+  function setupFilterObjectsSearch() {
+    const input = document.getElementById("filterObjectsSearch");
+    if (!input) return;
+
+    if (input._boundForModal) return;
+    input._boundForModal = true;
+
+    input.addEventListener("input", () => {
+      const q = input.value.trim().toLowerCase();
+      const tbody = document.getElementById("filterObjectsTableBody");
+      if (!tbody) return;
+
+      const items = Array.isArray(FILTER_OBJECTS_ALL_ITEMS)
+        ? FILTER_OBJECTS_ALL_ITEMS
+        : [];
+      if (!items.length) return;
+
+      const filtered = !q
+        ? items
+        : items.filter((obj) => {
+            const name = String(obj.name || "").toLowerCase();
+            const idStr = String(obj.id || "");
+
+            let catName = "";
+            if (FILTER_OBJECTS_KIND === "channel" && FILTER_OBJECTS_CATMAP) {
+              const pid = obj.parent_id ? String(obj.parent_id) : "";
+              catName = String(
+                FILTER_OBJECTS_CATMAP.get(pid) || ""
+              ).toLowerCase();
+            }
+
+            return (
+              name.includes(q) ||
+              idStr.includes(q) ||
+              (catName && catName.includes(q))
+            );
+          });
+
+      tbody.innerHTML = buildFilterObjectsRows(
+        filtered,
+        FILTER_OBJECTS_KIND,
+        FILTER_OBJECTS_CATMAP || new Map()
+      );
+
+      wireFilterObjectsTableInteractions();
+    });
+  }
+
+  async function openFilterObjectsModal(mappingId, options) {
+    const modal = document.getElementById("filterObjectsModal");
+    const tbody = document.getElementById("filterObjectsTableBody");
+    const titleEl = document.getElementById("filterObjectsTitle");
+    const helpEl = document.getElementById("filterObjectsHelp");
+    const nameHeader = document.getElementById("filterObjectsNameHeader");
+    const catHeader = document.getElementById("filterObjectsCategoryHeader");
+    const selectAll = document.getElementById("filterObjectsSelectAll");
+    const table = document.getElementById("filterObjectsTable");
+
+    if (!modal || !tbody) return;
+
+    if (table) {
+      table.classList.add("role-blocks-table", "filter-objects-table");
+    }
+
+    const mid =
+      mappingId ||
+      (currentFilterMapping && currentFilterMapping.mapping_id) ||
+      document.getElementById("filters_mapping_id")?.value ||
+      "";
+
+    tbody.innerHTML =
+      '<tr><td colspan="4" class="text-center small">Loading…</td></tr>';
+
+    if (!mid) {
+      tbody.innerHTML =
+        '<tr><td colspan="4" class="text-center small">No mapping selected.</td></tr>';
+      return;
+    }
+
+    const listKey = options.listKey;
+    const kind = options.kind;
+
+    const chip = CHIPS[listKey];
+    const baseIds = chip
+      ? chip.get()
+      : parseIdList(document.getElementById(listKey)?.value || "");
+
+    CURRENT_FILTER_PICKER = {
+      mappingId: mid,
+      listKey,
+      kind,
+      selected: new Set((baseIds || []).map(String)),
+    };
+
+    if (titleEl) {
+      const prefix = listKey.startsWith("wl_") ? "Allow" : "Block";
+      const what = kind === "category" ? "Categories" : "Channels";
+      titleEl.textContent = `${prefix} ${what}`;
+    }
+    if (helpEl) {
+      if (kind === "category") {
+        helpEl.textContent = listKey.startsWith("wl_")
+          ? "Only the selected categories will be cloned (including their channels)."
+          : "The selected categories (and their channels) will not be cloned.";
+      } else {
+        helpEl.textContent = listKey.startsWith("wl_")
+          ? "Only the selected channels will be cloned."
+          : "The selected channels will not be cloned.";
+      }
+    }
+    if (catHeader) {
+      catHeader.style.display = kind === "channel" ? "" : "none";
+    }
+
+    setInert(modal, false);
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("body-lock-scroll");
+
+    const closeBtn = document.getElementById("filterObjectsCloseBtn");
+    setTimeout(() => {
+      try {
+        (closeBtn || modal).focus();
+      } catch {}
+    }, 0);
+
+    if (modal._outsideClickHandler) {
+      modal.removeEventListener("mousedown", modal._outsideClickHandler);
+    }
+    modal._outsideClickHandler = function (evt) {
+      const contentEl = modal.querySelector(".modal-content");
+      if (contentEl && !contentEl.contains(evt.target)) {
+        closeFilterObjectsModal();
+      }
+    };
+    modal.addEventListener("mousedown", modal._outsideClickHandler);
+
+    if (modal._keyHandler) {
+      modal.removeEventListener("keydown", modal._keyHandler);
+    }
+    modal._keyHandler = function (evt) {
+      if (evt.key === "Escape" || evt.key === "Esc") {
+        evt.preventDefault();
+        evt.stopPropagation();
+        closeFilterObjectsModal();
+      }
+    };
+    modal.addEventListener("keydown", modal._keyHandler);
+
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      const tree = await fetchGuildTreeForMapping(mid, { noCache: true });
+      const categories = Array.isArray(tree.categories) ? tree.categories : [];
+      const channels = Array.isArray(tree.channels) ? tree.channels : [];
+
+      const catMap = new Map();
+      for (const c of categories) {
+        const id = String(c.id);
+        catMap.set(id, c.name || `Category ${id}`);
+      }
+
+      const items = kind === "category" ? categories : channels;
+      if (!items.length) {
+        tbody.innerHTML = `<tr><td colspan="4" class="text-center small">No ${
+          kind === "category" ? "categories" : "channels"
+        } found for this guild.</td></tr>`;
+        return;
+      }
+
+      FILTER_OBJECTS_ALL_ITEMS = items;
+      FILTER_OBJECTS_KIND = kind;
+      FILTER_OBJECTS_CATMAP = catMap;
+
+      tbody.innerHTML = buildFilterObjectsRows(items, kind, catMap);
+
+      wireFilterObjectsTableInteractions();
+      setupFilterObjectsSearch();
+    } catch (err) {
+      console.error("Error fetching guild channels/categories:", err);
+      tbody.innerHTML =
+        '<tr><td colspan="4" class="text-center small text-danger">Failed to fetch channels/categories from Discord.</td></tr>';
+    }
+  }
+
+  function renderRoleBlocksTable(roles) {
+    const tbody = document.getElementById("roleBlocksTableBody");
+    const selectAll = document.getElementById("roleBlocksSelectAll");
+    if (!tbody) return;
+
+    if (selectAll) {
+      selectAll.checked = false;
+      selectAll.indeterminate = false;
+    }
+
+    if (!roles.length) {
+      tbody.innerHTML =
+        '<tr><td colspan="3" class="text-center small">No roles found for this guild.</td></tr>';
+      return;
+    }
+
+    const rows = roles
+      .map((r) => {
+        const id = String(r.id);
+        const isBlocked = CURRENT_BLOCKED_ROLE_IDS.has(id);
+        const safeName = (r.name || "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+
+        const hex = (r.color_hex || "").trim() || "#99AAB5";
+
+        return `
+        <tr data-role-id="${id}">
+          <td>
+            <label class="checkbox-inline">
+              <input
+                type="checkbox"
+                class="role-block-toggle"
+                data-role-id="${id}"
+                ${isBlocked ? "checked" : ""}
+              />
+            </label>
+          </td>
+          <td>
+            <span class="role-pill" style="--role-color: ${hex}">
+              <span class="role-pill-text">${safeName}</span>
+            </span>
+          </td>
+          <td><code>${id}</code></td>
+        </tr>
+      `;
+      })
+      .join("");
+
+    tbody.innerHTML = rows;
+
+    tbody.querySelectorAll(".role-block-toggle").forEach((chk) => {
+      chk.addEventListener("change", (evt) => {
+        const rid = evt.target.getAttribute("data-role-id");
+        if (!rid) return;
+
+        if (evt.target.checked) {
+          CURRENT_BLOCKED_ROLE_IDS.add(rid);
+        } else {
+          CURRENT_BLOCKED_ROLE_IDS.delete(rid);
+        }
+
+        updateSelectAllState();
+      });
+    });
+
+    if (selectAll && !selectAll._bound) {
+      selectAll._bound = true;
+      selectAll.addEventListener("change", () => {
+        const checked = selectAll.checked;
+        const boxes = tbody.querySelectorAll(".role-block-toggle");
+        CURRENT_BLOCKED_ROLE_IDS.clear();
+
+        boxes.forEach((cb) => {
+          cb.checked = checked;
+          const rid = cb.getAttribute("data-role-id");
+          if (checked && rid) CURRENT_BLOCKED_ROLE_IDS.add(rid);
+        });
+
+        selectAll.indeterminate = false;
+      });
+    }
+
+    tbody.querySelectorAll("tr[data-role-id]").forEach((row) => {
+      row.addEventListener("click", (evt) => {
+        if (evt.target.closest("input[type='checkbox']")) return;
+
+        const cb = row.querySelector(".role-block-toggle");
+        if (!cb) return;
+
+        cb.checked = !cb.checked;
+        cb.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+    });
+
+    updateSelectAllState();
+  }
+
+  function updateSelectAllState() {
+    const tbody = document.getElementById("roleBlocksTableBody");
+    const selectAll = document.getElementById("roleBlocksSelectAll");
+    if (!tbody || !selectAll) return;
+
+    const boxes = Array.from(tbody.querySelectorAll(".role-block-toggle"));
+    if (!boxes.length) {
+      selectAll.checked = false;
+      selectAll.indeterminate = false;
+      return;
+    }
+
+    const checkedCount = boxes.filter((b) => b.checked).length;
+
+    if (checkedCount === 0) {
+      selectAll.checked = false;
+      selectAll.indeterminate = false;
+    } else if (checkedCount === boxes.length) {
+      selectAll.checked = true;
+      selectAll.indeterminate = false;
+    } else {
+      selectAll.checked = false;
+      selectAll.indeterminate = true;
+    }
+  }
+
+  function closeRoleBlocksModal() {
+    const modal = document.getElementById("roleBlocksModal");
+    if (!modal) return;
+
+    const active = document.activeElement;
+    if (active && modal.contains(active)) {
+      try {
+        active.blur();
+      } catch {}
+    }
+
+    const searchInput = document.getElementById("roleBlocksSearch");
+    if (searchInput) {
+      searchInput.value = "";
+    }
+
+    setInert(modal, true);
+    modal.classList.remove("show");
+    modal.setAttribute("aria-hidden", "true");
+
+    const anyOtherOpen = document.querySelector(
+      "#filters-modal.show, #mapping-modal.show, #log-modal.show, #confirm-modal.show"
+    );
+    if (!anyOtherOpen) {
+      document.body.classList.remove("body-lock-scroll");
+    }
+  }
+
+  window.openFiltersModal = openFiltersModal;
+  window.closeFiltersModal = closeFiltersModal;
+
+  function openConfirm({
+    title,
+    body,
+    confirmText = "OK",
+    confirmClass = "btn-ghost",
+    onConfirm,
+    showCancel = true,
+  }) {
+    if (!cModal) return;
+
+    if (cModal.parentNode) {
+      cModal.parentNode.appendChild(cModal);
+    }
+
+    confirmResolve = () => {
+      try {
+        onConfirm && onConfirm();
+      } finally {
+        closeConfirm();
+      }
+    };
+
+    confirmReject = () => closeConfirm();
+    lastFocusConfirm = document.activeElement;
+
+    cTitle.textContent = title || "Confirm";
+    cBody.textContent = body || "Are you sure?";
+    cBtnOk.textContent = confirmText || "OK";
+
+    cBtnOk.classList.remove(
+      "btn-primary",
+      "btn-outline",
+      "btn-ghost",
+      "btn-danger"
+    );
+    cBtnOk.classList.add(confirmClass || "btn-primary");
+
+    if (cBtnCa) {
+      if (showCancel) {
+        cBtnCa.removeAttribute("hidden");
+      } else {
+        cBtnCa.setAttribute("hidden", "");
+      }
+    }
+
+    cModal.classList.add("show");
+    setInert(cModal, false);
+    cModal.setAttribute("aria-hidden", "false");
+
+    document.body.classList.add("body-lock-scroll");
+
+    setTimeout(() => (cBtnOk || cModal).focus(), 0);
+  }
+
+  function confirmDeleteMapping(mapping) {
+    if (!mapping || !mapping.mapping_id) return;
+
+    const name = (mapping.mapping_name || "").trim();
+    const label = name ? `“${name}”` : `ID ${mapping.mapping_id}`;
+
+    openConfirm({
+      title: "Delete guild mapping?",
+      body: `This will remove the mapping ${label}. This cannot be undone.`,
+      confirmText: "Delete mapping",
+      confirmClass: "btn-ghost-red",
+      showCancel: true,
+      onConfirm: async () => {
+        try {
+          const res = await fetch(
+            `/api/guild-mappings/${encodeURIComponent(mapping.mapping_id)}`,
+            { method: "DELETE", credentials: "same-origin" }
+          );
+
+          if (!res.ok) {
+            const txt = await (async () => {
+              try {
+                return await res.text();
+              } catch {
+                return "";
+              }
+            })();
+            showToast(txt || `Delete failed (${res.status})`, {
+              type: "error",
+              timeout: 7000,
+            });
+            return;
+          }
+
+          showToast("Mapping deleted.", { type: "success" });
+          await refreshGuildMappings();
+
+          validateConfigAndToggle({ decorate: false });
+        } catch {
+          showToast("Network error", { type: "error" });
+        }
+      },
+    });
+  }
+
+  window.confirmDeleteMapping = confirmDeleteMapping;
+
+  function findMappingById(id) {
+    if (!id) return null;
+
+    const sid = String(id);
+    return (
+      GUILD_MAPPINGS.find((m) => m && String(m.mapping_id) === sid) || null
+    );
+  }
+
+  function renderGuildMappings() {
+    const listEl = document.getElementById("guild-mapping-list");
+    if (!listEl) return;
+
+    const searchInput = document.getElementById("mappingSearchInput");
+    const query = searchInput ? searchInput.value.trim().toLowerCase() : "";
+
+    let mappings = Array.isArray(GUILD_MAPPINGS) ? GUILD_MAPPINGS.slice() : [];
+
+    if (query) {
+      mappings = mappings.filter((m) => {
+        if (!m) return false;
+        const parts = [];
+
+        if (m.mapping_name) parts.push(m.mapping_name);
+        if (m.original_guild_name) parts.push(m.original_guild_name);
+        if (m.cloned_guild_name) parts.push(m.cloned_guild_name);
+        if (m.original_guild_id) parts.push(String(m.original_guild_id));
+        if (m.cloned_guild_id) parts.push(String(m.cloned_guild_id));
+
+        const haystack = parts.join(" ").toLowerCase();
+        return haystack.includes(query);
+      });
+    }
+
+    const mappingCardsHtml = mappings
+      .map((m) => {
+        const iconSrc = m.original_guild_icon_url || "/static/logo.png";
+
+        const statusRaw = (m.status || "active").toLowerCase();
+        const isPaused = statusRaw === "paused";
+
+        const statusIcon = isPaused ? ICONS.play : ICONS.pause;
+        const statusLabel = isPaused
+          ? "Resume cloning for this mapping"
+          : "Pause cloning for this mapping";
+
+        const statusBadgeHtml = isPaused
+          ? `<span class="status-pill status-pill-paused">Paused</span>`
+          : "";
+
+        return `
+        <div class="guild-card ${isPaused ? "is-paused" : "is-active"}"
+            data-id="${m.mapping_id}"
+            data-status="${statusRaw}">
+          <div class="guild-card-logo">
+            <img src="${iconSrc}" alt="" class="guild-card-logo-img">
+          </div>
+
+          <div class="guild-card-inner">
+            <div class="guild-card-main">
+              <div class="guild-card-name">
+                <div class="guild-card-name-title" title="${escapeHtml(
+                  m.mapping_name || ""
+                )}">
+                  ${escapeHtml(m.mapping_name || "")}
+                </div>
+              </div>
+
+              <div class="guild-card-actions">
+                <button class="btn-icon edit-mapping-btn"
+                        data-id="${m.mapping_id}"
+                        aria-label="Edit mapping"
+                        title="Settings">
+                  ${ICONS.settings}
+                </button>
+
+                <button class="btn-icon mapping-filters-btn"
+                        data-id="${m.mapping_id}"
+                        aria-label="Filters for this mapping"
+                        title="Filters">
+                  ${ICONS.filters}
+                </button>
+
+                <button class="btn-icon mapping-status-btn ${
+                  isPaused ? "is-paused" : "is-active"
+                }"
+                        data-id="${m.mapping_id}"
+                        type="button"
+                        aria-pressed="${isPaused ? "true" : "false"}"
+                        aria-label="${statusLabel}"
+                        title="${statusLabel}">
+                  ${statusIcon}
+                </button>
+
+                <button
+                  class="btn-icon delete-mapping-btn"
+                  type="button"
+                  data-action="delete"
+                  data-id="${m.mapping_id}"
+                  aria-label="Delete mapping"
+                  title="Delete mapping"
+                >
+                  ${ICONS.trash}
+                </button>
+              </div>
+            </div>
+            
+            <!-- Chip goes HERE, below the main section -->
+            ${
+              statusBadgeHtml
+                ? `
+              <div class="guild-card-status">
+                ${statusBadgeHtml}
+              </div>
+            `
+                : ""
+            }
+          </div>
+        </div>
+      `;
+      })
+      .join("");
+
+    const newCardHtml = `
+      <button
+        class="guild-card guild-card--new"
+        id="new-mapping-card"
+        type="button"
+        aria-label="Add new mapping"
+        title="Add new mapping"
+      >
+        <div class="new-card-inner">
+          <div class="new-card-plus">+</div>
+          <div class="new-card-label">Add Mapping</div>
+        </div>
+      </button>
+    `;
+
+    listEl.innerHTML = newCardHtml + mappingCardsHtml;
+
+    listEl.querySelectorAll(".edit-mapping-btn").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        const mapId = ev.currentTarget.getAttribute("data-id");
+        const mapping = findMappingById(mapId);
+        openMappingModal(mapping);
+      });
+    });
+
+    listEl.querySelectorAll(".mapping-filters-btn").forEach((btn) => {
+      btn.addEventListener("click", async (ev) => {
+        const mapId = ev.currentTarget.getAttribute("data-id");
+        const mapping = findMappingById(mapId);
+        await openFiltersModal(mapping);
+      });
+    });
+
+    listEl.querySelectorAll(".mapping-status-btn").forEach((btn) => {
+      btn.addEventListener("click", async (ev) => {
+        const mapId = ev.currentTarget.getAttribute("data-id");
+        if (!mapId) return;
+
+        const thisBtn = ev.currentTarget;
+        thisBtn.disabled = true;
+
+        try {
+          const res = await fetch(
+            `/api/guild-mappings/${encodeURIComponent(mapId)}/toggle-status`,
+            {
+              method: "POST",
+              credentials: "same-origin",
+            }
+          );
+
+          if (!res.ok) {
+            let msg = `Failed to update status (${res.status})`;
+            try {
+              const errJson = await res.json();
+              if (errJson && errJson.error) msg = errJson.error;
+            } catch {}
+            showToast(msg, { type: "error", timeout: 7000 });
+            return;
+          }
+
+          const data = await res.json();
+          const newStatus = (data.status || "").toLowerCase();
+
+          const mapping = findMappingById(mapId);
+          if (mapping) {
+            mapping.status = newStatus;
+          }
+
+          renderGuildMappings();
+
+          showToast(
+            newStatus === "paused"
+              ? "Mapping paused. It will no longer clone until resumed."
+              : "Mapping resumed. Cloning is active again.",
+            { type: "success" }
+          );
+
+          validateConfigAndToggle?.({ decorate: false });
+        } catch {
+          showToast("Network error while updating mapping status.", {
+            type: "error",
+          });
+        } finally {
+          thisBtn.disabled = false;
+        }
+      });
+    });
+
+    listEl.querySelectorAll(".delete-mapping-btn").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        const mapId = ev.currentTarget.getAttribute("data-id");
+        const mapping = findMappingById(mapId);
+        confirmDeleteMapping(mapping);
+      });
+    });
+
+    const newCardBtn = document.getElementById("new-mapping-card");
+    if (newCardBtn) {
+      newCardBtn.addEventListener("click", () => {
+        openMappingModal();
+      });
+    }
+
+    if (lastRunning === true) {
+      setGuildCardsLocked(true);
+    }
+  }
+
+  async function refreshGuildMappings() {
+    const res = await fetch("/api/guild-mappings", {
+      cache: "no-store",
+      credentials: "same-origin",
+    });
+    if (!res.ok) return;
+    const data = await res.json();
+    GUILD_MAPPINGS = data.mappings || [];
+    renderGuildMappings();
+    setGuildCardsLocked(lastRunning === true);
+    updateStartButtonOnly();
+  }
+
+  async function loadFiltersIntoFormForMapping(mid) {
+    const ff = document.getElementById("form-filters");
+    if (!ff) return;
+
+    const wlCats = document.getElementById("wl_categories");
+    const wlCh = document.getElementById("wl_channels");
+    const exCats = document.getElementById("ex_categories");
+    const exCh = document.getElementById("ex_channels");
+    const bw = document.getElementById("blocked_words");
+    const hiddenBlockedRoles = document.getElementById("blocked_role_ids");
+
+    const wlUsers = document.getElementById("wl_users");
+    const blUsers = document.getElementById("bl_users");
+
+    if (wlCats) wlCats.value = "";
+    if (wlCh) wlCh.value = "";
+    if (exCats) exCats.value = "";
+    if (exCh) exCh.value = "";
+    if (bw) bw.value = "";
+    if (hiddenBlockedRoles) hiddenBlockedRoles.value = "";
+    if (wlUsers) wlUsers.value = "";
+    if (blUsers) blUsers.value = "";
+
+    if (CHIPS.wl_categories) CHIPS.wl_categories.set([]);
+    if (CHIPS.wl_channels) CHIPS.wl_channels.set([]);
+    if (CHIPS.ex_categories) CHIPS.ex_categories.set([]);
+    if (CHIPS.ex_channels) CHIPS.ex_channels.set([]);
+    if (CHIPS.blocked_words) CHIPS.blocked_words.set([]);
+    if (CHIPS.blocked_roles) CHIPS.blocked_roles.set([]);
+    if (CHIPS.wl_users) CHIPS.wl_users.set([]);
+    if (CHIPS.bl_users) CHIPS.bl_users.set([]);
+
+    if (!mid) return;
+
+    try {
+      const res = await fetch(`/filters/${encodeURIComponent(mid)}`, {
+        method: "GET",
+        credentials: "same-origin",
+      });
+      if (!res.ok) throw new Error("bad");
+
+      const data = await res.json();
+
+      if (data && typeof data === "object") {
+        if (Array.isArray(data.wl_categories) && CHIPS.wl_categories) {
+          CHIPS.wl_categories.set(data.wl_categories);
+        }
+        if (Array.isArray(data.wl_channels) && CHIPS.wl_channels) {
+          CHIPS.wl_channels.set(data.wl_channels);
+        }
+        if (Array.isArray(data.ex_categories) && CHIPS.ex_categories) {
+          CHIPS.ex_categories.set(data.ex_categories);
+        }
+        if (Array.isArray(data.ex_channels) && CHIPS.ex_channels) {
+          CHIPS.ex_channels.set(data.ex_channels);
+        }
+        if (Array.isArray(data.blocked_words) && CHIPS.blocked_words) {
+          CHIPS.blocked_words.set(data.blocked_words);
+        }
+
+        let roleIds = [];
+        if (Array.isArray(data.blocked_role_ids)) {
+          roleIds = data.blocked_role_ids.map(String);
+        } else if (typeof data.blocked_role_ids_csv === "string") {
+          roleIds = parseIdList(data.blocked_role_ids_csv);
+        } else if (Array.isArray(data.blocked_roles)) {
+          roleIds = data.blocked_roles.map(String);
+        }
+
+        if (hiddenBlockedRoles) {
+          hiddenBlockedRoles.value = roleIds.join(",");
+          hiddenBlockedRoles.dispatchEvent(
+            new Event("input", { bubbles: true })
+          );
+        }
+        if (CHIPS.blocked_roles) {
+          CHIPS.blocked_roles.set(roleIds);
+        }
+
+        if (Array.isArray(data.wl_users)) {
+          if (wlUsers) {
+            wlUsers.value = data.wl_users.join(",");
+            wlUsers.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          if (CHIPS.wl_users) {
+            CHIPS.wl_users.set(data.wl_users);
+          }
+        }
+
+        if (Array.isArray(data.bl_users)) {
+          if (blUsers) {
+            blUsers.value = data.bl_users.join(",");
+            blUsers.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+          if (CHIPS.bl_users) {
+            CHIPS.bl_users.set(data.bl_users);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to load filters", err);
+    }
+  }
+
+  function setupMappingSettingsSearch() {
+    const input = document.getElementById("mappingSettingsSearch");
+    if (!input) return;
+    if (input._bound) return;
+    input._bound = true;
+
+    function applyFilter() {
+      const q = input.value.trim().toLowerCase();
+
+      const fields = document.querySelectorAll(
+        "#mapping-form .mapping-setting-field"
+      );
+
+      fields.forEach((field) => {
+        const key = (field.dataset.settingKey || "").toLowerCase();
+        const label = (
+          field.querySelector(".label-text")?.textContent || ""
+        ).toLowerCase();
+
+        const match = !q || key.includes(q) || label.includes(q);
+        field.style.display = match ? "" : "none";
+      });
+    }
+
+    input.addEventListener("input", applyFilter);
+
+    applyFilter();
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    const cModal = document.getElementById("confirm-modal");
-    const cTitle = document.getElementById("confirm-title");
-    const cBody = document.getElementById("confirm-body");
-    const cBtnOk = document.getElementById("confirm-okay");
-    const cBtnX = document.getElementById("confirm-close");
-    const cBtnCa = document.getElementById("confirm-cancel");
-    const cBack = cModal ? cModal.querySelector(".modal-backdrop") : null;
-
+    cModal = document.getElementById("confirm-modal");
+    cTitle = document.getElementById("confirm-title");
+    cBody = document.getElementById("confirm-body");
+    cBtnOk = document.getElementById("confirm-okay");
+    cBtnX = document.getElementById("confirm-close");
+    cBtnCa = document.getElementById("confirm-cancel");
+    cBack = cModal ? cModal.querySelector(".modal-backdrop") : null;
     refreshFooterVersion();
     setInterval(refreshFooterVersion, 600_000);
 
@@ -1185,13 +3576,173 @@
       });
     });
 
+    setupMappingSettingsSearch();
+
+    const fetchBtn = document.getElementById("filters-role-refresh");
+    const applyBtn = document.getElementById("roleBlocksApply");
+    const cancelBtn = document.getElementById("roleBlocksCancel");
+    const xBtn = document.getElementById("roleBlocksCloseBtn");
+    const modal = document.getElementById("roleBlocksModal");
+
+    const filterBrowseButtons = document.querySelectorAll(".filter-fetch-btn");
+    filterBrowseButtons.forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const listKey = btn.getAttribute("data-filter-target");
+        const kind = btn.getAttribute("data-filter-kind");
+        if (!listKey || !kind) return;
+
+        const mid =
+          (currentFilterMapping && currentFilterMapping.mapping_id) ||
+          document.getElementById("filters_mapping_id")?.value ||
+          "";
+        if (!mid) return;
+
+        await openFilterObjectsModal(mid, { listKey, kind });
+      });
+    });
+
+    const filterApply = document.getElementById("filterObjectsApply");
+    const filterCancel = document.getElementById("filterObjectsCancel");
+    const filterClose = document.getElementById("filterObjectsCloseBtn");
+
+    if (filterApply) {
+      filterApply.addEventListener("click", () => {
+        if (!CURRENT_FILTER_PICKER) {
+          closeFilterObjectsModal();
+          return;
+        }
+
+        const { listKey, selected } = CURRENT_FILTER_PICKER;
+        const list = Array.from(selected || []);
+
+        if (CHIPS[listKey]) {
+          CHIPS[listKey].set(list);
+        } else {
+          const hidden = document.getElementById(listKey);
+          if (hidden) {
+            hidden.value = list.join(",");
+            hidden.dispatchEvent(new Event("input", { bubbles: true }));
+          }
+        }
+
+        closeFilterObjectsModal();
+
+        // before checking if it's dirty
+        setTimeout(() => {
+          updateFiltersDirtyForModal();
+        }, 0);
+      });
+    }
+
+    [filterCancel, filterClose].forEach((btn) => {
+      if (btn) {
+        btn.addEventListener("click", () => {
+          closeFilterObjectsModal();
+        });
+      }
+    });
+
+    if (fetchBtn) {
+      fetchBtn.addEventListener("click", async () => {
+        const mid =
+          (currentFilterMapping && currentFilterMapping.mapping_id) ||
+          document.getElementById("filters_mapping_id")?.value ||
+          "";
+        await openRoleBlocksModal(mid);
+      });
+    }
+
+    if (applyBtn) {
+      applyBtn.addEventListener("click", () => {
+        const hidden = document.getElementById("blocked_role_ids");
+        const list = Array.from(CURRENT_BLOCKED_ROLE_IDS);
+
+        if (hidden) {
+          hidden.value = list.join(",");
+          hidden.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+        if (CHIPS.blocked_roles) {
+          CHIPS.blocked_roles.set(list);
+        }
+
+        closeRoleBlocksModal();
+      });
+    }
+
+    if (cancelBtn) {
+      cancelBtn.addEventListener("click", () => {
+        const hidden = document.getElementById("blocked_role_ids");
+
+        // Reset CURRENT_BLOCKED_ROLE_IDS to match what's *actually* blocked
+        if (CHIPS.blocked_roles) {
+          CURRENT_BLOCKED_ROLE_IDS = new Set(CHIPS.blocked_roles.get());
+        } else {
+          CURRENT_BLOCKED_ROLE_IDS = hidden
+            ? parseBlockedRolesCsv(hidden.value)
+            : new Set();
+        }
+
+        closeRoleBlocksModal();
+      });
+    }
+
+    if (xBtn) {
+      xBtn.addEventListener("click", () => {
+        closeRoleBlocksModal();
+      });
+    }
+
+    if (modal) {
+      modal.addEventListener("keydown", (evt) => {
+        if (evt.key === "Escape") {
+          evt.stopPropagation();
+          closeRoleBlocksModal();
+        }
+      });
+    }
     const cfgForm = document.getElementById("cfg-form");
-    if (cfgForm)
+    const cfgSaveBtn = document.getElementById("cfg-save-btn");
+    const cfgCancelBtn = document.getElementById("cfg-cancel-btn");
+
+    if (cfgForm && cfgSaveBtn && cfgCancelBtn) {
+      BASELINES.cfg = snapshotForm(cfgForm);
+
+      setCfgButtonsVisible(false);
+
+      const updateCfgDirty = () => {
+        const dirty = snapshotForm(cfgForm) !== BASELINES.cfg;
+        setCfgButtonsVisible(dirty);
+      };
+
+      cfgForm.addEventListener("input", updateCfgDirty);
+      cfgForm.addEventListener("change", updateCfgDirty);
+
       cfgForm.addEventListener("reset", () => {
         cfgValidated = false;
-        setTimeout(() => validateConfigAndToggle({ decorate: false }), 0);
+        setTimeout(() => {
+          BASELINES.cfg = snapshotForm(cfgForm);
+          validateConfigAndToggle({ decorate: "clear" });
+          setCfgButtonsVisible(false);
+        }, 0);
       });
 
+      cfgCancelBtn.addEventListener("click", () => {
+        cfgForm.reset();
+
+        const cmdHidden = document.getElementById("COMMAND_USERS");
+        if (cmdHidden && typeof BASELINES.cmd_users_csv === "string") {
+          cmdHidden.value = BASELINES.cmd_users_csv;
+
+          if (CHIPS.cmd_users) {
+            CHIPS.cmd_users.set(parseIdList(BASELINES.cmd_users_csv));
+          }
+        }
+
+        cfgValidated = false;
+        validateConfigAndToggle({ decorate: "clear" });
+        setCfgButtonsVisible(false);
+      });
+    }
     updateToggleButton({ server: {}, client: {} });
 
     startStatusPoll(4000);
@@ -1199,97 +3750,54 @@
     attachAdminBus();
     initSlideMenu();
 
-    let confirmResolve = null,
-      confirmReject = null,
-      lastFocus = null;
-
-    function openConfirm({
-      title,
-      body,
-      confirmText = "OK",
-      confirmClass = "btn-ghost",
-      onConfirm,
-      showCancel = true,
-    }) {
-      if (!cModal) return;
-      confirmResolve = () => {
-        try {
-          onConfirm && onConfirm();
-        } finally {
-          closeConfirm();
-        }
-      };
-      confirmReject = () => closeConfirm();
-      lastFocusConfirm = document.activeElement;
-
-      cTitle.textContent = title || "Confirm";
-      cBody.textContent = body || "Are you sure?";
-      cBtnOk.textContent = confirmText || "OK";
-
-      cBtnOk.classList.remove(
-        "btn-primary",
-        "btn-outline",
-        "btn-ghost",
-        "btn-danger"
-      );
-      cBtnOk.classList.add(confirmClass || "btn-primary");
-
-      if (cBtnCa) {
-        if (showCancel) cBtnCa.removeAttribute("hidden");
-        else cBtnCa.setAttribute("hidden", "");
-      }
-
-      cModal.classList.add("show");
-      setInert(cModal, false);
-      cModal.setAttribute("aria-hidden", "false");
-
-      setTimeout(() => (cBtnOk || cModal).focus(), 0);
-    }
-
-    function closeConfirm() {
-      if (!cModal) return;
-      const active = document.activeElement;
-      if (active && cModal.contains(active)) {
-        try {
-          active.blur();
-        } catch {}
-      }
-      setInert(cModal, true);
-      cModal.classList.remove("show");
-      cModal.setAttribute("aria-hidden", "true");
-      if (lastFocusConfirm && typeof lastFocusConfirm.focus === "function") {
-        try {
-          lastFocusConfirm.focus();
-        } catch {}
-      }
-      lastFocusConfirm = null;
-      confirmResolve = null;
-      confirmReject = null;
-    }
-
     if (cBtnOk)
-      cBtnOk.addEventListener(
-        "click",
-        () => confirmResolve && confirmResolve()
-      );
+      cBtnOk.addEventListener("click", () => {
+        if (confirmResolve) confirmResolve();
+      });
+
     if (cBtnX)
-      cBtnX.addEventListener("click", () => confirmReject && confirmReject());
+      cBtnX.addEventListener("click", () => {
+        if (confirmReject) confirmReject();
+      });
+
     if (cBtnCa)
-      cBtnCa.addEventListener("click", () => confirmReject && confirmReject());
+      cBtnCa.addEventListener("click", () => {
+        if (confirmReject) confirmReject();
+      });
+
     if (cBack)
-      cBack.addEventListener("click", () => confirmReject && confirmReject());
+      cBack.addEventListener("click", () => {
+        if (confirmReject) confirmReject();
+      });
+
     document.addEventListener("keydown", (e) => {
-      if (cModal && cModal.classList.contains("show")) {
-        if (e.key === "Escape") {
-          e.preventDefault();
-          confirmReject && confirmReject();
-        }
-        if (e.key === "Enter") {
-          e.preventDefault();
-          confirmResolve && confirmResolve();
-        }
+      const open = cModal && cModal.classList.contains("show");
+      if (!open) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (confirmReject) confirmReject();
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (confirmResolve) confirmResolve();
       }
     });
+
+    function bindNewMappingCard() {
+      const newCard = document.getElementById("new-mapping-card");
+      if (!newCard) return;
+      newCard.addEventListener("click", () => {
+        openMappingModal(null);
+      });
+      newCard.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openMappingModal(null);
+        }
+      });
+    }
+
+    bindNewMappingCard();
 
     const clearForm = document.querySelector('form[action="/logs/clear"]');
     if (clearForm) {
@@ -1319,26 +3827,6 @@
       );
     }
 
-    const cfgCancel = document.getElementById("btn-cancel");
-    if (cfgForm && cfgCancel) {
-      BASELINES.cfg = snapshotForm(cfgForm);
-      cfgCancel.hidden = true;
-
-      const updateCfgDirty = () => {
-        cfgCancel.hidden = snapshotForm(cfgForm) === BASELINES.cfg;
-      };
-
-      cfgForm.addEventListener("input", updateCfgDirty);
-      cfgForm.addEventListener("change", updateCfgDirty);
-      cfgForm.addEventListener("reset", () => setTimeout(updateCfgDirty, 0));
-      cfgCancel.addEventListener("click", () => {
-        cfgForm.reset();
-
-        cfgValidated = false;
-        validateConfigAndToggle({ decorate: "clear" });
-      });
-    }
-
     const messages = {
       "/save": "Configuration saved.",
       "/start": "Start command sent.",
@@ -1352,11 +3840,13 @@
         e.preventDefault();
 
         const actionPath = new URL(f.action, location.origin).pathname;
+
         if (actionPath === "/save") {
           cfgValidated = true;
           const { missing } = configState();
           markInvalid(missing);
         }
+
         const btn = f.querySelector('button[type="submit"],button:not([type])');
 
         if (f.id === "toggle-form" && actionPath === "/start") {
@@ -1389,20 +3879,30 @@
           const isSuccess = res.ok || (res.status >= 300 && res.status < 400);
 
           if (isSuccess) {
-            showToast(messages[actionPath] || "Done.", { type: "success" });
-          
-            // NEW: when stopping, mark a wipe and clear persisted backfill state
+            const isFilterSave =
+              /^\/filters\/[^/]+\/save$/.test(actionPath) ||
+              actionPath === "/filters/save";
+
+            showToast(
+              isFilterSave ? "Filters saved." : messages[actionPath] || "Done.",
+              { type: "success" }
+            );
+
             if (actionPath === "/stop") {
               try {
-                // stamp a short-lived wipe flag
                 localStorage.setItem("bf:__wipe", String(Date.now()));
-                // clear persisted backfill sets so nothing rehydrates
-                ["bf:running","bf:launching","bf:pulling","bf:queued","bf:cleaning","bf:done_tasks"]
-                  .forEach((k) => localStorage.removeItem(k));
+                [
+                  "bf:running",
+                  "bf:launching",
+                  "bf:pulling",
+                  "bf:queued",
+                  "bf:cleaning",
+                  "bf:done_tasks",
+                ].forEach((k) => localStorage.removeItem(k));
                 sessionStorage.removeItem("bf:taskmap");
               } catch {}
             }
-          
+
             if (actionPath === "/start" || actionPath === "/stop") {
               burstStatusPoll(800, 15000, 4000);
             } else if (actionPath === "/save") {
@@ -1411,21 +3911,39 @@
                 BASELINES.cmd_users_csv = cmdHidden.value;
                 cmdHidden.defaultValue = cmdHidden.value;
               }
+
               if (cfgForm) {
                 BASELINES.cfg = snapshotForm(cfgForm);
-                document
-                  .getElementById("btn-cancel")
-                  ?.setAttribute("hidden", "");
+
+                Array.from(cfgForm.elements).forEach((el) => {
+                  if (!el || !el.tagName) return;
+                  const tag = el.tagName.toUpperCase();
+
+                  if (tag === "INPUT" || tag === "TEXTAREA") {
+                    if (el.type === "checkbox" || el.type === "radio") {
+                      el.defaultChecked = el.checked;
+                    } else {
+                      el.defaultValue = el.value;
+                    }
+                  } else if (tag === "SELECT") {
+                    Array.from(el.options).forEach((opt) => {
+                      opt.defaultSelected = opt.selected;
+                    });
+                  }
+                });
+
+                setCfgButtonsVisible(false);
               }
+
               fetchAndRenderStatus();
-            } else if (actionPath === "/filters/save") {
+            } else if (isFilterSave) {
               const ff = document.getElementById("form-filters");
               if (ff) {
-                BASELINES.filters = snapshotForm(ff);
-                document
-                  .getElementById("btn-cancel-filters")
-                  ?.setAttribute("hidden", "");
+                FILTERS_BASELINE = snapshotForm(ff);
               }
+              const cancelBtn = document.getElementById("btn-cancel-filters");
+              if (cancelBtn) cancelBtn.setAttribute("hidden", "");
+              closeFiltersModal();
             }
           } else {
             const text = await safeText(res);
@@ -1447,65 +3965,45 @@
     initCollapsibleCards();
     initChips();
 
-    const filtersForm = document.getElementById("form-filters");
-    const filtersCancel = document.getElementById("btn-cancel-filters");
-
-    function updateFiltersDirty() {
-      if (!filtersForm || !filtersCancel) return;
-      filtersCancel.hidden = snapshotForm(filtersForm) === BASELINES.filters;
-    }
-
-    async function loadFiltersIntoForm() {
-      try {
-        const res = await fetch("/filters", {
-          cache: "no-store",
-          credentials: "same-origin",
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        CHIPS["wl_categories"]?.set(data.whitelist?.category ?? []);
-        CHIPS["wl_channels"]?.set(data.whitelist?.channel ?? []);
-        CHIPS["ex_categories"]?.set(data.exclude?.category ?? []);
-        CHIPS["ex_channels"]?.set(data.exclude?.channel ?? []);
-      } catch (e) {
-        console.warn("Failed loading filters", e);
-      }
-    }
-
-    (async () => {
-      await loadFiltersIntoForm();
-      if (filtersForm) {
-        BASELINES.filters = snapshotForm(filtersForm);
-        if (filtersCancel) filtersCancel.hidden = true;
-      }
-    })();
-
-    const filtersCard = document.getElementById("card-filters");
-    if (filtersCard) {
-      filtersCard.addEventListener("card-toggled", async (e) => {
-        if (!e.detail?.collapsed) {
-          await loadFiltersIntoForm();
-          if (filtersForm) {
-            BASELINES.filters = snapshotForm(filtersForm);
-            updateFiltersDirty();
-          }
-        }
+    const modalFiltersForm = document.getElementById("form-filters");
+    if (modalFiltersForm) {
+      modalFiltersForm.addEventListener("input", updateFiltersDirtyForModal);
+      modalFiltersForm.addEventListener("change", updateFiltersDirtyForModal);
+      modalFiltersForm.addEventListener("reset", () => {
+        setTimeout(updateFiltersDirtyForModal, 0);
       });
     }
 
-    if (filtersForm && filtersCancel) {
-      filtersForm.addEventListener("input", updateFiltersDirty);
-      filtersForm.addEventListener("change", updateFiltersDirty);
-      filtersForm.addEventListener("reset", () =>
-        setTimeout(updateFiltersDirty, 0)
-      );
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
 
-      filtersCancel.addEventListener("click", async () => {
-        filtersForm.reset();
-        await loadFiltersIntoForm();
-        BASELINES.filters = snapshotForm(filtersForm);
-        filtersCancel.hidden = true;
-      });
+      const rb = document.getElementById("roleBlocksModal");
+      const fm = document.getElementById("filters-modal");
+      const om = document.getElementById("filterObjectsModal");
+
+      if (rb && rb.classList.contains("show")) {
+        e.preventDefault();
+        closeRoleBlocksModal();
+        return;
+      }
+
+      if (om && om.classList.contains("show")) {
+        e.preventDefault();
+        closeFilterObjectsModal();
+        return;
+      }
+
+      if (fm && fm.classList.contains("show")) {
+        e.preventDefault();
+        maybeCloseFiltersModal();
+      }
+    });
+
+    function updateFiltersDirtyForModal() {
+      const form = document.getElementById("form-filters");
+      const cancelBtn = document.getElementById("btn-cancel-filters");
+      if (!form || !cancelBtn) return;
+      cancelBtn.hidden = snapshotForm(form) === FILTERS_BASELINE;
     }
 
     (function initAdminRealtime() {
@@ -1586,7 +4084,9 @@
           try {
             const evt = JSON.parse(ev.data);
             if (evt.kind === "filters") {
-              loadFiltersIntoForm();
+              if (currentFilterMapping && currentFilterMapping.mapping_id) {
+                loadFiltersIntoFormForMapping(currentFilterMapping.mapping_id);
+              }
             }
             if (evt.kind === "status") {
               const prefix = evt.role === "server" ? "server" : "client";
@@ -1692,6 +4192,61 @@
 
       window.InfoDots = { init, prime };
     })();
+
+    const mapModal = document.getElementById("mapping-modal");
+    const mapClose = document.getElementById("mapping-close");
+    const mapCancel = document.getElementById("mapping-cancel-btn");
+    const mapForm = document.getElementById("mapping-form");
+    const addBtn = document.getElementById("add-mapping-btn");
+
+    if (addBtn) {
+      addBtn.addEventListener("click", () => {
+        openMappingModal(null);
+      });
+    }
+
+    if (mapClose) {
+      mapClose.addEventListener("click", (e) => {
+        e.preventDefault();
+        maybeCloseMappingModal();
+      });
+    }
+
+    if (mapCancel) {
+      mapCancel.addEventListener("click", (e) => {
+        e.preventDefault();
+        resetMappingFormToBaseline();
+      });
+    }
+
+    if (mapForm) {
+      mapForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        await saveMappingFromModal();
+      });
+    }
+
+    const mappingSearchInput = document.getElementById("mappingSearchInput");
+    if (mappingSearchInput) {
+      let searchDebounce;
+      mappingSearchInput.addEventListener("input", () => {
+        clearTimeout(searchDebounce);
+        searchDebounce = setTimeout(() => {
+          renderGuildMappings();
+        }, 80);
+      });
+
+      mappingSearchInput.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          mappingSearchInput.value = "";
+          renderGuildMappings();
+          mappingSearchInput.blur();
+        }
+      });
+    }
+
+    refreshGuildMappings();
   });
 
   ["server", "client"].forEach((role) => {
@@ -1717,8 +4272,6 @@
 
   function isFieldValid(key, raw) {
     const v = String(raw || "").trim();
-    if (key === "CLONE_GUILD_ID")
-      return /^\d+$/.test(v);
     return v.length > 0;
   }
 
@@ -1738,12 +4291,13 @@
     const running =
       form.action.endsWith("/stop") ||
       btn.textContent.trim().toLowerCase() === "stop";
+
     const blockStart = !ok && !running;
 
     btn.dataset.invalid = blockStart ? "1" : "0";
     btn.title = blockStart
-      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, CLONE_GUILD_ID to start."
+      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, and at least one Guild Mapping to start."
       : "";
     btn.disabled = !!toggleLocked || blockStart;
-  }  
+  }
 })();

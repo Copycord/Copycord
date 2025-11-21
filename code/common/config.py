@@ -15,7 +15,7 @@ from typing import Optional
 from common.db import DBManager
 
 logger = logging.getLogger(__name__)
-CURRENT_VERSION = "v2.8.7"
+CURRENT_VERSION = "v3.0.0"
 
 
 class Config:
@@ -45,18 +45,11 @@ class Config:
                 except Exception:
                     return 0
 
-        def _bool(key: str, env_default: str = "false") -> bool:
-            raw = (_str(key, env_default) or "").strip().lower()
-            return raw in ("1", "true", "yes", "y", "on")
-
         self.RELEASE_CHECK_INTERVAL_SECONDS = 1810
         self.DEFAULT_WEBHOOK_AVATAR_URL = "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/logo/logo.png"
 
         self.SERVER_TOKEN = _str("SERVER_TOKEN")
         self.CLIENT_TOKEN = _str("CLIENT_TOKEN")
-
-        self.CLONE_GUILD_ID = _str("CLONE_GUILD_ID", "0") or "0"
-        self.HOST_GUILD_ID = _str("HOST_GUILD_ID", "0") or "0"
 
         self.SERVER_WS_HOST = _str("SERVER_WS_HOST", "server") or "server"
         self.SERVER_WS_PORT = _int("SERVER_WS_PORT", "8765")
@@ -78,18 +71,6 @@ class Config:
 
         self.SYNC_INTERVAL_SECONDS = _int("SYNC_INTERVAL_SECONDS", "3600")
 
-        self.ENABLE_CLONING = _bool("ENABLE_CLONING", "true")
-        self.DELETE_CHANNELS = _bool("DELETE_CHANNELS", "false")
-        self.EDIT_MESSAGES = _bool("EDIT_MESSAGES", "true")
-        self.DELETE_MESSAGES = _bool("DELETE_MESSAGES", "true")
-        self.DELETE_THREADS = _bool("DELETE_THREADS", "false")
-        self.CLONE_EMOJI = _bool("CLONE_EMOJI", "true")
-        self.CLONE_STICKER = _bool("CLONE_STICKER", "true")
-        self.CLONE_ROLES = _bool("CLONE_ROLES", "true")
-        self.MIRROR_ROLE_PERMISSIONS = _bool("MIRROR_ROLE_PERMISSIONS", "true")
-        self.DELETE_ROLES = _bool("DELETE_ROLES", "true")
-        self.MIRROR_CHANNEL_PERMISSIONS = _bool("MIRROR_CHANNEL_PERMISSIONS", "true")
-
         cmd_users_raw = _str("COMMAND_USERS", os.getenv("COMMAND_USERS", "")) or ""
         self.COMMAND_USERS = []
         for tok in str(cmd_users_raw).split(","):
@@ -107,6 +88,39 @@ class Config:
         self.excluded_channel_ids: set[int] = set()
 
         self._load_filters_from_db()
+
+    def default_mapping_settings(self) -> dict:
+        return {
+            "ENABLE_CLONING": True,
+            "CLONE_MESSAGES": True,
+            "DELETE_CHANNELS": True,
+            "DELETE_THREADS": True,
+            "DELETE_ROLES": True,
+            "UPDATE_ROLES": True,
+            "DELETE_MESSAGES": True,
+            "MIRROR_CHANNEL_PERMISSIONS": False,
+            "CLONE_ROLES": True,
+            "CLONE_EMOJI": True,
+            "CLONE_STICKER": True,
+            "EDIT_MESSAGES": True,
+            "MIRROR_ROLE_PERMISSIONS": False,
+            "REPOSITION_CHANNELS": True,
+            "RENAME_CHANNELS": True,
+            "SYNC_CHANNEL_NSFW": False,
+            "SYNC_CHANNEL_TOPIC": False,
+            "SYNC_CHANNEL_SLOWMODE": False,
+            "REARRANGE_ROLES": False,
+            "CLONE_VOICE": True,
+            "CLONE_VOICE_PROPERTIES": False,
+            "CLONE_STAGE": True,
+            "CLONE_STAGE_PROPERTIES": False,
+            "CLONE_GUILD_ICON": False,
+            "CLONE_GUILD_BANNER": False,
+            "CLONE_GUILD_SPLASH": False,
+            "CLONE_GUILD_DISCOVERY_SPLASH": False,
+            "SYNC_GUILD_DESCRIPTION": False,
+            "SYNC_FORUM_PROPERTIES": False,
+        }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):
         await receiver.bot.wait_until_ready()
@@ -135,7 +149,9 @@ class Config:
             return (ta > tb) - (ta < tb)
 
         async def _maybe_update_status(text: str):
-            """Only server has update_status; client does not."""
+            """
+            Only server has update_status; client receivers might not.
+            """
             fn = getattr(receiver, "update_status", None)
             if callable(fn):
                 try:
@@ -147,17 +163,69 @@ class Config:
                     "Skipping status update (receiver has no update_status)"
                 )
 
+        async def _notify_all_guild_owners(latest_tag: str, latest_url: str) -> bool:
+            """
+            DM every unique guild owner for every guild this bot is currently in.
+            If an owner owns multiple guilds that the bot is in, they only get one DM.
+            Returns True if we successfully DM’d at least one owner.
+            """
+            notified_any = False
+            seen_owner_ids: set[int] = set()
+
+            for g in list(receiver.bot.guilds):
+
+                try:
+                    owner = g.owner or await g.fetch_member(g.owner_id)
+                except Exception as e:
+                    self.logger.warning(
+                        "[⚠️] Could not resolve owner for guild %s: %s", g.id, e
+                    )
+                    continue
+
+                owner_id = getattr(owner, "id", None)
+                if owner_id is None:
+                    self.logger.warning(
+                        "[⚠️] Guild %s has no resolvable owner id, skipping DM", g.id
+                    )
+                    continue
+
+                if owner_id in seen_owner_ids:
+                    continue
+
+                try:
+                    await owner.send(
+                        f"A new Copycord release is available: "
+                        f"`{latest_tag}`\n{latest_url}"
+                    )
+                    self.logger.info(
+                        "[⬆️] Sent release DM to guild owner %s (guild %s)",
+                        owner_id,
+                        g.id,
+                    )
+                    seen_owner_ids.add(owner_id)
+                    notified_any = True
+
+                except Exception as e:
+
+                    self.logger.warning(
+                        "[⚠️] Failed to DM owner %s in guild %s about %s: %s",
+                        owner_id,
+                        g.id,
+                        latest_tag,
+                        e,
+                    )
+
+            return notified_any
+
         while not receiver.bot.is_closed():
             try:
-                guild_id = getattr(receiver, "clone_guild_id", None) or getattr(
-                    receiver, "host_guild_id", None
-                )
 
                 try:
                     if db.get_version() != CURRENT_VERSION:
                         db.set_version(CURRENT_VERSION)
                     running_ver = db.get_version()
                 except AttributeError:
+
                     current_in_cfg = db.get_config("current_version", "")
                     if current_in_cfg != CURRENT_VERSION:
                         db.set_config("current_version", CURRENT_VERSION)
@@ -165,6 +233,7 @@ class Config:
 
                 latest_tag = (db.get_config("latest_tag") or "").strip()
                 latest_url = db.get_config("latest_url") or ""
+                last_seen = db.get_notified_version() or ""
 
                 if not latest_tag:
                     self.logger.debug(
@@ -175,49 +244,26 @@ class Config:
                     continue
 
                 cmp_remote_local = _cmp_versions(latest_tag, running_ver)
-                last_seen = db.get_notified_version() or ""
 
-                if _norm_version(latest_tag) != _norm_version(last_seen):
-                    self.logger.debug(
-                        "[📢] latest_tag observed from DB: %s (%s)",
-                        latest_tag,
-                        latest_url,
-                    )
+                is_new_to_us = _norm_version(latest_tag) != _norm_version(last_seen)
 
                 if cmp_remote_local > 0:
                     self.logger.info(
                         "[⬆️] Update available: %s %s", latest_tag, latest_url
                     )
+
                     await _maybe_update_status("New update available!")
 
-                    if (
-                        should_dm
-                        and guild_id
-                        and _norm_version(latest_tag) != _norm_version(last_seen)
-                    ):
-                        guild = receiver.bot.get_guild(guild_id)
-                        if guild:
-                            try:
-                                owner = guild.owner or await guild.fetch_member(
-                                    guild.owner_id
-                                )
-                                await owner.send(
-                                    f"A new Copycord release is available: **{latest_tag}**\n{latest_url}"
-                                )
-                                self.logger.debug(
-                                    "Sent release DM to guild owner %s", owner
-                                )
-                                db.set_notified_version(latest_tag)
-                            except Exception as e:
-                                self.logger.warning(
-                                    "[⚠️] Failed to send new version DM: %s", e
-                                )
+                    if should_dm and is_new_to_us:
+                        sent_any = await _notify_all_guild_owners(
+                            latest_tag, latest_url
+                        )
+                        if sent_any:
+                            db.set_notified_version(latest_tag)
                 else:
                     await _maybe_update_status(f"{running_ver}")
 
-                    if cmp_remote_local == 0 and _norm_version(
-                        latest_tag
-                    ) != _norm_version(last_seen):
+                    if cmp_remote_local == 0 and is_new_to_us:
                         db.set_notified_version(latest_tag)
 
                 try:

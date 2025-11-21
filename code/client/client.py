@@ -1,6 +1,6 @@
 # =============================================================================
 #  Copycord
-#  Copyright (C) 2025 github.com/Copycord
+#  Copyright (C) 2021 github.com/Copycord
 #
 #  This source code is released under the GNU Affero General Public License
 #  version 3.0. A copy of the license is available at:
@@ -12,19 +12,21 @@ import asyncio
 import contextlib
 import re
 import signal
-import unicodedata
 from datetime import datetime, timezone
 import logging
 from typing import Optional, Any
 import discord
-from discord import ChannelType, MessageType
-from discord.errors import Forbidden, HTTPException
+from discord import ChannelType, ForumChannel, MessageType
 import os
 from discord.ext import commands
 from common.config import Config, CURRENT_VERSION
 from common.db import DBManager
 from client.sitemap import SitemapService
-from client.message_utils import MessageUtils, _resolve_forward, _resolve_forward_via_snapshot
+from client.message_utils import (
+    MessageUtils,
+    _resolve_forward,
+    _resolve_forward_via_snapshot,
+)
 from common.websockets import WebsocketManager, AdminBus
 from client.scraper import MemberScraper
 from client.helpers import ClientUiController, dump_message_debug
@@ -76,10 +78,7 @@ class ClientListener:
     def __init__(self):
         self.config = Config(logger=logger)
         self.db = DBManager(self.config.DB_PATH)
-        raw = (self.config.HOST_GUILD_ID or "").strip()
-        self.host_guild_id = int(raw) if raw.isdigit() else None
-        self.blocked_keywords = self.db.get_blocked_keywords()
-        self._rebuild_blocklist(self.blocked_keywords)
+        self._mapped_original_ids: set[int] = set(self.db.get_all_original_guild_ids())
         self.start_time = datetime.now(timezone.utc)
         self.bot = commands.Bot(command_prefix="!", self_bot=True)
         self.msg = MessageUtils(self.bot)
@@ -114,6 +113,8 @@ class ClientListener:
         self.bot.event(self.on_guild_join)
         self.bot.event(self.on_guild_remove)
         self.bot.event(self.on_guild_update)
+        self.bot.event(self.on_guild_emojis_update)
+        self.bot.event(self.on_guild_stickers_update)
         self.bus = AdminBus(
             role="client", logger=logger, admin_ws_url=self.config.ADMIN_WS_URL
         )
@@ -124,18 +125,12 @@ class ClientListener:
             logger=logger,
         )
         self.sitemap = SitemapService(
-            bot=self.bot,
-            config=self.config,
-            db=self.db,
-            ws=self.ws,
-            host_guild_id=self.host_guild_id,
-            logger=logger,
+            bot=self.bot, config=self.config, db=self.db, ws=self.ws, logger=logger
         )
         self.ui_controller = ClientUiController(
             bus=self.bus,
             admin_base_url=self.config.ADMIN_WS_URL,
             bot=self.bot,
-            guild_id=self.host_guild_id,
             listener=self,
             logger=logging.getLogger("client.ui"),
         )
@@ -148,6 +143,7 @@ class ClientListener:
             maxsize=int(os.getenv("BACKFILL_QUEUE_MAX", "500"))
         )
         self._bf_active: set[int] = set()
+        self._bf_active_meta: dict[int, dict] = {}
         self._bf_queued: set[int] = set()
         self._bf_worker_task: asyncio.Task | None = None
         self._bf_waiters: dict[int, asyncio.Event] = {}
@@ -159,6 +155,21 @@ class ClientListener:
                 sig, lambda s=sig: asyncio.create_task(self.bot.close())
             )
 
+    def _is_mapped_origin(self, guild_id: int | None) -> bool:
+        try:
+            return bool(guild_id and int(guild_id) in self._mapped_original_ids)
+        except Exception:
+            return False
+
+    def _reload_mapped_ids(self) -> None:
+        try:
+            self._mapped_original_ids = set(self.db.get_all_original_guild_ids())
+            logger.debug(
+                "[🔁] Reloaded mapped origins: %s", sorted(self._mapped_original_ids)
+            )
+        except Exception:
+            logger.exception("Failed reloading mapped origins")
+
     async def _on_ws(self, msg: dict) -> dict | None:
         """
         Handles WebSocket (WS) messages received by the client.
@@ -166,13 +177,10 @@ class ClientListener:
         typ = msg.get("type")
         data = msg.get("data", {})
 
-        if typ == "settings_update":
-            kws = data.get("blocked_keywords") or []
-            self._rebuild_blocklist(kws)
-            logger.info(
-                "[⚙️] Updated block list: %d keywords", len(self.blocked_keywords)
-            )
-            return
+        if typ == "mappings_reload":
+            self._reload_mapped_ids()
+            self.sitemap.schedule_sync(guild_id=None, delay=0.2)
+            return {"ok": True, "mapped": list(self._mapped_original_ids)}
 
         elif typ == "ping":
             now = datetime.now(timezone.utc)
@@ -191,25 +199,16 @@ class ClientListener:
                 },
             }
         elif typ == "filters_reload":
-            if not self.host_guild_id or not self.config.ENABLE_CLONING:
-                logger.debug(
-                    "[⚙️] Ignoring filters_reload: no host guild or cloning disabled"
-                )
-                return {
-                    "ok": False,
-                    "skipped": True,
-                    "reason": "no-host-or-cloning-disabled",
-                }
-
             self.config._load_filters_from_db()
             logger.info("[⚙️] Filters reloaded from DB")
 
+            gid = data.get("original_guild_id")
             try:
-                self.sitemap.reload_filters_and_resend()
+                self.sitemap.reload_filters_and_resend(gid)
             except AttributeError:
-                asyncio.create_task(self.sitemap.build_and_send())
+                asyncio.create_task(self.sitemap.build_and_send_all())
 
-            return {"ok": True, "note": "filters reloaded"}
+            return {"ok": True}
 
         elif typ == "clone_messages":
             chan_id = int(data.get("channel_id"))
@@ -243,6 +242,9 @@ class ClientListener:
                 "last_n": last_n,
                 "resume": resume,
                 "after_id": after_id,
+                "mapping_id": data.get("mapping_id"),
+                "cloned_guild_id": data.get("cloned_guild_id"),
+                "original_guild_id": data.get("original_guild_id"),
             }
             return await self._enqueue_backfill(chan_id, params)
 
@@ -263,7 +265,6 @@ class ClientListener:
         elif typ == "backfills_queue_query":
 
             try:
-
                 pending = list(getattr(self._bf_queue, "_queue", []))
             except Exception:
                 pending = []
@@ -274,13 +275,34 @@ class ClientListener:
                     cid = int(tup[0])
                 except Exception:
                     continue
-                pending_items.append(
-                    {
-                        "channel_id": str(cid),
-                        "position": idx,
-                        "state": "queued",
-                    }
-                )
+
+                meta = {}
+                if (
+                    isinstance(tup, (tuple, list))
+                    and len(tup) > 1
+                    and isinstance(tup[1], dict)
+                ):
+                    meta = tup[1] or {}
+
+                item = {
+                    "channel_id": str(cid),
+                    "position": idx,
+                    "state": "queued",
+                }
+
+                mid = meta.get("mapping_id")
+                if mid is not None:
+                    item["mapping_id"] = str(mid)
+
+                og = meta.get("original_guild_id")
+                if og is not None:
+                    item["original_guild_id"] = str(og)
+
+                cg = meta.get("cloned_guild_id")
+                if cg is not None:
+                    item["cloned_guild_id"] = str(cg)
+
+                pending_items.append(item)
 
             active_items = []
             for cid in list(self._bf_active):
@@ -288,13 +310,28 @@ class ClientListener:
                     cid_int = int(cid)
                 except Exception:
                     continue
-                active_items.append(
-                    {
-                        "channel_id": str(cid_int),
-                        "position": 0,
-                        "state": "active",
-                    }
-                )
+
+                meta = dict(self._bf_active_meta.get(cid_int) or {})
+
+                item = {
+                    "channel_id": str(cid_int),
+                    "position": 0,
+                    "state": "active",
+                }
+
+                mid = meta.get("mapping_id")
+                if mid is not None:
+                    item["mapping_id"] = str(mid)
+
+                og = meta.get("original_guild_id")
+                if og is not None:
+                    item["original_guild_id"] = str(og)
+
+                cg = meta.get("cloned_guild_id")
+                if cg is not None:
+                    item["cloned_guild_id"] = str(cg)
+
+                active_items.append(item)
 
             return {
                 "type": "backfills_queue",
@@ -303,25 +340,35 @@ class ClientListener:
             }
 
         elif typ == "sitemap_request":
-            if not self.config.ENABLE_CLONING:
-                return {"ok": False, "error": "Cloning is disabled"}
+            payload = data or {}
 
-            if not self.host_guild_id:
-                logger.warning("[🌐] sitemap_request ignored: no host guild configured")
-                return {"ok": False, "error": "No host guild configured"}
+            target_gid = None
+            try:
+                raw_gid = payload.get("guild_id")
+                target_gid = int(raw_gid) if raw_gid is not None else None
+            except Exception:
+                target_gid = None
 
-            if not self.bot.get_guild(int(self.host_guild_id)):
-                logger.warning(
-                    "[🌐] sitemap_request ignored: not a member of host guild %s",
-                    self.host_guild_id,
+            mapping_id = (payload.get("mapping_id") or "").strip() or None
+
+            if mapping_id:
+
+                logger.info(
+                    "[🌐] Received sitemap request for mapping %r (host=%s)",
+                    mapping_id,
+                    target_gid or "ANY",
                 )
-                return {
-                    "ok": False,
-                    "error": f"Not a member of host guild {self.host_guild_id}",
-                }
+                try:
+                    await self.sitemap.send_for_mapping_id(mapping_id)
+                except Exception:
+                    logger.exception(
+                        "[🌐] Failed to send sitemap for mapping %r", mapping_id
+                    )
+            else:
 
-            self.schedule_sync()
-            logger.info("[🌐] Received sitemap request")
+                self.schedule_sync(guild_id=target_gid)
+                logger.info("[🌐] Received sitemap request for %s", target_gid or "ALL")
+
             return {"ok": True}
 
         elif typ == "scrape_members":
@@ -451,12 +498,7 @@ class ClientListener:
 
                         snap = await self.scraper.snapshot_members()
                         try:
-                            rgid = str(
-                                self._scrape_gid
-                                or gid
-                                or self.host_guild_id
-                                or "unknown"
-                            )
+                            rgid = str(self._scrape_gid or gid or "unknown")
                             try:
                                 g = self.bot.get_guild(int(rgid))
                             except Exception:
@@ -663,18 +705,20 @@ class ClientListener:
             except Exception:
                 req_gid = 0
 
+            req_gid_val = (data or {}).get("guild_id")
             try:
-                host_gid = (
-                    int(self.host_guild_id)
-                    if getattr(self, "host_guild_id", None)
+                gid = int(req_gid_val) if req_gid_val is not None else 0
+            except Exception:
+                gid = 0
+
+            if not gid:
+                gid = (
+                    next(iter(self._mapped_original_ids))
+                    if self._mapped_original_ids
                     else 0
                 )
-            except Exception:
-                host_gid = 0
-
-            gid = req_gid or host_gid
             if not gid:
-                return {"ok": False, "reason": "no-host-guild"}
+                return {"ok": False, "reason": "no-mapped-origin"}
 
             guild = self.bot.get_guild(int(gid))
             if guild is None:
@@ -711,8 +755,17 @@ class ClientListener:
 
         channel_id = int(orig_channel_id)
         if hasattr(self, "chan_map"):
-            for src_id, row in self.chan_map.items():
-                if int(row.get("cloned_channel_id") or 0) == channel_id:
+
+            def _row_get(row, key, default=None):
+                try:
+                    if isinstance(row, dict):
+                        return row.get(key, default)
+                    return row[key] if key in row.keys() else default
+                except Exception:
+                    return default
+
+            for src_id, row in getattr(self, "chan_map", {}).items():
+                if int(_row_get(row, "cloned_channel_id", 0) or 0) == channel_id:
                     logger.debug(
                         f"[map] Mapped cloned channel {channel_id} -> host channel {src_id}"
                     )
@@ -728,19 +781,17 @@ class ClientListener:
 
         guild = getattr(channel, "guild", None)
         if guild is None:
-
-            host_guild = None
-            if hasattr(self, "host_guild_id") and self.host_guild_id:
-                host_guild = self.bot.get_guild(int(self.host_guild_id))
-
+            host_guild = next(
+                (
+                    self.bot.get_guild(gid)
+                    for gid in sorted(self._mapped_original_ids)
+                    if self.bot.get_guild(gid)
+                ),
+                None,
+            )
             if host_guild is None and self.bot.guilds:
                 host_guild = self.bot.guilds[0]
             guild = host_guild
-
-        if guild is None:
-            raise discord.Forbidden(
-                None, {"message": "No guild available for fallback"}
-            )
 
         if channel is None:
             me = guild.me or guild.get_member(
@@ -773,76 +824,90 @@ class ClientListener:
         await asyncio.sleep(5)
         while True:
             try:
-                await self.sitemap.build_and_send()
+                await self.sitemap.build_and_send_all()
             except Exception:
                 logger.exception("Error in periodic sync loop")
             await asyncio.sleep(self.config.SYNC_INTERVAL_SECONDS)
 
-    def schedule_sync(self):
-        self.sitemap.schedule_sync()
+    def schedule_sync(self, guild_id: int | None = None, delay: float = 1.0):
+        """
+        Ask SitemapService to (debounced) resend sitemap(s).
 
-    def _is_host_guild(self, g: "discord.Guild | None") -> bool:
-        if not self.config.ENABLE_CLONING:
-            return False
-        if self.host_guild_id is None:
-            return False
-        return bool(g and g.id == self.host_guild_id)
-
-    async def _disable_cloning(self, reason: str = ""):
-        logger.info("[🔕] Disabling server cloning: %s", reason or "(no reason)")
-        self.config.ENABLE_CLONING = False
-        if self._sync_task:
-            try:
-                self._sync_task.cancel()
-            except Exception:
-                pass
-            self._sync_task = None
+        guild_id:
+        - int -> only that origin guild's sitemap will be rebuilt/sent
+        - None -> fallback: mark all mapped origins dirty (legacy "send everything")
+        """
+        try:
+            self.sitemap.schedule_sync(guild_id=guild_id, delay=delay)
+        except TypeError:
+            self.sitemap.schedule_sync(None, delay=delay)
+        except Exception:
+            logger.exception("[sitemap] failed to schedule sync for %s", guild_id)
 
     async def on_ready(self):
-        host_guild = (
-            self.bot.get_guild(self.host_guild_id) if self.host_guild_id else None
-        )
 
-        if host_guild is None and self.config.ENABLE_CLONING:
-            await self._disable_cloning(
-                "No host guild configured or not a member of host guild."
-            )
-            host_name = "(no host guild)"
-        else:
-            host_name = host_guild.name if host_guild else "(no host guild)"
+        self._reload_mapped_ids()
 
         asyncio.create_task(self.config.setup_release_watcher(self, should_dm=False))
         self.ui_controller.start()
 
-        msg = f"Logged in as {self.bot.user.display_name}"
-        await self.bus.status(running=True, status=msg, discord={"ready": True})
+        who = getattr(getattr(self.bot, "user", None), "display_name", "(unknown)")
+        msg = f"Logged in as {who}"
+        await self.bus.status(
+            running=True,
+            status=msg,
+            discord={"ready": True},
+        )
         logger.info("[🤖] %s", msg)
 
-        if self.config.ENABLE_CLONING and host_guild is not None:
-            if self._sync_task is None:
-                self._sync_task = asyncio.create_task(self.periodic_sync_loop())
-        else:
-            if self.host_guild_id is not None:
-                logger.info("[🔕] Server cloning is disabled...")
+        if self._sync_task is None:
+            self._sync_task = asyncio.create_task(self.periodic_sync_loop())
 
         if self._ws_task is None:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
 
         asyncio.create_task(self._snapshot_all_guilds_once())
 
-    def _rebuild_blocklist(self, keywords: list[str] | None = None) -> None:
-        if keywords is None:
-            keywords = self.db.get_blocked_keywords()
+    def _rebuild_blocklist(self, kw_map: dict | None = None) -> None:
+        """
+        kw_map: { origin_guild_id (int/str or 0): ["badword", ...], ... }
 
-        self.blocked_keywords = [
-            k.lower().strip() for k in (keywords or []) if k and k.strip()
-        ]
+        After this runs:
+        self.blocked_keywords_map[guild_id] = ["badword", "otherword", ...]
+        self._blocked_patterns_map[guild_id] = [(compiled_regex, "badword"), ...]
+        """
+        if kw_map is None:
+            kw_map = self.db.get_blocked_keywords_by_origin()
 
-        self._blocked_patterns = [
-            re.compile(rf"(?<!\w){re.escape(k)}(?!\w)", re.IGNORECASE)
-            for k in self.blocked_keywords
-        ]
-        logger.debug("[⚙️] Block list now: %s", self.blocked_keywords)
+        normalized_map: dict[int, list[str]] = {}
+        patterns_map: dict[int, list[tuple[re.Pattern, str]]] = {}
+
+        for gid_key, words in (kw_map or {}).items():
+            try:
+                gid_int = int(gid_key)
+            except (TypeError, ValueError):
+                continue
+
+            cleaned_words = [
+                (w or "").strip().lower() for w in (words or []) if w and str(w).strip()
+            ]
+
+            normalized_map[gid_int] = cleaned_words
+
+            pat_list: list[tuple[re.Pattern, str]] = []
+            for w in cleaned_words:
+                regex = re.compile(
+                    rf"(?<!\w){re.escape(w)}(?!\w)",
+                    re.IGNORECASE,
+                )
+                pat_list.append((regex, w))
+
+            patterns_map[gid_int] = pat_list
+
+        self.blocked_keywords_map = normalized_map
+        self._blocked_patterns_map = patterns_map
+
+        logger.debug("[⚙️] Block list now: %s", self.blocked_keywords_map)
 
     def should_ignore(self, message: discord.Message) -> bool:
         """
@@ -850,21 +915,12 @@ class ClientListener:
         """
         ch = message.channel
         try:
-
-            ch_id = getattr(ch, "id", None)
-            cat_id = getattr(ch, "category_id", None)
-
-            if (
-                isinstance(getattr(ch, "__class__", None), type)
-                and getattr(ch.__class__, "__name__", "") == "Thread"
-            ):
-                parent = getattr(ch, "parent", None)
-                if parent is not None:
-
-                    cat_id = getattr(parent, "category_id", cat_id)
-
-            if self.sitemap.is_excluded_ids(ch_id, cat_id):
-                return True
+            if isinstance(ch, discord.Thread):
+                if not self.sitemap.in_scope_thread(ch):
+                    return True
+            else:
+                if not self.sitemap.in_scope_channel(ch):
+                    return True
         except Exception:
             pass
 
@@ -874,24 +930,9 @@ class ClientListener:
         if message.type == MessageType.channel_name_change:
             return True
 
-        if not self._is_host_guild(message.guild):
+        g = getattr(message, "guild", None)
+        if not g or not self._is_mapped_origin(g.id):
             return True
-
-        if message.channel.type in (ChannelType.voice, ChannelType.stage_voice):
-
-            return True
-
-        content = unicodedata.normalize("NFKC", message.content or "")
-        for pat in getattr(self, "_blocked_patterns", []):
-            if pat.search(content):
-                logger.info(
-                    "[❌] Dropping message %s: blocked keyword matched (%s)",
-                    message.id,
-                    pat.pattern,
-                )
-                return True
-
-        return False
 
     async def maybe_send_announcement(self, message: discord.Message) -> bool:
         content = message.content
@@ -899,6 +940,7 @@ class ClientListener:
         author = message.author
         chan_id = message.channel.id
         guild_id = message.guild.id if message.guild else 0
+        guild_name = message.guild.name if message.guild else "Unknown"
 
         triggers = self.db.get_effective_announcement_triggers(guild_id)
         if not triggers:
@@ -944,7 +986,7 @@ class ClientListener:
                     }
                     await self.ws.send(payload)
                     logger.info(
-                        f"[📢] Announcement `{kw}` by {author} in g={guild_id}."
+                        f"[📢] Announcement `{kw}` by {author} in {guild_name} ({guild_id})"
                     )
                     return True
 
@@ -955,13 +997,11 @@ class ClientListener:
         """
         Handles incoming Discord messages and processes them for forwarding.
         """
+        g = getattr(message, "guild", None)
+        if not g or not self._is_mapped_origin(g.id):
+            return
+
         await self.maybe_send_announcement(message)
-
-        if not self.config.ENABLE_CLONING:
-            return
-
-        if not self._is_host_guild(message.guild):
-            return
 
         if self.should_ignore(message):
             return
@@ -973,6 +1013,7 @@ class ClientListener:
 
         forwarded_flag_val = 0
         try:
+
             forwarded_flag_val = int(
                 getattr(getattr(message, "flags", 0), "value", 0) or 0
             )
@@ -988,13 +1029,15 @@ class ClientListener:
         if looks_like_forward:
             resolved = await _resolve_forward(self.bot, message)
             if resolved is None:
-                resolved = await _resolve_forward_via_snapshot(self.bot, message, logger=logger)
+                resolved = await _resolve_forward_via_snapshot(
+                    self.bot, message, logger=logger
+                )
 
             if resolved is not None:
                 src_msg = resolved
             else:
                 logger.info(
-                    "Dropping unresolvable forwarded message in #%s (are we in the server where the original was sent?)",
+                    "Dropping unresolvable forwarded message in #%s",
                     getattr(message.channel, "name", "?"),
                 )
                 return
@@ -1004,10 +1047,10 @@ class ClientListener:
 
         if not src_raw and src_sys:
             content = src_sys
-            author_name = "System"
+            author = "System"
         else:
             content = src_raw
-            author_name = (
+            author = (
                 src_msg.author.name if getattr(src_msg, "author", None) else "System"
             )
 
@@ -1018,7 +1061,7 @@ class ClientListener:
 
         if no_visible_text and no_attachments and no_embeds and no_stickers:
             logger.info(
-                "Not forwarding empty content in #%s",
+                "[🚫] Not forwarding empty content in #%s",
                 getattr(message.channel, "name", "?"),
             )
             return
@@ -1030,13 +1073,17 @@ class ClientListener:
                 "size": att.size,
             }
             for att in getattr(src_msg, "attachments", [])
+            for att in getattr(src_msg, "attachments", [])
         ]
 
+        raw_embeds = [e.to_dict() for e in getattr(src_msg, "embeds", [])]
+        mention_map = await self.msg.build_mention_map(src_msg, raw_embeds)
         raw_embeds = [e.to_dict() for e in getattr(src_msg, "embeds", [])]
         mention_map = await self.msg.build_mention_map(src_msg, raw_embeds)
         embeds = [
             self.msg.sanitize_embed_dict(e, src_msg, mention_map) for e in raw_embeds
         ]
+        safe_content = self.msg.sanitize_inline(content, src_msg, mention_map)
         safe_content = self.msg.sanitize_inline(content, src_msg, mention_map)
 
         components: list[dict] = []
@@ -1068,19 +1115,20 @@ class ClientListener:
         target_guild = message.guild
 
         is_thread = target_chan.type in (
-            discord.ChannelType.public_thread,
-            discord.ChannelType.private_thread,
+            ChannelType.public_thread,
+            ChannelType.private_thread,
         )
 
         stickers_payload = self.msg.stickers_payload(getattr(src_msg, "stickers", []))
+        stickers_payload = self.msg.stickers_payload(getattr(src_msg, "stickers", []))
 
-        base_data = {
+        data_block = {
             "guild_id": getattr(target_guild, "id", None),
             "message_id": getattr(src_msg, "id", None),
             "channel_id": target_chan.id,
             "channel_name": getattr(target_chan, "name", str(target_chan.id)),
             "channel_type": target_chan.type.value,
-            "author": author_name,
+            "author": author,
             "author_id": getattr(getattr(src_msg, "author", None), "id", None),
             "avatar_url": (
                 str(src_msg.author.display_avatar.url)
@@ -1098,7 +1146,7 @@ class ClientListener:
         if is_thread:
             parent = getattr(target_chan, "parent", None)
             if parent is not None:
-                base_data.update(
+                data_block.update(
                     {
                         "thread_parent_id": parent.id,
                         "thread_parent_name": getattr(parent, "name", str(parent.id)),
@@ -1111,13 +1159,16 @@ class ClientListener:
 
         payload = {
             "type": "thread_message" if is_thread else "message",
-            "data": base_data,
+            "data": data_block,
         }
+
 
         await self.ws.send(payload)
 
+
         logger.info(
-            "[📩] New msg detected in #%s from %s; forwarding to clone.",
+            "[📩] Forwarding msg from %s #%s sent by %s",
+            message.guild.name,
             message.channel.name,
             message.author.name,
         )
@@ -1146,12 +1197,10 @@ class ClientListener:
         """
         When an upstream message is edited, forward the new content/embeds/components.
         """
-        if not self.config.ENABLE_CLONING:
+        g = getattr(after, "guild", None)
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
-        if not self.config.EDIT_MESSAGES:
-            return
-        if not self._is_host_guild(after.guild):
-            return
+
         if self.should_ignore(after):
             return
 
@@ -1244,25 +1293,25 @@ class ClientListener:
         }
         await self.ws.send(payload)
         logger.info(
-            "[✏️] Message edit detected in #%s by %s → sent to server",
+            "[✏️] Forwarding message edit from %s #%s edited by %s",
+            g.name,
             payload["data"]["channel_name"],
             author,
         )
 
     async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):
+
+        g = getattr(payload, "guild", None)
+
+        if getattr(payload, "guild_id", None) is not None:
+            gid = int(payload.guild_id)
+        else:
+            gid = g.id if g else None
+
+        if not gid or not self._is_mapped_origin(gid):
+            return
+
         if payload.cached_message is not None:
-            return
-
-        if not self.config.ENABLE_CLONING:
-            return
-        if not self.config.EDIT_MESSAGES:
-            return
-
-        if (
-            self.host_guild_id
-            and payload.guild_id
-            and payload.guild_id != self.host_guild_id
-        ):
             return
 
         channel = self.bot.get_channel(payload.channel_id)
@@ -1271,10 +1320,6 @@ class ClientListener:
                 channel = await self.bot.fetch_channel(payload.channel_id)
             except Exception:
                 return
-
-        guild = getattr(channel, "guild", None)
-        if not guild or not self._is_host_guild(guild):
-            return
 
         if isinstance(channel, discord.Thread):
             if not self.sitemap.in_scope_thread(channel):
@@ -1315,30 +1360,39 @@ class ClientListener:
                 msg = None
 
         if msg:
+
             raw_embeds = [e.to_dict() for e in msg.embeds]
             mention_map = await self.msg.build_mention_map(msg, raw_embeds)
+
             embeds = [
                 self.msg.sanitize_embed_dict(e, msg, mention_map) for e in raw_embeds
             ]
             content = self.msg.sanitize_inline(msg.content or "", msg, mention_map)
-            author = getattr(getattr(msg, "author", None), "name", None)
-            author_id = getattr(getattr(msg, "author", None), "id", None)
+
+            author_obj = getattr(msg, "author", None)
+            author = getattr(author_obj, "name", None)
+            author_id = getattr(author_obj, "id", None)
             avatar_url = (
-                str(msg.author.display_avatar.url)
-                if getattr(msg.author, "display_avatar", None)
+                str(author_obj.display_avatar.url)
+                if author_obj and getattr(author_obj, "display_avatar", None)
                 else None
             )
+
             timestamp = str(msg.edited_at or msg.created_at)
+
         else:
             content = data.get("content")
             embeds = data.get("embeds")
+
             a = data.get("author") or {}
             author = a.get("global_name") or a.get("username") or a.get("name")
             author_id = a.get("id")
+
             if a.get("id") and a.get("avatar"):
                 avatar_url = (
                     f"https://cdn.discordapp.com/avatars/{a['id']}/{a['avatar']}.png"
                 )
+
             timestamp = data.get("edited_timestamp") or data.get("timestamp")
 
         is_thread = getattr(channel, "type", None) in (
@@ -1378,8 +1432,20 @@ class ClientListener:
         }
 
         await self.ws.send(out)
+
+        guild_name_for_log = None
+        if g is not None:
+            guild_name_for_log = getattr(g, "name", None)
+
+        if guild_name_for_log is None and hasattr(channel, "guild"):
+            guild_name_for_log = getattr(channel.guild, "name", None)
+
+        if guild_name_for_log is None:
+            guild_name_for_log = str(gid)
+
         logger.info(
-            "[✏️] Message edit detected in #%s → sent to server",
+            "[✏️] Forwarding message edit from %s in #%s",
+            guild_name_for_log,
             out["data"]["channel_name"],
         )
 
@@ -1387,14 +1453,11 @@ class ClientListener:
         """
         When an upstream message is deleted, tell the server to delete the cloned webhook message.
         """
-        if not self.config.ENABLE_CLONING:
+        g = getattr(message, "guild", None)
+
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
-        if not self.config.DELETE_MESSAGES:
-            return
-        if not getattr(message, "guild", None) or not self._is_host_guild(
-            message.guild
-        ):
-            return
+
         if self.should_ignore(message):
             return
 
@@ -1426,27 +1489,27 @@ class ClientListener:
         }
         await self.ws.send(payload)
         logger.info(
-            "[🗑️] Message delete detected in #%s → sent to server",
+            "[🗑️] Forwarding message delete from %s in #%s",
+            g.name,
             payload["data"]["channel_name"],
         )
 
     async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
         """
-        Same as above but for uncached messages.
+        Handle deletes for messages that weren't cached.
         """
+
+        g = getattr(payload, "guild", None)
+
+        if getattr(payload, "guild_id", None) is not None:
+            gid = int(payload.guild_id)
+        else:
+            gid = g.id if g else None
+
+        if not gid or not self._is_mapped_origin(gid):
+            return
+
         if payload.cached_message is not None:
-            return
-
-        if not self.config.ENABLE_CLONING:
-            return
-        if not self.config.DELETE_MESSAGES:
-            return
-
-        if (
-            self.host_guild_id
-            and payload.guild_id
-            and payload.guild_id != self.host_guild_id
-        ):
             return
 
         channel = self.bot.get_channel(payload.channel_id)
@@ -1455,10 +1518,6 @@ class ClientListener:
                 channel = await self.bot.fetch_channel(payload.channel_id)
             except Exception:
                 return
-
-        guild = getattr(channel, "guild", None)
-        if not guild or not self._is_host_guild(guild):
-            return
 
         if isinstance(channel, discord.Thread):
             if not self.sitemap.in_scope_thread(channel):
@@ -1471,10 +1530,13 @@ class ClientListener:
             ChannelType.public_thread,
             ChannelType.private_thread,
         )
+
         payload_out = {
             "type": "thread_message_delete" if is_thread else "message_delete",
             "data": {
-                "guild_id": getattr(guild, "id", None),
+                "guild_id": (
+                    int(payload.guild_id) if payload.guild_id is not None else None
+                ),
                 "message_id": int(payload.message_id),
                 "channel_id": int(payload.channel_id),
                 "channel_name": getattr(channel, "name", str(payload.channel_id)),
@@ -1495,9 +1557,22 @@ class ClientListener:
                 ),
             },
         }
+
         await self.ws.send(payload_out)
+
+        guild_name_for_log = None
+        if g is not None:
+            guild_name_for_log = getattr(g, "name", None)
+
+        if guild_name_for_log is None and hasattr(channel, "guild"):
+            guild_name_for_log = getattr(channel.guild, "name", None)
+
+        if guild_name_for_log is None:
+            guild_name_for_log = str(gid)
+
         logger.info(
-            "[🗑️] Message delete detected in #%s → sent to server",
+            "[🗑️] Forwarding message delete from %s in #%s → sent to server",
+            guild_name_for_log,
             payload_out["data"]["channel_name"],
         )
 
@@ -1508,27 +1583,30 @@ class ClientListener:
         This method checks if the deleted thread belongs to the host guild. If it does,
         it sends a notification payload to the WebSocket server with the thread's ID.
         """
-        if self.config.ENABLE_CLONING:
-            if not self._is_host_guild(thread.guild):
-                return
-            if not self.sitemap.in_scope_thread(thread):
-                logger.debug(
-                    "[thread] Ignoring delete for filtered-out thread %s (parent=%s)",
-                    getattr(thread, "id", None),
-                    getattr(getattr(thread, "parent", None), "id", None),
-                )
-                return
-            payload = {"type": "thread_delete", "data": {"thread_id": thread.id}}
-            await self.ws.send(payload)
-            logger.info("[📩] Notified server of deleted thread %s", thread.id)
+        g = getattr(thread, "guild", None)
+        if not g or not self._is_mapped_origin(g.id):
+            return
+
+        if not self.sitemap.in_scope_thread(thread):
+            logger.debug(
+                "[thread] Ignoring delete for filtered-out thread %s (parent=%s)",
+                getattr(thread, "id", None),
+                getattr(getattr(thread, "parent", None), "id", None),
+            )
+            return
+        payload = {
+            "type": "thread_delete",
+            "data": {"guild_id": thread.guild.id, "thread_id": thread.id},
+        }
+        await self.ws.send(payload)
+        logger.info("[📩] Forwarded thread %s delete from %s", thread.id, g.name)
 
     async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
         """
         Handles updates to a Discord thread, such as renaming.
         """
-        if not self.config.ENABLE_CLONING:
-            return
-        if not (before.guild and self._is_host_guild(before.guild)):
+        g = getattr(before, "guild", None)
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
 
         if not (
@@ -1545,6 +1623,7 @@ class ClientListener:
             payload = {
                 "type": "thread_rename",
                 "data": {
+                    "guild_id": before.guild.id,
                     "thread_id": before.id,
                     "new_name": after.name,
                     "old_name": before.name,
@@ -1553,7 +1632,7 @@ class ClientListener:
                 },
             }
             logger.info(
-                f"[✏️] Thread rename detected: {before.id} {before.name!r} → {after.name!r}"
+                f"[✏️] Forwarded thread rename from {g.name}: {before.id} {before.name!r} → {after.name!r}"
             )
             await self.ws.send(payload)
 
@@ -1561,32 +1640,35 @@ class ClientListener:
         """
         Event handler that is triggered when a new channel is created in a guild.
         """
-        if self.config.ENABLE_CLONING:
-            if not self._is_host_guild(channel.guild):
-                return
+        g = getattr(channel, "guild", None)
 
-            if not self.sitemap.in_scope_channel(channel):
-                logger.debug(
-                    "Ignored create for filtered-out channel/category %s",
-                    getattr(channel, "id", None),
-                )
-                return
-            self.schedule_sync()
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
+            return
+
+        if not self.sitemap.in_scope_channel(channel):
+            logger.debug(
+                "Ignored create for filtered-out channel/category %s",
+                getattr(channel, "id", None),
+            )
+            return
+        self.schedule_sync(guild_id=g.id)
 
     async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
         """
         Event handler that is triggered when a guild channel is deleted.
         """
-        if self.config.ENABLE_CLONING:
-            if not self._is_host_guild(channel.guild):
-                return
-            if not self.sitemap.in_scope_channel(channel):
-                logger.debug(
-                    "Ignored delete for filtered-out channel/category %s",
-                    getattr(channel, "id", None),
-                )
-                return
-            self.schedule_sync()
+        g = getattr(channel, "guild", None)
+
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
+            return
+
+        if not self.sitemap.in_scope_channel(channel):
+            logger.debug(
+                "Ignored delete for filtered-out channel/category %s",
+                getattr(channel, "id", None),
+            )
+            return
+        self.schedule_sync(guild_id=g.id)
 
     async def on_guild_channel_update(self, before, after):
         """
@@ -1594,76 +1676,354 @@ class ClientListener:
         This method is triggered when a guild channel is updated. It checks if the
         update occurred in the host guild and determines whether the update involves
         structural changes (such as a name change or a change in the parent category).
-        If a structural change is detected, it schedules a synchronization process.
+        If a structural or relevant metadata change is detected, it schedules a
+        synchronization process (sitemap).
         """
-        if self.config.ENABLE_CLONING:
-            if not self._is_host_guild(before.guild):
-                return
+        g = getattr(before, "guild", None)
 
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
+            return
+
+        perms_changed = False
+        try:
+            perms_changed = getattr(before, "overwrites", None) != getattr(
+                after, "overwrites", None
+            )
+        except Exception:
             perms_changed = False
+
+        if perms_changed:
+            self.schedule_sync(guild_id=g.id)
+            return
+
+        if not (
+            self.sitemap.in_scope_channel(before)
+            or self.sitemap.in_scope_channel(after)
+        ):
+            logger.debug(
+                "Ignored update for filtered-out channel/category %s",
+                getattr(before, "id", None),
+            )
+            return
+
+        name_changed = before.name != after.name
+        parent_before = getattr(before, "category_id", None)
+        parent_after = getattr(after, "category_id", None)
+        parent_changed = parent_before != parent_after
+
+        nsfw_changed = False
+        try:
+            nsfw_before = getattr(before, "nsfw", False)
+            nsfw_after = getattr(after, "nsfw", False)
+            nsfw_changed = nsfw_before != nsfw_after
+        except Exception:
+            nsfw_changed = False
+
+        topic_changed = False
+        try:
+            topic_before = getattr(before, "topic", None)
+            topic_after = getattr(after, "topic", None)
+
+            topic_before_normalized = topic_before if topic_before else None
+            topic_after_normalized = topic_after if topic_after else None
+            topic_changed = topic_before_normalized != topic_after_normalized
+        except Exception:
+            topic_changed = False
+
+        slowmode_changed = False
+        try:
+            slowmode_before = int(getattr(before, "slowmode_delay", 0) or 0)
+            slowmode_after = int(getattr(after, "slowmode_delay", 0) or 0)
+            slowmode_changed = slowmode_before != slowmode_after
+        except Exception:
+            slowmode_changed = False
+
+        voice_properties_changed = False
+        try:
+            is_voice = isinstance(after, discord.VoiceChannel)
+            if is_voice:
+                bitrate_before = getattr(before, "bitrate", 64000)
+                bitrate_after = getattr(after, "bitrate", 64000)
+
+                user_limit_before = getattr(before, "user_limit", 0)
+                user_limit_after = getattr(after, "user_limit", 0)
+
+                rtc_region_before = getattr(before, "rtc_region", None)
+                rtc_region_after = getattr(after, "rtc_region", None)
+
+                voice_properties_changed = (
+                    bitrate_before != bitrate_after
+                    or user_limit_before != user_limit_after
+                    or rtc_region_before != rtc_region_after
+                )
+
+                if voice_properties_changed:
+                    logger.debug(
+                        "[🔊] Voice properties changed for channel '%s' #%d → scheduling sitemap",
+                        after.name,
+                        after.id,
+                    )
+        except Exception:
+            voice_properties_changed = False
+
+        is_forum = isinstance(after, ForumChannel) or (
+            getattr(after, "type", None) == ChannelType.forum
+        )
+
+        forum_message_limit_changed = False
+        forum_layout_changed = False
+        forum_sort_changed = False
+        forum_archive_changed = False
+        forum_require_tag_changed = False
+        forum_default_reaction_changed = False
+        forum_tags_changed = False
+
+        if is_forum:
+
+            def _enum_int(val):
+                if val is None:
+                    return None
+                try:
+                    if isinstance(val, int):
+                        return val
+                    if hasattr(val, "value"):
+                        return int(val.value)
+                    return int(val)
+                except Exception:
+                    return None
+
             try:
-                perms_changed = getattr(before, "overwrites", None) != getattr(
-                    after, "overwrites", None
+                before_msg_limit = int(
+                    getattr(before, "default_thread_slowmode_delay", 0) or 0
                 )
+                after_msg_limit = int(
+                    getattr(after, "default_thread_slowmode_delay", 0) or 0
+                )
+                forum_message_limit_changed = before_msg_limit != after_msg_limit
             except Exception:
-                perms_changed = False
+                forum_message_limit_changed = False
 
-            if (
-                getattr(self.config, "MIRROR_CHANNEL_PERMISSIONS", False)
-                and getattr(self.config, "CLONE_ROLES", False)
-                and perms_changed
-            ):
-                self.schedule_sync()
-                return
+            try:
+                before_layout = _enum_int(getattr(before, "default_layout", None))
+                after_layout = _enum_int(getattr(after, "default_layout", None))
+            except Exception:
+                before_layout = after_layout = None
 
-            if not (
-                self.sitemap.in_scope_channel(before)
-                or self.sitemap.in_scope_channel(after)
-            ):
-                logger.debug(
-                    "Ignored update for filtered-out channel/category %s",
-                    getattr(before, "id", None),
+            forum_layout_changed = (
+                before_layout is not None
+                and after_layout is not None
+                and before_layout != after_layout
+            )
+
+            try:
+                before_sort = _enum_int(getattr(before, "default_sort_order", None))
+                after_sort = _enum_int(getattr(after, "default_sort_order", None))
+            except Exception:
+                before_sort = after_sort = None
+
+            forum_sort_changed = (
+                before_sort is not None
+                and after_sort is not None
+                and before_sort != after_sort
+            )
+
+            try:
+                before_arch = int(
+                    getattr(before, "default_auto_archive_duration", 0) or 0
                 )
-                return
-            name_changed = before.name != after.name
-            parent_before = getattr(before, "category_id", None)
-            parent_after = getattr(after, "category_id", None)
-            parent_changed = parent_before != parent_after
-
-            if name_changed or parent_changed:
-                self.schedule_sync()
-            else:
-                logger.debug(
-                    "Ignored channel update for %s: non-structural change", before.id
+                after_arch = int(
+                    getattr(after, "default_auto_archive_duration", 0) or 0
                 )
+                forum_archive_changed = before_arch != after_arch
+            except Exception:
+                forum_archive_changed = False
+
+            try:
+                flags_before = getattr(before, "flags", None)
+                flags_after = getattr(after, "flags", None)
+
+                if flags_before is not None and flags_after is not None:
+                    req_before = bool(getattr(flags_before, "require_tag", False))
+                    req_after = bool(getattr(flags_after, "require_tag", False))
+                else:
+                    req_before = bool(getattr(before, "requires_tag", False))
+                    req_after = bool(getattr(after, "requires_tag", False))
+
+                forum_require_tag_changed = req_before != req_after
+            except Exception:
+                forum_require_tag_changed = False
+
+            def _norm_forum_emoji(val):
+                if val is None:
+                    return (None, None, False)
+                if isinstance(val, (discord.Emoji, discord.PartialEmoji)):
+                    eid = getattr(val, "id", None)
+                    name = getattr(val, "name", None)
+                    animated = bool(getattr(val, "animated", False))
+                    return (eid, name, animated)
+                s = str(val) or ""
+                if not s:
+                    return (None, None, False)
+                return (None, s, False)
+
+            try:
+                before_emoji = _norm_forum_emoji(
+                    getattr(before, "default_reaction_emoji", None)
+                )
+                after_emoji = _norm_forum_emoji(
+                    getattr(after, "default_reaction_emoji", None)
+                )
+                forum_default_reaction_changed = before_emoji != after_emoji
+            except Exception:
+                forum_default_reaction_changed = False
+
+            def _norm_tag_emoji_value(val):
+                if isinstance(val, (discord.Emoji, discord.PartialEmoji)):
+                    if getattr(val, "id", None):
+                        return f"custom:{val.id}"
+                    return getattr(val, "name", "") or ""
+                return str(val or "")
+
+            def _canon_tags(tags):
+                out = []
+                for t in tags or []:
+                    name = (getattr(t, "name", "") or "").strip().lower()
+                    if not name:
+                        continue
+                    moderated = bool(getattr(t, "moderated", False))
+                    emoji_val = _norm_tag_emoji_value(getattr(t, "emoji", None))
+                    out.append((name, moderated, emoji_val))
+                out.sort()
+                return out
+
+            try:
+                before_tags_canon = _canon_tags(getattr(before, "available_tags", None))
+                after_tags_canon = _canon_tags(getattr(after, "available_tags", None))
+                forum_tags_changed = before_tags_canon != after_tags_canon
+            except Exception:
+                forum_tags_changed = False
+
+        forum_meta_changed = any(
+            [
+                forum_message_limit_changed,
+                forum_layout_changed,
+                forum_sort_changed,
+                forum_archive_changed,
+                forum_require_tag_changed,
+                forum_default_reaction_changed,
+                forum_tags_changed,
+            ]
+        )
+
+        if (
+            name_changed
+            or parent_changed
+            or nsfw_changed
+            or topic_changed
+            or slowmode_changed
+            or voice_properties_changed
+            or forum_meta_changed
+        ):
+            if nsfw_changed:
+                logger.debug(
+                    "[🔞] NSFW flag changed for channel '%s' #%d: %s → %s → scheduling sitemap",
+                    after.name,
+                    after.id,
+                    getattr(before, "nsfw", False),
+                    getattr(after, "nsfw", False),
+                )
+
+            if topic_changed:
+
+                def _truncate(s, max_len=50):
+                    if not s:
+                        return "(empty)"
+                    s_str = str(s)
+                    return (
+                        s_str if len(s_str) <= max_len else s_str[: max_len - 3] + "..."
+                    )
+
+                logger.debug(
+                    "[📝] Topic/post guidelines changed for channel '%s' #%d: %s → %s → scheduling sitemap",
+                    after.name,
+                    after.id,
+                    _truncate(getattr(before, "topic", None)),
+                    _truncate(getattr(after, "topic", None)),
+                )
+
+            if slowmode_changed:
+
+                def _format_delay(seconds):
+                    if seconds == 0:
+                        return "disabled"
+                    elif seconds < 60:
+                        return f"{seconds}s"
+                    elif seconds < 3600:
+                        mins = seconds // 60
+                        secs = seconds % 60
+                        return f"{mins}m {secs}s" if secs else f"{mins}m"
+                    else:
+                        hours = seconds // 3600
+                        mins = (seconds % 3600) // 60
+                        return f"{hours}h {mins}m" if mins else f"{hours}h"
+
+                logger.debug(
+                    "[⏱️] Slowmode changed for channel '%s' #%d: %s → %s → scheduling sitemap",
+                    after.name,
+                    after.id,
+                    _format_delay(int(getattr(before, "slowmode_delay", 0) or 0)),
+                    _format_delay(int(getattr(after, "slowmode_delay", 0) or 0)),
+                )
+
+            if forum_meta_changed and is_forum:
+                logger.debug(
+                    "[🧵] Forum metadata changed for '%s' #%d "
+                    "(message_limit=%s, layout=%s, sort=%s, archive=%s, "
+                    "require_tag=%s, default_reaction=%s, tags=%s) "
+                    "→ scheduling sitemap",
+                    after.name,
+                    after.id,
+                    forum_message_limit_changed,
+                    forum_layout_changed,
+                    forum_sort_changed,
+                    forum_archive_changed,
+                    forum_require_tag_changed,
+                    forum_default_reaction_changed,
+                    forum_tags_changed,
+                )
+
+            self.schedule_sync(guild_id=g.id)
+        else:
+            logger.debug(
+                "Ignored channel update for %s: non-structural / non-forum-metadata change",
+                before.id,
+            )
 
     async def on_guild_role_create(self, role: discord.Role):
-        if not self.config.ENABLE_CLONING or not getattr(
-            self.config, "CLONE_ROLES", True
-        ):
+
+        g = getattr(role, "guild", None)
+
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
-        if not self._is_host_guild(role.guild):
-            return
+
         logger.debug("[roles] create: %s (%d) → scheduling sitemap", role.name, role.id)
-        self.schedule_sync()
+        self.schedule_sync(guild_id=g.id)
 
     async def on_guild_role_delete(self, role: discord.Role):
-        if not self.config.ENABLE_CLONING or not getattr(
-            self.config, "CLONE_ROLES", True
-        ):
+        g = getattr(role, "guild", None)
+
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
-        if not self._is_host_guild(role.guild):
-            return
+
         logger.debug("[roles] delete: %s (%d) → scheduling sitemap", role.name, role.id)
-        self.schedule_sync()
+        self.schedule_sync(guild_id=g.id)
 
     async def on_guild_role_update(self, before: discord.Role, after: discord.Role):
-        if not self.config.ENABLE_CLONING or not getattr(
-            self.config, "CLONE_ROLES", True
-        ):
+        g = getattr(before, "guild", None)
+
+        if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
-        if not self._is_host_guild(after.guild):
-            return
+
         if not self.sitemap.role_change_is_relevant(before, after):
             logger.debug(
                 "[roles] update ignored (irrelevant): %s (%d)", after.name, after.id
@@ -1672,7 +2032,7 @@ class ClientListener:
         logger.debug(
             "[roles] update: %s (%d) → scheduling sitemap", after.name, after.id
         )
-        self.schedule_sync()
+        self.schedule_sync(guild_id=g.id)
 
     async def on_guild_join(self, guild: discord.Guild):
         try:
@@ -1690,12 +2050,95 @@ class ClientListener:
             logger.exception("[guilds] on_guild_remove failed")
 
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
+        """
+        Fired when the host guild updates.
+
+        - Always upserts basic guild row into DB.
+        - If any of the tracked metadata fields change:
+            - icon
+            - banner
+            - splash
+            - discovery_splash
+            - description
+
+          then we schedule a sitemap sync for that origin guild so the server/UI
+          see the updated metadata and can drive guild-metadata sync to clones.
+        """
         try:
+
             row = self._guild_row_from_obj(after)
             self.db.upsert_guild(**row)
             logger.debug("[guilds] update → upsert %s (%s)", after.name, after.id)
         except Exception:
-            logger.exception("[guilds] on_guild_update failed")
+            logger.exception("[guilds] on_guild_update failed during upsert")
+
+        if not self._is_mapped_origin(getattr(after, "id", None)):
+            return
+
+        def _asset_hash_from_attr(g: discord.Guild, attr: str) -> str | None:
+            try:
+                asset = getattr(g, attr, None)
+            except Exception:
+                asset = None
+            if not asset:
+                return None
+            try:
+                key = getattr(asset, "key", None)
+                s = str(key or asset)
+                base = s.rsplit("/", 1)[-1]
+                return base.split("?", 1)[0]
+            except Exception:
+                return None
+
+        icon_changed = _asset_hash_from_attr(before, "icon") != _asset_hash_from_attr(
+            after, "icon"
+        )
+        banner_changed = _asset_hash_from_attr(
+            before, "banner"
+        ) != _asset_hash_from_attr(after, "banner")
+        splash_changed = _asset_hash_from_attr(
+            before, "splash"
+        ) != _asset_hash_from_attr(after, "splash")
+        discovery_splash_changed = _asset_hash_from_attr(
+            before, "discovery_splash"
+        ) != _asset_hash_from_attr(after, "discovery_splash")
+
+        def _norm_desc(val) -> str | None:
+            if val is None:
+                return None
+            s = str(val).strip()
+            return s or None
+
+        desc_changed = _norm_desc(getattr(before, "description", None)) != _norm_desc(
+            getattr(after, "description", None)
+        )
+
+        if (
+            icon_changed
+            or banner_changed
+            or splash_changed
+            or discovery_splash_changed
+            or desc_changed
+        ):
+            logger.info(
+                "[guilds] metadata change for %s (%s): icon=%s banner=%s "
+                "splash=%s discovery_splash=%s description=%s → scheduling sitemap",
+                after.name,
+                after.id,
+                icon_changed,
+                banner_changed,
+                splash_changed,
+                discovery_splash_changed,
+                desc_changed,
+            )
+
+            self.schedule_sync(guild_id=after.id, delay=0.5)
+        else:
+            logger.debug(
+                "[guilds] update for %s (%s) did not touch tracked metadata; no sitemap",
+                after.name,
+                after.id,
+            )
 
     async def on_member_join(self, member: discord.Member):
         try:
@@ -1722,14 +2165,24 @@ class ClientListener:
             }
             await self.ws.send(payload)
             logger.info(
-                "[📩] Member join observed in %s: %s (%s) → notified server",
-                guild.id,
+                "[📩] Forwarded member join event observed in %s: %s (%s)",
+                guild.name,
                 member.display_name,
                 member.id,
             )
 
         except Exception:
             logger.exception("Failed to forward member_joined")
+
+    async def on_guild_emojis_update(self, guild, before, after):
+        if not self._is_mapped_origin(guild.id):
+            return
+        self.schedule_sync(guild_id=g.id)
+
+    async def on_guild_stickers_update(self, guild, before, after):
+        if not self._is_mapped_origin(guild.id):
+            return
+        self.schedule_sync(guild_id=g.id)
 
     def _guild_row_from_obj(self, g: discord.Guild) -> dict:
         try:
@@ -1783,6 +2236,7 @@ class ClientListener:
                     continue
 
                 self._bf_active.add(chan_id)
+                self._bf_active_meta[chan_id] = dict(params or {})
 
                 await self.backfill.run_channel(chan_id, **(params or {}))
 
@@ -1856,10 +2310,6 @@ class ClientListener:
     def run(self):
         """
         Runs the Copycord client.
-
-        This method initializes the asyncio event loop and starts the bot using the
-        provided client token from the configuration. It ensures proper shutdown
-        of the bot and cleanup of pending tasks when the event loop is closed.
         """
         logger.info("[✨] Starting Copycord Client %s", CURRENT_VERSION)
         loop = asyncio.get_event_loop()

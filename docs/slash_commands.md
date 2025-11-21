@@ -203,14 +203,26 @@ If enabled, you’ll receive a direct message with the new member’s details wh
 ```
 
 ---
-### `/purge_assets <type> <confirm>`
-**Description:** Purge all stickers, emojis, or roles.
+### `/purge_assets <type> <confirm> [unmapped_only] [cloned_only]`
+**Description:** Purge emojis, stickers, or roles from the current guild.
 
-**Usage Example:**
-```
+**Type Options:**
+- `emojis`
+- `stickers`
+- `roles`
+
+**Modes:**
+- `unmapped_only = true` — Only delete assets **not** mapped in the DB.
+- `cloned_only = true` — Only delete assets that **are mapped** (i.e., cloned assets).
+> These two options are **mutually exclusive**.
+
+**Usage Examples:**
+```text
 /purge_assets roles confirm
-```
-> **Note:** Make sure the copycord role is positioned at the top.
+/purge_assets emojis confirm unmapped_only:true
+/purge_assets stickers confirm cloned_only:true
+
+> **Note:** Make sure the copycord role is positioned at the top to remove roles.
 
 ---
 
@@ -267,4 +279,179 @@ If enabled, you’ll receive a direct message with the new member’s details wh
 **Notes:**
 - The resulting archive is saved under: `/data/assets`.
 - Inside the archive, assets are organized as:
+---
+
+### Role mention pings (`/role_mention`)
+
+Configure roles that get auto-mentioned at the **top of cloned messages**, per **clone** (cloned server) and optionally per **cloned channel**.
+
+These commands **must be run in the cloned server**, not the original (host) server.
+
+---
+
+#### `/role_mention add <role> [channel_id]`
+
+**Description:** Add a role to be mentioned on cloned messages for this clone.
+
+- `role` — The role in the **cloned guild** to mention.
+- `channel_id` — (Optional) **Cloned channel ID** to scope the ping.  
+  - Leave empty to apply to **all channels** in this clone.  
+  - Set to a specific channel ID to only ping in that cloned channel.
+
+> ⚠️ **Note:** Managed roles (created by integrations/bots) cannot be used and will be rejected.
+
+**Behavior:**
+
+- If `channel_id` is **empty**: the role will be mentioned on **all cloned messages** in this cloned server.
+- If `channel_id` is **set**: the role will only be mentioned on cloned messages in that **specific cloned channel**.
+- If you try to add a duplicate configuration for the same scope, the bot will tell you it is already configured.
+
+**Examples:**
+```text
+/role_mention add @Alerts
+/role_mention add @RaidPing channel_id:123456789012345678
+```
+
+---
+
+#### `/role_mention list`
+
+**Description:** List all role mention configurations for the **current clone**.
+
+For each config, the bot shows:
+
+- A **short config ID** (e.g. `a1b2c3d4`)
+- The **role** that will be mentioned
+- The **scope**:
+  - `all channels`, or
+  - a specific **cloned channel** (by mention or ID, if deleted)
+
+These config IDs are used with `/role_mention delete`.
+
+**Example:**
+```text
+/role_mention list
+```
+
+Example output format (embed content):
+
+```text
+`a1b2c3d4` • @Alerts — all channels
+`e5f6g7h8` • @RaidPing — channel #raids
+`z9y8x7w6` • @News — channel `123456789012345678` (deleted)
+```
+
+---
+
+#### `/role_mention delete <config_id>`
+
+**Description:** Delete a role mention configuration by its **config ID**.
+
+- `config_id` — The short ID shown in `/role_mention list` (e.g. `a1b2c3d4`).
+
+This removes that specific configuration for the **current clone** only.  
+If the ID doesn’t exist for this clone, the bot will respond that it was not found.
+
+**Examples:**
+```text
+/role_mention delete a1b2c3d4
+/role_mention delete e5f6g7h8
+```
+
+---
+
+## Channel webhook identity (`/channel_webhook`)
+
+Customize the webhook **name** and **avatar** Copycord uses when cloning messages, either per-channel or for all cloned channels.
+
+### `/channel_webhook set <channel> <webhook_name> [webhook_avatar_url]`
+**Description:** Set a custom webhook identity for one cloned channel.
+
+- `channel` — The **cloned** text channel to customize.
+- `webhook_name` — Name shown on all cloned messages in this channel.
+- `webhook_avatar_url` — (Optional) Image URL used as avatar.
+
+**Examples:**
+```text
+/channel_webhook set #cloned-chat "Copycord Relay"
+/channel_webhook set #cloned-chat "Copycord Relay" webhook_avatar_url:https://example.com/avatar.png
+```
+
+---
+
+### `/channel_webhook view <channel>`
+**Description:** View the custom webhook profile for a channel.
+
+Shows the current webhook name and avatar (if set) for that cloned channel.
+
+**Example:**
+```text
+/channel_webhook view #cloned-chat
+```
+
+---
+
+### `/channel_webhook clear <channel>`
+**Description:** Remove the custom webhook profile from a channel.
+
+After clearing, cloned messages in that channel use the original author’s name and avatar again.
+
+**Example:**
+```text
+/channel_webhook clear #cloned-chat
+```
+
+---
+
+### `/channel_webhook list`
+**Description:** List all channels in this clone that have custom webhook profiles.
+
+Shows each channel, its webhook name, and whether a custom avatar is set.
+
+**Example:**
+```text
+/channel_webhook list
+```
+
+---
+
+### `/channel_webhook set_all <webhook_name> <confirm> [webhook_avatar_url] [overwrite_existing]`
+**Description:** Apply a webhook name/avatar to **all cloned channels** in this server.
+
+- `webhook_name` — Name used on cloned messages in all cloned channels.
+- `confirm` — Must be `confirm` to run.
+- `webhook_avatar_url` — (Optional) Avatar URL applied to all channels.
+- `overwrite_existing` — If `true`, replaces any existing per-channel profiles.
+
+**Examples:**
+```text
+/channel_webhook set_all "Copycord Relay" confirm
+/channel_webhook set_all "Copycord Relay" confirm webhook_avatar_url:https://example.com/avatar.png overwrite_existing:true
+```
+
+---
+
+### `/channel_webhook clear_all <confirm>`
+**Description:** Clear **all** channel webhook profiles in this clone.
+
+- `confirm` — Must be `confirm` to proceed.
+
+After running, all cloned messages revert to using the original author’s name and avatar.
+
+**Example:**
+```text
+/channel_webhook clear_all confirm
+```
+
+---
+
+#### `/mapping_debug`
+
+**Description:** Show an ephemeral debug view of the **current clone's guild mapping** for the guild where the command is run.
+
+**Example:**
+```text
+/mapping_debug
+```
+
 ---

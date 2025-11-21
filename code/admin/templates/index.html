@@ -7,15 +7,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="{{ request.url_for('static', path='assets/main.css') }}?v={{ version }}">
   <link rel="icon" type="image/png" href="/static/logo.png">
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
 </head>
 
 <body>
   <header class="site-header" role="banner">
-    <button id="menu-toggle" class="menu-btn" aria-haspopup="true" aria-expanded="false"
-            aria-controls="side-menu" aria-label="Open menu">
+    <button id="menu-toggle" class="menu-btn" aria-haspopup="true" aria-expanded="false" aria-controls="side-menu"
+      aria-label="Open menu">
       <span class="bar"></span><span class="bar"></span><span class="bar"></span>
     </button>
-  
+
     <a class="header-left header-home" href="/" aria-label="">
       <img src="/static/logo.png" alt="" aria-hidden="true" class="header-logo" draggable="false" />
       <h1>Copycord</h1>
@@ -129,7 +130,6 @@
         </span>
       </a>
 
-
       <a class="promo-card promo-donate" href="{{ links.kofi }}" target="_blank" rel="noopener">
         <span class="promo-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
@@ -190,35 +190,56 @@
       </div>
     </div>
 
-    <div class="card">
-      <h3>Configuration</h3>
+    {# Shared tips dictionary for global + mapping modal #}
+    {% set FIELD_TIPS = {
+    "SERVER_TOKEN": "Your Discord bot token from the Developer Portal.",
+    "CLIENT_TOKEN": "Your Discord account token, visit repo for instructions on how to obtain.",
+    "COMMAND_USERS": "Comma-separated Discord user IDs allowed to run slash commands.",
+    "LOG_LEVEL": "INFO for normal use, DEBUG for troubleshooting.",
+    "HOST_GUILD_ID": "ID of the host server to mirror. Your account bot must be a member of this server.",
+    "CLONE_GUILD_ID": "ID of the clone server. Your bot must be a member of this server.",
+    "DELETE_ROLES": "When enabled, remove any roles in the clone that do not exist in the host.",
+    "UPDATE_ROLES": "When enabled, role properties (name, color, permissions) won't be synced after creation. You can
+    freely edit them in the clone.",
+    "MIRROR_ROLE_PERMISSIONS": "When enabled, mirror role permissions from the host to the clone.",
+    "EDIT_MESSAGES": "Messages that are edited in the host will be edited in the clone.",
+    "DELETE_MESSAGES": "Messages that are deleted in the host will be deleted in the clone.",
+    "DELETE_THREADS": "When enabled, delete in the clone any threads that were removed in the host.",
+    "DELETE_CHANNELS": "When enabled, delete in the clone any channels that were removed in the host.",
+    "CLONE_EMOJI": "When enabled, synchronize emojis from the host to the clone.",
+    "CLONE_STICKER": "When enabled, synchronize stickers from the host to the clone.",
+    "CLONE_ROLES": "When enabled, synchronize roles from the host to the clone.",
+    "MIRROR_CHANNEL_PERMISSIONS": "When enabled, channel permissions will sync with the host. CLONE_ROLES must be
+    enabled.",
+    "ENABLE_CLONING": "Master switch for cloning. Turn this off if you don't want Copycord to actively clone/sync
+    servers, but still want to use the other features.",
+    "CLONE_MESSAGES": "When enabled, messages sent in the host will be copied to the clone in real-time.",
+    "REPOSITION_CHANNELS": "When enabled, channels moved in the host server will be repositioned in the clone.",
+    "RENAME_CHANNELS": "When enabled, channels/categories renamed in the host server will be renamed in the clone.",
+    "SYNC_CHANNEL_NSFW": "When enabled, NSFW flags for channels will be synchronized from the host to the clone.",
+    "SYNC_CHANNEL_TOPIC": "When enabled, channel topics will be synchronized from the host to the clone.",
+    "SYNC_CHANNEL_SLOWMODE": "When enabled, slowmode settings for channels will be synchronized from the host to the clone.",
+    "CLONE_VOICE": "When enabled, voice channels will be cloned from the host to the clone.",
+    "CLONE_VOICE_PROPERTIES": "When enabled, voice channel properties (bitrate, user limit) will be synchronized from the host to the clone.",
+    "CLONE_STAGE": "When enabled, stage channels will be cloned from the host to the clone.",
+    "CLONE_STAGE_PROPERTIES": "When enabled, stage channel properties (bitrate, user limit) will be synchronized from the host to the clone.",
+    "CLONE_GUILD_ICON": "When enabled, the guild icon will be cloned from the host to the clone.",
+    "CLONE_GUILD_BANNER": "When enabled, the guild banner will be cloned from the host to the clone.",
+    "CLONE_GUILD_SPLASH": "When enabled, the guild splash will be cloned from the host to the clone.",
+    "CLONE_GUILD_DISCOVERY_SPLASH": "When enabled, the guild discovery splash will be cloned from the host to the clone.",
+    "SYNC_GUILD_DESCRIPTION": "When enabled, the guild description will be synchronized from the host to the clone.",
+    "SYNC_FORUM_PROPERTIES": "When enabled, forum properties (topic, tags, etc.) will be synchronized from the host to the clone.",
+    "REARRANGE_ROLES": "When enabled, roles will be rearranged in the clone to match the host server's role hierarchy.",
+    } %}
 
-      {% set FIELD_TIPS = {
-      "SERVER_TOKEN": "Bot token from the Discord Developer Portal.",
-      "CLIENT_TOKEN": "Discord account token.",
-      "DELETE_ROLES": "When enabled, remove any roles in the clone that do not exist in the host.",
-      "MIRROR_ROLE_PERMISSIONS": "When enabled, mirror role permissions from the host to the clone.",
-      "COMMAND_USERS": "User IDs authorized to run admin commands.",
-      "HOST_GUILD_ID": "ID of the host (source) server to mirror. Leave empty if not cloning servers.",
-      "CLONE_GUILD_ID": "ID of your destination (clone) server.",
-      "EDIT_MESSAGES": "Messages that are edited in the host will be edited in the clone.",
-      "DELETE_MESSAGES": "Messages that are deleted in the host will be deleted in the clone.",
-      "DELETE_THREADS": "When enabled, delete in the clone any threads that were removed in the host.",
-      "DELETE_CHANNELS": "When enabled, delete in the clone any channels that were removed in the host.",
-      "CLONE_EMOJI": "When enabled, synchronize emojis from the host to the clone.",
-      "CLONE_STICKER": "When enabled, synchronize stickers from the host to the clone.",
-      "CLONE_ROLES": "When enabled, synchronize roles from the host to the clone.",
-      "MIRROR_CHANNEL_PERMISSIONS": "When enabled, channel permissions will sync with the host. CLONE_ROLES must be
-      enabled.",
-      "ENABLE_CLONING": "Master switch to enable or disable cloning.",
-      } %}
+    <div class="card" id="global-config-card">
+      <h3>Global Configuration</h3>
 
       <form method="post" action="/save" id="cfg-form" novalidate>
         <div class="grid">
           {% for k in text_keys if k != 'COMMAND_USERS' %}
           {% set is_token = 'TOKEN' in k %}
-          {% set is_id = k.endswith('_ID') %}
-          <div class="field">
+          <div class="field field-token">
             <label for="{{ k }}" class="has-tip">
               <span class="label-text">{{ k }}</span>
               {% if FIELD_TIPS.get(k) %}
@@ -230,11 +251,33 @@
               {% endif %}
             </label>
 
-            <input type="{{ 'password' if is_token else 'text' }}" id="{{ k }}" name="{{ k }}"
-              value="{{ env.get(k,'') }}" {% if is_id %} inputmode="numeric" {% endif %} {% if is_token %}
-              autocomplete="off" spellcheck="false" {% endif %} />
+            {% if is_token %}
+            <div class="token-wrap">
+              <input type="password" id="{{ k }}" name="{{ k }}" value="{{ env.get(k,'') }}" autocomplete="off"
+                spellcheck="false" class="token-input" />
+
+              <button type="button" class="reveal-btn" data-target="{{ k }}" aria-pressed="false" title="Show">
+                <svg class="icon-eye" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                  viewBox="0 0 24 24">
+                  <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+
+                <svg class="icon-eye-off" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none"
+                  stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                  viewBox="0 0 24 24" style="display:none">
+                  <path
+                    d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.4 18.4 0 0 1 5.06-5.94M9.9 9.9A3 3 0 0 0 9 12a3 3 0 0 0 3 3 3 3 0 0 0 2.1-.9M1 1l22 22" />
+                </svg>
+              </button>
+            </div>
+            {% else %}
+            <input type="text" id="{{ k }}" name="{{ k }}" value="{{ env.get(k,'') }}" />
+            {% endif %}
           </div>
           {% endfor %}
+
 
           <div class="field field-chips">
             <label for="cmd_users_input" class="has-tip">
@@ -254,85 +297,13 @@
             <input type="hidden" name="COMMAND_USERS" id="COMMAND_USERS" value="{{ env.get('COMMAND_USERS','') }}">
           </div>
 
-          {% for k in bool_keys %}
-          {% if k not in ['EDIT_MESSAGES', 'DELETE_MESSAGES'] %}
-          <div class="field">
-            <label for="{{ k }}" class="has-tip">
-              <span class="label-text">{{ k }}</span>
-              {% if FIELD_TIPS.get(k) %}
-              <button type="button" class="info-dot" aria-label="What is {{ k }}?"
-                aria-describedby="tip-{{ k }}"></button>
-              <span id="tip-{{ k }}" role="tooltip" class="tip-bubble">
-                {{ FIELD_TIPS[k] }}
-              </span>
-              {% endif %}
-            </label>
-            <div class="select">
-              {% set val = env.get(k, 'True' if k!='MIRROR_ROLE_PERMISSIONS' else 'False') %}
-              <select id="{{ k }}" name="{{ k }}">
-                <option value="True" {{ 'selected' if val|string|lower in ['true','1','yes','on'] else '' }}>True
-                </option>
-                <option value="False" {{ 'selected' if val|string|lower in ['false','0','no','off'] else '' }}>False
-                </option>
-              </select>
-            </div>
-          </div>
-
-          {% if k == 'DELETE_CHANNELS' %}
-          <div class="field">
-            <label for="EDIT_MESSAGES" class="has-tip">
-              <span class="label-text">EDIT_MESSAGES</span>
-              {% if FIELD_TIPS.get('EDIT_MESSAGES') %}
-              <button type="button" class="info-dot" aria-label="What is EDIT_MESSAGES?"
-                aria-describedby="tip-EDIT_MESSAGES"></button>
-              <span id="tip-EDIT_MESSAGES" role="tooltip" class="tip-bubble">
-                {{ FIELD_TIPS['EDIT_MESSAGES'] }}
-              </span>
-              {% endif %}
-            </label>
-            <div class="select">
-              {% set val_edit = env.get('EDIT_MESSAGES', 'True') %}
-              <select id="EDIT_MESSAGES" name="EDIT_MESSAGES">
-                <option value="True" {{ 'selected' if val_edit|string|lower in ['true','1','yes','on'] else '' }}>True
-                </option>
-                <option value="False" {{ 'selected' if val_edit|string|lower in ['false','0','no','off'] else '' }}>
-                  False</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="field">
-            <label for="DELETE_MESSAGES" class="has-tip">
-              <span class="label-text">DELETE_MESSAGES</span>
-              {% if FIELD_TIPS.get('DELETE_MESSAGES') %}
-              <button type="button" class="info-dot" aria-label="What is DELETE_MESSAGES?"
-                aria-describedby="tip-DELETE_MESSAGES"></button>
-              <span id="tip-DELETE_MESSAGES" role="tooltip" class="tip-bubble">
-                {{ FIELD_TIPS['DELETE_MESSAGES'] }}
-              </span>
-              {% endif %}
-            </label>
-            <div class="select">
-              {% set val_del = env.get('DELETE_MESSAGES', 'True') %}
-              <select id="DELETE_MESSAGES" name="DELETE_MESSAGES">
-                <option value="True" {{ 'selected' if val_del|string|lower in ['true','1','yes','on'] else '' }}>True
-                </option>
-                <option value="False" {{ 'selected' if val_del|string|lower in ['false','0','no','off'] else '' }}>False
-                </option>
-              </select>
-            </div>
-          </div>
-          {% endif %}
-          {% endif %}
-          {% endfor %}
-
           <div class="field">
             <label for="LOG_LEVEL" class="has-tip">
               <span class="label-text">LOG_LEVEL</span>
               <button type="button" class="info-dot" aria-label="What is LOG_LEVEL?"
                 aria-describedby="tip-LOG_LEVEL"></button>
               <span id="tip-LOG_LEVEL" role="tooltip" class="tip-bubble">
-                INFO for normal use, DEBUG for troubleshooting.
+                {{ FIELD_TIPS['LOG_LEVEL'] }}
               </span>
             </label>
             <div class="select">
@@ -344,117 +315,34 @@
           </div>
 
           <div class="btns">
-            <button class="btn btn-ghost" type="submit">Save</button>
-            <button type="button" class="btn btn-ghost" id="btn-cancel" hidden>Cancel</button>
+            <button class="btn btn-ghost" type="submit" id="cfg-save-btn">Save</button>
+            <button type="button" class="btn btn-ghost" id="cfg-cancel-btn">Cancel</button>
           </div>
         </div>
       </form>
     </div>
 
-    {% set FILTER_TIPS = {
-    "wl_categories": "Host category IDs to whitelist. Only these categories (and their channels) are cloned.",
-    "wl_channels": "Host channel IDs to whitelist. Only these channels (and their linked categories) will be cloned.",
-    "ex_categories": "Host category IDs to exclude from cloning.",
-    "ex_channels": "Host channel IDs to exclude from cloning."
-    } %}
+    <div class="card" id="guild-config-card">
+      <h3>Cloning Configuration</h3>
 
-    <div class="card" id="card-filters">
-      <h3>Sync Filters</h3>
-      <div class="card-body">
+      <div class="guild-config-header">
+        <p class="text-subtle">
+          Map a source server to a target server to enable cloning for that pair
+        </p>
 
-        <details class="info-details">
-          <summary>Info</summary>
-          <div class="info-content">
-            <p><strong>Whitelist (allow-list):</strong> If <em>any</em> IDs are listed, <em>only</em> those
-              categories/channels are cloned. Leave <em>both</em> whitelist lists empty to disable whitelist mode.</p>
-            <p><strong>Excluded (deny-list):</strong> Anything listed here is dropped.</p>
-            <p><strong>Precedence:</strong></p>
-            <ol>
-              <li><strong>Channel whitelist</strong> &gt; channel exclude</li>
-              <li><strong>Channel exclude</strong> &gt; category whitelist</li>
-              <li><strong>Category whitelist</strong> &gt; category exclude</li>
-            </ol>
-            <p><strong>IDs:</strong> Use IDs from the <em>host (source) guild</em>, not the clone.</p>
-          </div>
-        </details>
-
-        <form id="form-filters" action="/filters/save" method="post">
-          <div class="filters-grid">
-            <div class="filters-col">
-              <h4>Whitelist (allow-list)</h4>
-
-              <div class="chips-field" style="position:relative">
-                <label class="chips-label has-tip" for="wl_categories_input">
-                  <span class="label-text">Categories to allow</span>
-                  <button type="button" class="info-dot" aria-label="What is Categories to allow?"
-                    aria-describedby="tip-wl_categories"></button>
-                  <span id="tip-wl_categories" role="tooltip" class="tip-bubble">
-                    {{ FILTER_TIPS['wl_categories'] }}
-                  </span>
-                </label>
-                <div class="chips chips-compact" data-chips="wl_categories">
-                  <input id="wl_categories_input" class="chip-input" type="text" inputmode="numeric" />
-                </div>
-                <input type="hidden" name="wl_categories" id="wl_categories" value="">
-              </div>
-
-              <div class="chips-field" style="position:relative">
-                <label class="chips-label has-tip" for="wl_channels_input">
-                  <span class="label-text">Channels to allow</span>
-                  <button type="button" class="info-dot" aria-label="What is Channels to allow?"
-                    aria-describedby="tip-wl_channels"></button>
-                  <span id="tip-wl_channels" role="tooltip" class="tip-bubble">
-                    {{ FILTER_TIPS['wl_channels'] }}
-                  </span>
-                </label>
-                <div class="chips chips-compact" data-chips="wl_channels">
-                  <input id="wl_channels_input" class="chip-input" type="text" inputmode="numeric" />
-                </div>
-                <input type="hidden" name="wl_channels" id="wl_channels" value="">
-              </div>
-            </div>
-
-            <div class="filters-col">
-              <h4>Exclude (deny-list)</h4>
-
-              <div class="chips-field" style="position:relative">
-                <label class="chips-label has-tip" for="ex_categories_input">
-                  <span class="label-text">Categories to drop</span>
-                  <button type="button" class="info-dot" aria-label="What is Categories to drop?"
-                    aria-describedby="tip-ex_categories"></button>
-                  <span id="tip-ex_categories" role="tooltip" class="tip-bubble">
-                    {{ FILTER_TIPS['ex_categories'] }}
-                  </span>
-                </label>
-                <div class="chips chips-compact" data-chips="ex_categories">
-                  <input id="ex_categories_input" class="chip-input" type="text" inputmode="numeric" />
-                </div>
-                <input type="hidden" name="ex_categories" id="ex_categories" value="">
-              </div>
-
-              <div class="chips-field" style="position:relative">
-                <label class="chips-label has-tip" for="ex_channels_input">
-                  <span class="label-text">Channels to drop</span>
-                  <button type="button" class="info-dot" aria-label="What is Channels to drop?"
-                    aria-describedby="tip-ex_channels"></button>
-                  <span id="tip-ex_channels" role="tooltip" class="tip-bubble">
-                    {{ FILTER_TIPS['ex_channels'] }}
-                  </span>
-                </label>
-                <div class="chips chips-compact" data-chips="ex_channels">
-                  <input id="ex_channels_input" class="chip-input" type="text" inputmode="numeric" />
-                </div>
-                <input type="hidden" name="ex_channels" id="ex_channels" value="">
-              </div>
-            </div>
-          </div>
-
-          <div class="btns mt-3">
-            <button class="btn btn-ghost" type="submit">Save Filters</button>
-            <button type="button" class="btn btn-ghost" id="btn-cancel-filters" hidden>Cancel</button>
-          </div>
-        </form>
+        <div class="guild-mapping-search">
+          <input
+            id="mappingSearchInput"
+            class="log-search-input"
+            type="text"
+            placeholder="Search mappings…"
+            aria-label="Search mappings"
+            autocomplete="off"
+          />
+        </div>
       </div>
+
+      <div id="guild-mapping-list" class="guild-mapping-list"></div>
     </div>
 
     <div id="log-modal" class="modal" aria-hidden="true">
@@ -483,6 +371,487 @@
         <div class="btns" style="padding: 0 16px 16px 16px;">
           <button type="button" id="confirm-cancel" class="btn btn-ghost">Cancel</button>
           <button type="button" id="confirm-okay" class="btn btn-ghost">Delete</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="mapping-modal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="mapping-title">
+        <div class="modal-header">
+          <div class="modal-title-wrap">
+            <div class="modal-title-main">Clone Mapping</div>
+            <div id="mapping-id-subtle" class="modal-title-subtle" hidden></div>
+          </div>
+          <button type="button" id="mapping-close" class="icon-btn verify-close" aria-label="Close">✕</button>
+        </div>
+
+        <form id="mapping-form" class="padded" autocomplete="off">
+          <input type="hidden" id="map_mapping_id" name="mapping_id" />
+
+          <div class="field">
+            <label for="map_mapping_name" class="has-tip">
+              <span class="label-text">Mapping Name</span>
+              <button type="button" class="info-dot" aria-label="What is Mapping Name?"
+                aria-describedby="tip-mapping_name"></button>
+              <span id="tip-mapping_name" role="tooltip" class="tip-bubble">
+                A friendly label for this clone pair. Shown on the dashboard cards.
+              </span>
+            </label>
+            <input type="text" id="map_mapping_name" name="mapping_name" maxlength="64" />
+          </div>
+
+        <div class="grid">
+          <div class="field">
+            <label for="map_original_guild_id" class="has-tip">
+              <span class="label-text">HOST_GUILD_ID</span>
+              <button type="button" class="info-dot" aria-label="What is HOST_GUILD_ID?"
+                aria-describedby="tip-HOST_GUILD_ID"></button>
+              <span id="tip-HOST_GUILD_ID" role="tooltip" class="tip-bubble">
+                {{ FIELD_TIPS['HOST_GUILD_ID'] }}
+              </span>
+            </label>
+            <input type="text" id="map_original_guild_id" name="original_guild_id" inputmode="numeric" />
+          </div>
+
+          <div class="field">
+            <label for="map_cloned_guild_id" class="has-tip">
+              <span class="label-text">CLONE_GUILD_ID</span>
+              <button type="button" class="info-dot" aria-label="What is CLONE_GUILD_ID?"
+                aria-describedby="tip-CLONE_GUILD_ID"></button>
+              <span id="tip-CLONE_GUILD_ID" role="tooltip" class="tip-bubble">
+                {{ FIELD_TIPS['CLONE_GUILD_ID'] }}
+              </span>
+            </label>
+            <input type="text" id="map_cloned_guild_id" name="cloned_guild_id" inputmode="numeric" />
+          </div>
+
+          <div class="field field-search-settings">
+            <label for="mappingSettingsSearch" class="has-tip">
+              <span class="label-text">Search Settings</span>
+            </label>
+
+            <input
+              id="mappingSettingsSearch"
+              class="log-search-input"
+              type="text"
+              placeholder="Search messages, clone_roles, etc…"
+              autocomplete="off"
+            />
+          </div>
+
+          {% for k in mapping_bool_keys %}
+          <div class="field mapping-setting-field" data-setting-key="{{ k | lower }}">
+            <label for="map_{{ k }}" class="has-tip">
+              <span class="label-text">{{ k }}</span>
+              {% if FIELD_TIPS.get(k) %}
+              <button type="button" class="info-dot" aria-label="What is {{ k }}?"
+                aria-describedby="tip-{{ k }}"></button>
+              <span id="tip-{{ k }}" role="tooltip" class="tip-bubble">
+                {{ FIELD_TIPS[k] }}
+              </span>
+              {% endif %}
+            </label>
+            <div class="select">
+              <select id="map_{{ k }}" name="{{ k }}">
+                <option value="True">True</option>
+                <option value="False">False</option>
+              </select>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="btns">
+          <button class="btn btn-ghost" type="button" id="mapping-cancel-btn" hidden>
+            Cancel
+          </button>
+          <button class="btn btn-ghost" type="submit" id="mapping-save-btn">
+            Save Mapping
+          </button>
+        </div>
+        </form>
+      </div>
+    </div>
+
+
+    <div id="filters-modal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="filters-title">
+        <div class="modal-header">
+          <h4 id="filters-title" class="modal-title">Filters</h4>
+          <button id="filters-close" type="button" class="icon-btn verify-close" aria-label="Close">✕</button>
+        </div>
+
+        <form id="form-filters" class="padded" method="post" action="" autocomplete="off">
+          <input type="hidden" id="filters_mapping_id" name="mapping_id" value="">
+
+          <div class="filters-grid">
+            <fieldset class="filters-col">
+              <legend>Whitelist (Allow-list)</legend>
+
+              <div class="field">
+                <div class="filters-roles-label-row">
+                  <label for="wl_categories_input" class="has-tip">
+                    <span class="label-text">Allowed Category IDs</span>
+                    <button type="button" class="info-dot" aria-label="Only sync channels inside these category IDs."
+                      aria-describedby="tip-wl_categories"></button>
+                    <span id="tip-wl_categories" role="tooltip" class="tip-bubble">
+                      Only these categories (and their channels) will sync.
+                      Leave empty to allow all categories.
+                    </span>
+                  </label>
+
+                  <button type="button" class="role-fetch-btn filter-fetch-btn" data-filter-target="wl_categories"
+                    data-filter-kind="category" aria-label="Browse categories for this host"
+                    title="Browse categories for this host">
+                    <span class="role-fetch-circle">
+                      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                        <path
+                          d="M7 2a5 5 0 1 1-3.536 8.536l-1.95 1.95a.75.75 0 1 0 1.06 1.06l1.95-1.95A5 5 0 0 1 7 2zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
+                      </svg>
+                    </span>
+                  </button>
+                </div>
+
+                <div class="chips" data-chips="wl_categories">
+                  <span class="chip-input-wrap">
+                    <input class="chip-input" id="wl_categories_input" type="text" inputmode="numeric"
+                      placeholder="Add category ID(s)…" />
+                  </span>
+                </div>
+
+                <input type="hidden" id="wl_categories" name="wl_categories" value="">
+              </div>
+
+              <div class="field">
+                <div class="filters-roles-label-row">
+                  <label for="wl_channels_input" class="has-tip">
+                    <span class="label-text">Allowed Channel IDs</span>
+                    <button type="button" class="info-dot" aria-label="Only sync these specific text channels."
+                      aria-describedby="tip-wl_channels"></button>
+                    <span id="tip-wl_channels" role="tooltip" class="tip-bubble">
+                      Only these channels will be cloned.
+                    </span>
+                  </label>
+
+                  <button type="button" class="role-fetch-btn filter-fetch-btn" data-filter-target="wl_channels"
+                    data-filter-kind="channel" aria-label="Browse channels for this host"
+                    title="Browse channels for this host">
+                    <span class="role-fetch-circle">
+                      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                        <path
+                          d="M7 2a5 5 0 1 1-3.536 8.536l-1.95 1.95a.75.75 0 1 0 1.06 1.06l1.95-1.95A5 5 0 0 1 7 2zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
+                      </svg>
+                    </span>
+                  </button>
+                </div>
+
+                <div class="chips" data-chips="wl_channels">
+                  <span class="chip-input-wrap">
+                    <input class="chip-input" id="wl_channels_input" type="text" inputmode="numeric"
+                      placeholder="Add channel ID(s)…" />
+                  </span>
+                </div>
+
+                <input type="hidden" id="wl_channels" name="wl_channels" value="">
+              </div>
+            </fieldset>
+
+            <fieldset class="filters-col">
+              <legend>Exclude (Deny-list)</legend>
+
+              <div class="field">
+                <div class="filters-roles-label-row">
+                  <label for="ex_categories_input" class="has-tip">
+                    <span class="label-text">Blocked Category IDs</span>
+                    <button type="button" class="info-dot" aria-label="Skip any channels in these categories."
+                      aria-describedby="tip-ex_categories"></button>
+                    <span id="tip-ex_categories" role="tooltip" class="tip-bubble">
+                      Channels inside these categories will be blocked from being cloned.
+                    </span>
+                  </label>
+
+                  <button type="button" class="role-fetch-btn filter-fetch-btn" data-filter-target="ex_categories"
+                    data-filter-kind="category" aria-label="Browse categories to block for this host"
+                    title="Browse categories to block for this host">
+                    <span class="role-fetch-circle">
+                      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                        <path
+                          d="M7 2a5 5 0 1 1-3.536 8.536l-1.95 1.95a.75.75 0 1 0 1.06 1.06l1.95-1.95A5 5 0 0 1 7 2zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
+                      </svg>
+                    </span>
+                  </button>
+                </div>
+
+                <div class="chips" data-chips="ex_categories">
+                  <span class="chip-input-wrap">
+                    <input class="chip-input" id="ex_categories_input" type="text" inputmode="numeric"
+                      placeholder="Add category ID(s)…" />
+                  </span>
+                </div>
+
+                <input type="hidden" id="ex_categories" name="ex_categories" value="">
+              </div>
+
+              <div class="field">
+                <div class="filters-roles-label-row">
+                  <label for="ex_channels_input" class="has-tip">
+                    <span class="label-text">Blocked Channel IDs</span>
+                    <button type="button" class="info-dot" aria-label="Never sync these specific channels."
+                      aria-describedby="tip-ex_channels"></button>
+                    <span id="tip-ex_channels" role="tooltip" class="tip-bubble">
+                      These channels will never sync, even if their category is allowed.
+                    </span>
+                  </label>
+
+                  <button type="button" class="role-fetch-btn filter-fetch-btn" data-filter-target="ex_channels"
+                    data-filter-kind="channel" aria-label="Browse channels to block for this host"
+                    title="Browse channels to block for this host">
+                    <span class="role-fetch-circle">
+                      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                        <path
+                          d="M7 2a5 5 0 1 1-3.536 8.536l-1.95 1.95a.75.75 0 1 0 1.06 1.06l1.95-1.95A5 5 0 0 1 7 2zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
+                      </svg>
+                    </span>
+                  </button>
+                </div>
+
+                <div class="chips" data-chips="ex_channels">
+                  <span class="chip-input-wrap">
+                    <input class="chip-input" id="ex_channels_input" type="text" inputmode="numeric"
+                      placeholder="Add channel ID(s)…" />
+                  </span>
+                </div>
+
+                <input type="hidden" id="ex_channels" name="ex_channels" value="">
+              </div>
+            </fieldset>
+          </div>
+
+          <fieldset class="filters-col filters-roles">
+            <legend>Role Blocks</legend>
+
+            <input type="hidden" id="blocked_role_ids" name="blocked_role_ids" value="">
+
+            <div class="field field-chips mt-2">
+
+              <div class="filters-roles-label-row">
+                <label class="has-tip">
+                  <span class="label-text">Blocked roles</span>
+                  <button type="button" class="info-dot" aria-label="Which roles does this affect?"
+                    aria-describedby="tip-blocked_roles"></button>
+                  <span id="tip-blocked_roles" role="tooltip" class="tip-bubble">
+                    List of role IDs to block from being cloned.
+                  </span>
+                </label>
+
+                <button type="button" class="role-fetch-btn" id="filters-role-refresh"
+                  aria-label="Fetch roles from Discord" title="Fetch Discord roles">
+                  <span class="role-fetch-circle">
+                    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+                      <path
+                        d="M7 2a5 5 0 1 1-3.536 8.536l-1.95 1.95a.75.75 0 0 1-1.06-1.06l1.95-1.95A5 5 0 0 1 7 2zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
+                    </svg>
+                  </span>
+                </button>
+
+                <span class="filters-roles-status" id="filters-role-status" aria-live="polite"></span>
+              </div>
+
+              <div class="chips chips-compact" data-chips="blocked_roles">
+                <div class="chip-input-wrap">
+                  <input id="blocked_role_ids_input" class="chip-input" type="text" inputmode="numeric"
+                    autocomplete="off" placeholder="Add role ID(s)…" />
+                </div>
+              </div>
+            </div>
+          </fieldset>
+
+
+          <fieldset class="filters-col filters-words">
+            <legend>Word Filters</legend>
+
+            <div class="field">
+              <label for="blocked_words_input" class="has-tip">
+                <span class="label-text">Blocked Words / Phrases</span>
+                <button type="button" class="info-dot"
+                  aria-label="Messages containing these words will NOT sync for this mapping."
+                  aria-describedby="tip-blocked_words"></button>
+                <span id="tip-blocked_words" role="tooltip" class="tip-bubble">
+                  Any message that contains one of these words will NOT
+                  be forwarded for this guild mapping.
+                </span>
+              </label>
+
+              <div class="chips" data-chips="blocked_words">
+                <span class="chip-input-wrap">
+                  <input class="chip-input" id="blocked_words_input" type="text" inputmode="text"
+                    placeholder="Add word or phrase…" />
+                </span>
+              </div>
+
+              <input type="hidden" id="blocked_words" name="blocked_words" value="">
+            </div>
+          </fieldset>
+
+          <fieldset class="filters-col filters-users">
+            <legend>User Filters</legend>
+            
+            <div class="field">
+              <label for="wl_users_input" class="has-tip">
+                <span class="label-text">Whitelisted User IDs</span>
+                <button type="button" class="info-dot"
+                  aria-label="Only messages from these users will be cloned"
+                  aria-describedby="tip-wl_users"></button>
+                <span id="tip-wl_users" role="tooltip" class="tip-bubble">
+                  When set, ONLY messages from these user IDs will be cloned.
+                  Leave empty to clone all users (unless blacklisted).
+                </span>
+              </label>
+
+              <div class="chips" data-chips="wl_users">
+                <span class="chip-input-wrap">
+                  <input class="chip-input" id="wl_users_input" type="text" inputmode="numeric"
+                    placeholder="Add user ID(s)…" />
+                </span>
+              </div>
+
+              <input type="hidden" id="wl_users" name="wl_users" value="">
+            </div>
+
+            <div class="field">
+              <label for="bl_users_input" class="has-tip">
+                <span class="label-text">Blacklisted User IDs</span>
+                <button type="button" class="info-dot"
+                  aria-label="Messages from these users will NOT be cloned"
+                  aria-describedby="tip-bl_users"></button>
+                <span id="tip-bl_users" role="tooltip" class="tip-bubble">
+                  Messages from these user IDs will be blocked from cloning.
+                </span>
+              </label>
+
+              <div class="chips" data-chips="bl_users">
+                <span class="chip-input-wrap">
+                  <input class="chip-input" id="bl_users_input" type="text" inputmode="numeric"
+                    placeholder="Add user ID(s)…" />
+                </span>
+              </div>
+
+              <input type="hidden" id="bl_users" name="bl_users" value="">
+            </div>
+          </fieldset>
+
+          <div class="btns modal-footer-row">
+            <button id="filters-save-btn" type="submit" class="btn btn-ghost">
+              Save Filters
+            </button>
+
+            <button id="btn-cancel-filters" type="button" class="btn btn-ghost-red" hidden>
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="roleBlocksModal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="roleBlocksTitle">
+        <div class="modal-header">
+          <h3 class="modal-title" id="roleBlocksTitle">Role Blocks</h3>
+          <button class="icon-btn verify-close" id="roleBlocksCloseBtn" type="button" aria-label="Close">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <p class="text-muted small">
+            Select which roles you want to block for this mapping.
+          </p>
+
+          <div class="mb-2 role-blocks-search">
+            <input type="text" id="roleBlocksSearch" class="log-search-input" placeholder="Search roles by name or ID…"
+              autocomplete="off" />
+          </div>
+
+          <div class="role-table-wrap">
+            <table class="role-table">
+              <thead>
+                <tr>
+                  <th class="role-table-select-col">
+                    <label class="checkbox-inline" title="Select / deselect all roles">
+                      <input type="checkbox" id="roleBlocksSelectAll" class="role-block-toggle role-block-select-all"
+                        aria-label="Select or deselect all roles" />
+                    </label>
+                  </th>
+                  <th>Role</th>
+                  <th>ID</th>
+                </tr>
+              </thead>
+              <tbody id="roleBlocksTableBody"></tbody>
+            </table>
+          </div>
+
+          <div class="modal-footer">
+            <button class="btn btn-ghost" id="roleBlocksCancel" type="button">
+              Cancel
+            </button>
+            <button class="btn btn-ghost" id="roleBlocksApply" type="button">
+              Apply
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="filterObjectsModal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="filterObjectsTitle">
+        <div class="modal-header">
+          <h3 class="modal-title" id="filterObjectsTitle">Browse</h3>
+          <button class="icon-btn verify-close" id="filterObjectsCloseBtn" type="button" aria-label="Close">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <p class="text-muted small" id="filterObjectsHelp">
+            Select items for this mapping.
+          </p>
+
+          <div class="mb-2 filter-objects-search">
+            <input type="text" id="filterObjectsSearch" class="log-search-input"
+              placeholder="Search by name, cat, or ID…" autocomplete="off" />
+          </div>
+
+          <div class="role-table-wrap">
+            <table id="filterObjectsTable" class="role-table">
+              <thead>
+                <tr>
+                  <th class="role-table-select-col">
+                    <label class="checkbox-inline" title="Select / deselect all items">
+                      <input type="checkbox" id="filterObjectsSelectAll" class="role-block-toggle role-block-select-all"
+                        aria-label="Select or deselect all items" />
+                    </label>
+                  </th>
+                  <th id="filterObjectsNameHeader">Name</th>
+                  <th id="filterObjectsCategoryHeader">Category</th>
+                  <th>ID</th>
+                </tr>
+              </thead>
+              <tbody id="filterObjectsTableBody"></tbody>
+            </table>
+          </div>
+
+          <div class="modal-footer">
+            <button class="btn btn-ghost" id="filterObjectsCancel" type="button">
+              Cancel
+            </button>
+            <button class="btn btn-ghost" id="filterObjectsApply" type="button">
+              Apply
+            </button>
+          </div>
         </div>
       </div>
     </div>

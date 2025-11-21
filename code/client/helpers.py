@@ -7,17 +7,16 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-
 from __future__ import annotations
 import asyncio
-import json
-import inspect
 import logging
 import time
+import json
+import inspect
 import uuid
+from datetime import datetime
 from typing import Optional, Any, Dict
 import discord
-from datetime import datetime
 from common.config import CURRENT_VERSION
 
 
@@ -28,7 +27,7 @@ class ClientUiController:
         bus,
         admin_base_url: str,
         bot: discord.Client,
-        guild_id: Optional[int],
+        guild_id: Optional[int] = None,
         listener,
         logger: Optional[logging.Logger] = None,
         topic: str = "client",
@@ -367,7 +366,6 @@ async def dm_member_by_id(bot, member_id: int, message: str) -> bool:
         return False
     except Exception as e:
         return False
-
 
 def _safe_primitive(val: Any) -> Any:
     """
