@@ -444,3 +444,14 @@ After running, all cloned messages revert to using the original author’s name 
 ```
 
 ---
+
+#### `/mapping_debug`
+
+**Description:** Show an ephemeral debug view of the **current clone's guild mapping** for the guild where the command is run.
+
+**Example:**
+```text
+/mapping_debug
+```
+
+---

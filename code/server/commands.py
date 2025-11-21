@@ -22,6 +22,7 @@ import time
 import logging
 import time
 import re
+import json
 from typing import Optional
 from common.config import Config
 from common.db import DBManager
@@ -45,6 +46,46 @@ def guild_scoped_slash_command(*dargs, **dkwargs):
     """Wrapper that always scopes slash commands to our mapped clone guilds."""
     dkwargs.setdefault("guild_ids", GUILD_IDS)
     return commands.slash_command(*dargs, **dkwargs)
+
+
+def _format_discord_timestamp(value) -> str:
+    """
+    Accepts:
+    - epoch int/float
+    - numeric string
+    - 'YYYY-MM-DD HH:MM:SS' or ISO-like strings
+
+    Returns Discord timestamp markup like:
+      <t:TIMESTAMP:f> (<t:TIMESTAMP:R>)
+    """
+    if not value:
+        return "`?`"
+
+    try:
+
+        if isinstance(value, (int, float)):
+            ts = int(value)
+        else:
+            s = str(value).strip()
+            if s.isdigit():
+                ts = int(s)
+            else:
+
+                try:
+                    dt = datetime.fromisoformat(s)
+                except ValueError:
+                    try:
+                        dt = datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
+                    except ValueError:
+                        return f"`{s}`"
+
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                ts = int(dt.timestamp())
+    except Exception:
+        return f"`{value}`"
+
+    return f"<t:{ts}:f> (<t:{ts}:R>)"
 
 
 class CloneCommands(commands.Cog):
@@ -2970,6 +3011,173 @@ class CloneCommands(commands.Cog):
         )
 
         await ctx.followup.send(embed=embed, ephemeral=True)
+
+    @guild_scoped_slash_command(
+        name="mapping_debug",
+        description="Show debug info and settings for this clone's guild mapping.",
+    )
+    async def mapping_debug(self, ctx: discord.ApplicationContext):
+        """
+        Ephemeral debug view of the guild_mapping row + settings for THIS cloned guild.
+        """
+        guild = ctx.guild
+        if not guild:
+            return await ctx.respond(
+                "This command must be run inside a server.", ephemeral=True
+            )
+
+        try:
+            mapping = self.db.get_mapping_by_clone(guild.id)
+        except Exception as e:
+            logger.exception(
+                "mapping_debug: failed to load mapping for clone=%s", guild.id
+            )
+            return await ctx.respond(
+                embed=self._err_embed(
+                    "Database error",
+                    f"Failed to load mapping for this guild:\n`{type(e).__name__}: {e}`",
+                ),
+                ephemeral=True,
+            )
+
+        if not mapping:
+            return await ctx.respond(
+                embed=self._err_embed(
+                    "No mapping",
+                    "This clone guild is not currently mapped to a source guild.",
+                ),
+                ephemeral=True,
+            )
+
+        mapping_id = str(mapping.get("mapping_id") or "?")
+        mapping_name = (mapping.get("mapping_name") or "").strip() or "(unnamed)"
+        status = (mapping.get("status") or "active").strip().lower()
+
+        orig_id = int(mapping.get("original_guild_id") or 0)
+        clone_id = int(mapping.get("cloned_guild_id") or guild.id)
+
+        orig_name = (mapping.get("original_guild_name") or "").strip() or "(unknown)"
+        clone_name = (mapping.get("cloned_guild_name") or "").strip() or guild.name
+
+        created_at_raw = mapping.get("created_at")
+        last_updated_raw = mapping.get("last_updated")
+
+        created_at_display = _format_discord_timestamp(created_at_raw)
+        last_updated_display = _format_discord_timestamp(last_updated_raw)
+
+        settings = mapping.get("settings") or {}
+        if not isinstance(settings, dict):
+            try:
+                settings = json.loads(str(settings))
+            except Exception:
+
+                settings = {"__raw__": str(mapping.get("settings"))}
+
+        try:
+            filters = self.db.get_filters_for_mapping(mapping_id)
+        except Exception:
+            filters = {
+                "whitelist": {"category": set(), "channel": set()},
+                "exclude": {"category": set(), "channel": set()},
+                "blocked_words": [],
+            }
+
+        blocked_words = list(filters.get("blocked_words") or [])
+        wl_cats = list(filters.get("whitelist", {}).get("category", []) or [])
+        wl_chans = list(filters.get("whitelist", {}).get("channel", []) or [])
+        ex_cats = list(filters.get("exclude", {}).get("category", []) or [])
+        ex_chans = list(filters.get("exclude", {}).get("channel", []) or [])
+
+        try:
+            blocked_roles = self.db.get_blocked_role_ids(cloned_guild_id=clone_id)
+        except Exception:
+            blocked_roles = []
+
+        try:
+            user_filters = self.db.get_user_filters_for_mapping(mapping_id)
+        except Exception:
+            user_filters = {"whitelist": [], "blacklist": []}
+
+        desc_lines = [
+            f"**Mapping ID:** `{mapping_id}`",
+            f"**Name:** {mapping_name}",
+            f"**Status:** `{status}`",
+            "",
+            f"**Source Guild:** {orig_name} (`{orig_id}`)",
+            f"**Clone Guild:** {clone_name} (`{clone_id}`)",
+            "",
+            f"**Created:** {created_at_display}",
+            f"**Last Updated:** {last_updated_display}",
+        ]
+
+        embed = discord.Embed(
+            title="🛠️ Guild Mapping Debug",
+            description="\n".join(desc_lines),
+            color=discord.Color.blurple(),
+            timestamp=datetime.now(timezone.utc),
+        )
+
+        filters_summary = [
+            f"Whitelist categories: **{len(wl_cats)}**",
+            f"Whitelist channels: **{len(wl_chans)}**",
+            f"Exclude categories: **{len(ex_cats)}**",
+            f"Exclude channels: **{len(ex_chans)}**",
+            f"Blocked keywords: **{len(blocked_words)}**",
+            f"Blocked roles: **{len(blocked_roles)}**",
+            f"User whitelist: **{len(user_filters.get('whitelist', []) )}**",
+            f"User blacklist: **{len(user_filters.get('blacklist', []) )}**",
+        ]
+
+        embed.add_field(
+            name="Filters & Blocks",
+            value="\n".join(filters_summary),
+            inline=False,
+        )
+
+        lines: list[str] = []
+        for key in sorted(settings.keys()):
+            val = settings[key]
+            if isinstance(val, (dict, list)):
+                val_repr = json.dumps(val, separators=(",", ":"), ensure_ascii=False)
+            else:
+                val_repr = str(val)
+
+            if len(val_repr) > 120:
+                val_repr = val_repr[:117] + "…"
+
+            emoji = ""
+            if isinstance(val, bool):
+                emoji = "✅" if val else "❌"
+
+            if emoji:
+                lines.append(f"{emoji} `{key}` = `{val_repr}`")
+            else:
+                lines.append(f"`{key}` = `{val_repr}`")
+
+        def _chunk_lines(xs: list[str], limit: int = 1000) -> list[str]:
+            chunks: list[str] = []
+            cur = ""
+            for line in xs:
+                add = ("\n" if cur else "") + line
+                if len(cur) + len(add) > limit:
+                    chunks.append(cur or "—")
+                    cur = line
+                else:
+                    cur += add
+            if cur:
+                chunks.append(cur)
+            if not chunks:
+                chunks.append("—")
+            return chunks
+
+        for idx, chunk in enumerate(_chunk_lines(lines)):
+            embed.add_field(
+                name="Settings" if idx == 0 else "Settings (cont.)",
+                value=chunk,
+                inline=False,
+            )
+
+        await ctx.respond(embed=embed, ephemeral=True)
 
 
 def setup(bot: commands.Bot):
