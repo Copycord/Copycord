@@ -672,16 +672,26 @@ class ServerReceiver:
                         "[⚠️] No guild mappings found. Nothing is currently set to clone."
                     )
             else:
-                logger.info(
-                    "[🧙‍♂️] Copycord is cloning %d of %d server%s (%d paused)",
-                    num_active,
-                    total,
-                    "" if total == 1 else "s",
-                    num_paused,
-                )
+                # If there are no paused mappings, don't show "(0 paused)"
+                if num_paused:
+                    logger.info(
+                        "[🧙‍♂️] Copycord is cloning %d of %d server%s (%d paused)",
+                        num_active,
+                        total,
+                        "" if total == 1 else "s",
+                        num_paused,
+                    )
+                else:
+                    logger.info(
+                        "[🧙‍♂️] Copycord is cloning %d of %d server%s",
+                        num_active,
+                        total,
+                        "" if total == 1 else "s",
+                    )
 
         except Exception:
             logger.exception("Failed to summarize guild_mappings on startup")
+
 
     async def on_ready(self):
         """

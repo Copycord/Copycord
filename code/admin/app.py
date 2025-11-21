@@ -23,7 +23,7 @@ import tarfile, tempfile, shutil
 import re
 import time
 import logging
-from typing import Dict, List, Set, Literal, Optional, Any
+from typing import Dict, List, Set, Literal, Optional, Any, Union
 from admin.auth import init_admin_auth
 from admin.logging_setup import (
     LOGGER,
@@ -219,38 +219,38 @@ BOOL_KEYS = [
     "CLONE_GUILD_DISCOVERY_SPLASH",
     "SYNC_GUILD_DESCRIPTION",
 ]
-DEFAULTS: Dict[str, str] = {
-    "DELETE_CHANNELS": "True",
-    "DELETE_THREADS": "True",
-    "DELETE_ROLES": "True",
-    "UPDATE_ROLES": "True",
-    "EDIT_MESSAGES": "True",
-    "REPOSITION_CHANNELS": "True",
-    "DELETE_MESSAGES": "True",
-    "CLONE_EMOJI": "True",
-    "CLONE_STICKER": "True",
-    "CLONE_ROLES": "True",
-    "REARRANGE_ROLES": "False",
-    "MIRROR_ROLE_PERMISSIONS": "False",
-    "ENABLE_CLONING": "True",
-    "CLONE_MESSAGES": "True",
+DEFAULTS: Dict[str, Union[bool, str]] = {
+    "DELETE_CHANNELS": True,
+    "DELETE_THREADS": True,
+    "DELETE_ROLES": True,
+    "UPDATE_ROLES": True,
+    "EDIT_MESSAGES": True,
+    "REPOSITION_CHANNELS": True,
+    "DELETE_MESSAGES": True,
+    "CLONE_EMOJI": True,
+    "CLONE_STICKER": True,
+    "CLONE_ROLES": True,
+    "REARRANGE_ROLES": False,
+    "MIRROR_ROLE_PERMISSIONS": False,
+    "ENABLE_CLONING": True,
+    "CLONE_MESSAGES": True,
     "LOG_LEVEL": "INFO",
     "COMMAND_USERS": "",
-    "MIRROR_CHANNEL_PERMISSIONS": "False",
-    "RENAME_CHANNELS": "True",
-    "SYNC_CHANNEL_NSFW": "False",
-    "SYNC_CHANNEL_TOPIC": "False",
-    "SYNC_CHANNEL_SLOWMODE": "False",
-    "CLONE_VOICE": "True",
-    "CLONE_VOICE_PROPERTIES": "False",
-    "CLONE_GUILD_ICON": "False",
-    "CLONE_GUILD_BANNER": "False",
-    "CLONE_GUILD_SPLASH": "False",
-    "CLONE_GUILD_DISCOVERY_SPLASH": "False",
-    "SYNC_GUILD_DESCRIPTION": "False",
-    "SYNC_FORUM_PROPERTIES": "False",
-    "CLONE_STAGE": "True",
-    "CLONE_STAGE_PROPERTIES": "False",
+    "MIRROR_CHANNEL_PERMISSIONS": False,
+    "RENAME_CHANNELS": True,
+    "SYNC_CHANNEL_NSFW": False,
+    "SYNC_CHANNEL_TOPIC": False,
+    "SYNC_CHANNEL_SLOWMODE": False,
+    "CLONE_VOICE": True,
+    "CLONE_VOICE_PROPERTIES": False,
+    "CLONE_GUILD_ICON": False,
+    "CLONE_GUILD_BANNER": False,
+    "CLONE_GUILD_SPLASH": False,
+    "CLONE_GUILD_DISCOVERY_SPLASH": False,
+    "SYNC_GUILD_DESCRIPTION": False,
+    "SYNC_FORUM_PROPERTIES": False,
+    "CLONE_STAGE": True,
+    "CLONE_STAGE_PROPERTIES": False,
 }
 
 
