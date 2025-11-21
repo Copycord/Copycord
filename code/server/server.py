@@ -1724,6 +1724,12 @@ class ServerReceiver:
                     parts += await self._sync_forums(guild, sitemap)
                     parts += await self._sync_channels(guild, sitemap)
                     parts += await self._sync_community(guild, sitemap)
+                    parts += await self._sync_channels(
+                        guild,
+                        sitemap,
+                        stage_only=True,
+                        skip_removed=True,
+                    )
                     parts += await self._sync_guild_metadata(guild, sitemap, settings)
                     parts += await self._sync_channel_metadata(guild, sitemap)
 
@@ -3897,7 +3903,14 @@ class ServerReceiver:
         self._unmapped_warned.discard(int(original_id))
         return int(original_id), int(ch.id), str(url)
 
-    async def _sync_channels(self, guild: Guild, sitemap: Dict) -> List[str]:
+    async def _sync_channels(
+        self,
+        guild: Guild,
+        sitemap: Dict,
+        *,
+        stage_only: bool = False,
+        skip_removed: bool = False,
+    ) -> List[str]:
         """
         Synchronizes the channels of a guild with the provided sitemap.
         """
@@ -3922,9 +3935,11 @@ class ServerReceiver:
 
         has_community = "COMMUNITY" in guild.features
 
-        rem = await self._handle_removed_channels(guild, incoming)
-        if rem:
-            parts.append(f"Deleted {rem} channels")
+        rem = 0
+        if not skip_removed:
+            rem = await self._handle_removed_channels(guild, incoming)
+            if rem:
+                parts.append(f"Deleted {rem} channels")
 
         created = renamed = converted = 0
         voice_skipped = stage_skipped = 0
@@ -3956,6 +3971,9 @@ class ServerReceiver:
 
             is_voice = ctype == ChannelType.voice.value
             is_stage = ctype == ChannelType.stage_voice.value
+            
+            if stage_only and not is_stage:
+                continue
 
             if is_voice:
                 if not clone_voice:
@@ -4010,9 +4028,18 @@ class ServerReceiver:
                     continue
 
                 if not has_community:
+                    if not stage_only:
+                        logger.debug(
+                            "[🎭] Deferring stage channel '%s' for clone_g=%s until after community sync",
+                            name,
+                            guild.id,
+                        )
+                        continue
+
+                    # Post-community pass still has no COMMUNITY – now it’s a real skip
                     stage_skipped += 1
                     logger.warning(
-                        "[⚠️] Skipping stage channel '%s' for clone_g=%s (COMMUNITY not enabled)",
+                        "[⚠️] Skipping stage channel '%s' for clone_g=%s (COMMUNITY not enabled even after community sync)",
                         name,
                         guild.id,
                     )
