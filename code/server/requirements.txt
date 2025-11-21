@@ -3,3 +3,4 @@ websockets==11.0.3
 aiohttp>=3.9,<4
 Pillow==11.3.0
 PyYAML==6.0.2
+tzdata ==2024.1

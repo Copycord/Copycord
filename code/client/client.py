@@ -14,7 +14,7 @@ import re
 import signal
 from datetime import datetime, timezone
 import logging
-from typing import Optional
+from typing import Optional, Any
 import discord
 from discord import ChannelType, ForumChannel, MessageType
 import os
@@ -29,7 +29,7 @@ from client.message_utils import (
 )
 from common.websockets import WebsocketManager, AdminBus
 from client.scraper import MemberScraper
-from client.helpers import ClientUiController
+from client.helpers import ClientUiController, dump_message_debug
 from client.export_runners import (
     BackfillEngine,
     ExportMessagesRunner,
@@ -992,10 +992,10 @@ class ClientListener:
 
         return False
 
+
     async def on_message(self, message: discord.Message):
         """
         Handles incoming Discord messages and processes them for forwarding.
-        This method is triggered whenever a message is sent in a channel the bot has access to.
         """
         g = getattr(message, "guild", None)
         if not g or not self._is_mapped_origin(g.id):
@@ -1005,6 +1005,8 @@ class ClientListener:
 
         if self.should_ignore(message):
             return
+
+        # logger.info("Full message dump:\n%s", dump_message_debug(message))
 
         raw = message.content or ""
         system = getattr(message, "system_content", "") or ""
@@ -1071,21 +1073,30 @@ class ClientListener:
                 "size": att.size,
             }
             for att in getattr(src_msg, "attachments", [])
+            for att in getattr(src_msg, "attachments", [])
         ]
 
         raw_embeds = [e.to_dict() for e in getattr(src_msg, "embeds", [])]
         mention_map = await self.msg.build_mention_map(src_msg, raw_embeds)
+        raw_embeds = [e.to_dict() for e in getattr(src_msg, "embeds", [])]
+        mention_map = await self.msg.build_mention_map(src_msg, raw_embeds)
         embeds = [
             self.msg.sanitize_embed_dict(e, src_msg, mention_map) for e in raw_embeds
+            self.msg.sanitize_embed_dict(e, src_msg, mention_map) for e in raw_embeds
         ]
+        safe_content = self.msg.sanitize_inline(content, src_msg, mention_map)
         safe_content = self.msg.sanitize_inline(content, src_msg, mention_map)
 
         components: list[dict] = []
         for comp in getattr(src_msg, "components", []):
+        for comp in getattr(src_msg, "components", []):
             try:
                 components.append(comp.to_dict())
             except NotImplementedError:
-                row: dict = {"type": getattr(comp, "type", None), "components": []}
+                row: dict = {
+                    "type": getattr(comp, "type", None),
+                    "components": [],
+                }
                 for child in getattr(comp, "children", []):
                     child_data: dict = {}
                     for attr in ("custom_id", "label", "style", "url", "disabled"):
@@ -1110,6 +1121,7 @@ class ClientListener:
             ChannelType.private_thread,
         )
 
+        stickers_payload = self.msg.stickers_payload(getattr(src_msg, "stickers", []))
         stickers_payload = self.msg.stickers_payload(getattr(src_msg, "stickers", []))
 
         data_block = {
@@ -1152,7 +1164,9 @@ class ClientListener:
             "data": data_block,
         }
 
+
         await self.ws.send(payload)
+
 
         logger.info(
             "[📩] Forwarding msg from %s #%s sent by %s",
