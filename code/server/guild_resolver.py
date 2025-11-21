@@ -74,7 +74,6 @@ class GuildResolver:
             )
 
         if host_guild_id is not None:
-            # Prefer an active mapping
             row = self.db.get_mapping_by_original(int(host_guild_id))
             if row and row.get("cloned_guild_id"):
                 st = str(row.get("status", "active") or "active").strip().lower()

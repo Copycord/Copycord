@@ -477,7 +477,6 @@ class ExportMessagesRunner:
                                 await asyncio.sleep(self.scan_sleep)
                             continue
 
-                        # referenced/original message instead. We'll detect that.
                         looks_empty = not (
                             (
                                 (msg.content or "")
@@ -1517,7 +1516,6 @@ class BackfillEngine:
                 skipped += 1
                 return
 
-            # --- capture the wrapper's context BEFORE we maybe unwrap ---
             wrapper_channel = getattr(m, "channel", None)
             wrapper_guild = getattr(m, "guild", None)
 
@@ -2166,7 +2164,6 @@ class BackfillEngine:
                 seen.add(tid)
                 yield th
 
-        # If the channel doesn't implement archived_threads (e.g. Voice / Stage),
 
         if not has_archived_attr:
             return
@@ -2224,7 +2221,6 @@ class BackfillEngine:
         async for th in _drain(_public_iter, "archived public"):
             yield th
 
-        # Forum channels stop here; they don't have private / joined private threads
         if getattr(parent, "type", None) == ChannelType.forum:
             return
 
@@ -2245,7 +2241,6 @@ class BackfillEngine:
             async for th in _drain(_joined_private_iter, "archived private (joined)"):
                 yield th
         except (TypeError, Forbidden):
-            # Either not supported or no access — that's fine
             pass
 
     async def _iter_history_resumable(

@@ -1945,7 +1945,6 @@ class ServerReceiver:
                         changed_fields.append("banner (cleared)")
                 else:
                     if not _can_clone_premium_asset("banner"):
-                        # Don't attempt to set a Nitro-only banner if clone is under-boosted
                         pass
                     else:
                         if host_hash is None or host_hash != clone_hash:
@@ -3227,7 +3226,6 @@ class ServerReceiver:
             if forum_changed_here:
                 forum_updated += 1
 
-            # Pull out raw forum layout so it doesn't get sent to ch.edit()
             raw_forum_layout = changes.pop("_raw_forum_layout", None)
 
             if not changes and raw_forum_layout is None:
@@ -3598,7 +3596,6 @@ class ServerReceiver:
 
             if ch:
                 if not wh_url:
-                    # Create webhook for voice channel's text chat
                     wh = await self._create_webhook_safely(
                         ch, "Copycord", await self._get_default_avatar_bytes()
                     )
@@ -3677,7 +3674,6 @@ class ServerReceiver:
                     e,
                 )
 
-        # Create webhook for voice channel's text chat
         wh = await self._create_webhook_safely(
             ch, "Copycord", await self._get_default_avatar_bytes()
         )
@@ -3773,7 +3769,6 @@ class ServerReceiver:
 
             if ch:
                 if not wh_url:
-                    # Create webhook for stage channel's text chat
                     wh = await self._create_webhook_safely(
                         ch, "Copycord", await self._get_default_avatar_bytes()
                     )
@@ -3864,7 +3859,6 @@ class ServerReceiver:
                     e,
                 )
 
-        # Create webhook for stage channel's text chat
         wh = await self._create_webhook_safely(
             ch, "Copycord", await self._get_default_avatar_bytes()
         )
@@ -4036,7 +4030,6 @@ class ServerReceiver:
                         )
                         continue
 
-                    # Post-community pass still has no COMMUNITY – now it’s a real skip
                     stage_skipped += 1
                     logger.warning(
                         "[⚠️] Skipping stage channel '%s' for clone_g=%s (COMMUNITY not enabled even after community sync)",

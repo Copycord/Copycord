@@ -230,7 +230,6 @@ class BackfillManager:
         is_resume = bool((meta or {}).get("resume"))
         reused = False
 
-        # figure out which guild we're targeting for this run
 
         clone_gid = st.get("cloned_guild_id")
 
@@ -273,7 +272,6 @@ class BackfillManager:
                     st["last_orig_id"] = row.get("last_orig_message_id") or None
                     st["last_ts"] = row.get("last_orig_timestamp") or None
 
-                    # carry over clone channel if we didn't already set it from meta
                     if st.get("clone_channel_id") is None and row.get(
                         "clone_channel_id"
                     ):
@@ -290,7 +288,6 @@ class BackfillManager:
             except Exception:
                 logger.exception("[bf] failed to reuse existing run for #%s", cid)
 
-        # 4. Fallback: if we *still* don't know clone_channel_id, grab it from chan_map.
 
         if st.get("clone_channel_id") is None:
             row = self.r.chan_map.get(cid) or {}

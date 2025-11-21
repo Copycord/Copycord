@@ -236,7 +236,6 @@ class Config:
                 last_seen = db.get_notified_version() or ""
 
                 if not latest_tag:
-                    # We don't know about any remote release yet, just publish our version.
                     self.logger.debug(
                         "No latest_tag in db_config yet; skipping this cycle"
                     )
@@ -249,7 +248,6 @@ class Config:
                 is_new_to_us = _norm_version(latest_tag) != _norm_version(last_seen)
 
                 if cmp_remote_local > 0:
-                    # There is a newer release than what we're running.
                     self.logger.info(
                         "[⬆️] Update available: %s %s", latest_tag, latest_url
                     )
@@ -261,18 +259,13 @@ class Config:
                             latest_tag, latest_url
                         )
                         if sent_any:
-                            # Mark this version as notified so we don't spam every loop.
                             db.set_notified_version(latest_tag)
                 else:
-                    # We're up to date or ahead. Just show our running version in presence.
                     await _maybe_update_status(f"{running_ver}")
-
-                    # If running_ver == latest_tag but DB hasn't recorded that we notified,
 
                     if cmp_remote_local == 0 and is_new_to_us:
                         db.set_notified_version(latest_tag)
 
-                # Keep DB's current_version in sync for legacy UIs.
                 try:
                     if db.get_version() != CURRENT_VERSION:
                         db.set_version(CURRENT_VERSION)

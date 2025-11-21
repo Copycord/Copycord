@@ -969,7 +969,6 @@ class DBManager:
             ).fetchone()
             old_clone = row["cloned_category_id"] if row else None
 
-            # If moving this clone's category to a new clone category id, clear parent links in THIS clone
             will_change_to_new = (
                 row is not None and clone_id is not None and old_clone != clone_id
             )
@@ -3416,7 +3415,6 @@ class DBManager:
             (int(original_channel_id), int(cloned_guild_id)),
         ).fetchone()
 
-    # ----- precise deletes so we don't clobber other clones -----
     def delete_channel_mapping_pair(
         self, original_channel_id: int, cloned_guild_id: int
     ):
@@ -3744,7 +3742,6 @@ class DBManager:
                         original_role_id=oid, cloned_guild_id=cloned_gid
                     )
                 except Exception:
-                    # Ignore individual failures so one bad ID doesn't kill the whole update
                     continue
 
         return len(ids)
@@ -3860,7 +3857,6 @@ class DBManager:
         - If user in blacklist -> filtered
         - Otherwise -> not filtered
         """
-        # Check if there's a whitelist for this mapping
         whitelist_count = self.conn.execute(
             """
             SELECT COUNT(*) FROM user_filters

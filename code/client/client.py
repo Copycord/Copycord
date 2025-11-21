@@ -1082,13 +1082,11 @@ class ClientListener:
         mention_map = await self.msg.build_mention_map(src_msg, raw_embeds)
         embeds = [
             self.msg.sanitize_embed_dict(e, src_msg, mention_map) for e in raw_embeds
-            self.msg.sanitize_embed_dict(e, src_msg, mention_map) for e in raw_embeds
         ]
         safe_content = self.msg.sanitize_inline(content, src_msg, mention_map)
         safe_content = self.msg.sanitize_inline(content, src_msg, mention_map)
 
         components: list[dict] = []
-        for comp in getattr(src_msg, "components", []):
         for comp in getattr(src_msg, "components", []):
             try:
                 components.append(comp.to_dict())

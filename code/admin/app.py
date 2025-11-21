@@ -2211,8 +2211,6 @@ async def api_mapping_roles(mapping_id: str):
 
         name = str(r.get("name") or "@unknown")
 
-        # 🔹 Skip @everyone (Discord's base role)
-
         if name == "@everyone" or rid == str(orig_id):
             continue
 
