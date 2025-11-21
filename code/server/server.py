@@ -13,7 +13,7 @@ import signal
 import asyncio
 import logging
 import random
-from typing import List, Optional, Tuple, Dict, Union, Coroutine, Any
+from typing import List, Optional, Set, Tuple, Dict, Union, Coroutine, Any
 import unicodedata
 import aiohttp
 import discord
@@ -1724,6 +1724,7 @@ class ServerReceiver:
                     parts += await self._sync_forums(guild, sitemap)
                     parts += await self._sync_channels(guild, sitemap)
                     parts += await self._sync_community(guild, sitemap)
+                    parts += await self._sync_guild_metadata(guild, sitemap, settings)
                     parts += await self._sync_channel_metadata(guild, sitemap)
 
                     moved = await self._handle_master_channel_moves(
@@ -1760,6 +1761,289 @@ class ServerReceiver:
         finally:
             logctx.sync_host_name.reset(_host_token)
             logctx.sync_display_id.reset(_id_token)
+            
+    async def _sync_guild_metadata(
+            self,
+            guild: discord.Guild,
+            sitemap: Dict,
+            settings: Dict[str, object],
+        ) -> List[str]:
+            """
+            Sync guild-level metadata for THIS clone.
+
+            Currently supported (per-mapping toggles):
+            - CLONE_GUILD_ICON
+            - CLONE_GUILD_BANNER
+            - CLONE_GUILD_SPLASH
+            - CLONE_GUILD_DISCOVERY_SPLASH
+            - SYNC_GUILD_DESCRIPTION
+            """
+            parts: List[str] = []
+
+            gmeta = sitemap.get("guild") or {}
+            host_gid_raw = gmeta.get("id")
+            try:
+                host_gid = int(host_gid_raw) if host_gid_raw is not None else None
+            except Exception:
+                host_gid = None
+
+            host_guild = self.bot.get_guild(int(host_gid)) if host_gid else None
+
+            # Permissions: need Manage Guild or Administrator
+            me = guild.me or guild.get_member(self.bot.user.id)
+            gp = getattr(me, "guild_permissions", None)
+            if not gp or not (gp.administrator or gp.manage_guild):
+                logger.warning(
+                    "[⚠️] Guild metadata sync skipped for guild %s: missing Manage Guild/Administrator.",
+                    guild.id,
+                )
+                return parts
+
+            # Helpers
+            def _normalized_hash_from_url(u: str | None) -> str | None:
+                """
+                Normalize an icon/banner/splash URL (or key) to a stable hash string:
+                strips guild id, query params, and file extension.
+                """
+                if not u:
+                    return None
+                try:
+                    # last path piece: ".../<guild_id>/<hash>.png?size=1024" -> "<hash>.png?size=1024"
+                    last = u.split("/")[-1]
+                    # drop query: "<hash>.png?size=1024" -> "<hash>.png"
+                    last = last.split("?", 1)[0]
+                    # drop extension: "<hash>.png" -> "<hash>"
+                    core = last.split(".", 1)[0]
+                    return core
+                except Exception:
+                    return None
+
+            def _asset_hash(asset) -> str | None:
+                """
+                Get a normalized hash for an Asset (or asset-like) object
+                by converting it to a URL string and normalizing it.
+                """
+                if not asset:
+                    return None
+                try:
+                    # Prefer .url if present, fallback to str(asset)
+                    u = getattr(asset, "url", None)
+                    if u is None:
+                        u = str(asset)
+                except Exception:
+                    try:
+                        u = str(asset)
+                    except Exception:
+                        return None
+                return _normalized_hash_from_url(u)
+
+            # Boost tiers for banner/splash validation
+            origin_premium_tier = int(gmeta.get("premium_tier") or 0)
+            clone_premium_tier = int(getattr(guild, "premium_tier", 0) or 0)
+
+            def _can_clone_premium_asset(kind: str) -> bool:
+                """
+                Skip banner/splash/discovery_splash if host boost tier > clone boost tier.
+                We still allow clearing if host has None.
+                """
+                if origin_premium_tier > clone_premium_tier:
+                    logger.info(
+                        "[✨] Skipping %s sync for clone guild %s: host premium_tier=%s > "
+                        "clone premium_tier=%s",
+                        kind,
+                        guild.id,
+                        origin_premium_tier,
+                        clone_premium_tier,
+                    )
+                    parts.append(
+                        f"Skipped {kind} (host boost tier {origin_premium_tier} > clone tier {clone_premium_tier})"
+                    )
+                    return False
+                return True
+
+            # Toggle flags (per mapping)
+            cfg_clone_icon = settings.get("CLONE_GUILD_ICON", False)
+            cfg_clone_banner = settings.get("CLONE_GUILD_BANNER", False)
+            cfg_clone_splash = settings.get("CLONE_GUILD_SPLASH", False)
+            cfg_clone_discovery_splash = settings.get(
+                "CLONE_GUILD_DISCOVERY_SPLASH", False
+            )
+
+            cfg_desc = settings.get("SYNC_GUILD_DESCRIPTION", False)
+
+            # Desired values from sitemap
+            want_desc = gmeta.get("description")
+
+            changes: Dict[str, object] = {}
+            changed_fields: list[str] = []
+
+            # === Icon ===
+            if cfg_clone_icon:
+                icon_url = gmeta.get("icon") or None
+                host_icon = getattr(host_guild, "icon", None) if host_guild else None
+                clone_icon = getattr(guild, "icon", None)
+
+                clone_hash = _asset_hash(clone_icon)
+
+                try:
+                    # No icon on host at all -> clear clone icon if present
+                    if icon_url is None and host_icon is None:
+                        if clone_icon is not None:
+                            changes["icon"] = None
+                            changed_fields.append("icon (cleared)")
+                    else:
+                        # Figure out the "host" hash, from live asset or URL
+                        host_hash = None
+                        if host_icon is not None:
+                            host_hash = _asset_hash(host_icon)
+                        elif icon_url is not None:
+                            host_hash = _normalized_hash_from_url(icon_url)
+
+                        # If we know both hashes and they match, nothing to do
+                        if host_hash is not None and clone_hash is not None and host_hash == clone_hash:
+                            pass  # already in sync
+                        else:
+                            icon_bytes = None
+
+                            # Prefer live asset if we can see the host guild
+                            if host_icon is not None:
+                                icon_bytes = await host_icon.read()
+
+                            # Fallback: fetch from CDN URL stored in sitemap
+                            if icon_bytes is None and icon_url is not None:
+                                if getattr(self, "session", None) is None or self.session.closed:
+                                    import aiohttp
+                                    self.session = aiohttp.ClientSession()
+
+                                async with self.session.get(icon_url) as resp:
+                                    resp.raise_for_status()
+                                    icon_bytes = await resp.read()
+
+                            # Apply icon if we actually got bytes
+                            if icon_bytes is not None:
+                                changes["icon"] = icon_bytes
+                                changed_fields.append("icon")
+                except Exception:
+                    logger.warning(
+                        "[⚠️] Failed syncing guild icon for clone %s",
+                        guild.id,
+                        exc_info=True,
+                    )
+
+            # === Banner ===
+            if cfg_clone_banner:
+                host_banner = getattr(host_guild, "banner", None) if host_guild else None
+                clone_banner = getattr(guild, "banner", None)
+                host_hash = _asset_hash(host_banner)
+                clone_hash = _asset_hash(clone_banner)
+
+                try:
+                    if host_banner is None:
+                        if clone_banner is not None:
+                            changes["banner"] = None
+                            changed_fields.append("banner (cleared)")
+                    else:
+                        if not _can_clone_premium_asset("banner"):
+                            # Don't attempt to set a Nitro-only banner if clone is under-boosted
+                            pass
+                        else:
+                            if host_hash is None or host_hash != clone_hash:
+                                banner_bytes = await host_banner.read()
+                                changes["banner"] = banner_bytes
+                                changed_fields.append("banner")
+                except Exception as e:
+                    logger.warning(
+                        "[⚠️] Failed syncing guild banner for clone %s: %s", guild.id, e
+                    )
+
+            # === Splash ===
+            if cfg_clone_splash:
+                host_splash = getattr(host_guild, "splash", None) if host_guild else None
+                clone_splash = getattr(guild, "splash", None)
+                host_hash = _asset_hash(host_splash)
+                clone_hash = _asset_hash(clone_splash)
+
+                try:
+                    if host_splash is None:
+                        if clone_splash is not None:
+                            changes["splash"] = None
+                            changed_fields.append("splash (cleared)")
+                    else:
+                        if not _can_clone_premium_asset("splash"):
+                            pass
+                        else:
+                            if host_hash is None or host_hash != clone_hash:
+                                splash_bytes = await host_splash.read()
+                                changes["splash"] = splash_bytes
+                                changed_fields.append("splash")
+                except Exception as e:
+                    logger.warning(
+                        "[⚠️] Failed syncing guild splash for clone %s: %s", guild.id, e
+                    )
+
+            # === Discovery splash ===
+            if cfg_clone_discovery_splash:
+                host_ds = (
+                    getattr(host_guild, "discovery_splash", None) if host_guild else None
+                )
+                clone_ds = getattr(guild, "discovery_splash", None)
+                host_hash = _asset_hash(host_ds)
+                clone_hash = _asset_hash(clone_ds)
+
+                try:
+                    if host_ds is None:
+                        if clone_ds is not None:
+                            changes["discovery_splash"] = None
+                            changed_fields.append("discovery_splash (cleared)")
+                    else:
+                        if not _can_clone_premium_asset("discovery_splash"):
+                            pass
+                        else:
+                            if host_hash is None or host_hash != clone_hash:
+                                ds_bytes = await host_ds.read()
+                                changes["discovery_splash"] = ds_bytes
+                                changed_fields.append("discovery_splash")
+                except Exception as e:
+                    logger.warning(
+                        "[⚠️] Failed syncing guild discovery_splash for clone %s: %s",
+                        guild.id,
+                        e,
+                    )
+
+            # === Description ===
+            if cfg_desc:
+                if getattr(guild, "description", None) != want_desc:
+                    changes["description"] = want_desc
+                    changed_fields.append("description")
+
+            # === Apply changes ===
+            if not changes:
+                return parts
+
+            try:
+                await self.ratelimit.acquire_for_guild(ActionType.EDIT_CHANNEL, guild.id)
+                await guild.edit(**changes)
+                logger.info(
+                    "[🏛️] Updated guild metadata for '%s' (%d): %s",
+                    guild.name,
+                    int(guild.id),
+                    ", ".join(changed_fields),
+                )
+                parts.append(
+                    "Updated guild metadata: " + ", ".join(sorted(set(changed_fields)))
+                )
+            except Exception:
+                logger.warning(
+                    "[⚠️] Failed to update guild metadata for clone guild %s",
+                    guild.id,
+                    exc_info=True,
+                )
+
+            return parts
+
+
+
+
 
     async def _sync_community(self, guild: discord.Guild, sitemap: Dict) -> List[str]:
         """

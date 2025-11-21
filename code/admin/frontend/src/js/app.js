@@ -194,6 +194,12 @@
     CLONE_VOICE_PROPERTIES: false,
     CLONE_STAGE: false,
     CLONE_STAGE_PROPERTIES: false,
+    CLONE_GUILD_ICON: false,
+    CLONE_GUILD_BANNER: false,
+    CLONE_GUILD_SPLASH: false,
+    CLONE_GUILD_DISCOVERY_SPLASH: false,
+    SYNC_GUILD_DESCRIPTION: false,
+    
   };
 
   let lastFocusLog = null;

@@ -935,7 +935,6 @@ class ClientListener:
         if not g or not self._is_mapped_origin(g.id):
             return True
 
-
     async def maybe_send_announcement(self, message: discord.Message) -> bool:
         content = message.content
         lower = content.lower()
@@ -1298,11 +1297,9 @@ class ClientListener:
         else:
             gid = g.id if g else None
 
-        # Ignore if we don't know the guild or it's not one we're cloning.
         if not gid or not self._is_mapped_origin(gid):
             return
 
-        # will cover it. Raw handler should only forward stuff we don't have cached.
         if payload.cached_message is not None:
             return
 
@@ -1345,7 +1342,6 @@ class ClientListener:
         avatar_url = None
         timestamp = None
 
-        # If we didn't have cached_message, try to fetch it live so we can enrich
 
         if msg is None:
             try:
@@ -1375,7 +1371,6 @@ class ClientListener:
             timestamp = str(msg.edited_at or msg.created_at)
 
         else:
-            # Fall back to raw payload data if we couldn't fetch the message
             content = data.get("content")
             embeds = data.get("embeds")
 
@@ -1428,7 +1423,6 @@ class ClientListener:
 
         await self.ws.send(out)
 
-        # Safe logging so we don't explode if payload.guild is missing.
         guild_name_for_log = None
         if g is not None:
             guild_name_for_log = getattr(g, "name", None)
@@ -1502,7 +1496,6 @@ class ClientListener:
         else:
             gid = g.id if g else None
 
-        # If we still don't know the guild or it's not one we're cloning, bail.
         if not gid or not self._is_mapped_origin(gid):
             return
 
@@ -1701,13 +1694,12 @@ class ClientListener:
                 getattr(before, "id", None),
             )
             return
-        
+
         name_changed = before.name != after.name
         parent_before = getattr(before, "category_id", None)
         parent_after = getattr(after, "category_id", None)
         parent_changed = parent_before != parent_after
-        
-        # Check for NSFW flag changes
+
         nsfw_changed = False
         try:
             nsfw_before = getattr(before, "nsfw", False)
@@ -1715,20 +1707,18 @@ class ClientListener:
             nsfw_changed = nsfw_before != nsfw_after
         except Exception:
             nsfw_changed = False
-        
-        # Check for topic changes
+
         topic_changed = False
         try:
             topic_before = getattr(before, "topic", None)
             topic_after = getattr(after, "topic", None)
-            # Normalize None and empty string for comparison
+
             topic_before_normalized = topic_before if topic_before else None
             topic_after_normalized = topic_after if topic_after else None
             topic_changed = topic_before_normalized != topic_after_normalized
         except Exception:
             topic_changed = False
-        
-        # Check for slowmode changes
+
         slowmode_changed = False
         try:
             slowmode_before = int(getattr(before, "slowmode_delay", 0) or 0)
@@ -1736,27 +1726,26 @@ class ClientListener:
             slowmode_changed = slowmode_before != slowmode_after
         except Exception:
             slowmode_changed = False
-        
-        # Check for voice channel property changes
+
         voice_properties_changed = False
         try:
             is_voice = isinstance(after, discord.VoiceChannel)
             if is_voice:
                 bitrate_before = getattr(before, "bitrate", 64000)
                 bitrate_after = getattr(after, "bitrate", 64000)
-                
+
                 user_limit_before = getattr(before, "user_limit", 0)
                 user_limit_after = getattr(after, "user_limit", 0)
-                
+
                 rtc_region_before = getattr(before, "rtc_region", None)
                 rtc_region_after = getattr(after, "rtc_region", None)
-                
+
                 voice_properties_changed = (
-                    bitrate_before != bitrate_after or
-                    user_limit_before != user_limit_after or
-                    rtc_region_before != rtc_region_after
+                    bitrate_before != bitrate_after
+                    or user_limit_before != user_limit_after
+                    or rtc_region_before != rtc_region_after
                 )
-                
+
                 if voice_properties_changed:
                     logger.debug(
                         "[🔊] Voice properties changed for channel '%s' #%d → scheduling sitemap",
@@ -1766,8 +1755,14 @@ class ClientListener:
         except Exception:
             voice_properties_changed = False
 
-        if (name_changed or parent_changed or nsfw_changed or topic_changed or 
-            slowmode_changed or voice_properties_changed):
+        if (
+            name_changed
+            or parent_changed
+            or nsfw_changed
+            or topic_changed
+            or slowmode_changed
+            or voice_properties_changed
+        ):
             if nsfw_changed:
                 logger.debug(
                     "[🔞] NSFW flag changed for channel '%s' #%d: %s → %s → scheduling sitemap",
@@ -1777,12 +1772,15 @@ class ClientListener:
                     getattr(after, "nsfw", False),
                 )
             if topic_changed:
+
                 def _truncate(s, max_len=50):
                     if not s:
                         return "(empty)"
                     s_str = str(s)
-                    return s_str if len(s_str) <= max_len else s_str[:max_len-3] + "..."
-                
+                    return (
+                        s_str if len(s_str) <= max_len else s_str[: max_len - 3] + "..."
+                    )
+
                 logger.debug(
                     "[📝] Topic changed for channel '%s' #%d: %s → %s → scheduling sitemap",
                     after.name,
@@ -1791,6 +1789,7 @@ class ClientListener:
                     _truncate(getattr(after, "topic", None)),
                 )
             if slowmode_changed:
+
                 def _format_delay(seconds):
                     if seconds == 0:
                         return "disabled"
@@ -1804,7 +1803,7 @@ class ClientListener:
                         hours = seconds // 3600
                         mins = (seconds % 3600) // 60
                         return f"{hours}h {mins}m" if mins else f"{hours}h"
-                
+
                 logger.debug(
                     "[⏱️] Slowmode changed for channel '%s' #%d: %s → %s → scheduling sitemap",
                     after.name,
@@ -1869,12 +1868,95 @@ class ClientListener:
             logger.exception("[guilds] on_guild_remove failed")
 
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
+        """
+        Fired when the host guild updates.
+
+        - Always upserts basic guild row into DB.
+        - If any of the tracked metadata fields change:
+            - icon
+            - banner
+            - splash
+            - discovery_splash
+            - description
+
+          then we schedule a sitemap sync for that origin guild so the server/UI
+          see the updated metadata and can drive guild-metadata sync to clones.
+        """
         try:
+
             row = self._guild_row_from_obj(after)
             self.db.upsert_guild(**row)
             logger.debug("[guilds] update → upsert %s (%s)", after.name, after.id)
         except Exception:
-            logger.exception("[guilds] on_guild_update failed")
+            logger.exception("[guilds] on_guild_update failed during upsert")
+
+        if not self._is_mapped_origin(getattr(after, "id", None)):
+            return
+
+        def _asset_hash_from_attr(g: discord.Guild, attr: str) -> str | None:
+            try:
+                asset = getattr(g, attr, None)
+            except Exception:
+                asset = None
+            if not asset:
+                return None
+            try:
+                key = getattr(asset, "key", None)
+                s = str(key or asset)
+                base = s.rsplit("/", 1)[-1]
+                return base.split("?", 1)[0]
+            except Exception:
+                return None
+
+        icon_changed = _asset_hash_from_attr(before, "icon") != _asset_hash_from_attr(
+            after, "icon"
+        )
+        banner_changed = _asset_hash_from_attr(
+            before, "banner"
+        ) != _asset_hash_from_attr(after, "banner")
+        splash_changed = _asset_hash_from_attr(
+            before, "splash"
+        ) != _asset_hash_from_attr(after, "splash")
+        discovery_splash_changed = _asset_hash_from_attr(
+            before, "discovery_splash"
+        ) != _asset_hash_from_attr(after, "discovery_splash")
+
+        def _norm_desc(val) -> str | None:
+            if val is None:
+                return None
+            s = str(val).strip()
+            return s or None
+
+        desc_changed = _norm_desc(getattr(before, "description", None)) != _norm_desc(
+            getattr(after, "description", None)
+        )
+
+        if (
+            icon_changed
+            or banner_changed
+            or splash_changed
+            or discovery_splash_changed
+            or desc_changed
+        ):
+            logger.info(
+                "[guilds] metadata change for %s (%s): icon=%s banner=%s "
+                "splash=%s discovery_splash=%s description=%s → scheduling sitemap",
+                after.name,
+                after.id,
+                icon_changed,
+                banner_changed,
+                splash_changed,
+                discovery_splash_changed,
+                desc_changed,
+            )
+
+            self.schedule_sync(guild_id=after.id, delay=0.5)
+        else:
+            logger.debug(
+                "[guilds] update for %s (%s) did not touch tracked metadata; no sitemap",
+                after.name,
+                after.id,
+            )
 
     async def on_member_join(self, member: discord.Member):
         try:

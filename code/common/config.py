@@ -114,6 +114,11 @@ class Config:
             "CLONE_VOICE_PROPERTIES": False,
             "CLONE_STAGE": False,
             "CLONE_STAGE_PROPERTIES": False,
+            "CLONE_GUILD_ICON": False,
+            "CLONE_GUILD_BANNER": False,
+            "CLONE_GUILD_SPLASH": False,
+            "CLONE_GUILD_DISCOVERY_SPLASH": False,
+            "SYNC_GUILD_DESCRIPTION": False,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):

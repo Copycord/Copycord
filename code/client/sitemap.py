@@ -61,6 +61,19 @@ class SitemapService:
         except Exception:
             mappings = []
 
+        def _build_label(m: dict) -> str:
+            mapping_id = (m.get("mapping_id") or "").strip() or str(origin_guild_id)
+
+            name = (m.get("mapping_name") or "").strip()
+            if not name and cloned_guild_id is not None:
+                name = (m.get("cloned_guild_name") or "").strip()
+            if not name:
+                name = (m.get("original_guild_name") or "").strip()
+            if not name:
+                name = guild_name_fallback
+
+            return f"{name}"
+
         if cloned_guild_id is not None:
             for m in mappings:
                 try:
@@ -69,13 +82,7 @@ class SitemapService:
                 except Exception:
                     continue
                 if ogid == int(origin_guild_id) and cgid == int(cloned_guild_id):
-                    mapping_id = (m.get("mapping_id") or "").strip() or str(
-                        origin_guild_id
-                    )
-                    name = (
-                        m.get("original_guild_name") or ""
-                    ).strip() or guild_name_fallback
-                    return f"{name} ({mapping_id})"
+                    return _build_label(m)
 
         for m in mappings:
             try:
@@ -83,11 +90,7 @@ class SitemapService:
             except Exception:
                 ogid = 0
             if ogid == int(origin_guild_id):
-                mapping_id = (m.get("mapping_id") or "").strip() or str(origin_guild_id)
-                name = (
-                    m.get("original_guild_name") or ""
-                ).strip() or guild_name_fallback
-                return f"{name} ({mapping_id})"
+                return _build_label(m)
 
         return f"{guild_name_fallback} ({origin_guild_id})"
 
@@ -185,9 +188,8 @@ class SitemapService:
                             g.id, g.name, int(cg) if cg is not None else None
                         )
                         self.logger.info(
-                            "[📩] Sitemap sent for %s -> clone %s",
+                            "[📩] Sitemap sent for %s",
                             label,
-                            cg or "(legacy)",
                         )
             except Exception as e:
                 self.logger.exception(
@@ -286,9 +288,8 @@ class SitemapService:
                                 g.id, g.name, int(cg) if cg is not None else None
                             )
                             self.logger.info(
-                                "[📩] Sitemap sent for %s -> clone %s",
+                                "[📩] Sitemap sent for %s",
                                 label,
-                                cg or "(legacy)",
                             )
                             sent += 1
                 except Exception as e:
@@ -303,7 +304,35 @@ class SitemapService:
         if not guild:
             self.logger.warning("[⛔] No accessible guild found to build a sitemap.")
             return {
-                "guild": {"id": None, "name": None},
+                "guild": {
+                    "id": None,
+                    "name": None,
+                    "owner_id": None,
+                    "icon": None,
+                    "banner": None,
+                    "splash": None,
+                    "discovery_splash": None,
+                    "description": None,
+                    "vanity_url_code": None,
+                    "preferred_locale": None,
+                    "features": [],
+                    "afk_channel_id": None,
+                    "afk_timeout": None,
+                    "system_channel_id": None,
+                    "system_channel_flags": None,
+                    "verification_level": None,
+                    "explicit_content_filter": None,
+                    "default_notifications": None,
+                    "widget_enabled": None,
+                    "widget_channel_id": None,
+                    "premium_tier": None,
+                    "premium_subscription_count": None,
+                    "max_members": None,
+                    "max_presences": None,
+                    "max_video_channel_users": None,
+                    "nsfw_level": None,
+                    "mfa_level": None,
+                },
                 "categories": [],
                 "standalone_channels": [],
                 "forums": [],
@@ -359,6 +388,22 @@ class SitemapService:
                 u = getattr(asset, "url", None) if asset else None
             return str(u) if u else ""
 
+        def _asset_str(obj, attr_name: str) -> Optional[str]:
+            """
+            Safely stringify a guild Asset-style attribute (icon, banner, splash, etc.).
+            Returns None if not present.
+            """
+            try:
+                asset = getattr(obj, attr_name, None)
+            except Exception:
+                asset = None
+            if not asset:
+                return None
+            try:
+                return str(asset)
+            except Exception:
+                return None
+
         try:
             fetched_stickers = await guild.fetch_stickers()
         except Exception as e:
@@ -389,16 +434,73 @@ class SitemapService:
                 }
             )
 
+        afk_channel_id = getattr(getattr(guild, "afk_channel", None), "id", None)
+        system_channel_id = getattr(getattr(guild, "system_channel", None), "id", None)
+        pref_locale = getattr(guild, "preferred_locale", None)
+        features = list(getattr(guild, "features", []) or [])
+
+        try:
+            scf = getattr(guild, "system_channel_flags", None)
+            system_flags_val = (
+                int(getattr(scf, "value", int(scf))) if scf is not None else None
+            )
+        except Exception:
+            system_flags_val = None
+
+        try:
+            widget_enabled = getattr(guild, "widget_enabled", None)
+        except Exception:
+            widget_enabled = None
+
+        try:
+            widget_channel = getattr(guild, "widget_channel", None)
+            widget_channel_id = (
+                getattr(widget_channel, "id", None) if widget_channel else None
+            )
+        except Exception:
+            widget_channel_id = None
+
         sitemap: Dict = {
             "guild": {
                 "id": guild.id,
                 "name": guild.name,
                 "owner_id": getattr(getattr(guild, "owner", None), "id", None),
-                "icon": (
-                    str(getattr(guild, "icon", ""))
-                    if getattr(guild, "icon", None)
-                    else None
+                "icon": _asset_str(guild, "icon"),
+                "banner": _asset_str(guild, "banner"),
+                "splash": _asset_str(guild, "splash"),
+                "discovery_splash": _asset_str(guild, "discovery_splash"),
+                "description": getattr(guild, "description", None),
+                "vanity_url_code": getattr(guild, "vanity_url_code", None),
+                "preferred_locale": (
+                    str(pref_locale) if pref_locale is not None else None
                 ),
+                "features": features,
+                "afk_channel_id": afk_channel_id,
+                "afk_timeout": getattr(guild, "afk_timeout", None),
+                "system_channel_id": system_channel_id,
+                "system_channel_flags": system_flags_val,
+                "widget_enabled": widget_enabled,
+                "widget_channel_id": widget_channel_id,
+                "verification_level": _enum_int(
+                    getattr(guild, "verification_level", None), 0
+                ),
+                "explicit_content_filter": _enum_int(
+                    getattr(guild, "explicit_content_filter", None), 0
+                ),
+                "default_notifications": _enum_int(
+                    getattr(guild, "default_notifications", None), 0
+                ),
+                "premium_tier": _enum_int(getattr(guild, "premium_tier", None), 0),
+                "premium_subscription_count": getattr(
+                    guild, "premium_subscription_count", None
+                ),
+                "max_members": getattr(guild, "max_members", None),
+                "max_presences": getattr(guild, "max_presences", None),
+                "max_video_channel_users": getattr(
+                    guild, "max_video_channel_users", None
+                ),
+                "nsfw_level": _enum_int(getattr(guild, "nsfw_level", None), 0),
+                "mfa_level": _enum_int(getattr(guild, "mfa_level", None), 0),
             },
             "categories": [],
             "standalone_channels": [],
@@ -645,7 +747,35 @@ class SitemapService:
         if not guild:
             self.logger.warning("[⛔] No accessible guild found to build a sitemap.")
             return {
-                "guild": {"id": None, "name": None},
+                "guild": {
+                    "id": None,
+                    "name": None,
+                    "owner_id": None,
+                    "icon": None,
+                    "banner": None,
+                    "splash": None,
+                    "discovery_splash": None,
+                    "description": None,
+                    "vanity_url_code": None,
+                    "preferred_locale": None,
+                    "features": [],
+                    "afk_channel_id": None,
+                    "afk_timeout": None,
+                    "system_channel_id": None,
+                    "system_channel_flags": None,
+                    "verification_level": None,
+                    "explicit_content_filter": None,
+                    "default_notifications": None,
+                    "widget_enabled": None,
+                    "widget_channel_id": None,
+                    "premium_tier": None,
+                    "premium_subscription_count": None,
+                    "max_members": None,
+                    "max_presences": None,
+                    "max_video_channel_users": None,
+                    "nsfw_level": None,
+                    "mfa_level": None,
+                },
                 "categories": [],
                 "standalone_channels": [],
                 "forums": [],
