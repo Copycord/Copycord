@@ -1,0 +1,4 @@
+{
+  "install_url": "https://github.com/Copycord/Copycord/blob/build-in-installer/install-tools/source/install.py",
+  "update_url": "https://github.com/Copycord/Copycord/blob/build-in-installer/install-tools/source/update.py"
+}
