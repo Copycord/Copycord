@@ -1,6 +1,6 @@
 [![Release](https://img.shields.io/github/v/release/Copycord/Copycord?label=Release&color=2E7D32&labelColor=2E7D32&logo=github&logoColor=FFFFFF)](https://github.com/Copycord/Copycord/releases/latest)
-[![Downloads](https://img.shields.io/badge/dynamic/json?url=https://ghcr-badge.elias.eu.org/api/Copycord/Copycord/copycord&query=downloadCount&label=Downloads&logo=github&color=C62828&labelColor=C62828&logoColor=FFFFFF)](https://github.com/Copycord/Copycord/pkgs/container/copycord)
-[![Discord](https://img.shields.io/discord/1406152440377638952?label=Discord&logo=discord&color=2E7D32&labelColor=2E7D32&logoColor=FFFFFF)](https://discord.gg/ArFdqrJHBj)
+[![Discord](https://img.shields.io/discord/1406152440377638952?label=Discord&logo=discord&color=C62828&labelColor=C62828&logoColor=FFFFFF)](https://discord.gg/ArFdqrJHBj)
+
 
 
 _⭐️ Love Copycord? Give us a star and join the conversation in our Discord community!_
@@ -116,7 +116,7 @@ Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multi
      - `Message Content`
    - Under **OAuth2**, generate an invite url with (Scopes: `bot`, Bot Permissions: `Administrator`) and invite the bot to your clone server.
 
-## Configuration
+## Docker Install
 
 ### 1. Create a copycord folder and add docker-compose.yml
 
@@ -175,9 +175,55 @@ docker-compose up -d
 
 This will pull the latest images and start the web ui: http://localhost:8080
 
-### 2. Configure Copycord via the web ui
+## Manual Install
 
-### Configuration
+### Windows
+
+1. Download the Windows installer bundle:  
+   [`copycord.zip`](https://github.com/Copycord/Copycord/raw/refs/heads/main/install-tools/windows/copycord.zip)
+2. Right-click the zip and choose **Extract All…** (for example, extract it to your **Desktop**).
+3. Open the extracted `copycord` folder.
+4. Double-click **`Install.exe`** to install Copycord.  
+   - This will download the latest Copycord build and set up everything in the same folder.
+5. To start Copycord, double-click **`copycord_windows.bat`**. This will start Copycord and the web ui: http://localhost:8080
+6. When a new Copycord version is released, double-click **`Update.exe`** from the same folder to auto-update.
+
+---
+
+### Linux
+
+1. Download the installer and updater scripts:
+   - [`install.py`](https://github.com/Copycord/Copycord/raw/refs/heads/main/install-tools/linux/install.py)  
+   - [`update.py`](https://github.com/Copycord/Copycord/raw/refs/heads/main/install-tools/linux/update.py)
+2. Place both files into a new folder, for example `~/copycord`.
+3. In a terminal, go to that folder and run the installer:
+
+   ```bash
+   cd ~/copycord
+   python3 install.py
+   ```
+
+   This will:
+
+   - Download the latest Copycord code
+   - Create `code/`, `data/`, and `venvs/` directories
+   - Generate the `copycord_linux.sh` start script
+
+4. Make the start script executable and run it:
+
+   ```bash
+   chmod +x copycord_linux.sh
+   ./copycord_linux.sh
+   ```
+
+5. To update Copycord later, from the same folder run:
+
+   ```bash
+   python3 update.py
+   ```
+6. Once started, visit the web ui: http://localhost:8080
+
+### Web UI Configuration
 
 <details>
 <summary><strong>Copycord Configuration Options (click to expand)</strong></summary>
