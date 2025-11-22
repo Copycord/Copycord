@@ -7,6 +7,7 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
+from textwrap import dedent
 from urllib.request import urlopen, Request
 
 
@@ -388,6 +389,163 @@ def build_frontend(app_root: Path) -> None:
     print(f"[updater] Copied built frontend to {static_dir}")
 
 
+def write_start_scripts(repo_root: Path) -> None:
+    """
+    Always (re)write start scripts so installer and updater behave the same.
+    - Windows:
+        - copycord_windows.bat (spawns 3 PS windows)
+        - scripts\admin.ps1 / server.ps1 / client.ps1
+    - Linux/macOS:
+        - copycord_linux.sh (LF, +x)
+    """
+    win_bat = repo_root / "copycord_windows.bat"
+    ps_dir = repo_root / "scripts"
+    ps_dir.mkdir(exist_ok=True)
+
+    ps_header = "\r\n".join(
+        [
+            "$ErrorActionPreference = 'Stop'",
+            "try { if ($PSVersionTable.PSVersion.Major -ge 7) { $PSStyle.OutputRendering = 'PlainText' } } catch {}",
+            "[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)",
+            "$here = Split-Path -Parent $MyInvocation.MyCommand.Path",
+            "$root = Split-Path -Parent $here",
+            "$code = Join-Path $root 'code'",
+            "",
+        ]
+    )
+
+    admin_ps1 = ps_dir / "admin.ps1"
+    admin_ps1.write_text(
+        ps_header
+        + "\r\n".join(
+            [
+                "$venv = Join-Path $root 'venvs\\admin\\Scripts\\python.exe'",
+                "$envPath = Join-Path $code '.env'",
+                "$port = 8080",
+                "if (Test-Path $envPath) {",
+                "  $line = (Get-Content -LiteralPath $envPath -Encoding UTF8 | Where-Object { $_ -match '^ADMIN_PORT=' } | Select-Object -First 1)",
+                "  if ($line) { $port = ($line -split '=',2)[1].Trim() }",
+                "}",
+                "Set-Location -LiteralPath $code",
+                "Write-Host ('[admin] starting on port ' + $port)",
+                "& $venv -m uvicorn admin.app:app --host 0.0.0.0 --port $port",
+                "if ($LASTEXITCODE) { Write-Host ('[admin] crashed with ' + $LASTEXITCODE); Read-Host 'Press Enter to close' }",
+                "",
+            ]
+        ),
+        encoding="utf-8-sig",
+    )
+
+    server_ps1 = ps_dir / "server.ps1"
+    server_ps1.write_text(
+        ps_header
+        + "\r\n".join(
+            [
+                "$venv = Join-Path $root 'venvs\\server\\Scripts\\python.exe'",
+                "Set-Location -LiteralPath $code",
+                "$env:ROLE = 'server'",
+                "$env:CONTROL_PORT = '9101'",
+                "Write-Host '[server] starting...'",
+                "& $venv -m control.control",
+                "if ($LASTEXITCODE) { Write-Host ('[server] crashed with ' + $LASTEXITCODE); Read-Host 'Press Enter to close' }",
+                "",
+            ]
+        ),
+        encoding="utf-8-sig",
+    )
+
+    client_ps1 = ps_dir / "client.ps1"
+    client_ps1.write_text(
+        ps_header
+        + "\r\n".join(
+            [
+                "$venv = Join-Path $root 'venvs\\client\\Scripts\\python.exe'",
+                "Set-Location -LiteralPath $code",
+                "$env:ROLE = 'client'",
+                "$env:CONTROL_PORT = '9102'",
+                "Write-Host '[client] starting...'",
+                "& $venv -m control.control",
+                "if ($LASTEXITCODE) { Write-Host ('[client] crashed with ' + $LASTEXITCODE); Read-Host 'Press Enter to close' }",
+                "",
+            ]
+        ),
+        encoding="utf-8-sig",
+    )
+
+    win_bat.write_text(
+        r"""
+@echo off
+setlocal enabledelayedexpansion
+chcp 65001 >nul
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
+
+set "ROOT=%~dp0"
+if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
+
+set "CODE_DIR=%ROOT%\code"
+set "VENV_ROOT=%ROOT%\venvs"
+
+if not exist "%CODE_DIR%" (
+  echo Error: code\ directory not found at "%CODE_DIR%"
+  echo Make sure you ran: python install_standalone.py
+  goto :EOF
+)
+if not exist "%VENV_ROOT%\admin\Scripts\python.exe" ( echo Error: admin venv missing & goto :EOF )
+if not exist "%VENV_ROOT%\server\Scripts\python.exe" ( echo Error: server venv missing & goto :EOF )
+if not exist "%VENV_ROOT%\client\Scripts\python.exe" ( echo Error: client venv missing & goto :EOF )
+
+set "PS=powershell.exe -NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -File"
+start "Copycord Admin"  /D "%CODE_DIR%" %PS% "%ROOT%\scripts\admin.ps1"
+start "Copycord Server" /D "%CODE_DIR%" %PS% "%ROOT%\scripts\server.ps1"
+start "Copycord Client" /D "%CODE_DIR%" %PS% "%ROOT%\scripts\client.ps1"
+
+echo.
+echo Launched: Admin, Server, Client (each in its own PowerShell).
+echo Close those windows to stop the services.
+echo.
+endlocal
+""".lstrip(
+            "\n"
+        ),
+        encoding="utf-8",
+        newline="\r\n",
+    )
+
+    print(f"[installer] Wrote Windows start script: {win_bat}")
+    print(f"[installer] Wrote PS launchers in: {ps_dir}")
+
+    sh_path = repo_root / "copycord_linux.sh"
+    sh_script = """
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+CODE_DIR="$ROOT/code"
+VENV_ROOT="$ROOT/venvs"
+ADMIN_VENV="$VENV_ROOT/admin"
+SERVER_VENV="$VENV_ROOT/server"
+CLIENT_VENV="$VENV_ROOT/client"
+[[ -d "$CODE_DIR" ]] || { echo "Missing $CODE_DIR"; exit 1; }
+[[ -d "$ADMIN_VENV" && -d "$SERVER_VENV" && -d "$CLIENT_VENV" ]] || { echo "Missing one or more venvs in $VENV_ROOT"; exit 1; }
+ADMIN_PORT="8080"; ENV_FILE="$CODE_DIR/.env"
+if [[ -f "$ENV_FILE" ]]; then
+  ENV_PORT="$(grep -E '^ADMIN_PORT=' "$ENV_FILE" | head -n1 | cut -d= -f2- | tr -d '\r' || true)"
+  [[ -n "${ENV_PORT:-}" ]] && ADMIN_PORT="$ENV_PORT"
+fi
+cd "$CODE_DIR"
+"$ADMIN_VENV/bin/python" -m uvicorn admin.app:app --host 0.0.0.0 --port "$ADMIN_PORT" & ADMIN_PID=$!
+ROLE=server CONTROL_PORT=9101 "$SERVER_VENV/bin/python" -m control.control & SERVER_PID=$!
+ROLE=client CONTROL_PORT=9102 "$CLIENT_VENV/bin/python" -m control.control & CLIENT_PID=$!
+trap 'kill "$ADMIN_PID" "$SERVER_PID" "$CLIENT_PID" 2>/dev/null || true; wait || true' INT TERM
+wait
+"""
+    sh_path.write_text(sh_script, encoding="utf-8")
+    try:
+        sh_path.chmod(sh_path.stat().st_mode | 0o111)
+    except Exception:
+        pass
+    print(f"[installer] Wrote Linux/macOS start script: {sh_path}")
+
+
 def main(argv: list[str] | None = None) -> int:
     repo_root = detect_repo_root()
     code_dir = repo_root / "code"
@@ -417,11 +575,15 @@ def main(argv: list[str] | None = None) -> int:
         print("\n[updater] Rebuilding admin frontend…")
         build_frontend(app_root)
 
+        write_start_scripts(repo_root)
+
         print("\n[updater] Done. Restart Copycord to run the updated build.")
         return 0
 
     target_tag = GITHUB_TAG or fetch_latest_tag(GITHUB_REPO)
     print(f"[updater] Target tag: {target_tag}")
+
+    write_start_scripts(repo_root)
 
     if current_ref == target_tag:
         print("[updater] Already on the latest tag; nothing to do.")
