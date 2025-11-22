@@ -573,18 +573,12 @@ def main(argv: list[str] | None = None) -> int:
     write_start_scripts(repo_root)
 
     print("\n[installer] Done.")
-    print(f"  1) Edit {env_path} and fill in SERVER_TOKEN, CLIENT_TOKEN, COMMAND_USERS, etc.")
+    print(f"  1) Change any environment settings as needed in {env_path}.")
     print("  2) To run everything on Windows:")
     print("       double-click start_copycord.bat")
-    print("     Or manually run the admin UI:")
-    if os.name == "nt":
-        print(f"       venvs\\admin\\Scripts\\python.exe -m uvicorn admin.app:app --host 0.0.0.0 --port {args.admin_port}")
-    else:
-        print(f"       ./venvs/admin/bin/python -m uvicorn admin.app:app --host 0.0.0.0 --port {args.admin_port}")
     print("  3) To run everything on Linux/macOS:")
     print("       ./start_copycord.sh")
     print("     (make sure it is executable: chmod +x start_copycord.sh if needed)")
-    print("\nYou can also run the server/client control services manually if you prefer.")
 
     return 0
 
