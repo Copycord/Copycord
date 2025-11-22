@@ -221,8 +221,7 @@ python3-venv + python3.10-venv:
 
    This will:
 
-   - Download the latest Copycord code
-   - Create `code/`, `data/`, and `venvs/` directories
+   - Download the latest Copycord version
    - Generate the `copycord_linux.sh` start script
 
 3. Make the start script executable and run it:
@@ -238,6 +237,9 @@ python3-venv + python3.10-venv:
    python3 update.py
    ```
 5. Once started, visit the web ui: http://localhost:8080
+
+### Environment Configuration
+- Set admin password, change ports, etc, in the env file located in the /code directory after installation.
 
 ### Web UI Configuration
 
