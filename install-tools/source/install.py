@@ -356,11 +356,11 @@ def ensure_env_file(app_root: Path, data_dir: Path, admin_port: int) -> Path:
 DATA_DIR={data_dir.as_posix()}
 DB_PATH={(data_dir / 'data.db').as_posix()}
 
-# ---- Admin ----
+
 ADMIN_HOST=127.0.0.1
 ADMIN_PORT={admin_port}
 
-# ---- Agent/Control Ports (define before derived URLs!) ----
+
 SERVER_WS_HOST=127.0.0.1
 SERVER_WS_PORT=8765
 
@@ -370,8 +370,8 @@ CLIENT_WS_PORT=8766
 CONTROL_PORT_SERVER=9101
 CONTROL_PORT_CLIENT=9102
 
-# ---- Derived URLs (dotenv expands ${{
-# VAR}} only if VAR is defined above) ----
+
+
 ADMIN_WS_URL=ws://127.0.0.1:${{ADMIN_PORT}}/bus
 WS_SERVER_URL=ws://127.0.0.1:${{SERVER_WS_PORT}}
 WS_CLIENT_URL=ws://127.0.0.1:${{CLIENT_WS_PORT}}
@@ -403,7 +403,6 @@ def write_start_scripts(repo_root: Path) -> None:
     ps_dir = repo_root / "scripts"
     ps_dir.mkdir(exist_ok=True)
 
-    # Shared PS header (prepended to each .ps1)
     ps_header = "\r\n".join(
         [
             "$ErrorActionPreference = 'Stop'",
@@ -416,7 +415,6 @@ def write_start_scripts(repo_root: Path) -> None:
         ]
     )
 
-    # --- preflight.ps1: ALL ports + Python >= 3.10 for each venv ---
     preflight_ps1 = ps_dir / "preflight.ps1"
     preflight_body = r"""
 $envFile   = Join-Path $code '.env'
@@ -449,12 +447,12 @@ function Get-EnvPorts {
 
   $lines = Get-Content -LiteralPath $Path -Encoding UTF8
   foreach ($line in $lines) {
-    # A) *_PORT=####
+    
     if ($line -match '^[A-Z0-9_]+_PORT\s*=\s*([0-9]{1,5})\s*$') {
       $v = [int]$Matches[1]
       if ($v -ge 1 -and $v -le 65535) { [void]$ports.Add($v) }
     }
-    # B) Only treat :#### as a port if it appears in a URL (skip times like 03:17)
+    
     $matches = [System.Text.RegularExpressions.Regex]::Matches(
       $line, '(?i)\b(?:ws|wss|http|https)://[^:\s]+:(\d{2,5})\b'
     )
@@ -524,7 +522,6 @@ if ($busy.Count -gt 0) {
         ps_header + preflight_body.replace("\n", "\r\n"), encoding="utf-8-sig"
     )
 
-    # --- admin.ps1 ---
     admin_ps1 = ps_dir / "admin.ps1"
     admin_ps1.write_text(
         ps_header
@@ -552,7 +549,6 @@ if ($busy.Count -gt 0) {
         encoding="utf-8-sig",
     )
 
-    # --- server.ps1 ---
     server_ps1 = ps_dir / "server.ps1"
     server_ps1.write_text(
         ps_header
@@ -571,7 +567,6 @@ if ($busy.Count -gt 0) {
         encoding="utf-8-sig",
     )
 
-    # --- client.ps1 ---
     client_ps1 = ps_dir / "client.ps1"
     client_ps1.write_text(
         ps_header
@@ -590,7 +585,6 @@ if ($busy.Count -gt 0) {
         encoding="utf-8-sig",
     )
 
-    # --- Windows .bat launcher (runs preflight first, pauses on failure) ---
     win_bat.write_text(
         r"""
 @echo off
@@ -643,9 +637,8 @@ endlocal
     print(f"[installer] Wrote Windows start script: {win_bat}")
     print(f"[installer] Wrote PS launchers in: {ps_dir}")
 
-    # --- Linux/macOS ---
     sh_path = repo_root / "copycord_linux.sh"
-    sh_script = """#!/usr/bin/env bash
+    sh_script = """
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 CODE_DIR="$ROOT/code"
@@ -691,13 +684,13 @@ port_in_use() {
   fi
 }
 
-# --- Preflight: Python >= 3.10 in all venvs ---
+
 ensure_py310 "$ADMIN_VENV/bin/python"  "admin venv"
 ensure_py310 "$SERVER_VENV/bin/python" "server venv"
 ensure_py310 "$CLIENT_VENV/bin/python" "client venv"
 echo "[preflight] Python looks good."
 
-# --- Preflight: ALL referenced ports free ---
+
 mapfile -t PORTS < <(get_ports | awk '$1>=1 && $1<=65535 {print $1}' | sort -n | uniq)
 
 BUSY=()
@@ -712,14 +705,14 @@ for p in "${PORTS[@]}"; do
   fi
 done
 
-if [[ ${#BUSY[@]} -gt 0 ]]; then
+if [[ ${
   echo "[preflight] One or more ports referenced in code/.env are busy:"
   for m in "${BUSY[@]}"; do echo "  • $m"; done
   echo "Fix: close the process(es) using these ports or change values in code/.env, then relaunch."
   exit 1
 fi
 
-# --- Start services ---
+
 ADMIN_PORT="8080"
 if [[ -f "$ENV_FILE" ]]; then
   ENV_PORT="$(grep -E '^ADMIN_PORT=' "$ENV_FILE" | head -n1 | cut -d= -f2- | tr -d $'\r' || true)"
@@ -886,6 +879,25 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _pause(msg: str = "\n[installer] Press any key to close this window...") -> None:
+    """Pause the process so the window doesn't disappear immediately."""
+    try:
+        if os.name == "nt":
+            try:
+                import msvcrt
+
+                print(msg, end="", flush=True)
+                msvcrt.getch()
+                print()
+                return
+            except Exception:
+                pass
+        input(msg)
+    except EOFError:
+
+        pass
+
+
 def _run_with_pause_installer() -> int:
     import traceback
 
@@ -899,11 +911,11 @@ def _run_with_pause_installer() -> int:
         traceback.print_exc()
         exit_code = 1
 
-    if os.name == "nt" and (exit_code or exit_code is True):
-        try:
-            input("\n[installer] Press Enter to close this window...")
-        except EOFError:
-            pass
+    is_frozen = bool(getattr(sys, "frozen", False))
+
+    should_pause = is_frozen or (os.name == "nt" and (exit_code or exit_code is True))
+    if should_pause:
+        _pause()
 
     return int(exit_code or 0)
 
