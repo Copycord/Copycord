@@ -3,3 +3,4 @@ websockets==11.0.3
 PyYAML==6.0.2
 aiohttp>=3.9,<4
 tzdata==2025.2
+audioop-lts==0.2.1; python_version >= "3.13"
