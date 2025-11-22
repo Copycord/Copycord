@@ -31,14 +31,15 @@ ROLE = os.getenv("ROLE", "server").strip().lower()
 DEFAULT_PORT = 9101 if ROLE == "server" else 9102
 PORT = int(os.getenv("CONTROL_PORT", str(DEFAULT_PORT)))
 
-DEFAULT_ROOT = "/app"
-DEFAULT_DATA = "/data"
+ROOT = Path(os.getenv("COPYCORD_ROOT", BASE_DIR)).resolve()
 
-ROOT = Path(os.getenv("COPYCORD_ROOT", DEFAULT_ROOT)).resolve()
-DATA = Path(os.getenv("DATA_DIR", DEFAULT_DATA)).resolve()
+
+DEFAULT_DATA_DIR = (BASE_DIR.parent / "data").resolve()
+DATA = Path(os.getenv("DATA_DIR", str(DEFAULT_DATA_DIR))).resolve()
 DATA.mkdir(parents=True, exist_ok=True)
 
 DB_PATH = os.getenv("DB_PATH", str(DATA / "data.db"))
+
 PYTHONPATH = os.getenv("PYTHONPATH", str(ROOT))
 MODULE = "server.server" if ROLE == "server" else "client.client"
 
