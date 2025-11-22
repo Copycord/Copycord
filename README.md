@@ -177,6 +177,10 @@ This will pull the latest images and start the web ui: http://localhost:8080
 
 ## Manual Install
 
+**Requirments**:
+- Python 3.10+
+- Node.js + npm
+
 ### Windows
 
 1. Download the Windows installer bundle:  
