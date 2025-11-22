@@ -1,13 +1,13 @@
-# Copycord Standalone (Installer & Updater)
+# Copycord Standalone (Launcher, Installer & Updater)
 
-This folder contains the **standalone installer and updater** for Copycord.
+This folder contains the **standalone launcher/installer/updater** for Copycord.
 
-You can install and update Copycord without cloning the Git repo manually.
+You can install, update, and run Copycord without cloning the Git repo manually.
 
-- On **Windows**, use the `.exe` files.
-- On **Linux/macOS**, use the `install.py` and `update.py` scripts.
+- On **Windows**, use **`Copycord.exe`** (all-in-one launcher).
+- On **Linux/macOS**, use **`installer.py`** (all-in-one launcher).
 
-Once installed, you’ll use the provided scripts to start Copycord.
+Once installed, you’ll use either the launcher or the provided start scripts to run Copycord.
 
 ---
 
@@ -15,12 +15,10 @@ Once installed, you’ll use the provided scripts to start Copycord.
 
 After installation, this folder will typically look like:
 
-- `Install.exe` – Windows installer
-- `Update.exe` – Windows updater
-- `install.py` – Linux/macOS installer
-- `update.py` – Linux/macOS updater
-- `copycord_windows.bat` – Start Copycord on Windows
-- `copycord_linux.sh` – Start Copycord on Linux/macOS
+- `Copycord.exe` – Windows launcher (install / update / run)
+- `installer.py` – Linux/macOS launcher (install / update / run)
+- `copycord_windows.bat` – Start Copycord on Windows (created by the installer)
+- `copycord_linux.sh` – Start Copycord on Linux/macOS (created by the installer)
 - `code/` – Copycord application code (created by the installer)
 - `venvs/` – Python virtual environments for admin/server/client
 - `data/` – Your Copycord data (database, backups, etc.)
@@ -58,7 +56,7 @@ sudo apt install python3 python3-venv python3-pip nodejs npm
 
 ### Windows (using `Copycord.exe`)
 
-1. Create a folder where you want Copycord to live.
+1. Create a folder where you want Copycord to live (for example: `C:\Copycord`).
 2. Download `Copycord.exe` from the latest release and place it **inside that folder**.
 3. **Double-click `Copycord.exe`.**
    - A console window will open with a menu.
@@ -70,46 +68,62 @@ sudo apt install python3 python3-venv python3-pip nodejs npm
      - Generate `copycord_windows.bat` (Windows start script)
 
 4. To **start Copycord** after install:
-   - Either run `Copycordr.exe` again and choose `3) Run Copycord`, **or**
+   - Either run `Copycord.exe` again and choose `3) Run Copycord (Windows)`, **or**
    - Double-click `copycord_windows.bat`.
 
 
-### Linux (using `install.py`)
+### Linux (using `installer.py`)
 
-1. Place these files in a folder where you want Copycord to live, e.g.:
+1. Place these files in a folder where you want Copycord to live, for example:
 
    ```bash
    mkdir -p ~/copycord
    cd ~/copycord
-   # (Put install.py, update.py, etc. here)
+   # Put installer.py here (and any other provided files)
    ```
 
-2. Run the installer:
+2. Run the launcher:
 
    ```bash
-   cd /path/to/copycord
-   python3 install.py
+   cd ~/copycord
+   python3 installer.py
    ```
 
-   This will:
+3. When the menu appears, choose: `1) Install Copycord`.
+
+   The launcher will:
 
    - Download the latest Copycord release from GitHub
    - Build the admin frontend
    - Create `code/`, `venvs/`, and `data/`
-   - Generate `copycord_linux.sh` (start script)
+   - Generate `copycord_linux.sh` (Linux/macOS start script)
 
-3. To **start Copycord**, see [Starting Copycord](#starting-copycord) below.
+4. To **start Copycord** after install:
+   - Either run `python3 installer.py` again and choose `4) Run Copycord (Linux)`, **or**
+   - Run the start script directly:
+
+     ```bash
+     cd ~/copycord
+     ./copycord_linux.sh
+     ```
+
+     (If needed, make it executable once with `chmod +x copycord_linux.sh`.)
 
 ---
 
 ## Starting Copycord
 
-After the installer has run successfully (on either OS), the start scripts will be available.
+After the installer has run successfully (on either OS), the start scripts and launcher options will be available.
 
 ### On Windows
 
-1. Open the Copycord folder (the one that contains `copycord_windows.bat`).
-2. **Double-click `copycord_windows.bat`.**
+From your Copycord folder (the one that contains `Copycord.exe` and `copycord_windows.bat`):
+
+- **Option A (recommended for new users):**  
+  Double-click `Copycord.exe` and choose `3) Run Copycord (Windows)`.
+
+- **Option B (direct script):**  
+  Double-click `copycord_windows.bat`.
 
 This will:
 
@@ -117,28 +131,33 @@ This will:
 - Start the **server agent**
 - Start the **client agent**
 
-You should then be able to open:
+Then open in your browser:
 
 ```text
 http://localhost:8080
 ```
 
-(or whatever port you configured in `.env`) in your browser to access the Copycord admin panel.
+(or whatever port you configured in `.env`) to access the Copycord admin panel.
 
 ### On Linux / macOS
 
-1. Make sure the script is executable (one-time):
+From your Copycord folder (for example `~/copycord`):
 
-   ```bash
-   cd /path/to/copycord
-   chmod +x copycord_linux.sh
-   ```
+- **Option A (launcher):**
 
-2. Start Copycord:
+  ```bash
+  cd ~/copycord
+  python3 installer.py
+  ```
 
-   ```bash
-   ./copycord_linux.sh
-   ```
+  Then choose `4) Run Copycord (Linux)`.
+
+- **Option B (direct script):**
+
+  ```bash
+  cd ~/copycord
+  ./copycord_linux.sh
+  ```
 
 This will start all components (admin UI, server agent, client agent).  
 Then open in your browser:
@@ -153,17 +172,18 @@ http://localhost:8080
 
 ## Updating Copycord
 
-When a new Copycord version is released, use the updater from this same folder.
+When a new Copycord version is released, use the same launcher to update from this folder.
 
 > **Always close any running Copycord windows/shells before updating.**  
 > (Close the admin/server/client terminals.)
 
-### Windows (using `Update.exe`)
+### Windows (using `Copycord.exe`)
 
-1. Go to your Copycord folder (the one that contains `Update.exe` and `code/`).
-2. **Double-click `Update.exe`.**
+1. Go to your Copycord folder (the one that contains `Copycord.exe` and `code/`).
+2. **Double-click `Copycord.exe`.**
+3. From the menu, choose `2) Update Copycord`.
 
-The updater will:
+The launcher will:
 
 - Detect your current installed version (`code/.version`)
 - Check GitHub for the latest tag
@@ -172,55 +192,62 @@ The updater will:
   - Update Python dependencies in `venvs/`
   - Rebuild the admin frontend
 
-3. Press **Enter** to close the updater window.
-4. Start Copycord again using `copycord_windows.bat`.
+4. When it finishes, start Copycord again using:
+   - `Copycord.exe` → `3) Run Copycord (Windows)`, or  
+   - `copycord_windows.bat`.
 
 ---
 
-### Linux / macOS (using `update.py`)
+### Linux / macOS (using `installer.py`)
 
-1. Stop Copycord (Ctrl+C in the terminal where `copycord_linux.sh` is running).
+1. Stop Copycord (Ctrl+C in the terminal where it is running).
 2. From the Copycord folder, run:
 
    ```bash
-   cd /path/to/copycord
-   python3 update.py
+   cd ~/copycord
+   python3 installer.py
    ```
 
-3. The updater will:
+3. From the menu, choose: `2) Update Copycord`.
 
-   - Check your current version in `code/.version`
-   - Compare with the latest GitHub tag
-   - Download new code if needed
-   - Update `venvs/` dependencies
-   - Rebuild the frontend
+The launcher will:
 
-4. When it finishes:
+- Check your current version in `code/.version`
+- Compare with the latest GitHub tag
+- Download new code if needed
+- Update `venvs/` dependencies
+- Rebuild the frontend
 
-   - If it says the update completed, restart Copycord with:
-
-     ```bash
-     ./copycord_linux.sh
-     ```
+4. When it finishes, start Copycord again with:
+   - `python3 installer.py` → `4) Run Copycord (Linux)`, or  
+   - `./copycord_linux.sh`.
 
 ---
 
 ## Environment variables
-- The env file is fully controllable and can be found inside the /code folder in your Copycord directory. Here you can modify variables like password, ports, etc.
+
+- The env file is fully controllable and can be found inside the `/code` folder in your Copycord directory (`code/.env`).  
+- Here you can modify variables such as:
+  - `PASSWORD`
+  - `ADMIN_PORT`
+  - WebSocket ports
+  - Backup settings, etc.
 
 ---
 
 ## Troubleshooting
 
 - **No Python found / Python error**  
-  - Install Python 3.10+.
-  - On Windows, ensure it’s added to PATH or use the “py” launcher.
+  - Install Python 3.10+.  
+  - On Windows, ensure it’s added to PATH or use the `py` launcher.
+
 - **npm not found**  
   - Install Node.js (which includes npm).
-- **“Could not find `code/` directory” in updater**  
-  - Make sure you are running `Update.exe` / `update.py` from the same folder where `code/` exists.
+
+- **“Could not find `code/` directory” / install not found**  
+  - Make sure you are running `Copycord.exe` / `installer.py` from the same folder where `code/` exists (after installation).
+
 - **Port already in use (8080)**  
-  - Edit `.env` (inside `code/`) and change `ADMIN_PORT`.
+  - Edit `.env` (inside `code/`) and change `ADMIN_PORT`, then restart Copycord.
 
 ---
-
