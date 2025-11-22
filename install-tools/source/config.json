@@ -1,7 +1,7 @@
 {
   "install_url": "https://github.com/Copycord/Copycord/blob/main/install-tools/source/install.py",
   "update_url": "https://github.com/Copycord/Copycord/blob/main/install-tools/source/update.py",
-  "launcher_version": "1.1.0",
+  "launcher_version": "1.1.1",
   "windows_launcher_url": "https://github.com/Copycord/Copycord/raw/refs/heads/main/install-tools/source/Copycord.exe",
   "linux_launcher_url":   "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/install-tools/source/launcher.py"
 }
