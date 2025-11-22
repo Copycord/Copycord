@@ -1,6 +1,6 @@
 services:
   admin:
-    image: ghcr.io/copycord/copycord:v3.1.2
+    image: ghcr.io/copycord/copycord:v3.1.3
     container_name: copycord-admin
     environment:
       - ROLE=admin
@@ -11,7 +11,7 @@ services:
       - ./data:/data
 
   server:
-    image: ghcr.io/copycord/copycord:v3.1.2
+    image: ghcr.io/copycord/copycord:v3.1.3
     container_name: copycord-server
     environment:
       - ROLE=server
@@ -21,7 +21,7 @@ services:
       - admin
 
   client:
-    image: ghcr.io/copycord/copycord:v3.1.2
+    image: ghcr.io/copycord/copycord:v3.1.3
     container_name: copycord-client
     environment:
       - ROLE=client
