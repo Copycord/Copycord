@@ -4,4 +4,4 @@ aiohttp>=3.9,<4
 Pillow==11.3.0
 PyYAML==6.0.2
 tzdata==2025.2
-audioop-lts; python_version >= "3.13"
+audioop-lts==0.2.1; python_version >= "3.13"
