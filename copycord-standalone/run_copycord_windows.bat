@@ -1,6 +1,11 @@
 @echo off
 setlocal enabledelayedexpansion
 
+:: Force Windows console to use UTF-8 (code page 65001)
+chcp 65001 >nul
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
+
 REM Directory where this script lives (repo root)
 set "ROOT=%~dp0"
 REM Remove trailing backslash if present

@@ -101,6 +101,7 @@ logging.getLogger("discord.client").setLevel(logging.ERROR)
 logger = logging.getLogger("server")
 
 
+
 class _GuildPrefixFilter(logging.Filter):
     """
     Prepend mapping name to every server log line.
@@ -10285,8 +10286,14 @@ class ServerReceiver:
         """
         logger.info("[✨] Starting Copycord Server %s", CURRENT_VERSION)
         loop = asyncio.get_event_loop()
+
         for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(self._shutdown()))
+            try:
+                loop.add_signal_handler(
+                    sig, lambda s=sig: asyncio.create_task(self._shutdown())
+                )
+            except (NotImplementedError, RuntimeError):
+                break
 
         try:
             loop.run_until_complete(self.bot.start(self.config.SERVER_TOKEN))
@@ -10295,6 +10302,7 @@ class ServerReceiver:
             for task in pending:
                 task.cancel()
             loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+
 
 
 def _autostart_enabled() -> bool:

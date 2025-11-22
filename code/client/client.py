@@ -38,6 +38,7 @@ from client.export_runners import (
     DmHistoryExporter,
 )
 
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
@@ -156,9 +157,12 @@ class ClientListener:
 
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(
-                sig, lambda s=sig: asyncio.create_task(self.bot.close())
-            )
+            try:
+                loop.add_signal_handler(
+                    sig, lambda s=sig: asyncio.create_task(self.bot.close())
+                )
+            except (NotImplementedError, RuntimeError):
+                break
 
     def _is_mapped_origin(self, guild_id: int | None) -> bool:
         try:

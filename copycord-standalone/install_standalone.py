@@ -238,7 +238,6 @@ def ensure_env_file(app_root: Path, data_dir: Path, admin_port: int) -> Path:
     # Use loopback + default ports in standalone mode.
     content = f"""\
     # Copycord standalone configuration
-    # This file is loaded by python-dotenv in admin/server/client/control.
 
     # Where Copycord stores its SQLite DB, backups, exports, logs, etc.
     DATA_DIR={data_dir.as_posix()}
@@ -248,6 +247,7 @@ def ensure_env_file(app_root: Path, data_dir: Path, admin_port: int) -> Path:
     ADMIN_HOST=127.0.0.1
     ADMIN_PORT={admin_port}
     ADMIN_WS_URL=ws://127.0.0.1:{admin_port}/bus
+    PASSWORD=changeme # Comment out to disable admin UI auth (not recommended)
 
     # Websocket endpoints for the Discord server + client agents
     SERVER_WS_HOST=127.0.0.1
@@ -261,28 +261,12 @@ def ensure_env_file(app_root: Path, data_dir: Path, admin_port: int) -> Path:
     # Control ports for the server + client (used by the Admin UI)
     WS_SERVER_CTRL_URL=ws://127.0.0.1:9101
     WS_CLIENT_CTRL_URL=ws://127.0.0.1:9102
+    
+    # Control ports for the server + client (used by controller)
+    CONTROL_PORT_SERVER=9101
+    CONTROL_PORT_CLIENT=9102
 
-    # Tokens (MUST be filled in by the user)
-    # Discord bot token for the server agent (py-cord)
-    SERVER_TOKEN=
-    # Discord token for the client agent (discord.py-self)
-    CLIENT_TOKEN=
-
-    # Comma-separated list of Discord user IDs allowed to use /copycord commands
-    COMMAND_USERS=
-
-    # Timezone configuration
-    TZ=UTC
-    UI_TZ=UTC
-
-    # Logging
-    LOG_LEVEL=info
-    LOG_FORMAT=plain
-
-    # Automatic start of server/client when the control service boots
-    COPYCORD_AUTOSTART=true
-
-    # Backups (the Admin UI also lets you configure this)
+    # Backups
     BACKUP_DIR={(data_dir / 'backups').as_posix()}
     BACKUP_RETAIN=14
     BACKUP_AT=03:17
@@ -320,7 +304,6 @@ def main(argv: list[str] | None = None) -> int:
     data_dir = repo_root / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     (data_dir / "backups").mkdir(exist_ok=True)
-    (data_dir / "logs").mkdir(exist_ok=True)
     print(f"[installer] Data dir:  {data_dir}")
 
     venv_root = repo_root / "venvs"
