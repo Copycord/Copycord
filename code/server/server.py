@@ -37,7 +37,8 @@ import hashlib
 import time
 from datetime import datetime, timezone
 from asyncio import Queue
-
+from pathlib import Path
+from dotenv import load_dotenv
 from common.config import Config, CURRENT_VERSION
 from common.common_helpers import resolve_mapping_settings
 from common.websockets import WebsocketManager, AdminBus
@@ -61,7 +62,11 @@ from server.permission_sync import ChannelPermissionSync
 from server.guild_resolver import GuildResolver
 from server import logctx
 
-LOG_DIR = "/data"
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
+
+DATA_DIR = os.getenv("DATA_DIR")
+LOG_DIR = os.getenv("LOG_DIR") or (DATA_DIR if DATA_DIR else "/data")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()

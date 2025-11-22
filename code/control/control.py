@@ -20,18 +20,26 @@ from pathlib import Path
 from typing import Optional
 import time
 from datetime import datetime, timezone
+from dotenv import load_dotenv
 from common.db import DBManager
 
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 
 ROLE = os.getenv("ROLE", "server").strip().lower()
 DEFAULT_PORT = 9101 if ROLE == "server" else 9102
 PORT = int(os.getenv("CONTROL_PORT", str(DEFAULT_PORT)))
-ROOT = Path("/app")
-DATA = Path("/data")
+
+DEFAULT_ROOT = "/app"
+DEFAULT_DATA = "/data"
+
+ROOT = Path(os.getenv("COPYCORD_ROOT", DEFAULT_ROOT)).resolve()
+DATA = Path(os.getenv("DATA_DIR", DEFAULT_DATA)).resolve()
 DATA.mkdir(parents=True, exist_ok=True)
 
-DB_PATH = os.getenv("DB_PATH", "/data/data.db")
-PYTHONPATH = "/app"
+DB_PATH = os.getenv("DB_PATH", str(DATA / "data.db"))
+PYTHONPATH = os.getenv("PYTHONPATH", str(ROOT))
 MODULE = "server.server" if ROLE == "server" else "client.client"
 
 PIDFILE = DATA / f"{ROLE}.pid"
