@@ -426,8 +426,13 @@ def write_start_scripts(repo_root: Path) -> None:
                 "}",
                 "Set-Location -LiteralPath $code",
                 "Write-Host ('[admin] starting on port ' + $port)",
-                "& $venv -m uvicorn admin.app:app --host 0.0.0.0 --port $port",
-                "if ($LASTEXITCODE) { Write-Host ('[admin] crashed with ' + $LASTEXITCODE); Read-Host 'Press Enter to close' }",
+                "try {",
+                "  & $venv -m uvicorn admin.app:app --host 0.0.0.0 --port $port",
+                "  if ($LASTEXITCODE) { throw \"Exit code: $LASTEXITCODE\" }",
+                "} catch {",
+                "  Write-Host (\"[admin] crashed: $_\")",
+                "  Read-Host 'Press Enter to close'",
+                "}",
                 "",
             ]
         ),
@@ -684,7 +689,7 @@ def main(argv: list[str] | None = None) -> int:
     print("       double-click copycord_windows.bat")
     print("  3) To run everything on Linux/macOS:")
     print("       ./copycord_linux.sh")
-    print("     (make sure it is executable: chmod +x start_copycord.sh if needed)")
+    print("     (make sure it is executable: chmod +x copycord_linux.sh if needed)")
 
     return 0
 

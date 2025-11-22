@@ -428,8 +428,13 @@ def write_start_scripts(repo_root: Path) -> None:
                 "}",
                 "Set-Location -LiteralPath $code",
                 "Write-Host ('[admin] starting on port ' + $port)",
-                "& $venv -m uvicorn admin.app:app --host 0.0.0.0 --port $port",
-                "if ($LASTEXITCODE) { Write-Host ('[admin] crashed with ' + $LASTEXITCODE); Read-Host 'Press Enter to close' }",
+                "try {",
+                "  & $venv -m uvicorn admin.app:app --host 0.0.0.0 --port $port",
+                "  if ($LASTEXITCODE) { throw \"Exit code: $LASTEXITCODE\" }",
+                "} catch {",
+                "  Write-Host (\"[admin] crashed: $_\")",
+                "  Read-Host 'Press Enter to close'",
+                "}",
                 "",
             ]
         ),
@@ -512,8 +517,8 @@ endlocal
         newline="\r\n",
     )
 
-    print(f"[installer] Wrote Windows start script: {win_bat}")
-    print(f"[installer] Wrote PS launchers in: {ps_dir}")
+    print(f"[updater] Wrote Windows start script: {win_bat}")
+    print(f"[updater] Wrote PS launchers in: {ps_dir}")
 
     sh_path = repo_root / "copycord_linux.sh"
     sh_script = """
@@ -543,7 +548,7 @@ wait
         sh_path.chmod(sh_path.stat().st_mode | 0o111)
     except Exception:
         pass
-    print(f"[installer] Wrote Linux/macOS start script: {sh_path}")
+    print(f"[updater] Wrote Linux/macOS start script: {sh_path}")
 
 
 def main(argv: list[str] | None = None) -> int:
