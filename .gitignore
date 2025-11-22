@@ -7,8 +7,7 @@ __pycache__/
 *.pyc
 .env
 compose.yml
-copycord-standalone/copycord/**
-copycord-standalone/copycord/*
-!copycord-standalone/copycord/install_standalone.py
-!copycord-standalone/copycord/README_STANDALONE.md
-!copycord-standalone/copycord/update_standalone.py
+install-tools/copycord/**
+!install-tools/copycord/install_standalone.py
+!install-tools/copycord/README.md
+!install-tools/copycord/update_standalone.py

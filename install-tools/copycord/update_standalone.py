@@ -8,12 +8,12 @@ import zipfile
 from pathlib import Path
 from urllib.request import urlopen, Request
 
-# GitHub repo + optional explicit tag/branch
+
 GITHUB_REPO = os.getenv("GITHUB_REPO", "Copycord/Copycord")
 GITHUB_TAG = os.getenv("GITHUB_TAG")
-GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "copycord-standalone")
+GITHUB_BRANCH = os.getenv("GITHUB_BRANCH")
 
-# Match the installer: version file that stores the last installed ref (tag or branch)
+
 VERSION_FILE_NAME = ".version"
 
 
@@ -115,7 +115,7 @@ def read_local_ref(code_dir: Path) -> str | None:
     if not version_file.is_file():
         return None
     try:
-        return (version_file.read_text(encoding="utf-8").strip() or None)
+        return version_file.read_text(encoding="utf-8").strip() or None
     except Exception:
         return None
 
@@ -210,7 +210,6 @@ def upgrade_venv(venv_dir: Path, requirements: Path) -> None:
     total_steps = 2
     step = 1
 
-    # 1) Upgrade pip
     run_pip_step(
         [str(pip), "install", "--upgrade", "pip"],
         step=step,
@@ -219,7 +218,6 @@ def upgrade_venv(venv_dir: Path, requirements: Path) -> None:
     )
     step += 1
 
-    # 2) Install requirements
     run_pip_step(
         [str(pip), "install", "-r", str(requirements)],
         step=step,
@@ -288,7 +286,6 @@ def main(argv: list[str] | None = None) -> int:
     current_ref = read_local_ref(code_dir)
     print(f"[updater] Currently installed ref: {current_ref or 'none'}")
 
-    # If GITHUB_BRANCH is set, we track that branch and always re-download it.
     if GITHUB_BRANCH:
         target_ref = GITHUB_BRANCH
         print(f"[updater] GITHUB_BRANCH is set; updating from branch: {target_ref}")
@@ -298,28 +295,23 @@ def main(argv: list[str] | None = None) -> int:
         )
         download_code(repo_root, target_ref, is_branch=True)
 
-        # Refresh app_root in case code/ was re-created
         app_root = repo_root / "code"
 
-        # After branch update, refresh deps inside the venvs.
         venv_root = repo_root / "venvs"
         print("\n[updater] Updating virtualenv dependencies…")
         upgrade_venv(venv_root / "admin", app_root / "admin" / "requirements.txt")
         upgrade_venv(venv_root / "server", app_root / "server" / "requirements.txt")
         upgrade_venv(venv_root / "client", app_root / "client" / "requirements.txt")
 
-        # Rebuild frontend to pick up any UI changes.
         print("\n[updater] Rebuilding admin frontend…")
         build_frontend(app_root)
 
         print("\n[updater] Done. Restart Copycord to run the updated build.")
         return 0
 
-    # Otherwise, we are working with tags
     target_tag = GITHUB_TAG or fetch_latest_tag(GITHUB_REPO)
     print(f"[updater] Target tag: {target_tag}")
 
-    # If already on the latest tag, stop immediately (no venv/npm work).
     if current_ref == target_tag:
         print("[updater] Already on the latest tag; nothing to do.")
         return 0
@@ -330,17 +322,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     download_code(repo_root, target_tag, is_branch=False)
 
-    # Refresh app_root in case code/ was re-created
     app_root = repo_root / "code"
 
-    # After code update, refresh deps inside the venvs.
     venv_root = repo_root / "venvs"
     print("\n[updater] Updating virtualenv dependencies…")
     upgrade_venv(venv_root / "admin", app_root / "admin" / "requirements.txt")
     upgrade_venv(venv_root / "server", app_root / "server" / "requirements.txt")
     upgrade_venv(venv_root / "client", app_root / "client" / "requirements.txt")
 
-    # Rebuild frontend to pick up any UI changes.
     print("\n[updater] Rebuilding admin frontend…")
     build_frontend(app_root)
 

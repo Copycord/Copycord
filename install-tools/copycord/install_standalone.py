@@ -11,13 +11,13 @@ from pathlib import Path
 from textwrap import dedent
 from urllib.request import urlopen, Request
 
-# GitHub repo configuration
+
 GITHUB_REPO = os.getenv("GITHUB_REPO", "Copycord/Copycord")
 GITHUB_TAG = os.getenv("GITHUB_TAG")
-# Default branch is copycord-standalone unless overridden
-GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "copycord-standalone")
 
-# Version file for updater comparison
+GITHUB_BRANCH = os.getenv("GITHUB_BRANCH")
+
+
 VERSION_FILE_NAME = ".version"
 
 
@@ -76,7 +76,9 @@ def fetch_latest_tag(repo: str) -> str:
         data = json.load(resp)
 
     if not data:
-        raise SystemExit("[installer] No tags found on GitHub; cannot determine latest version.")
+        raise SystemExit(
+            "[installer] No tags found on GitHub; cannot determine latest version."
+        )
 
     tag = data[0].get("name")
     if not tag:
@@ -121,12 +123,16 @@ def download_code(prefix: Path, ref: str, is_branch: bool = False) -> Path:
 
     candidates = [p for p in tmp_dir.iterdir() if p.is_dir()]
     if not candidates:
-        raise SystemExit("[installer] Downloaded archive did not contain any directories.")
+        raise SystemExit(
+            "[installer] Downloaded archive did not contain any directories."
+        )
     repo_src_root = candidates[0]
     src_code_dir = repo_src_root / "code"
 
     if not src_code_dir.is_dir():
-        raise SystemExit(f"[installer] Downloaded archive missing code/ (looked in {src_code_dir}).")
+        raise SystemExit(
+            f"[installer] Downloaded archive missing code/ (looked in {src_code_dir})."
+        )
 
     print(f"[installer] Moving {src_code_dir} -> {code_dir}")
     shutil.move(str(src_code_dir), str(code_dir))
@@ -171,7 +177,7 @@ def build_frontend(app_root: Path) -> None:
 
     npm = shutil.which("npm")
     if not npm:
-        # In normal flow this should already have been caught by check_prereqs()
+
         raise SystemExit(
             "[installer] ERROR: npm not found in PATH, but admin frontend requires it.\n"
             "Install Node.js (which includes npm) and re-run the installer."
@@ -223,17 +229,14 @@ def create_venv(
     if not python_exe:
         raise SystemExit(f"Python executable not found in venv: {bin_dir}")
 
-    # Make sure pip exists in the venv (some installs may not include it by default)
     try:
         run([str(python_exe), "-m", "ensurepip", "--upgrade"])
     except Exception as e:
         print(f"[installer] Warning: ensurepip failed ({e}), continuing…")
 
-    # Progress bar over the pip-related steps
     total_steps = 2 + (1 if extra_packages else 0)
     step = 1
 
-    # 1) Upgrade pip
     run_pip_step(
         [str(python_exe), "-m", "pip", "install", "--upgrade", "pip"],
         step=step,
@@ -242,7 +245,6 @@ def create_venv(
     )
     step += 1
 
-    # 2) Install main requirements
     run_pip_step(
         [str(python_exe), "-m", "pip", "install", "-r", str(requirements)],
         step=step,
@@ -251,7 +253,6 @@ def create_venv(
     )
     step += 1
 
-    # 3) Optional extra packages
     if extra_packages:
         run_pip_step(
             [str(python_exe), "-m", "pip", "install", *extra_packages],
@@ -269,7 +270,7 @@ def ensure_env_file(app_root: Path, data_dir: Path, admin_port: int) -> Path:
         return env_path
 
     content = f"""\
-    # Copycord standalone configuration
+    
 
     DATA_DIR={data_dir.as_posix()}
     DB_PATH={(data_dir / 'data.db').as_posix()}
@@ -277,7 +278,7 @@ def ensure_env_file(app_root: Path, data_dir: Path, admin_port: int) -> Path:
     ADMIN_HOST=127.0.0.1
     ADMIN_PORT={admin_port}
     ADMIN_WS_URL=ws://127.0.0.1:{admin_port}/bus
-    PASSWORD=copycord # Comment out to disable login page (not recommended)
+    PASSWORD=copycord 
 
     SERVER_WS_HOST=127.0.0.1
     SERVER_WS_PORT=8765
@@ -309,7 +310,8 @@ def write_start_scripts(repo_root: Path) -> None:
     sh_path = repo_root / "copycord_linux.sh"
 
     if not win_path.exists():
-        win_script = dedent(r"""\
+        win_script = dedent(
+            r"""\
         @echo off
         setlocal enabledelayedexpansion
 
@@ -395,18 +397,22 @@ def write_start_scripts(repo_root: Path) -> None:
         echo.
 
         endlocal
-        """).lstrip("\n")
+        """
+        ).lstrip("\n")
         win_path.write_text(win_script, encoding="utf-8", newline="\r\n")
         print(f"[installer] Wrote Windows start script: {win_path}")
     else:
-        print(f"[installer] Windows start script already exists at {win_path}, leaving it alone.")
+        print(
+            f"[installer] Windows start script already exists at {win_path}, leaving it alone."
+        )
 
     if not sh_path.exists():
-        sh_script = dedent("""\
-        #!/usr/bin/env bash
+        sh_script = dedent(
+            """\
+        
         set -euo pipefail
 
-        # Directory where this script lives (repo root)
+        
         ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
         CODE_DIR="$ROOT/code"
         VENV_ROOT="$ROOT/venvs"
@@ -427,7 +433,7 @@ def write_start_scripts(repo_root: Path) -> None:
           exit 1
         fi
 
-        # Default admin port, overridable via code/.env (ADMIN_PORT=...)
+        
         ADMIN_PORT="8080"
         ENV_FILE="$CODE_DIR/.env"
         if [[ -f "$ENV_FILE" ]]; then
@@ -472,7 +478,8 @@ def write_start_scripts(repo_root: Path) -> None:
         trap cleanup INT TERM
 
         wait
-        """).lstrip("\n")
+        """
+        ).lstrip("\n")
         sh_path.write_text(sh_script, encoding="utf-8")
         try:
             sh_path.chmod(sh_path.stat().st_mode | 0o111)
@@ -480,14 +487,15 @@ def write_start_scripts(repo_root: Path) -> None:
             pass
         print(f"[installer] Wrote Linux/macOS start script: {sh_path}")
     else:
-        print(f"[installer] Linux/macOS start script already exists at {sh_path}, leaving it alone.")
+        print(
+            f"[installer] Linux/macOS start script already exists at {sh_path}, leaving it alone."
+        )
 
 
 def check_prereqs() -> None:
     """Check that pip/ensurepip and npm are available; abort with a clear error if not."""
     print("[installer] Checking prerequisites…")
 
-    # Check pip (or at least ensurepip) for this Python
     ok = False
     try:
         subprocess.check_call(
@@ -497,7 +505,7 @@ def check_prereqs() -> None:
         )
         ok = True
     except Exception:
-        # Try ensurepip as a fallback (some envs rely on that to bootstrap pip)
+
         try:
             subprocess.check_call(
                 [sys.executable, "-m", "ensurepip", "--version"],
@@ -516,7 +524,6 @@ def check_prereqs() -> None:
             "    python install_standalone.py"
         )
 
-    # Check npm presence (required to build the admin frontend)
     npm = shutil.which("npm")
     if npm is None:
         raise SystemExit(
@@ -530,13 +537,16 @@ def check_prereqs() -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Install Copycord in standalone mode.")
-    parser.add_argument("--prefix", type=Path, help="Install prefix (default: current directory)")
-    parser.add_argument("--admin-port", type=int, default=8080, help="Port for admin web UI")
+    parser.add_argument(
+        "--prefix", type=Path, help="Install prefix (default: current directory)"
+    )
+    parser.add_argument(
+        "--admin-port", type=int, default=8080, help="Port for admin web UI"
+    )
     args = parser.parse_args(argv)
 
     prefix = args.prefix or Path.cwd()
 
-    # Check pip & npm before doing any heavy work
     check_prereqs()
 
     repo_root, app_root = detect_roots(prefix)
@@ -554,7 +564,6 @@ def main(argv: list[str] | None = None) -> int:
     venv_root = repo_root / "venvs"
     venv_root.mkdir(exist_ok=True)
 
-    # Create venvs and install requirements
     create_venv(venv_root / "admin", app_root / "admin" / "requirements.txt")
     create_venv(
         venv_root / "server",
@@ -569,7 +578,6 @@ def main(argv: list[str] | None = None) -> int:
 
     env_path = ensure_env_file(app_root, data_dir, args.admin_port)
 
-    # Create start scripts in repo root
     write_start_scripts(repo_root)
 
     print("\n[installer] Done.")
