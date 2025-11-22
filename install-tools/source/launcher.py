@@ -23,7 +23,7 @@ from urllib.request import Request, urlopen
 
 DEFAULT_CONFIG_URL = (
     "https://github.com/Copycord/Copycord/blob/"
-    "build-in-installer/install-tools/source/config.json"
+    "main/install-tools/source/config.json"
 )
 
 CONFIG_ENV_VAR = "COPYCORD_LAUNCHER_CONFIG_URL"
