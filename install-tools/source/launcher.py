@@ -10,12 +10,15 @@ from urllib.request import Request, urlopen
 # Copycord all-in-one launcher
 #
 #   1. Downloads a small JSON config which points to install/update scripts.
-#   2. Lets you choose "Install", "Update", or "Run Copycord".
+#   2. Lets you choose "Install", "Update", or "Run Copycord (Windows/Linux)".
 #   3. For install/update:
 #        - Downloads the corresponding Python source from GitHub.
 #        - Executes the remote script inside this process, calling its entrypoint.
-#   4. For "Run Copycord":
+#   4. For "Run Copycord (Windows)":
 #        - Locates and runs copycord_windows.bat in the same folder as the EXE
+#          (or its parent).
+#   5. For "Run Copycord (Linux)":
+#        - Locates and runs copycord_linux.sh in the same folder as the binary/script
 #          (or its parent).
 #
 # The remote install/update scripts remain in the GitHub repo so they can
@@ -30,7 +33,6 @@ CONFIG_ENV_VAR = "COPYCORD_LAUNCHER_CONFIG_URL"
 
 USER_AGENT = "Copycord-Launcher/1.0"
 
-
 REMOTE_PAUSE_HANDLED = False
 
 
@@ -44,7 +46,6 @@ def _github_blob_to_raw(url: str) -> str:
         return url
 
     try:
-
         before, after = url.split("github.com/", 1)
         parts = after.split("/")
         if len(parts) >= 5 and parts[2] == "blob":
@@ -54,7 +55,6 @@ def _github_blob_to_raw(url: str) -> str:
             path = "/".join(parts[4:])
             return f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
     except Exception:
-
         pass
 
     return url
@@ -118,15 +118,16 @@ def prompt_choice() -> str:
     print("======================================")
     print("1) Install Copycord")
     print("2) Update Copycord")
-    print("3) Run Copycord")
+    print("3) Run Copycord (Windows)")
+    print("4) Run Copycord (Linux)")
     print("Q) Quit")
     print()
 
     while True:
-        choice = input("Select an option [1/2/3/Q]: ").strip().lower()
-        if choice in ("1", "2", "3", "q", "quit", "exit"):
+        choice = input("Select an option [1/2/3/4/Q]: ").strip().lower()
+        if choice in ("1", "2", "3", "4", "q", "quit", "exit"):
             return choice
-        print("Invalid choice. Please enter 1, 2, 3, or Q.")
+        print("Invalid choice. Please enter 1, 2, 3, 4, or Q.")
 
 
 def run_remote(kind: str, url: str) -> int:
@@ -193,15 +194,12 @@ def run_remote(kind: str, url: str) -> int:
     return int(result or 0)
 
 
-def run_copycord() -> int:
+def run_copycord_windows() -> int:
     """
     Locate and run copycord_windows.bat to start Copycord in separate windows.
-
-    We look for the .bat file next to the EXE (when frozen) or next to this
-    script (when run as .py), and also in the parent directory as a fallback.
     """
     if os.name != "nt":
-        print("[launcher] 'Run Copycord' is currently only supported on Windows.")
+        print("[launcher] 'Run Copycord (Windows)' is only supported on Windows.")
         return 1
 
     if getattr(sys, "frozen", False):
@@ -229,7 +227,6 @@ def run_copycord() -> int:
 
     print(f"[launcher] Running {bat_path}…")
     try:
-
         subprocess.run(
             ["cmd", "/c", str(bat_path)],
             cwd=str(bat_path.parent),
@@ -242,9 +239,68 @@ def run_copycord() -> int:
         print(f"[launcher] Failed to start Copycord: {e}")
         return 1
 
-    print(
-        "[launcher] Copycord launch script finished."
-    )
+    print("[launcher] Copycord launch script finished.")
+    return 0
+
+
+def run_copycord_linux() -> int:
+    """
+    Locate and run copycord_linux.sh to start Copycord on Linux/macOS.
+    """
+    if os.name == "nt":
+        print("[launcher] 'Run Copycord (Linux)' is only supported on Linux/macOS.")
+        return 1
+
+    if getattr(sys, "frozen", False):
+        base = Path(sys.executable).resolve().parent
+    else:
+        base = Path(__file__).resolve().parent
+
+    candidates = [
+        base / "copycord_linux.sh",
+        base.parent / "copycord_linux.sh",
+    ]
+
+    script_path: Path | None = None
+    for c in candidates:
+        if c.is_file():
+            script_path = c
+            break
+
+    if script_path is None:
+        print("[launcher] ERROR: Could not find 'copycord_linux.sh'.")
+        print(
+            "          Make sure the launcher is in the same folder as copycord_linux.sh."
+        )
+        return 1
+
+    # Try to ensure it's executable
+    try:
+        mode = script_path.stat().st_mode
+        if not (mode & 0o111):
+            script_path.chmod(mode | 0o111)
+    except Exception:
+        pass
+
+    print(f"[launcher] Running {script_path}…")
+    try:
+        subprocess.run(
+            ["bash", str(script_path)],
+            cwd=str(script_path.parent),
+            check=True,
+        )
+    except FileNotFoundError:
+        print("[launcher] ERROR: 'bash' not found. Try running the script manually:")
+        print(f"          cd {script_path.parent} && sh {script_path.name}")
+        return 1
+    except subprocess.CalledProcessError as e:
+        print(f"[launcher] Copycord launch script exited with code {e.returncode}.")
+        return int(e.returncode)
+    except Exception as e:
+        print(f"[launcher] Failed to start Copycord: {e}")
+        return 1
+
+    print("[launcher] Copycord launch script finished.")
     return 0
 
 
@@ -281,7 +337,9 @@ def main(argv: list[str] | None = None) -> int:
         if choice == "2":
             return run_remote("update", cfg["update_url"])
         if choice == "3":
-            return run_copycord()
+            return run_copycord_windows()
+        if choice == "4":
+            return run_copycord_linux()
 
 
 def _pause_if_needed(exit_code: int) -> int:
@@ -293,7 +351,6 @@ def _pause_if_needed(exit_code: int) -> int:
         try:
             input("\nPress Enter to close this window...")
         except EOFError:
-
             pass
     return exit_code
 
