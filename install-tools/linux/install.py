@@ -126,7 +126,12 @@ def fetch_latest_tag(repo: str) -> str:
 
 
 def download_code(prefix: Path, ref: str, is_branch: bool = False) -> Path:
-    """Download the tagged or branch Copycord archive into prefix/code."""
+    """Download the tagged or branch Copycord archive into prefix/code.
+
+    Preserves an existing code/.env file by backing it up before replacing
+    code/ and restoring it afterwards. If the new archive also ships a .env,
+    that file is renamed to .env.example so we don't lose it.
+    """
     prefix = prefix.resolve()
     code_dir = prefix / "code"
 
@@ -139,6 +144,18 @@ def download_code(prefix: Path, ref: str, is_branch: bool = False) -> Path:
 
     zip_path = prefix / f"copycord-{ref}.zip"
     tmp_dir = prefix / "_copycord_src"
+
+    existing_env_content: str | None = None
+    existing_env_path = code_dir / ".env"
+    if existing_env_path.is_file():
+        try:
+            existing_env_content = existing_env_path.read_text(encoding="utf-8")
+            print(f"[installer] Backed up existing .env from {existing_env_path}")
+        except Exception as e:
+            print(
+                f"[installer] WARNING: Failed to read existing .env at "
+                f"{existing_env_path}: {e}"
+            )
 
     if code_dir.is_dir():
         print(f"[installer] Removing existing code/ at {code_dir}")
@@ -159,10 +176,12 @@ def download_code(prefix: Path, ref: str, is_branch: bool = False) -> Path:
         z.extractall(tmp_dir)
 
     candidates = [p for p in tmp_dir.iterdir() if p.is_dir()]
+
     if not candidates:
         raise SystemExit(
             "[installer] Downloaded archive did not contain any directories."
         )
+
     repo_src_root = candidates[0]
     src_code_dir = repo_src_root / "code"
 
@@ -173,6 +192,31 @@ def download_code(prefix: Path, ref: str, is_branch: bool = False) -> Path:
 
     print(f"[installer] Moving {src_code_dir} -> {code_dir}")
     shutil.move(str(src_code_dir), str(code_dir))
+
+    if existing_env_content is not None:
+        new_env_path = code_dir / ".env"
+        if new_env_path.exists():
+
+            example_path = code_dir / ".env.example"
+            try:
+                new_env_path.rename(example_path)
+                print(
+                    f"[installer] Renamed downloaded .env to {example_path} "
+                    "to preserve user configuration."
+                )
+            except Exception as e:
+                print(
+                    f"[installer] WARNING: Failed to rename downloaded .env to "
+                    f"{example_path}: {e}"
+                )
+
+        try:
+            (code_dir / ".env").write_text(existing_env_content, encoding="utf-8")
+            print("[installer] Restored existing .env into code/.")
+        except Exception as e:
+            print(
+                f"[installer] WARNING: Failed to restore existing .env into code/: {e}"
+            )
 
     version_file = code_dir / VERSION_FILE_NAME
     version_file.write_text(ref.strip() + "\n", encoding="utf-8")
