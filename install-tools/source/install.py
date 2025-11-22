@@ -575,48 +575,91 @@ def write_start_scripts(repo_root: Path) -> None:
         )
 
 
+def _probe(cmd: list[str]) -> str | None:
+    """Run a command and return its stdout (stripped), or None on failure."""
+    try:
+        out = subprocess.check_output(cmd, stderr=subprocess.STDOUT, text=True)
+        return (out or "").strip()
+    except Exception:
+        return None
+
+
 def check_prereqs() -> None:
-    """Check that pip/ensurepip and npm are available; abort with a clear error if not."""
+    """
+    Check that required tools are available and clearly print what's missing.
+
+    Requirements:
+      - Python 3.10+ (the interpreter running this script or the system Python we use)
+      - pip OR ensurepip (for that Python)
+      - npm (Node.js) for building the admin frontend
+    """
     print("[installer] Checking prerequisites…")
 
     python_cmd = find_system_python()
 
-    ok = False
-    try:
-        subprocess.check_call(
-            python_cmd + ["-m", "pip", "--version"],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        ok = True
-    except Exception:
+    py_ver_str = _probe(
+        python_cmd
+        + [
+            "-c",
+            "import sys;print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')",
+        ]
+    )
+    py_ok = False
+    py_detail = "unknown"
+    if py_ver_str:
+        py_detail = py_ver_str
         try:
-            subprocess.check_call(
-                python_cmd + ["-m", "ensurepip", "--version"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            ok = True
+            major, minor, *_ = (int(x) for x in py_ver_str.split("."))
+            py_ok = (major, minor) >= (3, 10)
         except Exception:
-            ok = False
+            py_ok = False
 
-    if not ok:
-        raise SystemExit(
-            "[installer] ERROR: Neither `python -m pip` nor `python -m ensurepip` "
-            "appear to be available for this Python interpreter.\n"
-            "Install pip (or use a Python build that includes pip/ensurepip) and re-run:\n"
-            "    python install_standalone.py"
+    pip_ver = _probe(python_cmd + ["-m", "pip", "--version"])
+    ensurepip_ver = _probe(python_cmd + ["-m", "ensurepip", "--version"])
+    pip_ok = bool(pip_ver or ensurepip_ver)
+
+    npm_path = shutil.which("npm")
+    npm_ver = _probe([npm_path, "--version"]) if npm_path else None
+    npm_ok = bool(npm_ver)
+
+    print("[installer] Detected:")
+    print(f"  - Python: {py_detail} ({'OK' if py_ok else 'need >= 3.10'})")
+    print(
+        f"  - pip: {'found' if pip_ver else 'not found'}"
+        f"{f' ({pip_ver})' if pip_ver else ''}"
+    )
+    print(
+        f"  - ensurepip: {'found' if ensurepip_ver else 'not found'}"
+        f"{f' ({ensurepip_ver})' if ensurepip_ver else ''}"
+    )
+    print(
+        f"  - npm: {'found' if npm_ok else 'not found'}"
+        f"{f' (v{npm_ver})' if npm_ver else ''}"
+    )
+
+    missing: list[str] = []
+    if not py_ok:
+        missing.append(f"Python 3.10+ (found {py_detail})")
+    if not pip_ok:
+        missing.append("pip or ensurepip for the detected Python")
+    if not npm_ok:
+        missing.append("npm (Node.js)")
+
+    if missing:
+        print("\n[installer] ERROR: Missing prerequisites:")
+        for item in missing:
+            print(f"  • {item}")
+        print(
+            "\nHow to fix:\n"
+            "  - Install Python 3.10+ from https://www.python.org/downloads/ (ensure it’s on PATH).\n"
+            "  - Ensure `pip` works for that Python (or install `ensurepip`).\n"
+            "  - Install Node.js (which includes npm): https://nodejs.org/\n"
+            "\nOnce installed, re-run:\n"
+            "    python install_standalone.py\n"
         )
+        raise SystemExit(1)
 
-    npm = shutil.which("npm")
-    if npm is None:
-        raise SystemExit(
-            "[installer] ERROR: npm is not installed or not found in your PATH.\n"
-            "Copycord's admin UI requires building the frontend with npm.\n"
-            "Install Node.js (which includes npm) and then re-run this installer."
-        )
-
-    print("[installer] Prerequisites OK (pip/ensurepip & npm found).")
+    print("[installer] Prerequisites OK.")
 
 
 def main(argv: list[str] | None = None) -> int:
