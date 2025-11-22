@@ -177,11 +177,12 @@ This will pull the latest images and start the web ui: http://localhost:8080
 
 ## Manual Install
 
-**Requirments**:
-- Python 3.10+
-- Node.js + npm
-
 ### Windows
+
+**Requirments**:
+
+Python 3.10+
+Node.js + npm
 
 1. Download the Windows installer bundle:  
    [`copycord.zip`](https://github.com/Copycord/Copycord/raw/refs/heads/main/install-tools/windows/copycord.zip)
@@ -196,6 +197,18 @@ This will pull the latest images and start the web ui: http://localhost:8080
 
 ### Linux
 
+**Requirements**:
+
+Python 3.10+
+
+Node.js + npm:
+  - `curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -`
+  - `sudo apt install -y nodejs`
+
+python3-venv + python3.10-venv:
+  - `sudo apt install -y python3-venv python3.10-venv`
+
+
 1. Create a Copycord directory and download the installer and updater scripts:
    - `curl -L "https://github.com/Copycord/Copycord/raw/refs/heads/main/install-tools/linux/install.py" -o install.py`
    - `curl -L "https://github.com/Copycord/Copycord/raw/refs/heads/main/install-tools/linux/update.py" -o update.py`
@@ -208,8 +221,7 @@ This will pull the latest images and start the web ui: http://localhost:8080
 
    This will:
 
-   - Download the latest Copycord code
-   - Create `code/`, `data/`, and `venvs/` directories
+   - Download the latest Copycord version
    - Generate the `copycord_linux.sh` start script
 
 3. Make the start script executable and run it:
@@ -225,6 +237,9 @@ This will pull the latest images and start the web ui: http://localhost:8080
    python3 update.py
    ```
 5. Once started, visit the web ui: http://localhost:8080
+
+### Environment Configuration
+- Set admin password, change ports, etc, in the env file located in the /code directory after installation.
 
 ### Web UI Configuration
 
