@@ -394,14 +394,16 @@ def write_start_scripts(repo_root: Path) -> None:
     Always (re)write start scripts so installer and updater behave the same.
     - Windows:
         - copycord_windows.bat (spawns 3 PS windows)
+        - scripts\preflight.ps1 (checks ALL ports + Python >= 3.10 in venvs)
         - scripts\admin.ps1 / server.ps1 / client.ps1
     - Linux/macOS:
-        - copycord_linux.sh (LF, +x)
+        - copycord_linux.sh (LF, +x) with preflight
     """
     win_bat = repo_root / "copycord_windows.bat"
     ps_dir = repo_root / "scripts"
     ps_dir.mkdir(exist_ok=True)
 
+    # Shared PS header (prepended to each .ps1)
     ps_header = "\r\n".join(
         [
             "$ErrorActionPreference = 'Stop'",
@@ -414,6 +416,115 @@ def write_start_scripts(repo_root: Path) -> None:
         ]
     )
 
+    # --- preflight.ps1: ALL ports + Python >= 3.10 for each venv ---
+    preflight_ps1 = ps_dir / "preflight.ps1"
+    preflight_body = r"""
+$envFile   = Join-Path $code '.env'
+$venvAdmin = Join-Path $root 'venvs\admin\Scripts\python.exe'
+$venvServer= Join-Path $root 'venvs\server\Scripts\python.exe'
+$venvClient= Join-Path $root 'venvs\client\Scripts\python.exe'
+
+function Assert-Py310 {
+  param([string]$Interpreter, [string]$Name)
+  if (-not (Test-Path -LiteralPath $Interpreter)) {
+    throw "Missing $Name interpreter at $Interpreter"
+  }
+  $ver = & $Interpreter -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"
+  if (-not $ver) { throw "Unable to get Python version for $Name ($Interpreter)" }
+  $parts = $ver.Split('.') | ForEach-Object { [int]$_ }
+  if ($parts[0] -lt 3 -or ($parts[0] -eq 3 -and $parts[1] -lt 10)) {
+    throw "$Name requires Python >= 3.10 (found $ver at $Interpreter)"
+  }
+}
+
+function Get-EnvPorts {
+  param([string]$Path)
+  $ports = New-Object 'System.Collections.Generic.HashSet[int]'
+  $defaults = @(8080,8765,8766,9101,9102)
+
+  if (-not (Test-Path -LiteralPath $Path)) {
+    foreach ($p in $defaults) { [void]$ports.Add([int]$p) }
+    return @($ports)
+  }
+
+  $lines = Get-Content -LiteralPath $Path -Encoding UTF8
+  foreach ($line in $lines) {
+    # A) *_PORT=####
+    if ($line -match '^[A-Z0-9_]+_PORT\s*=\s*([0-9]{1,5})\s*$') {
+      $v = [int]$Matches[1]
+      if ($v -ge 1 -and $v -le 65535) { [void]$ports.Add($v) }
+    }
+    # B) Only treat :#### as a port if it appears in a URL (skip times like 03:17)
+    $matches = [System.Text.RegularExpressions.Regex]::Matches(
+      $line, '(?i)\b(?:ws|wss|http|https)://[^:\s]+:(\d{2,5})\b'
+    )
+    foreach ($m in $matches) {
+      $v = [int]$m.Groups[1].Value
+      if ($v -ge 1 -and $v -le 65535) { [void]$ports.Add($v) }
+    }
+  }
+  return @($ports)
+}
+
+function Test-PortBusy {
+  param([int]$Port)
+  try {
+    $conn = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop
+    if ($conn) { return $true }
+  } catch {
+    $net = netstat -ano | Select-String "LISTENING.*:$Port\b"
+    if ($net) { return $true }
+  }
+  return $false
+}
+
+Write-Host '[preflight] Checking Python versions in venvs (need >= 3.10)…'
+try {
+  Assert-Py310 -Interpreter $venvAdmin -Name 'admin venv'
+  Assert-Py310 -Interpreter $venvServer -Name 'server venv'
+  Assert-Py310 -Interpreter $venvClient -Name 'client venv'
+} catch {
+  Write-Host ('[preflight] ERROR: ' + $_)
+  exit 1
+}
+Write-Host '[preflight] Python looks good.'
+
+$ports = @(Get-EnvPorts -Path $envFile)
+if (-not $ports -or $ports.Count -eq 0) { $ports = @(8080,8765,8766,9101,9102) }
+
+$busy = @()
+foreach ($p in ($ports | Sort-Object -Unique)) {
+  if (Test-PortBusy -Port $p) {
+    $procId = $null; $pname = $null
+    $line = netstat -ano | Select-String "LISTENING.*:$p\b" | Select-Object -First 1
+    if ($line) {
+      $parts = ($line -split '\s+') | Where-Object { $_ -ne '' }
+      if ($parts.Count -ge 5) { $procId = $parts[-1] }
+    }
+    if ($procId) {
+      try { $pname = (Get-Process -Id $procId -ErrorAction Stop).ProcessName } catch {}
+      if ($pname) { $busy += ("Port {0} is in use by PID {1} ({2})" -f $p, $procId, $pname) }
+      else { $busy += ("Port {0} is in use by PID {1}" -f $p, $procId) }
+    } else {
+      $busy += ("Port {0} is in use" -f $p)
+    }
+  }
+}
+
+if ($busy.Count -gt 0) {
+  Write-Host '[preflight] One or more ports referenced in code\.env are busy:'
+  $busy | ForEach-Object { Write-Host ("  • " + $_) }
+  Write-Host 'Fix: close the process(es) using these ports or change values in code\.env, then relaunch.'
+  exit 1
+} else {
+  Write-Host '[preflight] All referenced ports appear free.'
+}
+"""
+    preflight_ps1.write_text(
+        ps_header + preflight_body.replace("\n", "\r\n"), encoding="utf-8-sig"
+    )
+
+    # --- admin.ps1 ---
     admin_ps1 = ps_dir / "admin.ps1"
     admin_ps1.write_text(
         ps_header
@@ -430,9 +541,9 @@ def write_start_scripts(repo_root: Path) -> None:
                 "Write-Host ('[admin] starting on port ' + $port)",
                 "try {",
                 "  & $venv -m uvicorn admin.app:app --host 0.0.0.0 --port $port",
-                "  if ($LASTEXITCODE) { throw \"Exit code: $LASTEXITCODE\" }",
+                '  if ($LASTEXITCODE) { throw "Exit code: $LASTEXITCODE" }',
                 "} catch {",
-                "  Write-Host (\"[admin] crashed: $_\")",
+                '  Write-Host ("[admin] crashed: $_")',
                 "  Read-Host 'Press Enter to close'",
                 "}",
                 "",
@@ -441,6 +552,7 @@ def write_start_scripts(repo_root: Path) -> None:
         encoding="utf-8-sig",
     )
 
+    # --- server.ps1 ---
     server_ps1 = ps_dir / "server.ps1"
     server_ps1.write_text(
         ps_header
@@ -450,7 +562,7 @@ def write_start_scripts(repo_root: Path) -> None:
                 "Set-Location -LiteralPath $code",
                 "$env:ROLE = 'server'",
                 "$env:CONTROL_PORT = '9101'",
-                "Write-Host '[server] starting...'",
+                "Write-Host '[server] starting…'",
                 "& $venv -m control.control",
                 "if ($LASTEXITCODE) { Write-Host ('[server] crashed with ' + $LASTEXITCODE); Read-Host 'Press Enter to close' }",
                 "",
@@ -459,6 +571,7 @@ def write_start_scripts(repo_root: Path) -> None:
         encoding="utf-8-sig",
     )
 
+    # --- client.ps1 ---
     client_ps1 = ps_dir / "client.ps1"
     client_ps1.write_text(
         ps_header
@@ -468,7 +581,7 @@ def write_start_scripts(repo_root: Path) -> None:
                 "Set-Location -LiteralPath $code",
                 "$env:ROLE = 'client'",
                 "$env:CONTROL_PORT = '9102'",
-                "Write-Host '[client] starting...'",
+                "Write-Host '[client] starting…'",
                 "& $venv -m control.control",
                 "if ($LASTEXITCODE) { Write-Host ('[client] crashed with ' + $LASTEXITCODE); Read-Host 'Press Enter to close' }",
                 "",
@@ -477,6 +590,7 @@ def write_start_scripts(repo_root: Path) -> None:
         encoding="utf-8-sig",
     )
 
+    # --- Windows .bat launcher (runs preflight first, pauses on failure) ---
     win_bat.write_text(
         r"""
 @echo off
@@ -500,6 +614,15 @@ if not exist "%VENV_ROOT%\admin\Scripts\python.exe" ( echo Error: admin venv mis
 if not exist "%VENV_ROOT%\server\Scripts\python.exe" ( echo Error: server venv missing & goto :EOF )
 if not exist "%VENV_ROOT%\client\Scripts\python.exe" ( echo Error: client venv missing & goto :EOF )
 
+rem ---- Preflight: Python >= 3.10 in venvs + ALL ports free ----
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\preflight.ps1"
+if errorlevel 1 (
+  echo.
+  echo Preflight failed; fix the reported issues and try again.
+  pause
+  goto :EOF
+)
+
 set "PS=powershell.exe -NoLogo -NoProfile -NoExit -ExecutionPolicy Bypass -File"
 start "Copycord Admin"  /D "%CODE_DIR%" %PS% "%ROOT%\scripts\admin.ps1"
 start "Copycord Server" /D "%CODE_DIR%" %PS% "%ROOT%\scripts\server.ps1"
@@ -517,11 +640,12 @@ endlocal
         newline="\r\n",
     )
 
-    print(f"[updater] Wrote Windows start script: {win_bat}")
-    print(f"[updater] Wrote PS launchers in: {ps_dir}")
+    print(f"[installer] Wrote Windows start script: {win_bat}")
+    print(f"[installer] Wrote PS launchers in: {ps_dir}")
 
+    # --- Linux/macOS ---
     sh_path = repo_root / "copycord_linux.sh"
-    sh_script = """
+    sh_script = """#!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 CODE_DIR="$ROOT/code"
@@ -531,11 +655,77 @@ SERVER_VENV="$VENV_ROOT/server"
 CLIENT_VENV="$VENV_ROOT/client"
 [[ -d "$CODE_DIR" ]] || { echo "Missing $CODE_DIR"; exit 1; }
 [[ -d "$ADMIN_VENV" && -d "$SERVER_VENV" && -d "$CLIENT_VENV" ]] || { echo "Missing one or more venvs in $VENV_ROOT"; exit 1; }
-ADMIN_PORT="8080"; ENV_FILE="$CODE_DIR/.env"
+
+ENV_FILE="$CODE_DIR/.env"
+
+ensure_py310 () {
+  local bin="$1" name="$2"
+  [[ -x "$bin" ]] || { echo "[preflight] ERROR: Missing $name interpreter at $bin"; exit 1; }
+  local ver
+  ver="$("$bin" -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')" || {
+    echo "[preflight] ERROR: Unable to get Python version for $name ($bin)"; exit 1; }
+  local major="${ver%%.*}"; local rest="${ver#*.}"; local minor="${rest%%.*}"
+  if (( major < 3 || (major == 3 && minor < 10) )); then
+    echo "[preflight] ERROR: $name requires Python >= 3.10 (found $ver at $bin)"; exit 1;
+  fi
+}
+
+get_ports() {
+  if [[ ! -f "$ENV_FILE" ]]; then
+    echo 8080 8765 8766 9101 9102
+    return
+  fi
+  awk -F'=' '/^[A-Z0-9_]+_PORT[[:space:]]*=/ {gsub(/[[:space:]]/,"",$2); if ($2 ~ /^[0-9]+$/) print $2}' "$ENV_FILE"
+  grep -Eo ':[0-9]{2,5}' "$ENV_FILE" | sed 's/^://'
+}
+
+port_in_use() {
+  local p="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -lnt | awk '{print $4}' | grep -qE "(:|\\.)$p$" && return 0 || return 1
+  elif command -v lsof >/dev/null 2>&1; then
+    lsof -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 && return 0 || return 1
+  else
+    command -v netstat >/dev/null 2>&1 && netstat -lnt 2>/dev/null | awk '{print $4}' | grep -qE "(:|\\.)$p$" && return 0
+    return 1
+  fi
+}
+
+# --- Preflight: Python >= 3.10 in all venvs ---
+ensure_py310 "$ADMIN_VENV/bin/python"  "admin venv"
+ensure_py310 "$SERVER_VENV/bin/python" "server venv"
+ensure_py310 "$CLIENT_VENV/bin/python" "client venv"
+echo "[preflight] Python looks good."
+
+# --- Preflight: ALL referenced ports free ---
+mapfile -t PORTS < <(get_ports | awk '$1>=1 && $1<=65535 {print $1}' | sort -n | uniq)
+
+BUSY=()
+for p in "${PORTS[@]}"; do
+  if port_in_use "$p"; then
+    if command -v lsof >/dev/null 2>&1; then
+      who=$(lsof -iTCP:"$p" -sTCP:LISTEN -nP 2>/dev/null | awk 'NR>1 {print $1"["$2"]"}' | sort -u | tr '\n' ' ')
+      BUSY+=("Port $p is in use${who:+ by }${who}")
+    else
+      BUSY+=("Port $p is in use")
+    fi
+  fi
+done
+
+if [[ ${#BUSY[@]} -gt 0 ]]; then
+  echo "[preflight] One or more ports referenced in code/.env are busy:"
+  for m in "${BUSY[@]}"; do echo "  • $m"; done
+  echo "Fix: close the process(es) using these ports or change values in code/.env, then relaunch."
+  exit 1
+fi
+
+# --- Start services ---
+ADMIN_PORT="8080"
 if [[ -f "$ENV_FILE" ]]; then
-  ENV_PORT="$(grep -E '^ADMIN_PORT=' "$ENV_FILE" | head -n1 | cut -d= -f2- | tr -d '\r' || true)"
+  ENV_PORT="$(grep -E '^ADMIN_PORT=' "$ENV_FILE" | head -n1 | cut -d= -f2- | tr -d $'\r' || true)"
   [[ -n "${ENV_PORT:-}" ]] && ADMIN_PORT="$ENV_PORT"
 fi
+
 cd "$CODE_DIR"
 "$ADMIN_VENV/bin/python" -m uvicorn admin.app:app --host 0.0.0.0 --port "$ADMIN_PORT" & ADMIN_PID=$!
 ROLE=server CONTROL_PORT=9101 "$SERVER_VENV/bin/python" -m control.control & SERVER_PID=$!
@@ -548,7 +738,7 @@ wait
         sh_path.chmod(sh_path.stat().st_mode | 0o111)
     except Exception:
         pass
-    print(f"[updater] Wrote Linux/macOS start script: {sh_path}")
+    print(f"[installer] Wrote Linux/macOS start script: {sh_path}")
 
 
 def main(argv: list[str] | None = None) -> int:
