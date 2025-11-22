@@ -72,21 +72,22 @@ sudo apt install python3 python3-venv python3-pip nodejs npm
    - Double-click `copycord_windows.bat`.
 
 
-### Linux (using `installer.py`)
+### Linux (using `launcher.py`)
+`curl -L "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/install-tools/source/launcher.py" -o launcher.py`
 
 1. Place these files in a folder where you want Copycord to live, for example:
 
    ```bash
    mkdir -p ~/copycord
    cd ~/copycord
-   # Put installer.py here (and any other provided files)
+   # Put launcher.py here (and any other provided files)
    ```
 
 2. Run the launcher:
 
    ```bash
    cd ~/copycord
-   python3 installer.py
+   python3 launcher.py
    ```
 
 3. When the menu appears, choose: `1) Install Copycord`.
@@ -99,7 +100,7 @@ sudo apt install python3 python3-venv python3-pip nodejs npm
    - Generate `copycord_linux.sh` (Linux/macOS start script)
 
 4. To **start Copycord** after install:
-   - Either run `python3 installer.py` again and choose `4) Run Copycord (Linux)`, **or**
+   - Either run `python3 launcher.py` again and choose `4) Run Copycord (Linux)`, **or**
    - Run the start script directly:
 
      ```bash
