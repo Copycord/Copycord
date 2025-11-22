@@ -3,17 +3,20 @@ from __future__ import annotations
 import json
 import os
 import sys
+import subprocess
 from pathlib import Path
 from urllib.request import Request, urlopen
 
 # Copycord all-in-one launcher
 #
-# This script is meant to be compiled with PyInstaller into a single EXE.
-# At runtime it:
 #   1. Downloads a small JSON config which points to install/update scripts.
-#   2. Lets the user choose "Install" or "Update".
-#   3. Downloads the corresponding Python source from GitHub.
-#   4. Executes the remote script inside this process, calling its entrypoint.
+#   2. Lets you choose "Install", "Update", or "Run Copycord".
+#   3. For install/update:
+#        - Downloads the corresponding Python source from GitHub.
+#        - Executes the remote script inside this process, calling its entrypoint.
+#   4. For "Run Copycord":
+#        - Locates and runs copycord_windows.bat in the same folder as the EXE
+#          (or its parent).
 #
 # The remote install/update scripts remain in the GitHub repo so they can
 # be updated independently of this launcher EXE.
@@ -23,13 +26,11 @@ DEFAULT_CONFIG_URL = (
     "build-in-installer/install-tools/source/config.json"
 )
 
-# Env var override so you can point the launcher at a different config file
 CONFIG_ENV_VAR = "COPYCORD_LAUNCHER_CONFIG_URL"
 
 USER_AGENT = "Copycord-Launcher/1.0"
 
-# If we successfully call a remote *_run_with_pause_* function, that script
-# will handle the "Press Enter to close" logic itself when frozen.
+
 REMOTE_PAUSE_HANDLED = False
 
 
@@ -43,9 +44,7 @@ def _github_blob_to_raw(url: str) -> str:
         return url
 
     try:
-        # Example:
-        #   https://github.com/OWNER/REPO/blob/BRANCH/path/to/file.ext
-        # -> https://raw.githubusercontent.com/OWNER/REPO/BRANCH/path/to/file.ext
+
         before, after = url.split("github.com/", 1)
         parts = after.split("/")
         if len(parts) >= 5 and parts[2] == "blob":
@@ -55,7 +54,7 @@ def _github_blob_to_raw(url: str) -> str:
             path = "/".join(parts[4:])
             return f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
     except Exception:
-        # Fall back to original URL on any parsing error
+
         pass
 
     return url
@@ -103,7 +102,6 @@ def load_config(config_url: str | None = None) -> dict:
             "[launcher] ERROR: config.json must define 'install_url' and 'update_url'."
         )
 
-    # Normalize to raw URLs so users can store blob URLs in config if they want.
     cfg["install_url"] = _github_blob_to_raw(install_url)
     cfg["update_url"] = _github_blob_to_raw(update_url)
 
@@ -113,21 +111,22 @@ def load_config(config_url: str | None = None) -> dict:
 
 
 def prompt_choice() -> str:
-    """Simple interactive menu to choose Install or Update."""
+    """Simple interactive menu to choose Install, Update, or Run Copycord."""
     print()
     print("======================================")
     print("      Copycord Standalone Launcher    ")
     print("======================================")
     print("1) Install Copycord")
     print("2) Update Copycord")
+    print("3) Run Copycord")
     print("Q) Quit")
     print()
 
     while True:
-        choice = input("Select an option [1/2/Q]: ").strip().lower()
-        if choice in ("1", "2", "q", "quit", "exit"):
+        choice = input("Select an option [1/2/3/Q]: ").strip().lower()
+        if choice in ("1", "2", "3", "q", "quit", "exit"):
             return choice
-        print("Invalid choice. Please enter 1, 2, or Q.")
+        print("Invalid choice. Please enter 1, 2, 3, or Q.")
 
 
 def run_remote(kind: str, url: str) -> int:
@@ -155,7 +154,6 @@ def run_remote(kind: str, url: str) -> int:
         "__package__": None,
     }
 
-    # Execute the remote script so its functions are defined in 'namespace'
     code_obj = compile(source, f"<{module_name}>", "exec")
     exec(code_obj, namespace)
 
@@ -177,16 +175,14 @@ def run_remote(kind: str, url: str) -> int:
     if entry is None:
         print(
             "[launcher] ERROR: Remote script does not define a recognised entrypoint.\n"
-            "Expected one of: "
-            + ", ".join(candidates)
+            "Expected one of: " + ", ".join(candidates)
         )
         return 1
 
-    # Ensure the remote script doesn't see our launcher CLI flags.
     old_argv = sys.argv
     try:
         sys.argv = [old_argv[0]]
-        result = entry()  # type: ignore[misc]
+        result = entry()
     except SystemExit as e:
         code = e.code if isinstance(e.code, int) else 1
         print(f"[launcher] Remote script requested exit with code {code}.")
@@ -197,11 +193,66 @@ def run_remote(kind: str, url: str) -> int:
     return int(result or 0)
 
 
+def run_copycord() -> int:
+    """
+    Locate and run copycord_windows.bat to start Copycord in separate windows.
+
+    We look for the .bat file next to the EXE (when frozen) or next to this
+    script (when run as .py), and also in the parent directory as a fallback.
+    """
+    if os.name != "nt":
+        print("[launcher] 'Run Copycord' is currently only supported on Windows.")
+        return 1
+
+    if getattr(sys, "frozen", False):
+        base = Path(sys.executable).resolve().parent
+    else:
+        base = Path(__file__).resolve().parent
+
+    candidates = [
+        base / "copycord_windows.bat",
+        base.parent / "copycord_windows.bat",
+    ]
+
+    bat_path: Path | None = None
+    for c in candidates:
+        if c.is_file():
+            bat_path = c
+            break
+
+    if bat_path is None:
+        print("[launcher] ERROR: Could not find 'copycord_windows.bat'.")
+        print(
+            "          Make sure the launcher is in the same folder as copycord_windows.bat."
+        )
+        return 1
+
+    print(f"[launcher] Running {bat_path}…")
+    try:
+
+        subprocess.run(
+            ["cmd", "/c", str(bat_path)],
+            cwd=str(bat_path.parent),
+            check=True,
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"[launcher] Copycord launch script exited with code {e.returncode}.")
+        return int(e.returncode)
+    except Exception as e:
+        print(f"[launcher] Failed to start Copycord: {e}")
+        return 1
+
+    print(
+        "[launcher] Copycord launch script finished."
+    )
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Copycord all-in-one Install/Update launcher."
+        description="Copycord all-in-one Install/Update/Run launcher."
     )
     parser.add_argument(
         "--config-url",
@@ -229,6 +280,8 @@ def main(argv: list[str] | None = None) -> int:
             return run_remote("install", cfg["install_url"])
         if choice == "2":
             return run_remote("update", cfg["update_url"])
+        if choice == "3":
+            return run_copycord()
 
 
 def _pause_if_needed(exit_code: int) -> int:
@@ -240,7 +293,7 @@ def _pause_if_needed(exit_code: int) -> int:
         try:
             input("\nPress Enter to close this window...")
         except EOFError:
-            # Console may not be interactive; ignore.
+
             pass
     return exit_code
 
