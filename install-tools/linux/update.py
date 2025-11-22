@@ -197,6 +197,10 @@ def download_code(prefix: Path, ref: str, *, is_branch: bool = False) -> Path:
     Download the Copycord archive from GitHub into prefix/code, replacing any
     existing code/ directory, and update code/.version with the ref.
 
+    Preserves an existing code/.env file by backing it up before replacing
+    code/ and restoring it afterwards. If the new archive ships a .env, that
+    file is renamed to .env.example so we don't lose it.
+
     If is_branch is True, we use refs/heads/<ref>.zip, otherwise refs/tags/<ref>.zip.
     """
     prefix = prefix.resolve()
@@ -211,6 +215,18 @@ def download_code(prefix: Path, ref: str, *, is_branch: bool = False) -> Path:
 
     zip_path = prefix / f"copycord-{ref}.zip"
     tmp_dir = prefix / "_copycord_src"
+
+    existing_env_content: str | None = None
+    existing_env_path = code_dir / ".env"
+    if existing_env_path.is_file():
+        try:
+            existing_env_content = existing_env_path.read_text(encoding="utf-8")
+            print(f"[updater] Backed up existing .env from {existing_env_path}")
+        except Exception as e:
+            print(
+                f"[updater] WARNING: Failed to read existing .env at "
+                f"{existing_env_path}: {e}"
+            )
 
     if code_dir.is_dir():
         print(f"[updater] Removing existing code/ at {code_dir}")
@@ -236,6 +252,7 @@ def download_code(prefix: Path, ref: str, *, is_branch: bool = False) -> Path:
             "[updater] Downloaded archive did not contain any directories; "
             "cannot locate repo root."
         )
+
     repo_src_root = candidates[0]
     src_code_dir = repo_src_root / "code"
 
@@ -247,6 +264,28 @@ def download_code(prefix: Path, ref: str, *, is_branch: bool = False) -> Path:
 
     print(f"[updater] Moving {src_code_dir} -> {code_dir}")
     shutil.move(str(src_code_dir), str(code_dir))
+
+    if existing_env_content is not None:
+        new_env_path = code_dir / ".env"
+        if new_env_path.exists():
+            example_path = code_dir / ".env.example"
+            try:
+                new_env_path.rename(example_path)
+                print(
+                    f"[updater] Renamed downloaded .env to {example_path} "
+                    "to preserve user configuration."
+                )
+            except Exception as e:
+                print(
+                    f"[updater] WARNING: Failed to rename downloaded .env to "
+                    f"{example_path}: {e}"
+                )
+
+        try:
+            (code_dir / ".env").write_text(existing_env_content, encoding="utf-8")
+            print("[updater] Restored existing .env into code/.")
+        except Exception as e:
+            print(f"[updater] WARNING: Failed to restore existing .env into code/: {e}")
 
     version_file = code_dir / VERSION_FILE_NAME
     version_file.write_text(ref.strip() + "\n", encoding="utf-8")
