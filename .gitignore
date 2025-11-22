@@ -7,9 +7,4 @@ __pycache__/
 *.pyc
 .env
 compose.yml
-install-tools/copycord/**
-!install-tools/copycord/install.py
-!install-tools/copycord/install.exe
-!install-tools/copycord/README.md
-!install-tools/copycord/update.py
-!install-tools/copycord/update.exe
+install-tools/source/**
