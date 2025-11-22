@@ -5,7 +5,7 @@ This folder contains the **standalone launcher/installer/updater** for Copycord.
 You can install, update, and run Copycord without cloning the Git repo manually.
 
 - On **Windows**, use **`Copycord.exe`** (all-in-one launcher).
-- On **Linux/macOS**, use **`installer.py`** (all-in-one launcher).
+- On **Linux/macOS**, use **`launcher.py`** (all-in-one launcher).
 
 Once installed, you’ll use either the launcher or the provided start scripts to run Copycord.
 
@@ -16,7 +16,7 @@ Once installed, you’ll use either the launcher or the provided start scripts t
 After installation, this folder will typically look like:
 
 - `Copycord.exe` – Windows launcher (install / update / run)
-- `installer.py` – Linux/macOS launcher (install / update / run)
+- `launcher.py` – Linux/macOS launcher (install / update / run)
 - `copycord_windows.bat` – Start Copycord on Windows (created by the installer)
 - `copycord_linux.sh` – Start Copycord on Linux/macOS (created by the installer)
 - `code/` – Copycord application code (created by the installer)
