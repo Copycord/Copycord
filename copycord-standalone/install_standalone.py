@@ -30,7 +30,7 @@ from urllib.request import urlopen
 
 # GitHub repo and branch to download from
 GITHUB_REPO = os.getenv("GITHUB_REPO", "Copycord/Copycord")
-GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "main")
+GITHUB_BRANCH = os.getenv("GITHUB_BRANCH", "copycord-standalone")
 
 
 def run(cmd: list[str], **kwargs) -> None:
@@ -168,10 +168,15 @@ def build_frontend(app_root: Path) -> None:
         return
 
     static_dir = app_root / "admin" / "static"
-    if static_dir.exists():
-        shutil.rmtree(static_dir)
+    static_dir.mkdir(parents=True, exist_ok=True)
 
-    shutil.copytree(dist_dir, static_dir)
+    for item in dist_dir.iterdir():
+        dest = static_dir / item.name
+        if item.is_dir():
+            shutil.copytree(item, dest, dirs_exist_ok=True)
+        else:
+            shutil.copy2(item, dest)
+
     print(f"[installer] Copied built frontend to {static_dir}")
 
 
