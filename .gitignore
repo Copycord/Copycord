@@ -11,6 +11,4 @@ copycord-standalone/**
 copycord-standalone/*
 !copycord-standalone/install_standalone.py
 !copycord-standalone/README_STANDALONE.md
-!copycord-standalone/run_copycord_linux.sh
-!copycord-standalone/run_copycord_windows.bat
 !copycord-standalone/update_standalone.py
