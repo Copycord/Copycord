@@ -37,7 +37,8 @@ import hashlib
 import time
 from datetime import datetime, timezone
 from asyncio import Queue
-
+from pathlib import Path
+from dotenv import load_dotenv
 from common.config import Config, CURRENT_VERSION
 from common.common_helpers import resolve_mapping_settings
 from common.websockets import WebsocketManager, AdminBus
@@ -61,7 +62,11 @@ from server.permission_sync import ChannelPermissionSync
 from server.guild_resolver import GuildResolver
 from server import logctx
 
-LOG_DIR = "/data"
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
+
+DATA_DIR = os.getenv("DATA_DIR")
+LOG_DIR = os.getenv("LOG_DIR") or (DATA_DIR if DATA_DIR else "/data")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -94,6 +99,7 @@ for lib in (
 logging.getLogger("discord.client").setLevel(logging.ERROR)
 
 logger = logging.getLogger("server")
+
 
 
 class _GuildPrefixFilter(logging.Filter):
@@ -10280,8 +10286,14 @@ class ServerReceiver:
         """
         logger.info("[✨] Starting Copycord Server %s", CURRENT_VERSION)
         loop = asyncio.get_event_loop()
+
         for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda: asyncio.create_task(self._shutdown()))
+            try:
+                loop.add_signal_handler(
+                    sig, lambda s=sig: asyncio.create_task(self._shutdown())
+                )
+            except (NotImplementedError, RuntimeError):
+                break
 
         try:
             loop.run_until_complete(self.bot.start(self.config.SERVER_TOKEN))
@@ -10290,6 +10302,7 @@ class ServerReceiver:
             for task in pending:
                 task.cancel()
             loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+
 
 
 def _autostart_enabled() -> bool:

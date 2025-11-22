@@ -19,6 +19,8 @@ import discord
 from discord import ChannelType, ForumChannel, MessageType
 import os
 from discord.ext import commands
+from pathlib import Path
+from dotenv import load_dotenv
 from common.config import Config, CURRENT_VERSION
 from common.db import DBManager
 from client.sitemap import SitemapService
@@ -37,7 +39,11 @@ from client.export_runners import (
 )
 
 
-LOG_DIR = "/data"
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
+
+DATA_DIR = os.getenv("DATA_DIR")
+LOG_DIR = os.getenv("LOG_DIR") or (DATA_DIR if DATA_DIR else "/data")
 os.makedirs(LOG_DIR, exist_ok=True)
 
 LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -151,9 +157,12 @@ class ClientListener:
 
         loop = asyncio.get_event_loop()
         for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(
-                sig, lambda s=sig: asyncio.create_task(self.bot.close())
-            )
+            try:
+                loop.add_signal_handler(
+                    sig, lambda s=sig: asyncio.create_task(self.bot.close())
+                )
+            except (NotImplementedError, RuntimeError):
+                break
 
     def _is_mapped_origin(self, guild_id: int | None) -> bool:
         try:
@@ -459,7 +468,8 @@ class ClientListener:
 
                         import os, json, datetime as _dt
 
-                        scrapes_dir = "/data/scrapes"
+                        data_root = os.getenv("DATA_DIR", "/data")
+                        scrapes_dir = os.path.join(data_root, "scrapes")
                         os.makedirs(scrapes_dir, exist_ok=True)
 
                         rgid = str((result or {}).get("guild_id") or gid or "unknown")
@@ -653,7 +663,7 @@ class ClientListener:
                         logger=logger.getChild("dm_export"),
                         send_sleep=2.0,
                         do_precache_count=True,
-                        out_root="/data/exports",
+                        out_root=os.path.join(os.getenv("DATA_DIR", "/data"), "exports"),
                         save_json=save_json,
                     )
                     await exporter.run(user_id=uid, webhook_url=webhook_url)

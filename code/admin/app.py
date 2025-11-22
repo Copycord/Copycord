@@ -23,6 +23,7 @@ import tarfile, tempfile, shutil
 import re
 import time
 import logging
+from dotenv import load_dotenv
 from typing import Dict, List, Set, Literal, Optional, Any, Union
 from admin.auth import init_admin_auth
 from admin.logging_setup import (
@@ -71,6 +72,12 @@ from time import perf_counter
 import sys as _sys, json as _json, contextvars
 from datetime import datetime
 import aiohttp
+
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
+
+# Load .env BEFORE we read DATA_DIR / DB_PATH
+load_dotenv(PROJECT_ROOT / ".env")
 
 
 GITHUB_REPO = os.getenv("GITHUB_REPO", "Copycord/Copycord")
@@ -132,12 +139,13 @@ def _safe(x):
         return "<unprintable>"
 
 
-APP_TITLE = f"Copycord"
+APP_TITLE = "Copycord"
 
-
-DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
+DEFAULT_DATA_DIR = "/data"
+DATA_DIR = Path(os.getenv("DATA_DIR", DEFAULT_DATA_DIR)).resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-DB_PATH = os.getenv("DB_PATH", "/data/data.db")
+
+DB_PATH = os.getenv("DB_PATH", str(DATA_DIR / "data.db"))
 db = DBManager(DB_PATH, init_schema=True)
 
 BACKUP_DIR = Path(os.getenv("BACKUP_DIR", str(DATA_DIR / "backups")))
@@ -255,7 +263,6 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
 
 
 app = FastAPI(title=APP_TITLE)
-BASE_DIR = Path(__file__).parent
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 templates.env.globals.setdefault("links", {})

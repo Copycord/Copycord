@@ -1,9 +1,10 @@
-/data
-/backup
-code/admin/frontend/node_modules
-code/admin/static/assets
+/data/
+/backup/
+code/admin/frontend/node_modules/
+/code/admin/static/assets/
 code/admin/frontend/dist/
 __pycache__/
 *.pyc
 .env
 compose.yml
+install-tools/source/**

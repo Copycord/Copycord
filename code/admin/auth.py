@@ -13,6 +13,7 @@ import os
 import secrets
 from pathlib import Path
 from typing import Optional, Dict
+from dotenv import load_dotenv
 
 from fastapi import FastAPI, Request, Form, status
 from fastapi.responses import RedirectResponse, PlainTextResponse, HTMLResponse
@@ -23,6 +24,9 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 from admin.logging_setup import LOGGER
 from common.config import CURRENT_VERSION
 
+BASE_DIR = Path(__file__).resolve().parent        
+PROJECT_ROOT = BASE_DIR.parent  
+load_dotenv(PROJECT_ROOT / ".env")
 
 ADMIN_COOKIE_NAME = "cc_admin"
 SESSION_MAX_AGE = 60 * 60 * 12
