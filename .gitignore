@@ -7,7 +7,3 @@ __pycache__/
 *.pyc
 .env
 compose.yml
-install-tools/source/**
-!install-tools/source/install.py
-!install-tools/source/update.py
-!install-tools/source/config.json
