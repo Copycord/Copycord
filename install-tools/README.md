@@ -56,22 +56,23 @@ sudo apt install python3 python3-venv python3-pip nodejs npm
 
 ## First-Time Install
 
-### Windows (using `Install.exe`)
+### Windows (using `Copycord.exe`)
 
-1. Make sure `Install.exe` is in the folder where you want Copycord to live  
+1. Create a folder where you want Copycord to live.
+2. Download `Copycord.exe` from the latest release and place it **inside that folder**.
+3. **Double-click `Copycord.exe`.**
+   - A console window will open with a menu.
+   - Choose `1) Install Copycord`.
+   - The launcher will:
+     - Download the latest Copycord build from GitHub  
+     - Build the admin frontend  
+     - Create `code/`, `venvs/`, and `data/`  
+     - Generate `copycord_windows.bat` (Windows start script)
 
-2. **Double-click `Install.exe`.**
-   - A console window will open.
-   - It will:
-     - Download the latest Copycord release from GitHub
-     - Build the admin frontend
-     - Create `code/`, `venvs/`, and `data/`
-     - Generate `copycord_windows.bat` (start script)
+4. To **start Copycord** after install:
+   - Either run `Copycordr.exe` again and choose `3) Run Copycord`, **or**
+   - Double-click `copycord_windows.bat`.
 
-
-3. To **start Copycord**, see [Starting Copycord](#starting-copycord) below.
-
----
 
 ### Linux (using `install.py`)
 
