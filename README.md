@@ -196,11 +196,10 @@ This will pull the latest images and start the web ui: http://localhost:8080
 
 ### Linux
 
-1. Download the installer and updater scripts:
-   - [`install.py`](https://github.com/Copycord/Copycord/raw/refs/heads/main/install-tools/linux/install.py)  
-   - [`update.py`](https://github.com/Copycord/Copycord/raw/refs/heads/main/install-tools/linux/update.py)
-2. Place both files into a new folder, for example `~/copycord`.
-3. In a terminal, go to that folder and run the installer:
+1. Create a Copycord directory and download the installer and updater scripts:
+   - `curl -L "https://github.com/Copycord/Copycord/raw/refs/heads/main/install-tools/linux/install.py" -o install.py`
+   - `curl -L "https://github.com/Copycord/Copycord/raw/refs/heads/main/install-tools/linux/update.py" -o update.py`
+2. In a terminal, go to that folder and run the installer:
 
    ```bash
    cd ~/copycord
@@ -213,19 +212,19 @@ This will pull the latest images and start the web ui: http://localhost:8080
    - Create `code/`, `data/`, and `venvs/` directories
    - Generate the `copycord_linux.sh` start script
 
-4. Make the start script executable and run it:
+3. Make the start script executable and run it:
 
    ```bash
    chmod +x copycord_linux.sh
    ./copycord_linux.sh
    ```
 
-5. To update Copycord later, from the same folder run:
+4. To update Copycord later, from the same folder run:
 
    ```bash
    python3 update.py
    ```
-6. Once started, visit the web ui: http://localhost:8080
+5. Once started, visit the web ui: http://localhost:8080
 
 ### Web UI Configuration
 
