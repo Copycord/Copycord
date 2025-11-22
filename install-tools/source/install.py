@@ -356,24 +356,29 @@ def ensure_env_file(app_root: Path, data_dir: Path, admin_port: int) -> Path:
 DATA_DIR={data_dir.as_posix()}
 DB_PATH={(data_dir / 'data.db').as_posix()}
 
+# ---- Admin ----
 ADMIN_HOST=127.0.0.1
 ADMIN_PORT={admin_port}
-ADMIN_WS_URL=ws://127.0.0.1:${{ADMIN_PORT}}/bus
-PASSWORD=copycord 
 
+# ---- Agent/Control Ports (define before derived URLs!) ----
 SERVER_WS_HOST=127.0.0.1
 SERVER_WS_PORT=8765
-WS_SERVER_URL=ws://127.0.0.1:${{SERVER_WS_PORT}}
 
 CLIENT_WS_HOST=127.0.0.1
 CLIENT_WS_PORT=8766
-WS_CLIENT_URL=ws://127.0.0.1:${{CLIENT_WS_PORT}}
-
-WS_SERVER_CTRL_URL=ws://127.0.0.1:${{CONTROL_PORT_SERVER}}
-WS_CLIENT_CTRL_URL=ws://127.0.0.1:${{CONTROL_PORT_CLIENT}}
 
 CONTROL_PORT_SERVER=9101
 CONTROL_PORT_CLIENT=9102
+
+# ---- Derived URLs (dotenv expands ${{
+# VAR}} only if VAR is defined above) ----
+ADMIN_WS_URL=ws://127.0.0.1:${{ADMIN_PORT}}/bus
+WS_SERVER_URL=ws://127.0.0.1:${{SERVER_WS_PORT}}
+WS_CLIENT_URL=ws://127.0.0.1:${{CLIENT_WS_PORT}}
+WS_SERVER_CTRL_URL=ws://127.0.0.1:${{CONTROL_PORT_SERVER}}
+WS_CLIENT_CTRL_URL=ws://127.0.0.1:${{CONTROL_PORT_CLIENT}}
+
+PASSWORD=copycord 
 
 BACKUP_DIR={(data_dir / 'backups').as_posix()}
 BACKUP_RETAIN=14
