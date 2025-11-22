@@ -80,7 +80,7 @@ sudo apt install python3 python3-venv python3-pip nodejs npm
    ```bash
    mkdir -p ~/copycord
    cd ~/copycord
-   # Put launcher.py here (and any other provided files)
+   # Put launcher.py here
    ```
 
 2. Run the launcher:
