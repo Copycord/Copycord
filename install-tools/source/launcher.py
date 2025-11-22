@@ -3,37 +3,55 @@ from __future__ import annotations
 import json
 import os
 import sys
+import re
 import subprocess
 from pathlib import Path
 from urllib.request import Request, urlopen
 
-# Copycord all-in-one launcher
-#
-#   1. Downloads a small JSON config which points to install/update scripts.
-#   2. Lets you choose "Install", "Update", or "Run Copycord (Windows/Linux)".
-#   3. For install/update:
-#        - Downloads the corresponding Python source from GitHub.
-#        - Executes the remote script inside this process, calling its entrypoint.
-#   4. For "Run Copycord (Windows)":
-#        - Locates and runs copycord_windows.bat in the same folder as the EXE
-#          (or its parent).
-#   5. For "Run Copycord (Linux)":
-#        - Locates and runs copycord_linux.sh in the same folder as the binary/script
-#          (or its parent).
-#
-# The remote install/update scripts remain in the GitHub repo so they can
-# be updated independently of this launcher EXE.
 
 DEFAULT_CONFIG_URL = (
-    "https://github.com/Copycord/Copycord/blob/"
-    "main/install-tools/source/config.json"
+    "https://github.com/Copycord/Copycord/blob/" "main/install-tools/source/config.json"
 )
 
 CONFIG_ENV_VAR = "COPYCORD_LAUNCHER_CONFIG_URL"
 
-USER_AGENT = "Copycord-Launcher/1.0"
+LAUNCHER_VERSION = os.getenv("COPYCORD_LAUNCHER_VERSION", "1.0.0")
+LATEST_REMOTE_VERSION: str | None = None
+USER_AGENT = f"Copycord-Launcher/{LAUNCHER_VERSION}"
 
 REMOTE_PAUSE_HANDLED = False
+
+
+def _parse_ver(v: str) -> tuple:
+    nums = [int(x) for x in re.findall(r"\d+", v)]
+    nums = (nums + [0, 0, 0])[:3]
+    return tuple(nums)
+
+
+def _cmp_ver(a: str, b: str) -> int:
+    A, B = _parse_ver(a), _parse_ver(b)
+    return (A > B) - (A < B)
+
+
+def _platform_download_url(cfg: dict) -> str | None:
+    if os.name == "nt":
+        return cfg.get("windows_launcher_url")
+    return cfg.get("linux_launcher_url")
+
+
+def check_launcher_version(cfg: dict) -> None:
+    global LATEST_REMOTE_VERSION
+    latest = cfg.get("launcher_version")
+    LATEST_REMOTE_VERSION = latest
+    if not latest:
+        return
+    if _cmp_ver(LAUNCHER_VERSION, latest) < 0:
+        url = _platform_download_url(cfg)
+        print(
+            f"[launcher] A newer launcher is available: {latest} (you have {LAUNCHER_VERSION})."
+        )
+        if url:
+            print(f"[launcher] Download: {url}")
 
 
 def _github_blob_to_raw(url: str) -> str:
@@ -114,7 +132,9 @@ def prompt_choice() -> str:
     """Simple interactive menu to choose Install, Update, or Run Copycord."""
     print()
     print("======================================")
-    print("      Copycord Standalone Launcher    ")
+    print(f"  Copycord Standalone Launcher v{LAUNCHER_VERSION}")
+    if LATEST_REMOTE_VERSION and _cmp_ver(LAUNCHER_VERSION, LATEST_REMOTE_VERSION) < 0:
+        print(f"  Update available: v{LATEST_REMOTE_VERSION}")
     print("======================================")
     print("1) Install Copycord")
     print("2) Update Copycord")
@@ -321,6 +341,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         cfg = load_config(args.config_url)
+        check_launcher_version(cfg)
     except Exception as e:
         print(f"[launcher] Failed to load config: {e}")
         return 1
