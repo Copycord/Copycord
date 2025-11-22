@@ -6,3 +6,4 @@ python-multipart==0.0.20
 websockets==11.0.3
 aiohttp>=3.9,<4
 itsdangerous>=2.1
+tzdata==2025.2

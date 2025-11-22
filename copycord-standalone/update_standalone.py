@@ -6,27 +6,33 @@ Usage:
     python update_standalone.py
 
 Behavior:
-  - If this directory is a git clone (has `.git`) and git is available:
-        * Fetch latest changes from origin
-        * Check out and pull the `main` branch
+  - Determine the desired tag:
+        * If GITHUB_TAG is set: use that
+        * Otherwise: query GitHub for the "latest" tag
+  - Read the currently installed tag from code/.copycord_tag (if present)
+  - If the tags differ, download the new tagged archive from GitHub,
+    replace the code/ directory, and update code/.copycord_tag.
   - Re-run `pip install -r` inside the existing venvs (admin/server/client)
     so dependency changes are picked up.
   - Rebuild the admin frontend with npm (if npm is available) and copy the
     built assets into code/admin/static/.
-
-If this is a zip-based install without `.git`, the script will tell the user
-to download a fresh standalone package from GitHub and re-run the installer.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
+import zipfile
 from pathlib import Path
+from urllib.request import urlopen, Request
 
-# Still configurable if you later want to use it for non-git updates.
+# GitHub repo + optional explicit tag
 GITHUB_REPO = os.getenv("GITHUB_REPO", "Copycord/Copycord")
+GITHUB_TAG = os.getenv("GITHUB_TAG")  # if set, updater targets this tag explicitly
+
+VERSION_FILE_NAME = ".copycord_tag"
 
 
 def run(cmd: list[str], cwd: Path | None = None) -> str:
@@ -52,6 +58,102 @@ def detect_repo_root() -> Path:
     if (here.parent / "code").is_dir():
         return here.parent
     raise SystemExit("Could not find `code/` directory; run this from the repo root.")
+
+
+def fetch_latest_tag(repo: str) -> str:
+    """
+    Query GitHub for the list of tags and return the first one,
+    which is treated as the "latest" tag.
+    """
+    api_url = f"https://api.github.com/repos/{repo}/tags"
+    req = Request(api_url, headers={"User-Agent": "Copycord-Standalone-Updater"})
+    print(f"[updater] Fetching latest tag from {api_url}")
+    with urlopen(req) as resp:
+        data = json.load(resp)
+
+    if not data:
+        raise SystemExit(
+            "[updater] No tags found on GitHub; cannot determine latest version."
+        )
+
+    tag = data[0].get("name")
+    if not tag:
+        raise SystemExit("[updater] Unexpected tag payload from GitHub.")
+
+    print(f"[updater] Latest tag: {tag}")
+    return tag
+
+
+def read_local_tag(code_dir: Path) -> str | None:
+    version_file = code_dir / VERSION_FILE_NAME
+    if not version_file.is_file():
+        return None
+    try:
+        return (version_file.read_text(encoding="utf-8").strip() or None)
+    except Exception:
+        return None
+
+
+def download_code(prefix: Path, tag: str) -> Path:
+    """
+    Download the tagged Copycord archive from GitHub into prefix/code,
+    replacing any existing code/ directory, and update code/.copycord_tag.
+    """
+    prefix = prefix.resolve()
+    code_dir = prefix / "code"
+
+    archive_url = f"https://github.com/{GITHUB_REPO}/archive/refs/tags/{tag}.zip"
+    zip_path = prefix / f"copycord-{tag}.zip"
+    tmp_dir = prefix / "_copycord_src"
+
+    if code_dir.is_dir():
+        print(f"[updater] Removing existing code/ at {code_dir}")
+        shutil.rmtree(code_dir)
+
+    if tmp_dir.exists():
+        shutil.rmtree(tmp_dir)
+
+    print(f"[updater] Downloading {archive_url}")
+    with urlopen(archive_url) as resp:
+        data = resp.read()
+    zip_path.write_bytes(data)
+    print(f"[updater] Saved archive to {zip_path}")
+
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    print(f"[updater] Extracting archive into {tmp_dir}")
+    with zipfile.ZipFile(zip_path) as z:
+        z.extractall(tmp_dir)
+
+    candidates = [p for p in tmp_dir.iterdir() if p.is_dir()]
+    if not candidates:
+        raise SystemExit(
+            "[updater] Downloaded archive did not contain any directories; "
+            "cannot locate repo root."
+        )
+    repo_src_root = candidates[0]
+    src_code_dir = repo_src_root / "code"
+
+    if not src_code_dir.is_dir():
+        raise SystemExit(
+            f"[updater] Downloaded archive does not contain a `code/` directory "
+            f"(looked in {src_code_dir})."
+        )
+
+    print(f"[updater] Moving {src_code_dir} -> {code_dir}")
+    shutil.move(str(src_code_dir), str(code_dir))
+
+    version_file = code_dir / VERSION_FILE_NAME
+    version_file.write_text(tag.strip() + "\n", encoding="utf-8")
+    print(f"[updater] Recorded tag {tag} in {version_file}")
+
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    try:
+        zip_path.unlink()
+    except FileNotFoundError:
+        pass
+
+    print(f"[updater] Code downloaded to {code_dir}")
+    return code_dir
 
 
 def upgrade_venv(venv_dir: Path, requirements: Path) -> None:
@@ -123,31 +225,31 @@ def build_frontend(app_root: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     repo_root = detect_repo_root()
-    app_root = repo_root / "code"
+    code_dir = repo_root / "code"
     print(f"[updater] Repo root: {repo_root}")
-    print(f"[updater] App root:  {app_root}")
+    print(f"[updater] Code dir:  {code_dir}")
 
-    git_dir = repo_root / ".git"
-    git = shutil.which("git")
+    current_tag = read_local_tag(code_dir)
+    print(f"[updater] Currently installed tag: {current_tag or 'none'}")
 
-    if git and git_dir.is_dir():
-        print("[updater] Detected git repository; pulling `main` from origin…")
-        run([git, "fetch", "origin"], cwd=repo_root)
-        # Ensure we're on main, then pull
-        run([git, "checkout", "main"], cwd=repo_root)
-        run([git, "pull", "origin", "main"], cwd=repo_root)
-    else:
-        print(
-            "[updater] This does not look like a git clone (no .git directory found)."
-        )
-        print(
-            "[updater] If you installed from a zip/standalone package, "
-            "please download the newest standalone zip from GitHub releases "
-            "or the main branch build, extract it over this folder (or to a new folder) "
-            "and re-run install_standalone.py."
-        )
+    target_tag = GITHUB_TAG or fetch_latest_tag(GITHUB_REPO)
+    print(f"[updater] Target tag: {target_tag}")
 
-    # Whether or not we updated via git, refresh deps inside the venvs.
+    # 🔹 If already on the latest tag, stop immediately.
+    if current_tag == target_tag:
+        print("[updater] Already on the latest tag; nothing to do.")
+        return 0
+
+    print(
+        f"[updater] Tag mismatch -> updating code from "
+        f"{current_tag or 'none'} to {target_tag}"
+    )
+    download_code(repo_root, target_tag)
+
+    # Refresh app_root in case code/ was re-created
+    app_root = repo_root / "code"
+
+    # After code update, refresh deps inside the venvs.
     venv_root = repo_root / "venvs"
     print("\n[updater] Updating virtualenv dependencies…")
     upgrade_venv(venv_root / "admin", app_root / "admin" / "requirements.txt")
