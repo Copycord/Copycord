@@ -5,7 +5,7 @@ This folder contains the **standalone launcher/installer/updater** for Copycord.
 You can install, update, and run Copycord without cloning the Git repo manually.
 
 - On **Windows**, use **`Copycord.exe`** (all-in-one launcher).
-- On **Linux/macOS**, use **`installer.py`** (all-in-one launcher).
+- On **Linux/macOS**, use **`launcher.py`** (all-in-one launcher).
 
 Once installed, you’ll use either the launcher or the provided start scripts to run Copycord.
 
@@ -16,7 +16,7 @@ Once installed, you’ll use either the launcher or the provided start scripts t
 After installation, this folder will typically look like:
 
 - `Copycord.exe` – Windows launcher (install / update / run)
-- `installer.py` – Linux/macOS launcher (install / update / run)
+- `launcher.py` – Linux/macOS launcher (install / update / run)
 - `copycord_windows.bat` – Start Copycord on Windows (created by the installer)
 - `copycord_linux.sh` – Start Copycord on Linux/macOS (created by the installer)
 - `code/` – Copycord application code (created by the installer)
@@ -72,21 +72,22 @@ sudo apt install python3 python3-venv python3-pip nodejs npm
    - Double-click `copycord_windows.bat`.
 
 
-### Linux (using `installer.py`)
+### Linux (using `launcher.py`)
+`curl -L "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/install-tools/source/launcher.py" -o launcher.py`
 
 1. Place these files in a folder where you want Copycord to live, for example:
 
    ```bash
    mkdir -p ~/copycord
    cd ~/copycord
-   # Put installer.py here (and any other provided files)
+   # Put launcher.py here
    ```
 
 2. Run the launcher:
 
    ```bash
    cd ~/copycord
-   python3 installer.py
+   python3 launcher.py
    ```
 
 3. When the menu appears, choose: `1) Install Copycord`.
@@ -99,7 +100,7 @@ sudo apt install python3 python3-venv python3-pip nodejs npm
    - Generate `copycord_linux.sh` (Linux/macOS start script)
 
 4. To **start Copycord** after install:
-   - Either run `python3 installer.py` again and choose `4) Run Copycord (Linux)`, **or**
+   - Either run `python3 launcher.py` again and choose `4) Run Copycord (Linux)`, **or**
    - Run the start script directly:
 
      ```bash
@@ -147,7 +148,7 @@ From your Copycord folder (for example `~/copycord`):
 
   ```bash
   cd ~/copycord
-  python3 installer.py
+  python3 launcher.py
   ```
 
   Then choose `4) Run Copycord (Linux)`.
@@ -198,14 +199,14 @@ The launcher will:
 
 ---
 
-### Linux / macOS (using `installer.py`)
+### Linux / macOS (using `launcher.py`)
 
 1. Stop Copycord (Ctrl+C in the terminal where it is running).
 2. From the Copycord folder, run:
 
    ```bash
    cd ~/copycord
-   python3 installer.py
+   python3 launcher.py
    ```
 
 3. From the menu, choose: `2) Update Copycord`.
@@ -219,7 +220,7 @@ The launcher will:
 - Rebuild the frontend
 
 4. When it finishes, start Copycord again with:
-   - `python3 installer.py` → `4) Run Copycord (Linux)`, or  
+   - `python3 launcher.py` → `4) Run Copycord (Linux)`, or  
    - `./copycord_linux.sh`.
 
 ---
@@ -245,7 +246,7 @@ The launcher will:
   - Install Node.js (which includes npm).
 
 - **“Could not find `code/` directory” / install not found**  
-  - Make sure you are running `Copycord.exe` / `installer.py` from the same folder where `code/` exists (after installation).
+  - Make sure you are running `Copycord.exe` / `launcher.py` from the same folder where `code/` exists (after installation).
 
 - **Port already in use (8080)**  
   - Edit `.env` (inside `code/`) and change `ADMIN_PORT`, then restart Copycord.
