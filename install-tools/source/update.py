@@ -403,7 +403,6 @@ def write_start_scripts(repo_root: Path) -> None:
     ps_dir = repo_root / "scripts"
     ps_dir.mkdir(exist_ok=True)
 
-    # Shared PS header (prepended to each .ps1)
     ps_header = "\r\n".join(
         [
             "$ErrorActionPreference = 'Stop'",
@@ -416,7 +415,6 @@ def write_start_scripts(repo_root: Path) -> None:
         ]
     )
 
-    # --- preflight.ps1: ALL ports + Python >= 3.10 for each venv ---
     preflight_ps1 = ps_dir / "preflight.ps1"
     preflight_body = r"""
 $envFile   = Join-Path $code '.env'
@@ -449,12 +447,12 @@ function Get-EnvPorts {
 
   $lines = Get-Content -LiteralPath $Path -Encoding UTF8
   foreach ($line in $lines) {
-    # A) *_PORT=####
+    # *_PORT=####
     if ($line -match '^[A-Z0-9_]+_PORT\s*=\s*([0-9]{1,5})\s*$') {
       $v = [int]$Matches[1]
       if ($v -ge 1 -and $v -le 65535) { [void]$ports.Add($v) }
     }
-    # B) Only treat :#### as a port if it appears in a URL (skip times like 03:17)
+    # Only treat :#### as a port if it appears in a URL
     $matches = [System.Text.RegularExpressions.Regex]::Matches(
       $line, '(?i)\b(?:ws|wss|http|https)://[^:\s]+:(\d{2,5})\b'
     )
@@ -524,7 +522,7 @@ if ($busy.Count -gt 0) {
         ps_header + preflight_body.replace("\n", "\r\n"), encoding="utf-8-sig"
     )
 
-    # --- admin.ps1 ---
+    # --- admin.ps1 (show URL) ---
     admin_ps1 = ps_dir / "admin.ps1"
     admin_ps1.write_text(
         ps_header
@@ -533,12 +531,16 @@ if ($busy.Count -gt 0) {
                 "$venv = Join-Path $root 'venvs\\admin\\Scripts\\python.exe'",
                 "$envPath = Join-Path $code '.env'",
                 "$port = 8080",
+                "$hostVal = 'localhost'",
                 "if (Test-Path $envPath) {",
                 "  $line = (Get-Content -LiteralPath $envPath -Encoding UTF8 | Where-Object { $_ -match '^ADMIN_PORT=' } | Select-Object -First 1)",
                 "  if ($line) { $port = ($line -split '=',2)[1].Trim() }",
+                "  $hline = (Get-Content -LiteralPath $envPath -Encoding UTF8 | Where-Object { $_ -match '^ADMIN_HOST=' } | Select-Object -First 1)",
+                "  if ($hline) { $hostVal = ($hline -split '=',2)[1].Trim() }",
                 "}",
+                "$displayHost = if ($hostVal -eq '0.0.0.0') { 'localhost' } else { $hostVal }",
                 "Set-Location -LiteralPath $code",
-                "Write-Host ('[admin] starting on port ' + $port)",
+                "Write-Host ('[admin] Web UI Started: http://' + $displayHost + ':' + $port)",
                 "try {",
                 "  & $venv -m uvicorn admin.app:app --host 0.0.0.0 --port $port",
                 '  if ($LASTEXITCODE) { throw "Exit code: $LASTEXITCODE" }',
@@ -590,7 +592,7 @@ if ($busy.Count -gt 0) {
         encoding="utf-8-sig",
     )
 
-    # --- Windows .bat launcher (runs preflight first, pauses on failure) ---
+    # --- Windows .bat launcher ---
     win_bat.write_text(
         r"""
 @echo off
@@ -704,7 +706,7 @@ BUSY=()
 for p in "${PORTS[@]}"; do
   if port_in_use "$p"; then
     if command -v lsof >/dev/null 2>&1; then
-      who=$(lsof -iTCP:"$p" -sTCP:LISTEN -nP 2>/dev/null | awk 'NR>1 {print $1"["$2"]"}' | sort -u | tr '\n' ' ')
+      who=$(lsof -iTCP:"$p" -sTCP:LISTEN -nP 2>/dev/null | awk 'NR>1 {print $1"["$2"]"}' | sort -u | tr "\\n" " ")
       BUSY+=("Port $p is in use${who:+ by }${who}")
     else
       BUSY+=("Port $p is in use")
@@ -719,12 +721,22 @@ if [[ ${#BUSY[@]} -gt 0 ]]; then
   exit 1
 fi
 
-# --- Start services ---
+# --- Resolve admin host/port for message ---
 ADMIN_PORT="8080"
 if [[ -f "$ENV_FILE" ]]; then
-  ENV_PORT="$(grep -E '^ADMIN_PORT=' "$ENV_FILE" | head -n1 | cut -d= -f2- | tr -d $'\r' || true)"
+  ENV_PORT="$(grep -E '^ADMIN_PORT=' "$ENV_FILE" | head -n1 | cut -d= -f2- | tr -d $'\\r' || true)"
   [[ -n "${ENV_PORT:-}" ]] && ADMIN_PORT="$ENV_PORT"
 fi
+
+ADMIN_HOST="localhost"
+if [[ -f "$ENV_FILE" ]]; then
+  ENV_HOST="$(grep -E '^ADMIN_HOST=' "$ENV_FILE" | head -n1 | cut -d= -f2- | tr -d $'\\r' || true)"
+  [[ -n "${ENV_HOST:-}" ]] && ADMIN_HOST="$ENV_HOST"
+fi
+DISPLAY_HOST="$ADMIN_HOST"
+[[ "$DISPLAY_HOST" == "0.0.0.0" ]] && DISPLAY_HOST="localhost"
+
+echo "[admin] Web UI Started: http://$DISPLAY_HOST:$ADMIN_PORT"
 
 cd "$CODE_DIR"
 "$ADMIN_VENV/bin/python" -m uvicorn admin.app:app --host 0.0.0.0 --port "$ADMIN_PORT" & ADMIN_PID=$!

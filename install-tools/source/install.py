@@ -447,12 +447,12 @@ function Get-EnvPorts {
 
   $lines = Get-Content -LiteralPath $Path -Encoding UTF8
   foreach ($line in $lines) {
-    
+    # *_PORT=####
     if ($line -match '^[A-Z0-9_]+_PORT\s*=\s*([0-9]{1,5})\s*$') {
       $v = [int]$Matches[1]
       if ($v -ge 1 -and $v -le 65535) { [void]$ports.Add($v) }
     }
-    
+    # Only treat :#### as a port if it appears in a URL
     $matches = [System.Text.RegularExpressions.Regex]::Matches(
       $line, '(?i)\b(?:ws|wss|http|https)://[^:\s]+:(\d{2,5})\b'
     )
@@ -522,6 +522,7 @@ if ($busy.Count -gt 0) {
         ps_header + preflight_body.replace("\n", "\r\n"), encoding="utf-8-sig"
     )
 
+    # --- admin.ps1 (show URL) ---
     admin_ps1 = ps_dir / "admin.ps1"
     admin_ps1.write_text(
         ps_header
@@ -530,12 +531,16 @@ if ($busy.Count -gt 0) {
                 "$venv = Join-Path $root 'venvs\\admin\\Scripts\\python.exe'",
                 "$envPath = Join-Path $code '.env'",
                 "$port = 8080",
+                "$hostVal = 'localhost'",
                 "if (Test-Path $envPath) {",
                 "  $line = (Get-Content -LiteralPath $envPath -Encoding UTF8 | Where-Object { $_ -match '^ADMIN_PORT=' } | Select-Object -First 1)",
                 "  if ($line) { $port = ($line -split '=',2)[1].Trim() }",
+                "  $hline = (Get-Content -LiteralPath $envPath -Encoding UTF8 | Where-Object { $_ -match '^ADMIN_HOST=' } | Select-Object -First 1)",
+                "  if ($hline) { $hostVal = ($hline -split '=',2)[1].Trim() }",
                 "}",
+                "$displayHost = if ($hostVal -eq '0.0.0.0') { 'localhost' } else { $hostVal }",
                 "Set-Location -LiteralPath $code",
-                "Write-Host ('[admin] starting on port ' + $port)",
+                "Write-Host ('[admin] Web UI Started: http://' + $displayHost + ':' + $port)",
                 "try {",
                 "  & $venv -m uvicorn admin.app:app --host 0.0.0.0 --port $port",
                 '  if ($LASTEXITCODE) { throw "Exit code: $LASTEXITCODE" }',
@@ -549,6 +554,7 @@ if ($busy.Count -gt 0) {
         encoding="utf-8-sig",
     )
 
+    # --- server.ps1 ---
     server_ps1 = ps_dir / "server.ps1"
     server_ps1.write_text(
         ps_header
@@ -567,6 +573,7 @@ if ($busy.Count -gt 0) {
         encoding="utf-8-sig",
     )
 
+    # --- client.ps1 ---
     client_ps1 = ps_dir / "client.ps1"
     client_ps1.write_text(
         ps_header
@@ -585,6 +592,7 @@ if ($busy.Count -gt 0) {
         encoding="utf-8-sig",
     )
 
+    # --- Windows .bat launcher ---
     win_bat.write_text(
         r"""
 @echo off
@@ -637,8 +645,9 @@ endlocal
     print(f"[installer] Wrote Windows start script: {win_bat}")
     print(f"[installer] Wrote PS launchers in: {ps_dir}")
 
+    # --- Linux/macOS ---
     sh_path = repo_root / "copycord_linux.sh"
-    sh_script = """
+    sh_script = """#!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 CODE_DIR="$ROOT/code"
@@ -684,20 +693,20 @@ port_in_use() {
   fi
 }
 
-
+# --- Preflight: Python >= 3.10 in all venvs ---
 ensure_py310 "$ADMIN_VENV/bin/python"  "admin venv"
 ensure_py310 "$SERVER_VENV/bin/python" "server venv"
 ensure_py310 "$CLIENT_VENV/bin/python" "client venv"
 echo "[preflight] Python looks good."
 
-
+# --- Preflight: ALL referenced ports free ---
 mapfile -t PORTS < <(get_ports | awk '$1>=1 && $1<=65535 {print $1}' | sort -n | uniq)
 
 BUSY=()
 for p in "${PORTS[@]}"; do
   if port_in_use "$p"; then
     if command -v lsof >/dev/null 2>&1; then
-      who=$(lsof -iTCP:"$p" -sTCP:LISTEN -nP 2>/dev/null | awk 'NR>1 {print $1"["$2"]"}' | sort -u | tr '\n' ' ')
+      who=$(lsof -iTCP:"$p" -sTCP:LISTEN -nP 2>/dev/null | awk 'NR>1 {print $1"["$2"]"}' | sort -u | tr "\\n" " ")
       BUSY+=("Port $p is in use${who:+ by }${who}")
     else
       BUSY+=("Port $p is in use")
@@ -705,19 +714,29 @@ for p in "${PORTS[@]}"; do
   fi
 done
 
-if [[ ${
+if [[ ${#BUSY[@]} -gt 0 ]]; then
   echo "[preflight] One or more ports referenced in code/.env are busy:"
   for m in "${BUSY[@]}"; do echo "  • $m"; done
   echo "Fix: close the process(es) using these ports or change values in code/.env, then relaunch."
   exit 1
 fi
 
-
+# --- Resolve admin host/port for message ---
 ADMIN_PORT="8080"
 if [[ -f "$ENV_FILE" ]]; then
-  ENV_PORT="$(grep -E '^ADMIN_PORT=' "$ENV_FILE" | head -n1 | cut -d= -f2- | tr -d $'\r' || true)"
+  ENV_PORT="$(grep -E '^ADMIN_PORT=' "$ENV_FILE" | head -n1 | cut -d= -f2- | tr -d $'\\r' || true)"
   [[ -n "${ENV_PORT:-}" ]] && ADMIN_PORT="$ENV_PORT"
 fi
+
+ADMIN_HOST="localhost"
+if [[ -f "$ENV_FILE" ]]; then
+  ENV_HOST="$(grep -E '^ADMIN_HOST=' "$ENV_FILE" | head -n1 | cut -d= -f2- | tr -d $'\\r' || true)"
+  [[ -n "${ENV_HOST:-}" ]] && ADMIN_HOST="$ENV_HOST"
+fi
+DISPLAY_HOST="$ADMIN_HOST"
+[[ "$DISPLAY_HOST" == "0.0.0.0" ]] && DISPLAY_HOST="localhost"
+
+echo "[admin] Web UI Started: http://$DISPLAY_HOST:$ADMIN_PORT"
 
 cd "$CODE_DIR"
 "$ADMIN_VENV/bin/python" -m uvicorn admin.app:app --host 0.0.0.0 --port "$ADMIN_PORT" & ADMIN_PID=$!
