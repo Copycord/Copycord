@@ -175,71 +175,117 @@ docker-compose up -d
 
 This will pull the latest images and start the web ui: http://localhost:8080
 
-## Manual Install
+## Manual Install (NEW) ✨
+
+<details>
+<summary><strong>Manual Install (Windows & Linux)</strong></summary>
 
 ### Windows
 
-**Requirments**:
+**Requirements**:
 
-Python 3.10+
+Python 3.10+  
 Node.js + npm
 
 1. Download the Windows installer bundle:  
    [`copycord.zip`](https://github.com/Copycord/Copycord/raw/refs/heads/main/install-tools/windows/copycord.zip)
 2. Right-click the zip and choose **Extract All…** (for example, extract it to your **Desktop**).
 3. Open the extracted `copycord` folder.
-4. Double-click **`Install.exe`** to install Copycord.  
+4. Double-click **`Copycord.exe`** and select the install option.  
    - This will download the latest Copycord build and set up everything in the same folder.
-5. To start Copycord, double-click **`copycord_windows.bat`**. This will start Copycord and the web ui: http://localhost:8080
-6. When a new Copycord version is released, double-click **`Update.exe`** from the same folder to auto-update.
+5. To start Copycord, double-click **`Copycord.exe`** and select the run option.  
+   - This will start Copycord and the web UI: <http://localhost:8080>
+6. When a new Copycord version is released, double-click **`Copycord.exe`** and select the update option.
 
 ---
 
 ### Linux
 
-**Requirements**:
+**Requirements**
 
-Python 3.10+
-
-Node.js + npm:
+- Python 3.10+
+- Node.js + npm  
+  (Ubuntu/Debian example):
   - `curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -`
   - `sudo apt install -y nodejs`
-
-python3-venv + python3.10-venv:
+- `python3-venv` + `python3.10-venv`  
   - `sudo apt install -y python3-venv python3.10-venv`
 
+---
 
-1. Create a Copycord directory and download the installer and updater scripts:
-   - `curl -L "https://github.com/Copycord/Copycord/raw/refs/heads/main/install-tools/linux/install.py" -o install.py`
-   - `curl -L "https://github.com/Copycord/Copycord/raw/refs/heads/main/install-tools/linux/update.py" -o update.py`
-2. In a terminal, go to that folder and run the installer:
+### Install Copycord (Linux)
+
+1. Create a Copycord folder and download the launcher:
+
+   ```bash
+   mkdir -p ~/copycord
+   cd ~/copycord
+   curl -L "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/install-tools/source/launcher.py" -o launcher.py
+   ```
+
+2. Run the launcher and install:
 
    ```bash
    cd ~/copycord
-   python3 install.py
+   python3 launcher.py
    ```
 
-   This will:
+   - When the menu appears, choose: `1) Install Copycord`
+   - This will:
+     - Download the latest Copycord version
+     - Build the admin frontend
+     - Create `code/`, `venvs/`, and `data/`
+     - Generate `copycord_linux.sh` (Linux start script)
 
-   - Download the latest Copycord version
-   - Generate the `copycord_linux.sh` start script
+---
 
-3. Make the start script executable and run it:
+### Run Copycord (Linux)
+
+You can start Copycord in either of these ways (from `~/copycord`):
+
+- Using the launcher menu:
+
+  ```bash
+  cd ~/copycord
+  python3 launcher.py
+  ```
+
+  - Choose: `4) Run Copycord (Linux)`
+
+- Or run the start script directly:
+
+  ```bash
+  cd ~/copycord
+  ./copycord_linux.sh
+  ```
+
+  (If needed: `chmod +x copycord_linux.sh` once.)
+
+Once started, open the web UI in your browser:
+
+- <http://localhost:8080>
+
+---
+
+### Update Copycord (Linux)
+
+1. From the same folder (`~/copycord`), run:
 
    ```bash
-   chmod +x copycord_linux.sh
-   ./copycord_linux.sh
+   python3 launcher.py
    ```
 
-4. To update Copycord later, from the same folder run:
+2. Choose: `2) Update Copycord`  
+   - This will update your Copycord install to the latest version.
 
-   ```bash
-   python3 update.py
-   ```
-5. Once started, visit the web ui: http://localhost:8080
+---
 
 ### Environment Configuration
-- Set admin password, change ports, etc, in the env file located in the /code directory after installation.
+
+- Set the admin password, change ports, etc., in the `.env` file located in the `code` directory after installation.
+
+</details>
+
 
 ### Web UI Configuration
 
