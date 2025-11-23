@@ -1144,11 +1144,13 @@ def _run_with_pause_installer() -> int:
         print()
 
         if not exit_code:
+            print("[installer] Installation complete ✅")
             print(
                 "[installer] You can edit environment settings like PASSWORD, PORTS, etc. in: code/.env"
             )
             print("[installer] To run everything on Windows:")
-            print("  - double-click copycord_windows.bat")
+            print("  - use Copycord.exe or")
+            print("  - use copycord_windows.bat")
             print("[installer] To run everything on Linux/macOS:")
             print("  - ./copycord_linux.sh")
             print(
