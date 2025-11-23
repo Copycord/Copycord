@@ -19,29 +19,41 @@ GITHUB_BRANCH = os.getenv("GITHUB_BRANCH")
 
 VERSION_FILE_NAME = ".version"
 
-
 QUIET = True
-
 
 BAR_WIDTH = 40
 _progress_percent = 0
 _current_status = ""
 _last_render_line = ""
+_last_render_len = 0
+
+MAX_STATUS = 50
 
 
 def _render_progress() -> None:
     """Render the single-line progress bar in quiet mode."""
-    global _last_render_line
+    global _last_render_line, _last_render_len
     if not QUIET:
         return
 
     percent = max(0, min(_progress_percent, 100))
     filled = int(BAR_WIDTH * percent / 100)
     bar = "#" * filled + "-" * (BAR_WIDTH - filled)
-    status = (_current_status or "")[:50]
-    line = f"\r[installer] [{bar}] {percent:3d}%  {status:<50}"
+
+    status = _current_status or ""
+
+    if len(status) > MAX_STATUS:
+        status = "…" + status[-(MAX_STATUS - 1) :]
+
+    core = f"[installer] [{bar}] {percent:3d}%  {status:<{MAX_STATUS}}"
+
+    padding = " " * max(0, _last_render_len - len(core))
+
+    line = "\r" + core + padding
+
     if line != _last_render_line:
         _last_render_line = line
+        _last_render_len = len(core)
         print(line, end="", flush=True)
 
 
@@ -172,7 +184,6 @@ def run_pip_step(
     - QUIET=True   → hide pip output completely (global bar handles UX).
     """
     if not QUIET:
-
         print(f"[installer] ({step}/{total}) {label}…")
         proc = subprocess.run(
             cmd,
@@ -506,7 +517,7 @@ def create_venv(
 
 
 def ensure_env_file(app_root: Path, data_dir: Path, admin_port: int) -> Path:
-    """Create a default .env next to the code/ folder if it doesn't exist."""
+    """Create a default .env inside the code/ folder if it doesn't exist."""
     env_path = app_root / ".env"
     stage = STAGE_PROGRESS.get("env_scripts")
 
@@ -663,7 +674,7 @@ $busy = @()
 foreach ($p in ($ports | Sort-Object -Unique)) {
   if (Test-PortBusy -Port $p) {
     $procId = $null; $pname = $null
-    $line = netstat -ano | Select-String "LISTENING.*:$Port\b" | Select-Object -First 1
+    $line = netstat -ano | Select-String "LISTENING.*:$p\b" | Select-Object -First 1
     if ($line) {
       $parts = ($line -split '\s+') | Where-Object { $_ -ne '' }
       if ($parts.Count -ge 5) { $procId = $parts[-1] }
@@ -811,7 +822,7 @@ endlocal
     info(f"[installer] Wrote PS launchers in: {ps_dir}")
 
     sh_path = repo_root / "copycord_linux.sh"
-    sh_script = """#!/usr/bin/env bash
+    sh_script = """
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 CODE_DIR="$ROOT/code"
@@ -857,12 +868,10 @@ port_in_use() {
   fi
 }
 
-
 ensure_py311 "$ADMIN_VENV/bin/python"  "admin venv"
 ensure_py311 "$SERVER_VENV/bin/python" "server venv"
 ensure_py311 "$CLIENT_VENV/bin/python" "client venv"
 echo "[preflight] Python looks good."
-
 
 mapfile -t PORTS < <(get_ports | awk '$1>=1 && $1<=65535 {print $1}' | sort -n | uniq)
 
@@ -878,13 +887,16 @@ for p in "${PORTS[@]}"; do
   fi
 done
 
-if [[ ${
+if (( ${
   echo "[preflight] One or more ports referenced in code/.env are busy:"
-  for m in "${BUSY[@]}"; do echo "  • $m"; done
+  for m in "${BUSY[@]}"; do
+    echo "  • $m"
+  done
   echo "Fix: close the process(es) using these ports or change values in code/.env, then relaunch."
   exit 1
+else
+  echo "[preflight] All referenced ports appear free."
 fi
-
 
 ADMIN_PORT="8080"
 if [[ -f "$ENV_FILE" ]]; then
@@ -915,6 +927,9 @@ wait
     except Exception:
         pass
     info(f"[installer] Wrote Linux/macOS start script: {sh_path}")
+
+    if stage:
+        stage.tick("Start scripts written.")
 
 
 def _probe(cmd: list[str]) -> str | None:
@@ -953,7 +968,6 @@ def check_prereqs() -> None:
         py_detail = py_ver_str
         try:
             major, minor, *_ = (int(x) for x in py_ver_str.split("."))
-
             py_ok = major == 3 and minor == 11
         except Exception:
             py_ok = False
@@ -1075,7 +1089,8 @@ def main(argv: list[str] | None = None) -> int:
             f"[installer] You can edit environment settings like PASSWORD, PORTS, etc. in: {env_path}"
         )
         print("[installer] To run everything on Windows:")
-        print("  - double-click copycord_windows.bat")
+        print("  - use Copycord.exe or")
+        print("  - use copycord_windows.bat")
         print("[installer] To run everything on Linux/macOS:")
         print("  - ./copycord_linux.sh")
         print("    (make sure it is executable: chmod +x copycord_linux.sh if needed)")
@@ -1127,15 +1142,22 @@ def _run_with_pause_installer() -> int:
             _advance_one("Finishing installation…")
 
         print()
-        print(
-            "[installer] You can edit environment settings like PASSWORD, PORTS, etc. in: code/.env"
-        )
-        print("[installer] To run everything on Windows:")
-        print("  - double-click copycord_windows.bat")
-        print("[installer] To run everything on Linux/macOS:")
-        print("  - ./copycord_linux.sh")
-        print("    (make sure it is executable: chmod +x copycord_linux.sh if needed)")
-        print()
+
+        if not exit_code:
+            print(
+                "[installer] You can edit environment settings like PASSWORD, PORTS, etc. in: code/.env"
+            )
+            print("[installer] To run everything on Windows:")
+            print("  - double-click copycord_windows.bat")
+            print("[installer] To run everything on Linux/macOS:")
+            print("  - ./copycord_linux.sh")
+            print(
+                "    (make sure it is executable: chmod +x copycord_linux.sh if needed)"
+            )
+            print()
+        else:
+            print("[installer] Installation failed. See the error messages above.")
+            print()
 
     is_frozen = bool(getattr(sys, "frozen", False))
 
