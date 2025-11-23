@@ -7,7 +7,6 @@ import subprocess
 import sys
 import zipfile
 from pathlib import Path
-from textwrap import dedent
 from urllib.request import urlopen, Request
 
 
@@ -19,6 +18,79 @@ GITHUB_BRANCH = os.getenv("GITHUB_BRANCH")
 VERSION_FILE_NAME = ".version"
 
 
+QUIET = True
+
+
+BAR_WIDTH = 40
+_progress_percent = 0
+_current_status = ""
+_last_render_line = ""
+
+
+def _render_progress() -> None:
+    """Render the single-line progress bar in quiet mode."""
+    global _last_render_line
+    if not QUIET:
+        return
+
+    percent = max(0, min(_progress_percent, 100))
+    filled = int(BAR_WIDTH * percent / 100)
+    bar = "#" * filled + "-" * (BAR_WIDTH - filled)
+    status = (_current_status or "")[:50]
+    line = f"\r[updater] [{bar}] {percent:3d}%  {status:<50}"
+    if line != _last_render_line:
+        _last_render_line = line
+        print(line, end="", flush=True)
+
+
+def _advance_one(status: str) -> None:
+    """Advance the global progress bar by 1% (up to 100)."""
+    global _progress_percent, _current_status
+    if not QUIET:
+        return
+    if _progress_percent >= 100:
+        return
+    _progress_percent += 1
+    _current_status = status
+    _render_progress()
+
+
+class StageProgress:
+    """Limit how many 1% ticks a given stage can consume."""
+
+    def __init__(self, max_ticks: int):
+        self.max_ticks = max_ticks
+        self.used = 0
+
+    def tick(self, status: str) -> None:
+        if self.used >= self.max_ticks:
+            return
+        self.used += 1
+        _advance_one(status)
+
+
+STAGE_PROGRESS: dict[str, StageProgress] = {
+    "detect": StageProgress(10),
+    "download": StageProgress(30),
+    "frontend": StageProgress(20),
+    "venv_admin": StageProgress(10),
+    "venv_server": StageProgress(8),
+    "venv_client": StageProgress(8),
+    "scripts": StageProgress(9),
+}
+
+
+def info(msg: str) -> None:
+    """Info / progress logs (hidden when QUIET=True)."""
+    if not QUIET:
+        print(msg)
+
+
+def error(msg: str) -> None:
+    """Errors always show."""
+    print(msg, file=sys.stderr)
+
+
 def find_system_python() -> list[str]:
     """
     Return a command list to invoke a real Python interpreter.
@@ -26,9 +98,6 @@ def find_system_python() -> list[str]:
     - When running normally: use this interpreter (sys.executable)
     - When frozen in an .exe: try 'py -3', 'py', 'python', 'python3'
     """
-    import sys
-    import subprocess
-
     if not getattr(sys, "frozen", False):
         return [sys.executable]
 
@@ -51,25 +120,45 @@ def find_system_python() -> list[str]:
 
     raise SystemExit(
         "[Copycord] ERROR: No suitable Python interpreter found on this system.\n"
-        "Please install Python 3.10+ from https://www.python.org/downloads/ "
+        "Please install Python 3.11.x (64-bit) from https://www.python.org/downloads/ "
         "and then run this .exe again."
     )
 
 
-def run(cmd: list[str], cwd: Path | None = None) -> str:
-    print(f"[updater] $ {' '.join(cmd)}")
+def run(cmd: list[str], cwd: Path | None = None) -> str | None:
+    """
+    Wrapper around subprocess.run.
+
+    - When QUIET=False: echo the command and stream output.
+    - When QUIET=True: silence stdout/stderr.
+    """
+    if not QUIET:
+        print(f"[updater] $ {' '.join(cmd)}")
+        proc = subprocess.run(
+            cmd,
+            cwd=str(cwd) if cwd else None,
+            text=True,
+        )
+        if proc.returncode != 0:
+            raise SystemExit(
+                f"[updater] Command failed with exit code {proc.returncode}: "
+                f"{' '.join(cmd)}"
+            )
+        return None
+
     proc = subprocess.run(
         cmd,
         cwd=str(cwd) if cwd else None,
-        stdout=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
         stderr=subprocess.STDOUT,
         text=True,
-        check=False,
     )
     if proc.returncode != 0:
-        print(proc.stdout)
-        raise SystemExit(f"Command failed with exit code {proc.returncode}")
-    return proc.stdout
+        raise SystemExit(
+            f"[updater] Command failed with exit code {proc.returncode}: "
+            f"{' '.join(cmd)}"
+        )
+    return None
 
 
 def run_pip_step(
@@ -81,14 +170,28 @@ def run_pip_step(
     cwd: Path | None = None,
 ) -> None:
     """
-    Run a pip-related command quietly and show a simple progress bar line instead
-    of full pip logs.
-    """
-    bar_width = 24
-    filled = int(bar_width * step / total)
-    bar = "#" * filled + "-" * (bar_width - filled)
+    Run a pip-related command.
 
-    print(f"[updater] [{bar}] {step}/{total} {label}...", end="", flush=True)
+    - QUIET=False  → let pip show its own output + a simple step label.
+    - QUIET=True   → hide pip output completely (global bar handles UX).
+    """
+    if not QUIET:
+        print(f"[updater] ({step}/{total}) {label}…")
+        proc = subprocess.run(
+            cmd,
+            cwd=str(cwd) if cwd else None,
+        )
+        if proc.returncode != 0:
+            print("  -> failed")
+            cmd_str = " ".join(cmd)
+            raise SystemExit(
+                "[updater] ERROR: pip command failed while "
+                f"{label}.\n"
+                f"Command was:\n"
+                f"    {cmd_str}\n"
+            )
+        print("  -> done")
+        return
 
     proc = subprocess.run(
         cmd,
@@ -99,9 +202,8 @@ def run_pip_step(
     )
 
     if proc.returncode != 0:
-        print(" failed")
         cmd_str = " ".join(cmd)
-        raise SystemExit(
+        error(
             "[updater] ERROR: pip command failed while "
             f"{label}.\n"
             f"Command was:\n"
@@ -109,27 +211,18 @@ def run_pip_step(
             "Please run that command manually to see the full error output, "
             "then fix the issue and re-run the updater."
         )
-
-    print(" done")
+        raise SystemExit(1)
 
 
 def detect_repo_root() -> Path:
     """
     Try to find the Copycord install root (the folder that contains `code/`).
-
-    When frozen (PyInstaller .exe), __file__ points into a temp _MEI folder,
-    so we must use sys.executable (the actual .exe path).
-
-    When running as a normal script, we can safely use __file__.
     """
-    import sys
-
     bases: list[Path] = []
 
     if getattr(sys, "frozen", False):
         bases.append(Path(sys.executable).resolve().parent)
     else:
-
         bases.append(Path(__file__).resolve().parent)
 
     bases.append(Path.cwd())
@@ -158,12 +251,12 @@ def detect_repo_root() -> Path:
 
 def fetch_latest_tag(repo: str) -> str:
     """
-    Query GitHub for the list of tags and return the first one,
-    which is treated as the "latest" tag.
+    Query GitHub for the list of tags and return the first one
+    (treated as "latest").
     """
     api_url = f"https://api.github.com/repos/{repo}/tags"
     req = Request(api_url, headers={"User-Agent": "Copycord-Standalone-Updater"})
-    print(f"[updater] Fetching latest tag from {api_url}")
+    info(f"[updater] Fetching latest tag from {api_url}")
     with urlopen(req) as resp:
         data = json.load(resp)
 
@@ -176,7 +269,7 @@ def fetch_latest_tag(repo: str) -> str:
     if not tag:
         raise SystemExit("[updater] Unexpected tag payload from GitHub.")
 
-    print(f"[updater] Latest tag: {tag}")
+    info(f"[updater] Latest tag: {tag}")
     return tag
 
 
@@ -198,14 +291,11 @@ def download_code(prefix: Path, ref: str, *, is_branch: bool = False) -> Path:
     Download the Copycord archive from GitHub into prefix/code, replacing any
     existing code/ directory, and update code/.version with the ref.
 
-    Preserves an existing code/.env file by backing it up before replacing
-    code/ and restoring it afterwards. If the new archive ships a .env, that
-    file is renamed to .env.example so we don't lose it.
-
-    If is_branch is True, we use refs/heads/<ref>.zip, otherwise refs/tags/<ref>.zip.
+    Preserves an existing code/.env file and renames new .env -> .env.example.
     """
     prefix = prefix.resolve()
     code_dir = prefix / "code"
+    stage = STAGE_PROGRESS.get("download")
 
     if is_branch:
         archive_url = f"https://github.com/{GITHUB_REPO}/archive/refs/heads/{ref}.zip"
@@ -217,35 +307,54 @@ def download_code(prefix: Path, ref: str, *, is_branch: bool = False) -> Path:
     zip_path = prefix / f"copycord-{ref}.zip"
     tmp_dir = prefix / "_copycord_src"
 
+    if stage:
+        stage.tick(f"Preparing download ({label})…")
+
     existing_env_content: str | None = None
     existing_env_path = code_dir / ".env"
     if existing_env_path.is_file():
         try:
             existing_env_content = existing_env_path.read_text(encoding="utf-8")
-            print(f"[updater] Backed up existing .env from {existing_env_path}")
+            info(f"[updater] Backed up existing .env from {existing_env_path}")
         except Exception as e:
-            print(
+            error(
                 f"[updater] WARNING: Failed to read existing .env at "
                 f"{existing_env_path}: {e}"
             )
 
     if code_dir.is_dir():
-        print(f"[updater] Removing existing code/ at {code_dir}")
+        info(f"[updater] Removing existing code/ at {code_dir}")
         shutil.rmtree(code_dir)
 
     if tmp_dir.exists():
         shutil.rmtree(tmp_dir)
 
-    print(f"[updater] Downloading {label} from {archive_url}")
-    with urlopen(archive_url) as resp:
-        data = resp.read()
-    zip_path.write_bytes(data)
-    print(f"[updater] Saved archive to {zip_path}")
+    info(f"[updater] Downloading {label} from {archive_url}")
+
+    with urlopen(archive_url) as resp, open(zip_path, "wb") as f:
+        chunk_size = 64 * 1024
+        chunk_count = 0
+        while True:
+            chunk = resp.read(chunk_size)
+            if not chunk:
+                break
+            f.write(chunk)
+            chunk_count += 1
+            if stage and chunk_count % 5 == 0:
+                stage.tick("Downloading archive…")
+
+    info(f"[updater] Saved archive to {zip_path}")
 
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    print(f"[updater] Extracting archive into {tmp_dir}")
+    info(f"[updater] Extracting archive into {tmp_dir}")
     with zipfile.ZipFile(zip_path) as z:
-        z.extractall(tmp_dir)
+        members = z.infolist()
+        total_members = len(members) or 1
+        step = max(1, total_members // 10)
+        for idx, m in enumerate(members, start=1):
+            z.extract(m, tmp_dir)
+            if stage and idx % step == 0:
+                stage.tick("Extracting files…")
 
     candidates = [p for p in tmp_dir.iterdir() if p.is_dir()]
     if not candidates:
@@ -263,8 +372,10 @@ def download_code(prefix: Path, ref: str, *, is_branch: bool = False) -> Path:
             f"(looked in {src_code_dir})."
         )
 
-    print(f"[updater] Moving {src_code_dir} -> {code_dir}")
+    info(f"[updater] Moving {src_code_dir} -> {code_dir}")
     shutil.move(str(src_code_dir), str(code_dir))
+    if stage:
+        stage.tick("Copying code into place…")
 
     if existing_env_content is not None:
         new_env_path = code_dir / ".env"
@@ -272,25 +383,25 @@ def download_code(prefix: Path, ref: str, *, is_branch: bool = False) -> Path:
             example_path = code_dir / ".env.example"
             try:
                 new_env_path.rename(example_path)
-                print(
+                info(
                     f"[updater] Renamed downloaded .env to {example_path} "
                     "to preserve user configuration."
                 )
             except Exception as e:
-                print(
+                error(
                     f"[updater] WARNING: Failed to rename downloaded .env to "
                     f"{example_path}: {e}"
                 )
 
         try:
             (code_dir / ".env").write_text(existing_env_content, encoding="utf-8")
-            print("[updater] Restored existing .env into code/.")
+            info("[updater] Restored existing .env into code/.")
         except Exception as e:
-            print(f"[updater] WARNING: Failed to restore existing .env into code/: {e}")
+            error(f"[updater] WARNING: Failed to restore existing .env into code/: {e}")
 
     version_file = code_dir / VERSION_FILE_NAME
     version_file.write_text(ref.strip() + "\n", encoding="utf-8")
-    print(f"[updater] Recorded {label} in {version_file}")
+    info(f"[updater] Recorded {label} in {version_file}")
 
     shutil.rmtree(tmp_dir, ignore_errors=True)
     try:
@@ -298,30 +409,50 @@ def download_code(prefix: Path, ref: str, *, is_branch: bool = False) -> Path:
     except FileNotFoundError:
         pass
 
-    print(f"[updater] Code downloaded to {code_dir}")
+    if stage:
+        stage.tick("Download and extraction complete.")
+
+    info(f"[updater] Code downloaded to {code_dir}")
     return code_dir
 
 
-def upgrade_venv(venv_dir: Path, requirements: Path) -> None:
+def upgrade_venv(
+    venv_dir: Path,
+    requirements: Path,
+    *,
+    stage_name: str | None = None,
+) -> None:
     """Upgrade pip and requirements inside a venv with quiet logs + progress."""
+    stage = STAGE_PROGRESS.get(stage_name) if stage_name else None
+
     if not venv_dir.exists():
-        print(f"[updater] venv missing (skipping): {venv_dir}")
+        info(f"[updater] venv missing (skipping): {venv_dir}")
+        if stage:
+            stage.tick("venv missing, skipping…")
         return
 
     bin_dir = venv_dir / ("Scripts" if os.name == "nt" else "bin")
     pip = bin_dir / "pip"
     if not pip.exists():
-        print(f"[updater] pip missing in {venv_dir} (skipping)")
+        info(f"[updater] pip missing in {venv_dir} (skipping)")
+        if stage:
+            stage.tick("pip missing, skipping…")
         return
     if not requirements.is_file():
-        print(f"[updater] requirements not found: {requirements}")
+        info(f"[updater] requirements not found: {requirements}")
+        if stage:
+            stage.tick("requirements missing, skipping…")
         return
 
-    print(f"\n[updater] Updating venv: {venv_dir}")
+    info(f"\n[updater] Updating venv: {venv_dir}")
+    if stage:
+        stage.tick(f"Updating venv {venv_dir.name}…")
 
     total_steps = 2
     step = 1
 
+    if stage:
+        stage.tick("Upgrading pip in venv…")
     run_pip_step(
         [str(pip), "install", "--upgrade", "pip"],
         step=step,
@@ -330,6 +461,8 @@ def upgrade_venv(venv_dir: Path, requirements: Path) -> None:
     )
     step += 1
 
+    if stage:
+        stage.tick("Installing requirements…")
     run_pip_step(
         [str(pip), "install", "-r", str(requirements)],
         step=step,
@@ -340,37 +473,39 @@ def upgrade_venv(venv_dir: Path, requirements: Path) -> None:
 
 def build_frontend(app_root: Path) -> None:
     """
-    Build the admin frontend using npm and copy the built assets into admin/static/,
-    mirroring what the Docker 'webbuild' stage does.
+    Build the admin frontend via npm and copy into admin/static/.
     """
     frontend_dir = app_root / "admin" / "frontend"
     package_json = frontend_dir / "package.json"
+    stage = STAGE_PROGRESS.get("frontend")
 
     if not package_json.is_file():
-        print("[updater] No admin frontend package.json found; skipping npm build.")
+        info("[updater] No admin frontend package.json found; skipping npm build.")
+        if stage:
+            stage.tick("No admin frontend to build.")
         return
 
     npm = shutil.which("npm")
     if not npm:
-        print(
-            "[updater] WARNING: npm is not installed or not in PATH; skipping frontend build."
-        )
-        print(
+        error(
+            "[updater] WARNING: npm is not installed or not in PATH; skipping frontend build.\n"
             "           The admin UI may not reflect the latest changes until you build the "
-            "frontend manually."
-        )
-        print(
+            "frontend manually.\n"
             f"           To build manually later: cd {frontend_dir} && npm ci && npm run build"
         )
         return
 
-    print(f"[updater] Rebuilding admin frontend via npm in {frontend_dir}")
+    info(f"[updater] Rebuilding admin frontend via npm in {frontend_dir}")
+    if stage:
+        stage.tick("Installing frontend dependencies…")
     run([npm, "ci"], cwd=frontend_dir)
+    if stage:
+        stage.tick("Building admin UI…")
     run([npm, "run", "build"], cwd=frontend_dir)
 
     dist_dir = frontend_dir / "dist"
     if not dist_dir.is_dir():
-        print(
+        error(
             f"[updater] WARNING: npm build did not produce dist/ at {dist_dir}; "
             "leaving existing admin/static/ as-is."
         )
@@ -379,14 +514,21 @@ def build_frontend(app_root: Path) -> None:
     static_dir = app_root / "admin" / "static"
     static_dir.mkdir(parents=True, exist_ok=True)
 
-    for item in dist_dir.iterdir():
+    items = list(dist_dir.iterdir())
+    total_items = len(items) or 1
+    step = max(1, total_items // 10)
+    for idx, item in enumerate(items, start=1):
         dest = static_dir / item.name
         if item.is_dir():
             shutil.copytree(item, dest, dirs_exist_ok=True)
         else:
             shutil.copy2(item, dest)
+        if stage and idx % step == 0:
+            stage.tick("Copying frontend assets…")
 
-    print(f"[updater] Copied built frontend to {static_dir}")
+    if stage:
+        stage.tick("Frontend build finished.")
+    info(f"[updater] Copied built frontend to {static_dir}")
 
 
 def write_start_scripts(repo_root: Path) -> None:
@@ -398,6 +540,8 @@ def write_start_scripts(repo_root: Path) -> None:
     - Linux/macOS:
         - copycord_linux.sh (LF, +x) with preflight
     """
+    stage = STAGE_PROGRESS.get("env_scripts")
+
     win_bat = repo_root / "copycord_windows.bat"
     ps_dir = repo_root / "scripts"
     ps_dir.mkdir(exist_ok=True)
@@ -448,12 +592,12 @@ function Get-EnvPorts {
 
   $lines = Get-Content -LiteralPath $Path -Encoding UTF8
   foreach ($line in $lines) {
-    # *_PORT=####
+    
     if ($line -match '^[A-Z0-9_]+_PORT\s*=\s*([0-9]{1,5})\s*$') {
       $v = [int]$Matches[1]
       if ($v -ge 1 -and $v -le 65535) { [void]$ports.Add($v) }
     }
-    # Only treat :#### as a port if it appears in a URL
+    
     $matches = [System.Text.RegularExpressions.Regex]::Matches(
       $line, '(?i)\b(?:ws|wss|http|https)://[^:\s]+:(\d{2,5})\b'
     )
@@ -495,7 +639,7 @@ $busy = @()
 foreach ($p in ($ports | Sort-Object -Unique)) {
   if (Test-PortBusy -Port $p) {
     $procId = $null; $pname = $null
-    $line = netstat -ano | Select-String "LISTENING.*:$p\b" | Select-Object -First 1
+    $line = netstat -ano | Select-String "LISTENING.*:$Port\b" | Select-Object -First 1
     if ($line) {
       $parts = ($line -split '\s+') | Where-Object { $_ -ne '' }
       if ($parts.Count -ge 5) { $procId = $parts[-1] }
@@ -523,7 +667,6 @@ if ($busy.Count -gt 0) {
         ps_header + preflight_body.replace("\n", "\r\n"), encoding="utf-8-sig"
     )
 
-    # --- admin.ps1 (show URL) ---
     admin_ps1 = ps_dir / "admin.ps1"
     admin_ps1.write_text(
         ps_header
@@ -555,7 +698,6 @@ if ($busy.Count -gt 0) {
         encoding="utf-8-sig",
     )
 
-    # --- server.ps1 ---
     server_ps1 = ps_dir / "server.ps1"
     server_ps1.write_text(
         ps_header
@@ -574,7 +716,6 @@ if ($busy.Count -gt 0) {
         encoding="utf-8-sig",
     )
 
-    # --- client.ps1 ---
     client_ps1 = ps_dir / "client.ps1"
     client_ps1.write_text(
         ps_header
@@ -593,7 +734,6 @@ if ($busy.Count -gt 0) {
         encoding="utf-8-sig",
     )
 
-    # --- Windows .bat launcher ---
     win_bat.write_text(
         r"""
 @echo off
@@ -643,12 +783,11 @@ endlocal
         newline="\r\n",
     )
 
-    print(f"[installer] Wrote Windows start script: {win_bat}")
-    print(f"[installer] Wrote PS launchers in: {ps_dir}")
+    info(f"[installer] Wrote Windows start script: {win_bat}")
+    info(f"[installer] Wrote PS launchers in: {ps_dir}")
 
-    # --- Linux/macOS ---
     sh_path = repo_root / "copycord_linux.sh"
-    sh_script = """#!/usr/bin/env bash
+    sh_script = """
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 CODE_DIR="$ROOT/code"
@@ -694,13 +833,13 @@ port_in_use() {
   fi
 }
 
-# --- Preflight: Python >= 3.10 in all venvs ---
+
 ensure_py311 "$ADMIN_VENV/bin/python"  "admin venv"
 ensure_py311 "$SERVER_VENV/bin/python" "server venv"
 ensure_py311 "$CLIENT_VENV/bin/python" "client venv"
 echo "[preflight] Python looks good."
 
-# --- Preflight: ALL referenced ports free ---
+
 mapfile -t PORTS < <(get_ports | awk '$1>=1 && $1<=65535 {print $1}' | sort -n | uniq)
 
 BUSY=()
@@ -715,14 +854,14 @@ for p in "${PORTS[@]}"; do
   fi
 done
 
-if [[ ${#BUSY[@]} -gt 0 ]]; then
+if [[ ${
   echo "[preflight] One or more ports referenced in code/.env are busy:"
   for m in "${BUSY[@]}"; do echo "  • $m"; done
   echo "Fix: close the process(es) using these ports or change values in code/.env, then relaunch."
   exit 1
 fi
 
-# --- Resolve admin host/port for message ---
+
 ADMIN_PORT="8080"
 if [[ -f "$ENV_FILE" ]]; then
   ENV_PORT="$(grep -E '^ADMIN_PORT=' "$ENV_FILE" | head -n1 | cut -d= -f2- | tr -d $'\\r' || true)"
@@ -751,54 +890,76 @@ wait
         sh_path.chmod(sh_path.stat().st_mode | 0o111)
     except Exception:
         pass
-    print(f"[installer] Wrote Linux/macOS start script: {sh_path}")
+    info(f"[installer] Wrote Linux/macOS start script: {sh_path}")
 
 
 def main(argv: list[str] | None = None) -> int:
+    stage_detect = STAGE_PROGRESS.get("detect")
+
     repo_root = detect_repo_root()
     code_dir = repo_root / "code"
-    print(f"[updater] Repo root: {repo_root}")
-    print(f"[updater] Code dir:  {code_dir}")
+    info(f"[updater] Repo root: {repo_root}")
+    info(f"[updater] Code dir:  {code_dir}")
+    if stage_detect:
+        stage_detect.tick("Locating install directory…")
 
     current_ref = read_local_ref(code_dir)
-    print(f"[updater] Currently installed ref: {current_ref or 'none'}")
+    info(f"[updater] Currently installed ref: {current_ref or 'none'}")
+    if stage_detect:
+        stage_detect.tick("Checking current version…")
 
     if GITHUB_BRANCH:
         target_ref = GITHUB_BRANCH
-        print(f"[updater] GITHUB_BRANCH is set; updating from branch: {target_ref}")
-        print(
+        info(f"[updater] GITHUB_BRANCH is set; updating from branch: {target_ref}")
+        info(
             "[updater] Note: for branches we always download the latest archive, "
             "since there is no simple way to detect 'no changes' via the .version file."
         )
+        if stage_detect:
+            stage_detect.tick("Using configured branch…")
+
         download_code(repo_root, target_ref, is_branch=True)
 
         app_root = repo_root / "code"
 
         venv_root = repo_root / "venvs"
-        print("\n[updater] Updating virtualenv dependencies…")
-        upgrade_venv(venv_root / "admin", app_root / "admin" / "requirements.txt")
-        upgrade_venv(venv_root / "server", app_root / "server" / "requirements.txt")
-        upgrade_venv(venv_root / "client", app_root / "client" / "requirements.txt")
+        info("\n[updater] Updating virtualenv dependencies…")
+        upgrade_venv(
+            venv_root / "admin",
+            app_root / "admin" / "requirements.txt",
+            stage_name="venv_admin",
+        )
+        upgrade_venv(
+            venv_root / "server",
+            app_root / "server" / "requirements.txt",
+            stage_name="venv_server",
+        )
+        upgrade_venv(
+            venv_root / "client",
+            app_root / "client" / "requirements.txt",
+            stage_name="venv_client",
+        )
 
-        print("\n[updater] Rebuilding admin frontend…")
+        info("\n[updater] Rebuilding admin frontend…")
         build_frontend(app_root)
 
         write_start_scripts(repo_root)
 
-        print("\n[updater] Done. Restart Copycord to run the updated build.")
+        info("\n[updater] Done. Restart Copycord to run the updated build.")
         return 0
 
     target_tag = GITHUB_TAG or fetch_latest_tag(GITHUB_REPO)
-    print(f"[updater] Target tag: {target_tag}")
+    info(f"[updater] Target tag: {target_tag}")
+    if stage_detect:
+        stage_detect.tick("Checking latest tag…")
 
     write_start_scripts(repo_root)
 
     if current_ref == target_tag:
-        print("[updater] Already on the latest tag; nothing to do.")
-
+        info("[updater] Already on the latest tag; nothing to do.")
         return 2
 
-    print(
+    info(
         f"[updater] Tag mismatch -> updating code from "
         f"{current_ref or 'none'} to {target_tag}"
     )
@@ -807,37 +968,65 @@ def main(argv: list[str] | None = None) -> int:
     app_root = repo_root / "code"
 
     venv_root = repo_root / "venvs"
-    print("\n[updater] Updating virtualenv dependencies…")
-    upgrade_venv(venv_root / "admin", app_root / "admin" / "requirements.txt")
-    upgrade_venv(venv_root / "server", app_root / "server" / "requirements.txt")
-    upgrade_venv(venv_root / "client", app_root / "client" / "requirements.txt")
+    info("\n[updater] Updating virtualenv dependencies…")
+    upgrade_venv(
+        venv_root / "admin",
+        app_root / "admin" / "requirements.txt",
+        stage_name="venv_admin",
+    )
+    upgrade_venv(
+        venv_root / "server",
+        app_root / "server" / "requirements.txt",
+        stage_name="venv_server",
+    )
+    upgrade_venv(
+        venv_root / "client",
+        app_root / "client" / "requirements.txt",
+        stage_name="venv_client",
+    )
 
-    print("\n[updater] Rebuilding admin frontend…")
+    info("\n[updater] Rebuilding admin frontend…")
     build_frontend(app_root)
 
-    print("\n[updater] Done. Restart Copycord to run the updated version.")
+    info("\n[updater] Done. Restart Copycord to run the updated version.")
     return 0
 
 
 def _run_with_pause_updater() -> int:
     import traceback
 
+    global _progress_percent, _current_status, _last_render_line
+
     exit_code = 0
     sys_exit_message: str | None = None
+
+    _progress_percent = 0
+    _current_status = ""
+    _last_render_line = ""
 
     try:
         exit_code = main()
     except SystemExit as e:
-
         if isinstance(e.code, int):
             exit_code = e.code
         else:
             sys_exit_message = str(e.code)
             exit_code = 1
     except Exception:
-        print("\n[updater] Unexpected error:")
+        error("\n[updater] Unexpected error:")
         traceback.print_exc()
         exit_code = 1
+
+    if QUIET:
+        if exit_code == 0:
+            label = "Update complete ✅"
+        elif exit_code == 2:
+            label = "Already up to date ✅"
+        else:
+            label = "Update failed ❌"
+        while _progress_percent < 100:
+            _advance_one(label)
+        print()
 
     if exit_code == 0:
         print("\n[updater] Update complete. You are now running the latest version.")
