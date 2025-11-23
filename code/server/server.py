@@ -6686,8 +6686,22 @@ class ServerReceiver:
                 atts = list(msg.get("attachments") or [])
             except Exception:
                 atts = []
-            image_atts = [a for a in atts if _is_image_att(a)]
-            other_atts = [a for a in atts if not _is_image_att(a)]
+
+            dedup_atts = []
+            seen_keys = set()
+            for a in atts:
+                key = (
+                    (a.get("url") or "").lower(),
+                    (a.get("filename") or "").lower(),
+                )
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                dedup_atts.append(a)
+
+            image_atts = [a for a in dedup_atts if _is_image_att(a)]
+            other_atts = [a for a in dedup_atts if not _is_image_att(a)]
+
             if len(image_atts) > 5:
                 base_text = (msg.get("content") or "").strip()
                 chunks = [image_atts[i : i + 5] for i in range(0, len(image_atts), 5)]
