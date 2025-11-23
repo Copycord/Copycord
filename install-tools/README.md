@@ -33,14 +33,14 @@ After installation, this folder will typically look like:
 
 ### Windows
 
-- **Python 3.10+** installed (from python.org or Microsoft Store)
+- **Python 3.11** installed (from python.org or Microsoft Store)
 - **Node.js + npm** installed (for building the admin web UI)
 - Internet access to download Copycord from GitHub
 
 
 ### Linux
 
-- **Python 3.10+** with `venv` and `pip`
+- **Python 3.11+** with `venv` and `pip`
 - **Node.js + npm**
 - Internet access to download Copycord from GitHub
 
