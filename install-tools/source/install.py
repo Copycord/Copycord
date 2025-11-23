@@ -811,7 +811,7 @@ endlocal
     info(f"[installer] Wrote PS launchers in: {ps_dir}")
 
     sh_path = repo_root / "copycord_linux.sh"
-    sh_script = """
+    sh_script = """#!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 CODE_DIR="$ROOT/code"

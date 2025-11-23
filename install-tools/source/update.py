@@ -540,7 +540,7 @@ def write_start_scripts(repo_root: Path) -> None:
     - Linux/macOS:
         - copycord_linux.sh (LF, +x) with preflight
     """
-    stage = STAGE_PROGRESS.get("env_scripts")
+    stage = STAGE_PROGRESS.get("scripts")
 
     win_bat = repo_root / "copycord_windows.bat"
     ps_dir = repo_root / "scripts"
@@ -787,7 +787,7 @@ endlocal
     info(f"[installer] Wrote PS launchers in: {ps_dir}")
 
     sh_path = repo_root / "copycord_linux.sh"
-    sh_script = """
+    sh_script = """#!/usr/bin/env bash
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 CODE_DIR="$ROOT/code"
