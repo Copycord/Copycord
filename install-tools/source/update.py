@@ -394,8 +394,7 @@ def write_start_scripts(repo_root: Path) -> None:
     Always (re)write start scripts so installer and updater behave the same.
     - Windows:
         - copycord_windows.bat (spawns 3 PS windows)
-        - scripts\preflight.ps1 (checks ALL ports + Python >= 3.10 in venvs)
-        - scripts\admin.ps1 / server.ps1 / client.ps1
+        - scripts\preflight.ps1 (checks ALL ports + Python 3.11.x in venvs)
     - Linux/macOS:
         - copycord_linux.sh (LF, +x) with preflight
     """
@@ -422,7 +421,7 @@ $venvAdmin = Join-Path $root 'venvs\admin\Scripts\python.exe'
 $venvServer= Join-Path $root 'venvs\server\Scripts\python.exe'
 $venvClient= Join-Path $root 'venvs\client\Scripts\python.exe'
 
-function Assert-Py310 {
+function Assert-Py311 {
   param([string]$Interpreter, [string]$Name)
   if (-not (Test-Path -LiteralPath $Interpreter)) {
     throw "Missing $Name interpreter at $Interpreter"
@@ -430,8 +429,10 @@ function Assert-Py310 {
   $ver = & $Interpreter -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')"
   if (-not $ver) { throw "Unable to get Python version for $Name ($Interpreter)" }
   $parts = $ver.Split('.') | ForEach-Object { [int]$_ }
-  if ($parts[0] -lt 3 -or ($parts[0] -eq 3 -and $parts[1] -lt 10)) {
-    throw "$Name requires Python >= 3.10 (found $ver at $Interpreter)"
+  $major = $parts[0]
+  $minor = $parts[1]
+  if ($major -ne 3 -or $minor -ne 11) {
+    throw "$Name requires Python 3.11.x (found $ver at $Interpreter)"
   }
 }
 
@@ -476,11 +477,11 @@ function Test-PortBusy {
   return $false
 }
 
-Write-Host '[preflight] Checking Python versions in venvs (need >= 3.10)…'
+Write-Host '[preflight] Checking Python versions in venvs (need 3.11.x)…'
 try {
-  Assert-Py310 -Interpreter $venvAdmin -Name 'admin venv'
-  Assert-Py310 -Interpreter $venvServer -Name 'server venv'
-  Assert-Py310 -Interpreter $venvClient -Name 'client venv'
+  Assert-Py311 -Interpreter $venvAdmin -Name 'admin venv'
+  Assert-Py311 -Interpreter $venvServer -Name 'server venv'
+  Assert-Py311 -Interpreter $venvClient -Name 'client venv'
 } catch {
   Write-Host ('[preflight] ERROR: ' + $_)
   exit 1
@@ -616,7 +617,7 @@ if not exist "%VENV_ROOT%\admin\Scripts\python.exe" ( echo Error: admin venv mis
 if not exist "%VENV_ROOT%\server\Scripts\python.exe" ( echo Error: server venv missing & goto :EOF )
 if not exist "%VENV_ROOT%\client\Scripts\python.exe" ( echo Error: client venv missing & goto :EOF )
 
-rem ---- Preflight: Python >= 3.10 in venvs + ALL ports free ----
+rem ---- Preflight: Python 3.11.x in venvs + ALL ports free ----
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\preflight.ps1"
 if errorlevel 1 (
   echo.
@@ -660,15 +661,15 @@ CLIENT_VENV="$VENV_ROOT/client"
 
 ENV_FILE="$CODE_DIR/.env"
 
-ensure_py310 () {
+ensure_py311 () {
   local bin="$1" name="$2"
   [[ -x "$bin" ]] || { echo "[preflight] ERROR: Missing $name interpreter at $bin"; exit 1; }
   local ver
   ver="$("$bin" -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')" || {
     echo "[preflight] ERROR: Unable to get Python version for $name ($bin)"; exit 1; }
   local major="${ver%%.*}"; local rest="${ver#*.}"; local minor="${rest%%.*}"
-  if (( major < 3 || (major == 3 && minor < 10) )); then
-    echo "[preflight] ERROR: $name requires Python >= 3.10 (found $ver at $bin)"; exit 1;
+  if ! (( major == 3 && minor == 11 )); then
+    echo "[preflight] ERROR: $name requires Python 3.11.x (found $ver at $bin)"; exit 1;
   fi
 }
 
@@ -694,9 +695,9 @@ port_in_use() {
 }
 
 # --- Preflight: Python >= 3.10 in all venvs ---
-ensure_py310 "$ADMIN_VENV/bin/python"  "admin venv"
-ensure_py310 "$SERVER_VENV/bin/python" "server venv"
-ensure_py310 "$CLIENT_VENV/bin/python" "client venv"
+ensure_py311 "$ADMIN_VENV/bin/python"  "admin venv"
+ensure_py311 "$SERVER_VENV/bin/python" "server venv"
+ensure_py311 "$CLIENT_VENV/bin/python" "client venv"
 echo "[preflight] Python looks good."
 
 # --- Preflight: ALL referenced ports free ---
