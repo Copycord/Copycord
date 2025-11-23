@@ -184,7 +184,7 @@ This will pull the latest images and start the web ui: http://localhost:8080
 
 **Requirements**:
 
-Python 3.10+  
+Python 3.11
 Node.js + npm
 
 1. Download the Windows installer bundle:  
@@ -203,13 +203,13 @@ Node.js + npm
 
 **Requirements**
 
-- Python 3.10+
+- Python 3.11
 - Node.js + npm  
   (Ubuntu/Debian example):
   - `curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash -`
   - `sudo apt install -y nodejs`
-- `python3-venv` + `python3.10-venv`  
-  - `sudo apt install -y python3-venv python3.10-venv`
+- `python3-venv` + `python3.11-venv`  
+  - `sudo apt install -y python3-venv python3.11-venv`
 
 ---
 
