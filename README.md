@@ -184,8 +184,8 @@ This will pull the latest images and start the web ui: http://localhost:8080
 
 **Requirements**:
 
-Python 3.11
-Node.js + npm
+- Python 3.11
+- Node.js + npm
 
 1. Download the Windows installer bundle:  
    [`copycord.zip`](https://github.com/Copycord/Copycord/raw/refs/heads/main/install-tools/windows/copycord.zip)
