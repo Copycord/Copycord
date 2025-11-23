@@ -32,13 +32,17 @@ def resolve_mapping_settings(
     eff = dict(config.default_mapping_settings())
 
     row = None
+
+    pair_requested = original_guild_id is not None and cloned_guild_id is not None
+    force_disable = False
+
     if mapping_id is not None:
         try:
             row = db.get_mapping_by_id(int(mapping_id))
         except Exception:
             row = None
 
-    if row is None and original_guild_id is not None and cloned_guild_id is not None:
+    if row is None and pair_requested:
         try:
             row = db.get_mapping_by_original_and_clone(
                 int(original_guild_id), int(cloned_guild_id)
@@ -46,13 +50,16 @@ def resolve_mapping_settings(
         except Exception:
             row = None
 
-    if row is None and original_guild_id is not None:
+        if row is None:
+            force_disable = True
+
+    if row is None and not pair_requested and original_guild_id is not None:
         try:
             row = db.get_mapping_by_original(int(original_guild_id))
         except Exception:
             row = None
 
-    if row is None and cloned_guild_id is not None:
+    if row is None and not pair_requested and cloned_guild_id is not None:
         try:
             row = db.get_mapping_by_clone(int(cloned_guild_id))
         except Exception:
@@ -84,7 +91,7 @@ def resolve_mapping_settings(
     except Exception:
         st = "active"
 
-    if st == "paused":
+    if st == "paused" or force_disable:
         eff["ENABLE_CLONING"] = False
 
     if not eff.get("ENABLE_CLONING", True):
