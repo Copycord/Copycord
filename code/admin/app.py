@@ -1563,7 +1563,39 @@ async def _start_release_watcher():
 @app.on_event("startup")
 async def _start_backup_scheduler():
     backup_scheduler.start()
+    
+@app.on_event("startup")
+async def _cleanup_stale_mapping_pairs_on_boot():
+    """
+    On admin API startup, purge any per-(host, clone) state that no longer
+    has a corresponding row in guild_mappings. This keeps the DB free of
+    stale mappings that could confuse the server.
+    """
+    try:
+        stats = db.cleanup_stale_mapping_pairs()
+        pairs = int(stats.get("pairs_cleared") or 0)
+        rb_only = int(stats.get("role_blocks_only") or 0)
 
+        if pairs:
+            LOGGER.info(
+                "Startup cleanup: removed %d stale guild mapping pair(s) with "
+                "no active mapping. Your database is now in sync with current "
+                "guild mappings.",
+                pairs,
+            )
+        elif rb_only:
+            LOGGER.debug(
+                "Startup cleanup: only orphaned blocked-role entries were removed."
+            )
+        else:
+            LOGGER.debug(
+                "Startup cleanup: no stale mapping state found. "
+                "All guild mappings are already in sync."
+            )
+    except Exception:
+        LOGGER.exception(
+            "Startup cleanup: failed while removing stale mapping state."
+        )
 
 @app.on_event("shutdown")
 async def _stop_backup_scheduler():
@@ -3592,6 +3624,10 @@ async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
     cloned_guild_id = int(payload.get("cloned_guild_id") or 0)
     settings = payload.get("settings") or {}
 
+    existing = db.get_mapping_by_id(mapping_id)
+    old_host_id = int(existing["original_guild_id"] or 0) if existing else 0
+    old_clone_id = int(existing["cloned_guild_id"] or 0) if existing else 0
+
     client_token = db.get_config("CLIENT_TOKEN", "")
     server_token = db.get_config("SERVER_TOKEN", "")
 
@@ -3617,6 +3653,11 @@ async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
             },
             status_code=400,
         )
+
+    if existing and (
+        old_host_id != original_guild_id or old_clone_id != cloned_guild_id
+    ):
+        db.clear_mapping_pair_state(old_host_id, old_clone_id)
 
     db.upsert_guild_mapping(
         mapping_id=mapping_id,

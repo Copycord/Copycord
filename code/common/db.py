@@ -4196,3 +4196,172 @@ class DBManager:
                 """,
                 (status_norm, str(mapping_id)),
             )
+
+    def clear_mapping_pair_state(
+        self,
+        original_guild_id: int,
+        cloned_guild_id: int,
+    ) -> None:
+        """
+        Wipe all per-(original_guild_id, cloned_guild_id) state across
+        the DB, but keep the guild_mappings row itself.
+
+        Used when repointing an existing mapping to a new clone guild
+        so we don't leave stale rows for the old pair.
+        """
+        ogid = int(original_guild_id or 0)
+        cgid = int(cloned_guild_id or 0)
+        if not ogid and not cgid:
+            return
+
+        tables_to_clean = [
+            "messages",
+            "filters",
+            "blocked_keywords",
+            "backfill_runs",
+            "role_blocks",
+            "threads",
+            "channel_mappings",
+            "category_mappings",
+            "role_mappings",
+            "emoji_mappings",
+            "sticker_mappings",
+        ]
+
+        with self.conn:
+            for tbl in tables_to_clean:
+                try:
+                    if tbl == "role_blocks":
+                        self.conn.execute(
+                            f"""
+                            DELETE FROM {tbl}
+                            WHERE cloned_guild_id = ?
+                            """,
+                            (cgid,),
+                        )
+                    else:
+                        self.conn.execute(
+                            f"""
+                            DELETE FROM {tbl}
+                            WHERE original_guild_id = ?
+                            AND cloned_guild_id   = ?
+                            """,
+                            (ogid, cgid),
+                        )
+                except sqlite3.OperationalError:
+                    # Older DBs might not have all tables yet; ignore.
+                    pass
+
+    def cleanup_stale_mapping_pairs(self) -> dict[str, int]:
+        """
+        At boot: scan for any per-(original_guild_id, cloned_guild_id) state
+        that no longer has a row in guild_mappings and wipe it using
+        clear_mapping_pair_state().
+
+        Returns a small stats dict for logging.
+        """
+        import sqlite3
+
+        with self.lock:
+            # 1) Build the set of valid mapping pairs from guild_mappings
+            try:
+                rows = self.conn.execute(
+                    """
+                    SELECT DISTINCT original_guild_id, cloned_guild_id
+                    FROM guild_mappings
+                    WHERE original_guild_id IS NOT NULL
+                      AND cloned_guild_id IS NOT NULL
+                      AND original_guild_id != 0
+                      AND cloned_guild_id != 0
+                    """
+                ).fetchall()
+            except sqlite3.OperationalError:
+                # No guild_mappings table yet (very old DB?) -> nothing we can safely clean.
+                return {"pairs_cleared": 0, "role_blocks_only": 0}
+
+            valid_pairs: set[tuple[int, int]] = set()
+            valid_clone_ids: set[int] = set()
+            for r in rows or []:
+                ogid = int(r["original_guild_id"] or 0)
+                cgid = int(r["cloned_guild_id"] or 0)
+                if not ogid or not cgid:
+                    continue
+                valid_pairs.add((ogid, cgid))
+                valid_clone_ids.add(cgid)
+
+            # 2) Collect all (host, clone) pairs that appear in the per-mapping tables
+            tables_to_scan_for_pairs = [
+                "messages",
+                "filters",
+                "blocked_keywords",
+                "backfill_runs",
+                "threads",
+                "channel_mappings",
+                "category_mappings",
+                "role_mappings",
+                "emoji_mappings",
+                "sticker_mappings",
+            ]
+
+            found_pairs: set[tuple[int, int]] = set()
+
+            for tbl in tables_to_scan_for_pairs:
+                try:
+                    rows = self.conn.execute(
+                        f"""
+                        SELECT DISTINCT original_guild_id, cloned_guild_id
+                        FROM {tbl}
+                        WHERE original_guild_id IS NOT NULL
+                          AND cloned_guild_id IS NOT NULL
+                          AND original_guild_id != 0
+                          AND cloned_guild_id != 0
+                        """
+                    ).fetchall()
+                except sqlite3.OperationalError:
+                    # Table may not exist yet on older DBs; just skip.
+                    continue
+
+                for r in rows or []:
+                    ogid = int(r["original_guild_id"] or 0)
+                    cgid = int(r["cloned_guild_id"] or 0)
+                    if not ogid or not cgid:
+                        continue
+                    found_pairs.add((ogid, cgid))
+
+            # Pairs that show up in those tables but *not* in guild_mappings
+            stale_pairs = {p for p in found_pairs if p not in valid_pairs}
+
+            # 3) role_blocks is keyed only by cloned_guild_id, so clean any clones
+            # that are no longer present in *any* mapping.
+            stale_role_block_clones: set[int] = set()
+            try:
+                rb_rows = self.conn.execute(
+                    """
+                    SELECT DISTINCT cloned_guild_id
+                    FROM role_blocks
+                    WHERE cloned_guild_id IS NOT NULL
+                      AND cloned_guild_id != 0
+                    """
+                ).fetchall()
+            except sqlite3.OperationalError:
+                rb_rows = []
+
+            for r in rb_rows or []:
+                cgid = int(r["cloned_guild_id"] or 0)
+                if not cgid:
+                    continue
+                if cgid not in valid_clone_ids:
+                    stale_role_block_clones.add(cgid)
+
+            # 4) Actually wipe stale state using the helper
+            for ogid, cgid in stale_pairs:
+                self.clear_mapping_pair_state(ogid, cgid)
+
+            for cgid in stale_role_block_clones:
+                # ogid=0 -> clear_mapping_pair_state only affects role_blocks.
+                self.clear_mapping_pair_state(0, cgid)
+
+        return {
+            "pairs_cleared": len(stale_pairs),
+            "role_blocks_only": len(stale_role_block_clones),
+        }
