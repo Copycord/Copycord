@@ -78,10 +78,12 @@ Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multi
 > </details>
 
 ## Getting Started
+> [!TIP]
+> You can set up Copycord using Docker or the manual launcher
 
 ### Prerequisites
 
-- [Docker](https://github.com/Copycord/Copycord/blob/main/docs/Instructions.md)
+- [Docker](https://github.com/Copycord/Copycord/blob/main/docs/Instructions.md) or manual installer (See below)
 - Discord Account Token + Discord Bot Token
 
 ### Setup
@@ -282,7 +284,7 @@ Once started, open the web UI in your browser:
 
 ### Environment Configuration
 
-- Set the admin password, change ports, etc., in the `.env` file located in the `code` directory after installation.
+- Set the admin password, change ports, etc., in the `.env` file located in the `code/` directory after installation.
 
 </details>
 
