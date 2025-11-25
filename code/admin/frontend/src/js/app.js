@@ -200,7 +200,6 @@
     CLONE_GUILD_DISCOVERY_SPLASH: false,
     SYNC_GUILD_DESCRIPTION: false,
     SYNC_FORUM_PROPERTIES: false,
-    
   };
 
   let lastFocusLog = null;
@@ -1696,6 +1695,7 @@
 
   const REQUIRED_KEYS = ["SERVER_TOKEN", "CLIENT_TOKEN"];
   let cfgValidated = false;
+  let blockStartForBadTokens = false;
 
   function setCfgButtonsVisible(show) {
     const saveBtn = document.getElementById("cfg-save-btn");
@@ -1744,6 +1744,68 @@
     });
   }
 
+  function highlightTokenInputsFromErrors(errs) {
+    const bad = new Set();
+
+    if (Array.isArray(errs)) {
+      for (const msg of errs) {
+        const m = String(msg || "");
+        if (m.includes("CLIENT_TOKEN")) bad.add("CLIENT_TOKEN");
+        if (m.includes("SERVER_TOKEN")) bad.add("SERVER_TOKEN");
+      }
+    }
+
+    // Fallback: if we know tokens are bad but couldn't parse which one,
+    // highlight both so it's obvious what to fix.
+    if (!bad.size && blockStartForBadTokens) {
+      bad.add("CLIENT_TOKEN");
+      bad.add("SERVER_TOKEN");
+    }
+
+    ["CLIENT_TOKEN", "SERVER_TOKEN"].forEach((id) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.classList.toggle("is-invalid", bad.has(id));
+    });
+  }
+
+  async function checkSavedTokensOnLoad() {
+    try {
+      const res = await fetch("/api/validate-tokens", {
+        method: "GET",
+        headers: { Accept: "application/json" },
+        credentials: "same-origin",
+      });
+
+      if (!res.ok) {
+        console.warn("Token validation failed with status", res.status);
+        return;
+      }
+
+      const data = await res.json();
+      const hasTokens = !!data.has_tokens;
+      const ok = !!data.ok;
+      const errs = Array.isArray(data.errors) ? data.errors : [];
+
+      blockStartForBadTokens = hasTokens && !ok;
+
+      if (blockStartForBadTokens) {
+        highlightTokenInputsFromErrors(errs);
+
+        const message =
+          errs.join(" ") ||
+          "Saved tokens are no longer valid. Please update SERVER_TOKEN and CLIENT_TOKEN.";
+        showToast(message, { type: "error", timeout: 8000 });
+      } else {
+        highlightTokenInputsFromErrors([]);
+      }
+    } catch (err) {
+      console.error("Token validation on load failed:", err);
+    } finally {
+      updateStartButtonOnly();
+    }
+  }
+
   function validateConfigAndToggle({ decorate = false } = {}) {
     const btn = document.getElementById("toggle-btn");
     const form = document.getElementById("toggle-form");
@@ -1781,11 +1843,21 @@
       form.action.endsWith("/stop") ||
       btn.textContent.trim().toLowerCase() === "stop";
 
-    const blockStart = !ok && !running;
+    const blockStart = (!ok || blockStartForBadTokens) && !running;
     btn.dataset.invalid = blockStart ? "1" : "0";
-    btn.title = blockStart
-      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, and at least one Guild Mapping to start."
-      : "";
+
+    if (blockStartForBadTokens) {
+      btn.title =
+        "Saved tokens are no longer valid. Please update SERVER_TOKEN and CLIENT_TOKEN to start.";
+    } else if (!ok) {
+      btn.title =
+        "Provide SERVER_TOKEN, CLIENT_TOKEN, and at least one Guild Mapping to start.";
+    } else {
+      btn.title = "";
+    }
+
+    btn.disabled = !!toggleLocked || blockStart;
+
     btn.disabled = !!toggleLocked || blockStart;
 
     if (saveBtn) {
@@ -3745,6 +3817,7 @@
     }
     updateToggleButton({ server: {}, client: {} });
 
+    checkSavedTokensOnLoad();
     startStatusPoll(4000);
     fetchAndRenderStatus();
     attachAdminBus();
@@ -3907,6 +3980,12 @@
               burstStatusPoll(800, 15000, 4000);
             } else if (actionPath === "/save") {
               const cmdHidden = document.getElementById("COMMAND_USERS");
+              blockStartForBadTokens = false;
+              ["CLIENT_TOKEN", "SERVER_TOKEN"].forEach((id) => {
+                const el = document.getElementById(id);
+                if (el) el.classList.remove("is-invalid");
+              });
+              updateStartButtonOnly();
               if (cmdHidden) {
                 BASELINES.cmd_users_csv = cmdHidden.value;
                 cmdHidden.defaultValue = cmdHidden.value;
@@ -4292,12 +4371,20 @@
       form.action.endsWith("/stop") ||
       btn.textContent.trim().toLowerCase() === "stop";
 
-    const blockStart = !ok && !running;
+    const blockStart = (!ok || blockStartForBadTokens) && !running;
 
     btn.dataset.invalid = blockStart ? "1" : "0";
-    btn.title = blockStart
-      ? "Provide SERVER_TOKEN, CLIENT_TOKEN, and at least one Guild Mapping to start."
-      : "";
+
+    if (blockStartForBadTokens) {
+      btn.title =
+        "Saved tokens are no longer valid. Please update SERVER_TOKEN and CLIENT_TOKEN to start.";
+    } else if (!ok) {
+      btn.title =
+        "Provide SERVER_TOKEN, CLIENT_TOKEN, and at least one Guild Mapping to start.";
+    } else {
+      btn.title = "";
+    }
+
     btn.disabled = !!toggleLocked || blockStart;
   }
 })();

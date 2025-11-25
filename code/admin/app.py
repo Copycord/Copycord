@@ -1600,6 +1600,40 @@ async def _cleanup_stale_mapping_pairs_on_boot():
 @app.on_event("shutdown")
 async def _stop_backup_scheduler():
     await backup_scheduler.stop()
+    
+
+@app.get("/api/validate-tokens", response_class=JSONResponse)
+async def api_validate_tokens():
+    """
+    Check whether the saved CLIENT_TOKEN and SERVER_TOKEN are currently valid.
+
+    """
+    env = _read_env()
+    raw_client = (env.get("CLIENT_TOKEN") or "").strip()
+    raw_server = (env.get("SERVER_TOKEN") or "").strip()
+
+    has_tokens = bool(raw_client and raw_server)
+    if not has_tokens:
+        return JSONResponse(
+            {"ok": False, "has_tokens": False, "errors": []}
+        )
+
+    errs = await _verify_tokens_for_save(
+        {
+            "CLIENT_TOKEN": raw_client,
+            "SERVER_TOKEN": raw_server,
+        }
+    )
+    ok = not errs
+
+    return JSONResponse(
+        {
+            "ok": ok,
+            "has_tokens": True,
+            "errors": errs,
+        }
+    )
+
 
 
 @app.api_route("/admin/backup-now", methods=["GET", "POST"])
