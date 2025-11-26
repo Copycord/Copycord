@@ -101,7 +101,6 @@ logging.getLogger("discord.client").setLevel(logging.ERROR)
 logger = logging.getLogger("server")
 
 
-
 class _GuildPrefixFilter(logging.Filter):
     """
     Prepend mapping name to every server log line.
@@ -678,7 +677,6 @@ class ServerReceiver:
                         "[⚠️] No guild mappings found. Nothing is currently set to clone."
                     )
             else:
-                # If there are no paused mappings, don't show "(0 paused)"
                 if num_paused:
                     logger.info(
                         "[🧙‍♂️] Copycord is cloning %d of %d server%s (%d paused)",
@@ -697,7 +695,6 @@ class ServerReceiver:
 
         except Exception:
             logger.exception("Failed to summarize guild_mappings on startup")
-
 
     async def on_ready(self):
         """
@@ -2283,9 +2280,15 @@ class ServerReceiver:
     ) -> tuple[int, int, set[int]]:
         """
         For THIS clone guild only:
-        - Ensure every upstream category has a mapped clone category present here.
-        - If a category is created/found, ensure only THIS clone's channels that belong to that upstream
-            category are parented correctly (skip if already correct).
+
+        - Only repair categories/channels when there is already a mapping in the DB.
+        - If a mapped category is missing in the clone, recreate (or adopt by name) and
+        update the mapping.
+        - If REPOSITION_CHANNELS is enabled, ensure mapped channels are parented to the
+        correct mapped category.
+
+        This MUST NOT act as a first-time category creator; it should only "repair"
+        broken state where the DB mappings exist but the clone-side objects do not.
         """
         created = 0
         reparented = 0
@@ -2315,6 +2318,9 @@ class ServerReceiver:
                 per_cat = (self.cat_map_by_clone or {}).get(int(guild.id), {}) or {}
                 per_chan = (self.chan_map_by_clone or {}).get(int(guild.id), {}) or {}
 
+        if not per_cat and not per_chan:
+            return 0, 0, set()
+
         for orig_cat_id, upstream in upstream_cats.items():
             upstream_name = (upstream.get("name") or "").strip()
 
@@ -2331,10 +2337,14 @@ class ServerReceiver:
                         int(orig_cat_id)
                     ] = mapping
 
+            if mapping is None:
+                continue
+
             clone_cat_id = int((mapping or {}).get("cloned_category_id") or 0)
             cat_obj = guild.get_channel(clone_cat_id) if clone_cat_id else None
 
             if not cat_obj:
+
                 cat_obj = discord.utils.get(guild.categories, name=upstream_name)
 
                 if not cat_obj:
@@ -2397,14 +2407,17 @@ class ServerReceiver:
                 continue
 
             cat_id_for_this_clone = int(cat_obj.id)
+
             for ch_orig_id, ch_map in list(per_chan.items()):
                 try:
                     if int(ch_map.get("original_parent_category_id") or 0) != int(
                         orig_cat_id
                     ):
                         continue
+
                     ch = guild.get_channel(int(ch_map.get("cloned_channel_id") or 0))
                     if not ch:
+
                         continue
 
                     actual_parent_id = int(ch.category.id) if ch.category else None
@@ -3981,7 +3994,7 @@ class ServerReceiver:
 
             is_voice = ctype == ChannelType.voice.value
             is_stage = ctype == ChannelType.stage_voice.value
-            
+
             if stage_only and not is_stage:
                 continue
 
@@ -4739,73 +4752,22 @@ class ServerReceiver:
     ) -> int:
         """
         For THIS clone guild only:
-        - Remove categories that no longer exist on the host OR are blacklisted / filtered out
-        for this clone's mapping.
+        - Remove categories that no longer exist in the *filtered* sitemap
+        (i.e. they were removed on the host or filtered out client-side).
         - If DELETE_CHANNELS is true for this clone, delete all cloned child channels and then
         the cloned category itself.
+        - If DELETE_CHANNELS is false, keep the existing channels/category in the clone, but
+        delete only the DB mappings so Copycord no longer tracks them.
         - ALWAYS delete channel mappings (and the category mapping) for this clone when a
-        category is out-of-scope (blacklisted/filtered/removed) for this clone.
+        category is out-of-scope for this clone.
         """
 
         self._load_mappings()
 
         valid_ids: set[int] = {int(c["id"]) for c in (sitemap.get("categories") or [])}
         removed = 0
-
-        def _build_filter_view_for_mapping(
-            origin_guild_id: int, cloned_guild_id: int
-        ) -> dict:
-            f = self.db.get_filters(
-                original_guild_id=int(origin_guild_id),
-                cloned_guild_id=int(cloned_guild_id),
-            ) or {
-                "whitelist": {"category": [], "channel": []},
-                "exclude": {"category": [], "channel": []},
-            }
-
-            def _to_int_set(xs):
-                out = set()
-                for x in xs or []:
-                    try:
-                        out.add(int(x))
-                    except Exception:
-                        pass
-                return out
-
-            include_category_ids = _to_int_set(
-                (f.get("whitelist") or {}).get("category")
-            )
-            include_channel_ids = _to_int_set((f.get("whitelist") or {}).get("channel"))
-            excluded_category_ids = _to_int_set(
-                (f.get("exclude") or {}).get("category")
-            )
-            excluded_channel_ids = _to_int_set((f.get("exclude") or {}).get("channel"))
-
-            return {
-                "include_category_ids": include_category_ids,
-                "include_channel_ids": include_channel_ids,
-                "excluded_category_ids": excluded_category_ids,
-                "excluded_channel_ids": excluded_channel_ids,
-                "whitelist_enabled": bool(include_category_ids or include_channel_ids),
-            }
-
-        def _category_is_blacklisted_for_clone(cat_id: int, view: dict) -> bool:
-
-            include_category_ids = view["include_category_ids"]
-            include_channel_ids = view["include_channel_ids"]
-            excluded_category_ids = view["excluded_category_ids"]
-            excluded_channel_ids = view["excluded_channel_ids"]
-            wl_on = bool(view["whitelist_enabled"])
-
-            wl_cat = cat_id in include_category_ids
-            ex_cat = cat_id in excluded_category_ids
-
-            if wl_on and not wl_cat:
-                return True
-
-            if ex_cat:
-                return True
-            return False
+        removed_with_delete_channels = 0
+        removed_mappings_only = 0
 
         per_all = getattr(self, "cat_map_by_clone", {}) or {}
         per_clone = dict(per_all.get(int(guild.id), {}) or {})
@@ -4826,6 +4788,9 @@ class ServerReceiver:
 
             in_sitemap = int(orig_id) in valid_ids
 
+            if in_sitemap:
+                continue
+
             try:
                 origin_gid = int(row.get("original_guild_id") or 0)
             except Exception:
@@ -4842,21 +4807,11 @@ class ServerReceiver:
             )
             delete_channels = bool(settings.get("DELETE_CHANNELS", False))
 
-            filter_view = _build_filter_view_for_mapping(origin_gid, int(guild.id))
-            is_blacklisted = _category_is_blacklisted_for_clone(
-                int(orig_id), filter_view
-            )
-
-            out_of_scope = (not in_sitemap) or is_blacklisted
-            if not out_of_scope:
-                continue
-
             clone_cat_id = int(row.get("cloned_category_id") or 0)
             clone_cat = guild.get_channel(clone_cat_id) if clone_cat_id else None
 
             if clone_cat and delete_channels:
                 try:
-
                     for ch in list(getattr(clone_cat, "channels", []) or []):
                         try:
                             await self.ratelimit.acquire_for_guild(
@@ -4864,7 +4819,7 @@ class ServerReceiver:
                             )
                             await ch.delete()
                             logger.info(
-                                "[🗑️] Deleted channel %s in blacklisted/removed category %s",
+                                "[🗑️] Deleted channel %s in removed category %s",
                                 getattr(ch, "name", ch.id),
                                 getattr(clone_cat, "name", clone_cat.id),
                             )
@@ -4882,7 +4837,7 @@ class ServerReceiver:
                         exc_info=True,
                     )
 
-            if clone_cat:
+            if clone_cat and delete_channels:
                 try:
                     await self.ratelimit.acquire_for_guild(
                         ActionType.DELETE_CHANNEL, guild.id
@@ -4902,10 +4857,10 @@ class ServerReceiver:
             try:
                 cur = self.db.conn.execute(
                     """
-                    SELECT original_channel_id
-                    FROM channel_mappings
-                    WHERE original_parent_category_id = ? AND cloned_guild_id = ?
-                    """,
+                        SELECT original_channel_id
+                        FROM channel_mappings
+                        WHERE original_parent_category_id = ? AND cloned_guild_id = ?
+                        """,
                     (int(orig_id), int(guild.id)),
                 )
                 rows = cur.fetchall() or []
@@ -4920,10 +4875,8 @@ class ServerReceiver:
                 except Exception:
                     continue
                 try:
-
                     self.db.delete_channel_mapping_pair(int(ocid), int(guild.id))
                 except Exception:
-
                     with contextlib.suppress(Exception):
                         self.db.delete_channel_mapping(int(ocid))
 
@@ -4953,7 +4906,25 @@ class ServerReceiver:
             except Exception:
                 pass
 
+            if delete_channels:
+                removed_with_delete_channels += 1
+            else:
+                removed_mappings_only += 1
+
             removed += 1
+
+        if removed_with_delete_channels:
+            logger.info(
+                "[🗑️] Cleanup: removed %d category(ies) and their channel mappings for clone %s",
+                removed_with_delete_channels,
+                guild.id,
+            )
+        if removed_mappings_only:
+            logger.info(
+                "[🧹] Cleanup: removed DB mappings for %d category(ies) in clone %s",
+                removed_mappings_only,
+                guild.id,
+            )
 
         return removed
 
@@ -4971,12 +4942,20 @@ class ServerReceiver:
         """
         Delete cloned channels not present on the host, for THIS clone guild only.
         Always removes the (origin, clone) mapping row for this guild when host no longer has it.
+
+        Summary:
+        - If DELETE_CHANNELS is true and the channel is not protected, delete the channel + mapping.
+        - Otherwise, keep the channel (or it's already gone / protected / API-blocked) and
+        delete only the DB mapping.
         """
 
         self._load_mappings()
 
         valid_ids = {int(c["id"]) for c in (incoming or [])}
         removed = 0
+        removed_with_delete = 0
+        removed_mappings_only = 0
+
         protected = self._protected_channel_ids(guild)
 
         per_all = getattr(self, "chan_map_by_clone", {}) or {}
@@ -5011,6 +4990,9 @@ class ServerReceiver:
             )
             delete_channels = bool(settings.get("DELETE_CHANNELS", False))
 
+            deleted_here = False
+            mappings_only_here = False
+
             if ch and delete_channels:
                 if ch.id in protected:
                     logger.info(
@@ -5018,6 +5000,7 @@ class ServerReceiver:
                         ch.name,
                         ch.id,
                     )
+                    mappings_only_here = True
                 else:
                     await self.ratelimit.acquire_for_guild(
                         ActionType.DELETE_CHANNEL, guild.id
@@ -5025,7 +5008,9 @@ class ServerReceiver:
                     try:
                         await ch.delete()
                         logger.info("[🗑️] Deleted channel #%s (%d)", ch.name, ch.id)
+                        deleted_here = True
                     except discord.HTTPException as e:
+
                         if getattr(
                             e, "code", None
                         ) == 50074 or "required for community" in str(e):
@@ -5038,10 +5023,16 @@ class ServerReceiver:
                             logger.warning(
                                 "[⚠️] Failed to delete channel #%d: %s", ch.id, e
                             )
+                        mappings_only_here = True
+            elif ch and not delete_channels:
+
+                mappings_only_here = True
             elif not ch:
+
                 logger.info(
                     "[🗑️] Cloned channel #%d not found; removing mapping", clone_id
                 )
+                mappings_only_here = True
 
             try:
                 self.db.delete_channel_mapping_pair(int(orig_id), int(guild.id))
@@ -5051,7 +5042,25 @@ class ServerReceiver:
             per_all.setdefault(int(guild.id), {}).pop(int(orig_id), None)
             self.chan_map.pop(int(orig_id), None)
 
+            if deleted_here:
+                removed_with_delete += 1
+            elif mappings_only_here:
+                removed_mappings_only += 1
+
             removed += 1
+
+        if removed_with_delete:
+            logger.info(
+                "[🗑️] Cleanup: removed %d channel(s) and their mappings for clone %s",
+                removed_with_delete,
+                guild.id,
+            )
+        if removed_mappings_only:
+            logger.info(
+                "[🧹] Cleanup: removed DB mappings for %d channel(s) in clone %s",
+                removed_mappings_only,
+                guild.id,
+            )
 
         return removed
 
@@ -10316,7 +10325,6 @@ class ServerReceiver:
             for task in pending:
                 task.cancel()
             loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-
 
 
 def _autostart_enabled() -> bool:
