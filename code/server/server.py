@@ -2525,6 +2525,70 @@ class ServerReceiver:
             )
             return parts
 
+        guild_info = sitemap.get("guild") or {}
+        target = sitemap.get("target") or {}
+
+        try:
+            ctx_host_gid = int(guild_info.get("id") or 0)
+        except (TypeError, ValueError):
+            ctx_host_gid = 0
+
+        try:
+            ctx_cloned_gid = int(target.get("cloned_guild_id") or guild.id or 0)
+        except (TypeError, ValueError):
+            ctx_cloned_gid = int(guild.id)
+
+        mapping_id_hint = target.get("mapping_id")
+
+        ctx_mapping_row: dict | None = None
+        if ctx_host_gid:
+            mrow = None
+            try:
+                if mapping_id_hint:
+                    mrow = self.db.get_mapping_by_id(str(mapping_id_hint))
+                if not mrow and ctx_cloned_gid:
+                    mrow = self.db.get_mapping_by_original_and_clone(
+                        ctx_host_gid, ctx_cloned_gid
+                    )
+                if not mrow:
+                    mrow = self.db.get_mapping_by_original(ctx_host_gid)
+            except Exception:
+                mrow = None
+
+            if mrow:
+                if not isinstance(mrow, dict):
+                    try:
+                        mrow = {k: mrow[k] for k in mrow.keys()}
+                    except Exception:
+                        mrow = dict(mrow)
+                ctx_mapping_row = mrow
+
+        def _sanitize_topic(text: str | None, limit: int) -> str | None:
+            """
+            Rewrite host channel mentions and message links inside a topic
+            using the existing inline sanitizer, then clip to Discord's limits.
+            """
+            if not text:
+                return text
+            if not ctx_host_gid or not ctx_mapping_row:
+                # No mapping context for this clone; keep as-is, just clip size.
+                return text[:limit]
+            try:
+                rewritten = self._sanitize_inline(
+                    text,
+                    ctx_guild_id=ctx_host_gid,
+                    ctx_mapping_row=ctx_mapping_row,
+                )
+                if rewritten is None:
+                    return None
+                return rewritten[:limit]
+            except Exception:
+                logger.debug(
+                    "[meta] Topic sanitize failed; using original value",
+                    exc_info=True,
+                )
+                return text[:limit]
+
         topic_map: Dict[int, Optional[str]] = {}
         nsfw_map: Dict[int, bool] = {}
         slowmode_map: Dict[int, int] = {}
@@ -2542,7 +2606,9 @@ class ServerReceiver:
             ch_type = int(ch.get("type", 0))
 
             if sync_topic:
-                topic_map[cid] = ch.get("topic")
+                raw_topic = ch.get("topic")
+                # Regular channel topic limit is 1024 characters
+                topic_map[cid] = _sanitize_topic(raw_topic, 1024)
 
             if sync_nsfw:
                 nsfw_map[cid] = bool(ch.get("nsfw"))
@@ -2571,7 +2637,8 @@ class ServerReceiver:
                     "bitrate": ch.get("bitrate"),
                     "user_limit": ch.get("user_limit"),
                     "rtc_region": ch.get("rtc_region"),
-                    "topic": ch.get("topic"),
+                    # Stage channel topic limit is 120 characters
+                    "topic": _sanitize_topic(ch.get("topic"), 120),
                     "video_quality": ch.get("video_quality"),
                 }
 
@@ -2579,9 +2646,9 @@ class ServerReceiver:
                 fm: Dict[str, object] = {}
 
                 if "post_guidelines" in ch:
-                    fm["topic"] = ch.get("post_guidelines")
+                    fm["topic"] = _sanitize_topic(ch.get("post_guidelines"), 1024)
                 elif "topic" in ch:
-                    fm["topic"] = ch.get("topic")
+                    fm["topic"] = _sanitize_topic(ch.get("topic"), 1024)
 
                 if "message_limit_per_interval" in ch:
                     try:
@@ -2774,7 +2841,6 @@ class ServerReceiver:
                     has_unmod = True
 
             if desired_req and not has_unmod:
-
                 out.append(("general", False, "🏷️"))
 
             out.sort()
@@ -3146,10 +3212,8 @@ class ServerReceiver:
                 tags_changed = False
 
                 if tags_already_match:
-
                     desired_tags = list(clone_tags)
                 elif src_tags_meta:
-
                     for tmeta in src_tags_meta:
                         name = (tmeta.get("name") or "").strip()
                         if not name:
@@ -3167,7 +3231,6 @@ class ServerReceiver:
                                 moderated=moderated,
                             )
                         except Exception:
-
                             try:
                                 new_tag_obj = discord.ForumTag(
                                     name=name,
@@ -3182,7 +3245,6 @@ class ServerReceiver:
 
                     tags_changed = True
                 else:
-
                     if clone_tags:
                         desired_tags = list(clone_tags)
 
@@ -3238,7 +3300,6 @@ class ServerReceiver:
                         current_req = bool(getattr(ch, "requires_tag", False))
 
                     if desired_req != current_req:
-
                         if desired_req and not _has_unmoderated_tag(final_tags):
                             logger.warning(
                                 "[meta] Cannot enable require_tag for forum #%d (%s): "
@@ -3327,7 +3388,6 @@ class ServerReceiver:
                     new_flags.require_tag = bool(desired_req)
                     flag_changes["flags"] = new_flags.value
                 else:
-
                     flag_changes["require_tag"] = bool(desired_req)
 
                 await ch.edit(**flag_changes)
@@ -3360,6 +3420,7 @@ class ServerReceiver:
             parts.append(f"Updated forum properties on {forum_updated} channels")
 
         return parts
+
 
     async def _sync_categories(self, guild: Guild, sitemap: Dict) -> List[str]:
         """
