@@ -8325,3 +8325,19 @@ body.login-page {
   display: inline-flex;
   align-items: center;
 }
+
+.field > input.field-readonly {
+  background: #1a102d;
+  color: var(--muted);
+  border-color: rgba(255, 255, 255, 0.06);
+  opacity: 0.6;
+  cursor: not-allowed;
+  transition: none;
+}
+
+.field > input.field-readonly:focus,
+.field > input.field-readonly:active {
+  outline: none;
+  box-shadow: none;
+  border-color: rgba(255, 255, 255, 0.06);
+}
