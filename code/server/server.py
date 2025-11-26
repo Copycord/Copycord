@@ -8050,10 +8050,13 @@ class ServerReceiver:
                 pass
 
         if not mappings:
+            # No mapping at all for this thread's parent channel.
+            # Drop the message
             async with self._warn_lock:
                 if orig_tid not in self._unmapped_threads_warned:
-                    logger.info(
-                        "[⌛] No mapping yet for thread '%s' (thread_id=%s, parent=%s); msg from %s queued until after sync",
+                    logger.debug(
+                        "[🚫] No mapping for thread '%s' (thread_id=%s, parent=%s); "
+                        "dropping message from %s",
                         data.get("thread_name", "<unnamed>"),
                         orig_tid,
                         data.get("thread_parent_name")
@@ -8062,7 +8065,6 @@ class ServerReceiver:
                         data.get("author", "<unknown>"),
                     )
                     self._unmapped_threads_warned.add(orig_tid)
-            self._pending_thread_msgs.append(data)
             return
 
         if is_backfill:
