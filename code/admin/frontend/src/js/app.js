@@ -1755,8 +1755,6 @@
       }
     }
 
-    // Fallback: if we know tokens are bad but couldn't parse which one,
-    // highlight both so it's obvious what to fix.
     if (!bad.size && blockStartForBadTokens) {
       bad.add("CLIENT_TOKEN");
       bad.add("SERVER_TOKEN");
@@ -2001,6 +1999,7 @@
 
     mapValidated = false;
     bindMappingFieldListeners();
+
     [nameInput, hostInput, cloneInput].forEach((el) => {
       if (!el) return;
       el.classList.remove("is-invalid", "flash");
@@ -2022,6 +2021,36 @@
       } else {
         subtleEl.hidden = true;
         subtleEl.textContent = "";
+      }
+    }
+
+    if (hostInput) {
+      if (isEdit) {
+        hostInput.readOnly = true;
+        hostInput.classList.add("field-readonly");
+        hostInput.setAttribute("aria-readonly", "true");
+        hostInput.title =
+          "HOST_GUILD_ID cannot be changed after the mapping is created.";
+      } else {
+        hostInput.readOnly = false;
+        hostInput.classList.remove("field-readonly");
+        hostInput.removeAttribute("aria-readonly");
+        hostInput.removeAttribute("title");
+      }
+    }
+
+    if (cloneInput) {
+      if (isEdit) {
+        cloneInput.readOnly = true;
+        cloneInput.classList.add("field-readonly");
+        cloneInput.setAttribute("aria-readonly", "true");
+        cloneInput.title =
+          "CLONE_GUILD_ID cannot be changed after the mapping is created.";
+      } else {
+        cloneInput.readOnly = false;
+        cloneInput.classList.remove("field-readonly");
+        cloneInput.removeAttribute("aria-readonly");
+        cloneInput.removeAttribute("title");
       }
     }
 
@@ -2311,13 +2340,11 @@
     const modal = document.getElementById("mapping-modal");
     if (!modal) return;
 
-    // If it's not showing or not dirty, just close
     if (!modal.classList.contains("show") || !mappingFormIsDirty()) {
       closeMappingModal();
       return;
     }
 
-    // Don't stack confirm dialogs
     if (cModal && cModal.classList.contains("show")) {
       return;
     }
@@ -2346,7 +2373,6 @@
 
       if (el.type === "submit" || el.type === "button") return;
 
-      // Checkboxes / radios (you probably don't have any here, but safe anyway)
       if (el.type === "checkbox" || el.type === "radio") {
         const values = params.getAll(name);
         el.checked = values.includes(el.value);
@@ -2384,7 +2410,6 @@
   });
 
   function maybeCloseFiltersModal() {
-    // If the confirm modal is already open, don't stack another one
     if (cModal && cModal.classList.contains("show")) {
       return;
     }
@@ -3699,7 +3724,6 @@
 
         closeFilterObjectsModal();
 
-        // before checking if it's dirty
         setTimeout(() => {
           updateFiltersDirtyForModal();
         }, 0);
@@ -3745,7 +3769,6 @@
       cancelBtn.addEventListener("click", () => {
         const hidden = document.getElementById("blocked_role_ids");
 
-        // Reset CURRENT_BLOCKED_ROLE_IDS to match what's *actually* blocked
         if (CHIPS.blocked_roles) {
           CURRENT_BLOCKED_ROLE_IDS = new Set(CHIPS.blocked_roles.get());
         } else {
