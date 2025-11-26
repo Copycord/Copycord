@@ -183,7 +183,7 @@ class CloneCommands(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         if not self.allowed_users:
-            logger.warning("[⚠️] No allowed users configured.")
+            logger.warning("[⚠️] No command users configured. Slash commands will not work.")
         else:
             logger.debug(
                 "[⚙️] Commands permissions set for users: %s",
