@@ -327,6 +327,7 @@ Once started, open the web UI in your browser:
 | `CLONE_GUILD_DISCOVERY_SPLASH` | false   | Sync guild discovery splash                                                                    |
 | `SYNC_GUILD_DESCRIPTION`       | false   | Sync guild description                                                                         |
 | `SYNC_FORUM_PROPERTIES`        | false   | Sync forum properties (layout, tags, guidelines, etc.)                                         |
+| `ANONYMIZE_USERS`              | false   | Anonymize user identities with random names (e.g., SwiftFox123) and random avatar images       |
 
 </details>
 

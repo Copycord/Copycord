@@ -200,6 +200,7 @@
     CLONE_GUILD_DISCOVERY_SPLASH: false,
     SYNC_GUILD_DESCRIPTION: false,
     SYNC_FORUM_PROPERTIES: false,
+    ANONYMIZE_USERS: false,
   };
 
   let lastFocusLog = null;
