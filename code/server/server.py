@@ -9472,8 +9472,9 @@ class ServerReceiver:
 
         row = self._bf_pick_mapping_for_target(original_id)
         if not row:
-            logger.warning("[bf] no mapping for channel=%s; cannot rotate", original_id)
-
+            logger.warning(
+                "[bf] no mapping for channel=%s; using live forward", original_id
+            )
             await self.handle_message(data)
             return
 
@@ -9511,29 +9512,12 @@ class ServerReceiver:
             if clone_id and st.get("clone_channel_id") is None:
                 st["clone_channel_id"] = clone_id
 
-        try:
-            if clone_id:
-                await self.backfill.ensure_temps_ready(clone_id)
-        except Exception as e:
-            logger.debug(
-                "[bf] ensure_temps_ready failed | clone=%s err=%s", clone_id, e
-            )
-
-        try:
-            url, _used_pool = await self.backfill.pick_url_for_send(
-                clone_channel_id=clone_id or 0,
-                primary_url=primary_url,
-                create_missing=True,
-            )
-        except Exception as e:
-            logger.warning("[bf] rotation failed, using primary | err=%s", e)
-            url = primary_url
+        url = primary_url
 
         base = dict(data)
         inner = base.pop("message", None)
 
         if isinstance(inner, dict):
-
             OVERWRITE_KEYS = {
                 "content",
                 "embeds",
@@ -9589,7 +9573,9 @@ class ServerReceiver:
 
         row = self._bf_pick_mapping_for_target(parent_id)
         if not row:
-            logger.warning("[bf] no mapping for parent=%s; cannot rotate", parent_id)
+            logger.warning(
+                "[bf] no mapping for parent=%s; using live thread forward", parent_id
+            )
             await self.handle_thread_message(data)
             return
 
@@ -9631,23 +9617,8 @@ class ServerReceiver:
             if clone_id and st.get("clone_channel_id") is None:
                 st["clone_channel_id"] = clone_id
 
-        try:
-            if clone_id:
-                await self.backfill.ensure_temps_ready(clone_id)
-        except Exception as e:
-            logger.debug(
-                "[bf] ensure_temps_ready failed | clone=%s err=%s", clone_id, e
-            )
-
-        try:
-            url, _used_pool = await self.backfill.pick_url_for_send(
-                clone_channel_id=clone_id or 0,
-                primary_url=primary_url,
-                create_missing=True,
-            )
-        except Exception as e:
-            logger.warning("[bf] rotation failed, using primary | err=%s", e)
-            url = primary_url
+        # No temp-webhook rotation anymore — always use the primary webhook
+        url = primary_url
 
         forced = dict(data)
         forced["__backfill__"] = True
@@ -9661,6 +9632,7 @@ class ServerReceiver:
             forced["mapping_id"] = mapping_id_hint
 
         await self.handle_thread_message(forced)
+
 
     def _prune_old_messages_loop(
         self, retention_seconds: int | None = None
