@@ -57,6 +57,7 @@ from server.helpers import (
     _is_image_att,
     _calc_text_len_with_urls,
     _safe_mid,
+    _anonymize_user,
 )
 from server.permission_sync import ChannelPermissionSync
 from server.guild_resolver import GuildResolver
@@ -121,7 +122,6 @@ class _GuildPrefixFilter(logging.Filter):
 logger.addFilter(_GuildPrefixFilter())
 
 logger.setLevel(LEVEL)
-
 
 class ServerReceiver:
     def __init__(self):
@@ -6590,6 +6590,26 @@ class ServerReceiver:
 
         custom_username = msg.get("author") or "Unknown"
         custom_avatar_url = msg.get("avatar_url")
+
+        # Check for user anonymization setting
+        if ctx_mapping_row:
+            orig_gid = ctx_mapping_row.get("original_guild_id")
+            clone_gid = ctx_mapping_row.get("cloned_guild_id")
+            try:
+                mapping_settings = resolve_mapping_settings(
+                    self.db,
+                    self.config,
+                    original_guild_id=int(orig_gid) if orig_gid else None,
+                    cloned_guild_id=int(clone_gid) if clone_gid else None,
+                )
+            except Exception:
+                mapping_settings = {}
+
+            if mapping_settings.get("ANONYMIZE_USERS", False):
+                user_id = msg.get("author_id") or msg.get("user_id") or 0
+                anon_name, anon_avatar = _anonymize_user(user_id)
+                custom_username = anon_name
+                custom_avatar_url = anon_avatar
 
         if target_cloned_channel_id and ctx_mapping_row:
             try:

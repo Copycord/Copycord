@@ -226,6 +226,7 @@ BOOL_KEYS = [
     "CLONE_GUILD_SPLASH",
     "CLONE_GUILD_DISCOVERY_SPLASH",
     "SYNC_GUILD_DESCRIPTION",
+    "ANONYMIZE_USERS",
 ]
 DEFAULTS: Dict[str, Union[bool, str]] = {
     "DELETE_CHANNELS": True,
@@ -259,6 +260,7 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "SYNC_FORUM_PROPERTIES": False,
     "CLONE_STAGE": True,
     "CLONE_STAGE_PROPERTIES": False,
+    "ANONYMIZE_USERS": False,
 }
 
 
