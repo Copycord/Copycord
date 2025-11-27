@@ -120,6 +120,7 @@ class Config:
             "CLONE_GUILD_DISCOVERY_SPLASH": False,
             "SYNC_GUILD_DESCRIPTION": False,
             "SYNC_FORUM_PROPERTIES": False,
+            "ANONYMIZE_USERS": False,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):
