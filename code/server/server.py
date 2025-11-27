@@ -57,6 +57,7 @@ from server.helpers import (
     _is_image_att,
     _calc_text_len_with_urls,
     _safe_mid,
+    _anonymize_user,
 )
 from server.permission_sync import ChannelPermissionSync
 from server.guild_resolver import GuildResolver
@@ -121,53 +122,6 @@ class _GuildPrefixFilter(logging.Filter):
 logger.addFilter(_GuildPrefixFilter())
 
 logger.setLevel(LEVEL)
-
-# =============================================================================
-# User Anonymization
-# =============================================================================
-_ANON_ADJECTIVES = [
-    "Swift", "Brave", "Clever", "Gentle", "Fierce", "Quiet", "Bold", "Calm",
-    "Eager", "Happy", "Jolly", "Kind", "Lucky", "Merry", "Noble", "Proud",
-    "Quick", "Sharp", "Wise", "Zesty", "Amber", "Azure", "Coral", "Crimson",
-    "Golden", "Ivory", "Jade", "Misty", "Rusty", "Silver", "Sunny", "Velvet",
-    "Wild", "Cosmic", "Dreamy", "Frosty", "Glowing", "Hidden", "Lunar", "Mystic",
-    "Nimble", "Radiant", "Shadow", "Stormy", "Thunder", "Vivid", "Wandering", "Zen",
-]
-
-_ANON_NOUNS = [
-    "Fox", "Wolf", "Bear", "Hawk", "Owl", "Deer", "Lynx", "Crow",
-    "Otter", "Raven", "Tiger", "Eagle", "Falcon", "Heron", "Panda", "Viper",
-    "Dragon", "Phoenix", "Griffin", "Sphinx", "Kraken", "Wyrm", "Hydra", "Titan",
-    "Star", "Moon", "Comet", "Nova", "Nebula", "Quasar", "Void", "Storm",
-    "River", "Mountain", "Forest", "Ocean", "Glacier", "Canyon", "Meadow", "Valley",
-    "Knight", "Mage", "Rogue", "Sage", "Scout", "Warden", "Hunter", "Seeker",
-]
-
-
-def _anonymize_user(user_id: int | str) -> tuple[str, str]:
-    """
-    Generate a deterministic anonymous identity for a user.
-
-    Returns:
-        tuple of (anonymized_name, avatar_url)
-        - Name format: [Adjective][Noun][0-999]
-        - Avatar: Random image from picsum.photos (seeded by user_id)
-    """
-    uid = int(user_id) if user_id else 0
-    h = hashlib.sha256(str(uid).encode()).hexdigest()
-
-    adj_idx = int(h[:8], 16) % len(_ANON_ADJECTIVES)
-    noun_idx = int(h[8:16], 16) % len(_ANON_NOUNS)
-    num = int(h[16:24], 16) % 1000
-
-    name = f"{_ANON_ADJECTIVES[adj_idx]}{_ANON_NOUNS[noun_idx]}{num}"
-
-    # Use a seed for picsum to get consistent image per user
-    avatar_seed = int(h[24:32], 16) % 1000000
-    avatar_url = f"https://picsum.photos/seed/{avatar_seed}/200"
-
-    return name, avatar_url
-
 
 class ServerReceiver:
     def __init__(self):
