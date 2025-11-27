@@ -52,7 +52,7 @@ class BackfillManager:
         self._start_locks: dict[int, asyncio.Lock] = {}
         self._global_sync: dict | None = None
         self._temp_prefix_canon = "Copycord"
-        self.temp_webhook_max = 1
+        self.temp_webhook_max = 0
 
     def _cleanup_meta_payload(
         self, cid: int, *, st_override: dict | None = None
@@ -539,11 +539,6 @@ class BackfillManager:
             st["expected_total"],
             prev,
         )
-
-        if st.pop("temps_deferred", False):
-            clone_id = st.get("clone_channel_id")
-            if clone_id is not None:
-                asyncio.create_task(self.ensure_temps_ready(int(clone_id)))
 
     def add_expected_total(self, channel_id: int, delta: int = 1) -> None:
         """Increment expected_total by delta (used for synthetic units like text-thread creations)."""
