@@ -147,7 +147,6 @@ a {
   border-radius: 18px;
   padding: 18px;
   margin-top: 18px;
-  backdrop-filter: blur(8px);
 }
 table {
   width: 100%;
@@ -420,8 +419,7 @@ th {
 .modal-backdrop {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.6);
 }
 .modal-content {
   position: relative;
@@ -1058,8 +1056,7 @@ table.runtime th:nth-child(3) {
 .menu-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.6);
   z-index: 70;
 }
 .side-menu[aria-hidden='true'] {
@@ -1101,8 +1098,7 @@ table.runtime th:nth-child(3) {
 .menu-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.6);
   z-index: 70;
 }
 .side-menu {
@@ -1278,8 +1274,7 @@ body {
   right: 0;
   top: var(--header-h);
   bottom: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(3px);
+  background: rgba(0, 0, 0, 0.6);
   z-index: 70;
   opacity: 0;
   pointer-events: none;
@@ -1310,7 +1305,6 @@ body {
   z-index: 75;
   display: flex;
   flex-direction: column;
-  backdrop-filter: blur(8px);
 }
 .side-menu.is-open {
   transform: translateX(0);
@@ -1888,8 +1882,7 @@ body {
   right: 0;
   top: var(--header-h);
   bottom: 0;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(3px);
+  background: rgba(0, 0, 0, 0.6);
   z-index: 1000;
 }
 .verify-modal {
@@ -1910,7 +1903,6 @@ body {
   display: flex;
   flex-direction: column;
   outline: 0;
-  backdrop-filter: blur(8px);
 }
 .verify-card {
   display: flex;
@@ -2071,9 +2063,6 @@ body {
   background: var(--accent);
   background-color: #1a1030;
   color: var(--text);
-
-  backdrop-filter: blur(6px) saturate(140%);
-  -webkit-backdrop-filter: blur(6px) saturate(140%);
 
   overflow: hidden;
 
@@ -3442,8 +3431,7 @@ body {
 }
 
 .guild-details-modal .modal-backdrop {
-  backdrop-filter: blur(2px) !important;
-  -webkit-backdrop-filter: blur(2px) !important;
+  background: rgba(0, 0, 0, 0.6);
 }
 .guild-card .guild-name {
   display: -webkit-box;
@@ -3800,8 +3788,7 @@ body {
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  background: rgba(0, 0, 0, 0.35);
-  backdrop-filter: saturate(120%) blur(5px);
+  background: rgba(0, 0, 0, 0.6);
 }
 #page-busy .busy-box {
   display: inline-flex;
@@ -4527,8 +4514,7 @@ body {
 .export-modal .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(2px);
+  background: rgba(0, 0, 0, 0.6);
   z-index: 9998;
 }
 
@@ -5886,15 +5872,9 @@ body.is-loading {
   display: grid;
   place-items: center;
 
-  background: transparent;
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.5);
 
-  transition: opacity 0.24s ease-in-out, backdrop-filter 0.4s ease-in-out,
-    -webkit-backdrop-filter 0.4s ease-in-out;
-
-  will-change: opacity, backdrop-filter;
-  transform: translateZ(0);
+  transition: opacity 0.24s ease-in-out;
 
   opacity: 1;
   pointer-events: all;
@@ -5932,8 +5912,6 @@ body.is-loading {
 
 .app-loader.is-hiding {
   opacity: 0;
-  backdrop-filter: blur(0);
-  -webkit-backdrop-filter: blur(0);
   pointer-events: none;
 }
 .app-loader.is-hiding .app-loader__text {
@@ -7637,8 +7615,6 @@ body.login-page {
   border-radius: 14px;
   background: var(--card);
   border: 1px solid var(--border);
-
-  backdrop-filter: blur(14px);
 
   box-shadow: 0 18px 30px rgba(0, 0, 0, 0.55);
   color: var(--text);
