@@ -6611,6 +6611,26 @@ class ServerReceiver:
                 custom_username = anon_name
                 custom_avatar_url = anon_avatar
 
+            if mapping_settings.get("DISABLE_EVERYONE_MENTIONS", False):
+                # Escape @everyone and @here with zero-width space to prevent mentions
+                text = text.replace("@everyone", "@\u200beveryone")
+                text = text.replace("@here", "@\u200bhere")
+                # Also filter embeds
+                for e in embeds:
+                    if getattr(e, "description", None):
+                        e.description = e.description.replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere")
+                    if getattr(e, "title", None):
+                        e.title = e.title.replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere")
+                    if getattr(e, "footer", None) and getattr(e.footer, "text", None):
+                        e.footer.text = e.footer.text.replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere")
+                    if getattr(e, "author", None) and getattr(e.author, "name", None):
+                        e.author.name = e.author.name.replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere")
+                    for f in getattr(e, "fields", []) or []:
+                        if getattr(f, "name", None):
+                            f.name = f.name.replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere")
+                        if getattr(f, "value", None):
+                            f.value = f.value.replace("@everyone", "@\u200beveryone").replace("@here", "@\u200bhere")
+
         if target_cloned_channel_id and ctx_mapping_row:
             try:
                 clone_gid = int(ctx_mapping_row.get("cloned_guild_id") or 0)

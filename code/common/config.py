@@ -121,6 +121,7 @@ class Config:
             "SYNC_GUILD_DESCRIPTION": False,
             "SYNC_FORUM_PROPERTIES": False,
             "ANONYMIZE_USERS": False,
+            "DISABLE_EVERYONE_MENTIONS": False,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):
