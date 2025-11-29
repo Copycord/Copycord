@@ -577,7 +577,12 @@
     return tooltipEl;
   }
 
-  function showTooltip(x, y) {
+  let lastTooltipUpdate = 0;
+  function showTooltip(x, y, force) {
+    const now = Date.now();
+    if (!force && now - lastTooltipUpdate < 50) return;
+    lastTooltipUpdate = now;
+
     const tip = ensureTooltipEl();
 
     const offsetY = 16;
@@ -614,11 +619,11 @@
     overlay.addEventListener("touchend", kill);
 
     overlay.addEventListener("mouseenter", (e) => {
-      showTooltip(e.clientX, e.clientY);
+      showTooltip(e.clientX, e.clientY, true);
     });
 
     overlay.addEventListener("mousemove", (e) => {
-      showTooltip(e.clientX, e.clientY);
+      showTooltip(e.clientX, e.clientY, false);
     });
 
     overlay.addEventListener("mouseleave", () => {

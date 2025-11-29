@@ -68,7 +68,7 @@
 
     await waitForTransitions(
       loader,
-      ["opacity", "backdrop-filter", "-webkit-backdrop-filter"],
+      ["opacity",],
       800
     );
 
