@@ -301,15 +301,15 @@ Once started, open the web UI in your browser:
 | `ENABLE_CLONING`               | true    | Master switch for cloning                                                                      |
 | `CLONE_MESSAGES`               | true    | Clone messages in real-time                                                                    |
 | `DELETE_CHANNELS`              | true    | Delete channels/categories removed in the host                                                 |
-| `DELETE_THREADS`              | true    | Delete threads removed in the host                                                             |
+| `DELETE_THREADS`               | true    | Delete threads removed in the host                                                             |
 | `DELETE_ROLES`                 | true    | Delete roles that no longer exist in the host                                                  |
-| `UPDATE_ROLES`                | true    | Allow updating role properties after creation                                                  |
-| `DELETE_MESSAGES`             | true    | Delete cloned messages when the host message is deleted                                        |
+| `UPDATE_ROLES`                 | true    | Allow updating role properties after creation                                                  |
+| `DELETE_MESSAGES`              | true    | Delete cloned messages when the host message is deleted                                        |
 | `MIRROR_CHANNEL_PERMISSIONS`   | false   | Mirror channel permissions from the host                                                       |
 | `CLONE_ROLES`                  | true    | Clone roles                                                                                    |
 | `CLONE_EMOJI`                  | true    | Clone emojis                                                                                   |
 | `CLONE_STICKER`                | true    | Clone stickers                                                                                 |
-| `EDIT_MESSAGES`               | true    | Edit cloned messages when host messages are edited                                             |
+| `EDIT_MESSAGES`                | true    | Edit cloned messages when host messages are edited                                             |
 | `MIRROR_ROLE_PERMISSIONS`      | false   | Mirror role permissions                                                                        |
 | `REPOSITION_CHANNELS`          | true    | Sync channel order                                                                             |
 | `RENAME_CHANNELS`              | true    | Sync channel renames                                                                           |
@@ -328,6 +328,7 @@ Once started, open the web UI in your browser:
 | `SYNC_GUILD_DESCRIPTION`       | false   | Sync guild description                                                                         |
 | `SYNC_FORUM_PROPERTIES`        | false   | Sync forum properties (layout, tags, guidelines, etc.)                                         |
 | `ANONYMIZE_USERS`              | false   | Anonymize user identities with random names (e.g., SwiftFox123) and random avatar images       |
+| `DISABLE_EVERYONE_MENTIONS`    | false   | Strip @everyone and @here mentions from mirrored messages                                      |
 
 </details>
 
