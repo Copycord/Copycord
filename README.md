@@ -328,7 +328,7 @@ Once started, open the web UI in your browser:
 | `SYNC_GUILD_DESCRIPTION`       | false   | Sync guild description                                                                         |
 | `SYNC_FORUM_PROPERTIES`        | false   | Sync forum properties (layout, tags, guidelines, etc.)                                         |
 | `ANONYMIZE_USERS`              | false   | Anonymize user identities with random names (e.g., SwiftFox123) and random avatar images       |
-| `DISABLE_EVERYONE_MENTIONS`    | false   | Strip @everyone and @here mentions from mirrored messages                                      |
+| `DISABLE_EVERYONE_MENTIONS`    | false   | Disable @everyone and @here mentions in mirrored messages                                      |
 
 </details>
 
