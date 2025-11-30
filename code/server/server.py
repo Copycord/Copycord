@@ -6349,11 +6349,17 @@ class ServerReceiver:
         """
         If a role mention doesn't resolve in the clone guild, replace <@&id> with
         a plain-text '@RoleName' so it doesn't show up as @unknown-role.
+
+        Uses client-provided role_mentions (original ids + names) plus the DB
+        mapping (original -> cloned) so we can handle:
+        - messages that still contain original ids
+        - messages that have been remapped to cloned ids, even if the cloned role
+            was later deleted from the clone guild
         """
         if not content or not role_mentions or not cloned_guild_id:
             return content
 
-        id_to_name: dict[int, str] = {}
+        orig_id_to_name: dict[int, str] = {}
         for item in role_mentions:
             if not isinstance(item, dict):
                 continue
@@ -6365,10 +6371,44 @@ class ServerReceiver:
                 continue
             if not rid or not name:
                 continue
-            id_to_name[rid] = name
+            orig_id_to_name[rid] = name
 
-        if not id_to_name:
+        if not orig_id_to_name:
             return content
+
+        cloned_id_to_name: dict[int, str] = {}
+
+        for orig_id, name in orig_id_to_name.items():
+            row = None
+            try:
+                row = self.db.get_role_mapping_for_clone(
+                    original_id=orig_id,
+                    cloned_guild_id=int(cloned_guild_id),
+                )
+            except Exception:
+                row = None
+
+            if row is None:
+                try:
+                    row = self.db.get_role_mapping(orig_id)
+                except Exception:
+                    row = None
+
+            if not row:
+                continue
+
+            if not isinstance(row, dict):
+                try:
+                    row = {k: row[k] for k in row.keys()}
+                except Exception:
+                    continue
+
+            try:
+                cloned_id = int(row.get("cloned_role_id") or orig_id)
+            except Exception:
+                cloned_id = orig_id
+
+            cloned_id_to_name[cloned_id] = name
 
         valid_ids: set[int] = set()
         try:
@@ -6376,13 +6416,11 @@ class ServerReceiver:
         except Exception:
             g = None
 
-        if g is None:
-            return content
-
-        try:
-            valid_ids = {r.id for r in getattr(g, "roles", [])}
-        except Exception:
-            valid_ids = set()
+        if g is not None:
+            try:
+                valid_ids = {r.id for r in getattr(g, "roles", [])}
+            except Exception:
+                valid_ids = set()
 
         _m_role = re.compile(r"<@&(?P<id>\d+)>")
 
@@ -6397,7 +6435,7 @@ class ServerReceiver:
             if rid in valid_ids:
                 return full
 
-            name = id_to_name.get(rid)
+            name = cloned_id_to_name.get(rid) or orig_id_to_name.get(rid)
             if not name:
                 return full
 
