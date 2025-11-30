@@ -217,10 +217,11 @@ If enabled, you’ll receive a direct message with the new member’s details wh
 > These two options are **mutually exclusive**.
 
 **Usage Examples:**
-```text
+```
 /purge_assets roles confirm
 /purge_assets emojis confirm unmapped_only:true
 /purge_assets stickers confirm cloned_only:true
+```
 
 > **Note:** Make sure the copycord role is positioned at the top to remove roles.
 
