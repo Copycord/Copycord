@@ -1130,7 +1130,6 @@ class ClientListener:
         )
 
         stickers_payload = self.msg.stickers_payload(getattr(src_msg, "stickers", []))
-        stickers_payload = self.msg.stickers_payload(getattr(src_msg, "stickers", []))
         
         role_mentions = self.msg._build_role_mentions_payload(src_msg)
 
