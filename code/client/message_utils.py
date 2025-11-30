@@ -244,6 +244,17 @@ class MessageUtils:
 
         return data
 
+    def _build_role_mentions_payload(self, src_msg: discord.Message) -> list[dict]:
+        roles = getattr(src_msg, "role_mentions", None) or []
+        out: list[dict] = []
+        for r in roles:
+            rid = getattr(r, "id", None)
+            name = getattr(r, "name", None)
+            if not rid or not name:
+                continue
+            out.append({"id": int(rid), "name": str(name)})
+        return out
+
 
 class Snapshot:
     """All snapshot-related helpers, shims, and the REST fallback."""

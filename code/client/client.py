@@ -1130,7 +1130,8 @@ class ClientListener:
         )
 
         stickers_payload = self.msg.stickers_payload(getattr(src_msg, "stickers", []))
-        stickers_payload = self.msg.stickers_payload(getattr(src_msg, "stickers", []))
+        
+        role_mentions = self.msg._build_role_mentions_payload(src_msg)
 
         data_block = {
             "guild_id": getattr(target_guild, "id", None),
@@ -1152,6 +1153,9 @@ class ClientListener:
             "stickers": stickers_payload,
             "embeds": embeds,
         }
+        
+        if role_mentions:
+            data_block["role_mentions"] = role_mentions
 
         if is_thread:
             parent = getattr(target_chan, "parent", None)
@@ -1262,6 +1266,8 @@ class ClientListener:
                     row["components"].append(child_data)
                 components.append(row)
 
+        role_mentions = self.msg._build_role_mentions_payload(after)
+
         is_thread = after.channel.type in (
             ChannelType.public_thread,
             ChannelType.private_thread,
@@ -1301,6 +1307,10 @@ class ClientListener:
                 ),
             },
         }
+        
+        if role_mentions:
+            payload["data"]["role_mentions"] = role_mentions
+            
         await self.ws.send(payload)
         logger.info(
             "[✏️] Forwarding message edit from %s #%s edited by %s",
@@ -1378,6 +1388,7 @@ class ClientListener:
                 self.msg.sanitize_embed_dict(e, msg, mention_map) for e in raw_embeds
             ]
             content = self.msg.sanitize_inline(msg.content or "", msg, mention_map)
+            
 
             author_obj = getattr(msg, "author", None)
             author = getattr(author_obj, "name", None)
@@ -1404,6 +1415,10 @@ class ClientListener:
                 )
 
             timestamp = data.get("edited_timestamp") or data.get("timestamp")
+            
+        role_mentions = []
+        if msg is not None:
+            role_mentions = self.msg._build_role_mentions_payload(msg)
 
         is_thread = getattr(channel, "type", None) in (
             discord.ChannelType.public_thread,
@@ -1440,6 +1455,9 @@ class ClientListener:
                 ),
             },
         }
+        
+        if role_mentions:
+            out["data"]["role_mentions"] = role_mentions
 
         await self.ws.send(out)
 
