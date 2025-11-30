@@ -6538,314 +6538,363 @@ class ServerReceiver:
             return []
 
     def _build_webhook_payload(
-            self,
-            msg: Dict,
-            *,
-            ctx_guild_id: int | None = None,
-            ctx_mapping_row: dict | None = None,
-            prepend_roles: list[int] | None = None,
-            target_cloned_channel_id: int | None = None,
-        ) -> dict:
-            """
-            Constructs a webhook payload from a given message dictionary.
-            """
+        self,
+        msg: Dict,
+        *,
+        ctx_guild_id: int | None = None,
+        ctx_mapping_row: dict | None = None,
+        prepend_roles: list[int] | None = None,
+        target_cloned_channel_id: int | None = None,
+    ) -> dict:
+        """
+        Constructs a webhook payload from a given message dictionary.
+        """
 
-            cloned_guild_id_for_mentions: int | None = None
-            if target_cloned_channel_id is not None:
+        cloned_guild_id_for_mentions: int | None = None
+        if target_cloned_channel_id is not None:
+            try:
+                ch = self.bot.get_channel(int(target_cloned_channel_id))
+            except Exception:
+                ch = None
+            if ch is not None and getattr(ch, "guild", None) is not None:
                 try:
-                    ch = self.bot.get_channel(int(target_cloned_channel_id))
+                    cloned_guild_id_for_mentions = int(ch.guild.id)
                 except Exception:
-                    ch = None
-                if ch is not None and getattr(ch, "guild", None) is not None:
+                    cloned_guild_id_for_mentions = None
+
+        role_mentions_meta = msg.get("role_mentions") or []
+
+        orig_id_to_name: dict[int, str] | None = None
+        cloned_id_to_name: dict[int, str] | None = None
+        valid_role_ids: set[int] | None = None
+        live_role_names: dict[int, str] | None = None
+
+        if role_mentions_meta and cloned_guild_id_for_mentions:
+            tmp_orig: dict[int, str] = {}
+
+            for item in role_mentions_meta:
+                if not isinstance(item, dict):
+                    continue
+                raw_id = item.get("id")
+                name = (item.get("name") or "").strip()
+                try:
+                    rid = int(raw_id)
+                except Exception:
+                    continue
+                if not rid or not name:
+                    continue
+                tmp_orig[rid] = name
+
+            if tmp_orig:
+                orig_id_to_name = tmp_orig
+                tmp_cloned: dict[int, str] = {}
+
+                for orig_id, name in tmp_orig.items():
+                    row = None
                     try:
-                        cloned_guild_id_for_mentions = int(ch.guild.id)
+                        row = self.db.get_role_mapping_for_clone(
+                            original_id=orig_id,
+                            cloned_guild_id=int(cloned_guild_id_for_mentions),
+                        )
                     except Exception:
-                        cloned_guild_id_for_mentions = None
-
-            role_mentions_meta = msg.get("role_mentions") or []
-
-            orig_id_to_name: dict[int, str] | None = None
-            cloned_id_to_name: dict[int, str] | None = None
-            valid_role_ids: set[int] | None = None
-
-            if role_mentions_meta and cloned_guild_id_for_mentions:
-                tmp_orig: dict[int, str] = {}
-
-                for item in role_mentions_meta:
-                    if not isinstance(item, dict):
-                        continue
-                    raw_id = item.get("id")
-                    name = (item.get("name") or "").strip()
-                    try:
-                        rid = int(raw_id)
-                    except Exception:
-                        continue
-                    if not rid or not name:
-                        continue
-                    tmp_orig[rid] = name
-
-                if tmp_orig:
-                    orig_id_to_name = tmp_orig
-                    tmp_cloned: dict[int, str] = {}
-
-                    for orig_id, name in tmp_orig.items():
                         row = None
+
+                    if row is None:
                         try:
-                            row = self.db.get_role_mapping_for_clone(
-                                original_id=orig_id,
-                                cloned_guild_id=int(cloned_guild_id_for_mentions),
-                            )
+                            row = self.db.get_role_mapping(orig_id)
                         except Exception:
                             row = None
 
-                        if row is None:
-                            try:
-                                row = self.db.get_role_mapping(orig_id)
-                            except Exception:
-                                row = None
+                    if not row:
+                        continue
 
-                        if not row:
+                    if not isinstance(row, dict):
+                        try:
+                            row = {k: row[k] for k in row.keys()}
+                        except Exception:
                             continue
 
-                        if not isinstance(row, dict):
-                            try:
-                                row = {k: row[k] for k in row.keys()}
-                            except Exception:
-                                continue
-
-                        try:
-                            cloned_id = int(row.get("cloned_role_id") or orig_id)
-                        except Exception:
-                            cloned_id = orig_id
-
-                        tmp_cloned[cloned_id] = name
-
-                    cloned_id_to_name = tmp_cloned
-
                     try:
-                        g = self.bot.get_guild(int(cloned_guild_id_for_mentions))
+                        cloned_id = int(row.get("cloned_role_id") or orig_id)
                     except Exception:
-                        g = None
+                        cloned_id = orig_id
 
-                    if g is not None:
-                        try:
-                            valid_role_ids = {r.id for r in getattr(g, "roles", [])}
-                        except Exception:
-                            valid_role_ids = set()
-                    else:
+                    tmp_cloned[cloned_id] = name
+
+                cloned_id_to_name = tmp_cloned
+
+                try:
+                    g = self.bot.get_guild(int(cloned_guild_id_for_mentions))
+                except Exception:
+                    g = None
+
+                if g is not None:
+                    try:
+                        roles = list(getattr(g, "roles", []) or [])
+                        valid_role_ids = {r.id for r in roles}
+                        live_role_names = {r.id: r.name for r in roles}
+                    except Exception:
                         valid_role_ids = set()
+                        live_role_names = {}
+                else:
+                    valid_role_ids = set()
+                    live_role_names = {}
 
-            text = self._sanitize_inline(
-                msg.get("content", "") or "",
-                ctx_guild_id=ctx_guild_id,
-                ctx_mapping_row=ctx_mapping_row,
+        text = self._sanitize_inline(
+            msg.get("content", "") or "",
+            ctx_guild_id=ctx_guild_id,
+            ctx_mapping_row=ctx_mapping_row,
+        )
+
+        if orig_id_to_name:
+            text = self._fallback_unknown_role_mentions(
+                text,
+                orig_id_to_name=orig_id_to_name,
+                cloned_id_to_name=cloned_id_to_name,
+                valid_ids=valid_role_ids,
             )
 
-            if orig_id_to_name:
-                text = self._fallback_unknown_role_mentions(
-                    text,
-                    orig_id_to_name=orig_id_to_name,
-                    cloned_id_to_name=cloned_id_to_name,
-                    valid_ids=valid_role_ids,
+        if prepend_roles and not msg.get("__backfill__"):
+            role_mentions = " ".join(f"<@&{rid}>" for rid in prepend_roles)
+            if text:
+                text = f"{role_mentions}\n{text}"
+            else:
+                text = role_mentions
+
+        for att in msg.get("attachments", []) or []:
+            url = att.get("url")
+            if url and url not in text:
+                text += f"\n{url}"
+
+        raw_embeds = msg.get("embeds", []) or []
+        embeds: list[Embed] = []
+
+        for raw in raw_embeds:
+            if isinstance(raw, dict):
+                e_type = raw.get("type")
+                page_url = raw.get("url")
+                if e_type in ("gifv", "video", "image") and page_url:
+                    if page_url not in text:
+                        text += f"\n{page_url}"
+                    continue
+                try:
+                    embeds.append(Embed.from_dict(raw))
+                except Exception as e:
+                    logger.warning("[⚠️] Could not convert embed dict to Embed: %s", e)
+            elif isinstance(raw, Embed):
+                embeds.append(raw)
+
+        for e in embeds:
+            if getattr(e, "description", None):
+                e.description = self._sanitize_inline(
+                    e.description,
+                    ctx_guild_id=ctx_guild_id,
+                    ctx_mapping_row=ctx_mapping_row,
                 )
-
-            if prepend_roles and not msg.get("__backfill__"):
-                role_mentions = " ".join(f"<@&{rid}>" for rid in prepend_roles)
-                if text:
-                    text = f"{role_mentions}\n{text}"
-                else:
-                    text = role_mentions
-
-            for att in msg.get("attachments", []) or []:
-                url = att.get("url")
-                if url and url not in text:
-                    text += f"\n{url}"
-
-            raw_embeds = msg.get("embeds", []) or []
-            embeds: list[Embed] = []
-
-            for raw in raw_embeds:
-                if isinstance(raw, dict):
-                    e_type = raw.get("type")
-                    page_url = raw.get("url")
-                    if e_type in ("gifv", "video", "image") and page_url:
-                        if page_url not in text:
-                            text += f"\n{page_url}"
-                        continue
-                    try:
-                        embeds.append(Embed.from_dict(raw))
-                    except Exception as e:
-                        logger.warning("[⚠️] Could not convert embed dict to Embed: %s", e)
-                elif isinstance(raw, Embed):
-                    embeds.append(raw)
-
-            for e in embeds:
-                if getattr(e, "description", None):
-                    e.description = self._sanitize_inline(
+                if orig_id_to_name:
+                    e.description = self._fallback_unknown_role_mentions(
                         e.description,
-                        ctx_guild_id=ctx_guild_id,
-                        ctx_mapping_row=ctx_mapping_row,
+                        orig_id_to_name=orig_id_to_name,
+                        cloned_id_to_name=cloned_id_to_name,
+                        valid_ids=valid_role_ids,
                     )
-                    if orig_id_to_name:
-                        e.description = self._fallback_unknown_role_mentions(
-                            e.description,
-                            orig_id_to_name=orig_id_to_name,
-                            cloned_id_to_name=cloned_id_to_name,
-                            valid_ids=valid_role_ids,
-                        )
 
-                if getattr(e, "title", None):
-                    e.title = self._sanitize_inline(
+            if getattr(e, "title", None):
+                e.title = self._sanitize_inline(
+                    e.title,
+                    ctx_guild_id=ctx_guild_id,
+                    ctx_mapping_row=ctx_mapping_row,
+                )
+                if orig_id_to_name:
+                    e.title = self._fallback_unknown_role_mentions(
                         e.title,
-                        ctx_guild_id=ctx_guild_id,
-                        ctx_mapping_row=ctx_mapping_row,
+                        orig_id_to_name=orig_id_to_name,
+                        cloned_id_to_name=cloned_id_to_name,
+                        valid_ids=valid_role_ids,
                     )
-                    if orig_id_to_name:
-                        e.title = self._fallback_unknown_role_mentions(
-                            e.title,
-                            orig_id_to_name=orig_id_to_name,
-                            cloned_id_to_name=cloned_id_to_name,
-                            valid_ids=valid_role_ids,
-                        )
 
-                if getattr(e, "footer", None) and getattr(e.footer, "text", None):
-                    e.footer.text = self._sanitize_inline(
+            if getattr(e, "footer", None) and getattr(e.footer, "text", None):
+                e.footer.text = self._sanitize_inline(
+                    e.footer.text,
+                    ctx_guild_id=ctx_guild_id,
+                    ctx_mapping_row=ctx_mapping_row,
+                )
+                if orig_id_to_name:
+                    e.footer.text = self._fallback_unknown_role_mentions(
                         e.footer.text,
-                        ctx_guild_id=ctx_guild_id,
-                        ctx_mapping_row=ctx_mapping_row,
+                        orig_id_to_name=orig_id_to_name,
+                        cloned_id_to_name=cloned_id_to_name,
+                        valid_ids=valid_role_ids,
                     )
-                    if orig_id_to_name:
-                        e.footer.text = self._fallback_unknown_role_mentions(
-                            e.footer.text,
-                            orig_id_to_name=orig_id_to_name,
-                            cloned_id_to_name=cloned_id_to_name,
-                            valid_ids=valid_role_ids,
-                        )
 
-                if getattr(e, "author", None) and getattr(e.author, "name", None):
-                    e.author.name = self._sanitize_inline(
+            if getattr(e, "author", None) and getattr(e.author, "name", None):
+                e.author.name = self._sanitize_inline(
+                    e.author.name,
+                    ctx_guild_id=ctx_guild_id,
+                    ctx_mapping_row=ctx_mapping_row,
+                )
+                if orig_id_to_name:
+                    e.author.name = self._fallback_unknown_role_mentions(
                         e.author.name,
+                        orig_id_to_name=orig_id_to_name,
+                        cloned_id_to_name=cloned_id_to_name,
+                        valid_ids=valid_role_ids,
+                    )
+
+            for f in getattr(e, "fields", []) or []:
+                if getattr(f, "name", None):
+                    f.name = self._sanitize_inline(
+                        f.name,
                         ctx_guild_id=ctx_guild_id,
                         ctx_mapping_row=ctx_mapping_row,
                     )
                     if orig_id_to_name:
-                        e.author.name = self._fallback_unknown_role_mentions(
-                            e.author.name,
+                        f.name = self._fallback_unknown_role_mentions(
+                            f.name,
+                            orig_id_to_name=orig_id_to_name,
+                            cloned_id_to_name=cloned_id_to_name,
+                            valid_ids=valid_role_ids,
+                        )
+                if getattr(f, "value", None):
+                    f.value = self._sanitize_inline(
+                        f.value,
+                        ctx_guild_id=ctx_guild_id,
+                        ctx_mapping_row=ctx_mapping_row,
+                    )
+                    if orig_id_to_name:
+                        f.value = self._fallback_unknown_role_mentions(
+                            f.value,
                             orig_id_to_name=orig_id_to_name,
                             cloned_id_to_name=cloned_id_to_name,
                             valid_ids=valid_role_ids,
                         )
 
-                for f in getattr(e, "fields", []) or []:
-                    if getattr(f, "name", None):
-                        f.name = self._sanitize_inline(
-                            f.name,
-                            ctx_guild_id=ctx_guild_id,
-                            ctx_mapping_row=ctx_mapping_row,
-                        )
-                        if orig_id_to_name:
-                            f.name = self._fallback_unknown_role_mentions(
-                                f.name,
-                                orig_id_to_name=orig_id_to_name,
-                                cloned_id_to_name=cloned_id_to_name,
-                                valid_ids=valid_role_ids,
-                            )
-                    if getattr(f, "value", None):
-                        f.value = self._sanitize_inline(
-                            f.value,
-                            ctx_guild_id=ctx_guild_id,
-                            ctx_mapping_row=ctx_mapping_row,
-                        )
-                        if orig_id_to_name:
-                            f.value = self._fallback_unknown_role_mentions(
-                                f.value,
-                                orig_id_to_name=orig_id_to_name,
-                                cloned_id_to_name=cloned_id_to_name,
-                                valid_ids=valid_role_ids,
-                            )
+        custom_username = msg.get("author") or "Unknown"
+        custom_avatar_url = msg.get("avatar_url")
 
-            custom_username = msg.get("author") or "Unknown"
-            custom_avatar_url = msg.get("avatar_url")
+        disable_role_mentions = False
 
-            if ctx_mapping_row:
-                orig_gid = ctx_mapping_row.get("original_guild_id")
-                clone_gid = ctx_mapping_row.get("cloned_guild_id")
-                try:
-                    mapping_settings = resolve_mapping_settings(
-                        self.db,
-                        self.config,
-                        original_guild_id=int(orig_gid) if orig_gid else None,
-                        cloned_guild_id=int(clone_gid) if clone_gid else None,
+        if ctx_mapping_row:
+            orig_gid = ctx_mapping_row.get("original_guild_id")
+            clone_gid = ctx_mapping_row.get("cloned_guild_id")
+            try:
+                mapping_settings = resolve_mapping_settings(
+                    self.db,
+                    self.config,
+                    original_guild_id=int(orig_gid) if orig_gid else None,
+                    cloned_guild_id=int(clone_gid) if clone_gid else None,
+                )
+            except Exception:
+                mapping_settings = {}
+
+            if mapping_settings.get("ANONYMIZE_USERS", False):
+                user_id = msg.get("author_id") or msg.get("user_id") or 0
+                anon_name, anon_avatar = _anonymize_user(user_id)
+                custom_username = anon_name
+                custom_avatar_url = anon_avatar
+
+            disable_role_mentions = mapping_settings.get("DISABLE_ROLE_MENTIONS", False)
+
+            if disable_role_mentions and orig_id_to_name:
+
+                def _strip_role_mentions(content: str | None) -> str | None:
+                    if not content:
+                        return content
+
+                    def repl(m: re.Match) -> str:
+                        raw_id = m.group("id")
+                        try:
+                            rid = int(raw_id)
+                        except Exception:
+                            return m.group(0)
+
+                        name = (
+                            (cloned_id_to_name or {}).get(rid)
+                            or (orig_id_to_name or {}).get(rid)
+                            or (live_role_names or {}).get(rid)
+                        )
+                        if not name:
+                            return m.group(0)
+                        return f"@{name}"
+
+                    return re.sub(r"<@&(?P<id>\d+)>", repl, content)
+
+                text = _strip_role_mentions(text)
+
+                for e in embeds:
+                    if getattr(e, "description", None):
+                        e.description = _strip_role_mentions(e.description)
+                    if getattr(e, "title", None):
+                        e.title = _strip_role_mentions(e.title)
+                    if getattr(e, "footer", None) and getattr(e.footer, "text", None):
+                        e.footer.text = _strip_role_mentions(e.footer.text)
+                    if getattr(e, "author", None) and getattr(e.author, "name", None):
+                        e.author.name = _strip_role_mentions(e.author.name)
+                    for f in getattr(e, "fields", []) or []:
+                        if getattr(f, "name", None):
+                            f.name = _strip_role_mentions(f.name)
+                        if getattr(f, "value", None):
+                            f.value = _strip_role_mentions(f.value)
+
+            if mapping_settings.get("DISABLE_EVERYONE_MENTIONS", False):
+
+                text = text.replace("@everyone", "@\u200beveryone")
+                text = text.replace("@here", "@\u200bhere")
+
+                for e in embeds:
+                    if getattr(e, "description", None):
+                        e.description = e.description.replace(
+                            "@everyone", "@\u200beveryone"
+                        ).replace("@here", "@\u200bhere")
+                    if getattr(e, "title", None):
+                        e.title = e.title.replace(
+                            "@everyone", "@\u200beveryone"
+                        ).replace("@here", "@\u200bhere")
+                    if getattr(e, "footer", None) and getattr(e.footer, "text", None):
+                        e.footer.text = e.footer.text.replace(
+                            "@everyone", "@\u200beveryone"
+                        ).replace("@here", "@\u200bhere")
+                    if getattr(e, "author", None) and getattr(e.author, "name", None):
+                        e.author.name = e.author.name.replace(
+                            "@everyone", "@\u200beveryone"
+                        ).replace("@here", "@\u200bhere")
+                    for f in getattr(e, "fields", []) or []:
+                        if getattr(f, "name", None):
+                            f.name = f.name.replace(
+                                "@everyone", "@\u200beveryone"
+                            ).replace("@here", "@\u200bhere")
+                        if getattr(f, "value", None):
+                            f.value = f.value.replace(
+                                "@everyone", "@\u200beveryone"
+                            ).replace("@here", "@\u200bhere")
+
+        if target_cloned_channel_id and ctx_mapping_row:
+            try:
+                clone_gid = int(ctx_mapping_row.get("cloned_guild_id") or 0)
+                if clone_gid:
+                    profile = self.db.get_channel_webhook_profile(
+                        cloned_channel_id=int(target_cloned_channel_id),
+                        cloned_guild_id=clone_gid,
                     )
-                except Exception:
-                    mapping_settings = {}
+                    if profile:
+                        if profile.get("webhook_name"):
+                            custom_username = profile["webhook_name"]
+                        if profile.get("webhook_avatar_url"):
+                            custom_avatar_url = profile["webhook_avatar_url"]
+            except Exception:
+                logger.debug("Failed to fetch channel webhook profile", exc_info=True)
 
-                if mapping_settings.get("ANONYMIZE_USERS", False):
-                    user_id = msg.get("author_id") or msg.get("user_id") or 0
-                    anon_name, anon_avatar = _anonymize_user(user_id)
-                    custom_username = anon_name
-                    custom_avatar_url = anon_avatar
+        base = {
+            "username": custom_username,
+            "avatar_url": custom_avatar_url,
+        }
 
-                if mapping_settings.get("DISABLE_EVERYONE_MENTIONS", False):
+        if len(text) > 2000:
+            long_embed = Embed(description=text[:4096])
+            return {**base, "content": None, "embeds": [long_embed] + embeds}
 
-                    text = text.replace("@everyone", "@\u200beveryone")
-                    text = text.replace("@here", "@\u200bhere")
-
-                    for e in embeds:
-                        if getattr(e, "description", None):
-                            e.description = e.description.replace(
-                                "@everyone", "@\u200beveryone"
-                            ).replace("@here", "@\u200bhere")
-                        if getattr(e, "title", None):
-                            e.title = e.title.replace(
-                                "@everyone", "@\u200beveryone"
-                            ).replace("@here", "@\u200bhere")
-                        if getattr(e, "footer", None) and getattr(e.footer, "text", None):
-                            e.footer.text = e.footer.text.replace(
-                                "@everyone", "@\u200beveryone"
-                            ).replace("@here", "@\u200bhere")
-                        if getattr(e, "author", None) and getattr(e.author, "name", None):
-                            e.author.name = e.author.name.replace(
-                                "@everyone", "@\u200beveryone"
-                            ).replace("@here", "@\u200bhere")
-                        for f in getattr(e, "fields", []) or []:
-                            if getattr(f, "name", None):
-                                f.name = f.name.replace(
-                                    "@everyone", "@\u200beveryone"
-                                ).replace("@here", "@\u200bhere")
-                            if getattr(f, "value", None):
-                                f.value = f.value.replace(
-                                    "@everyone", "@\u200beveryone"
-                                ).replace("@here", "@\u200bhere")
-
-            if target_cloned_channel_id and ctx_mapping_row:
-                try:
-                    clone_gid = int(ctx_mapping_row.get("cloned_guild_id") or 0)
-                    if clone_gid:
-                        profile = self.db.get_channel_webhook_profile(
-                            cloned_channel_id=int(target_cloned_channel_id),
-                            cloned_guild_id=clone_gid,
-                        )
-                        if profile:
-                            if profile.get("webhook_name"):
-                                custom_username = profile["webhook_name"]
-                            if profile.get("webhook_avatar_url"):
-                                custom_avatar_url = profile["webhook_avatar_url"]
-                except Exception:
-                    logger.debug("Failed to fetch channel webhook profile", exc_info=True)
-
-            base = {
-                "username": custom_username,
-                "avatar_url": custom_avatar_url,
-            }
-
-            if len(text) > 2000:
-                long_embed = Embed(description=text[:4096])
-                return {**base, "content": None, "embeds": [long_embed] + embeds}
-
-            payload = {**base, "content": (text or None), "embeds": embeds}
-            return payload
-
+        payload = {**base, "content": (text or None), "embeds": embeds}
+        return payload
 
     def _log_tag(self, data: dict) -> str:
         """

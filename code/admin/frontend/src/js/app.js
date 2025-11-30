@@ -202,6 +202,7 @@
     SYNC_FORUM_PROPERTIES: false,
     ANONYMIZE_USERS: false,
     DISABLE_EVERYONE_MENTIONS: false,
+    DISABLE_ROLE_MENTIONS: false,
   };
 
   let lastFocusLog = null;
