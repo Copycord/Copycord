@@ -196,6 +196,7 @@ class ServerReceiver:
         self._task_display_id: dict[int, str] = {}
         self._bf_delay = 2.0
         orig_on_connect = self.bot.on_connect
+        self._M_ROLE = re.compile(r"<@&(?P<id>\d+)>")
         self.onclonejoin = OnCloneJoin(self.bot, self.db)
         self.bus = AdminBus(
             role="server", logger=logger, admin_ws_url=self.config.ADMIN_WS_URL
@@ -6301,7 +6302,6 @@ class ServerReceiver:
         """
         Rewrite <@&role_id> mentions to the appropriate cloned role id.
         """
-        _m_role = re.compile(r"<@&(?P<id>\d+)>")
 
         def repl(m: re.Match) -> str:
             full = m.group(0)
@@ -6337,7 +6337,7 @@ class ServerReceiver:
             cloned_id = int(row.get("cloned_role_id") or rid)
             return f"<@&{cloned_id}>"
 
-        return _m_role.sub(repl, content)
+        return self._M_ROLE.sub(repl, content)
 
     def _fallback_unknown_role_mentions(
         self,
@@ -6422,8 +6422,6 @@ class ServerReceiver:
             except Exception:
                 valid_ids = set()
 
-        _m_role = re.compile(r"<@&(?P<id>\d+)>")
-
         def repl(m: re.Match) -> str:
             full = m.group(0)
             raw_id = m.group("id")
@@ -6441,7 +6439,7 @@ class ServerReceiver:
 
             return f"@{name}"
 
-        return _m_role.sub(repl, content)
+        return self._M_ROLE.sub(repl, content)
 
     def _rewrite_message_links(
         self,
