@@ -6654,13 +6654,6 @@ class ServerReceiver:
                 valid_ids=valid_role_ids,
             )
 
-        if prepend_roles and not msg.get("__backfill__"):
-            role_mentions = " ".join(f"<@&{rid}>" for rid in prepend_roles)
-            if text:
-                text = f"{role_mentions}\n{text}"
-            else:
-                text = role_mentions
-
         for att in msg.get("attachments", []) or []:
             url = att.get("url")
             if url and url not in text:
@@ -6867,6 +6860,13 @@ class ServerReceiver:
                             f.value = f.value.replace(
                                 "@everyone", "@\u200beveryone"
                             ).replace("@here", "@\u200bhere")
+
+        if prepend_roles and not msg.get("__backfill__"):
+            role_mentions = " ".join(f"<@&{rid}>" for rid in prepend_roles)
+            if text:
+                text = f"{role_mentions}\n{text}"
+            else:
+                text = role_mentions
 
         if target_cloned_channel_id and ctx_mapping_row:
             try:
