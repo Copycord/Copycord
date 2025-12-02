@@ -2342,12 +2342,9 @@ class ClientListener:
         token = (self.config.CLIENT_TOKEN or "").strip()
         if not token:
             logger.error(
-                "[⛔] CLIENT_TOKEN is missing. Set CLIENT_TOKEN in your config "
+                "[⛔] CLIENT_TOKEN is empty. Set CLIENT_TOKEN in your config "
                 "before starting the client."
             )
-            with contextlib.suppress(Exception):
-                loop.run_until_complete(
-                )
             return
 
         try:
@@ -2359,9 +2356,6 @@ class ClientListener:
                 "Check CLIENT_TOKEN in your config.",
                 e,
             )
-            with contextlib.suppress(Exception):
-                loop.run_until_complete(
-                )
 
         except ConnectionClosed as e:
             code = getattr(e, "code", None)
@@ -2372,22 +2366,13 @@ class ClientListener:
                     "(Authentication failed). Your CLIENT_TOKEN is invalid or "
                     "no longer usable. Please update it in the config."
                 )
-                with contextlib.suppress(Exception):
-                    loop.run_until_complete(
-                    )
             else:
                 logger.exception(
                     "[⛔] Discord gateway connection closed (code=%s)", code
                 )
-                with contextlib.suppress(Exception):
-                    loop.run_until_complete(
-                    )
 
         except Exception:
             logger.exception("[⛔] Unexpected error while running client")
-            with contextlib.suppress(Exception):
-                loop.run_until_complete(
-                )
 
     def run(self):
         """
