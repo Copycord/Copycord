@@ -21,6 +21,7 @@ import os
 from discord.ext import commands
 from pathlib import Path
 from dotenv import load_dotenv
+from discord.errors import ConnectionClosed, LoginFailure
 from common.config import Config, CURRENT_VERSION
 from common.db import DBManager
 from client.sitemap import SitemapService
@@ -569,7 +570,7 @@ class ClientListener:
                                 pass
 
                     except BaseException as e:
-                        logger.exception("[❌] OP8 scrape failed: %r", e)
+                        logger.exception("[⛔] OP8 scrape failed: %r", e)
                         try:
                             await self.bus.publish(
                                 kind="client",
@@ -589,7 +590,7 @@ class ClientListener:
                 return {"ok": True, "accepted": True, "guild_id": gid}
 
             except BaseException as e:
-                logger.exception("[❌] OP8 scrape failed (outer): %r", e)
+                logger.exception("[⛔] OP8 scrape failed (outer): %r", e)
                 try:
                     await self.bus.publish(
                         kind="client",
@@ -663,7 +664,9 @@ class ClientListener:
                         logger=logger.getChild("dm_export"),
                         send_sleep=2.0,
                         do_precache_count=True,
-                        out_root=os.path.join(os.getenv("DATA_DIR", "/data"), "exports"),
+                        out_root=os.path.join(
+                            os.getenv("DATA_DIR", "/data"), "exports"
+                        ),
                         save_json=save_json,
                     )
                     await exporter.run(user_id=uid, webhook_url=webhook_url)
@@ -1002,7 +1005,6 @@ class ClientListener:
 
         return False
 
-
     async def on_message(self, message: discord.Message):
         """
         Handles incoming Discord messages and processes them for forwarding.
@@ -1130,7 +1132,7 @@ class ClientListener:
         )
 
         stickers_payload = self.msg.stickers_payload(getattr(src_msg, "stickers", []))
-        
+
         role_mentions = self.msg._build_role_mentions_payload(src_msg)
 
         data_block = {
@@ -1153,7 +1155,7 @@ class ClientListener:
             "stickers": stickers_payload,
             "embeds": embeds,
         }
-        
+
         if role_mentions:
             data_block["role_mentions"] = role_mentions
 
@@ -1176,9 +1178,7 @@ class ClientListener:
             "data": data_block,
         }
 
-
         await self.ws.send(payload)
-
 
         logger.info(
             "[📩] Forwarding msg from %s #%s sent by %s",
@@ -1307,10 +1307,10 @@ class ClientListener:
                 ),
             },
         }
-        
+
         if role_mentions:
             payload["data"]["role_mentions"] = role_mentions
-            
+
         await self.ws.send(payload)
         logger.info(
             "[✏️] Forwarding message edit from %s #%s edited by %s",
@@ -1388,7 +1388,6 @@ class ClientListener:
                 self.msg.sanitize_embed_dict(e, msg, mention_map) for e in raw_embeds
             ]
             content = self.msg.sanitize_inline(msg.content or "", msg, mention_map)
-            
 
             author_obj = getattr(msg, "author", None)
             author = getattr(author_obj, "name", None)
@@ -1415,7 +1414,7 @@ class ClientListener:
                 )
 
             timestamp = data.get("edited_timestamp") or data.get("timestamp")
-            
+
         role_mentions = []
         if msg is not None:
             role_mentions = self.msg._build_role_mentions_payload(msg)
@@ -1455,7 +1454,7 @@ class ClientListener:
                 ),
             },
         }
-        
+
         if role_mentions:
             out["data"]["role_mentions"] = role_mentions
 
@@ -2335,14 +2334,71 @@ class ClientListener:
             await self.bot.close()
         logger.info("Client shutdown complete.")
 
+    def _run_client_gracefully(self, loop: asyncio.AbstractEventLoop) -> None:
+        """
+        Start the Discord client and handle gateway/login errors in a user-friendly way.
+        """
+
+        token = (self.config.CLIENT_TOKEN or "").strip()
+        if not token:
+            logger.error(
+                "[⛔] CLIENT_TOKEN is missing. Set CLIENT_TOKEN in your config "
+                "before starting the client."
+            )
+            with contextlib.suppress(Exception):
+                loop.run_until_complete(
+                )
+            return
+
+        try:
+            loop.run_until_complete(self.bot.start(token))
+
+        except LoginFailure as e:
+            logger.error(
+                "[⛔] Discord login failed (LoginFailure): %s. "
+                "Check CLIENT_TOKEN in your config.",
+                e,
+            )
+            with contextlib.suppress(Exception):
+                loop.run_until_complete(
+                )
+
+        except ConnectionClosed as e:
+            code = getattr(e, "code", None)
+
+            if code == 4004:
+                logger.error(
+                    "[⛔] Discord gateway closed the connection with 4004 "
+                    "(Authentication failed). Your CLIENT_TOKEN is invalid or "
+                    "no longer usable. Please update it in the config."
+                )
+                with contextlib.suppress(Exception):
+                    loop.run_until_complete(
+                    )
+            else:
+                logger.exception(
+                    "[⛔] Discord gateway connection closed (code=%s)", code
+                )
+                with contextlib.suppress(Exception):
+                    loop.run_until_complete(
+                    )
+
+        except Exception:
+            logger.exception("[⛔] Unexpected error while running client")
+            with contextlib.suppress(Exception):
+                loop.run_until_complete(
+                )
+
     def run(self):
         """
         Runs the Copycord client.
         """
         logger.info("[✨] Starting Copycord Client %s", CURRENT_VERSION)
         loop = asyncio.get_event_loop()
+
         try:
-            loop.run_until_complete(self.bot.start(self.config.CLIENT_TOKEN))
+            self._run_client_gracefully(loop)
+
         finally:
             loop.run_until_complete(self._shutdown())
             pending = asyncio.all_tasks(loop=loop)
