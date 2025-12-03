@@ -230,6 +230,7 @@ BOOL_KEYS = [
     "ANONYMIZE_USERS",
     "DISABLE_EVERYONE_MENTIONS",
     "DISABLE_ROLE_MENTIONS",
+    "DB_CLEANUP_MSG",
 ]
 DEFAULTS: Dict[str, Union[bool, str]] = {
     "DELETE_CHANNELS": True,
@@ -267,6 +268,7 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "DISABLE_EVERYONE_MENTIONS": False,
     "DISABLE_ROLE_MENTIONS": False,
     "TAG_REPLY_MSG": False,
+    "DB_CLEANUP_MSG": True,
 }
 
 
