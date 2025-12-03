@@ -9936,34 +9936,73 @@ class ServerReceiver:
         await self.handle_thread_message(forced)
 
     def _prune_old_messages_loop(
-            self, retention_seconds: int | None = None
-        ) -> asyncio.Task:
+        self, retention_seconds: int | None = None
+    ) -> asyncio.Task:
+        """
+        Start hourly task that deletes old rows from the `messages` table.
+
+        Retention priority:
+
+        1) app_config.MESSAGE_RETENTION_DAYS      (days → seconds)
+        2) app_config.MESSAGE_RETENTION_SECONDS   (legacy seconds)
+        3) Legacy env vars MESSAGE_RETENTION_DAYS / MESSAGE_RETENTION_SECONDS
+        4) Fallback default (7 days)
+        """
+
+        if getattr(self, "_prune_task", None) and not self._prune_task.done():
+            return self._prune_task
+
+        if retention_seconds is None:
+            retention_seconds = 7 * 24 * 3600
+
+        def _resolve_retention_seconds() -> int:
             """
-            Start hourly task that deletes old rows from the `messages` table.
+            Compute the effective retention window, preferring app_config days.
             """
+            cfg_sec = cfg_days = ""
+            try:
+                cfg_sec = (
+                    self.db.get_config("MESSAGE_RETENTION_SECONDS", "") or ""
+                ).strip()
+                cfg_days = (
+                    self.db.get_config("MESSAGE_RETENTION_DAYS", "") or ""
+                ).strip()
+            except Exception:
+                cfg_sec = cfg_days = ""
 
-            if getattr(self, "_prune_task", None) and not self._prune_task.done():
-                return self._prune_task
+            if cfg_days.isdigit():
+                return int(cfg_days) * 24 * 3600
 
-            if retention_seconds is None:
-                env_sec = os.getenv("MESSAGE_RETENTION_SECONDS")
-                env_days = os.getenv("MESSAGE_RETENTION_DAYS")
-                if env_sec and env_sec.isdigit():
-                    retention_seconds = int(env_sec)
-                elif env_days and env_days.isdigit():
-                    retention_seconds = int(env_days) * 24 * 3600
-                else:
-                    retention_seconds = 7 * 24 * 3600
+            if cfg_sec.isdigit():
+                return int(cfg_sec)
 
-            async def _runner():
-                logger.debug(
-                    "[🧹] starting hourly pruner (retention=%d seconds ~= %.2f days)",
-                    retention_seconds,
-                    retention_seconds / 86400.0,
-                )
-                try:
-                    while True:
-                        try:
+            env_days = os.getenv("MESSAGE_RETENTION_DAYS")
+            env_sec = os.getenv("MESSAGE_RETENTION_SECONDS")
+            if env_days and env_days.isdigit():
+                return int(env_days) * 24 * 3600
+            if env_sec and env_sec.isdigit():
+                return int(env_sec)
+
+            return int(retention_seconds)
+
+        async def _runner():
+            try:
+                while True:
+                    try:
+                        effective_retention = max(_resolve_retention_seconds(), 0)
+
+                        if effective_retention <= 0:
+                            logger.debug(
+                                "[🧹] DB cleanup disabled (effective retention <= 0)."
+                            )
+                            skip_pairs: list[tuple[int, int]] = []
+                        else:
+                            logger.debug(
+                                "[🧹] running DB cleanup "
+                                "(retention=%d seconds ~= %.2f days)",
+                                effective_retention,
+                                effective_retention / 86400.0,
+                            )
                             skip_pairs: list[tuple[int, int]] = []
                             skip_labels: list[str] = []
 
@@ -9984,14 +10023,13 @@ class ServerReceiver:
                                 rows = []
 
                             for row in rows:
-                                # Normalize row → dict
+
                                 if isinstance(row, dict):
                                     r = row
                                 else:
                                     try:
                                         r = {k: row[k] for k in row.keys()}
                                     except Exception:
-                                        # Fallback for plain tuples
                                         try:
                                             orig_gid, clone_gid, mapping_name = row
                                         except Exception:
@@ -10022,7 +10060,6 @@ class ServerReceiver:
                                 except Exception:
                                     settings = self.config.default_mapping_settings()
 
-                                # Default is True; only skip when explicitly False
                                 if settings.get("DB_CLEANUP_MSG", True) is False:
                                     skip_pairs.append((orig_int, clone_int))
                                     label = mapping_name or f"{orig_int}->{clone_int}"
@@ -10030,31 +10067,32 @@ class ServerReceiver:
 
                             if skip_pairs:
                                 logger.debug(
-                                    "[🧹] skipping DB cleanup for %d mappings (DB_CLEANUP_MSG=False): %s",
+                                    "[🧹] skipping DB cleanup for %d mappings "
+                                    "(DB_CLEANUP_MSG=False): %s",
                                     len(skip_pairs),
                                     ", ".join(skip_labels),
                                 )
 
-                            deleted = self.db.delete_old_messages(
-                                retention_seconds,
-                                skip_pairs=skip_pairs or None,
-                            )
-                            if deleted:
-                                logger.info(
-                                    "[🧹] Deleted %d old message mappings from db.",
-                                    deleted,
+                            if effective_retention > 0:
+                                deleted = self.db.delete_old_messages(
+                                    effective_retention,
+                                    skip_pairs=skip_pairs or None,
                                 )
+                                if deleted:
+                                    logger.info(
+                                        "[🧹] Deleted %d old message mappings from db.",
+                                        deleted,
+                                    )
 
-                        except Exception:
-                            logger.exception("[🧹] delete_old_messages failed")
+                    except Exception:
+                        logger.exception("[🧹] delete_old_messages failed")
 
-                        await asyncio.sleep(60 * 60)
-                except asyncio.CancelledError:
-                    raise
+                    await asyncio.sleep(60 * 60)
+            except asyncio.CancelledError:
+                raise
 
-            self._prune_task = asyncio.create_task(_runner(), name="prune-old-messages")
-            return self._prune_task
-
+        self._prune_task = asyncio.create_task(_runner(), name="prune-old-messages")
+        return self._prune_task
 
     async def _delete_with_row(
         self, row, orig_mid: int, channel_name: str | None = None
