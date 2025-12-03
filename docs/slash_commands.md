@@ -459,6 +459,8 @@ After running, all cloned messages revert to using the original author’s name 
 
 ## Copycord Env (`/env`)
 
+Configure specific environment variables.
+
 #### `/msg_cleanup`
 
 **Description:** Set how many days stored messages are kept in the database before the automatic cleanup task removes them.
@@ -470,3 +472,73 @@ After running, all cloned messages revert to using the original author’s name 
 
 ---
 
+## Per-mapping word/phrase rewrites (`/rewrite`)
+
+Configure simple **find & replace rules** that modify cloned messages for a specific mapping (source guild → cloned guild).  
+These rewrites are applied **after** other sanitization, and affect both message content and most embed text (title, description, fields, etc.).
+
+---
+
+### `/rewrite add <source_text> <replacement_text>`
+**Description:** Add or update a word/phrase rewrite for the **current clone mapping** (the guild where you run the command).
+
+- `source_text` — Word or phrase to search for in cloned messages (case-insensitive).
+- `replacement_text` — Text that should replace `source_text` in cloned messages.
+
+If a rewrite with the same `source_text` already exists for this mapping, it will be **updated** instead of creating a duplicate.
+
+**Examples:**
+```text
+/rewrite add source_text:"hello" replacement_text:"yo"
+/rewrite add source_text:"team rocket" replacement_text:"team valor"
+```
+
+With the above rules configured, a cloned message like:
+
+```text
+hello from team rocket
+```
+
+would be delivered to the cloned guild as:
+
+```text
+yo from team valor
+```
+
+---
+
+### `/rewrite list`
+**Description:** List all word/phrase rewrites configured for the **current clone mapping**.
+
+Each rewrite is shown with a numeric **ID** and its mapping:
+
+- `[id] source_text → replacement_text`
+
+You can use this ID with `/rewrite remove` to delete a specific rule.
+
+**Example:**
+```text
+/rewrite list
+```
+
+Example output (embed body):
+```text
+[1] `hello` → `yo`
+[2] `team rocket` → `team valor`
+```
+
+---
+
+### `/rewrite remove <rewrite_id>`
+**Description:** Remove a word/phrase rewrite for the **current clone mapping** using its numeric ID (as shown in `/rewrite list`).
+
+- `rewrite_id` — The ID of the rewrite rule to delete.
+
+If no rewrite exists with that ID for this mapping, Copycord will tell you that nothing was removed.
+
+**Examples:**
+```text
+/rewrite remove rewrite_id:2
+```
+
+After the above, the rule for `team rocket` → `team valor` is removed, but any other rewrite rules remain active.

@@ -154,6 +154,10 @@ class ServerReceiver:
         ] = {}
         self._blocked_keywords_lock = asyncio.Lock()
         self._user_filters_cache: dict[tuple[int, int], dict[str, set[int]]] = {}
+        self._word_rewrites_cache: dict[
+            tuple[int, int], list[tuple[re.Pattern, str]]
+        ] = {}
+        self._word_rewrites_lock = asyncio.Lock()
         self._user_filters_lock = asyncio.Lock()
         self._default_avatar_bytes: Optional[bytes] = None
         self._ws_task: asyncio.Task | None = None
@@ -718,6 +722,7 @@ class ServerReceiver:
         self._verify_task = asyncio.create_task(self._verify_listen_loop())
         await self._load_blocked_keywords_cache()
         await self._load_user_filters_cache()
+        await self._load_word_rewrites_cache()
         await self.bus.log("Boot completed")
         await self.update_status(f"{CURRENT_VERSION}")
 
@@ -6147,6 +6152,80 @@ class ServerReceiver:
                         e,
                     )
 
+    def _apply_word_rewrites(
+        self,
+        text: str | None,
+        embeds: list[discord.Embed] | None,
+        *,
+        original_guild_id: int | None,
+        cloned_guild_id: int | None,
+    ) -> tuple[str | None, list[discord.Embed] | None]:
+        """
+        Apply per-mapping word/phrase rewrites to the message text and embed text.
+        """
+        if (text is None) and not embeds:
+            return text, embeds
+
+        if not original_guild_id or not cloned_guild_id:
+            return text, embeds
+
+        patterns = self._get_word_rewrites_for_mapping(
+            original_guild_id, cloned_guild_id
+        )
+        if not patterns:
+            return text, embeds
+
+        def _apply_to_str(s: str | None) -> str | None:
+            if not s:
+                return s
+            out = s
+            for pat, repl in patterns:
+                try:
+                    out = pat.sub(repl, out)
+                except Exception:
+                    continue
+            return out
+
+        if isinstance(text, str):
+            text = _apply_to_str(text)
+
+        if embeds:
+            for emb in embeds:
+                try:
+                    if emb.title:
+                        emb.title = _apply_to_str(emb.title)
+
+                    if emb.description:
+                        emb.description = _apply_to_str(emb.description)
+
+                    if emb.footer and getattr(emb.footer, "text", None):
+                        emb.set_footer(
+                            text=_apply_to_str(emb.footer.text),
+                            icon_url=getattr(
+                                emb.footer, "icon_url", discord.Embed.Empty
+                            ),
+                        )
+
+                    if emb.author and getattr(emb.author, "name", None):
+                        emb.set_author(
+                            name=_apply_to_str(emb.author.name),
+                            url=getattr(emb.author, "url", discord.Embed.Empty),
+                            icon_url=getattr(
+                                emb.author, "icon_url", discord.Embed.Empty
+                            ),
+                        )
+
+                    for f in emb.fields:
+                        if f.name:
+                            f.name = _apply_to_str(f.name)
+                        if f.value:
+                            f.value = _apply_to_str(f.value)
+                except Exception:
+                    logger.exception("[rewrites] Failed to apply rewrites to embed")
+                    continue
+
+        return text, embeds
+
     def _sanitize_inline(
         self,
         s: str | None,
@@ -6908,6 +6987,17 @@ class ServerReceiver:
                             f.value = f.value.replace(
                                 "@everyone", "@\u200beveryone"
                             ).replace("@here", "@\u200bhere")
+
+            try:
+                if orig_gid and clone_gid:
+                    text, embeds = self._apply_word_rewrites(
+                        text,
+                        embeds,
+                        original_guild_id=int(orig_gid),
+                        cloned_guild_id=int(clone_gid),
+                    )
+            except Exception:
+                logger.exception("[rewrites] Failed to apply word rewrites for mapping")
 
         if prepend_roles and not msg.get("__backfill__"):
             role_mentions = " ".join(f"<@&{rid}>" for rid in prepend_roles)
@@ -10516,6 +10606,117 @@ class ServerReceiver:
         patterns.extend(self._blocked_keywords_cache.get(key_global, []))
 
         return patterns
+
+    async def _load_word_rewrites_cache(self) -> None:
+        """
+        Load all mapping word/phrase rewrites from DB and compile regex patterns.
+
+        Cache structure:
+            {(original_guild_id, cloned_guild_id): [(pattern, replacement), ...]}
+        """
+        async with self._word_rewrites_lock:
+            self._word_rewrites_cache.clear()
+
+            logger.debug("[rewrites] Loading word rewrites from database.")
+
+            try:
+                rows = self.db.get_all_mapping_rewrites()
+            except Exception:
+                logger.exception("[rewrites] Failed to load word rewrites from DB")
+                return
+
+            if not rows:
+                logger.debug("[rewrites] No word rewrites found in database")
+                return
+
+            grouped: dict[tuple[int, int], list[tuple[str, str]]] = {}
+
+            for row in rows:
+                try:
+                    source = (row.get("source_text") or "").strip()
+                    if not source:
+                        continue
+
+                    repl = row.get("replacement_text") or ""
+                    orig_gid = (
+                        int(row.get("original_guild_id"))
+                        if row.get("original_guild_id") is not None
+                        else 0
+                    )
+                    clone_gid = (
+                        int(row.get("cloned_guild_id"))
+                        if row.get("cloned_guild_id") is not None
+                        else 0
+                    )
+                except Exception:
+                    continue
+
+                key = (orig_gid, clone_gid)
+                grouped.setdefault(key, []).append((source, repl))
+
+            total_patterns = 0
+            failed_patterns = 0
+
+            for key, pairs in grouped.items():
+                patterns: list[tuple[re.Pattern, str]] = []
+
+                pairs_sorted = sorted(pairs, key=lambda p: len(p[0]), reverse=True)
+                for source, repl in pairs_sorted:
+                    try:
+
+                        regex = re.compile(re.escape(source), re.IGNORECASE)
+                        patterns.append((regex, repl))
+                        total_patterns += 1
+                    except Exception as e:
+                        failed_patterns += 1
+                        logger.warning(
+                            "[rewrites] Failed to compile regex for source '%s': %s",
+                            source,
+                            e,
+                        )
+
+                if patterns:
+                    self._word_rewrites_cache[key] = patterns
+
+            logger.debug(
+                "[rewrites] Loaded %d rewrite patterns across %d mapping scopes (%d failed)",
+                total_patterns,
+                len(grouped),
+                failed_patterns,
+            )
+
+    def _get_word_rewrites_for_mapping(
+        self,
+        original_guild_id: int,
+        cloned_guild_id: int,
+    ) -> list[tuple[re.Pattern, str]]:
+        """
+        Get compiled rewrite patterns for a specific mapping.
+
+        Checks three scopes in order:
+        1. Mapping-specific (original_guild_id, cloned_guild_id)
+        2. Host-level (original_guild_id, 0)
+        3. Global (0, 0)
+        """
+        patterns: list[tuple[re.Pattern, str]] = []
+
+        key_mapping = (int(original_guild_id), int(cloned_guild_id))
+        patterns.extend(self._word_rewrites_cache.get(key_mapping, []))
+
+        key_host = (int(original_guild_id), 0)
+        patterns.extend(self._word_rewrites_cache.get(key_host, []))
+
+        key_global = (0, 0)
+        patterns.extend(self._word_rewrites_cache.get(key_global, []))
+
+        return patterns
+
+    async def _clear_word_rewrites_cache_async(self) -> None:
+        """
+        Reload mapping rewrite cache from DB.
+        Called after rewrite updates via slash commands.
+        """
+        await self._load_word_rewrites_cache()
 
     async def _clear_blocked_keywords_cache_async(self):
         """
