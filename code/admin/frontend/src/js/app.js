@@ -203,6 +203,8 @@
     ANONYMIZE_USERS: false,
     DISABLE_EVERYONE_MENTIONS: false,
     DISABLE_ROLE_MENTIONS: false,
+    TAG_REPLY_MSG: false,
+    DB_CLEANUP_MSG: true,
   };
 
   let lastFocusLog = null;

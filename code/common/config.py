@@ -124,6 +124,7 @@ class Config:
             "DISABLE_EVERYONE_MENTIONS": False,
             "DISABLE_ROLE_MENTIONS": False,
             "TAG_REPLY_MSG": False,
+            "DB_CLEANUP_MSG": True,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):
