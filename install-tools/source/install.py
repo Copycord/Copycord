@@ -887,7 +887,7 @@ for p in "${PORTS[@]}"; do
   fi
 done
 
-if (( ${
+if (( ${#BUSY[@]} > 0 )); then
   echo "[preflight] One or more ports referenced in code/.env are busy:"
   for m in "${BUSY[@]}"; do
     echo "  • $m"
@@ -921,6 +921,7 @@ ROLE=client CONTROL_PORT=9102 "$CLIENT_VENV/bin/python" -m control.control & CLI
 trap 'kill "$ADMIN_PID" "$SERVER_PID" "$CLIENT_PID" 2>/dev/null || true; wait || true' INT TERM
 wait
 """
+
     sh_path.write_text(sh_script, encoding="utf-8")
     try:
         sh_path.chmod(sh_path.stat().st_mode | 0o111)
@@ -930,6 +931,7 @@ wait
 
     if stage:
         stage.tick("Start scripts written.")
+
 
 
 def _probe(cmd: list[str]) -> str | None:

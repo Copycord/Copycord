@@ -540,7 +540,7 @@ def write_start_scripts(repo_root: Path) -> None:
     - Linux/macOS:
         - copycord_linux.sh (LF, +x) with preflight
     """
-    stage = STAGE_PROGRESS.get("scripts")
+    stage = STAGE_PROGRESS.get("env_scripts")
 
     win_bat = repo_root / "copycord_windows.bat"
     ps_dir = repo_root / "scripts"
@@ -639,7 +639,7 @@ $busy = @()
 foreach ($p in ($ports | Sort-Object -Unique)) {
   if (Test-PortBusy -Port $p) {
     $procId = $null; $pname = $null
-    $line = netstat -ano | Select-String "LISTENING.*:$Port\b" | Select-Object -First 1
+    $line = netstat -ano | Select-String "LISTENING.*:$p\b" | Select-Object -First 1
     if ($line) {
       $parts = ($line -split '\s+') | Where-Object { $_ -ne '' }
       if ($parts.Count -ge 5) { $procId = $parts[-1] }
@@ -787,7 +787,7 @@ endlocal
     info(f"[installer] Wrote PS launchers in: {ps_dir}")
 
     sh_path = repo_root / "copycord_linux.sh"
-    sh_script = """#!/usr/bin/env bash
+    sh_script = """
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 CODE_DIR="$ROOT/code"
@@ -833,12 +833,10 @@ port_in_use() {
   fi
 }
 
-
 ensure_py311 "$ADMIN_VENV/bin/python"  "admin venv"
 ensure_py311 "$SERVER_VENV/bin/python" "server venv"
 ensure_py311 "$CLIENT_VENV/bin/python" "client venv"
 echo "[preflight] Python looks good."
-
 
 mapfile -t PORTS < <(get_ports | awk '$1>=1 && $1<=65535 {print $1}' | sort -n | uniq)
 
@@ -854,13 +852,16 @@ for p in "${PORTS[@]}"; do
   fi
 done
 
-if [[ ${
+if (( ${#BUSY[@]} > 0 )); then
   echo "[preflight] One or more ports referenced in code/.env are busy:"
-  for m in "${BUSY[@]}"; do echo "  • $m"; done
+  for m in "${BUSY[@]}"; do
+    echo "  • $m"
+  done
   echo "Fix: close the process(es) using these ports or change values in code/.env, then relaunch."
   exit 1
+else
+  echo "[preflight] All referenced ports appear free."
 fi
-
 
 ADMIN_PORT="8080"
 if [[ -f "$ENV_FILE" ]]; then
@@ -885,12 +886,17 @@ ROLE=client CONTROL_PORT=9102 "$CLIENT_VENV/bin/python" -m control.control & CLI
 trap 'kill "$ADMIN_PID" "$SERVER_PID" "$CLIENT_PID" 2>/dev/null || true; wait || true' INT TERM
 wait
 """
+
     sh_path.write_text(sh_script, encoding="utf-8")
     try:
         sh_path.chmod(sh_path.stat().st_mode | 0o111)
     except Exception:
         pass
     info(f"[installer] Wrote Linux/macOS start script: {sh_path}")
+
+    if stage:
+        stage.tick("Start scripts written.")
+
 
 
 def main(argv: list[str] | None = None) -> int:
