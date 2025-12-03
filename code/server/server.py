@@ -9936,58 +9936,125 @@ class ServerReceiver:
         await self.handle_thread_message(forced)
 
     def _prune_old_messages_loop(
-        self, retention_seconds: int | None = None
-    ) -> asyncio.Task:
-        """
-        Start hourly task that deletes old rows from the `messages` table.
-        """
+            self, retention_seconds: int | None = None
+        ) -> asyncio.Task:
+            """
+            Start hourly task that deletes old rows from the `messages` table.
+            """
 
-        if getattr(self, "_prune_task", None) and not self._prune_task.done():
+            if getattr(self, "_prune_task", None) and not self._prune_task.done():
+                return self._prune_task
+
+            if retention_seconds is None:
+                env_sec = os.getenv("MESSAGE_RETENTION_SECONDS")
+                env_days = os.getenv("MESSAGE_RETENTION_DAYS")
+                if env_sec and env_sec.isdigit():
+                    retention_seconds = int(env_sec)
+                elif env_days and env_days.isdigit():
+                    retention_seconds = int(env_days) * 24 * 3600
+                else:
+                    retention_seconds = 7 * 24 * 3600
+
+            async def _runner():
+                logger.debug(
+                    "[🧹] starting hourly pruner (retention=%d seconds ~= %.2f days)",
+                    retention_seconds,
+                    retention_seconds / 86400.0,
+                )
+                try:
+                    while True:
+                        try:
+                            skip_pairs: list[tuple[int, int]] = []
+                            skip_labels: list[str] = []
+
+                            try:
+                                with self.db.lock, self.db.conn:
+                                    rows = self.db.conn.execute(
+                                        """
+                                        SELECT DISTINCT
+                                            original_guild_id,
+                                            cloned_guild_id,
+                                            mapping_name
+                                        FROM guild_mappings
+                                        WHERE cloned_guild_id IS NOT NULL
+                                        AND cloned_guild_id != 0
+                                        """
+                                    ).fetchall()
+                            except Exception:
+                                rows = []
+
+                            for row in rows:
+                                # Normalize row → dict
+                                if isinstance(row, dict):
+                                    r = row
+                                else:
+                                    try:
+                                        r = {k: row[k] for k in row.keys()}
+                                    except Exception:
+                                        # Fallback for plain tuples
+                                        try:
+                                            orig_gid, clone_gid, mapping_name = row
+                                        except Exception:
+                                            continue
+                                        r = {
+                                            "original_guild_id": orig_gid,
+                                            "cloned_guild_id": clone_gid,
+                                            "mapping_name": mapping_name,
+                                        }
+
+                                orig_gid = r.get("original_guild_id")
+                                clone_gid = r.get("cloned_guild_id")
+                                mapping_name = (r.get("mapping_name") or "").strip()
+
+                                try:
+                                    orig_int = int(orig_gid or 0)
+                                    clone_int = int(clone_gid or 0)
+                                except Exception:
+                                    continue
+
+                                try:
+                                    settings = resolve_mapping_settings(
+                                        self.db,
+                                        self.config,
+                                        original_guild_id=orig_int,
+                                        cloned_guild_id=clone_int,
+                                    )
+                                except Exception:
+                                    settings = self.config.default_mapping_settings()
+
+                                # Default is True; only skip when explicitly False
+                                if settings.get("DB_CLEANUP_MSG", True) is False:
+                                    skip_pairs.append((orig_int, clone_int))
+                                    label = mapping_name or f"{orig_int}->{clone_int}"
+                                    skip_labels.append(label)
+
+                            if skip_pairs:
+                                logger.debug(
+                                    "[🧹] skipping DB cleanup for %d mappings (DB_CLEANUP_MSG=False): %s",
+                                    len(skip_pairs),
+                                    ", ".join(skip_labels),
+                                )
+
+                            deleted = self.db.delete_old_messages(
+                                retention_seconds,
+                                skip_pairs=skip_pairs or None,
+                            )
+                            if deleted:
+                                logger.info(
+                                    "[🧹] Deleted %d old message mappings from db.",
+                                    deleted,
+                                )
+
+                        except Exception:
+                            logger.exception("[🧹] delete_old_messages failed")
+
+                        await asyncio.sleep(60 * 60)
+                except asyncio.CancelledError:
+                    raise
+
+            self._prune_task = asyncio.create_task(_runner(), name="prune-old-messages")
             return self._prune_task
 
-        if retention_seconds is None:
-            env_sec = os.getenv("MESSAGE_RETENTION_SECONDS")
-            env_days = os.getenv("MESSAGE_RETENTION_DAYS")
-            if env_sec and env_sec.isdigit():
-                retention_seconds = int(env_sec)
-            elif env_days and env_days.isdigit():
-                retention_seconds = int(env_days) * 24 * 3600
-            else:
-                retention_seconds = 7 * 24 * 3600
-
-        try:
-            with self.db.lock, self.db.conn:
-                self.db.conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_messages_created_at ON messages(created_at);"
-                )
-        except Exception:
-            logger.exception("[prune] failed to ensure idx_messages_created_at")
-
-        async def _runner():
-            logger.debug(
-                "[prune] starting hourly pruner (retention=%d seconds ~= %.2f days)",
-                retention_seconds,
-                retention_seconds / 86400.0,
-            )
-            try:
-                while True:
-                    try:
-                        deleted = self.db.delete_old_messages(retention_seconds)
-                        if deleted:
-                            logger.info(
-                                "[prune] deleted %d old message mappings from db.",
-                                deleted,
-                            )
-
-                    except Exception:
-                        logger.exception("[prune] delete_old_messages failed")
-
-                    await asyncio.sleep(60 * 60)
-            except asyncio.CancelledError:
-                raise
-
-        self._prune_task = asyncio.create_task(_runner(), name="prune-old-messages")
-        return self._prune_task
 
     async def _delete_with_row(
         self, row, orig_mid: int, channel_name: str | None = None

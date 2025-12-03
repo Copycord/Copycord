@@ -2167,21 +2167,58 @@ class DBManager:
             (int(original_message_id), int(cloned_guild_id)),
         ).fetchone()
 
-    def delete_old_messages(self, older_than_seconds: int = 7 * 24 * 3600) -> int:
+    def delete_old_messages(
+        self,
+        older_than_seconds: int = 7 * 24 * 3600,
+        skip_pairs: Optional[list[tuple[int, int]]] = None,
+    ) -> int:
         """
         Delete rows from messages where created_at is older than now - older_than_seconds.
+
+        If skip_pairs is provided, it should be a list of (original_guild_id, cloned_guild_id)
+        pairs for which no rows will be deleted (used for per-mapping DB_CLEANUP_MSG=False).
         Returns the number of rows deleted.
         """
         with self.lock, self.conn:
             before = self.conn.total_changes
-            self.conn.execute(
-                """
-                DELETE FROM messages
-                WHERE created_at < (CAST(strftime('%s','now') AS INTEGER) - ?)
-                """,
-                (int(older_than_seconds),),
-            )
+
+            if not skip_pairs:
+                self.conn.execute(
+                    """
+                    DELETE FROM messages
+                    WHERE created_at < (CAST(strftime('%s','now') AS INTEGER) - ?)
+                    """,
+                    (int(older_than_seconds),),
+                )
+            else:
+                clauses = []
+                params: list[int] = [int(older_than_seconds)]
+
+                for orig_gid, clone_gid in skip_pairs:
+                    try:
+                        og = int(orig_gid)
+                        cg = int(clone_gid)
+                    except Exception:
+                        continue
+                    clauses.append("(original_guild_id = ? AND cloned_guild_id = ?)")
+                    params.extend([og, cg])
+
+                if clauses:
+                    sql = (
+                        "DELETE FROM messages "
+                        "WHERE created_at < (CAST(strftime('%s','now') AS INTEGER) - ?) "
+                        "AND NOT (" + " OR ".join(clauses) + ")"
+                    )
+                else:
+                    sql = (
+                        "DELETE FROM messages "
+                        "WHERE created_at < (CAST(strftime('%s','now') AS INTEGER) - ?)"
+                    )
+
+                self.conn.execute(sql, tuple(params))
+
             return self.conn.total_changes - before
+
 
     def delete_message_mapping(self, original_message_id: int) -> int:
         """
