@@ -15,7 +15,7 @@ from typing import Optional
 from common.db import DBManager
 
 logger = logging.getLogger(__name__)
-CURRENT_VERSION = "v3.5.1"
+CURRENT_VERSION = "v3.6.0"
 
 
 class Config:
