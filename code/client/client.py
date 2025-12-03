@@ -1018,8 +1018,6 @@ class ClientListener:
         if self.should_ignore(message):
             return
 
-        # logger.info("Full message dump:\n%s", dump_message_debug(message))
-
         raw = message.content or ""
         system = getattr(message, "system_content", "") or ""
 
@@ -1154,6 +1152,29 @@ class ClientListener:
             "components": components,
             "stickers": stickers_payload,
             "embeds": embeds,
+            **(
+                {
+                    "reference": {
+                        k: int(v)
+                        for k, v in {
+                            "message_id": getattr(
+                                getattr(src_msg, "reference", None), "message_id", None
+                            ),
+                            "channel_id": getattr(
+                                getattr(src_msg, "reference", None), "channel_id", None
+                            ),
+                            "guild_id": getattr(
+                                getattr(src_msg, "reference", None), "guild_id", None
+                            ),
+                        }.items()
+                        if v is not None
+                    }
+                }
+                if src_msg is not None
+                and getattr(src_msg, "reference", None)
+                and getattr(src_msg.reference, "message_id", None)
+                else {}
+            ),
         }
 
         if role_mentions:
@@ -1295,6 +1316,34 @@ class ClientListener:
                 "components": components,
                 "stickers": stickers_payload,
                 "embeds": embeds,
+                **(
+                    {
+                        "reference": {
+                            k: int(v)
+                            for k, v in {
+                                "message_id": getattr(
+                                    getattr(after, "reference", None),
+                                    "message_id",
+                                    None,
+                                ),
+                                "channel_id": getattr(
+                                    getattr(after, "reference", None),
+                                    "channel_id",
+                                    None,
+                                ),
+                                "guild_id": getattr(
+                                    getattr(after, "reference", None),
+                                    "guild_id",
+                                    None,
+                                ),
+                            }.items()
+                            if v is not None
+                        }
+                    }
+                    if getattr(after, "reference", None)
+                    and getattr(after.reference, "message_id", None)
+                    else {}
+                ),
                 **(
                     {
                         "thread_parent_id": after.channel.parent.id,
@@ -1442,6 +1491,29 @@ class ClientListener:
                 "content": content,
                 "timestamp": timestamp,
                 "embeds": embeds,
+                **(
+                    {
+                        "reference": {
+                            k: int(v)
+                            for k, v in {
+                                "message_id": getattr(
+                                    getattr(msg, "reference", None), "message_id", None
+                                ),
+                                "channel_id": getattr(
+                                    getattr(msg, "reference", None), "channel_id", None
+                                ),
+                                "guild_id": getattr(
+                                    getattr(msg, "reference", None), "guild_id", None
+                                ),
+                            }.items()
+                            if v is not None
+                        }
+                    }
+                    if msg is not None
+                    and getattr(msg, "reference", None)
+                    and getattr(msg.reference, "message_id", None)
+                    else {}
+                ),
                 **(
                     {
                         "thread_parent_id": channel.parent.id,

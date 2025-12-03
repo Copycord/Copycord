@@ -123,6 +123,7 @@ class Config:
             "ANONYMIZE_USERS": False,
             "DISABLE_EVERYONE_MENTIONS": False,
             "DISABLE_ROLE_MENTIONS": False,
+            "TAG_REPLY_MSG": False,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):

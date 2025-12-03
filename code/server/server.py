@@ -6780,6 +6780,8 @@ class ServerReceiver:
             except Exception:
                 mapping_settings = {}
 
+            tag_reply_msg = bool(mapping_settings.get("TAG_REPLY_MSG", False))
+
             if mapping_settings.get("ANONYMIZE_USERS", False):
                 user_id = msg.get("author_id") or msg.get("user_id") or 0
                 anon_name, anon_avatar = _anonymize_user(user_id)
@@ -6828,6 +6830,52 @@ class ServerReceiver:
                             f.name = _strip_role_mentions(f.name)
                         if getattr(f, "value", None):
                             f.value = _strip_role_mentions(f.value)
+
+            if tag_reply_msg:
+                try:
+                    ref = msg.get("reference") or {}
+                except Exception:
+                    ref = {}
+
+                ref_msg_id = None
+                ref_guild_id = None
+
+                if isinstance(ref, dict):
+                    ref_msg_id = ref.get("message_id")
+                    ref_guild_id = ref.get("guild_id") or orig_gid
+
+                try:
+                    clone_gid_int = int(clone_gid or 0)
+                except Exception:
+                    clone_gid_int = 0
+
+                if ref_msg_id and ref_guild_id and clone_gid_int:
+                    try:
+                        row = self.db.get_message_mapping_pair(
+                            original_message_id=int(ref_msg_id),
+                            cloned_guild_id=clone_gid_int,
+                        )
+                    except Exception:
+                        row = None
+
+                    if row is not None:
+                        try:
+                            cloned_channel_id = int(row["cloned_channel_id"])
+                            cloned_message_id = int(row["cloned_message_id"])
+                        except Exception:
+                            cloned_channel_id = 0
+                            cloned_message_id = 0
+
+                        if cloned_channel_id and cloned_message_id:
+                            reply_link = (
+                                f"https://discord.com/channels/"
+                                f"{clone_gid_int}/{cloned_channel_id}/{cloned_message_id}"
+                            )
+                            header = f"> In reply to: {reply_link}"
+                            if text:
+                                text = f"{header}\n{text}"
+                            else:
+                                text = header
 
             if mapping_settings.get("DISABLE_EVERYONE_MENTIONS", False):
 

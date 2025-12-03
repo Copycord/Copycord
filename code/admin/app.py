@@ -203,6 +203,7 @@ BOOL_KEYS = [
     "DELETE_THREADS",
     "DELETE_MESSAGES",
     "EDIT_MESSAGES",
+    "TAG_REPLY_MSG",
     "REPOSITION_CHANNELS",
     "CLONE_VOICE",
     "CLONE_VOICE_PROPERTIES",
@@ -265,6 +266,7 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "ANONYMIZE_USERS": False,
     "DISABLE_EVERYONE_MENTIONS": False,
     "DISABLE_ROLE_MENTIONS": False,
+    "TAG_REPLY_MSG": False,
 }
 
 
