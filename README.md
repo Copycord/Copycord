@@ -305,6 +305,7 @@ Once started, open the web UI in your browser:
 | `DELETE_ROLES`                 | true    | Delete roles that no longer exist in the host                                                  |
 | `UPDATE_ROLES`                 | true    | Allow updating role properties after creation                                                  |
 | `DELETE_MESSAGES`              | true    | Delete cloned messages when the host message is deleted                                        |
+| `TAG_REPLY_MSG`                | false   | Adds a tag of the message that is being replied to                                             |
 | `MIRROR_CHANNEL_PERMISSIONS`   | false   | Mirror channel permissions from the host                                                       |
 | `CLONE_ROLES`                  | true    | Clone roles                                                                                    |
 | `CLONE_EMOJI`                  | true    | Clone emojis                                                                                   |
