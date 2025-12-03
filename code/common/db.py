@@ -783,6 +783,44 @@ class DBManager:
                 "CREATE INDEX IF NOT EXISTS idx_channel_webhook_profiles_clone ON channel_webhook_profiles(cloned_guild_id);",
             ],
         )
+        
+        self._ensure_table(
+            name="mapping_rewrites",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+                    original_guild_id INTEGER NOT NULL,
+                    cloned_guild_id   INTEGER NOT NULL,
+                    source_text       TEXT    NOT NULL,
+                    replacement_text  TEXT    NOT NULL,
+                    created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_updated      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(original_guild_id, cloned_guild_id, source_text)
+                );
+            """,
+            required_columns={
+                "id",
+                "original_guild_id",
+                "cloned_guild_id",
+                "source_text",
+                "replacement_text",
+                "created_at",
+                "last_updated",
+            },
+            copy_map={
+                "id": "id",
+                "original_guild_id": "original_guild_id",
+                "cloned_guild_id": "cloned_guild_id",
+                "source_text": "source_text",
+                "replacement_text": "COALESCE(replacement_text, '')",
+                "created_at": "COALESCE(created_at, CURRENT_TIMESTAMP)",
+                "last_updated": "COALESCE(last_updated, CURRENT_TIMESTAMP)",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_rewrites_orig_clone ON mapping_rewrites(original_guild_id, cloned_guild_id);",
+            ],
+        )
+
 
     def _table_exists(self, name: str) -> bool:
         row = self.conn.execute(
@@ -4395,3 +4433,125 @@ class DBManager:
             "pairs_cleared": len(stale_pairs),
             "role_blocks_only": len(stale_role_block_clones),
         }
+
+    def upsert_mapping_rewrite(
+        self,
+        *,
+        original_guild_id: int,
+        cloned_guild_id: int,
+        source_text: str,
+        replacement_text: str,
+    ) -> bool:
+        """
+        Insert or update a word/phrase rewrite for a specific mapping.
+
+        Returns True if an existing row was updated, False if it was newly inserted.
+        """
+        source_text = (source_text or "").strip()
+        replacement_text = replacement_text or ""
+        if not source_text:
+            return False
+
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                """
+                SELECT 1
+                FROM mapping_rewrites
+                WHERE original_guild_id = ?
+                  AND cloned_guild_id   = ?
+                  AND source_text       = ?
+                """,
+                (int(original_guild_id), int(cloned_guild_id), source_text),
+            )
+            existed = cur.fetchone() is not None
+
+            self.conn.execute(
+                """
+                INSERT INTO mapping_rewrites (
+                    original_guild_id,
+                    cloned_guild_id,
+                    source_text,
+                    replacement_text
+                )
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(original_guild_id, cloned_guild_id, source_text)
+                DO UPDATE SET
+                    replacement_text = excluded.replacement_text,
+                    last_updated     = CURRENT_TIMESTAMP
+                """,
+                (int(original_guild_id), int(cloned_guild_id), source_text, replacement_text),
+            )
+            self.conn.commit()
+
+        return existed
+
+    def delete_mapping_rewrite(
+        self,
+        *,
+        original_guild_id: int,
+        cloned_guild_id: int,
+        rewrite_id: int,
+    ) -> bool:
+        """
+        Delete a single rewrite rule for this mapping, keyed by numeric ID.
+        """
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                """
+                DELETE FROM mapping_rewrites
+                WHERE id = ?
+                  AND original_guild_id = ?
+                  AND cloned_guild_id   = ?
+                """,
+                (int(rewrite_id), int(original_guild_id), int(cloned_guild_id)),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def list_mapping_rewrites_for_mapping(
+        self,
+        *,
+        original_guild_id: int,
+        cloned_guild_id: int,
+    ) -> list[dict]:
+        """
+        All rewrites for a given mapping, oldest first.
+        """
+        cur = self.conn.execute(
+            """
+            SELECT
+                id,
+                original_guild_id,
+                cloned_guild_id,
+                source_text,
+                replacement_text,
+                created_at,
+                last_updated
+            FROM mapping_rewrites
+            WHERE original_guild_id = ?
+              AND cloned_guild_id   = ?
+            ORDER BY datetime(created_at) ASC, LENGTH(source_text) DESC
+            """,
+            (int(original_guild_id), int(cloned_guild_id)),
+        )
+        rows = cur.fetchall()
+        cols = [c[0] for c in cur.description]
+        return [dict(zip(cols, r)) for r in rows]
+
+    def get_all_mapping_rewrites(self) -> list[dict]:
+        """
+        Flat list of all rewrites; used by the server to build its cache.
+        """
+        cur = self.conn.execute(
+            """
+            SELECT
+                original_guild_id,
+                cloned_guild_id,
+                source_text,
+                replacement_text
+            FROM mapping_rewrites
+            """
+        )
+        rows = cur.fetchall()
+        cols = [c[0] for c in cur.description]
+        return [dict(zip(cols, r)) for r in rows]

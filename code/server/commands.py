@@ -98,10 +98,16 @@ class CloneCommands(commands.Cog):
         "Manage role mentions for cloned messages in THIS server.",
         guild_ids=GUILD_IDS,
     )
-    
+
     env_group = discord.SlashCommandGroup(
         "env",
         "View or update Copycord environment-style settings.",
+        guild_ids=GUILD_IDS,
+    )
+
+    rewrite_group = discord.SlashCommandGroup(
+        "rewrite",
+        "Manage word/phrase rewrites for this clone mapping.",
         guild_ids=GUILD_IDS,
     )
 
@@ -189,7 +195,9 @@ class CloneCommands(commands.Cog):
     @commands.Cog.listener()
     async def on_ready(self):
         if not self.allowed_users:
-            logger.warning("[⚠️] No command users configured. Slash commands will not work.")
+            logger.warning(
+                "[⚠️] No command users configured. Slash commands will not work."
+            )
         else:
             logger.debug(
                 "[⚙️] Commands permissions set for users: %s",
@@ -3184,7 +3192,7 @@ class CloneCommands(commands.Cog):
             )
 
         await ctx.respond(embed=embed, ephemeral=True)
-        
+
     @env_group.command(
         name="msg_cleanup",
         description="Set how long to keep stored messages (in days) before DB cleanup.",
@@ -3215,7 +3223,9 @@ class CloneCommands(commands.Cog):
             self.db.set_config("MESSAGE_RETENTION_DAYS", str(int(days)))
             self.db.delete_config("MESSAGE_RETENTION_SECONDS")
         except Exception as e:
-            logger.exception("[env_msg_cleanup] Failed to update app_config", exc_info=e)
+            logger.exception(
+                "[env_msg_cleanup] Failed to update app_config", exc_info=e
+            )
             return await ctx.followup.send(
                 embed=self._err_embed(
                     "Database error",
@@ -3231,7 +3241,245 @@ class CloneCommands(commands.Cog):
         )
         await ctx.followup.send(embed=embed, ephemeral=True)
 
+    @rewrite_group.command(
+        name="add",
+        description="Add or update a word/phrase rewrite for THIS clone mapping.",
+    )
+    async def rewrite_add(
+        self,
+        ctx: discord.ApplicationContext,
+        source_text: str = Option(
+            str,
+            "Word or phrase to replace in cloned messages",
+            required=True,
+        ),
+        replacement_text: str = Option(
+            str,
+            "What to replace it with",
+            required=True,
+        ),
+    ):
+        """
+        Example:
+            /rewrite add source_text: hello replacement_text: yo
+            /rewrite add source_text: team rocket replacement_text: team valor
 
+        All cloned messages for THIS mapping will replace those phrases
+        (case-insensitive) after other sanitization.
+        """
+        guild = ctx.guild
+        if not guild:
+            embed = discord.Embed(
+                title="Rewrite: Error",
+                description="This command must be run inside a server.",
+                color=discord.Color.red(),
+            )
+            return await ctx.respond(embed=embed, ephemeral=True)
+
+        mapping_row = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping_row:
+            embed = discord.Embed(
+                title="Rewrite: Error",
+                description=(
+                    "This server isn't mapped to a source guild, "
+                    "so I can't scope the rewrite."
+                ),
+                color=discord.Color.red(),
+            )
+            return await ctx.respond(embed=embed, ephemeral=True)
+
+        source_text = (source_text or "").strip()
+        if not source_text:
+            embed = discord.Embed(
+                title="Rewrite: Error",
+                description="Source text cannot be empty.",
+                color=discord.Color.red(),
+            )
+            return await ctx.respond(embed=embed, ephemeral=True)
+
+        orig_id = int(mapping_row["original_guild_id"])
+        clone_id = int(mapping_row["cloned_guild_id"])
+
+        try:
+            existed = self.db.upsert_mapping_rewrite(
+                original_guild_id=orig_id,
+                cloned_guild_id=clone_id,
+                source_text=source_text,
+                replacement_text=replacement_text,
+            )
+        except Exception as e:
+            logger.exception(
+                "[rewrite_add] Failed to upsert mapping rewrite", exc_info=e
+            )
+            embed = discord.Embed(
+                title="Rewrite: Error",
+                description=f"Failed to save rewrite:\n`{e}`",
+                color=discord.Color.red(),
+            )
+            return await ctx.respond(embed=embed, ephemeral=True)
+
+        try:
+            server = getattr(self.bot, "server", None)
+            if server and hasattr(server, "_clear_word_rewrites_cache_async"):
+                await server._clear_word_rewrites_cache_async()
+        except Exception:
+            logger.exception("[rewrite_add] Failed to clear rewrite cache")
+
+        verb = "updated" if existed else "added"
+        embed = discord.Embed(
+            title="Rewrite Saved",
+            description=f"Rewrite **{verb}** for this clone mapping.",
+            color=discord.Color.green(),
+        )
+        embed.add_field(
+            name="Source",
+            value=f"`{source_text}`",
+            inline=True,
+        )
+        embed.add_field(
+            name="Replacement",
+            value=f"`{replacement_text}`",
+            inline=True,
+        )
+
+        await ctx.respond(embed=embed, ephemeral=True)
+
+    @rewrite_group.command(
+        name="remove",
+        description="Remove a word/phrase rewrite for THIS clone mapping.",
+    )
+    async def rewrite_remove(
+        self,
+        ctx: discord.ApplicationContext,
+        rewrite_id: int = Option(
+            int,
+            "ID of the rewrite to remove (see /rewrite list)",
+            required=True,
+            min_value=1,
+        ),
+    ):
+        guild = ctx.guild
+        if not guild:
+            embed = discord.Embed(
+                title="Rewrite: Error",
+                description="This command must be run inside a server.",
+                color=discord.Color.red(),
+            )
+            return await ctx.respond(embed=embed, ephemeral=True)
+
+        mapping_row = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping_row:
+            embed = discord.Embed(
+                title="Rewrite: Error",
+                description=(
+                    "This server isn't mapped to a source guild, "
+                    "so I can't scope the rewrite."
+                ),
+                color=discord.Color.red(),
+            )
+            return await ctx.respond(embed=embed, ephemeral=True)
+
+        orig_id = int(mapping_row["original_guild_id"])
+        clone_id = int(mapping_row["cloned_guild_id"])
+
+        try:
+            removed = self.db.delete_mapping_rewrite(
+                original_guild_id=orig_id,
+                cloned_guild_id=clone_id,
+                rewrite_id=rewrite_id,
+            )
+        except Exception as e:
+            logger.exception(
+                "[rewrite_remove] Failed to delete mapping rewrite", exc_info=e
+            )
+            embed = discord.Embed(
+                title="Rewrite: Error",
+                description=f"Failed to remove rewrite:\n`{e}`",
+                color=discord.Color.red(),
+            )
+            return await ctx.respond(embed=embed, ephemeral=True)
+
+        if not removed:
+            embed = discord.Embed(
+                title="Rewrite Not Found",
+                description=f"No rewrite found with ID `{rewrite_id}` on this mapping.",
+                color=discord.Color.orange(),
+            )
+            return await ctx.respond(embed=embed, ephemeral=True)
+
+        try:
+            server = getattr(self.bot, "server", None)
+            if server and hasattr(server, "_clear_word_rewrites_cache_async"):
+                await server._clear_word_rewrites_cache_async()
+        except Exception:
+            logger.exception("[rewrite_remove] Failed to clear rewrite cache")
+
+        embed = discord.Embed(
+            title="Rewrite Removed",
+            description=f"Removed rewrite with ID `{rewrite_id}` on this clone mapping.",
+            color=discord.Color.green(),
+        )
+        await ctx.respond(embed=embed, ephemeral=True)
+
+    @rewrite_group.command(
+        name="list",
+        description="List word/phrase rewrites for THIS clone mapping.",
+    )
+    async def rewrite_list(self, ctx: discord.ApplicationContext):
+        guild = ctx.guild
+        if not guild:
+            embed = discord.Embed(
+                title="Rewrite: Error",
+                description="This command must be run inside a server.",
+                color=discord.Color.red(),
+            )
+            return await ctx.respond(embed=embed, ephemeral=True)
+
+        mapping_row = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping_row:
+            embed = discord.Embed(
+                title="Rewrite: Error",
+                description=(
+                    "This server isn't mapped to a source guild, "
+                    "so I can't find its rewrites."
+                ),
+                color=discord.Color.red(),
+            )
+            return await ctx.respond(embed=embed, ephemeral=True)
+
+        orig_id = int(mapping_row["original_guild_id"])
+        clone_id = int(mapping_row["cloned_guild_id"])
+
+        rows = self.db.list_mapping_rewrites_for_mapping(
+            original_guild_id=orig_id,
+            cloned_guild_id=clone_id,
+        )
+
+        if not rows:
+            embed = discord.Embed(
+                title="Rewrites",
+                description="There are no rewrites configured for this clone mapping.",
+                color=discord.Color.blurple(),
+            )
+            return await ctx.respond(embed=embed, ephemeral=True)
+
+        lines: list[str] = []
+        for row in rows:
+            rid = row.get("id")
+            src = row.get("source_text") or ""
+            repl = row.get("replacement_text") or ""
+            lines.append(f"[`{rid}`] `{src}` → `{repl}`")
+
+        body = "\n".join(lines)
+
+        embed = discord.Embed(
+            title="Word/Phrase Rewrites",
+            description=body,
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text="Use /rewrite remove <id> to delete a rule.")
+
+        await ctx.respond(embed=embed, ephemeral=True)
 
 
 def setup(bot: commands.Bot):
