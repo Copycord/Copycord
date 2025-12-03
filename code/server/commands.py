@@ -98,6 +98,12 @@ class CloneCommands(commands.Cog):
         "Manage role mentions for cloned messages in THIS server.",
         guild_ids=GUILD_IDS,
     )
+    
+    env_group = discord.SlashCommandGroup(
+        "env",
+        "View or update Copycord environment-style settings.",
+        guild_ids=GUILD_IDS,
+    )
 
     channel_webhook_group = discord.SlashCommandGroup(
         "channel_webhook",
@@ -3178,6 +3184,54 @@ class CloneCommands(commands.Cog):
             )
 
         await ctx.respond(embed=embed, ephemeral=True)
+        
+    @env_group.command(
+        name="msg_cleanup",
+        description="Set how long to keep stored messages (in days) before DB cleanup.",
+    )
+    async def env_set_retention(
+        self,
+        ctx: discord.ApplicationContext,
+        days: int = Option(
+            int,
+            "Retention in whole days (e.g. 7 = keep 7 days of messages)",
+            required=True,
+            min_value=1,
+        ),
+    ):
+        """
+        Configure DB message retention via app_config.
+
+        Canonical key:
+        - MESSAGE_RETENTION_DAYS
+
+        We still delete MESSAGE_RETENTION_SECONDS so that app_config
+        does not have conflicting values. Seconds remain supported as a
+        legacy read path in the server, but are no longer settable here.
+        """
+        await ctx.defer(ephemeral=True)
+
+        try:
+            self.db.set_config("MESSAGE_RETENTION_DAYS", str(int(days)))
+            self.db.delete_config("MESSAGE_RETENTION_SECONDS")
+        except Exception as e:
+            logger.exception("[env_msg_cleanup] Failed to update app_config", exc_info=e)
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Database error",
+                    "Failed to update the message cleanup setting. "
+                    "Check the server logs for details.",
+                ),
+                ephemeral=True,
+            )
+
+        embed = self._ok_embed(
+            "Message cleanup updated",
+            f"Stored messages will now be kept for `{days}` day(s) before they are deleted from the database.",
+        )
+        await ctx.followup.send(embed=embed, ephemeral=True)
+
+
 
 
 def setup(bot: commands.Bot):

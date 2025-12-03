@@ -456,3 +456,17 @@ After running, all cloned messages revert to using the original author’s name 
 ```
 
 ---
+
+## Copycord Env (`/env`)
+
+#### `/msg_cleanup`
+
+**Description:** Set how many days stored messages are kept in the database before the automatic cleanup task removes them.
+
+**Example:**
+```text
+/env msg_cleanup days:7
+```
+
+---
+
