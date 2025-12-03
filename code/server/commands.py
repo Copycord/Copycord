@@ -23,6 +23,9 @@ import logging
 import time
 import re
 import json
+import io
+import zipfile
+import sqlite3
 from typing import Optional
 from common.config import Config
 from common.db import DBManager
@@ -3480,6 +3483,194 @@ class CloneCommands(commands.Cog):
         embed.set_footer(text="Use /rewrite remove <id> to delete a rule.")
 
         await ctx.respond(embed=embed, ephemeral=True)
+
+    @guild_scoped_slash_command(
+        name="debug_report",
+        description="Generate a ZIP with redacted JSON dumps of all Copycord DB tables.",
+    )
+    async def debug_report(self, ctx: discord.ApplicationContext):
+        """
+        Generate a redacted JSON dump of all DB tables, zipped for debugging.
+
+        - One JSON file per table: db_tables/<table>.json
+        - Obvious secrets (tokens, webhook URLs, passwords, etc.) are redacted.
+        - app_config values are redacted when the key looks secret (TOKEN, SECRET, etc.).
+        """
+        await ctx.defer(ephemeral=True)
+
+        conn = self.db.conn
+        if conn is None:
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Database error",
+                    "Database connection is not available (conn is None).",
+                ),
+                ephemeral=True,
+            )
+
+        buf = io.BytesIO()
+        now = datetime.now(timezone.utc)
+        generated_iso = now.isoformat()
+
+        sensitive_col_tokens = [
+            "token",
+            "secret",
+            "password",
+            "webhook_url",
+            "webhook",
+            "session",
+            "cookie",
+            "api_key",
+        ]
+
+        sensitive_key_tokens = [
+            "token",
+            "secret",
+            "webhook",
+            "password",
+            "api_key",
+            "client_id",
+            "client_secret",
+        ]
+
+        try:
+            with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+
+                cur = conn.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                )
+                rows = cur.fetchall()
+
+                table_names: list[str] = []
+                for r in rows:
+                    try:
+                        name = r["name"]
+                    except Exception:
+                        name = r[0]
+                    if not name:
+                        continue
+                    table_names.append(str(name))
+
+                table_names = sorted(set(table_names))
+
+                for table in table_names:
+                    try:
+                        cur_tbl = conn.execute(f"SELECT * FROM {table}")
+                    except Exception as e:
+                        # If a table can't be selected, record the error instead of crashing the whole export
+                        error_payload = {
+                            "_meta": {
+                                "table": table,
+                                "error": f"{type(e).__name__}: {e}",
+                                "generated_at": generated_iso,
+                            },
+                            "rows": [],
+                        }
+                        zf.writestr(
+                            f"db_tables/{table}.json",
+                            json.dumps(error_payload, indent=2, default=str),
+                        )
+                        continue
+
+                    cols = [d[0] for d in (cur_tbl.description or [])]
+                    redacted_cols = [
+                        c
+                        for c in cols
+                        if any(tok in c.lower() for tok in sensitive_col_tokens)
+                    ]
+
+                    table_rows: list[dict] = []
+                    fetched = cur_tbl.fetchall()
+
+                    for r in fetched:
+
+                        row_dict_raw: dict = {}
+                        for idx, col in enumerate(cols):
+                            try:
+                                val = r[col]
+                            except Exception:
+                                val = r[idx]
+
+                            row_dict_raw[col] = val
+
+                        row_dict_out: dict = {}
+                        for col, val in row_dict_raw.items():
+                            col_l = col.lower()
+                            redacted = False
+
+                            if any(tok in col_l for tok in sensitive_col_tokens):
+                                redacted = True
+
+                            if table == "app_config" and col == "value":
+                                key_val = row_dict_raw.get("key")
+                                if isinstance(key_val, str):
+                                    key_up = key_val.upper()
+                                    if any(
+                                        tok.upper() in key_up
+                                        for tok in sensitive_key_tokens
+                                    ):
+                                        redacted = True
+
+                            if redacted and val is not None:
+                                row_dict_out[col] = "[redacted]"
+                            else:
+                                row_dict_out[col] = val
+
+                        table_rows.append(row_dict_out)
+
+                    payload = {
+                        "_meta": {
+                            "table": table,
+                            "row_count": len(table_rows),
+                            "generated_at": generated_iso,
+                            "redacted_columns": redacted_cols,
+                            "notes": (
+                                "Values for some app_config keys (TOKEN/SECRET/etc.) "
+                                "are redacted as [redacted]."
+                                if table == "app_config"
+                                else ""
+                            ),
+                        },
+                        "rows": table_rows,
+                    }
+
+                    zf.writestr(
+                        f"db_tables/{table}.json",
+                        json.dumps(payload, indent=2, ensure_ascii=False, default=str),
+                    )
+
+        except Exception as e:
+            logger.exception("debug_report: failed to build ZIP")
+            return await ctx.followup.send(
+                embed=self._err_embed(
+                    "Debug report failed",
+                    f"An error occurred while building the debug report:\n"
+                    f"`{type(e).__name__}: {e}`",
+                ),
+                ephemeral=True,
+            )
+
+        buf.seek(0)
+        ts = now.strftime("%Y%m%d-%H%M%S")
+        filename = f"copycord_debug_report_{ts}.zip"
+
+        embed = discord.Embed(
+            title="Debug Report Ready",
+            description=(
+                'Secrets (tokens, webhook URLs, passwords, etc.) are **replaced with** `"[redacted]"`.\n\n'
+                "This report is intended for troubleshooting Copycord.\n"
+                "**Only share it directly with trusted Copycord developers**."
+            ),
+            color=discord.Color.blurple(),
+            timestamp=None,
+        )
+
+        await ctx.followup.send(
+            embed=embed,
+            file=discord.File(buf, filename=filename),
+            ephemeral=True,
+        )
 
 
 def setup(bot: commands.Bot):
