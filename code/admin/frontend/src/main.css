@@ -8667,3 +8667,69 @@ body.login-page {
     white-space: normal;
   }
 }
+
+/* === Notifications page loading overlay === */
+body.page-notifications .page-loader {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+  background: rgba(5, 7, 11, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+
+  pointer-events: none;
+}
+
+/* Show loader while page is loading so guilds can be fetched via api */
+body.page-notifications.page-loading .page-loader {
+  display: flex;
+}
+
+.page-loader-inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 22px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.9);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+.page-loader-pulse {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #a855f7;
+  animation: pageLoaderPulse 0.9s ease-in-out infinite;
+}
+
+.page-loader-text {
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: #e5e7eb;
+}
+
+body.page-notifications.page-loading .container {
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  body.page-notifications .container {
+    transition: filter 0.25s ease-out, opacity 0.25s ease-out;
+  }
+}
+
+@keyframes pageLoaderPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.6);
+    opacity: 1;
+  }
+}

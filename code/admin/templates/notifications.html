@@ -10,7 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
 </head>
 
-<body>
+<body class="page-notifications page-loading">
     <header class="site-header" role="banner">
         <button id="menu-toggle" class="menu-btn" aria-haspopup="true" aria-expanded="false" aria-controls="side-menu"
             aria-label="Open menu">
@@ -22,6 +22,13 @@
             <h1>Copycord</h1>
         </a>
     </header>
+
+    <div id="notif-page-loader" class="page-loader" aria-hidden="true">
+        <div class="page-loader-inner">
+            <div class="page-loader-pulse" aria-hidden="true"></div>
+            <div class="page-loader-text">Loading...</div>
+        </div>
+    </div>
 
     <div id="menu-backdrop" class="menu-backdrop" hidden></div>
 
@@ -148,7 +155,8 @@
             <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="notifModalTitle">
                 <div class="modal-header">
                     <h3 class="modal-title" id="notifModalTitle">New Notification</h3>
-                    <button class="icon-btn verify-close" id="notifModalCloseBtn" type="button" aria-label="Close">✕</button>
+                    <button class="icon-btn verify-close" id="notifModalCloseBtn" type="button"
+                        aria-label="Close">✕</button>
                 </div>
 
                 <div class="modal-body">

@@ -3840,6 +3840,76 @@ async def api_delete_mapping(mapping_id: str):
     return JSONResponse({"ok": True})
 
 
+@app.get("/api/client-guilds", response_class=JSONResponse)
+async def api_client_guilds():
+    """
+    Return list of guilds for the CLIENT (selfbot) account, using CLIENT_TOKEN.
+
+    """
+
+    cfg = db.get_all_config()
+    client_token = (cfg.get("CLIENT_TOKEN") or "").strip()
+
+    if not client_token:
+
+        raise HTTPException(status_code=400, detail="client-token-missing")
+
+    url = f"{DISCORD_API_BASE}/users/@me/guilds"
+    headers = {
+        "Authorization": client_token,
+    }
+
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(url, headers=headers, timeout=15) as resp:
+                text = await resp.text()
+                if resp.status != 200:
+                    LOGGER.warning(
+                        "Discord /users/@me/guilds failed: status=%s body=%s",
+                        resp.status,
+                        text[:300],
+                    )
+                    if resp.status == 401:
+
+                        raise HTTPException(
+                            status_code=502, detail="client-token-invalid"
+                        )
+                    raise HTTPException(
+                        status_code=502, detail="discord-guilds-fetch-failed"
+                    )
+                try:
+                    raw = json.loads(text)
+                except Exception:
+                    LOGGER.exception("Failed to decode JSON from /users/@me/guilds")
+                    raise HTTPException(
+                        status_code=502, detail="discord-guilds-json-error"
+                    )
+    except HTTPException:
+
+        raise
+    except Exception:
+        LOGGER.exception("Error calling Discord /users/@me/guilds")
+        raise HTTPException(status_code=502, detail="discord-guilds-error")
+
+    items: list[dict[str, str]] = []
+    for g in raw or []:
+        try:
+            gid = str(g.get("id"))
+        except Exception:
+            continue
+        name = str(g.get("name") or f"Guild {gid}")
+        items.append(
+            {
+                "id": gid,
+                "name": name,
+            }
+        )
+
+    items.sort(key=lambda x: x["name"].lower())
+
+    return JSONResponse({"ok": True, "items": items})
+
+
 @app.get("/api/notifications", response_class=JSONResponse)
 async def api_list_notifications(guild_id: str | None = Query(default=None)):
     """

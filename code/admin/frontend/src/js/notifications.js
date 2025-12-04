@@ -138,15 +138,13 @@ function themedConfirm({
 }
 
 export class NotificationSystem {
-  /**
-   * @param {{ showToast?: (msg: string, opts?: any) => void }} opts
-   */
   constructor(opts = {}) {
     this.showToast =
       typeof opts.showToast === "function"
         ? opts.showToast
         : (msg, _opts) => alert(msg);
 
+    this.root = null;
     this.guildSelect = null;
     this.listEl = null;
     this.emptyEl = null;
@@ -156,14 +154,16 @@ export class NotificationSystem {
     this.guilds = [];
     this.currentItems = [];
     this.isSaving = false;
+    this.guildsPromise = null;
+    this.hardFail = false;
   }
-
   init() {
     const root = document.getElementById("notif-root");
     if (!root) {
       console.warn("[Notifications] #notif-root not found, skipping init.");
       return;
     }
+    this.root = root;
 
     this.listEl = document.getElementById("notification-list");
     this.emptyEl = document.getElementById("notification-empty");
@@ -182,7 +182,11 @@ export class NotificationSystem {
     const cancelBtn = document.getElementById("notifCancelBtn");
 
     if (createBtn) {
-      createBtn.addEventListener("click", () => this.openCreateModal());
+      // Disable until guilds are loaded so user can't open an empty select
+      createBtn.disabled = true;
+      createBtn.addEventListener("click", () => {
+        this.openCreateModal().catch(console.error);
+      });
     }
     if (closeBtn) {
       closeBtn.addEventListener("click", () => this.closeModal());
@@ -204,27 +208,68 @@ export class NotificationSystem {
     }
     this.updateProviderFields();
 
-    this.loadGuilds().catch(console.error);
-    this.refreshList().catch(console.error);
+    const loader = window.loaderTest;
+    if (loader && typeof loader.show === "function") {
+      loader.show();
+    }
+
+    this.guildsPromise = this.loadGuilds();
+    const rulesPromise = this.refreshList();
+
+    Promise.allSettled([this.guildsPromise, rulesPromise])
+      .catch((err) => {
+        console.error("[Notifications] init error:", err);
+      })
+      .finally(() => {
+        const hardFail = this.hardFail === true;
+
+        if (!hardFail) {
+          if (createBtn) {
+            createBtn.disabled = false;
+          }
+
+          if (this.root) {
+            this.root.hidden = false;
+          }
+
+          document.body.classList.remove("page-loading");
+
+          if (loader && typeof loader.hide === "function") {
+            loader.hide();
+          }
+        } else {
+          console.warn(
+            "[Notifications] Guild load failed with server error; keeping loading state."
+          );
+        }
+      });
   }
 
   async loadGuilds() {
     try {
-      const res = await fetch("/api/guilds", {
+      const res = await fetch("/api/client-guilds", {
         credentials: "same-origin",
         cache: "no-store",
       });
+
       if (!res.ok) {
+        if (res.status >= 500) {
+          this.hardFail = true;
+        }
+
         this.showToast(`Failed to load guilds (${res.status})`, {
           type: "error",
         });
         return;
       }
+
       const data = await res.json();
       this.guilds = Array.isArray(data.items) ? data.items : [];
       this.populateGuildSelects();
     } catch (err) {
       console.error("[Notifications] loadGuilds error:", err);
+
+      this.hardFail = true;
       this.showToast(
         "Failed to load guild list. Some features may be limited.",
         { type: "error" }
@@ -417,7 +462,18 @@ export class NotificationSystem {
     return parts.join(" · ");
   }
 
-  openCreateModal() {
+  async openCreateModal() {
+    if (this.guildsPromise) {
+      try {
+        await this.guildsPromise;
+      } catch (err) {
+        console.error("[Notifications] guildsPromise failed:", err);
+        // We still allow opening, but you'll just see "All guilds" in that case
+      }
+    }
+
+    this.populateGuildSelects();
+
     this.resetForm();
 
     const guildSelect = document.getElementById("notif_guild_id");
