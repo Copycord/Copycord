@@ -68,6 +68,19 @@
         </li>
 
         <li>
+          <a class="menu-item" href="/notifications" rel="noopener">
+            <span class="mi" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                stroke-width="1.5" aria-hidden="true" focusable="false">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                  d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
+              </svg>
+            </span>
+            <span class="mi-label">Notifications</span>
+          </a>
+        </li>
+
+        <li>
           <a class="menu-item" href="/system" rel="noopener">
             <span class="mi" aria-hidden="true">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"
@@ -79,6 +92,7 @@
             <span class="mi-label">System</span>
           </a>
         </li>
+
       </ul>
     </nav>
 
@@ -218,23 +232,30 @@
     "RENAME_CHANNELS": "When enabled, channels/categories renamed in the host server will be renamed in the clone.",
     "SYNC_CHANNEL_NSFW": "When enabled, NSFW flags for channels will be synchronized from the host to the clone.",
     "SYNC_CHANNEL_TOPIC": "When enabled, channel topics will be synchronized from the host to the clone.",
-    "SYNC_CHANNEL_SLOWMODE": "When enabled, slowmode settings for channels will be synchronized from the host to the clone.",
+    "SYNC_CHANNEL_SLOWMODE": "When enabled, slowmode settings for channels will be synchronized from the host to the
+    clone.",
     "CLONE_VOICE": "When enabled, voice channels will be cloned from the host to the clone.",
-    "CLONE_VOICE_PROPERTIES": "When enabled, voice channel properties (bitrate, user limit) will be synchronized from the host to the clone.",
+    "CLONE_VOICE_PROPERTIES": "When enabled, voice channel properties (bitrate, user limit) will be synchronized from
+    the host to the clone.",
     "CLONE_STAGE": "When enabled, stage channels will be cloned from the host to the clone.",
-    "CLONE_STAGE_PROPERTIES": "When enabled, stage channel properties (bitrate, user limit) will be synchronized from the host to the clone.",
+    "CLONE_STAGE_PROPERTIES": "When enabled, stage channel properties (bitrate, user limit) will be synchronized from
+    the host to the clone.",
     "CLONE_GUILD_ICON": "When enabled, the guild icon will be cloned from the host to the clone.",
     "CLONE_GUILD_BANNER": "When enabled, the guild banner will be cloned from the host to the clone.",
     "CLONE_GUILD_SPLASH": "When enabled, the guild splash will be cloned from the host to the clone.",
-    "CLONE_GUILD_DISCOVERY_SPLASH": "When enabled, the guild discovery splash will be cloned from the host to the clone.",
+    "CLONE_GUILD_DISCOVERY_SPLASH": "When enabled, the guild discovery splash will be cloned from the host to the
+    clone.",
     "SYNC_GUILD_DESCRIPTION": "When enabled, the guild description will be synchronized from the host to the clone.",
-    "SYNC_FORUM_PROPERTIES": "When enabled, forum properties (topic, tags, etc.) will be synchronized from the host to the clone.",
+    "SYNC_FORUM_PROPERTIES": "When enabled, forum properties (topic, tags, etc.) will be synchronized from the host to
+    the clone.",
     "REARRANGE_ROLES": "When enabled, roles will be rearranged in the clone to match the host server's role hierarchy.",
-    "ANONYMIZE_USERS": "When enabled, user identities will be anonymized with random names (e.g., SwiftFox123) and random avatar images.",
+    "ANONYMIZE_USERS": "When enabled, user identities will be anonymized with random names (e.g., SwiftFox123) and
+    random avatar images.",
     "DISABLE_EVERYONE_MENTIONS": "When enabled, @everyone and @here mentions will be disabled in mirrored messages.",
     "DISABLE_ROLE_MENTIONS": "When enabled, role mentions will be disabled in mirrored messages to stop role pings.",
     "TAG_REPLY_MSG": "When enabled, messages that are replies will include a tag of the message being replied to.",
-    "DB_CLEANUP_MSG": "When enabled, runs an hourly task to delete messages stored in the database that are older than 7 days."
+    "DB_CLEANUP_MSG": "When enabled, runs an hourly task to delete messages stored in the database that are older than 7
+    days."
     } %}
 
     <div class="card" id="global-config-card">
@@ -336,14 +357,8 @@
         </p>
 
         <div class="guild-mapping-search">
-          <input
-            id="mappingSearchInput"
-            class="log-search-input"
-            type="text"
-            placeholder="Search mappings…"
-            aria-label="Search mappings"
-            autocomplete="off"
-          />
+          <input id="mappingSearchInput" class="log-search-input" type="text" placeholder="Search mappings…"
+            aria-label="Search mappings" autocomplete="off" />
         </div>
       </div>
 
@@ -407,75 +422,70 @@
             <input type="text" id="map_mapping_name" name="mapping_name" maxlength="64" />
           </div>
 
-        <div class="grid">
-          <div class="field">
-            <label for="map_original_guild_id" class="has-tip">
-              <span class="label-text">HOST_GUILD_ID</span>
-              <button type="button" class="info-dot" aria-label="What is HOST_GUILD_ID?"
-                aria-describedby="tip-HOST_GUILD_ID"></button>
-              <span id="tip-HOST_GUILD_ID" role="tooltip" class="tip-bubble">
-                {{ FIELD_TIPS['HOST_GUILD_ID'] }}
-              </span>
-            </label>
-            <input type="text" id="map_original_guild_id" name="original_guild_id" inputmode="numeric" />
-          </div>
-
-          <div class="field">
-            <label for="map_cloned_guild_id" class="has-tip">
-              <span class="label-text">CLONE_GUILD_ID</span>
-              <button type="button" class="info-dot" aria-label="What is CLONE_GUILD_ID?"
-                aria-describedby="tip-CLONE_GUILD_ID"></button>
-              <span id="tip-CLONE_GUILD_ID" role="tooltip" class="tip-bubble">
-                {{ FIELD_TIPS['CLONE_GUILD_ID'] }}
-              </span>
-            </label>
-            <input type="text" id="map_cloned_guild_id" name="cloned_guild_id" inputmode="numeric" />
-          </div>
-
-          <div class="field field-search-settings">
-            <label for="mappingSettingsSearch" class="has-tip">
-              <span class="label-text">Search Settings</span>
-            </label>
-
-            <input
-              id="mappingSettingsSearch"
-              class="log-search-input"
-              type="text"
-              placeholder="Search messages, clone_roles, etc…"
-              autocomplete="off"
-            />
-          </div>
-
-          {% for k in mapping_bool_keys %}
-          <div class="field mapping-setting-field" data-setting-key="{{ k | lower }}">
-            <label for="map_{{ k }}" class="has-tip">
-              <span class="label-text">{{ k }}</span>
-              {% if FIELD_TIPS.get(k) %}
-              <button type="button" class="info-dot" aria-label="What is {{ k }}?"
-                aria-describedby="tip-{{ k }}"></button>
-              <span id="tip-{{ k }}" role="tooltip" class="tip-bubble">
-                {{ FIELD_TIPS[k] }}
-              </span>
-              {% endif %}
-            </label>
-            <div class="select">
-              <select id="map_{{ k }}" name="{{ k }}">
-                <option value="True">True</option>
-                <option value="False">False</option>
-              </select>
+          <div class="grid">
+            <div class="field">
+              <label for="map_original_guild_id" class="has-tip">
+                <span class="label-text">HOST_GUILD_ID</span>
+                <button type="button" class="info-dot" aria-label="What is HOST_GUILD_ID?"
+                  aria-describedby="tip-HOST_GUILD_ID"></button>
+                <span id="tip-HOST_GUILD_ID" role="tooltip" class="tip-bubble">
+                  {{ FIELD_TIPS['HOST_GUILD_ID'] }}
+                </span>
+              </label>
+              <input type="text" id="map_original_guild_id" name="original_guild_id" inputmode="numeric" />
             </div>
-          </div>
-          {% endfor %}
-        </div>
 
-        <div class="btns">
-          <button class="btn btn-ghost" type="button" id="mapping-cancel-btn" hidden>
-            Cancel
-          </button>
-          <button class="btn btn-ghost" type="submit" id="mapping-save-btn">
-            Save Mapping
-          </button>
-        </div>
+            <div class="field">
+              <label for="map_cloned_guild_id" class="has-tip">
+                <span class="label-text">CLONE_GUILD_ID</span>
+                <button type="button" class="info-dot" aria-label="What is CLONE_GUILD_ID?"
+                  aria-describedby="tip-CLONE_GUILD_ID"></button>
+                <span id="tip-CLONE_GUILD_ID" role="tooltip" class="tip-bubble">
+                  {{ FIELD_TIPS['CLONE_GUILD_ID'] }}
+                </span>
+              </label>
+              <input type="text" id="map_cloned_guild_id" name="cloned_guild_id" inputmode="numeric" />
+            </div>
+
+            <div class="field field-search-settings">
+              <label for="mappingSettingsSearch" class="has-tip">
+                <span class="label-text">Search Settings</span>
+              </label>
+
+              <input id="mappingSettingsSearch" class="log-search-input" type="text"
+                placeholder="Search messages, clone_roles, etc…" autocomplete="off" />
+            </div>
+
+            {% for k in mapping_bool_keys %}
+            <div class="field mapping-setting-field" data-setting-key="{{ k | lower }}">
+              <label for="map_{{ k }}" class="has-tip">
+                <span class="label-text">{{ k }}</span>
+                {% if FIELD_TIPS.get(k) %}
+                <button type="button" class="info-dot" aria-label="What is {{ k }}?"
+                  aria-describedby="tip-{{ k }}"></button>
+                <span id="tip-{{ k }}" role="tooltip" class="tip-bubble">
+                  {{ FIELD_TIPS[k] }}
+                </span>
+                {% endif %}
+              </label>
+              <div class="select">
+                <select id="map_{{ k }}" name="{{ k }}">
+                  <option value="True">True</option>
+                  <option value="False">False</option>
+                </select>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+
+          <div class="btns">
+            <button class="btn btn-ghost" type="button" id="mapping-cancel-btn" hidden>
+              Cancel
+            </button>
+            <button class="btn btn-ghost" type="submit" id="mapping-save-btn">
+              Save Mapping
+            </button>
+          </div>
         </form>
       </div>
     </div>
@@ -704,12 +714,11 @@
 
           <fieldset class="filters-col filters-users">
             <legend>User Filters</legend>
-            
+
             <div class="field">
               <label for="wl_users_input" class="has-tip">
                 <span class="label-text">Whitelisted User IDs</span>
-                <button type="button" class="info-dot"
-                  aria-label="Only messages from these users will be cloned"
+                <button type="button" class="info-dot" aria-label="Only messages from these users will be cloned"
                   aria-describedby="tip-wl_users"></button>
                 <span id="tip-wl_users" role="tooltip" class="tip-bubble">
                   When set, ONLY messages from these user IDs will be cloned.
@@ -730,8 +739,7 @@
             <div class="field">
               <label for="bl_users_input" class="has-tip">
                 <span class="label-text">Blacklisted User IDs</span>
-                <button type="button" class="info-dot"
-                  aria-label="Messages from these users will NOT be cloned"
+                <button type="button" class="info-dot" aria-label="Messages from these users will NOT be cloned"
                   aria-describedby="tip-bl_users"></button>
                 <span id="tip-bl_users" role="tooltip" class="tip-bubble">
                   Messages from these user IDs will be blocked from cloning.
