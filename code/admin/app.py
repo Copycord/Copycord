@@ -76,7 +76,7 @@ import aiohttp
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
 
-# Load .env BEFORE we read DATA_DIR / DB_PATH
+
 load_dotenv(PROJECT_ROOT / ".env")
 
 
@@ -1163,6 +1163,23 @@ async def _ws_cmd(url: str, payload: dict, timeout: float = 0.7) -> dict:
                     )
                     return {"ok": False, "running": False, "error": "bad-response"}
         except Exception as e:
+
+            err_str = (str(e) or "").strip()
+
+            if not err_str:
+
+                strerror = getattr(e, "strerror", "") or ""
+                errno = getattr(e, "errno", None)
+                if strerror:
+                    if errno is not None:
+                        err_str = f"[Errno {errno}] {strerror}"
+                    else:
+                        err_str = strerror
+
+            if not err_str:
+
+                err_str = e.__class__.__name__
+
             LOGGER.debug(
                 "_ws_cmd error | url=%s took_ms=%.1f err=%s",
                 url,
@@ -1170,7 +1187,7 @@ async def _ws_cmd(url: str, payload: dict, timeout: float = 0.7) -> dict:
                 repr(e),
                 extra={"took_ms": round(t.ms, 1)},
             )
-            return {"ok": False, "running": False, "error": str(e)}
+            return {"ok": False, "running": False, "error": err_str}
 
 
 def _as_bool(v: str | None, default: bool = False) -> bool:
@@ -1409,21 +1426,107 @@ async def save(request: Request):
     return RedirectResponse("/", status_code=303)
 
 
+async def _check_controller(
+    name: str, url: str, timeout: float = 0.7
+) -> tuple[bool, str, dict]:
+    """
+    Ping a controller with {"cmd": "status"} and decide if it's reachable.
+
+    Returns (reachable, friendly_reason, raw_response).
+    - reachable = did the Admin reach the controller WebSocket at all?
+    - friendly_reason = short text like "running", "stopped", or an error string.
+    """
+    res = await _ws_cmd(url, {"cmd": "status"}, timeout=timeout)
+
+    if not res.get("ok") or res.get("error"):
+        reason = (res.get("error") or "unreachable").strip()
+        return False, reason, res
+
+    running = bool(res.get("running"))
+    reason = "running" if running else "stopped"
+    return True, reason, res
+
+
 @app.post("/start")
 async def start_all():
+
     errs = _validate(_read_env(), for_start=True)
     if errs:
         LOGGER.warning("POST /start blocked | errs=%s", errs)
-        return PlainTextResponse("Cannot start: " + "; ".join(errs), status_code=400)
+        return PlainTextResponse(
+            "Cannot start: " + "; ".join(errs),
+            status_code=400,
+        )
+
+    srv_ok, srv_reason, srv_ping = await _check_controller("Server", SERVER_CTRL_URL)
+    cli_ok, cli_reason, cli_ping = await _check_controller("Client", CLIENT_CTRL_URL)
+
+    unreachable_parts: list[str] = []
+    if not srv_ok:
+        unreachable_parts.append(f"- Server: {srv_reason}")
+    if not cli_ok:
+        unreachable_parts.append(f"- Client: {cli_reason}")
+
+    if unreachable_parts:
+        if not srv_ok and not cli_ok:
+            msg = (
+                "Couldn’t start Copycord.\n\n"
+                "The Admin panel cannot reach either the Server or Client controller.\n"
+                "Make sure the Server, Client, and Admin containers are all running and that "
+                "the control ports are reachable, then try again."
+            )
+        elif not srv_ok:
+            msg = (
+                "Couldn’t start Copycord.\n\n"
+                "The Admin panel cannot reach the Server controller.\n"
+                "Make sure the Server container is running and reachable, then try again."
+            )
+        else:
+            msg = (
+                "Couldn’t start Copycord.\n\n"
+                "The Admin panel cannot reach the Client controller.\n"
+                "Make sure the Client container is running and reachable, then try again."
+            )
+
+        msg += "\n\nDetails:\n" + "\n".join(unreachable_parts)
+
+        LOGGER.error(
+            "POST /start preflight failed | server=%s client=%s",
+            srv_ping,
+            cli_ping,
+        )
+        return PlainTextResponse(msg, status_code=502)
+
     srv = await _ws_cmd(SERVER_CTRL_URL, {"cmd": "start"})
     cli = await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "start"})
-    if not srv.get("ok") or srv.get("error") or not cli.get("ok") or cli.get("error"):
-        detail = f"server={srv.get('error') or srv.get('status')}, client={cli.get('error') or cli.get('status')}"
-        LOGGER.error("POST /start failed | %s", detail)
-        return PlainTextResponse(f"Start failed: {detail}", status_code=502)
-    LOGGER.info("POST /start ok")
-    return RedirectResponse("/", status_code=303)
 
+    errors: list[str] = []
+    if not srv.get("ok") or srv.get("error"):
+        errors.append(
+            f"- Server: {srv.get('error') or srv.get('status') or 'failed to start'}"
+        )
+    if not cli.get("ok") or cli.get("error"):
+        errors.append(
+            f"- Client: {cli.get('error') or cli.get('status') or 'failed to start'}"
+        )
+
+    if errors:
+        detail = "\n".join(errors)
+        LOGGER.error("POST /start failed | %s", detail.replace("\n", " | "))
+        friendly = (
+            "Couldn’t start Copycord.\n\n"
+            "The Admin panel reached the controllers, but there was a problem starting:\n"
+            f"{detail}\n\n"
+            "Check the Server and Client logs for more details."
+        )
+        return PlainTextResponse(friendly, status_code=502)
+
+    LOGGER.info(
+        "POST /start ok | server=%s client=%s",
+        srv.get("status") or srv.get("running"),
+        cli.get("status") or cli.get("running"),
+    )
+    return RedirectResponse("/", status_code=303)
 
 @app.post("/stop")
 async def stop_all():
@@ -1573,7 +1676,8 @@ async def _start_release_watcher():
 @app.on_event("startup")
 async def _start_backup_scheduler():
     backup_scheduler.start()
-    
+
+
 @app.on_event("startup")
 async def _cleanup_stale_mapping_pairs_on_boot():
     """
@@ -1603,14 +1707,13 @@ async def _cleanup_stale_mapping_pairs_on_boot():
                 "All guild mappings are already in sync."
             )
     except Exception:
-        LOGGER.exception(
-            "Startup cleanup: failed while removing stale mapping state."
-        )
+        LOGGER.exception("Startup cleanup: failed while removing stale mapping state.")
+
 
 @app.on_event("shutdown")
 async def _stop_backup_scheduler():
     await backup_scheduler.stop()
-    
+
 
 @app.get("/api/validate-tokens", response_class=JSONResponse)
 async def api_validate_tokens():
@@ -1624,9 +1727,7 @@ async def api_validate_tokens():
 
     has_tokens = bool(raw_client and raw_server)
     if not has_tokens:
-        return JSONResponse(
-            {"ok": False, "has_tokens": False, "errors": []}
-        )
+        return JSONResponse({"ok": False, "has_tokens": False, "errors": []})
 
     errs = await _verify_tokens_for_save(
         {
@@ -1643,7 +1744,6 @@ async def api_validate_tokens():
             "errors": errs,
         }
     )
-
 
 
 @app.api_route("/admin/backup-now", methods=["GET", "POST"])
