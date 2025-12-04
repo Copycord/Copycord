@@ -1471,20 +1471,20 @@ async def start_all():
         if not srv_ok and not cli_ok:
             msg = (
                 "Couldn’t start Copycord.\n\n"
-                "The Admin panel cannot reach either the **Server** or **Client** controller.\n"
+                "The Admin panel cannot reach either the Server or Client controller.\n"
                 "Make sure the Server, Client, and Admin containers are all running and that "
                 "the control ports are reachable, then try again."
             )
         elif not srv_ok:
             msg = (
                 "Couldn’t start Copycord.\n\n"
-                "The Admin panel cannot reach the **Server** controller.\n"
+                "The Admin panel cannot reach the Server controller.\n"
                 "Make sure the Server container is running and reachable, then try again."
             )
         else:
             msg = (
                 "Couldn’t start Copycord.\n\n"
-                "The Admin panel cannot reach the **Client** controller.\n"
+                "The Admin panel cannot reach the Client controller.\n"
                 "Make sure the Client container is running and reachable, then try again."
             )
 
