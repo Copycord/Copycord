@@ -8317,3 +8317,353 @@ body.login-page {
   box-shadow: none;
   border-color: rgba(255, 255, 255, 0.06);
 }
+
+/* Notifications page style */
+.notifications-page {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.notifications-page .card {
+  margin-top: 18px;
+}
+
+.notifications-page .card-header h2 {
+  margin: 0 0 4px 0;
+  font-size: 1.15rem;
+}
+
+.notifications-page .card-subtitle {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.notif-scope-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 10px;
+  margin-bottom: 14px;
+}
+
+.notif-scope-row .form-group {
+  min-width: 220px;
+  max-width: 360px;
+}
+
+.notif-scope-row .form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.form-row .form-group {
+  flex: 1 1 200px;
+  margin-bottom: 0;
+}
+
+.form-label {
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: 2px;
+}
+
+.help-text {
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0.85;
+}
+
+.form-group .input,
+.form-row .input {
+  width: 100%;
+}
+
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.checkbox-inline input[type='checkbox'] {
+  accent-color: var(--primary);
+}
+
+.empty-state {
+  padding: 18px 14px;
+  border-radius: 14px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  background: radial-gradient(
+      circle at top left,
+      rgba(167, 139, 250, 0.12),
+      transparent 55%
+    ),
+    #140b26;
+  text-align: left;
+  margin-top: 8px;
+}
+
+.empty-state p {
+  margin: 0 0 10px 0;
+  color: var(--muted);
+}
+
+.notif-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.notif-card {
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #1f1237, #160b2a);
+  box-shadow: var(--shadow);
+  padding: 12px 12px 10px 12px;
+}
+
+.notif-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.notif-card-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.notif-label-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.notif-label {
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notif-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.notif-pill--enabled {
+  background: rgba(16, 185, 129, 0.16);
+  color: var(--good);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.notif-pill--disabled {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--muted);
+  border-color: rgba(148, 163, 184, 0.4);
+}
+
+.notif-meta {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.notif-meta-dot::before {
+  content: '•';
+  margin: 0 4px;
+  opacity: 0.6;
+}
+
+.notif-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.notif-card-actions .btn {
+  padding-inline: 10px;
+  min-height: 32px;
+  font-size: 12px;
+}
+
+.notif-card-filters {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.notif-filter-label {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.notif-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+}
+
+.notif-provider-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--accent);
+  background: rgba(139, 92, 246, 0.12);
+}
+
+#notifModal .modal-body {
+  padding: 12px 16px 14px 16px;
+}
+
+#notifModal .form-group.form-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+#notifModal .modal-content {
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+#notifModal #notification-form {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+}
+
+#notifModal .modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 16px 0;
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+
+#notifModal .modal-body::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+#notifModal .modal-body::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--primary), var(--primary-700));
+  border: 2px solid #140b26;
+  border-radius: 12px;
+}
+
+#notifModal .modal-body::-webkit-scrollbar-track {
+  background: #140b26;
+  border-radius: 12px;
+}
+
+#notifModal .form-row:last-of-type {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+#notifModal .form-row:last-of-type .form-group:first-child {
+  flex: 1 1 auto;
+}
+
+#notifModal .form-row:last-of-type .form-group.form-actions {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 800px) {
+  .notif-scope-row {
+    align-items: stretch;
+  }
+
+  .notif-scope-row .form-actions {
+    width: 100%;
+    justify-content: flex-start;
+    margin-left: 0;
+  }
+
+  .notif-scope-row .form-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  #notifModal .form-row:last-of-type {
+    flex-wrap: wrap;
+  }
+
+  #notifModal .form-group.form-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .notif-card-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .notif-card-actions {
+    margin-left: 0;
+  }
+
+  .notif-label {
+    white-space: normal;
+  }
+}

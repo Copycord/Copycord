@@ -5,3 +5,4 @@ import "./js/app.js";
 import "./js/channels.js";
 import "./js/guilds.js";
 import "./js/system.js";
+import "./js/notifications.js";

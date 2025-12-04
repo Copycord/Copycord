@@ -271,7 +271,6 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "DB_CLEANUP_MSG": True,
 }
 
-
 app = FastAPI(title=APP_TITLE)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -1528,6 +1527,7 @@ async def start_all():
     )
     return RedirectResponse("/", status_code=303)
 
+
 @app.post("/stop")
 async def stop_all():
     LOGGER.info("POST /stop requested")
@@ -1875,6 +1875,23 @@ async def system_page(request: Request):
             "request": request,
             "title": f"System · {APP_TITLE}",
             "version": CURRENT_VERSION,
+        },
+    )
+
+
+@app.get("/notifications")
+async def notifications_page(request: Request):
+    """
+    Render the Message Notifications page.
+    """
+    env = _read_env()
+    return templates.TemplateResponse(
+        "notifications.html",
+        {
+            "request": request,
+            "title": APP_TITLE + " – Notifications",
+            "version": CURRENT_VERSION,
+            "log_level": env.get("LOG_LEVEL", "INFO"),
         },
     )
 
@@ -3821,6 +3838,72 @@ async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
 async def api_delete_mapping(mapping_id: str):
     db.delete_guild_mapping(mapping_id)
     return JSONResponse({"ok": True})
+
+
+@app.get("/api/notifications", response_class=JSONResponse)
+async def api_list_notifications(guild_id: str | None = Query(default=None)):
+    """
+    List message notification rules, optionally filtered by guild_id.
+    """
+    rows = db.list_message_notifications(guild_id=guild_id)
+    return JSONResponse({"ok": True, "items": rows})
+
+
+@app.post("/api/notifications", response_class=JSONResponse)
+async def api_save_notification(payload: Dict[str, Any] = Body(...)):
+    """
+    Create or update a message notification rule.
+
+    Expects JSON:
+    {
+      "notif_id": "...",
+      "guild_id": "...",
+      "label": "Ping for keyword",
+      "provider": "pushover" | "webhook" | "telegram",
+      "enabled": true,
+      "config": {...},
+      "filters": {...}
+    }
+    """
+    notif_id = (payload.get("notif_id") or "").strip() or None
+    guild_id = (payload.get("guild_id") or "").strip() or None
+    label = (payload.get("label") or "").strip()
+    provider = (payload.get("provider") or "").strip().lower()
+    enabled = bool(payload.get("enabled", True))
+    config = payload.get("config") or {}
+    filters = payload.get("filters") or {}
+
+    if not label:
+        return JSONResponse(
+            {"ok": False, "error": "label-required"},
+            status_code=400,
+        )
+
+    nid = db.upsert_message_notification(
+        notif_id,
+        guild_id=guild_id,
+        label=label,
+        provider=provider,
+        enabled=enabled,
+        config=config,
+        filters=filters,
+    )
+
+    item = db.get_message_notification(nid)
+    return JSONResponse({"ok": True, "item": item})
+
+
+@app.delete("/api/notifications/{notif_id}", response_class=JSONResponse)
+async def api_delete_notification(notif_id: str):
+    """
+    Delete a message notification rule.
+    """
+    existing = db.get_message_notification(notif_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="notif-not-found")
+
+    db.delete_message_notification(notif_id)
+    return JSONResponse({"ok": True, "deleted": notif_id})
 
 
 app = ConnCloseOnShutdownASGI(app)
