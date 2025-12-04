@@ -1021,8 +1021,7 @@ def check_prereqs() -> None:
             "  - Install Python 3.11.x from https://www.python.org/downloads/ (ensure it’s on PATH).\n"
             "  - Ensure `pip` works for that Python (or install `ensurepip`).\n"
             "  - Install Node.js (which includes npm): https://nodejs.org/\n"
-            "\nOnce installed, re-run:\n"
-            "    python install_standalone.py\n"
+            "\nOnce configured, re-run the Copycord installer."
         )
         raise SystemExit(1)
 
