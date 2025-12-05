@@ -584,8 +584,8 @@ DISCORD_API_BASE = "https://discord.com/api/v10"
 
 async def _check_client_token_valid(raw_token: str) -> bool:
     """
-    Returns True if CLIENT_TOKEN (selfbot/user token) is a valid session.
-    We just hit /users/@me with the raw token.
+    Returns True if CLIENT_TOKEN (selfbot/user token) is a valid *user* session.
+    We hit /users/@me with the raw token and also reject bot tokens here.
     """
     token = (raw_token or "").strip()
     if not token:
@@ -601,28 +601,40 @@ async def _check_client_token_valid(raw_token: str) -> bool:
     try:
         async with aiohttp.ClientSession() as sess:
             async with sess.get(url, headers=headers, timeout=10) as resp:
-                ok = resp.status == 200
-
                 body_preview = None
+                is_bot = None
+                uid = None
+                uname = None
+
                 try:
                     j = await resp.json()
                     uid = j.get("id")
                     uname = j.get("username")
+                    is_bot = bool(j.get("bot", False))
                     body_preview = {
                         "id": uid,
                         "username": uname,
+                        "bot": is_bot,
                         "keys": list(j.keys())[:10],
                     }
                 except Exception:
                     body_preview = "<non-json or parse-failed>"
 
+                ok = (resp.status == 200) and not is_bot
+
                 LOGGER.debug(
-                    "_check_client_token_valid | status=%s ok=%s token=%s body_preview=%s",
+                    "_check_client_token_valid | status=%s ok=%s token=%s is_bot=%s body_preview=%s",
                     resp.status,
                     ok,
                     _redact_token(token),
+                    is_bot,
                     body_preview,
                 )
+
+                if resp.status == 200 and is_bot:
+                    LOGGER.warning(
+                        "_check_client_token_valid | token looks like a bot token; rejecting for CLIENT_TOKEN use"
+                    )
 
                 return ok
     except Exception as e:
@@ -636,8 +648,8 @@ async def _check_client_token_valid(raw_token: str) -> bool:
 
 async def _check_server_token_valid(bot_token: str) -> bool:
     """
-    Returns True if SERVER_TOKEN (bot token) is valid.
-    We hit /users/@me but with Authorization: Bot <token>.
+    Returns True if SERVER_TOKEN (bot token) is valid and actually a bot.
+    We hit /users/@me with Authorization: Bot <token>.
     """
     token = (bot_token or "").strip()
     if not token:
@@ -652,28 +664,40 @@ async def _check_server_token_valid(bot_token: str) -> bool:
     try:
         async with aiohttp.ClientSession() as sess:
             async with sess.get(url, headers=headers, timeout=10) as resp:
-                ok = resp.status == 200
-
                 body_preview = None
+                is_bot = None
+                uid = None
+                uname = None
+
                 try:
                     j = await resp.json()
                     uid = j.get("id")
                     uname = j.get("username")
+                    is_bot = bool(j.get("bot", False))
                     body_preview = {
                         "id": uid,
                         "username": uname,
+                        "bot": is_bot,
                         "keys": list(j.keys())[:10],
                     }
                 except Exception:
                     body_preview = "<non-json or parse-failed>"
 
+                ok = (resp.status == 200) and bool(is_bot)
+
                 LOGGER.debug(
-                    "_check_server_token_valid | status=%s ok=%s bot_token=%s body_preview=%s",
+                    "_check_server_token_valid | status=%s ok=%s bot_token=%s is_bot=%s body_preview=%s",
                     resp.status,
                     ok,
                     _redact_token(token),
+                    is_bot,
                     body_preview,
                 )
+
+                if resp.status == 200 and not is_bot:
+                    LOGGER.warning(
+                        "_check_server_token_valid | token is not a bot user; rejecting for SERVER_TOKEN use"
+                    )
 
                 return ok
     except Exception as e:
@@ -692,14 +716,24 @@ async def _verify_tokens_for_save(values: dict[str, str]) -> list[str]:
     """
     errs: list[str] = []
 
-    raw_client = values.get("CLIENT_TOKEN", "")
-    raw_server = values.get("SERVER_TOKEN", "")
+    raw_client = values.get("CLIENT_TOKEN", "") or ""
+    raw_server = values.get("SERVER_TOKEN", "") or ""
 
     LOGGER.debug(
         "_verify_tokens_for_save | starting client_token=%s server_token=%s",
         _redact_token(raw_client),
         _redact_token(raw_server),
     )
+
+    if (
+        raw_client.strip()
+        and raw_server.strip()
+        and raw_client.strip() == raw_server.strip()
+    ):
+        errs.append(
+            "CLIENT_TOKEN and SERVER_TOKEN must be different tokens (account vs bot)."
+        )
+        return errs
 
     client_ok = await _check_client_token_valid(raw_client)
     server_ok = await _check_server_token_valid(raw_server)
@@ -711,10 +745,14 @@ async def _verify_tokens_for_save(values: dict[str, str]) -> list[str]:
     )
 
     if not client_ok:
-        errs.append("CLIENT_TOKEN: Discord account token is invalid.")
+        errs.append(
+            "CLIENT_TOKEN: Discord account token is invalid or appears to be a bot token."
+        )
 
     if not server_ok:
-        errs.append("SERVER_TOKEN: Discord bot token is invalid.")
+        errs.append(
+            "SERVER_TOKEN: Discord bot token is invalid or does not look like a bot account."
+        )
 
     return errs
 
@@ -1527,6 +1565,7 @@ async def start_all():
         cli.get("status") or cli.get("running"),
     )
     return RedirectResponse("/", status_code=303)
+
 
 @app.post("/stop")
 async def stop_all():
