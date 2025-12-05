@@ -1610,6 +1610,8 @@ class BackfillEngine:
                 ChannelType.public_thread,
                 ChannelType.private_thread,
             )
+            
+            ref = getattr(real_msg, "reference", None)
 
             payload = {
                 "type": "thread_message" if is_thread else "message",
@@ -1644,6 +1646,21 @@ class BackfillEngine:
                     "__backfill__": True,
                     **(
                         {
+                            "reference": {
+                                k: int(v)
+                                for k, v in {
+                                    "message_id": getattr(ref, "message_id", None),
+                                    "channel_id": getattr(ref, "channel_id", None),
+                                    "guild_id": getattr(ref, "guild_id", None),
+                                }.items()
+                                if v is not None
+                            }
+                        }
+                        if ref is not None and getattr(ref, "message_id", None)
+                        else {}
+                    ),
+                    **(
+                        {
                             "thread_parent_id": wrapper_parent_id,
                             "thread_parent_name": wrapper_parent_name,
                             "thread_id": wrapper_channel_id,
@@ -1654,6 +1671,7 @@ class BackfillEngine:
                     ),
                 },
             }
+
 
             await self._safe_ws_send(payload)
             sent += 1
