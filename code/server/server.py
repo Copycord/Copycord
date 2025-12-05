@@ -182,6 +182,7 @@ class ServerReceiver:
         self._webhooks: dict[str, Webhook] = {}
         self._warn_lock = asyncio.Lock()
         self._webhook_gate_by_clone: dict[int, asyncio.Lock] = {}
+        self._bf_send_gate_by_source: dict[int, asyncio.Lock] = {}
         self._active_backfills: set[int] = set()
         self._bf_event_buffer: dict[int, list[tuple[str, dict]]] = {}
         self._send_tasks: set[asyncio.Task] = set()
@@ -323,6 +324,14 @@ class ServerReceiver:
         if lock is None:
             lock = asyncio.Lock()
             self._webhook_gate_by_clone[int(gid)] = lock
+        return lock
+
+    def _get_backfill_gate_for_source(self, source_channel_id: int) -> asyncio.Lock:
+        cid = int(source_channel_id)
+        lock = self._bf_send_gate_by_source.get(cid)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._bf_send_gate_by_source[cid] = lock
         return lock
 
     @contextlib.contextmanager
@@ -7067,8 +7076,36 @@ class ServerReceiver:
 
     async def forward_message(self, msg: Dict):
         """
+        Public entry point for forwarding a message.
+
+        For backfill messages:
+        - serialize by original channel_id so that we never
+        send message N+1 until message N has completed
+        its webhook send + DB upsert.
+
+        For live messages:
+        - keep existing parallel behaviour.
+        """
+        if self._shutting_down:
+            return
+
+        try:
+            source_id = int(msg.get("channel_id") or 0)
+        except Exception:
+            source_id = 0
+
+        is_backfill = bool(msg.get("__backfill__"))
+
+        if not is_backfill or not source_id:
+            return await self._forward_message_inner(msg)
+
+        gate = self._get_backfill_gate_for_source(source_id)
+        async with gate:
+            return await self._forward_message_inner(msg)
+
+    async def _forward_message_inner(self, msg: Dict):
+        """
         Forwards a message to the appropriate channel webhook(s) based on the channel mapping.
-        Now fans out to ALL clone mappings for the origin channel.
         """
         if self._shutting_down:
             return
@@ -7211,7 +7248,7 @@ class ServerReceiver:
                         sub["attachments"] = img_chunk
                     if idx != len(chunks) - 1:
                         sub["__skip_backfill_mark__"] = True
-                    await self.forward_message(sub)
+                    await self._forward_message_inner(sub)
                 return
 
         precheck_payload = self._build_webhook_payload(
