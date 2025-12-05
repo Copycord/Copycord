@@ -820,6 +820,49 @@ class DBManager:
                 "CREATE INDEX IF NOT EXISTS idx_rewrites_orig_clone ON mapping_rewrites(original_guild_id, cloned_guild_id);",
             ],
         )
+        self._ensure_table(
+            name="message_notifications",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    notif_id        TEXT PRIMARY KEY,
+                    guild_id        TEXT,
+                    label           TEXT NOT NULL,
+                    provider        TEXT NOT NULL,
+                    enabled         INTEGER NOT NULL DEFAULT 1,
+                    config_json     TEXT NOT NULL DEFAULT '{}',
+                    filters_json    TEXT NOT NULL DEFAULT '{}',
+                    created_at      INTEGER   NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+                    last_updated    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """,
+            required_columns={
+                "notif_id",
+                "guild_id",
+                "label",
+                "provider",
+                "enabled",
+                "config_json",
+                "filters_json",
+                "created_at",
+                "last_updated",
+            },
+            copy_map={
+                "notif_id": "notif_id",
+                "guild_id": "guild_id", 
+                "label": "label",
+                "provider": "provider",
+                "enabled": "enabled",
+                "config_json": "config_json",
+                "filters_json": "filters_json",
+                "created_at": "created_at",
+                "last_updated": "last_updated",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_msg_notif_guild ON message_notifications(guild_id);",
+                "CREATE INDEX IF NOT EXISTS idx_msg_notif_provider ON message_notifications(provider);",
+            ],
+        )
+
 
 
     def _table_exists(self, name: str) -> bool:
@@ -4555,3 +4598,152 @@ class DBManager:
         rows = cur.fetchall()
         cols = [c[0] for c in cur.description]
         return [dict(zip(cols, r)) for r in rows]
+
+    def list_message_notifications(self, guild_id: str | None = None) -> list[dict]:
+        """
+        List stored message notification rules, optionally scoped to a guild_id.
+        """
+        with self.lock:
+            cur = self.conn.cursor()
+            if guild_id:
+                cur.execute(
+                    "SELECT * FROM message_notifications WHERE guild_id = ? ORDER BY created_at DESC",
+                    (str(guild_id),),
+                )
+            else:
+                cur.execute(
+                    "SELECT * FROM message_notifications ORDER BY created_at DESC"
+                )
+            rows = cur.fetchall()
+
+        out: list[dict] = []
+        for row in rows or []:
+            rec = dict(row)
+            try:
+                config = json.loads(rec.get("config_json") or "{}")
+            except Exception:
+                config = {}
+            try:
+                filters = json.loads(rec.get("filters_json") or "{}")
+            except Exception:
+                filters = {}
+
+            out.append(
+                {
+                    "notif_id": rec.get("notif_id"),
+                    "guild_id": rec.get("guild_id"),
+                    "label": rec.get("label") or "",
+                    "provider": rec.get("provider") or "",
+                    "enabled": bool(rec.get("enabled")),
+                    "config": config,
+                    "filters": filters,
+                    "created_at": rec.get("created_at"),
+                    "last_updated": rec.get("last_updated"),
+                }
+            )
+        return out
+
+
+    def get_message_notification(self, notif_id: str) -> dict | None:
+        with self.lock:
+            cur = self.conn.cursor()
+            cur.execute(
+                "SELECT * FROM message_notifications WHERE notif_id = ?",
+                (str(notif_id),),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+
+        rec = dict(row)
+        try:
+            config = json.loads(rec.get("config_json") or "{}")
+        except Exception:
+            config = {}
+        try:
+            filters = json.loads(rec.get("filters_json") or "{}")
+        except Exception:
+            filters = {}
+
+        return {
+            "notif_id": rec.get("notif_id"),
+            "guild_id": rec.get("guild_id"),
+            "label": rec.get("label") or "",
+            "provider": rec.get("provider") or "",
+            "enabled": bool(rec.get("enabled")),
+            "config": config,
+            "filters": filters,
+            "created_at": rec.get("created_at"),
+            "last_updated": rec.get("last_updated"),
+        }
+
+
+    def upsert_message_notification(
+        self,
+        notif_id: str | None,
+        *,
+        guild_id: str | None,
+        label: str,
+        provider: str,
+        enabled: bool = True,
+        config: dict | None = None,
+        filters: dict | None = None,
+    ) -> str:
+        """
+        Insert or update a message notification rule.
+        """
+        nid = (notif_id or "").strip() or uuid.uuid4().hex
+        cfg_js = json.dumps(config or {}, ensure_ascii=False)
+        flt_js = json.dumps(filters or {}, ensure_ascii=False)
+
+        with self.lock, self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO message_notifications (
+                    notif_id,
+                    guild_id,
+                    label,
+                    provider,
+                    enabled,
+                    config_json,
+                    filters_json,
+                    created_at,
+                    last_updated
+                )
+                VALUES (
+                    ?, ?, ?, ?, ?, ?, ?,
+                    COALESCE(
+                        (SELECT created_at FROM message_notifications WHERE notif_id = ?),
+                        CAST(strftime('%s','now') AS INTEGER)
+                    ),
+                    CURRENT_TIMESTAMP
+                )
+                ON CONFLICT(notif_id) DO UPDATE SET
+                    guild_id    = excluded.guild_id,
+                    label       = excluded.label,
+                    provider    = excluded.provider,
+                    enabled     = excluded.enabled,
+                    config_json = excluded.config_json,
+                    filters_json= excluded.filters_json,
+                    last_updated= CURRENT_TIMESTAMP
+                """,
+                (
+                    nid,
+                    guild_id,
+                    label,
+                    provider,
+                    int(bool(enabled)),
+                    cfg_js,
+                    flt_js,
+                    nid,
+                ),
+            )
+        return nid
+
+
+    def delete_message_notification(self, notif_id: str) -> None:
+        with self.lock, self.conn:
+            self.conn.execute(
+                "DELETE FROM message_notifications WHERE notif_id = ?",
+                (str(notif_id),),
+            )
