@@ -720,6 +720,16 @@ if ($busy.Count -gt 0) {
                 "$displayHost = if ($hostVal -eq '0.0.0.0') { 'localhost' } else { $hostVal }",
                 "Set-Location -LiteralPath $code",
                 "Write-Host ('[admin] Web UI Started: http://' + $displayHost + ':' + $port)",
+                "",
+                "# Auto-open dashboard unless user opts out via COPYCORD_NO_AUTO_OPEN",
+                "if (-not $env:COPYCORD_NO_AUTO_OPEN) {",
+                "  try {",
+                "    Start-Process (\"http://{0}:{1}\" -f $displayHost, $port)",
+                "  } catch {",
+                "    Write-Host (\"[admin] Failed to auto-open browser: $_\")",
+                "  }",
+                "}",
+                "",
                 "try {",
                 "  & $venv -m uvicorn admin.app:app --host 0.0.0.0 --port $port",
                 '  if ($LASTEXITCODE) { throw "Exit code: $LASTEXITCODE" }',
@@ -913,6 +923,15 @@ DISPLAY_HOST="$ADMIN_HOST"
 [[ "$DISPLAY_HOST" == "0.0.0.0" ]] && DISPLAY_HOST="localhost"
 
 echo "[admin] Web UI Started: http://$DISPLAY_HOST:$ADMIN_PORT"
+
+# Auto-open browser unless COPYCORD_NO_AUTO_OPEN is set
+if [[ -z "${COPYCORD_NO_AUTO_OPEN:-}" ]]; then
+  if command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "http://$DISPLAY_HOST:$ADMIN_PORT" >/dev/null 2>&1 &
+  elif command -v open >/dev/null 2>&1; then
+    open "http://$DISPLAY_HOST:$ADMIN_PORT" >/dev/null 2>&1 &
+  fi
+fi
 
 cd "$CODE_DIR"
 "$ADMIN_VENV/bin/python" -m uvicorn admin.app:app --host 0.0.0.0 --port "$ADMIN_PORT" & ADMIN_PID=$!
