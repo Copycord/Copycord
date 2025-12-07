@@ -206,7 +206,9 @@ def auto_update_launcher_if_needed(cfg: dict) -> None:
     if os.name == "nt" and getattr(sys, "frozen", False):
         stem = here.stem
         base_stem = re.sub(r"_v\d+(?:\.\d+)*$", "", stem)
-        new_name = f"{base_stem}_v{latest}{here.suffix}"
+        
+        safe_stem = base_stem.replace(" ", "_")
+        new_name = f"{safe_stem}_v{latest}{here.suffix}"
         new_path = here.with_name(new_name)
 
         try:
@@ -226,7 +228,6 @@ def auto_update_launcher_if_needed(cfg: dict) -> None:
         print("[Launcher]   2) Launch the new file above to use the updated launcher.")
         print("[Launcher]   3) Once you're happy with it, you can delete this older launcher.")
         print()
-        
         return
 
     
