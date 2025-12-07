@@ -17,12 +17,12 @@ DEFAULT_CONFIG_URL = (
 
 CONFIG_ENV_VAR = "COPYCORD_LAUNCHER_CONFIG_URL"
 
-LAUNCHER_VERSION = "1.2.0"  
+LAUNCHER_VERSION = "1.2.0"
 LATEST_REMOTE_VERSION: str | None = None
 USER_AGENT = f"Copycord-Launcher/{LAUNCHER_VERSION}"
 
 REMOTE_PAUSE_HANDLED = False
-AUTO_UPDATE_LAUNCHER = True  
+AUTO_UPDATE_LAUNCHER = True
 
 FRESH_ENV_FLAG = "COPYCORD_LAUNCHER_FRESH"
 
@@ -124,9 +124,8 @@ def _clear_console() -> None:
 
 def _restart_new_launcher(new_path: Path) -> None:
     """
-    Start the newly-downloaded launcher and exit this process.
-    We tag the new process with an env flag so it knows to clear the console
-    after a short delay, giving a "fresh" look.
+    Start the newly-downloaded launcher (Python script) and exit this process.
+    Used for non-frozen launches where we can just re-exec the script.
     """
     if os.name == "nt" and getattr(sys, "frozen", False):
         argv = [str(new_path)] + sys.argv[1:]
@@ -144,13 +143,9 @@ def _restart_new_launcher(new_path: Path) -> None:
 
 def _finalize_self_update() -> None:
     """
-    For Windows frozen launchers that were started from a versioned name
-    like 'Copycord Launcher_v1.1.0.exe', clean up:
-
-      - Delete the old base exe (e.g. 'Copycord Launcher.exe') if it exists.
-      - Rename or copy this file to the base name.
-
-    This runs in the *new* launcher process, after it's already running.
+    Legacy helper for versioned exe names. Currently a no-op in the
+    in-place-update flow, but kept for safety if you ever bring back
+    versioned filenames.
     """
     if not (os.name == "nt" and getattr(sys, "frozen", False)):
         return
@@ -172,29 +167,16 @@ def _finalize_self_update() -> None:
                 base_path.unlink()
             except PermissionError:
                 return
-
-        
-        try:
-            here.rename(base_path)
-            return
-        except OSError:
-            
-            import shutil
-
-            try:
-                shutil.copy2(here, base_path)
-            except OSError:
-                
-                return
     except Exception:
-        
         return
+    
 
 
 def _maybe_clear_console_on_fresh_start() -> None:
     """
-    If we were started as part of an auto-update, wait 3 seconds so the user
-    can see "Loading new launcher…", then clear the console to fake a fresh start.
+    If we were started as part of an auto-update (non-frozen path),
+    wait 3 seconds so the user can see "Loading new launcher…",
+    then clear the console to fake a fresh start.
     """
     if os.environ.pop(FRESH_ENV_FLAG, None):
         time.sleep(3)
@@ -207,11 +189,14 @@ def auto_update_launcher_if_needed(cfg: dict) -> None:
     artifact for this platform and restart into it.
 
     On Windows + frozen exe:
-      - Download to <base>_v<latest>.exe
-      - Start that new exe directly.
-      - The new exe will then clean up/rename itself on startup.
+      - Download to <launcher>.exe.new
+      - Use a small cmd script to:
+          * wait a bit
+          * move the .new file over the old exe
+          * start the updated exe
+      - This ensures only ONE launcher file exists afterwards.
 
-    On non-frozen (Python script):
+    On non-frozen (Python script / Linux):
       - Replace this .py file in-place, then re-run it.
     """
     global LATEST_REMOTE_VERSION
@@ -239,24 +224,44 @@ def auto_update_launcher_if_needed(cfg: dict) -> None:
         print("[Launcher] Update available but no launcher URL is configured for this platform.")
         return
 
-    print("[Launcher] Updating launcher…")
     here = _self_path()
 
+    
     if os.name == "nt" and getattr(sys, "frozen", False):
-        stem = here.stem
-        base_stem = re.sub(r"(?:_updated|_v\d+(?:\.\d+)*)$", "", stem)
-        new_name = f"{base_stem}_v{latest}{here.suffix}"
-        new_path = here.with_name(new_name)
-    else:
-        
-        new_path = here
+        tmp_path = here.with_suffix(here.suffix + ".new")
 
+        try:
+            _download_file(url, tmp_path)
+        except Exception:
+            print("[Launcher] Launcher update failed. Continuing with current version.")
+            return
+
+        print("[Launcher] Launcher update installed. Restarting…")
+
+        old_name = here.name
+        tmp_name = tmp_path.name
+
+        
+        cmd_script = (
+            "ping 127.0.0.1 -n 3 >nul & "
+            f'move /y "{tmp_name}" "{old_name}" >nul 2>&1 & '
+            f'start "" "{old_name}"'
+        )
+
+        subprocess.Popen(
+            ["cmd", "/c", cmd_script],
+            cwd=str(here.parent),
+        )
+        raise SystemExit(0)
+
+    
+    print("[Launcher] Updating launcher… (non-frozen path)")
+    new_path = here
     tmp_path = new_path.with_suffix(new_path.suffix + ".tmp")
 
     try:
         _download_file(url, tmp_path)
 
-        
         try:
             new_path.unlink(missing_ok=True)  
         except TypeError:
@@ -502,7 +507,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = load_config(args.config_url)
         auto_update_launcher_if_needed(cfg)
-        
     except Exception as e:
         print(f"[Launcher] Failed to load config: {e}")
         return 1
