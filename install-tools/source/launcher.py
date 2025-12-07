@@ -124,8 +124,8 @@ def _clear_console() -> None:
 
 def _restart_new_launcher(new_path: Path) -> None:
     """
-    Start the newly-downloaded launcher (Python script) and exit this process.
-    Used for non-frozen launches where we can just re-exec the script.
+    Start the newly-downloaded launcher and exit this process.
+    (Used for non-frozen paths where we can re-run the .py directly.)
     """
     if os.name == "nt" and getattr(sys, "frozen", False):
         argv = [str(new_path)] + sys.argv[1:]
@@ -143,9 +143,10 @@ def _restart_new_launcher(new_path: Path) -> None:
 
 def _finalize_self_update() -> None:
     """
-    Legacy helper for versioned exe names. Currently a no-op in the
-    in-place-update flow, but kept for safety if you ever bring back
-    versioned filenames.
+    Legacy helper for versioned exe names (Copycord Launcher_vX.Y.Z.exe).
+
+    Left in as a no-op in the current .new-based flow, but harmless if
+    someone still has an old versioned file around.
     """
     if not (os.name == "nt" and getattr(sys, "frozen", False)):
         return
@@ -153,7 +154,7 @@ def _finalize_self_update() -> None:
     here = Path(sys.executable).resolve()
     m = re.match(r"^(?P<stem>.+?)_v\d+(?:\.\d+)*(?P<suffix>\.exe)$", here.name, re.IGNORECASE)
     if not m:
-        return  
+        return
 
     base_name = m.group("stem") + m.group("suffix")
     base_path = here.with_name(base_name)
@@ -169,13 +170,12 @@ def _finalize_self_update() -> None:
                 return
     except Exception:
         return
-    
 
 
 def _maybe_clear_console_on_fresh_start() -> None:
     """
     If we were started as part of an auto-update (non-frozen path),
-    wait 3 seconds so the user can see "Loading new launcher…",
+    wait 3 seconds so the user can see 'Loading new launcher…',
     then clear the console to fake a fresh start.
     """
     if os.environ.pop(FRESH_ENV_FLAG, None):
@@ -189,12 +189,13 @@ def auto_update_launcher_if_needed(cfg: dict) -> None:
     artifact for this platform and restart into it.
 
     On Windows + frozen exe:
-      - Download to <launcher>.exe.new
-      - Use a small cmd script to:
-          * wait a bit
-          * move the .new file over the old exe
-          * start the updated exe
-      - This ensures only ONE launcher file exists afterwards.
+      - Download to <launcher>.exe.new (same folder).
+      - Spawn a small cmd helper that:
+          * waits a bit
+          * moves the .new file over the old exe
+          * starts the exe again
+      - Because the swap happens in a separate process, the old exe
+        is no longer running when it is replaced.
 
     On non-frozen (Python script / Linux):
       - Replace this .py file in-place, then re-run it.
@@ -208,7 +209,6 @@ def auto_update_launcher_if_needed(cfg: dict) -> None:
         return
 
     if _cmp_ver(LAUNCHER_VERSION, latest) >= 0:
-        
         return
 
     print(
@@ -238,20 +238,18 @@ def auto_update_launcher_if_needed(cfg: dict) -> None:
 
         print("[Launcher] Launcher update installed. Restarting…")
 
-        old_name = here.name
-        tmp_name = tmp_path.name
+        old_full = str(here)
+        tmp_full = str(tmp_path)
 
-        
+        # Use absolute paths so UNC paths / weird cwd don't break anything.
         cmd_script = (
             "ping 127.0.0.1 -n 3 >nul & "
-            f'move /y "{tmp_name}" "{old_name}" >nul 2>&1 & '
-            f'start "" "{old_name}"'
+            f'move /y "{tmp_full}" "{old_full}" >nul 2>&1 & '
+            f'start "" "{old_full}"'
         )
 
-        subprocess.Popen(
-            ["cmd", "/c", cmd_script],
-            cwd=str(here.parent),
-        )
+        
+        subprocess.Popen(["cmd", "/c", cmd_script])
         raise SystemExit(0)
 
     
@@ -487,9 +485,7 @@ def run_copycord_linux() -> int:
 def main(argv: list[str] | None = None) -> int:
     import argparse
 
-    
     _finalize_self_update()
-    
     _maybe_clear_console_on_fresh_start()
 
     parser = argparse.ArgumentParser(
