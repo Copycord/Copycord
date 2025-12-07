@@ -5,21 +5,26 @@ import os
 import sys
 import re
 import subprocess
+import time
 from pathlib import Path
 from urllib.request import Request, urlopen
 
 
 DEFAULT_CONFIG_URL = (
-    "https://github.com/Copycord/Copycord/blob/" "main/install-tools/source/config.json"
+    "https://github.com/Copycord/Copycord/blob/"
+    "main/install-tools/source/config.json"
 )
 
 CONFIG_ENV_VAR = "COPYCORD_LAUNCHER_CONFIG_URL"
 
-LAUNCHER_VERSION = "1.1.0"
+LAUNCHER_VERSION = "1.2.0"  
 LATEST_REMOTE_VERSION: str | None = None
 USER_AGENT = f"Copycord-Launcher/{LAUNCHER_VERSION}"
 
 REMOTE_PAUSE_HANDLED = False
+AUTO_UPDATE_LAUNCHER = True  
+
+FRESH_ENV_FLAG = "COPYCORD_LAUNCHER_FRESH"
 
 
 def _parse_ver(v: str) -> tuple:
@@ -37,21 +42,6 @@ def _platform_download_url(cfg: dict) -> str | None:
     if os.name == "nt":
         return cfg.get("windows_launcher_url")
     return cfg.get("linux_launcher_url")
-
-
-def check_launcher_version(cfg: dict) -> None:
-    global LATEST_REMOTE_VERSION
-    latest = cfg.get("launcher_version")
-    LATEST_REMOTE_VERSION = latest
-    if not latest:
-        return
-    if _cmp_ver(LAUNCHER_VERSION, latest) < 0:
-        url = _platform_download_url(cfg)
-        print(
-            f"[launcher] A newer launcher is available: {latest} (you have {LAUNCHER_VERSION})."
-        )
-        if url:
-            print(f"[launcher] Download: {url}")
 
 
 def _github_blob_to_raw(url: str) -> str:
@@ -81,7 +71,6 @@ def _github_blob_to_raw(url: str) -> str:
 def _fetch_text(url: str) -> str:
     """Download text content from a URL with a Copycord-specific User-Agent."""
     raw_url = _github_blob_to_raw(url)
-    print(f"[launcher] Downloading: {raw_url}")
     req = Request(raw_url, headers={"User-Agent": USER_AGENT})
     with urlopen(req) as resp:
         data = resp.read()
@@ -97,6 +86,194 @@ def _fetch_json(url: str) -> dict:
     return json.loads(text)
 
 
+def _self_path() -> Path:
+    """
+    Path to the current launcher:
+      - Frozen exe: sys.executable
+      - Normal script: this file
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve()
+    return Path(__file__).resolve()
+
+
+def _download_file(url: str, dest: Path) -> None:
+    """
+    Download a binary file (exe or .py) to dest.
+    Uses the same User-Agent + GitHub blob→raw logic as _fetch_text.
+    """
+    print("[Launcher] Downloading new launcher…")
+    raw_url = _github_blob_to_raw(url)
+    req = Request(raw_url, headers={"User-Agent": USER_AGENT})
+    with urlopen(req) as resp, open(dest, "wb") as f:
+        while True:
+            chunk = resp.read(8192)
+            if not chunk:
+                break
+            f.write(chunk)
+    print("[Launcher] Download complete.")
+
+
+def _clear_console() -> None:
+    """Clear the current console/terminal."""
+    if os.name == "nt":
+        os.system("cls")
+    else:
+        os.system("clear")
+
+
+def _restart_new_launcher(new_path: Path) -> None:
+    """
+    Start the newly-downloaded launcher and exit this process.
+    We tag the new process with an env flag so it knows to clear the console
+    after a short delay, giving a "fresh" look.
+    """
+    if os.name == "nt" and getattr(sys, "frozen", False):
+        argv = [str(new_path)] + sys.argv[1:]
+    else:
+        argv = [sys.executable, str(new_path)] + sys.argv[1:]
+
+    print("[Launcher] Loading new launcher…")
+
+    env = os.environ.copy()
+    env[FRESH_ENV_FLAG] = "1"
+
+    subprocess.Popen(argv, cwd=str(new_path.parent), env=env)
+    raise SystemExit(0)
+
+
+def _finalize_self_update() -> None:
+    """
+    For Windows frozen launchers that were started from a versioned name
+    like 'Copycord Launcher_v1.1.0.exe', clean up:
+
+      - Delete the old base exe (e.g. 'Copycord Launcher.exe') if it exists.
+      - Rename or copy this file to the base name.
+
+    This runs in the *new* launcher process, after it's already running.
+    """
+    if not (os.name == "nt" and getattr(sys, "frozen", False)):
+        return
+
+    here = Path(sys.executable).resolve()
+    m = re.match(r"^(?P<stem>.+?)_v\d+(?:\.\d+)*(?P<suffix>\.exe)$", here.name, re.IGNORECASE)
+    if not m:
+        return  
+
+    base_name = m.group("stem") + m.group("suffix")
+    base_path = here.with_name(base_name)
+
+    if base_path == here:
+        return
+
+    try:
+        if base_path.exists():
+            try:
+                base_path.unlink()
+            except PermissionError:
+                return
+
+        
+        try:
+            here.rename(base_path)
+            return
+        except OSError:
+            
+            import shutil
+
+            try:
+                shutil.copy2(here, base_path)
+            except OSError:
+                
+                return
+    except Exception:
+        
+        return
+
+
+def _maybe_clear_console_on_fresh_start() -> None:
+    """
+    If we were started as part of an auto-update, wait 3 seconds so the user
+    can see "Loading new launcher…", then clear the console to fake a fresh start.
+    """
+    if os.environ.pop(FRESH_ENV_FLAG, None):
+        time.sleep(3)
+        _clear_console()
+
+
+def auto_update_launcher_if_needed(cfg: dict) -> None:
+    """
+    If the remote config says there's a newer launcher, download the correct
+    artifact for this platform and restart into it.
+
+    On Windows + frozen exe:
+      - Download to <base>_v<latest>.exe
+      - Start that new exe directly.
+      - The new exe will then clean up/rename itself on startup.
+
+    On non-frozen (Python script):
+      - Replace this .py file in-place, then re-run it.
+    """
+    global LATEST_REMOTE_VERSION
+
+    latest = cfg.get("launcher_version")
+    LATEST_REMOTE_VERSION = latest
+
+    if not latest:
+        return
+
+    if _cmp_ver(LAUNCHER_VERSION, latest) >= 0:
+        
+        return
+
+    print(
+        f"[Launcher] New launcher version detected: v{latest} (current: v{LAUNCHER_VERSION})"
+    )
+
+    if not AUTO_UPDATE_LAUNCHER:
+        print("[Launcher] Auto-update is disabled. Please download the new launcher manually.")
+        return
+
+    url = _platform_download_url(cfg)
+    if not url:
+        print("[Launcher] Update available but no launcher URL is configured for this platform.")
+        return
+
+    print("[Launcher] Updating launcher…")
+    here = _self_path()
+
+    if os.name == "nt" and getattr(sys, "frozen", False):
+        stem = here.stem
+        base_stem = re.sub(r"(?:_updated|_v\d+(?:\.\d+)*)$", "", stem)
+        new_name = f"{base_stem}_v{latest}{here.suffix}"
+        new_path = here.with_name(new_name)
+    else:
+        
+        new_path = here
+
+    tmp_path = new_path.with_suffix(new_path.suffix + ".tmp")
+
+    try:
+        _download_file(url, tmp_path)
+
+        
+        try:
+            new_path.unlink(missing_ok=True)  
+        except TypeError:
+            try:
+                new_path.unlink()
+            except FileNotFoundError:
+                pass
+
+        tmp_path.rename(new_path)
+    except Exception:
+        print("[Launcher] Launcher update failed. Continuing with current version.")
+        return
+
+    print("[Launcher] Launcher update installed.")
+    _restart_new_launcher(new_path)
+
+
 def load_config(config_url: str | None = None) -> dict:
     """
     Load the config JSON that contains the URLs for install/update scripts.
@@ -109,7 +286,6 @@ def load_config(config_url: str | None = None) -> dict:
     if not config_url:
         config_url = os.getenv(CONFIG_ENV_VAR, DEFAULT_CONFIG_URL)
 
-    print(f"[launcher] Using config URL: {config_url}")
     cfg = _fetch_json(config_url)
 
     install_url = cfg.get("install_url")
@@ -117,14 +293,11 @@ def load_config(config_url: str | None = None) -> dict:
 
     if not install_url or not update_url:
         raise SystemExit(
-            "[launcher] ERROR: config.json must define 'install_url' and 'update_url'."
+            "[Launcher] ERROR: config.json must define 'install_url' and 'update_url'."
         )
 
     cfg["install_url"] = _github_blob_to_raw(install_url)
     cfg["update_url"] = _github_blob_to_raw(update_url)
-
-    print(f"[launcher]   install_url -> {cfg['install_url']}")
-    print(f"[launcher]   update_url -> {cfg['update_url']}")
     return cfg
 
 
@@ -153,20 +326,10 @@ def prompt_choice() -> str:
 def run_remote(kind: str, url: str) -> int:
     """
     Download a remote Python script and execute it in-process.
-
-    We specifically look for the following entrypoints:
-
-      - Install script: _run_with_pause_installer() or main()
-      - Update script : _run_with_pause_updater() or main()
-
-    We temporarily reset sys.argv so the remote script's argparse doesn't see
-    any launcher-specific CLI flags.
     """
     global REMOTE_PAUSE_HANDLED
 
-    print(f"[launcher] Fetching remote {kind} script…")
     source = _fetch_text(url)
-    print(f"[launcher] Downloaded {len(source)} bytes from {url}")
 
     module_name = f"copycord_{kind}_remote"
     namespace: dict[str, object] = {
@@ -188,14 +351,13 @@ def run_remote(kind: str, url: str) -> int:
         obj = namespace.get(name)
         if callable(obj):
             entry = obj
-            print(f"[launcher] Running remote entrypoint: {name}()")
             if name.startswith("_run_with_pause"):
                 REMOTE_PAUSE_HANDLED = True
             break
 
     if entry is None:
         print(
-            "[launcher] ERROR: Remote script does not define a recognised entrypoint.\n"
+            "[Launcher] ERROR: Remote script does not define a recognised entrypoint.\n"
             "Expected one of: " + ", ".join(candidates)
         )
         return 1
@@ -206,7 +368,6 @@ def run_remote(kind: str, url: str) -> int:
         result = entry()
     except SystemExit as e:
         code = e.code if isinstance(e.code, int) else 1
-        print(f"[launcher] Remote script requested exit with code {code}.")
         return int(code)
     finally:
         sys.argv = old_argv
@@ -219,7 +380,7 @@ def run_copycord_windows() -> int:
     Locate and run copycord_windows.bat to start Copycord in separate windows.
     """
     if os.name != "nt":
-        print("[launcher] 'Run Copycord (Windows)' is only supported on Windows.")
+        print("[Launcher] 'Run Copycord (Windows)' is only supported on Windows.")
         return 1
 
     if getattr(sys, "frozen", False):
@@ -239,13 +400,12 @@ def run_copycord_windows() -> int:
             break
 
     if bat_path is None:
-        print("[launcher] ERROR: Could not find 'copycord_windows.bat'.")
+        print("[Launcher] ERROR: Could not find 'copycord_windows.bat'.")
         print(
             "          Make sure the launcher is in the same folder as copycord_windows.bat."
         )
         return 1
 
-    print(f"[launcher] Running {bat_path}…")
     try:
         subprocess.run(
             ["cmd", "/c", str(bat_path)],
@@ -253,13 +413,12 @@ def run_copycord_windows() -> int:
             check=True,
         )
     except subprocess.CalledProcessError as e:
-        print(f"[launcher] Copycord launch script exited with code {e.returncode}.")
+        print(f"[Launcher] Copycord launch script exited with code {e.returncode}.")
         return int(e.returncode)
-    except Exception as e:
-        print(f"[launcher] Failed to start Copycord: {e}")
+    except Exception:
+        print("[Launcher] Failed to start Copycord.")
         return 1
 
-    print("[launcher] Copycord launch script finished.")
     return 0
 
 
@@ -268,7 +427,7 @@ def run_copycord_linux() -> int:
     Locate and run copycord_linux.sh to start Copycord on Linux/macOS.
     """
     if os.name == "nt":
-        print("[launcher] 'Run Copycord (Linux)' is only supported on Linux/macOS.")
+        print("[Launcher] 'Run Copycord (Linux)' is only supported on Linux/macOS.")
         return 1
 
     if getattr(sys, "frozen", False):
@@ -288,13 +447,12 @@ def run_copycord_linux() -> int:
             break
 
     if script_path is None:
-        print("[launcher] ERROR: Could not find 'copycord_linux.sh'.")
+        print("[Launcher] ERROR: Could not find 'copycord_linux.sh'.")
         print(
             "          Make sure the launcher is in the same folder as copycord_linux.sh."
         )
         return 1
 
-    # Try to ensure it's executable
     try:
         mode = script_path.stat().st_mode
         if not (mode & 0o111):
@@ -302,7 +460,6 @@ def run_copycord_linux() -> int:
     except Exception:
         pass
 
-    print(f"[launcher] Running {script_path}…")
     try:
         subprocess.run(
             ["bash", str(script_path)],
@@ -310,22 +467,25 @@ def run_copycord_linux() -> int:
             check=True,
         )
     except FileNotFoundError:
-        print("[launcher] ERROR: 'bash' not found. Try running the script manually:")
-        print(f"          cd {script_path.parent} && sh {script_path.name}")
+        print("[Launcher] ERROR: 'bash' not found. Try running the script manually.")
         return 1
     except subprocess.CalledProcessError as e:
-        print(f"[launcher] Copycord launch script exited with code {e.returncode}.")
+        print(f"[Launcher] Copycord launch script exited with code {e.returncode}.")
         return int(e.returncode)
-    except Exception as e:
-        print(f"[launcher] Failed to start Copycord: {e}")
+    except Exception:
+        print("[Launcher] Failed to start Copycord.")
         return 1
 
-    print("[launcher] Copycord launch script finished.")
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
+
+    
+    _finalize_self_update()
+    
+    _maybe_clear_console_on_fresh_start()
 
     parser = argparse.ArgumentParser(
         description="Copycord all-in-one Install/Update/Run launcher."
@@ -341,16 +501,17 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         cfg = load_config(args.config_url)
-        check_launcher_version(cfg)
+        auto_update_launcher_if_needed(cfg)
+        
     except Exception as e:
-        print(f"[launcher] Failed to load config: {e}")
+        print(f"[Launcher] Failed to load config: {e}")
         return 1
 
     while True:
         choice = prompt_choice()
 
         if choice in ("q", "quit", "exit"):
-            print("[launcher] Exiting without changes.")
+            print("[Launcher] Exiting without changes.")
             return 0
 
         if choice == "1":
