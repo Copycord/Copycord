@@ -25,6 +25,7 @@ REMOTE_PAUSE_HANDLED = False
 AUTO_UPDATE_LAUNCHER = True
 
 FRESH_ENV_FLAG = "COPYCORD_LAUNCHER_FRESH"
+DOWNLOADED_NEW_LAUNCHER = False  
 
 
 def _parse_ver(v: str) -> tuple:
@@ -145,31 +146,11 @@ def _finalize_self_update() -> None:
     """
     Legacy helper for versioned exe names (Copycord Launcher_vX.Y.Z.exe).
 
-    Left in as a no-op in the current .new-based flow, but harmless if
-    someone still has an old versioned file around.
+    No-op in the simplified flow; kept for compatibility.
     """
     if not (os.name == "nt" and getattr(sys, "frozen", False)):
         return
-
-    here = Path(sys.executable).resolve()
-    m = re.match(r"^(?P<stem>.+?)_v\d+(?:\.\d+)*(?P<suffix>\.exe)$", here.name, re.IGNORECASE)
-    if not m:
-        return
-
-    base_name = m.group("stem") + m.group("suffix")
-    base_path = here.with_name(base_name)
-
-    if base_path == here:
-        return
-
-    try:
-        if base_path.exists():
-            try:
-                base_path.unlink()
-            except PermissionError:
-                return
-    except Exception:
-        return
+    
 
 
 def _maybe_clear_console_on_fresh_start() -> None:
@@ -185,22 +166,17 @@ def _maybe_clear_console_on_fresh_start() -> None:
 
 def auto_update_launcher_if_needed(cfg: dict) -> None:
     """
-    If the remote config says there's a newer launcher, download the correct
-    artifact for this platform and restart into it.
+    If the remote config says there's a newer launcher:
 
-    On Windows + frozen exe:
-      - Download to <launcher>.exe.new (same folder).
-      - Spawn a small cmd helper that:
-          * waits a bit
-          * moves the .new file over the old exe
-          * starts the exe again
-      - Because the swap happens in a separate process, the old exe
-        is no longer running when it is replaced.
+    - On Windows frozen (.exe):
+        * Download a new launcher exe with the version in the filename
+          next to the current one, and tell the user what to run/delete.
+        * Do NOT try to delete or rename anything automatically.
 
-    On non-frozen (Python script / Linux):
-      - Replace this .py file in-place, then re-run it.
+    - On non-frozen (Python script / Linux/macOS):
+        * Replace this .py file in-place, then re-run it.
     """
-    global LATEST_REMOTE_VERSION
+    global LATEST_REMOTE_VERSION, DOWNLOADED_NEW_LAUNCHER
 
     latest = cfg.get("launcher_version")
     LATEST_REMOTE_VERSION = latest
@@ -228,29 +204,30 @@ def auto_update_launcher_if_needed(cfg: dict) -> None:
 
     
     if os.name == "nt" and getattr(sys, "frozen", False):
-        tmp_path = here.with_suffix(here.suffix + ".new")
+        stem = here.stem
+        base_stem = re.sub(r"_v\d+(?:\.\d+)*$", "", stem)
+        new_name = f"{base_stem}_v{latest}{here.suffix}"
+        new_path = here.with_name(new_name)
 
         try:
-            _download_file(url, tmp_path)
+            _download_file(url, new_path)
         except Exception:
             print("[Launcher] Launcher update failed. Continuing with current version.")
             return
 
-        print("[Launcher] Launcher update installed. Restarting…")
+        DOWNLOADED_NEW_LAUNCHER = True
 
-        old_full = str(here)
-        tmp_full = str(tmp_path)
-
-        # Use absolute paths so UNC paths / weird cwd don't break anything.
-        cmd_script = (
-            "ping 127.0.0.1 -n 3 >nul & "
-            f'move /y "{tmp_full}" "{old_full}" >nul 2>&1 & '
-            f'start "" "{old_full}"'
-        )
-
+        print()
+        print("[Launcher] A newer Copycord Launcher has been downloaded:")
+        print(f"[Launcher]   {new_path.name}")
+        print()
+        print("[Launcher] Please:")
+        print("[Launcher]   1) Close this window.")
+        print("[Launcher]   2) Launch the new file above to use the updated launcher.")
+        print("[Launcher]   3) Once you're happy with it, you can delete this older launcher.")
+        print()
         
-        subprocess.Popen(["cmd", "/c", cmd_script])
-        raise SystemExit(0)
+        return
 
     
     print("[Launcher] Updating launcher… (non-frozen path)")
@@ -503,6 +480,12 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = load_config(args.config_url)
         auto_update_launcher_if_needed(cfg)
+
+        
+        
+        if DOWNLOADED_NEW_LAUNCHER:
+            return 0
+
     except Exception as e:
         print(f"[Launcher] Failed to load config: {e}")
         return 1
