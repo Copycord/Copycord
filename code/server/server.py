@@ -7074,6 +7074,35 @@ class ServerReceiver:
     def _clear_bf_throttle(self, clone_id: int) -> None:
         self._bf_throttle.pop(int(clone_id), None)
 
+    async def forward_thread_message(self, data: dict):
+        """
+        Public entry point for forwarding a thread message.
+
+        For backfill messages:
+        - serialize by thread_parent_id so that we never create a thread
+          before the parent message's webhook send + DB upsert finishes.
+
+        For live messages:
+        - keep existing parallel behaviour.
+        """
+        if self._shutting_down:
+            return
+
+        is_backfill = bool((data or {}).get("__backfill__"))
+
+        raw_parent = (data or {}).get("thread_parent_id")
+        try:
+            parent_id = int(raw_parent or 0)
+        except Exception:
+            parent_id = 0
+
+        if not is_backfill or not parent_id:
+            return await self.handle_thread_message(data)
+
+        gate = self._get_backfill_gate_for_source(parent_id)
+        async with gate:
+            return await self.handle_thread_message(data)
+
     async def forward_message(self, msg: Dict):
         """
         Public entry point for forwarding a message.
@@ -9278,7 +9307,7 @@ class ServerReceiver:
                                             name=data["thread_name"],
                                             auto_archive_duration=60,
                                         )
-                                        
+
                                     mode = "channel-fallback"
                                     return await cloned_parent.create_thread(
                                         name=data["thread_name"],
@@ -10170,7 +10199,7 @@ class ServerReceiver:
             logger.warning(
                 "[bf] no mapping for parent=%s; using live thread forward", parent_id
             )
-            await self.handle_thread_message(data)
+            await self.forward_thread_message(data)
             return
 
         clone_id = None
@@ -10196,7 +10225,7 @@ class ServerReceiver:
                 parent_id,
                 row,
             )
-            await self.handle_thread_message(data)
+            await self.forward_thread_message(data)
             return
 
         st = self.backfill._progress.get(int(parent_id))
@@ -10224,7 +10253,7 @@ class ServerReceiver:
         if mapping_id_hint is not None:
             forced["mapping_id"] = mapping_id_hint
 
-        await self.handle_thread_message(forced)
+        await self.forward_thread_message(forced)
 
     def _prune_old_messages_loop(
         self, retention_seconds: int | None = None
