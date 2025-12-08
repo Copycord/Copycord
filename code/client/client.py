@@ -1239,6 +1239,26 @@ class ClientListener:
         if self.should_ignore(after):
             return
 
+        before_thread = getattr(before, "thread", None)
+        after_thread = getattr(after, "thread", None)
+
+        attachments_before = [(a.url, a.size) for a in before.attachments]
+        attachments_after = [(a.url, a.size) for a in after.attachments]
+
+        if (
+            getattr(self.config, "IGNORE_THREAD_LINK_EDITS", True)
+            and before_thread is None
+            and after_thread is not None
+            and (before.content or "") == (after.content or "")
+            and attachments_before == attachments_after
+        ):
+            logger.debug(
+                "[edit] Ignoring thread-link edit for %s (thread_id=%s)",
+                after.id,
+                getattr(after_thread, "id", None),
+            )
+            return
+
         if getattr(self.config, "IGNORE_EMBED_ONLY_EDITS", True):
             if not self._is_meaningful_edit(before, after):
                 logger.debug("[edit] Ignoring embed-only/unfurl edit for %s", after.id)
@@ -1397,8 +1417,20 @@ class ClientListener:
             if not self.sitemap.in_scope_channel(channel):
                 return
 
-        msg = payload.cached_message
         data = payload.data or {}
+
+        if getattr(self.config, "IGNORE_THREAD_LINK_EDITS", True):
+
+            if "thread" in data and not isinstance(channel, discord.Thread):
+                thread_info = data.get("thread") or {}
+                logger.debug(
+                    "[edit] Ignoring raw thread-link edit for %s (thread_id=%s)",
+                    payload.message_id,
+                    thread_info.get("id"),
+                )
+                return
+
+        msg = payload.cached_message
 
         if getattr(self.config, "IGNORE_EMBED_ONLY_EDITS", True):
             changed = set(data.keys()) - {

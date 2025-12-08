@@ -7074,6 +7074,35 @@ class ServerReceiver:
     def _clear_bf_throttle(self, clone_id: int) -> None:
         self._bf_throttle.pop(int(clone_id), None)
 
+    async def forward_thread_message(self, data: dict):
+        """
+        Public entry point for forwarding a thread message.
+
+        For backfill messages:
+        - serialize by thread_parent_id so that we never create a thread
+          before the parent message's webhook send + DB upsert finishes.
+
+        For live messages:
+        - keep existing parallel behaviour.
+        """
+        if self._shutting_down:
+            return
+
+        is_backfill = bool((data or {}).get("__backfill__"))
+
+        raw_parent = (data or {}).get("thread_parent_id")
+        try:
+            parent_id = int(raw_parent or 0)
+        except Exception:
+            parent_id = 0
+
+        if not is_backfill or not parent_id:
+            return await self.handle_thread_message(data)
+
+        gate = self._get_backfill_gate_for_source(parent_id)
+        async with gate:
+            return await self.handle_thread_message(data)
+
     async def forward_message(self, msg: Dict):
         """
         Public entry point for forwarding a message.
@@ -8138,24 +8167,48 @@ class ServerReceiver:
         delay = base_delay
         for i in range(attempts):
             try:
-                rows = list(
+                raw_rows = list(
                     self.db.get_message_mappings_for_original(original_message_id) or []
                 )
             except Exception:
-                rows = []
-            if rows:
-                return rows
+                raw_rows = []
+
+            if raw_rows:
+                norm_rows: list[dict] = []
+                for r in raw_rows:
+                    if isinstance(r, dict):
+                        norm_rows.append(r)
+                    else:
+                        try:
+                            norm_rows.append({k: r[k] for k in r.keys()})
+                        except Exception:
+                            logger.warning(
+                                "[%s] failed to normalize row for original_message_id=%s: %r",
+                                log_prefix,
+                                original_message_id,
+                                r,
+                            )
+                logger.debug(
+                    "[%s] found %d mapping row(s) for original_message_id=%s",
+                    log_prefix,
+                    len(norm_rows),
+                    original_message_id,
+                )
+                return norm_rows
+
             if i < attempts - 1:
                 jd = jitter * (2 * (random.random() - 0.5)) if jitter else 0.0
                 await asyncio.sleep(max(0.0, min(max_delay, delay + jd)))
                 delay = min(max_delay, delay * 2)
             else:
                 logger.debug(
-                    "[%s] no rows for orig_mid=%s after %s attempts",
+                    "[%s] no message mappings found for original_message_id=%s "
+                    "after %s attempt(s)",
                     log_prefix,
                     original_message_id,
                     attempts,
                 )
+
         return []
 
     async def _edit_with_row(self, row, data: dict, orig_mid: int) -> bool:
@@ -8453,6 +8506,18 @@ class ServerReceiver:
             ctx_guild_id=host_guild_id or None,
             ctx_mapping_row=None,
         )
+
+        content = (payload.get("content") or "").strip()
+        author_name = str(data.get("author") or "").strip()
+        system_banner = "sorry, we couldn't load the first message in this thread"
+
+        if (
+            content
+            and author_name.lower() == "system"
+            and system_banner in content.lower()
+        ):
+            return
+
         stickers = data.get("stickers") or []
 
         def _is_custom_sticker(s: dict) -> bool:
@@ -9117,23 +9182,149 @@ class ServerReceiver:
                                 return None
 
                             async def _create_text_thread():
-                                if sem:
-                                    async with sem:
-                                        if is_backfill:
-                                            await self._bf_gate(int(cloned_id))
-                                        new_thread = await cloned_parent.create_thread(
+                                """
+                                Create a text-thread in the cloned channel, trying the best we can to attach it
+                                to the cloned starter message so Discord treats it as a proper
+                                message-based thread.
+
+                                Fallback: if we cannot resolve the starter message mapping, we fall back
+                                to channel.create_thread(...) which creates an unlinked thread.
+                                """
+                                candidates: list[int] = []
+
+                                ref = data.get("reference") or {}
+                                if isinstance(ref, dict):
+                                    try:
+                                        ref_mid = int(ref.get("message_id") or 0)
+                                    except Exception:
+                                        ref_mid = 0
+                                    if ref_mid:
+                                        candidates.append(ref_mid)
+
+                                orig_tid = 0
+                                try:
+                                    orig_tid = int(data.get("thread_id") or 0)
+                                except Exception:
+                                    orig_tid = 0
+                                if orig_tid and orig_tid not in candidates:
+                                    candidates.append(orig_tid)
+
+                                try:
+                                    cur_mid = int(data.get("message_id") or 0)
+                                except Exception:
+                                    cur_mid = 0
+                                if cur_mid and cur_mid not in candidates:
+                                    candidates.append(cur_mid)
+
+                                starter_msg: discord.Message | None = None
+                                this_clone_gid = int(getattr(guild, "id", 0)) or None
+
+                                for cand in candidates:
+                                    try:
+                                        starter_maps = (
+                                            await self._get_message_mappings_with_retry(
+                                                cand,
+                                                attempts=6,
+                                                base_delay=0.2,
+                                                log_prefix=f"thread-starter-{cand}",
+                                            )
+                                        )
+                                    except Exception:
+                                        starter_maps = []
+
+                                    if not starter_maps:
+                                        continue
+
+                                    candidate_rows: list[dict] = []
+                                    for sm in starter_maps:
+
+                                        try:
+                                            sm_gid = int(sm.get("cloned_guild_id") or 0)
+                                        except Exception:
+                                            sm_gid = 0
+                                        try:
+                                            sm_cid = int(
+                                                sm.get("cloned_channel_id") or 0
+                                            )
+                                        except Exception:
+                                            sm_cid = 0
+                                        try:
+                                            sm_mid = int(
+                                                sm.get("cloned_message_id") or 0
+                                            )
+                                        except Exception:
+                                            sm_mid = 0
+
+                                        if (
+                                            sm_gid
+                                            and sm_gid == this_clone_gid
+                                            and sm_cid
+                                            and sm_cid == int(cloned_id)
+                                            and sm_mid
+                                        ):
+                                            candidate_rows.append(sm)
+
+                                    if not candidate_rows:
+                                        continue
+
+                                    candidate_rows.sort(
+                                        key=lambda r: r.get(
+                                            "updated_at", r.get("created_at", 0)
+                                        ),
+                                        reverse=True,
+                                    )
+                                    chosen = candidate_rows[0]
+                                    try:
+                                        chosen_mid = int(
+                                            chosen.get("cloned_message_id") or 0
+                                        )
+                                    except Exception:
+                                        chosen_mid = 0
+
+                                    if not chosen_mid:
+                                        continue
+
+                                    try:
+                                        starter_msg = await cloned_parent.fetch_message(
+                                            chosen_mid
+                                        )
+                                    except discord.NotFound:
+                                        starter_msg = None
+                                    except Exception as e:
+                                        starter_msg = None
+
+                                    if starter_msg is not None:
+                                        break
+
+                                mode = "unknown"
+
+                                async def _actually_create_thread() -> discord.Thread:
+                                    nonlocal mode
+
+                                    if starter_msg is not None:
+                                        mode = "linked-starter-msg"
+                                        return await starter_msg.create_thread(
                                             name=data["thread_name"],
-                                            type=ChannelType.public_thread,
                                             auto_archive_duration=60,
                                         )
-                                else:
-                                    if is_backfill:
-                                        await self._bf_gate(int(cloned_id))
-                                    new_thread = await cloned_parent.create_thread(
+
+                                    mode = "channel-fallback"
+                                    return await cloned_parent.create_thread(
                                         name=data["thread_name"],
                                         type=ChannelType.public_thread,
                                         auto_archive_duration=60,
                                     )
+
+                                if sem:
+                                    async with sem:
+                                        if is_backfill:
+                                            await self._bf_gate(int(cloned_id))
+                                        new_thread = await _actually_create_thread()
+                                else:
+                                    if is_backfill:
+                                        await self._bf_gate(int(cloned_id))
+                                    new_thread = await _actually_create_thread()
+
                                 if is_backfill and hasattr(self, "backfill"):
                                     self.backfill.add_expected_total(parent_id, 1)
                                     self.backfill.note_sent(parent_id, None)
@@ -9142,10 +9333,12 @@ class ServerReceiver:
                                         int(data["message_id"]),
                                         data.get("timestamp"),
                                     )
+
                                 logger.info(
-                                    "[🧵]%s Created text thread '%s' → cloned_thread_id=%s in #%s",
+                                    "[🧵]%s Created text thread '%s' (%s) → cloned_thread_id=%s in #%s",
                                     tag,
                                     data["thread_name"],
+                                    mode,
                                     new_thread.id,
                                     getattr(cloned_parent, "name", cloned_id),
                                 )
@@ -10006,7 +10199,7 @@ class ServerReceiver:
             logger.warning(
                 "[bf] no mapping for parent=%s; using live thread forward", parent_id
             )
-            await self.handle_thread_message(data)
+            await self.forward_thread_message(data)
             return
 
         clone_id = None
@@ -10032,7 +10225,7 @@ class ServerReceiver:
                 parent_id,
                 row,
             )
-            await self.handle_thread_message(data)
+            await self.forward_thread_message(data)
             return
 
         st = self.backfill._progress.get(int(parent_id))
@@ -10060,7 +10253,7 @@ class ServerReceiver:
         if mapping_id_hint is not None:
             forced["mapping_id"] = mapping_id_hint
 
-        await self.handle_thread_message(forced)
+        await self.forward_thread_message(forced)
 
     def _prune_old_messages_loop(
         self, retention_seconds: int | None = None
