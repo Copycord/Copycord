@@ -6210,18 +6210,14 @@ class ServerReceiver:
                     if emb.footer and getattr(emb.footer, "text", None):
                         emb.set_footer(
                             text=_apply_to_str(emb.footer.text),
-                            icon_url=getattr(
-                                emb.footer, "icon_url", discord.Embed.Empty
-                            ),
+                            icon_url=getattr(emb.footer, "icon_url", None),
                         )
 
                     if emb.author and getattr(emb.author, "name", None):
                         emb.set_author(
                             name=_apply_to_str(emb.author.name),
-                            url=getattr(emb.author, "url", discord.Embed.Empty),
-                            icon_url=getattr(
-                                emb.author, "icon_url", discord.Embed.Empty
-                            ),
+                            url=getattr(emb.author, "url", None),
+                            icon_url=getattr(emb.author, "icon_url", None),
                         )
 
                     for f in emb.fields:
@@ -6234,6 +6230,7 @@ class ServerReceiver:
                     continue
 
         return text, embeds
+
 
     def _sanitize_inline(
         self,
