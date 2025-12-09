@@ -14,6 +14,11 @@ function ensureConfirmModal() {
         <div class="modal-backdrop"></div>
         <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1">
           <div class="modal-header">
+            <div class="confirm-icon" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+              </svg>
+            </div>
             <h4 id="confirm-title" class="modal-title">Confirm</h4>
             <button type="button" id="confirm-close" class="icon-btn verify-close" aria-label="Close">✕</button>
           </div>
@@ -207,11 +212,15 @@ export class NotificationSystem {
       );
     }
     this.updateProviderFields();
+    this.initChipInputs();
+    this.initSelectBounce();
 
     const loader = window.loaderTest;
     if (loader && typeof loader.show === "function") {
       loader.show();
     }
+
+    this.showSkeletons();
 
     this.guildsPromise = this.loadGuilds();
     const rulesPromise = this.refreshList();
@@ -321,6 +330,39 @@ export class NotificationSystem {
     this.renderList(items);
   }
 
+  showSkeletons(count = 3) {
+    if (!this.listEl || !this.emptyEl) return;
+
+    this.emptyEl.hidden = true;
+
+    const skeletons = Array.from({ length: count }, (_, i) => `
+      <div class="notif-card-skeleton" style="animation-delay: ${i * 0.08}s">
+        <div class="skeleton-header">
+          <div class="skeleton-main">
+            <div class="skeleton skeleton-title"></div>
+            <div class="skeleton skeleton-meta"></div>
+          </div>
+          <div class="skeleton-badges">
+            <div class="skeleton skeleton-badge"></div>
+            <div class="skeleton skeleton-status"></div>
+          </div>
+        </div>
+        <div class="skeleton-chips">
+          <div class="skeleton skeleton-chip"></div>
+          <div class="skeleton skeleton-chip" style="width: 80px"></div>
+          <div class="skeleton skeleton-chip" style="width: 50px"></div>
+        </div>
+        <div class="skeleton-footer">
+          <div class="skeleton skeleton-btn"></div>
+          <div class="skeleton skeleton-btn" style="width: 70px"></div>
+          <div class="skeleton skeleton-btn" style="width: 55px"></div>
+        </div>
+      </div>
+    `).join("");
+
+    this.listEl.innerHTML = skeletons;
+  }
+
   renderList(items) {
     if (!this.listEl || !this.emptyEl) return;
 
@@ -332,7 +374,13 @@ export class NotificationSystem {
 
     this.emptyEl.hidden = true;
 
-    const html = items
+    const addBtnHtml = `
+      <div class="notif-list-header">
+        <button type="button" class="btn btn-ghost notif-add-btn">+ New Notification</button>
+      </div>
+    `;
+
+    const html = addBtnHtml + items
       .map((n) => {
         const enabled = !!n.enabled;
         const provider = (n.provider || "").toLowerCase();
@@ -340,21 +388,23 @@ export class NotificationSystem {
         const scopeLabel = this.describeScope(n.guild_id);
         const filtersSummary = this.describeFilters(n.filters || {});
         const providerLabel = this.describeProvider(provider);
+        const keywordChipsHtml = this.renderKeywordChips(n.filters || {});
 
         return `
           <article class="notif-card" data-id="${this.escapeAttr(n.notif_id)}">
             <header class="notif-card-header">
-              <div>
+              <div class="notif-card-main">
                 <h3 class="notif-card-title">${label}</h3>
-                <div class="notif-card-meta small text-muted">
+                <div class="notif-card-meta">
                   <span>${this.escapeHtml(scopeLabel)}</span>
                   <span class="bullet">•</span>
                   <span>${this.escapeHtml(filtersSummary)}</span>
                 </div>
               </div>
               <div class="notif-card-header-right">
-                <span class="badge badge-provider badge-provider-${provider}">
-                  ${this.escapeHtml(providerLabel)}
+                <span class="badge-provider badge-provider-${provider}">
+                  <span class="badge-provider-icon"></span>
+                  <span class="badge-provider-label">${this.escapeHtml(providerLabel)}</span>
                 </span>
                 <span class="status-pill ${
                   enabled ? "status-pill-on" : "status-pill-off"
@@ -363,7 +413,7 @@ export class NotificationSystem {
                 </span>
               </div>
             </header>
-
+            ${keywordChipsHtml}
             <footer class="notif-card-footer">
               <button type="button" class="btn btn-ghost notif-edit-btn">
                 Edit
@@ -381,6 +431,13 @@ export class NotificationSystem {
       .join("");
 
     this.listEl.innerHTML = html;
+
+    const addBtn = this.listEl.querySelector(".notif-add-btn");
+    if (addBtn) {
+      addBtn.addEventListener("click", () => {
+        this.openCreateModal().catch(console.error);
+      });
+    }
 
     this.listEl.querySelectorAll(".notif-edit-btn").forEach((btn) => {
       btn.addEventListener("click", (ev) => {
@@ -437,6 +494,24 @@ export class NotificationSystem {
       default:
         return provider || "Custom";
     }
+  }
+
+  renderKeywordChips(filters, maxVisible = 3) {
+    const keywords = this.toArray(filters.keywords_any || []).filter(Boolean);
+    if (!keywords.length) return "";
+
+    const visible = keywords.slice(0, maxVisible);
+    const remaining = keywords.length - maxVisible;
+
+    let html = '<div class="notif-keyword-chips">';
+    visible.forEach((kw) => {
+      html += `<span class="notif-keyword-chip">${this.escapeHtml(kw)}</span>`;
+    });
+    if (remaining > 0) {
+      html += `<span class="notif-keyword-chip notif-keyword-chip--more">+${remaining} more</span>`;
+    }
+    html += "</div>";
+    return html;
   }
 
   describeScope(guildId) {
@@ -521,13 +596,21 @@ export class NotificationSystem {
     const caseCb = document.getElementById("notif_case_sensitive");
     const embedsCb = document.getElementById("notif_include_embeds");
 
-    if (anyInput)
-      anyInput.value = this.toArray(filters.keywords_any).join(", ");
-    if (allInput)
-      allInput.value = this.toArray(filters.keywords_all).join(", ");
+    const anyValue = this.toArray(filters.keywords_any).join(", ");
+    const allValue = this.toArray(filters.keywords_all).join(", ");
+
+    if (anyInput) anyInput.value = anyValue;
+    if (allInput) allInput.value = allValue;
     if (chInput) chInput.value = this.toArray(filters.channel_ids).join(", ");
     if (caseCb) caseCb.checked = !!filters.case_sensitive;
     if (embedsCb) embedsCb.checked = !!filters.include_embeds;
+
+    const anyWrap = document.querySelector('[data-chip-input="notif_keywords_any"]');
+    const allWrap = document.querySelector('[data-chip-input="notif_keywords_all"]');
+    const chWrap = document.querySelector('[data-chip-input="notif_channels"]');
+    if (anyWrap) this.setChipsFromValue(anyWrap, anyValue);
+    if (allWrap) this.setChipsFromValue(allWrap, allValue);
+    if (chWrap) this.setChipsFromValue(chWrap, this.toArray(filters.channel_ids).join(", "));
 
     this.updateProviderFields();
     this.showModal();
@@ -568,6 +651,15 @@ export class NotificationSystem {
       if (el) el.value = "";
     });
 
+    document.querySelectorAll(".chip-input-wrap .chip").forEach((c) => c.remove());
+
+    // Restore placeholder option
+    const providerSelect = document.getElementById("notif_provider");
+    if (providerSelect) {
+      const placeholder = providerSelect.querySelector('option[value=""]');
+      if (placeholder) placeholder.hidden = false;
+    }
+
     this.updateProviderFields();
   }
 
@@ -581,6 +673,126 @@ export class NotificationSystem {
       if (!el) return;
       el.hidden = provider !== name;
     });
+
+    // Hide placeholder option once a provider is selected
+    if (providerSelect && provider) {
+      const placeholder = providerSelect.querySelector('option[value=""]');
+      if (placeholder) placeholder.hidden = true;
+    }
+
+    const iconEl = document.getElementById("provider-icon");
+    if (iconEl) {
+      const icons = {
+        pushover: "https://pushover.net/images/pushover-logo.svg",
+        telegram: "https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg",
+        webhook: null,
+      };
+      const iconUrl = icons[provider];
+      if (iconUrl) {
+        iconEl.innerHTML = `<img src="${iconUrl}" alt="${provider}" />`;
+        iconEl.hidden = false;
+      } else {
+        iconEl.innerHTML = "";
+        iconEl.hidden = true;
+      }
+    }
+  }
+
+  initChipInputs() {
+    const wraps = document.querySelectorAll(".chip-input-wrap");
+    wraps.forEach((wrap) => {
+      const textInput = wrap.querySelector(".chip-text-input");
+      if (!textInput) return;
+
+      textInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === ",") {
+          e.preventDefault();
+          const val = textInput.value.trim();
+          if (val) {
+            this.addChip(wrap, val);
+            textInput.value = "";
+          }
+        }
+        if (e.key === "Backspace" && textInput.value === "") {
+          const chips = wrap.querySelectorAll(".chip");
+          if (chips.length) {
+            this.removeChip(chips[chips.length - 1]);
+          }
+        }
+      });
+
+      textInput.addEventListener("blur", () => {
+        const val = textInput.value.trim();
+        if (val) {
+          this.addChip(wrap, val);
+          textInput.value = "";
+        }
+      });
+
+      wrap.addEventListener("click", (e) => {
+        if (e.target === wrap) {
+          textInput.focus();
+        }
+      });
+    });
+  }
+
+  initSelectBounce() {
+    document.querySelectorAll("select.input").forEach((select) => {
+      select.addEventListener("mousedown", () => {
+        select.classList.remove("bounce");
+        void select.offsetWidth; // Force reflow
+        select.classList.add("bounce");
+      });
+      select.addEventListener("animationend", () => {
+        select.classList.remove("bounce");
+      });
+    });
+  }
+
+  addChip(wrap, value) {
+    const existing = Array.from(wrap.querySelectorAll(".chip")).map(
+      (c) => c.dataset.value
+    );
+    if (existing.includes(value)) return;
+
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.dataset.value = value;
+    chip.innerHTML = `${this.escapeHtml(value)}<button type="button" class="chip-remove" aria-label="Remove">×</button>`;
+
+    chip.querySelector(".chip-remove").addEventListener("click", () => {
+      this.removeChip(chip);
+    });
+
+    const textInput = wrap.querySelector(".chip-text-input");
+    wrap.insertBefore(chip, textInput);
+    this.syncChipsToInput(wrap);
+  }
+
+  removeChip(chip) {
+    const wrap = chip.closest(".chip-input-wrap");
+    chip.remove();
+    if (wrap) this.syncChipsToInput(wrap);
+  }
+
+  syncChipsToInput(wrap) {
+    const inputId = wrap.dataset.chipInput;
+    const hiddenInput = document.getElementById(inputId);
+    if (!hiddenInput) return;
+
+    const values = Array.from(wrap.querySelectorAll(".chip")).map(
+      (c) => c.dataset.value
+    );
+    hiddenInput.value = values.join(", ");
+  }
+
+  setChipsFromValue(wrap, value) {
+    const chips = wrap.querySelectorAll(".chip");
+    chips.forEach((c) => c.remove());
+
+    const values = this.splitCsv(value);
+    values.forEach((v) => this.addChip(wrap, v));
   }
 
   async handleSubmit() {

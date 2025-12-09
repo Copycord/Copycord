@@ -117,7 +117,6 @@
     </aside>
 
     <div class="container">
-        <!-- Root for notifications page -->
         <div id="notif-root" class="notifications-page">
             <section class="card">
                 <header class="card-header">
@@ -129,18 +128,15 @@
                 </header>
 
                 <div class="card-body">
-                    <!-- Primary action -->
-                    <div class="notif-scope-row">
-                        <div class="form-actions">
-                            <button id="notifCreateBtn" class="btn btn-ghost" type="button">
-                                + New Notification
-                            </button>
-                        </div>
-                    </div>
-
-                    <!-- Empty state + list, all in the same card -->
                     <div id="notification-empty" class="empty-state" hidden>
-                        <p>No notification rules yet.</p>
+                        <svg class="empty-state-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
+                        </svg>
+                        <h3 class="empty-state-title">No notification rules yet</h3>
+                        <p>Create rules to get alerts when specific keywords appear in messages.</p>
+                        <button id="notifCreateBtn" type="button" class="btn btn-ghost">
+                            + Create your first rule
+                        </button>
                     </div>
 
                     <div id="notification-list" class="notif-list"></div>
@@ -148,7 +144,6 @@
             </section>
         </div>
 
-        <!-- Modal lives at root so it's not clipped by cards -->
         <div id="notifModal" class="modal" aria-hidden="true">
             <div class="modal-backdrop"></div>
 
@@ -163,122 +158,138 @@
                     <form id="notification-form" autocomplete="off">
                         <input type="hidden" id="notif_id" name="notif_id" value="" />
 
-                        <div class="form-group">
-                            <label for="notif_label" class="form-label">Name</label>
-                            <input id="notif_label" name="label" class="input" type="text"
-                                placeholder="e.g. Pushover: #support keyword alerts" required />
-                            <p class="help-text">
-                                A short name so you can recognize this rule later.
-                            </p>
-                        </div>
+                        <div class="form-section">
+                            <h4 class="form-section-title">Basic Information</h4>
 
-                        <div class="form-group">
-                            <label for="notif_guild_id" class="form-label">Guild scope</label>
-                            <select id="notif_guild_id" name="guild_id" class="input">
-                                <option value="">All guilds</option>
-                                <!-- options are populated by notifications.js via /api/guilds -->
-                            </select>
-                            <p class="help-text">
-                                If set, this rule only applies to messages from the selected guild.
-                            </p>
-                        </div>
-
-                        <div class="form-group">
-                            <label for="notif_provider" class="form-label">Provider</label>
-                            <select id="notif_provider" name="provider" class="input" required>
-                                <option value="">Choose provider…</option>
-                                <option value="pushover">Pushover</option>
-                                <option value="webhook">Generic webhook</option>
-                                <option value="telegram">Telegram</option>
-                            </select>
-                            <p class="help-text">
-                                Choose where Copycord should send alerts when this rule matches.
-                            </p>
-                        </div>
-
-                        <!-- Provider-specific fields -->
-                        <div id="provider_pushover" class="provider-fields" hidden>
-                            <div class="form-row">
-                                <div class="form-group">
-                                    <label class="form-label" for="pushover_app_token">App token</label>
-                                    <input id="pushover_app_token" class="input" type="text" autocomplete="off"
-                                        placeholder="Pushover application token" />
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="pushover_user_key">User / group key</label>
-                                    <input id="pushover_user_key" class="input" type="text" autocomplete="off"
-                                        placeholder="User or group key" />
-                                </div>
-                            </div>
-                        </div>
-
-                        <div id="provider_webhook" class="provider-fields" hidden>
                             <div class="form-group">
-                                <label class="form-label" for="webhook_url">Webhook URL</label>
-                                <input id="webhook_url" class="input" type="url" autocomplete="off"
-                                    placeholder="https://example.com/webhook" />
+                                <label for="notif_label" class="form-label">Name</label>
+                                <input id="notif_label" name="label" class="input" type="text"
+                                    placeholder="e.g. Pushover: #support keyword alerts" required />
                                 <p class="help-text">
-                                    Copycord will POST a JSON payload whenever this rule fires.
+                                    A short name so you can recognize this rule later.
+                                </p>
+                            </div>
+
+                            <div class="form-group">
+                                <label for="notif_guild_id" class="form-label">Guild scope</label>
+                                <select id="notif_guild_id" name="guild_id" class="input">
+                                    <option value="">All guilds</option>
+                                </select>
+                                <p class="help-text">
+                                    If set, this rule only applies to messages from the selected guild.
                                 </p>
                             </div>
                         </div>
 
-                        <div id="provider_telegram" class="provider-fields" hidden>
+                        <div class="form-section">
+                            <h4 class="form-section-title">Provider Configuration</h4>
+
+                            <div class="form-group">
+                                <label for="notif_provider" class="form-label">Provider</label>
+                                <div class="provider-select-wrap">
+                                    <span id="provider-icon" class="provider-icon" hidden></span>
+                                    <select id="notif_provider" name="provider" class="input" required>
+                                        <option value="">Choose provider…</option>
+                                        <option value="pushover">Pushover</option>
+                                        <option value="webhook">Generic webhook</option>
+                                        <option value="telegram">Telegram</option>
+                                    </select>
+                                </div>
+                                <p class="help-text">
+                                    Choose where Copycord should send alerts when this rule matches.
+                                </p>
+                            </div>
+
+                            <div id="provider_pushover" class="provider-fields" hidden>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label class="form-label" for="pushover_app_token">App token</label>
+                                        <input id="pushover_app_token" class="input" type="text" autocomplete="off"
+                                            placeholder="Pushover application token" />
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label" for="pushover_user_key">User / group key</label>
+                                        <input id="pushover_user_key" class="input" type="text" autocomplete="off"
+                                            placeholder="User or group key" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div id="provider_webhook" class="provider-fields" hidden>
+                                <div class="form-group">
+                                    <label class="form-label" for="webhook_url">Webhook URL</label>
+                                    <input id="webhook_url" class="input" type="url" autocomplete="off"
+                                        placeholder="https://example.com/webhook" />
+                                    <p class="help-text">
+                                        Copycord will POST a JSON payload whenever this rule fires.
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div id="provider_telegram" class="provider-fields" hidden>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label class="form-label" for="telegram_bot_token">Bot token</label>
+                                        <input id="telegram_bot_token" class="input" type="text" autocomplete="off"
+                                            placeholder="123456:ABC-DEF..." />
+                                    </div>
+                                    <div class="form-group">
+                                        <label class="form-label" for="telegram_chat_id">Chat ID</label>
+                                        <input id="telegram_chat_id" class="input" type="text" autocomplete="off"
+                                            placeholder="Chat or channel ID" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="form-section">
+                            <h4 class="form-section-title">Filters</h4>
+
+                            <div class="form-group">
+                                <label class="form-label">Match any of these words / phrases</label>
+                                <input id="notif_keywords_any" type="hidden" />
+                                <div class="chip-input-wrap" data-chip-input="notif_keywords_any">
+                                    <input type="text" class="chip-text-input" placeholder="Type and press Enter..." />
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Require all of these words (optional)</label>
+                                <input id="notif_keywords_all" type="hidden" />
+                                <div class="chip-input-wrap" data-chip-input="notif_keywords_all">
+                                    <input type="text" class="chip-text-input" placeholder="Type and press Enter..." />
+                                </div>
+                            </div>
+
+                            <div class="form-group">
+                                <label class="form-label">Limit to channel IDs (optional)</label>
+                                <input id="notif_channels" type="hidden" />
+                                <div class="chip-input-wrap" data-chip-input="notif_channels">
+                                    <input type="text" class="chip-text-input" placeholder="Type channel ID and press Enter..." />
+                                </div>
+                            </div>
+
                             <div class="form-row">
-                                <div class="form-group">
-                                    <label class="form-label" for="telegram_bot_token">Bot token</label>
-                                    <input id="telegram_bot_token" class="input" type="text" autocomplete="off"
-                                        placeholder="123456:ABC-DEF..." />
-                                </div>
-                                <div class="form-group">
-                                    <label class="form-label" for="telegram_chat_id">Chat ID</label>
-                                    <input id="telegram_chat_id" class="input" type="text" autocomplete="off"
-                                        placeholder="Chat or channel ID" />
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Filters -->
-                        <div class="form-group">
-                            <label class="form-label" for="notif_keywords_any">Match any of these words /
-                                phrases</label>
-                            <input id="notif_keywords_any" class="input" type="text"
-                                placeholder="Comma separated (e.g. support, outage, urgent)" />
-                        </div>
-
-                        <div class="form-group">
-                            <label class="form-label" for="notif_keywords_all">Require all of these words
-                                (optional)</label>
-                            <input id="notif_keywords_all" class="input" type="text"
-                                placeholder="Comma separated (e.g. payment, failed)" />
-                        </div>
-
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="form-label" for="notif_channels">Limit to channel IDs (optional)</label>
-                                <input id="notif_channels" class="input" type="text"
-                                    placeholder="Comma separated channel IDs, or empty for all channels" />
-                            </div>
-                            <div class="form-group">
-                                <label class="checkbox-inline">
+                                <label class="toggle">
                                     <input id="notif_case_sensitive" type="checkbox" />
-                                    <span>Case sensitive</span>
+                                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    <span class="toggle-label">Case sensitive</span>
                                 </label>
-                                <label class="checkbox-inline">
+                                <label class="toggle">
                                     <input id="notif_include_embeds" type="checkbox" />
-                                    <span>Search text in embeds</span>
+                                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    <span class="toggle-label">Search text in embeds</span>
                                 </label>
                             </div>
                         </div>
 
-                        <div class="form-row">
-                            <div class="form-group">
-                                <label class="checkbox-inline">
-                                    <input id="notif_enabled" type="checkbox" checked />
-                                    <span>Rule enabled</span>
-                                </label>
-                            </div>
-                            <div class="form-group form-actions">
+                        <div class="modal-form-footer">
+                            <label class="toggle toggle--enabled">
+                                <input id="notif_enabled" type="checkbox" checked />
+                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                <span class="toggle-label">Rule enabled</span>
+                            </label>
+                            <div class="form-actions">
                                 <button id="notifCancelBtn" type="button" class="btn btn-ghost">
                                     Cancel
                                 </button>
