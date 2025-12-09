@@ -48,6 +48,14 @@
               d="M8 5.75v12.5a.75.75 0 0 0 1.137.624l8-6.25a.75.75 0 0 0 0-1.248l-8-6.25A.75.75 0 0 0 8 5.75z" />
       </svg>
     `,
+
+    clone: `
+    <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
+          stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+      <rect x="9" y="9" width="10" height="10" rx="2"></rect>
+      <rect x="5" y="5" width="10" height="10" rx="2"></rect>
+    </svg>
+  `,
   };
 
   let mapValidated = false;
@@ -1988,7 +1996,7 @@
     }
   }
 
-  function openMappingModal(mapping) {
+  function openMappingModal(mapping, opts = {}) {
     const modal = document.getElementById("mapping-modal");
     if (!modal) return;
 
@@ -1998,7 +2006,6 @@
     const nameInput = document.getElementById("map_mapping_name");
     const hostInput = document.getElementById("map_original_guild_id");
     const cloneInput = document.getElementById("map_cloned_guild_id");
-
     const subtleEl = document.getElementById("mapping-id-subtle");
 
     const searchInput = document.getElementById("mappingSettingsSearch");
@@ -2015,17 +2022,42 @@
       el.classList.remove("is-invalid", "flash");
     });
 
-    const isEdit = !!mapping;
+    // 🔧 New: support modes: "edit" | "clone" | "create"
+    const mode = opts.mode || (mapping ? "edit" : "create");
+    const isEdit = mode === "edit";
+    const cloneFrom = mode === "clone" && mapping ? mapping : null;
 
-    if (idInput) idInput.value = (isEdit && mapping.mapping_id) || "";
-    if (nameInput) nameInput.value = (isEdit && mapping.mapping_name) || "";
-    if (hostInput)
-      hostInput.value = (isEdit && mapping.original_guild_id) || "";
-    if (cloneInput)
-      cloneInput.value = (isEdit && mapping.cloned_guild_id) || "";
+    // ID field: only filled in edit mode
+    if (idInput) {
+      idInput.value = isEdit && mapping?.mapping_id ? mapping.mapping_id : "";
+    }
 
+    // Name + guild ids:
+    // - edit: use mapping values
+    // - clone/create: blank, user fills them in
+    if (nameInput) {
+      nameInput.value =
+        isEdit && mapping?.mapping_name ? mapping.mapping_name : "";
+    }
+    if (hostInput) {
+      hostInput.value =
+        isEdit && mapping?.original_guild_id ? mapping.original_guild_id : "";
+    }
+    if (cloneInput) {
+      cloneInput.value =
+        isEdit && mapping?.cloned_guild_id ? mapping.cloned_guild_id : "";
+    }
+
+    if (!isEdit) {
+      // For clone + create, we want these empty
+      if (nameInput) nameInput.value = "";
+      if (hostInput) hostInput.value = "";
+      if (cloneInput) cloneInput.value = "";
+    }
+
+    // Subtle mapping ID display only on edit
     if (subtleEl) {
-      if (isEdit && mapping.mapping_id) {
+      if (isEdit && mapping?.mapping_id) {
         subtleEl.hidden = false;
         subtleEl.textContent = `${mapping.mapping_id}`;
       } else {
@@ -2034,6 +2066,9 @@
       }
     }
 
+    // Host / clone read-only:
+    // - edit: locked
+    // - clone/create: editable
     if (hostInput) {
       if (isEdit) {
         hostInput.readOnly = true;
@@ -2064,13 +2099,20 @@
       }
     }
 
+    // ⚙️ Settings:
+    // - edit: use mapping.settings
+    // - clone: use cloneFrom.settings
+    // - create: use DEFAULT_MAPPING_SETTINGS
     document
       .querySelectorAll("#mapping-form select[id^='map_']")
       .forEach((sel) => {
         const key = sel.id.replace(/^map_/, "");
 
         let rawVal;
-        if (isEdit && mapping.settings && key in mapping.settings) {
+        if (cloneFrom && cloneFrom.settings && key in cloneFrom.settings) {
+          // Clone mode: copy from source mapping
+          rawVal = cloneFrom.settings[key];
+        } else if (isEdit && mapping?.settings && key in mapping.settings) {
           rawVal = mapping.settings[key];
         } else {
           rawVal = DEFAULT_MAPPING_SETTINGS[key];
@@ -2081,13 +2123,9 @@
           normalized = rawVal;
         } else if (typeof rawVal === "string") {
           const lower = rawVal.toLowerCase();
-          if (lower === "true") {
-            normalized = true;
-          } else if (lower === "false") {
-            normalized = false;
-          } else {
-            normalized = !!rawVal;
-          }
+          if (lower === "true") normalized = true;
+          else if (lower === "false") normalized = false;
+          else normalized = !!rawVal;
         } else {
           normalized = !!rawVal;
         }
@@ -2141,6 +2179,10 @@
       }
     }, 0);
 
+    // Close on outside click
+    if (modal._outsideClickHandler) {
+      modal.removeEventListener("mousedown", modal._outsideClickHandler);
+    }
     modal._outsideClickHandler = function (evt) {
       const contentEl = modal.querySelector(".modal-content");
       if (contentEl && !contentEl.contains(evt.target)) {
@@ -2151,7 +2193,6 @@
   }
 
   window.openMappingModal = openMappingModal;
-  window.closeMappingModal = closeMappingModal;
 
   function setMappingSaveBusy(isBusy) {
     const btn = document.getElementById("mapping-save-btn");
@@ -3333,75 +3374,79 @@
           : "";
 
         return `
-        <div class="guild-card ${isPaused ? "is-paused" : "is-active"}"
-            data-id="${m.mapping_id}"
-            data-status="${statusRaw}">
-          <div class="guild-card-logo">
-            <img src="${iconSrc}" alt="" class="guild-card-logo-img">
-          </div>
+      <div class="guild-card ${isPaused ? "is-paused" : "is-active"}"
+           data-id="${m.mapping_id}"
+           data-status="${statusRaw}">
+        <div class="guild-card-logo">
+          <img src="${iconSrc}" alt="" class="guild-card-logo-img">
+        </div>
 
-          <div class="guild-card-inner">
-            <div class="guild-card-main">
-              <div class="guild-card-name">
-                <div class="guild-card-name-title" title="${escapeHtml(
-                  m.mapping_name || ""
-                )}">
-                  ${escapeHtml(m.mapping_name || "")}
-                </div>
-              </div>
-
-              <div class="guild-card-actions">
-                <button class="btn-icon edit-mapping-btn"
-                        data-id="${m.mapping_id}"
-                        aria-label="Edit mapping"
-                        title="Settings">
-                  ${ICONS.settings}
-                </button>
-
-                <button class="btn-icon mapping-filters-btn"
-                        data-id="${m.mapping_id}"
-                        aria-label="Filters for this mapping"
-                        title="Filters">
-                  ${ICONS.filters}
-                </button>
-
-                <button class="btn-icon mapping-status-btn ${
-                  isPaused ? "is-paused" : "is-active"
-                }"
-                        data-id="${m.mapping_id}"
-                        type="button"
-                        aria-pressed="${isPaused ? "true" : "false"}"
-                        aria-label="${statusLabel}"
-                        title="${statusLabel}">
-                  ${statusIcon}
-                </button>
-
-                <button
-                  class="btn-icon delete-mapping-btn"
-                  type="button"
-                  data-action="delete"
-                  data-id="${m.mapping_id}"
-                  aria-label="Delete mapping"
-                  title="Delete mapping"
-                >
-                  ${ICONS.trash}
-                </button>
+        <div class="guild-card-inner">
+          <div class="guild-card-main">
+            <div class="guild-card-name">
+              <div class="guild-card-name-title"
+                   title="${escapeHtml(m.mapping_name || "")}">
+                ${escapeHtml(m.mapping_name || "")}
               </div>
             </div>
-            
-            <!-- Chip goes HERE, below the main section -->
-            ${
-              statusBadgeHtml
-                ? `
-              <div class="guild-card-status">
-                ${statusBadgeHtml}
-              </div>
-            `
-                : ""
-            }
+
+            <div class="guild-card-actions">
+              <button class="btn-icon edit-mapping-btn"
+                      data-id="${m.mapping_id}"
+                      aria-label="Edit mapping"
+                      title="Settings">
+                ${ICONS.settings}
+              </button>
+
+              <button class="btn-icon mapping-filters-btn"
+                      data-id="${m.mapping_id}"
+                      aria-label="Filters for this mapping"
+                      title="Filters">
+                ${ICONS.filters}
+              </button>
+
+              <button class="btn-icon mapping-status-btn ${
+                isPaused ? "is-paused" : "is-active"
+              }"
+                      data-id="${m.mapping_id}"
+                      type="button"
+                      aria-pressed="${isPaused ? "true" : "false"}"
+                      aria-label="${statusLabel}"
+                      title="${statusLabel}">
+                ${statusIcon}
+              </button>
+
+              <button class="btn-icon clone-mapping-btn"
+                      data-id="${m.mapping_id}"
+                      aria-label="Clone mapping"
+                      title="Create new mapping with the same settings">
+                ${ICONS.clone}
+              </button>
+
+              <button
+                class="btn-icon delete-mapping-btn"
+                type="button"
+                data-action="delete"
+                data-id="${m.mapping_id}"
+                aria-label="Delete mapping"
+                title="Delete mapping">
+                ${ICONS.trash}
+              </button>
+            </div>
           </div>
+
+          ${
+            statusBadgeHtml
+              ? `
+            <div class="guild-card-status">
+              ${statusBadgeHtml}
+            </div>
+          `
+              : ""
+          }
         </div>
-      `;
+      </div>
+    `;
       })
       .join("");
 
@@ -3427,6 +3472,16 @@
         const mapId = ev.currentTarget.getAttribute("data-id");
         const mapping = findMappingById(mapId);
         openMappingModal(mapping);
+      });
+    });
+
+    listEl.querySelectorAll(".clone-mapping-btn").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        const mapId = ev.currentTarget.getAttribute("data-id");
+        const mapping = findMappingById(mapId);
+        if (!mapping) return;
+        // Open as a *new* mapping, but copy settings from this one
+        openMappingModal(mapping, { mode: "clone" });
       });
     });
 
