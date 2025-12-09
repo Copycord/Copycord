@@ -11,36 +11,45 @@ function ensureConfirmModal() {
     modal.className = "modal";
     modal.setAttribute("aria-hidden", "true");
     modal.innerHTML = `
-        <div class="modal-backdrop"></div>
-        <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1">
-          <div class="modal-header">
-            <div class="confirm-icon" aria-hidden="true">
-              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
-              </svg>
-            </div>
-            <h4 id="confirm-title" class="modal-title">Confirm</h4>
-            <button type="button" id="confirm-close" class="icon-btn verify-close" aria-label="Close">✕</button>
-          </div>
-          <div class="p-4" id="confirm-body" style="padding:12px 16px;"></div>
-          <div class="btns" style="padding:0 16px 16px 16px;">
-            <button type="button" id="confirm-cancel" class="btn btn-ghost">Cancel</button>
-            <button type="button" id="confirm-okay" class="btn btn-ghost">OK</button>
-          </div>
+      <div class="modal-backdrop"></div>
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1">
+        <div class="modal-header">
+          <h4 id="confirm-title" class="modal-title">Confirm</h4>
+          <button type="button" id="confirm-close" class="icon-btn verify-close" aria-label="Close">✕</button>
         </div>
-      `;
+        <div class="p-4" id="confirm-body" style="padding:12px 16px;"></div>
+        <div class="btns" style="padding:0 16px 16px 16px;">
+          <button type="button" id="confirm-cancel" class="btn btn-ghost">Cancel</button>
+          <button type="button" id="confirm-okay" class="btn btn-ghost">OK</button>
+        </div>
+      </div>
+    `;
     document.body.appendChild(modal);
   }
 
   let style = document.getElementById("confirm-modal-patch");
   const css = `
-      #confirm-modal { display: none; }
-      #confirm-modal.is-open { display: block; }
-      #confirm-modal .modal-content:focus { outline: none; box-shadow: none; }
-      #confirm-modal .btn:focus, #confirm-modal .btn:focus-visible {
-        outline: none; box-shadow: none;
-      }
-    `;
+    #confirm-modal {
+      display: none;
+    }
+    #confirm-modal.show {
+      display: flex;
+      opacity: 1;
+      visibility: visible;
+      align-items: center;
+      justify-content: center;
+      z-index: 90;
+    }
+    #confirm-modal .modal-content:focus {
+      outline: none;
+      box-shadow: none;
+    }
+    #confirm-modal .btn:focus,
+    #confirm-modal .btn:focus-visible {
+      outline: none;
+      box-shadow: none;
+    }
+  `;
   if (!style) {
     style = document.createElement("style");
     style.id = "confirm-modal-patch";
@@ -49,97 +58,93 @@ function ensureConfirmModal() {
   } else {
     style.textContent = css;
   }
+
   return modal;
 }
 
-function themedConfirm({
+function openConfirm({
   title,
   body,
   confirmText = "OK",
-  cancelText = "Cancel",
-  btnClassOk = "btn btn-ghost",
-  btnClassCancel = "btn btn-ghost",
-} = {}) {
-  return new Promise((resolve) => {
-    const cModal = ensureConfirmModal();
-    const cTitle = cModal.querySelector("#confirm-title");
-    const cBody = cModal.querySelector("#confirm-body");
-    const cOk = cModal.querySelector("#confirm-okay");
-    const cCa = cModal.querySelector("#confirm-cancel");
-    const cX = cModal.querySelector("#confirm-close");
-    const cBack = cModal.querySelector(".modal-backdrop");
-    const dialog = cModal.querySelector(".modal-content");
+  confirmClass = "btn-ghost",
+  onConfirm,
+  showCancel = true,
+}) {
+  const cModal = ensureConfirmModal();
+  const cTitle = cModal.querySelector("#confirm-title");
+  const cBody = cModal.querySelector("#confirm-body");
+  const cBtnOk = cModal.querySelector("#confirm-okay");
+  const cBtnCa = cModal.querySelector("#confirm-cancel");
+  const cBtnX = cModal.querySelector("#confirm-close");
+  const cBack = cModal.querySelector(".modal-backdrop");
+  const dialog = cModal.querySelector(".modal-content");
 
-    const norm = (s) => String(s || "").trim();
-    const ensureBtnPrefix = (s) => {
-      const k = norm(s);
-      if (!k) return "btn btn-ghost";
+  blurActive();
 
-      const parts = k.split(/\s+/).filter(Boolean);
-      if (!parts.includes("btn")) {
-        parts.unshift("btn");
+  if (cTitle) cTitle.textContent = title || "Confirm";
+  if (cBody) cBody.textContent = body || "Are you sure?";
+  if (cBtnOk) cBtnOk.textContent = confirmText || "OK";
+
+  if (cBtnOk) {
+    cBtnOk.className = `btn ${confirmClass || "btn-ghost"}`;
+  }
+  if (cBtnCa) {
+    cBtnCa.hidden = !showCancel;
+  }
+
+  const close = () => {
+    cModal.classList.remove("show");
+    cModal.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("body-lock-scroll");
+  };
+
+  if (cBtnOk) {
+    cBtnOk.onclick = () => {
+      try {
+        if (typeof onConfirm === "function") onConfirm();
+      } finally {
+        close();
       }
-      return parts.join(" ");
     };
-    const stripBtnVariants = (el) => {
-      if (!el) return;
-      el.classList.remove(
-        "btn-primary",
-        "btn-danger",
-        "btn-outline",
-        "btn-ghost",
-        "btn-ghost-red",
-        "btn-ghost-purple",
-        "btn-ghost-green"
-      );
-    };
+  }
+  if (cBtnCa) {
+    cBtnCa.onclick = () => close();
+  }
+  if (cBtnX) {
+    cBtnX.onclick = () => close();
+  }
+  if (cBack) {
+    cBack.onclick = () => close();
+  }
 
-    if (cTitle) cTitle.textContent = title || "Confirm";
-    if (cBody) cBody.textContent = body || "Are you sure?";
-
-    if (cOk) {
-      cOk.textContent = confirmText;
-      stripBtnVariants(cOk);
-      cOk.className = ensureBtnPrefix(btnClassOk);
-    }
-    if (cCa) {
-      cCa.textContent = cancelText;
-      stripBtnVariants(cCa);
-      cCa.className = ensureBtnPrefix(btnClassCancel);
-    }
-
-    const close = (result) => {
-      cModal.classList.remove("is-open");
-      cModal.setAttribute("aria-hidden", "true");
-      cModal.style.display = "";
-      cOk?.removeEventListener("click", onOk);
-      cCa?.removeEventListener("click", onNo);
-      cX?.removeEventListener("click", onNo);
-      cBack?.removeEventListener("click", onNo);
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
       document.removeEventListener("keydown", onKey, { capture: true });
-      setTimeout(blurActive, 0);
-      resolve(result);
-    };
+    }
+  };
+  document.addEventListener("keydown", onKey, { capture: true });
 
-    const onOk = () => close(true);
-    const onNo = () => close(false);
-    const onKey = (e) => {
-      if (e.key === "Escape") close(false);
-      if (e.key === "Enter") close(true);
-    };
+  cModal.classList.add("show");
+  cModal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("body-lock-scroll");
 
-    blurActive();
-    cModal.classList.add("is-open");
-    cModal.setAttribute("aria-hidden", "false");
-    cModal.style.display = "block";
-    setTimeout(() => dialog?.focus({ preventScroll: true }), 0);
-
-    cOk?.addEventListener("click", onOk);
-    cCa?.addEventListener("click", onNo);
-    cX?.addEventListener("click", onNo);
-    cBack?.addEventListener("click", onNo);
-    document.addEventListener("keydown", onKey, { capture: true });
+  requestAnimationFrame(() => {
+    if (dialog && typeof dialog.focus === "function") {
+      dialog.focus({ preventScroll: true });
+    } else if (cBtnOk && typeof cBtnOk.focus === "function") {
+      cBtnOk.focus();
+    }
   });
+}
+
+function closeConfirm() {
+  const cModal = document.getElementById("confirm-modal");
+  if (!cModal) return;
+  cModal.classList.remove("show");
+  cModal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("body-lock-scroll");
 }
 
 export class NotificationSystem {
@@ -162,6 +167,7 @@ export class NotificationSystem {
     this.guildsPromise = null;
     this.hardFail = false;
   }
+
   init() {
     const root = document.getElementById("notif-root");
     if (!root) {
@@ -262,13 +268,20 @@ export class NotificationSystem {
       });
 
       if (!res.ok) {
-        if (res.status >= 500) {
-          this.hardFail = true;
+        this.hardFail = true;
+
+        if (res.status === 404) {
+          this.showToast(
+            "We couldn’t load any guilds yet. It looks like your Discord client token isn’t configured—open the Configuration page, add your tokens, then come back here.",
+            { type: "warning" }
+          );
+        } else {
+          this.showToast(
+            `Failed to load guilds (${res.status}). Please check your configuration and try again.`,
+            { type: "error" }
+          );
         }
 
-        this.showToast(`Failed to load guilds (${res.status})`, {
-          type: "error",
-        });
         return;
       }
 
@@ -280,7 +293,7 @@ export class NotificationSystem {
 
       this.hardFail = true;
       this.showToast(
-        "Failed to load guild list. Some features may be limited.",
+        "Failed to load guild list. Check your connection and token configuration, then try reloading.",
         { type: "error" }
       );
     }
@@ -335,7 +348,9 @@ export class NotificationSystem {
 
     this.emptyEl.hidden = true;
 
-    const skeletons = Array.from({ length: count }, (_, i) => `
+    const skeletons = Array.from(
+      { length: count },
+      (_, i) => `
       <div class="notif-card-skeleton" style="animation-delay: ${i * 0.08}s">
         <div class="skeleton-header">
           <div class="skeleton-main">
@@ -358,7 +373,8 @@ export class NotificationSystem {
           <div class="skeleton skeleton-btn" style="width: 55px"></div>
         </div>
       </div>
-    `).join("");
+    `
+    ).join("");
 
     this.listEl.innerHTML = skeletons;
   }
@@ -380,17 +396,19 @@ export class NotificationSystem {
       </div>
     `;
 
-    const html = addBtnHtml + items
-      .map((n) => {
-        const enabled = !!n.enabled;
-        const provider = (n.provider || "").toLowerCase();
-        const label = this.escapeHtml(n.label || "");
-        const scopeLabel = this.describeScope(n.guild_id);
-        const filtersSummary = this.describeFilters(n.filters || {});
-        const providerLabel = this.describeProvider(provider);
-        const keywordChipsHtml = this.renderKeywordChips(n.filters || {});
+    const html =
+      addBtnHtml +
+      items
+        .map((n) => {
+          const enabled = !!n.enabled;
+          const provider = (n.provider || "").toLowerCase();
+          const label = this.escapeHtml(n.label || "");
+          const scopeLabel = this.describeScope(n.guild_id);
+          const filtersSummary = this.describeFilters(n.filters || {});
+          const providerLabel = this.describeProvider(provider);
+          const keywordChipsHtml = this.renderKeywordChips(n.filters || {});
 
-        return `
+          return `
           <article class="notif-card" data-id="${this.escapeAttr(n.notif_id)}">
             <header class="notif-card-header">
               <div class="notif-card-main">
@@ -404,7 +422,9 @@ export class NotificationSystem {
               <div class="notif-card-header-right">
                 <span class="badge-provider badge-provider-${provider}">
                   ${this.getProviderIconHtml(provider)}
-                  <span class="badge-provider-label">${this.escapeHtml(providerLabel)}</span>
+                  <span class="badge-provider-label">${this.escapeHtml(
+                    providerLabel
+                  )}</span>
                 </span>
                 <span class="status-pill ${
                   enabled ? "status-pill-on" : "status-pill-off"
@@ -427,8 +447,8 @@ export class NotificationSystem {
             </footer>
           </article>
         `;
-      })
-      .join("");
+        })
+        .join("");
 
     this.listEl.innerHTML = html;
 
@@ -460,14 +480,35 @@ export class NotificationSystem {
     });
 
     this.listEl.querySelectorAll(".notif-delete-btn").forEach((btn) => {
-      btn.addEventListener("click", async (ev) => {
+      btn.addEventListener("click", (ev) => {
         const card = ev.currentTarget.closest(".notif-card");
         const id = card?.getAttribute("data-id");
         if (!id) return;
 
-        if (!confirm("Delete this notification rule?")) return;
+        const doDelete = () => {
+          this.deleteNotification(id).catch((err) => {
+            console.error("[Notifications] deleteNotification failed:", err);
+          });
+        };
 
-        this.deleteNotification(id).catch(console.error);
+        try {
+          openConfirm({
+            title: "Delete notification rule",
+            body: "Are you sure you want to delete this notification rule?",
+            confirmText: "Delete",
+            confirmClass: "btn-ghost-red",
+            onConfirm: () => doDelete(),
+            showCancel: true,
+          });
+        } catch (err) {
+          console.error(
+            "[Notifications] openConfirm failed, falling back to confirm():",
+            err
+          );
+          if (window.confirm("Delete this notification rule?")) {
+            doDelete();
+          }
+        }
       });
     });
   }
@@ -545,7 +586,6 @@ export class NotificationSystem {
     }
 
     this.populateGuildSelects();
-
     this.resetForm();
 
     const guildSelect = document.getElementById("notif_guild_id");
@@ -602,12 +642,20 @@ export class NotificationSystem {
     if (caseCb) caseCb.checked = !!filters.case_sensitive;
     if (embedsCb) embedsCb.checked = !!filters.include_embeds;
 
-    const anyWrap = document.querySelector('[data-chip-input="notif_keywords_any"]');
-    const allWrap = document.querySelector('[data-chip-input="notif_keywords_all"]');
+    const anyWrap = document.querySelector(
+      '[data-chip-input="notif_keywords_any"]'
+    );
+    const allWrap = document.querySelector(
+      '[data-chip-input="notif_keywords_all"]'
+    );
     const chWrap = document.querySelector('[data-chip-input="notif_channels"]');
     if (anyWrap) this.setChipsFromValue(anyWrap, anyValue);
     if (allWrap) this.setChipsFromValue(allWrap, allValue);
-    if (chWrap) this.setChipsFromValue(chWrap, this.toArray(filters.channel_ids).join(", "));
+    if (chWrap)
+      this.setChipsFromValue(
+        chWrap,
+        this.toArray(filters.channel_ids).join(", ")
+      );
 
     this.updateProviderFields();
     this.showModal();
@@ -648,9 +696,10 @@ export class NotificationSystem {
       if (el) el.value = "";
     });
 
-    document.querySelectorAll(".chip-input-wrap .chip").forEach((c) => c.remove());
+    document
+      .querySelectorAll(".chip-input-wrap .chip")
+      .forEach((c) => c.remove());
 
-    // Restore placeholder option
     const providerSelect = document.getElementById("notif_provider");
     if (providerSelect) {
       const placeholder = providerSelect.querySelector('option[value=""]');
@@ -671,7 +720,6 @@ export class NotificationSystem {
       el.hidden = provider !== name;
     });
 
-    // Hide placeholder option once a provider is selected
     if (providerSelect && provider) {
       const placeholder = providerSelect.querySelector('option[value=""]');
       if (placeholder) placeholder.hidden = true;
@@ -681,7 +729,8 @@ export class NotificationSystem {
     if (iconEl) {
       const icons = {
         pushover: "https://pushover.net/images/pushover-logo.svg",
-        telegram: "https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg",
+        telegram:
+          "https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg",
         webhook: null,
       };
       const iconUrl = icons[provider];
@@ -738,7 +787,7 @@ export class NotificationSystem {
     document.querySelectorAll("select.input").forEach((select) => {
       select.addEventListener("mousedown", () => {
         select.classList.remove("bounce");
-        void select.offsetWidth; // Force reflow
+        void select.offsetWidth;
         select.classList.add("bounce");
       });
       select.addEventListener("animationend", () => {
@@ -756,7 +805,9 @@ export class NotificationSystem {
     const chip = document.createElement("span");
     chip.className = "chip";
     chip.dataset.value = value;
-    chip.innerHTML = `${this.escapeHtml(value)}<button type="button" class="chip-remove" aria-label="Remove">×</button>`;
+    chip.innerHTML = `${this.escapeHtml(
+      value
+    )}<button type="button" class="chip-remove" aria-label="Remove">×</button>`;
 
     chip.querySelector(".chip-remove").addEventListener("click", () => {
       this.removeChip(chip);

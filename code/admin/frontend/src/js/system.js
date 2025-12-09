@@ -66,11 +66,7 @@
 
     loader.classList.add("is-hiding");
 
-    await waitForTransitions(
-      loader,
-      ["opacity",],
-      800
-    );
+    await waitForTransitions(loader, ["opacity"], 800);
 
     loader.classList.add("is-hidden");
     document.body.classList.remove("is-loading");
@@ -216,31 +212,31 @@
       modal.className = "modal";
       modal.setAttribute("aria-hidden", "true");
       modal.innerHTML = `
-        <div class="modal-backdrop"></div>
-        <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1">
-          <div class="modal-header">
-            <h4 id="confirm-title" class="modal-title">Confirm</h4>
-            <button type="button" id="confirm-close" class="icon-btn verify-close" aria-label="Close">✕</button>
-          </div>
-          <div class="p-4" id="confirm-body" style="padding:12px 16px;"></div>
-          <div class="btns" style="padding:0 16px 16px 16px;">
-            <button type="button" id="confirm-cancel" class="btn btn-ghost">Cancel</button>
-            <button type="button" id="confirm-okay" class="btn btn-ghost">OK</button>
-          </div>
+      <div class="modal-backdrop"></div>
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1">
+        <div class="modal-header">
+          <h4 id="confirm-title" class="modal-title">Confirm</h4>
+          <button type="button" id="confirm-close" class="icon-btn verify-close" aria-label="Close">✕</button>
         </div>
-      `;
+        <div class="p-4" id="confirm-body" style="padding:12px 16px;"></div>
+        <div class="btns" style="padding:0 16px 16px 16px;">
+          <button type="button" id="confirm-cancel" class="btn btn-ghost">Cancel</button>
+          <button type="button" id="confirm-okay" class="btn btn-ghost">OK</button>
+        </div>
+      </div>
+    `;
       document.body.appendChild(modal);
     }
 
     let style = document.getElementById("confirm-modal-patch");
     const css = `
-      #confirm-modal { display: none; }
-      #confirm-modal.is-open { display: block; }
-      #confirm-modal .modal-content:focus { outline: none; box-shadow: none; }
-      #confirm-modal .btn:focus, #confirm-modal .btn:focus-visible {
-        outline: none; box-shadow: none;
-      }
-    `;
+    #confirm-modal .modal-content:focus { outline: none; box-shadow: none; }
+    #confirm-modal .btn:focus,
+    #confirm-modal .btn:focus-visible {
+      outline: none;
+      box-shadow: none;
+    }
+  `;
     if (!style) {
       style = document.createElement("style");
       style.id = "confirm-modal-patch";
@@ -277,7 +273,6 @@
       };
       const stripBtnVariants = (el) => {
         if (!el) return;
-
         el.classList.remove(
           "btn-primary",
           "btn-danger",
@@ -304,14 +299,16 @@
       }
 
       const close = (result) => {
-        cModal.classList.remove("is-open");
+        cModal.classList.remove("show");
         cModal.setAttribute("aria-hidden", "true");
-        cModal.style.display = "";
-        cOk?.removeEventListener("click", onOk);
-        cCa?.removeEventListener("click", onNo);
-        cX?.removeEventListener("click", onNo);
-        cBack?.removeEventListener("click", onNo);
-        document.removeEventListener("keydown", onKey, { capture: true });
+        document.body.classList.remove("body-lock-scroll");
+
+        cOk && cOk.removeEventListener("click", onOk);
+        cCa && cCa.removeEventListener("click", onNo);
+        cX && cX.removeEventListener("click", onNo);
+        cBack && cBack.removeEventListener("click", onNo);
+        document.removeEventListener("keydown", onKey, true);
+
         setTimeout(blurActive, 0);
         resolve(result);
       };
@@ -319,21 +316,37 @@
       const onOk = () => close(true);
       const onNo = () => close(false);
       const onKey = (e) => {
-        if (e.key === "Escape") close(false);
-        if (e.key === "Enter") close(true);
+        if (e.key === "Escape") {
+          e.preventDefault();
+          close(false);
+        }
+        if (e.key === "Enter") {
+          if (dialog && dialog.contains(document.activeElement)) {
+            e.preventDefault();
+            close(true);
+          }
+        }
       };
 
       blurActive();
-      cModal.classList.add("is-open");
-      cModal.setAttribute("aria-hidden", "false");
-      cModal.style.display = "block";
-      setTimeout(() => dialog?.focus({ preventScroll: true }), 0);
 
-      cOk?.addEventListener("click", onOk);
-      cCa?.addEventListener("click", onNo);
-      cX?.addEventListener("click", onNo);
-      cBack?.addEventListener("click", onNo);
-      document.addEventListener("keydown", onKey, { capture: true });
+      cModal.classList.add("show");
+      cModal.setAttribute("aria-hidden", "false");
+      document.body.classList.add("body-lock-scroll");
+
+      requestAnimationFrame(() => {
+        if (dialog && typeof dialog.focus === "function") {
+          dialog.focus({ preventScroll: true });
+        } else if (cOk && typeof cOk.focus === "function") {
+          cOk.focus();
+        }
+      });
+
+      cOk && cOk.addEventListener("click", onOk);
+      cCa && cCa.addEventListener("click", onNo);
+      cX && cX.addEventListener("click", onNo);
+      cBack && cBack.addEventListener("click", onNo);
+      document.addEventListener("keydown", onKey, true);
     });
   }
 
