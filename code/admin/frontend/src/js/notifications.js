@@ -403,7 +403,7 @@ export class NotificationSystem {
               </div>
               <div class="notif-card-header-right">
                 <span class="badge-provider badge-provider-${provider}">
-                  <span class="badge-provider-icon"></span>
+                  ${this.getProviderIconHtml(provider)}
                   <span class="badge-provider-label">${this.escapeHtml(providerLabel)}</span>
                 </span>
                 <span class="status-pill ${
@@ -465,18 +465,7 @@ export class NotificationSystem {
         const id = card?.getAttribute("data-id");
         if (!id) return;
 
-        blurActive();
-
-        const confirmed = await themedConfirm({
-          title: "Delete notification rule?",
-          body: "This will permanently delete this notification rule. This cannot be undone.",
-          confirmText: "Delete",
-          cancelText: "Cancel",
-          btnClassOk: "btn-ghost-red",
-          btnClassCancel: "btn-ghost",
-        });
-
-        if (!confirmed) return;
+        if (!confirm("Delete this notification rule?")) return;
 
         this.deleteNotification(id).catch(console.error);
       });
@@ -494,6 +483,14 @@ export class NotificationSystem {
       default:
         return provider || "Custom";
     }
+  }
+
+  getProviderIconHtml(provider) {
+    const icons = {
+      pushover: `<img class="badge-provider-icon" src="https://pushover.net/images/pushover-logo.svg" alt="" />`,
+      telegram: `<img class="badge-provider-icon" src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" alt="" />`,
+    };
+    return icons[provider] || "";
   }
 
   renderKeywordChips(filters, maxVisible = 3) {

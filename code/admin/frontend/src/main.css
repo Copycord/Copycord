@@ -8979,14 +8979,8 @@ textarea.input:disabled {
 .badge-provider-icon {
   width: 14px;
   height: 14px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.badge-provider-icon svg {
-  width: 100%;
-  height: 100%;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 
 /* Pushover - warm red */
