@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="utf-8" />
-    <title>Copycord – Message Notifications</title>
+    <title>{{ title or "Advanced" }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="stylesheet" href="{{ request.url_for('static', path='assets/main.css') }}?v={{ version }}">
     <link rel="icon" type="image/png" href="/static/logo.png">
@@ -269,6 +269,14 @@
                                 </div>
                             </div>
 
+                            <div class="form-group">
+                                <label class="form-label">Limit to user IDs (optional)</label>
+                                <input id="notif_users" type="hidden" />
+                                <div class="chip-input-wrap" data-chip-input="notif_users">
+                                    <input type="text" class="chip-text-input" placeholder="Type user ID and press Enter..." />
+                                </div>
+                            </div>
+
                             <div class="form-row">
                                 <label class="toggle">
                                     <input id="notif_case_sensitive" type="checkbox" />
@@ -279,6 +287,11 @@
                                     <input id="notif_include_embeds" type="checkbox" />
                                     <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     <span class="toggle-label">Search text in embeds</span>
+                                </label>
+                                <label class="toggle">
+                                    <input id="notif_bot_messages" type="checkbox" />
+                                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    <span class="toggle-label">Bot messages</span>
                                 </label>
                             </div>
                         </div>

@@ -564,12 +564,15 @@ export class NotificationSystem {
     const any = this.toArray(filters.keywords_any).filter(Boolean);
     const all = this.toArray(filters.keywords_all).filter(Boolean);
     const channels = this.toArray(filters.channel_ids).filter(Boolean);
+    const users = this.toArray(filters.user_ids).filter(Boolean);
     const parts = [];
 
     if (any.length) parts.push(`any of [${any.join(", ")}]`);
     if (all.length) parts.push(`all of [${all.join(", ")}]`);
     if (channels.length)
       parts.push(`channels: ${channels.map((c) => `#${c}`).join(", ")}`);
+    if (users.length)
+      parts.push(`users: ${users.map((u) => `@${u}`).join(", ")}`);
 
     if (!parts.length) return "No extra filters (all messages)";
     return parts.join(" · ");
@@ -630,17 +633,23 @@ export class NotificationSystem {
     const anyInput = document.getElementById("notif_keywords_any");
     const allInput = document.getElementById("notif_keywords_all");
     const chInput = document.getElementById("notif_channels");
+    const userInput = document.getElementById("notif_users");
     const caseCb = document.getElementById("notif_case_sensitive");
     const embedsCb = document.getElementById("notif_include_embeds");
+    const botsCb = document.getElementById("notif_bot_messages");
 
     const anyValue = this.toArray(filters.keywords_any).join(", ");
     const allValue = this.toArray(filters.keywords_all).join(", ");
+    const chValue = this.toArray(filters.channel_ids).join(", ");
+    const userValue = this.toArray(filters.user_ids).join(", ");
 
     if (anyInput) anyInput.value = anyValue;
     if (allInput) allInput.value = allValue;
-    if (chInput) chInput.value = this.toArray(filters.channel_ids).join(", ");
+    if (chInput) chInput.value = chValue;
+    if (userInput) userInput.value = userValue;
     if (caseCb) caseCb.checked = !!filters.case_sensitive;
     if (embedsCb) embedsCb.checked = !!filters.include_embeds;
+    if (botsCb) botsCb.checked = !!filters.include_bots;
 
     const anyWrap = document.querySelector(
       '[data-chip-input="notif_keywords_any"]'
@@ -649,13 +658,11 @@ export class NotificationSystem {
       '[data-chip-input="notif_keywords_all"]'
     );
     const chWrap = document.querySelector('[data-chip-input="notif_channels"]');
+    const userWrap = document.querySelector('[data-chip-input="notif_users"]');
     if (anyWrap) this.setChipsFromValue(anyWrap, anyValue);
     if (allWrap) this.setChipsFromValue(allWrap, allValue);
-    if (chWrap)
-      this.setChipsFromValue(
-        chWrap,
-        this.toArray(filters.channel_ids).join(", ")
-      );
+    if (chWrap) this.setChipsFromValue(chWrap, chValue);
+    if (userWrap) this.setChipsFromValue(userWrap, userValue);
 
     this.updateProviderFields();
     this.showModal();
@@ -866,8 +873,10 @@ export class NotificationSystem {
     const anyInput = document.getElementById("notif_keywords_any");
     const allInput = document.getElementById("notif_keywords_all");
     const chInput = document.getElementById("notif_channels");
+    const userInput = document.getElementById("notif_users");
     const caseCb = document.getElementById("notif_case_sensitive");
     const embedsCb = document.getElementById("notif_include_embeds");
+    const botsCb = document.getElementById("notif_bot_messages");
 
     const provider = (providerSelect?.value || "").toLowerCase().trim();
 
@@ -890,8 +899,10 @@ export class NotificationSystem {
       keywords_any: this.splitCsv(anyInput?.value),
       keywords_all: this.splitCsv(allInput?.value),
       channel_ids: this.splitCsv(chInput?.value),
+      user_ids: this.splitCsv(userInput?.value),
       case_sensitive: !!(caseCb && caseCb.checked),
       include_embeds: !!(embedsCb && embedsCb.checked),
+      include_bots: !!(botsCb && botsCb.checked),
     };
 
     return {
