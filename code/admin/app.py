@@ -62,6 +62,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.types import Scope, Receive, Send
 from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from common.config import CURRENT_VERSION
 from common.db import DBManager
 from common.backup_scheduler import BackupConfig, DailySQLiteBackupScheduler
@@ -279,6 +280,23 @@ templates.env.globals.setdefault("links", {})
 app.include_router(links_router)
 shutdown_event = asyncio.Event()
 init_admin_auth(app, templates, DATA_DIR)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    if exc.status_code == 404 and "text/html" in (request.headers.get("accept") or ""):
+        return templates.TemplateResponse(
+            "404.html",
+            {
+                "request": request,
+                "version": CURRENT_VERSION,
+            },
+            status_code=404,
+        )
+    return JSONResponse(
+        {"detail": exc.detail},
+        status_code=exc.status_code,
+    )
 
 
 class RequestContextMiddleware(BaseHTTPMiddleware):
