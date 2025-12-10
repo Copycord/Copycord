@@ -3419,7 +3419,7 @@
               <button class="btn-icon clone-mapping-btn"
                       data-id="${m.mapping_id}"
                       aria-label="Clone mapping"
-                      title="Create new mapping with the same settings">
+                      title="Clone mapping">
                 ${ICONS.clone}
               </button>
 
