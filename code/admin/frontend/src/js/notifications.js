@@ -11,31 +11,45 @@ function ensureConfirmModal() {
     modal.className = "modal";
     modal.setAttribute("aria-hidden", "true");
     modal.innerHTML = `
-        <div class="modal-backdrop"></div>
-        <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1">
-          <div class="modal-header">
-            <h4 id="confirm-title" class="modal-title">Confirm</h4>
-            <button type="button" id="confirm-close" class="icon-btn verify-close" aria-label="Close">✕</button>
-          </div>
-          <div class="p-4" id="confirm-body" style="padding:12px 16px;"></div>
-          <div class="btns" style="padding:0 16px 16px 16px;">
-            <button type="button" id="confirm-cancel" class="btn btn-ghost">Cancel</button>
-            <button type="button" id="confirm-okay" class="btn btn-ghost">OK</button>
-          </div>
+      <div class="modal-backdrop"></div>
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="confirm-title" tabindex="-1">
+        <div class="modal-header">
+          <h4 id="confirm-title" class="modal-title">Confirm</h4>
+          <button type="button" id="confirm-close" class="icon-btn verify-close" aria-label="Close">✕</button>
         </div>
-      `;
+        <div class="p-4" id="confirm-body" style="padding:12px 16px;"></div>
+        <div class="btns" style="padding:0 16px 16px 16px;">
+          <button type="button" id="confirm-cancel" class="btn btn-ghost">Cancel</button>
+          <button type="button" id="confirm-okay" class="btn btn-ghost">OK</button>
+        </div>
+      </div>
+    `;
     document.body.appendChild(modal);
   }
 
   let style = document.getElementById("confirm-modal-patch");
   const css = `
-      #confirm-modal { display: none; }
-      #confirm-modal.is-open { display: block; }
-      #confirm-modal .modal-content:focus { outline: none; box-shadow: none; }
-      #confirm-modal .btn:focus, #confirm-modal .btn:focus-visible {
-        outline: none; box-shadow: none;
-      }
-    `;
+    #confirm-modal {
+      display: none;
+    }
+    #confirm-modal.show {
+      display: flex;
+      opacity: 1;
+      visibility: visible;
+      align-items: center;
+      justify-content: center;
+      z-index: 90;
+    }
+    #confirm-modal .modal-content:focus {
+      outline: none;
+      box-shadow: none;
+    }
+    #confirm-modal .btn:focus,
+    #confirm-modal .btn:focus-visible {
+      outline: none;
+      box-shadow: none;
+    }
+  `;
   if (!style) {
     style = document.createElement("style");
     style.id = "confirm-modal-patch";
@@ -44,97 +58,93 @@ function ensureConfirmModal() {
   } else {
     style.textContent = css;
   }
+
   return modal;
 }
 
-function themedConfirm({
+function openConfirm({
   title,
   body,
   confirmText = "OK",
-  cancelText = "Cancel",
-  btnClassOk = "btn btn-ghost",
-  btnClassCancel = "btn btn-ghost",
-} = {}) {
-  return new Promise((resolve) => {
-    const cModal = ensureConfirmModal();
-    const cTitle = cModal.querySelector("#confirm-title");
-    const cBody = cModal.querySelector("#confirm-body");
-    const cOk = cModal.querySelector("#confirm-okay");
-    const cCa = cModal.querySelector("#confirm-cancel");
-    const cX = cModal.querySelector("#confirm-close");
-    const cBack = cModal.querySelector(".modal-backdrop");
-    const dialog = cModal.querySelector(".modal-content");
+  confirmClass = "btn-ghost",
+  onConfirm,
+  showCancel = true,
+}) {
+  const cModal = ensureConfirmModal();
+  const cTitle = cModal.querySelector("#confirm-title");
+  const cBody = cModal.querySelector("#confirm-body");
+  const cBtnOk = cModal.querySelector("#confirm-okay");
+  const cBtnCa = cModal.querySelector("#confirm-cancel");
+  const cBtnX = cModal.querySelector("#confirm-close");
+  const cBack = cModal.querySelector(".modal-backdrop");
+  const dialog = cModal.querySelector(".modal-content");
 
-    const norm = (s) => String(s || "").trim();
-    const ensureBtnPrefix = (s) => {
-      const k = norm(s);
-      if (!k) return "btn btn-ghost";
+  blurActive();
 
-      const parts = k.split(/\s+/).filter(Boolean);
-      if (!parts.includes("btn")) {
-        parts.unshift("btn");
+  if (cTitle) cTitle.textContent = title || "Confirm";
+  if (cBody) cBody.textContent = body || "Are you sure?";
+  if (cBtnOk) cBtnOk.textContent = confirmText || "OK";
+
+  if (cBtnOk) {
+    cBtnOk.className = `btn ${confirmClass || "btn-ghost"}`;
+  }
+  if (cBtnCa) {
+    cBtnCa.hidden = !showCancel;
+  }
+
+  const close = () => {
+    cModal.classList.remove("show");
+    cModal.setAttribute("aria-hidden", "true");
+    document.body.classList.remove("body-lock-scroll");
+  };
+
+  if (cBtnOk) {
+    cBtnOk.onclick = () => {
+      try {
+        if (typeof onConfirm === "function") onConfirm();
+      } finally {
+        close();
       }
-      return parts.join(" ");
     };
-    const stripBtnVariants = (el) => {
-      if (!el) return;
-      el.classList.remove(
-        "btn-primary",
-        "btn-danger",
-        "btn-outline",
-        "btn-ghost",
-        "btn-ghost-red",
-        "btn-ghost-purple",
-        "btn-ghost-green"
-      );
-    };
+  }
+  if (cBtnCa) {
+    cBtnCa.onclick = () => close();
+  }
+  if (cBtnX) {
+    cBtnX.onclick = () => close();
+  }
+  if (cBack) {
+    cBack.onclick = () => close();
+  }
 
-    if (cTitle) cTitle.textContent = title || "Confirm";
-    if (cBody) cBody.textContent = body || "Are you sure?";
-
-    if (cOk) {
-      cOk.textContent = confirmText;
-      stripBtnVariants(cOk);
-      cOk.className = ensureBtnPrefix(btnClassOk);
-    }
-    if (cCa) {
-      cCa.textContent = cancelText;
-      stripBtnVariants(cCa);
-      cCa.className = ensureBtnPrefix(btnClassCancel);
-    }
-
-    const close = (result) => {
-      cModal.classList.remove("is-open");
-      cModal.setAttribute("aria-hidden", "true");
-      cModal.style.display = "";
-      cOk?.removeEventListener("click", onOk);
-      cCa?.removeEventListener("click", onNo);
-      cX?.removeEventListener("click", onNo);
-      cBack?.removeEventListener("click", onNo);
+  const onKey = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
       document.removeEventListener("keydown", onKey, { capture: true });
-      setTimeout(blurActive, 0);
-      resolve(result);
-    };
+    }
+  };
+  document.addEventListener("keydown", onKey, { capture: true });
 
-    const onOk = () => close(true);
-    const onNo = () => close(false);
-    const onKey = (e) => {
-      if (e.key === "Escape") close(false);
-      if (e.key === "Enter") close(true);
-    };
+  cModal.classList.add("show");
+  cModal.setAttribute("aria-hidden", "false");
+  document.body.classList.add("body-lock-scroll");
 
-    blurActive();
-    cModal.classList.add("is-open");
-    cModal.setAttribute("aria-hidden", "false");
-    cModal.style.display = "block";
-    setTimeout(() => dialog?.focus({ preventScroll: true }), 0);
-
-    cOk?.addEventListener("click", onOk);
-    cCa?.addEventListener("click", onNo);
-    cX?.addEventListener("click", onNo);
-    cBack?.addEventListener("click", onNo);
-    document.addEventListener("keydown", onKey, { capture: true });
+  requestAnimationFrame(() => {
+    if (dialog && typeof dialog.focus === "function") {
+      dialog.focus({ preventScroll: true });
+    } else if (cBtnOk && typeof cBtnOk.focus === "function") {
+      cBtnOk.focus();
+    }
   });
+}
+
+function closeConfirm() {
+  const cModal = document.getElementById("confirm-modal");
+  if (!cModal) return;
+  cModal.classList.remove("show");
+  cModal.setAttribute("aria-hidden", "true");
+  document.body.classList.remove("body-lock-scroll");
 }
 
 export class NotificationSystem {
@@ -157,6 +167,7 @@ export class NotificationSystem {
     this.guildsPromise = null;
     this.hardFail = false;
   }
+
   init() {
     const root = document.getElementById("notif-root");
     if (!root) {
@@ -207,11 +218,15 @@ export class NotificationSystem {
       );
     }
     this.updateProviderFields();
+    this.initChipInputs();
+    this.initSelectBounce();
 
     const loader = window.loaderTest;
     if (loader && typeof loader.show === "function") {
       loader.show();
     }
+
+    this.showSkeletons();
 
     this.guildsPromise = this.loadGuilds();
     const rulesPromise = this.refreshList();
@@ -253,13 +268,20 @@ export class NotificationSystem {
       });
 
       if (!res.ok) {
-        if (res.status >= 500) {
-          this.hardFail = true;
+        this.hardFail = true;
+
+        if (res.status === 404) {
+          this.showToast(
+            "We couldn’t load any guilds yet. It looks like your Discord client token isn’t configured—open the Configuration page, add your tokens, then come back here.",
+            { type: "warning" }
+          );
+        } else {
+          this.showToast(
+            `Failed to load guilds (${res.status}). Please check your configuration and try again.`,
+            { type: "error" }
+          );
         }
 
-        this.showToast(`Failed to load guilds (${res.status})`, {
-          type: "error",
-        });
         return;
       }
 
@@ -271,7 +293,7 @@ export class NotificationSystem {
 
       this.hardFail = true;
       this.showToast(
-        "Failed to load guild list. Some features may be limited.",
+        "Failed to load guild list. Check your connection and token configuration, then try reloading.",
         { type: "error" }
       );
     }
@@ -321,6 +343,42 @@ export class NotificationSystem {
     this.renderList(items);
   }
 
+  showSkeletons(count = 3) {
+    if (!this.listEl || !this.emptyEl) return;
+
+    this.emptyEl.hidden = true;
+
+    const skeletons = Array.from(
+      { length: count },
+      (_, i) => `
+      <div class="notif-card-skeleton" style="animation-delay: ${i * 0.08}s">
+        <div class="skeleton-header">
+          <div class="skeleton-main">
+            <div class="skeleton skeleton-title"></div>
+            <div class="skeleton skeleton-meta"></div>
+          </div>
+          <div class="skeleton-badges">
+            <div class="skeleton skeleton-badge"></div>
+            <div class="skeleton skeleton-status"></div>
+          </div>
+        </div>
+        <div class="skeleton-chips">
+          <div class="skeleton skeleton-chip"></div>
+          <div class="skeleton skeleton-chip" style="width: 80px"></div>
+          <div class="skeleton skeleton-chip" style="width: 50px"></div>
+        </div>
+        <div class="skeleton-footer">
+          <div class="skeleton skeleton-btn"></div>
+          <div class="skeleton skeleton-btn" style="width: 70px"></div>
+          <div class="skeleton skeleton-btn" style="width: 55px"></div>
+        </div>
+      </div>
+    `
+    ).join("");
+
+    this.listEl.innerHTML = skeletons;
+  }
+
   renderList(items) {
     if (!this.listEl || !this.emptyEl) return;
 
@@ -332,29 +390,41 @@ export class NotificationSystem {
 
     this.emptyEl.hidden = true;
 
-    const html = items
-      .map((n) => {
-        const enabled = !!n.enabled;
-        const provider = (n.provider || "").toLowerCase();
-        const label = this.escapeHtml(n.label || "");
-        const scopeLabel = this.describeScope(n.guild_id);
-        const filtersSummary = this.describeFilters(n.filters || {});
-        const providerLabel = this.describeProvider(provider);
+    const addBtnHtml = `
+      <div class="notif-list-header">
+        <button type="button" class="btn btn-ghost notif-add-btn">+ New Notification</button>
+      </div>
+    `;
 
-        return `
+    const html =
+      addBtnHtml +
+      items
+        .map((n) => {
+          const enabled = !!n.enabled;
+          const provider = (n.provider || "").toLowerCase();
+          const label = this.escapeHtml(n.label || "");
+          const scopeLabel = this.describeScope(n.guild_id);
+          const filtersSummary = this.describeFilters(n.filters || {});
+          const providerLabel = this.describeProvider(provider);
+          const keywordChipsHtml = this.renderKeywordChips(n.filters || {});
+
+          return `
           <article class="notif-card" data-id="${this.escapeAttr(n.notif_id)}">
             <header class="notif-card-header">
-              <div>
+              <div class="notif-card-main">
                 <h3 class="notif-card-title">${label}</h3>
-                <div class="notif-card-meta small text-muted">
+                <div class="notif-card-meta">
                   <span>${this.escapeHtml(scopeLabel)}</span>
                   <span class="bullet">•</span>
                   <span>${this.escapeHtml(filtersSummary)}</span>
                 </div>
               </div>
               <div class="notif-card-header-right">
-                <span class="badge badge-provider badge-provider-${provider}">
-                  ${this.escapeHtml(providerLabel)}
+                <span class="badge-provider badge-provider-${provider}">
+                  ${this.getProviderIconHtml(provider)}
+                  <span class="badge-provider-label">${this.escapeHtml(
+                    providerLabel
+                  )}</span>
                 </span>
                 <span class="status-pill ${
                   enabled ? "status-pill-on" : "status-pill-off"
@@ -363,7 +433,7 @@ export class NotificationSystem {
                 </span>
               </div>
             </header>
-
+            ${keywordChipsHtml}
             <footer class="notif-card-footer">
               <button type="button" class="btn btn-ghost notif-edit-btn">
                 Edit
@@ -377,10 +447,17 @@ export class NotificationSystem {
             </footer>
           </article>
         `;
-      })
-      .join("");
+        })
+        .join("");
 
     this.listEl.innerHTML = html;
+
+    const addBtn = this.listEl.querySelector(".notif-add-btn");
+    if (addBtn) {
+      addBtn.addEventListener("click", () => {
+        this.openCreateModal().catch(console.error);
+      });
+    }
 
     this.listEl.querySelectorAll(".notif-edit-btn").forEach((btn) => {
       btn.addEventListener("click", (ev) => {
@@ -403,25 +480,35 @@ export class NotificationSystem {
     });
 
     this.listEl.querySelectorAll(".notif-delete-btn").forEach((btn) => {
-      btn.addEventListener("click", async (ev) => {
+      btn.addEventListener("click", (ev) => {
         const card = ev.currentTarget.closest(".notif-card");
         const id = card?.getAttribute("data-id");
         if (!id) return;
 
-        blurActive();
+        const doDelete = () => {
+          this.deleteNotification(id).catch((err) => {
+            console.error("[Notifications] deleteNotification failed:", err);
+          });
+        };
 
-        const confirmed = await themedConfirm({
-          title: "Delete notification rule?",
-          body: "This will permanently delete this notification rule. This cannot be undone.",
-          confirmText: "Delete",
-          cancelText: "Cancel",
-          btnClassOk: "btn-ghost-red",
-          btnClassCancel: "btn-ghost",
-        });
-
-        if (!confirmed) return;
-
-        this.deleteNotification(id).catch(console.error);
+        try {
+          openConfirm({
+            title: "Delete notification rule",
+            body: "Are you sure you want to delete this notification rule?",
+            confirmText: "Delete",
+            confirmClass: "btn-ghost-red",
+            onConfirm: () => doDelete(),
+            showCancel: true,
+          });
+        } catch (err) {
+          console.error(
+            "[Notifications] openConfirm failed, falling back to confirm():",
+            err
+          );
+          if (window.confirm("Delete this notification rule?")) {
+            doDelete();
+          }
+        }
       });
     });
   }
@@ -439,6 +526,32 @@ export class NotificationSystem {
     }
   }
 
+  getProviderIconHtml(provider) {
+    const icons = {
+      pushover: `<img class="badge-provider-icon" src="https://pushover.net/images/pushover-logo.svg" alt="" />`,
+      telegram: `<img class="badge-provider-icon" src="https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg" alt="" />`,
+    };
+    return icons[provider] || "";
+  }
+
+  renderKeywordChips(filters, maxVisible = 3) {
+    const keywords = this.toArray(filters.keywords_any || []).filter(Boolean);
+    if (!keywords.length) return "";
+
+    const visible = keywords.slice(0, maxVisible);
+    const remaining = keywords.length - maxVisible;
+
+    let html = '<div class="notif-keyword-chips">';
+    visible.forEach((kw) => {
+      html += `<span class="notif-keyword-chip">${this.escapeHtml(kw)}</span>`;
+    });
+    if (remaining > 0) {
+      html += `<span class="notif-keyword-chip notif-keyword-chip--more">+${remaining} more</span>`;
+    }
+    html += "</div>";
+    return html;
+  }
+
   describeScope(guildId) {
     if (!guildId) return "Scope: all guilds";
     const gid = String(guildId);
@@ -451,12 +564,15 @@ export class NotificationSystem {
     const any = this.toArray(filters.keywords_any).filter(Boolean);
     const all = this.toArray(filters.keywords_all).filter(Boolean);
     const channels = this.toArray(filters.channel_ids).filter(Boolean);
+    const users = this.toArray(filters.user_ids).filter(Boolean);
     const parts = [];
 
     if (any.length) parts.push(`any of [${any.join(", ")}]`);
     if (all.length) parts.push(`all of [${all.join(", ")}]`);
     if (channels.length)
       parts.push(`channels: ${channels.map((c) => `#${c}`).join(", ")}`);
+    if (users.length)
+      parts.push(`users: ${users.map((u) => `@${u}`).join(", ")}`);
 
     if (!parts.length) return "No extra filters (all messages)";
     return parts.join(" · ");
@@ -473,7 +589,6 @@ export class NotificationSystem {
     }
 
     this.populateGuildSelects();
-
     this.resetForm();
 
     const guildSelect = document.getElementById("notif_guild_id");
@@ -518,16 +633,36 @@ export class NotificationSystem {
     const anyInput = document.getElementById("notif_keywords_any");
     const allInput = document.getElementById("notif_keywords_all");
     const chInput = document.getElementById("notif_channels");
+    const userInput = document.getElementById("notif_users");
     const caseCb = document.getElementById("notif_case_sensitive");
     const embedsCb = document.getElementById("notif_include_embeds");
+    const botsCb = document.getElementById("notif_bot_messages");
 
-    if (anyInput)
-      anyInput.value = this.toArray(filters.keywords_any).join(", ");
-    if (allInput)
-      allInput.value = this.toArray(filters.keywords_all).join(", ");
-    if (chInput) chInput.value = this.toArray(filters.channel_ids).join(", ");
+    const anyValue = this.toArray(filters.keywords_any).join(", ");
+    const allValue = this.toArray(filters.keywords_all).join(", ");
+    const chValue = this.toArray(filters.channel_ids).join(", ");
+    const userValue = this.toArray(filters.user_ids).join(", ");
+
+    if (anyInput) anyInput.value = anyValue;
+    if (allInput) allInput.value = allValue;
+    if (chInput) chInput.value = chValue;
+    if (userInput) userInput.value = userValue;
     if (caseCb) caseCb.checked = !!filters.case_sensitive;
     if (embedsCb) embedsCb.checked = !!filters.include_embeds;
+    if (botsCb) botsCb.checked = !!filters.include_bots;
+
+    const anyWrap = document.querySelector(
+      '[data-chip-input="notif_keywords_any"]'
+    );
+    const allWrap = document.querySelector(
+      '[data-chip-input="notif_keywords_all"]'
+    );
+    const chWrap = document.querySelector('[data-chip-input="notif_channels"]');
+    const userWrap = document.querySelector('[data-chip-input="notif_users"]');
+    if (anyWrap) this.setChipsFromValue(anyWrap, anyValue);
+    if (allWrap) this.setChipsFromValue(allWrap, allValue);
+    if (chWrap) this.setChipsFromValue(chWrap, chValue);
+    if (userWrap) this.setChipsFromValue(userWrap, userValue);
 
     this.updateProviderFields();
     this.showModal();
@@ -568,6 +703,16 @@ export class NotificationSystem {
       if (el) el.value = "";
     });
 
+    document
+      .querySelectorAll(".chip-input-wrap .chip")
+      .forEach((c) => c.remove());
+
+    const providerSelect = document.getElementById("notif_provider");
+    if (providerSelect) {
+      const placeholder = providerSelect.querySelector('option[value=""]');
+      if (placeholder) placeholder.hidden = false;
+    }
+
     this.updateProviderFields();
   }
 
@@ -581,6 +726,128 @@ export class NotificationSystem {
       if (!el) return;
       el.hidden = provider !== name;
     });
+
+    if (providerSelect && provider) {
+      const placeholder = providerSelect.querySelector('option[value=""]');
+      if (placeholder) placeholder.hidden = true;
+    }
+
+    const iconEl = document.getElementById("provider-icon");
+    if (iconEl) {
+      const icons = {
+        pushover: "https://pushover.net/images/pushover-logo.svg",
+        telegram:
+          "https://upload.wikimedia.org/wikipedia/commons/8/82/Telegram_logo.svg",
+        webhook: null,
+      };
+      const iconUrl = icons[provider];
+      if (iconUrl) {
+        iconEl.innerHTML = `<img src="${iconUrl}" alt="${provider}" />`;
+        iconEl.hidden = false;
+      } else {
+        iconEl.innerHTML = "";
+        iconEl.hidden = true;
+      }
+    }
+  }
+
+  initChipInputs() {
+    const wraps = document.querySelectorAll(".chip-input-wrap");
+    wraps.forEach((wrap) => {
+      const textInput = wrap.querySelector(".chip-text-input");
+      if (!textInput) return;
+
+      textInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === ",") {
+          e.preventDefault();
+          const val = textInput.value.trim();
+          if (val) {
+            this.addChip(wrap, val);
+            textInput.value = "";
+          }
+        }
+        if (e.key === "Backspace" && textInput.value === "") {
+          const chips = wrap.querySelectorAll(".chip");
+          if (chips.length) {
+            this.removeChip(chips[chips.length - 1]);
+          }
+        }
+      });
+
+      textInput.addEventListener("blur", () => {
+        const val = textInput.value.trim();
+        if (val) {
+          this.addChip(wrap, val);
+          textInput.value = "";
+        }
+      });
+
+      wrap.addEventListener("click", (e) => {
+        if (e.target === wrap) {
+          textInput.focus();
+        }
+      });
+    });
+  }
+
+  initSelectBounce() {
+    document.querySelectorAll("select.input").forEach((select) => {
+      select.addEventListener("mousedown", () => {
+        select.classList.remove("bounce");
+        void select.offsetWidth;
+        select.classList.add("bounce");
+      });
+      select.addEventListener("animationend", () => {
+        select.classList.remove("bounce");
+      });
+    });
+  }
+
+  addChip(wrap, value) {
+    const existing = Array.from(wrap.querySelectorAll(".chip")).map(
+      (c) => c.dataset.value
+    );
+    if (existing.includes(value)) return;
+
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.dataset.value = value;
+    chip.innerHTML = `${this.escapeHtml(
+      value
+    )}<button type="button" class="chip-remove" aria-label="Remove">×</button>`;
+
+    chip.querySelector(".chip-remove").addEventListener("click", () => {
+      this.removeChip(chip);
+    });
+
+    const textInput = wrap.querySelector(".chip-text-input");
+    wrap.insertBefore(chip, textInput);
+    this.syncChipsToInput(wrap);
+  }
+
+  removeChip(chip) {
+    const wrap = chip.closest(".chip-input-wrap");
+    chip.remove();
+    if (wrap) this.syncChipsToInput(wrap);
+  }
+
+  syncChipsToInput(wrap) {
+    const inputId = wrap.dataset.chipInput;
+    const hiddenInput = document.getElementById(inputId);
+    if (!hiddenInput) return;
+
+    const values = Array.from(wrap.querySelectorAll(".chip")).map(
+      (c) => c.dataset.value
+    );
+    hiddenInput.value = values.join(", ");
+  }
+
+  setChipsFromValue(wrap, value) {
+    const chips = wrap.querySelectorAll(".chip");
+    chips.forEach((c) => c.remove());
+
+    const values = this.splitCsv(value);
+    values.forEach((v) => this.addChip(wrap, v));
   }
 
   async handleSubmit() {
@@ -606,8 +873,10 @@ export class NotificationSystem {
     const anyInput = document.getElementById("notif_keywords_any");
     const allInput = document.getElementById("notif_keywords_all");
     const chInput = document.getElementById("notif_channels");
+    const userInput = document.getElementById("notif_users");
     const caseCb = document.getElementById("notif_case_sensitive");
     const embedsCb = document.getElementById("notif_include_embeds");
+    const botsCb = document.getElementById("notif_bot_messages");
 
     const provider = (providerSelect?.value || "").toLowerCase().trim();
 
@@ -630,8 +899,10 @@ export class NotificationSystem {
       keywords_any: this.splitCsv(anyInput?.value),
       keywords_all: this.splitCsv(allInput?.value),
       channel_ids: this.splitCsv(chInput?.value),
+      user_ids: this.splitCsv(userInput?.value),
       case_sensitive: !!(caseCb && caseCb.checked),
       include_embeds: !!(embedsCb && embedsCb.checked),
+      include_bots: !!(botsCb && botsCb.checked),
     };
 
     return {

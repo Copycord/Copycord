@@ -1889,7 +1889,7 @@ async def notifications_page(request: Request):
         "notifications.html",
         {
             "request": request,
-            "title": APP_TITLE + " – Notifications",
+            "title": f"Notifications · {APP_TITLE}",
             "version": CURRENT_VERSION,
             "log_level": env.get("LOG_LEVEL", "INFO"),
         },
@@ -3910,12 +3910,59 @@ async def api_client_guilds():
     return JSONResponse({"ok": True, "items": items})
 
 
+def _normalize_notification_filters(raw: dict | None) -> dict:
+    """
+    Normalize filter payload so the DB and UI always see consistent shapes.
+
+    - keywords_*: list[str]
+    - channel_ids: list[str]
+    - user_ids: list[str]
+    - case_sensitive: bool
+    - include_embeds: bool
+    - include_bots: bool (default False to preserve old behaviour)
+    """
+    raw = raw or {}
+
+    def to_str_list(value) -> list[str]:
+        if not value:
+            return []
+        if isinstance(value, str):
+
+            return [x.strip() for x in value.split(",") if x.strip()]
+        if isinstance(value, (list, tuple, set)):
+            out = []
+            for v in value:
+                if v is None:
+                    continue
+                s = str(v).strip()
+                if s:
+                    out.append(s)
+            return out
+
+        return []
+
+    return {
+        "keywords_any": to_str_list(raw.get("keywords_any")),
+        "keywords_all": to_str_list(raw.get("keywords_all")),
+        "channel_ids": to_str_list(raw.get("channel_ids")),
+        "user_ids": to_str_list(raw.get("user_ids")),
+        "case_sensitive": bool(raw.get("case_sensitive")),
+        "include_embeds": bool(raw.get("include_embeds")),
+        "include_bots": bool(raw.get("include_bots", False)),
+    }
+
+
 @app.get("/api/notifications", response_class=JSONResponse)
 async def api_list_notifications(guild_id: str | None = Query(default=None)):
     """
     List message notification rules, optionally filtered by guild_id.
     """
-    rows = db.list_message_notifications(guild_id=guild_id)
+    rows = db.list_message_notifications(guild_id=guild_id) or []
+
+    for row in rows:
+        filt = row.get("filters") or {}
+        row["filters"] = _normalize_notification_filters(filt)
+
     return JSONResponse({"ok": True, "items": rows})
 
 
@@ -3932,7 +3979,15 @@ async def api_save_notification(payload: Dict[str, Any] = Body(...)):
       "provider": "pushover" | "webhook" | "telegram",
       "enabled": true,
       "config": {...},
-      "filters": {...}
+      "filters": {
+        "keywords_any": [...],
+        "keywords_all": [...],
+        "channel_ids": [...],
+        "user_ids": [...],
+        "case_sensitive": bool,
+        "include_embeds": bool,
+        "include_bots": bool
+      }
     }
     """
     notif_id = (payload.get("notif_id") or "").strip() or None
@@ -3941,13 +3996,15 @@ async def api_save_notification(payload: Dict[str, Any] = Body(...)):
     provider = (payload.get("provider") or "").strip().lower()
     enabled = bool(payload.get("enabled", True))
     config = payload.get("config") or {}
-    filters = payload.get("filters") or {}
+    raw_filters = payload.get("filters") or {}
 
     if not label:
         return JSONResponse(
             {"ok": False, "error": "label-required"},
             status_code=400,
         )
+
+    filters = _normalize_notification_filters(raw_filters)
 
     nid = db.upsert_message_notification(
         notif_id,
@@ -3959,7 +4016,10 @@ async def api_save_notification(payload: Dict[str, Any] = Body(...)):
         filters=filters,
     )
 
-    item = db.get_message_notification(nid)
+    item = db.get_message_notification(nid) or {}
+    item_filters = item.get("filters") or {}
+    item["filters"] = _normalize_notification_filters(item_filters)
+
     return JSONResponse({"ok": True, "item": item})
 
 
