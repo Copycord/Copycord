@@ -289,7 +289,6 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
             "404.html",
             {
                 "request": request,
-                "title": "Page not found",
                 "version": CURRENT_VERSION,
             },
             status_code=404,
