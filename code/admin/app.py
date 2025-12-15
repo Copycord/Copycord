@@ -1,6 +1,6 @@
 # =============================================================================
 #  Copycord
-#  Copyright (C) 2021 github.com/Copycord
+#  Copyright (C) 2025 github.com/Copycord
 #
 #  This source code is released under the GNU Affero General Public License
 #  version 3.0. A copy of the license is available at:
@@ -271,7 +271,6 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "TAG_REPLY_MSG": False,
     "DB_CLEANUP_MSG": True,
 }
-
 
 app = FastAPI(title=APP_TITLE)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
@@ -1932,6 +1931,23 @@ async def system_page(request: Request):
             "request": request,
             "title": f"System · {APP_TITLE}",
             "version": CURRENT_VERSION,
+        },
+    )
+
+
+@app.get("/forwarding")
+async def forwarding_page(request: Request):
+    """
+    Render the Message Forwarding page.
+    """
+    env = _read_env()
+    return templates.TemplateResponse(
+        "forwarding.html",
+        {
+            "request": request,
+            "title": f"Forwarding · {APP_TITLE}",
+            "version": CURRENT_VERSION,
+            "log_level": env.get("LOG_LEVEL", "INFO"),
         },
     )
 
@@ -3878,6 +3894,255 @@ async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
 async def api_delete_mapping(mapping_id: str):
     db.delete_guild_mapping(mapping_id)
     return JSONResponse({"ok": True})
+
+
+@app.get("/api/client-guilds", response_class=JSONResponse)
+async def api_client_guilds():
+    """
+    Return list of guilds for the CLIENT (selfbot) account, using CLIENT_TOKEN.
+
+    """
+
+    cfg = db.get_all_config()
+    client_token = (cfg.get("CLIENT_TOKEN") or "").strip()
+
+    if not client_token:
+
+        raise HTTPException(status_code=400, detail="client-token-missing")
+
+    url = f"{DISCORD_API_BASE}/users/@me/guilds"
+    headers = {
+        "Authorization": client_token,
+    }
+
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(url, headers=headers, timeout=15) as resp:
+                text = await resp.text()
+                if resp.status != 200:
+                    LOGGER.warning(
+                        "Discord /users/@me/guilds failed: status=%s body=%s",
+                        resp.status,
+                        text[:300],
+                    )
+                    if resp.status == 401:
+
+                        raise HTTPException(
+                            status_code=502, detail="client-token-invalid"
+                        )
+                    raise HTTPException(
+                        status_code=502, detail="discord-guilds-fetch-failed"
+                    )
+                try:
+                    raw = json.loads(text)
+                except Exception:
+                    LOGGER.exception("Failed to decode JSON from /users/@me/guilds")
+                    raise HTTPException(
+                        status_code=502, detail="discord-guilds-json-error"
+                    )
+    except HTTPException:
+
+        raise
+    except Exception:
+        LOGGER.exception("Error calling Discord /users/@me/guilds")
+        raise HTTPException(status_code=502, detail="discord-guilds-error")
+
+    items: list[dict[str, str]] = []
+    for g in raw or []:
+        try:
+            gid = str(g.get("id"))
+        except Exception:
+            continue
+        name = str(g.get("name") or f"Guild {gid}")
+        items.append(
+            {
+                "id": gid,
+                "name": name,
+            }
+        )
+
+    items.sort(key=lambda x: x["name"].lower())
+
+    return JSONResponse({"ok": True, "items": items})
+
+
+def to_bool(value, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if s in ("1", "true", "yes", "y", "on"):
+            return True
+        if s in ("0", "false", "no", "n", "off", ""):
+            return False
+    return default
+
+
+def _normalize_forwarding_rule_filters(raw: dict | str | None) -> dict:
+    """
+    Normalize filter payload so the DB and UI always see consistent shapes.
+
+    - keywords_*: list[str]
+    - channel_ids: list[str]
+    - user_ids: list[str]
+    - case_sensitive: bool
+    - include_embeds: bool
+    - include_bots: bool (default False to preserve old behaviour)
+    - has_attachments: bool (default False)
+    """
+    if not raw:
+        raw = {}
+    elif isinstance(raw, str):
+
+        try:
+            raw = json.loads(raw) or {}
+        except Exception:
+            raw = {}
+
+    if not isinstance(raw, dict):
+        raw = {}
+
+    def to_str_list(value) -> list[str]:
+        if not value:
+            return []
+        if isinstance(value, str):
+            return [x.strip() for x in value.split(",") if x.strip()]
+        if isinstance(value, (list, tuple, set)):
+            out = []
+            for v in value:
+                if v is None:
+                    continue
+                s = str(v).strip()
+                if s:
+                    out.append(s)
+            return out
+        return []
+
+    return {
+        "keywords_any": to_str_list(raw.get("keywords_any")),
+        "keywords_all": to_str_list(raw.get("keywords_all")),
+        "channel_ids": to_str_list(raw.get("channel_ids")),
+        "user_ids": to_str_list(raw.get("user_ids")),
+        "case_sensitive": to_bool(raw.get("case_sensitive"), False),
+        "include_embeds": to_bool(raw.get("include_embeds"), False),
+        "include_bots": to_bool(raw.get("include_bots"), False),
+        "has_attachments": to_bool(
+            raw.get("has_attachments", raw.get("hasMedia")), False
+        ),
+    }
+
+
+@app.get("/api/forwarding", response_class=JSONResponse)
+async def api_list_forwarding(guild_id: str | None = Query(default=None)):
+    """
+    List message forwarding rules, optionally filtered by guild_id.
+    """
+    rows = db.list_message_forwarding_rules(guild_id=guild_id) or []
+
+    for row in rows:
+        row_filters = row.get("filters")
+        row["filters"] = _normalize_forwarding_rule_filters(row_filters)
+
+    return JSONResponse({"ok": True, "items": rows})
+
+
+@app.post("/api/forwarding", response_class=JSONResponse)
+async def api_save_forwarding(payload: dict = Body(...)):
+    rule_id = str(payload.get("rule_id") or "").strip()
+    raw_guild = str(payload.get("guild_id") or "").strip()
+    guild_id = int(raw_guild) if raw_guild.isdigit() else None
+
+    label = (payload.get("label") or "").strip()
+    provider = (payload.get("provider") or "").strip().lower()
+    enabled = to_bool(payload.get("enabled", True), True)
+
+    config = payload.get("config") or {}
+    filters = _normalize_forwarding_rule_filters(payload.get("filters"))
+
+    if not rule_id:
+        rule_id = uuid.uuid4().hex
+
+    if not guild_id:
+        raise HTTPException(status_code=400, detail="missing-guild-id")
+    if provider not in ("pushover", "telegram", "discord"):
+        raise HTTPException(status_code=400, detail="invalid-provider")
+
+    try:
+        db.upsert_message_forwarding_rule(
+            rule_id=rule_id,
+            guild_id=guild_id,
+            label=label,
+            provider=provider,
+            enabled=enabled,
+            config=config,
+            filters=filters,
+        )
+    except Exception:
+        LOGGER.exception("Failed to upsert message forwarding")
+        raise HTTPException(status_code=500, detail="db-failure")
+
+    msg = {
+        "type": "forwarding_reload",
+        "data": {},
+    }
+    try:
+        asyncio.create_task(_ws_cmd(CLIENT_AGENT_URL, msg, timeout=1.0))
+    except Exception:
+        LOGGER.warning("forwarding_reload ws send failed", exc_info=True)
+
+    return {
+        "ok": True,
+        "rule_id": rule_id,
+        "guild_id": str(guild_id),
+    }
+
+
+@app.delete("/api/forwarding/{rule_id}", response_class=JSONResponse)
+async def api_delete_forwarding(rule_id: str):
+    """
+    Delete a message forwarding rule.
+    """
+    existing = db.get_message_forwarding_rule(rule_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="fwd-not-found")
+
+    db.delete_message_forward_rule(rule_id)
+    return JSONResponse({"ok": True, "deleted": rule_id})
+
+
+@app.get("/api/forwarding/count", response_class=JSONResponse)
+async def api_forwarding_count():
+    """
+    Returns the total number of forwarded messages recorded so far,
+    plus counts grouped by provider.
+    """
+    try:
+        total = db.count_forwarded_messages()
+        by_provider = db.count_forwarded_by_provider()
+        return JSONResponse({"ok": True, "count": total, "by_provider": by_provider})
+    except Exception as e:
+        LOGGER.exception("Failed to fetch forwarding count: %s", e)
+        return JSONResponse({"ok": False, "error": "db-error"}, status_code=500)
+
+
+@app.get("/api/forwarding/count/by-rule", response_class=JSONResponse)
+async def api_forwarding_count_by_rule(include_null: bool = False):
+    """
+    Returns counts of forwarded messages grouped by rule_id.
+
+    Query params:
+    - include_null (bool): include a bucket for missing/empty rule_id under key "".
+    """
+    try:
+        by_rule = db.count_forwarded_by_rule(include_null=include_null)
+        return JSONResponse({"ok": True, "by_rule": by_rule})
+    except Exception as e:
+        LOGGER.exception("Failed to fetch forwarding count by rule: %s", e)
+        return JSONResponse({"ok": False, "error": "db-error"}, status_code=500)
 
 
 app = ConnCloseOnShutdownASGI(app)

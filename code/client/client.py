@@ -1,6 +1,6 @@
 # =============================================================================
 #  Copycord
-#  Copyright (C) 2021 github.com/Copycord
+#  Copyright (C) 2025 github.com/Copycord
 #
 #  This source code is released under the GNU Affero General Public License
 #  version 3.0. A copy of the license is available at:
@@ -38,6 +38,7 @@ from client.export_runners import (
     ExportMessagesRunner,
     DmHistoryExporter,
 )
+from client.forwarding import ForwardingManager
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -131,6 +132,14 @@ class ClientListener:
             listen_port=self.config.CLIENT_WS_PORT,
             logger=logger,
         )
+        
+        self.forwarding = ForwardingManager(
+            config=self.config,
+            db=self.db,
+            ws=self.ws,
+            logger=logging.getLogger("client.forwarding"),
+        )
+        
         self.sitemap = SitemapService(
             bot=self.bot, config=self.config, db=self.db, ws=self.ws, logger=logger
         )
@@ -217,6 +226,17 @@ class ClientListener:
                 self.sitemap.reload_filters_and_resend(gid)
             except AttributeError:
                 asyncio.create_task(self.sitemap.build_and_send_all())
+
+            return {"ok": True}
+        
+        elif typ == "forwarding_reload":
+            try:
+                await self.forwarding.reload_config()
+                logger.debug("[notify] Forwarding rules reloaded from DB")
+            except AttributeError:
+                pass
+            except Exception:
+                logger.exception("[notify] Failed to reload forwarding rules")
 
             return {"ok": True}
 
@@ -858,7 +878,7 @@ class ClientListener:
             logger.exception("[sitemap] failed to schedule sync for %s", guild_id)
 
     async def on_ready(self):
-
+        await self.forwarding.start()
         self._reload_mapped_ids()
 
         asyncio.create_task(self.config.setup_release_watcher(self, should_dm=False))
@@ -1207,6 +1227,11 @@ class ClientListener:
             message.channel.name,
             message.author.name,
         )
+        
+        asyncio.create_task(self.forwarding.handle_new_message(
+            discord_message=src_msg
+        ))
+
 
     def _is_meaningful_edit(
         self, before: discord.Message, after: discord.Message
@@ -2433,6 +2458,9 @@ class ClientListener:
                     await asyncio.wait_for(t, timeout=5.0)
         except Exception as e:
             logger.debug("Shutdown error: %r", e)
+            
+        with contextlib.suppress(Exception):
+            await self.forwarding.close(drain=False)
 
         with contextlib.suppress(Exception):
             await self.bot.close()

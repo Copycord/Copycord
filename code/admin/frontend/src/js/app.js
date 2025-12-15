@@ -3062,7 +3062,7 @@
     } catch (err) {
       console.error("Error fetching guild channels/categories:", err);
       tbody.innerHTML =
-        '<tr><td colspan="4" class="text-center small text-danger">Failed to fetch channels/categories from Discord.</td></tr>';
+        '<tr><td colspan="4" class="text-center small text-danger">Failed to fetch channels/categories from Discord. Try again later.</td></tr>';
     }
   }
 

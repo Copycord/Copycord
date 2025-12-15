@@ -1,6 +1,6 @@
 # =============================================================================
 #  Copycord
-#  Copyright (C) 2021 github.com/Copycord
+#  Copyright (C) 2025 github.com/Copycord
 #
 #  This source code is released under the GNU Affero General Public License
 #  version 3.0. A copy of the license is available at:
