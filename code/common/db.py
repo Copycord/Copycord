@@ -1,12 +1,3 @@
-# =============================================================================
-#  Copycord
-#  Copyright (C) 2025 github.com/Copycord
-#
-#  This source code is released under the GNU Affero General Public License
-#  version 3.0. A copy of the license is available at:
-#  https://www.gnu.org/licenses/agpl-3.0.en.html
-# =============================================================================
-
 from datetime import datetime
 import json
 import sqlite3, threading
@@ -783,7 +774,7 @@ class DBManager:
                 "CREATE INDEX IF NOT EXISTS idx_channel_webhook_profiles_clone ON channel_webhook_profiles(cloned_guild_id);",
             ],
         )
-        
+
         self._ensure_table(
             name="mapping_rewrites",
             create_sql_template="""
@@ -821,10 +812,10 @@ class DBManager:
             ],
         )
         self._ensure_table(
-            name="message_notifications",
+            name="message_forwarding",
             create_sql_template="""
                 CREATE TABLE {table} (
-                    notif_id        TEXT PRIMARY KEY,
+                    rule_id        TEXT PRIMARY KEY,
                     guild_id        TEXT,
                     label           TEXT NOT NULL,
                     provider        TEXT NOT NULL,
@@ -836,7 +827,7 @@ class DBManager:
                 );
             """,
             required_columns={
-                "notif_id",
+                "rule_id",
                 "guild_id",
                 "label",
                 "provider",
@@ -847,8 +838,8 @@ class DBManager:
                 "last_updated",
             },
             copy_map={
-                "notif_id": "notif_id",
-                "guild_id": "guild_id", 
+                "rule_id": "rule_id",
+                "guild_id": "guild_id",
                 "label": "label",
                 "provider": "provider",
                 "enabled": "enabled",
@@ -858,12 +849,52 @@ class DBManager:
                 "last_updated": "last_updated",
             },
             post_sql=[
-                "CREATE INDEX IF NOT EXISTS idx_msg_notif_guild ON message_notifications(guild_id);",
-                "CREATE INDEX IF NOT EXISTS idx_msg_notif_provider ON message_notifications(provider);",
+                "CREATE INDEX IF NOT EXISTS idx_msg_forward_guild ON message_forwarding(guild_id);",
+                "CREATE INDEX IF NOT EXISTS idx_msg_forward_provider ON message_forwarding(provider);",
             ],
         )
 
-
+        self._ensure_table(
+            name="forwarding_events",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    event_id          TEXT PRIMARY KEY,
+                    provider          TEXT NOT NULL,
+                    rule_id           TEXT,
+                    guild_id          INTEGER,
+                    source_message_id INTEGER,
+                    part_index        INTEGER NOT NULL DEFAULT 1,
+                    part_total        INTEGER NOT NULL DEFAULT 1,
+                    created_at        INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
+                );
+            """,
+            required_columns={
+                "event_id",
+                "provider",
+                "rule_id",
+                "guild_id",
+                "source_message_id",
+                "part_index",
+                "part_total",
+                "created_at",
+            },
+            copy_map={
+                "event_id": "event_id",
+                "provider": "provider",
+                "rule_id": "rule_id",
+                "guild_id": "guild_id",
+                "source_message_id": "source_message_id",
+                "part_index": "part_index",
+                "part_total": "part_total",
+                "created_at": "created_at",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_forwarding_events_provider ON forwarding_events(provider);",
+                "CREATE INDEX IF NOT EXISTS idx_forwarding_events_rule ON forwarding_events(rule_id);",
+                "CREATE INDEX IF NOT EXISTS idx_forwarding_events_guild ON forwarding_events(guild_id);",
+                "CREATE INDEX IF NOT EXISTS idx_forwarding_events_created ON forwarding_events(created_at);",
+            ],
+        )
 
     def _table_exists(self, name: str) -> bool:
         row = self.conn.execute(
@@ -2299,7 +2330,6 @@ class DBManager:
                 self.conn.execute(sql, tuple(params))
 
             return self.conn.total_changes - before
-
 
     def delete_message_mapping(self, original_message_id: int) -> int:
         """
@@ -4522,7 +4552,12 @@ class DBManager:
                     replacement_text = excluded.replacement_text,
                     last_updated     = CURRENT_TIMESTAMP
                 """,
-                (int(original_guild_id), int(cloned_guild_id), source_text, replacement_text),
+                (
+                    int(original_guild_id),
+                    int(cloned_guild_id),
+                    source_text,
+                    replacement_text,
+                ),
             )
             self.conn.commit()
 
@@ -4599,21 +4634,19 @@ class DBManager:
         cols = [c[0] for c in cur.description]
         return [dict(zip(cols, r)) for r in rows]
 
-    def list_message_notifications(self, guild_id: str | None = None) -> list[dict]:
+    def list_message_forwarding_rules(self, guild_id: str | None = None) -> list[dict]:
         """
-        List stored message notification rules, optionally scoped to a guild_id.
+        List stored message forwarding rules, optionally scoped to a guild_id.
         """
         with self.lock:
             cur = self.conn.cursor()
             if guild_id:
                 cur.execute(
-                    "SELECT * FROM message_notifications WHERE guild_id = ? ORDER BY created_at DESC",
+                    "SELECT * FROM message_forwarding WHERE guild_id = ? ORDER BY created_at DESC",
                     (str(guild_id),),
                 )
             else:
-                cur.execute(
-                    "SELECT * FROM message_notifications ORDER BY created_at DESC"
-                )
+                cur.execute("SELECT * FROM message_forwarding ORDER BY created_at DESC")
             rows = cur.fetchall()
 
         out: list[dict] = []
@@ -4630,7 +4663,7 @@ class DBManager:
 
             out.append(
                 {
-                    "notif_id": rec.get("notif_id"),
+                    "rule_id": rec.get("rule_id"),
                     "guild_id": rec.get("guild_id"),
                     "label": rec.get("label") or "",
                     "provider": rec.get("provider") or "",
@@ -4643,13 +4676,12 @@ class DBManager:
             )
         return out
 
-
-    def get_message_notification(self, notif_id: str) -> dict | None:
+    def get_message_forwarding_rule(self, rule_id: str) -> dict | None:
         with self.lock:
             cur = self.conn.cursor()
             cur.execute(
-                "SELECT * FROM message_notifications WHERE notif_id = ?",
-                (str(notif_id),),
+                "SELECT * FROM message_forwarding WHERE rule_id = ?",
+                (str(rule_id),),
             )
             row = cur.fetchone()
         if not row:
@@ -4666,7 +4698,7 @@ class DBManager:
             filters = {}
 
         return {
-            "notif_id": rec.get("notif_id"),
+            "rule_id": rec.get("rule_id"),
             "guild_id": rec.get("guild_id"),
             "label": rec.get("label") or "",
             "provider": rec.get("provider") or "",
@@ -4677,10 +4709,9 @@ class DBManager:
             "last_updated": rec.get("last_updated"),
         }
 
-
-    def upsert_message_notification(
+    def upsert_message_forwarding_rule(
         self,
-        notif_id: str | None,
+        rule_id: str | None,
         *,
         guild_id: str | None,
         label: str,
@@ -4690,17 +4721,17 @@ class DBManager:
         filters: dict | None = None,
     ) -> str:
         """
-        Insert or update a message notification rule.
+        Insert or update a message forwarding rule.
         """
-        nid = (notif_id or "").strip() or uuid.uuid4().hex
+        nid = (rule_id or "").strip() or uuid.uuid4().hex
         cfg_js = json.dumps(config or {}, ensure_ascii=False)
         flt_js = json.dumps(filters or {}, ensure_ascii=False)
 
         with self.lock, self.conn:
             self.conn.execute(
                 """
-                INSERT INTO message_notifications (
-                    notif_id,
+                INSERT INTO message_forwarding (
+                    rule_id,
                     guild_id,
                     label,
                     provider,
@@ -4713,12 +4744,12 @@ class DBManager:
                 VALUES (
                     ?, ?, ?, ?, ?, ?, ?,
                     COALESCE(
-                        (SELECT created_at FROM message_notifications WHERE notif_id = ?),
+                        (SELECT created_at FROM message_forwarding WHERE rule_id = ?),
                         CAST(strftime('%s','now') AS INTEGER)
                     ),
                     CURRENT_TIMESTAMP
                 )
-                ON CONFLICT(notif_id) DO UPDATE SET
+                ON CONFLICT(rule_id) DO UPDATE SET
                     guild_id    = excluded.guild_id,
                     label       = excluded.label,
                     provider    = excluded.provider,
@@ -4740,10 +4771,89 @@ class DBManager:
             )
         return nid
 
-
-    def delete_message_notification(self, notif_id: str) -> None:
+    def delete_message_forward_rule(self, rule_id: str) -> None:
         with self.lock, self.conn:
             self.conn.execute(
-                "DELETE FROM message_notifications WHERE notif_id = ?",
-                (str(notif_id),),
+                "DELETE FROM message_forwarding WHERE rule_id = ?",
+                (str(rule_id),),
             )
+
+    def record_forwarding_event(
+        self,
+        *,
+        provider: str,
+        rule_id: Optional[str] = None,
+        guild_id: Optional[int] = None,
+        source_message_id: Optional[int] = None,
+        part_index: int = 1,
+        part_total: int = 1,
+        event_id: Optional[str] = None,
+    ) -> str:
+        """
+        Record a single forwarding send event (minimal details).
+        Returns the event_id.
+        """
+        eid = event_id or uuid.uuid4().hex
+        with self.lock, self.conn:
+            self.conn.execute(
+                """
+                INSERT INTO forwarding_events(
+                    event_id, provider, rule_id, guild_id, source_message_id,
+                    part_index, part_total, created_at
+                )
+                VALUES (?,?,?,?,?,?,?,CAST(strftime('%s','now') AS INTEGER))
+                """,
+                (
+                    eid,
+                    (provider or "").strip().lower(),
+                    (rule_id or "").strip() or None,
+                    int(guild_id) if guild_id is not None else None,
+                    int(source_message_id) if source_message_id is not None else None,
+                    int(part_index or 1),
+                    int(part_total or 1),
+                ),
+            )
+        return eid
+
+    def count_forwarded_messages(self) -> int:
+        """
+        Total number of forwarded messages recorded (each sent payload counted once).
+        """
+        row = self.conn.execute("SELECT COUNT(*) FROM forwarding_events").fetchone()
+        return int(row[0] if row and row[0] is not None else 0)
+
+    def count_forwarded_by_provider(self) -> dict:
+        """
+        Count forwarded messages grouped by provider.
+        """
+        rows = self.conn.execute(
+            "SELECT provider, COUNT(*) AS cnt FROM forwarding_events GROUP BY provider"
+        ).fetchall()
+        return {str(r["provider"]): int(r["cnt"]) for r in rows}
+
+    def count_forwarded_by_rule(self, include_null: bool = False) -> dict:
+        """
+        Count forwarded messages grouped by rule_id.
+
+        - By default, excludes NULL/empty rule_id.
+        - When include_null=True, groups missing rule_id under the empty string "".
+        """
+        if include_null:
+            rows = self.conn.execute(
+                """
+                SELECT COALESCE(NULLIF(TRIM(rule_id), ''), '') AS rule_id, COUNT(*) AS cnt
+                FROM forwarding_events
+                GROUP BY rule_id
+                """
+            ).fetchall()
+            return {str(r["rule_id"]): int(r["cnt"]) for r in rows}
+        else:
+            rows = self.conn.execute(
+                """
+                SELECT rule_id, COUNT(*) AS cnt
+                FROM forwarding_events
+                WHERE rule_id IS NOT NULL AND TRIM(rule_id) <> ''
+                GROUP BY rule_id
+                """
+            ).fetchall()
+            return {str(r["rule_id"]): int(r["cnt"]) for r in rows}

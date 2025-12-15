@@ -1,6 +1,6 @@
 # =============================================================================
 #  Copycord
-#  Copyright (C) 2021 github.com/Copycord
+#  Copyright (C) 2025 github.com/Copycord
 #
 #  This source code is released under the GNU Affero General Public License
 #  version 3.0. A copy of the license is available at:
@@ -1879,17 +1879,17 @@ async def system_page(request: Request):
     )
 
 
-@app.get("/notifications")
-async def notifications_page(request: Request):
+@app.get("/forwarding")
+async def forwarding_page(request: Request):
     """
-    Render the Message Notifications page.
+    Render the Message Forwarding page.
     """
     env = _read_env()
     return templates.TemplateResponse(
-        "notifications.html",
+        "forwarding.html",
         {
             "request": request,
-            "title": f"Notifications · {APP_TITLE}",
+            "title": f"Forwarding · {APP_TITLE}",
             "version": CURRENT_VERSION,
             "log_level": env.get("LOG_LEVEL", "INFO"),
         },
@@ -3910,7 +3910,23 @@ async def api_client_guilds():
     return JSONResponse({"ok": True, "items": items})
 
 
-def _normalize_notification_filters(raw: dict | None) -> dict:
+def to_bool(value, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        s = value.strip().lower()
+        if s in ("1", "true", "yes", "y", "on"):
+            return True
+        if s in ("0", "false", "no", "n", "off", ""):
+            return False
+    return default
+
+
+def _normalize_forwarding_rule_filters(raw: dict | str | None) -> dict:
     """
     Normalize filter payload so the DB and UI always see consistent shapes.
 
@@ -3920,14 +3936,24 @@ def _normalize_notification_filters(raw: dict | None) -> dict:
     - case_sensitive: bool
     - include_embeds: bool
     - include_bots: bool (default False to preserve old behaviour)
+    - has_attachments: bool (default False)
     """
-    raw = raw or {}
+    if not raw:
+        raw = {}
+    elif isinstance(raw, str):
+
+        try:
+            raw = json.loads(raw) or {}
+        except Exception:
+            raw = {}
+
+    if not isinstance(raw, dict):
+        raw = {}
 
     def to_str_list(value) -> list[str]:
         if not value:
             return []
         if isinstance(value, str):
-
             return [x.strip() for x in value.split(",") if x.strip()]
         if isinstance(value, (list, tuple, set)):
             out = []
@@ -3938,7 +3964,6 @@ def _normalize_notification_filters(raw: dict | None) -> dict:
                 if s:
                     out.append(s)
             return out
-
         return []
 
     return {
@@ -3946,94 +3971,122 @@ def _normalize_notification_filters(raw: dict | None) -> dict:
         "keywords_all": to_str_list(raw.get("keywords_all")),
         "channel_ids": to_str_list(raw.get("channel_ids")),
         "user_ids": to_str_list(raw.get("user_ids")),
-        "case_sensitive": bool(raw.get("case_sensitive")),
-        "include_embeds": bool(raw.get("include_embeds")),
-        "include_bots": bool(raw.get("include_bots", False)),
+        "case_sensitive": to_bool(raw.get("case_sensitive"), False),
+        "include_embeds": to_bool(raw.get("include_embeds"), False),
+        "include_bots": to_bool(raw.get("include_bots"), False),
+        "has_attachments": to_bool(
+            raw.get("has_attachments", raw.get("hasMedia")), False
+        ),
     }
 
 
-@app.get("/api/notifications", response_class=JSONResponse)
-async def api_list_notifications(guild_id: str | None = Query(default=None)):
+@app.get("/api/forwarding", response_class=JSONResponse)
+async def api_list_forwarding(guild_id: str | None = Query(default=None)):
     """
-    List message notification rules, optionally filtered by guild_id.
+    List message forwarding rules, optionally filtered by guild_id.
     """
-    rows = db.list_message_notifications(guild_id=guild_id) or []
+    rows = db.list_message_forwarding_rules(guild_id=guild_id) or []
 
     for row in rows:
-        filt = row.get("filters") or {}
-        row["filters"] = _normalize_notification_filters(filt)
+        row_filters = row.get("filters")
+        row["filters"] = _normalize_forwarding_rule_filters(row_filters)
 
     return JSONResponse({"ok": True, "items": rows})
 
 
-@app.post("/api/notifications", response_class=JSONResponse)
-async def api_save_notification(payload: Dict[str, Any] = Body(...)):
-    """
-    Create or update a message notification rule.
+@app.post("/api/forwarding", response_class=JSONResponse)
+async def api_save_forwarding(payload: dict = Body(...)):
+    rule_id = str(payload.get("rule_id") or "").strip()
+    raw_guild = str(payload.get("guild_id") or "").strip()
+    guild_id = int(raw_guild) if raw_guild.isdigit() else None
 
-    Expects JSON:
-    {
-      "notif_id": "...",
-      "guild_id": "...",
-      "label": "Ping for keyword",
-      "provider": "pushover" | "webhook" | "telegram",
-      "enabled": true,
-      "config": {...},
-      "filters": {
-        "keywords_any": [...],
-        "keywords_all": [...],
-        "channel_ids": [...],
-        "user_ids": [...],
-        "case_sensitive": bool,
-        "include_embeds": bool,
-        "include_bots": bool
-      }
-    }
-    """
-    notif_id = (payload.get("notif_id") or "").strip() or None
-    guild_id = (payload.get("guild_id") or "").strip() or None
     label = (payload.get("label") or "").strip()
     provider = (payload.get("provider") or "").strip().lower()
-    enabled = bool(payload.get("enabled", True))
+    enabled = to_bool(payload.get("enabled", True), True)
+
     config = payload.get("config") or {}
-    raw_filters = payload.get("filters") or {}
+    filters = _normalize_forwarding_rule_filters(payload.get("filters"))
 
-    if not label:
-        return JSONResponse(
-            {"ok": False, "error": "label-required"},
-            status_code=400,
+    if not rule_id:
+        rule_id = uuid.uuid4().hex
+
+    if not guild_id:
+        raise HTTPException(status_code=400, detail="missing-guild-id")
+    if provider not in ("pushover", "telegram", "discord"):
+        raise HTTPException(status_code=400, detail="invalid-provider")
+
+    try:
+        db.upsert_message_forwarding_rule(
+            rule_id=rule_id,
+            guild_id=guild_id,
+            label=label,
+            provider=provider,
+            enabled=enabled,
+            config=config,
+            filters=filters,
         )
+    except Exception:
+        LOGGER.exception("Failed to upsert message forwarding")
+        raise HTTPException(status_code=500, detail="db-failure")
 
-    filters = _normalize_notification_filters(raw_filters)
+    msg = {
+        "type": "forwarding_reload",
+        "data": {},
+    }
+    try:
+        asyncio.create_task(_ws_cmd(CLIENT_AGENT_URL, msg, timeout=1.0))
+    except Exception:
+        LOGGER.warning("forwarding_reload ws send failed", exc_info=True)
 
-    nid = db.upsert_message_notification(
-        notif_id,
-        guild_id=guild_id,
-        label=label,
-        provider=provider,
-        enabled=enabled,
-        config=config,
-        filters=filters,
-    )
-
-    item = db.get_message_notification(nid) or {}
-    item_filters = item.get("filters") or {}
-    item["filters"] = _normalize_notification_filters(item_filters)
-
-    return JSONResponse({"ok": True, "item": item})
+    return {
+        "ok": True,
+        "rule_id": rule_id,
+        "guild_id": str(guild_id),
+    }
 
 
-@app.delete("/api/notifications/{notif_id}", response_class=JSONResponse)
-async def api_delete_notification(notif_id: str):
+@app.delete("/api/forwarding/{rule_id}", response_class=JSONResponse)
+async def api_delete_forwarding(rule_id: str):
     """
-    Delete a message notification rule.
+    Delete a message forwarding rule.
     """
-    existing = db.get_message_notification(notif_id)
+    existing = db.get_message_forwarding_rule(rule_id)
     if not existing:
-        raise HTTPException(status_code=404, detail="notif-not-found")
+        raise HTTPException(status_code=404, detail="fwd-not-found")
 
-    db.delete_message_notification(notif_id)
-    return JSONResponse({"ok": True, "deleted": notif_id})
+    db.delete_message_forward_rule(rule_id)
+    return JSONResponse({"ok": True, "deleted": rule_id})
+
+
+@app.get("/api/forwarding/count", response_class=JSONResponse)
+async def api_forwarding_count():
+    """
+    Returns the total number of forwarded messages recorded so far,
+    plus counts grouped by provider.
+    """
+    try:
+        total = db.count_forwarded_messages()
+        by_provider = db.count_forwarded_by_provider()
+        return JSONResponse({"ok": True, "count": total, "by_provider": by_provider})
+    except Exception as e:
+        LOGGER.exception("Failed to fetch forwarding count: %s", e)
+        return JSONResponse({"ok": False, "error": "db-error"}, status_code=500)
+
+
+@app.get("/api/forwarding/count/by-rule", response_class=JSONResponse)
+async def api_forwarding_count_by_rule(include_null: bool = False):
+    """
+    Returns counts of forwarded messages grouped by rule_id.
+
+    Query params:
+    - include_null (bool): include a bucket for missing/empty rule_id under key "".
+    """
+    try:
+        by_rule = db.count_forwarded_by_rule(include_null=include_null)
+        return JSONResponse({"ok": True, "by_rule": by_rule})
+    except Exception as e:
+        LOGGER.exception("Failed to fetch forwarding count by rule: %s", e)
+        return JSONResponse({"ok": False, "error": "db-error"}, status_code=500)
 
 
 app = ConnCloseOnShutdownASGI(app)

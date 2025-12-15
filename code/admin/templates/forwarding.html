@@ -10,7 +10,7 @@
     <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js"></script>
 </head>
 
-<body class="page-notifications page-loading">
+<body class="page-forwarding page-loading">
     <header class="site-header" role="banner">
         <button id="menu-toggle" class="menu-btn" aria-haspopup="true" aria-expanded="false" aria-controls="side-menu"
             aria-label="Open menu">
@@ -23,7 +23,7 @@
         </a>
     </header>
 
-    <div id="notif-page-loader" class="page-loader" aria-hidden="true">
+    <div id="fwd-page-loader" class="page-loader" aria-hidden="true">
         <div class="page-loader-inner">
             <div class="page-loader-pulse" aria-hidden="true"></div>
             <div class="page-loader-text">Loading...</div>
@@ -31,7 +31,6 @@
     </div>
 
     <div id="menu-backdrop" class="menu-backdrop" hidden></div>
-
     <aside id="side-menu" class="side-menu" aria-hidden="true" aria-label="Site menu">
         <nav class="side-menu-body">
             <ul class="menu-list">
@@ -77,15 +76,15 @@
                 </li>
 
                 <li>
-                    <a class="menu-item is-active" href="/notifications" rel="noopener">
+                    <a class="menu-item is-active" href="/forwarding" rel="noopener">
                         <span class="mi" aria-hidden="true">
                             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
                                 stroke="currentColor" stroke-width="1.5" aria-hidden="true" focusable="false">
                                 <path stroke-linecap="round" stroke-linejoin="round"
-                                    d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
+                                    d="m3.75 13.5 10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75Z" />
                             </svg>
                         </span>
-                        <span class="mi-label">Notifications</span>
+                        <span class="mi-label">Forwarding</span>
                     </a>
                 </li>
 
@@ -101,6 +100,7 @@
                         <span class="mi-label">System</span>
                     </a>
                 </li>
+
             </ul>
         </nav>
 
@@ -117,62 +117,60 @@
     </aside>
 
     <div class="container">
-        <div id="notif-root" class="notifications-page">
+        <div id="fwd-root" class="forwarding-page" hidden>
             <section class="card">
                 <header class="card-header">
-                    <h2>Notification Rules</h2>
-                    <p class="card-subtitle">
-                        Watch for specific words, phrases, or channels in messages and send alerts to
-                        Pushover, webhooks, or Telegram.
-                    </p>
+                    <h2>Forwarding</h2>
                 </header>
 
                 <div class="card-body">
-                    <div id="notification-empty" class="empty-state" hidden>
-                        <svg class="empty-state-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
+                    <div id="forwarding-empty" class="empty-state" hidden>
+                        <svg class="empty-state-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"
+                            stroke="currentColor" stroke-width="1.5">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="m3.75 13.5 10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75Z" />
                         </svg>
-                        <h3 class="empty-state-title">No notification rules yet</h3>
-                        <p>Create rules to get alerts when specific keywords appear in messages.</p>
-                        <button id="notifCreateBtn" type="button" class="btn btn-ghost">
+                        <h3 class="empty-state-title">No forwarding rules yet</h3>
+                        <p>Create rules to forward messages to external services.</p>
+                        <button id="fwdCreateBtn" type="button" class="btn btn-primary">
                             + Create your first rule
                         </button>
                     </div>
 
-                    <div id="notification-list" class="notif-list"></div>
+                    <div id="forwarding-list" class="fwd-list"></div>
                 </div>
             </section>
         </div>
 
-        <div id="notifModal" class="modal" aria-hidden="true">
+        <div id="fwdModal" class="modal" aria-hidden="true">
             <div class="modal-backdrop"></div>
 
-            <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="notifModalTitle">
+            <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="fwdModalTitle">
                 <div class="modal-header">
-                    <h3 class="modal-title" id="notifModalTitle">New Notification</h3>
-                    <button class="icon-btn verify-close" id="notifModalCloseBtn" type="button"
+                    <h3 class="modal-title" id="fwdModalTitle">New Forwarding Rule</h3>
+                    <button class="icon-btn verify-close" id="fwdModalCloseBtn" type="button"
                         aria-label="Close">✕</button>
                 </div>
 
                 <div class="modal-body">
-                    <form id="notification-form" autocomplete="off">
-                        <input type="hidden" id="notif_id" name="notif_id" value="" />
+                    <form id="forwarding-form" autocomplete="off">
+                        <input type="hidden" id="fwd_id" value="" />
 
                         <div class="form-section">
                             <h4 class="form-section-title">Basic Information</h4>
 
                             <div class="form-group">
-                                <label for="notif_label" class="form-label">Name</label>
-                                <input id="notif_label" name="label" class="input" type="text"
-                                    placeholder="e.g. Pushover: #support keyword alerts" required />
+                                <label for="fwd_label" class="form-label">Name</label>
+                                <input id="fwd_label" class="input" type="text"
+                                    placeholder="e.g. Discord: #support keyword forwards" required />
                                 <p class="help-text">
                                     A short name so you can recognize this rule later.
                                 </p>
                             </div>
 
                             <div class="form-group">
-                                <label for="notif_guild_id" class="form-label">Guild scope</label>
-                                <select id="notif_guild_id" name="guild_id" class="input">
+                                <label for="fwd_guild_id" class="form-label">Guild scope</label>
+                                <select id="fwd_guild_id" class="input">
                                     <option value="">All guilds</option>
                                 </select>
                                 <p class="help-text">
@@ -185,18 +183,22 @@
                             <h4 class="form-section-title">Provider Configuration</h4>
 
                             <div class="form-group">
-                                <label for="notif_provider" class="form-label">Provider</label>
+                                <label for="fwd_provider" class="form-label">Provider</label>
                                 <div class="provider-select-wrap">
-                                    <span id="provider-icon" class="provider-icon" hidden></span>
-                                    <select id="notif_provider" name="provider" class="input" required>
-                                        <option value="">Choose provider…</option>
-                                        <option value="pushover">Pushover</option>
-                                        <option value="webhook">Generic webhook</option>
-                                        <option value="telegram">Telegram</option>
-                                    </select>
+
+                                    <input type="hidden" id="fwd_provider" required />
+                                    <button type="button" id="providerSelectBtn" class="input provider-select-btn"
+                                        aria-haspopup="listbox" aria-expanded="false">
+                                        <span class="provider-opt-icon" aria-hidden="true"></span>
+                                        <span class="provider-opt-label">Choose provider…</span>
+                                        <span class="provider-opt-caret" aria-hidden="true">▾</span>
+                                    </button>
+
+                                    <div id="providerSelectMenu" class="provider-select-menu provider-dd-menu"
+                                        role="listbox" tabindex="-1" hidden></div>
                                 </div>
                                 <p class="help-text">
-                                    Choose where Copycord should send alerts when this rule matches.
+                                    Choose where Copycord should forward messages when this rule matches.
                                 </p>
                             </div>
 
@@ -215,13 +217,13 @@
                                 </div>
                             </div>
 
-                            <div id="provider_webhook" class="provider-fields" hidden>
+                            <div id="provider_discord" class="provider-fields" hidden>
                                 <div class="form-group">
-                                    <label class="form-label" for="webhook_url">Webhook URL</label>
-                                    <input id="webhook_url" class="input" type="url" autocomplete="off"
-                                        placeholder="https://example.com/webhook" />
+                                    <label class="form-label" for="discord_webhook_url">Discord webhook URL</label>
+                                    <input id="discord_webhook_url" class="input" type="url" autocomplete="off"
+                                        placeholder="https://discord.com/api/webhooks/..." />
                                     <p class="help-text">
-                                        Copycord will POST a JSON payload whenever this rule fires.
+                                        Copycord will forward the matched message to this Discord webhook.
                                     </p>
                                 </div>
                             </div>
@@ -247,66 +249,87 @@
 
                             <div class="form-group">
                                 <label class="form-label">Match any of these words / phrases</label>
-                                <input id="notif_keywords_any" type="hidden" />
-                                <div class="chip-input-wrap" data-chip-input="notif_keywords_any">
+                                <input id="fwd_keywords_any" type="hidden" />
+                                <div class="chip-input-wrap" data-chip-input="fwd_keywords_any">
                                     <input type="text" class="chip-text-input" placeholder="Type and press Enter..." />
                                 </div>
                             </div>
 
                             <div class="form-group">
                                 <label class="form-label">Require all of these words (optional)</label>
-                                <input id="notif_keywords_all" type="hidden" />
-                                <div class="chip-input-wrap" data-chip-input="notif_keywords_all">
+                                <input id="fwd_keywords_all" type="hidden" />
+                                <div class="chip-input-wrap" data-chip-input="fwd_keywords_all">
                                     <input type="text" class="chip-text-input" placeholder="Type and press Enter..." />
                                 </div>
                             </div>
 
                             <div class="form-group">
                                 <label class="form-label">Limit to channel IDs (optional)</label>
-                                <input id="notif_channels" type="hidden" />
-                                <div class="chip-input-wrap" data-chip-input="notif_channels">
-                                    <input type="text" class="chip-text-input" placeholder="Type channel ID and press Enter..." />
+                                <input id="fwd_channels" type="hidden" />
+                                <div class="chip-input-wrap" data-chip-input="fwd_channels">
+                                    <input type="text" class="chip-text-input"
+                                        placeholder="Type channel ID and press Enter..." />
                                 </div>
                             </div>
 
                             <div class="form-group">
                                 <label class="form-label">Limit to user IDs (optional)</label>
-                                <input id="notif_users" type="hidden" />
-                                <div class="chip-input-wrap" data-chip-input="notif_users">
-                                    <input type="text" class="chip-text-input" placeholder="Type user ID and press Enter..." />
+                                <input id="fwd_users" type="hidden" />
+                                <div class="chip-input-wrap" data-chip-input="fwd_users">
+                                    <input type="text" class="chip-text-input"
+                                        placeholder="Type user ID and press Enter..." />
                                 </div>
                             </div>
 
-                            <div class="form-row">
-                                <label class="toggle">
-                                    <input id="notif_case_sensitive" type="checkbox" />
-                                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    <span class="toggle-label">Case sensitive</span>
-                                </label>
-                                <label class="toggle">
-                                    <input id="notif_include_embeds" type="checkbox" />
-                                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    <span class="toggle-label">Search text in embeds</span>
-                                </label>
-                                <label class="toggle">
-                                    <input id="notif_bot_messages" type="checkbox" />
-                                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    <span class="toggle-label">Bot messages</span>
-                                </label>
-                            </div>
+                            <details id="fwdFiltersMore" class="filters-advanced">
+                                <summary class="filters-advanced-summary">
+                                    <span class="filters-advanced-title">More filters</span>
+                                    <span class="filters-advanced-chev" aria-hidden="true">▾</span>
+                                </summary>
+
+                                <div class="filters-advanced-body">
+                                    <div class="form-row">
+                                        <label class="toggle"
+                                            title="Only match if the message text matches your keywords with the exact same capitalization">
+                                            <input id="fwd_case_sensitive" type="checkbox" />
+                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            <span class="toggle-label">Case sensitive</span>
+                                        </label>
+
+                                        <label class="toggle" title="Also search inside embed">
+                                            <input id="fwd_include_embeds" type="checkbox" />
+                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            <span class="toggle-label">Search text in embeds</span>
+                                        </label>
+
+                                        <label class="toggle" title="Allow this rule to match messages sent by bots">
+                                            <input id="fwd_bot_messages" type="checkbox" />
+                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            <span class="toggle-label">Bot messages</span>
+                                        </label>
+
+                                        <label class="toggle"
+                                            title="Only match messages that include attachments (images, videos, audio, or files)">
+                                            <input id="fwd_has_attachments" type="checkbox" />
+                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            <span class="toggle-label">Has attachments</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </details>
                         </div>
 
                         <div class="modal-form-footer">
                             <label class="toggle toggle--enabled">
-                                <input id="notif_enabled" type="checkbox" checked />
+                                <input id="fwd_enabled" type="checkbox" checked />
                                 <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                 <span class="toggle-label">Rule enabled</span>
                             </label>
                             <div class="form-actions">
-                                <button id="notifCancelBtn" type="button" class="btn btn-ghost">
+                                <button id="fwdCancelBtn" type="button" class="btn btn-ghost">
                                     Cancel
                                 </button>
-                                <button id="notifSaveBtn" type="submit" class="btn btn-primary">
+                                <button id="fwdSaveBtn" type="submit" class="btn btn-primary">
                                     Save Rule
                                 </button>
                             </div>
@@ -318,7 +341,7 @@
 
         <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
 
-        <footer id="fixed-footer" role="contentinfo" aria-label="Site footer">
+        <footer id="fixed-footer" hidden role="contentinfo" aria-label="Site footer">
             <div class="footer-bar">
                 <span class="footer-brand" aria-label="Copycord version {{ version or 'dev' }}">
                     <span class="brand-name">Copycord</span>
