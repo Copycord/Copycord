@@ -18,6 +18,11 @@ Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multi
 > </details>
 >
 > <details>
+> <summary><b>Forward Messages to External Service 🆕</b></summary>
+> Create custom rules with flexible filters, then forward matching messages instantly in real time to Telegram, Pushover, and more—so you never miss an important message or notification again.
+> </details>
+>
+> <details>
 > <summary><b>Live Message Forwarding</b></summary>
 > Every new message is forwarded in real time to your clone via webhooks, keeping both servers perfectly in sync including edits and deletes.
 > </details>
