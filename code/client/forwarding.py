@@ -1679,6 +1679,27 @@ class ForwardingManager:
             "allowed_mentions": {"parse": []},
         }
 
+        uname = (
+            (rule.config.get("username") or "")
+            or (rule.config.get("bot_username") or "")
+            or (rule.config.get("webhook_username") or "")
+        ).strip()
+        if uname:
+            payload["username"] = _clip(uname, 80)
+
+        avatar_url = (
+            (rule.config.get("avatar_url") or "")
+            or (rule.config.get("bot_avatar_url") or "")
+            or (rule.config.get("bot_avatar") or "")
+            or (rule.config.get("webhook_avatar_url") or "")
+        ).strip()
+        if avatar_url:
+            if avatar_url.startswith("http://") or avatar_url.startswith("https://"):
+                payload["avatar_url"] = avatar_url
+            else:
+                self.log.debug("[⏩] Discord webhook avatar_url ignored (not http/https) | rule_id=%s", rule.rule_id)
+
+
         status, body, retry_after = await _post_with_discord_429_retry(
             session, url, payload
         )

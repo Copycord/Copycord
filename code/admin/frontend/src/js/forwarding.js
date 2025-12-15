@@ -979,6 +979,20 @@ export class ForwardingSystem {
     const discordWebhookUrl = document.getElementById("discord_webhook_url");
     if (discordWebhookUrl) discordWebhookUrl.value = cfg.url || "";
 
+    this.ensureDiscordOptionalFields();
+    const discordWebhookUsername = document.getElementById(
+      "discord_webhook_username"
+    );
+    const discordWebhookAvatar = document.getElementById(
+      "discord_webhook_avatar_url"
+    );
+    if (discordWebhookUsername)
+      discordWebhookUsername.value =
+        cfg.username || cfg.bot_username || cfg.webhook_username || "";
+    if (discordWebhookAvatar)
+      discordWebhookAvatar.value =
+        cfg.avatar_url || cfg.bot_avatar_url || cfg.bot_avatar || "";
+
     const tgToken = document.getElementById("telegram_bot_token");
     const tgChat = document.getElementById("telegram_chat_id");
     if (tgToken) tgToken.value = cfg.bot_token || "";
@@ -1060,6 +1074,8 @@ export class ForwardingSystem {
       "pushover_app_token",
       "pushover_user_key",
       "discord_webhook_url",
+      "discord_webhook_username",
+      "discord_webhook_avatar_url",
       "telegram_bot_token",
       "telegram_chat_id",
     ].forEach((id) => {
@@ -1091,6 +1107,80 @@ export class ForwardingSystem {
       if (!el) return;
       el.hidden = provider !== name;
     });
+
+    if (provider === "discord") {
+      this.ensureDiscordOptionalFields();
+    }
+  }
+
+  ensureDiscordOptionalFields() {
+    const section = document.getElementById("provider_discord");
+    if (!section) return;
+
+    const hasUsername = !!document.getElementById("discord_webhook_username");
+    const hasAvatar = !!document.getElementById("discord_webhook_avatar_url");
+    if (hasUsername && hasAvatar) return;
+
+    const mkField = (id, labelText, placeholder) => {
+      const wrap = document.createElement("div");
+      wrap.className = "field";
+
+      const label = document.createElement("label");
+      label.className = "label";
+      label.setAttribute("for", id);
+      label.textContent = labelText;
+
+      const input = document.createElement("input");
+      input.type = "text";
+      input.id = id;
+      input.className = "input";
+      input.placeholder = placeholder || "";
+      input.autocomplete = "off";
+
+      wrap.appendChild(label);
+      wrap.appendChild(input);
+      return wrap;
+    };
+
+    const usernameField = hasUsername
+      ? null
+      : mkField(
+          "discord_webhook_username",
+          "Bot Username (optional)",
+          "Override webhook username (e.g., Copycord)"
+        );
+
+    const avatarField = hasAvatar
+      ? null
+      : mkField(
+          "discord_webhook_avatar_url",
+          "Bot Avatar URL (optional)",
+          "https://… (image URL)"
+        );
+
+    const urlInput = document.getElementById("discord_webhook_url");
+    const anchor =
+      (urlInput &&
+        (urlInput.closest(".field") || urlInput.closest(".form-row"))) ||
+      (urlInput ? urlInput.parentElement : null);
+
+    const insertAfter = (node, after) => {
+      if (!node) return;
+      if (!after || !after.parentNode) {
+        section.appendChild(node);
+        return;
+      }
+      after.parentNode.insertBefore(node, after.nextSibling);
+    };
+
+    if (usernameField) insertAfter(usernameField, anchor);
+    if (avatarField) {
+      const uEl = document.getElementById("discord_webhook_username");
+      const after =
+        (uEl && (uEl.closest(".field") || uEl.closest(".form-row"))) ||
+        (uEl ? uEl.parentElement : anchor);
+      insertAfter(avatarField, after);
+    }
   }
 
   initChipInputs() {
@@ -1249,6 +1339,15 @@ export class ForwardingSystem {
     } else if (provider === "discord") {
       cfg.url =
         document.getElementById("discord_webhook_url")?.value.trim() || "";
+
+      const uname =
+        document.getElementById("discord_webhook_username")?.value.trim() || "";
+      const avatar =
+        document.getElementById("discord_webhook_avatar_url")?.value.trim() ||
+        "";
+
+      if (uname) cfg.username = uname;
+      if (avatar) cfg.avatar_url = avatar;
     } else if (provider === "telegram") {
       cfg.bot_token =
         document.getElementById("telegram_bot_token")?.value.trim() || "";
