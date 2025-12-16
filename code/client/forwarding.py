@@ -7,6 +7,7 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 from __future__ import annotations
 
 import asyncio
@@ -22,6 +23,7 @@ import aiohttp
 import discord
 import re
 import html
+from client.message_utils import _resolve_forward, _resolve_forward_via_snapshot
 
 log = logging.getLogger(__name__)
 
@@ -487,18 +489,84 @@ class ForwardingManager:
         async with self._cache_lock:
             self._rules_cache = by_guild
 
-    async def handle_new_message(self, *, discord_message: discord.Message) -> None:
+    async def handle_new_message(
+        self,
+        *,
+        discord_message: discord.Message,
+        attrs_override: Optional[dict] = None,
+        bot: Any = None,
+    ) -> None:
+        if not self._started:
+            await self.start()
+        await self.handle_message(
+            discord_message, attrs_override=attrs_override, bot=bot
+        )
+
+    async def handle_message(
+        self,
+        message: discord.Message,
+        *,
+        attrs_override: Optional[dict] = None,
+        bot: Any = None,
+    ) -> None:
+        guild = getattr(message, "guild", None)
+        if not guild:
+            return
+
+        rules = await self._get_rules_for_guild(int(guild.id))
+        if not rules:
+            return
+
+        src_msg = message
+        if attrs_override is None:
+            src_msg = await self._maybe_resolve_forward(bot, message)
+            if src_msg is None:
+                return
+            attrs = self._get_message_attributes(src_msg)
+        else:
+            attrs = dict(attrs_override)
+
+        for rule in rules:
+            if rule.enabled and rule.filters.apply(attrs):
+                await self._dispatch_forwarding(rule, attrs)
+
+    def _looks_like_forward_wrapper(self, message: discord.Message) -> bool:
+        raw = (getattr(message, "content", "") or "").strip()
+        sys = (getattr(message, "system_content", "") or "").strip()
+        if raw or sys:
+            return False
+
+        if (
+            getattr(message, "attachments", None)
+            or getattr(message, "embeds", None)
+            or getattr(message, "stickers", None)
+        ):
+            return False
+
+        forwarded_flag_val = 0
         try:
-            if not self._started:
-                await self.start()
-            await self.handle_message(discord_message)
+            forwarded_flag_val = int(
+                getattr(getattr(message, "flags", 0), "value", 0) or 0
+            )
         except Exception:
-            self.log.exception(
-                "[⏩] Failed to process forwarding for message %s",
-                getattr(discord_message, "id", None),
+            pass
+
+        return bool(getattr(message, "reference", None) or (forwarded_flag_val & 16384))
+
+    async def _maybe_resolve_forward(
+        self, bot: Any, wrapper_msg: discord.Message
+    ) -> Optional[discord.Message]:
+        if bot is None or not self._looks_like_forward_wrapper(wrapper_msg):
+            return wrapper_msg
+
+        resolved = await _resolve_forward(bot, wrapper_msg)
+        if resolved is None:
+            resolved = await _resolve_forward_via_snapshot(
+                bot, wrapper_msg, logger=self.log
             )
 
-    async def handle_message(self, message: discord.Message) -> None:
+        return resolved
+
         guild = message.guild
         if not guild:
             return
@@ -1693,8 +1761,10 @@ class ForwardingManager:
             if avatar_url.startswith("http://") or avatar_url.startswith("https://"):
                 payload["avatar_url"] = avatar_url
             else:
-                self.log.debug("[⏩] Discord webhook avatar_url ignored (not http/https) | rule_id=%s", rule.rule_id)
-
+                self.log.debug(
+                    "[⏩] Discord webhook avatar_url ignored (not http/https) | rule_id=%s",
+                    rule.rule_id,
+                )
 
         status, body, retry_after = await _post_with_discord_429_retry(
             session, url, payload

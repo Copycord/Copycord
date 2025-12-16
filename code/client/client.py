@@ -1030,7 +1030,7 @@ class ClientListener:
         Handles incoming Discord messages and processes them for forwarding.
         """
         asyncio.create_task(self.forwarding.handle_new_message(
-            discord_message=message
+            discord_message=message, bot=self.bot
         ))
         
         g = getattr(message, "guild", None)
