@@ -1735,13 +1735,18 @@ class ForwardingManager:
             lines.append("Files:")
             lines.extend(non_image_links)
 
-        discord_content = _clip("\n".join(lines).strip() or "New message", 2000)
+        text = _clip("\n".join(lines).strip(), 2000)
 
         payload = {
-            "content": discord_content,
             "embeds": embeds,
             "allowed_mentions": {"parse": []},
         }
+
+        if text:
+            payload["content"] = text
+        else:
+            if not embeds:
+                payload["content"] = "New message"
 
         uname = (
             (rule.config.get("username") or "")
@@ -1766,9 +1771,7 @@ class ForwardingManager:
                     rule.rule_id,
                 )
 
-        status, body, retry_after = await _post_with_discord_429_retry(
-            session, url, payload
-        )
+        status, body, retry_after = await _post_with_discord_429_retry(session, url, payload)
 
         if status == 429:
             raise RetryableForwardingError(
@@ -1805,6 +1808,7 @@ class ForwardingManager:
             )
         except Exception:
             self.log.debug("[⏩] failed to record discord webhook event", exc_info=True)
+
 
 
 async def _post_with_discord_429_retry(
