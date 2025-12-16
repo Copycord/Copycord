@@ -4036,6 +4036,179 @@ def _normalize_forwarding_rule_filters(raw: dict | str | None) -> dict:
     }
 
 
+async def _validate_forwarding_provider_config(
+    provider: str, config: Any
+) -> tuple[bool, list[str], dict]:
+    """Validate provider credentials/config by calling the provider API.
+
+    Returns: (ok, errors, details)
+    - ok: True if valid
+    - errors: list[str] user-friendly error messages
+    - details: optional metadata to help the UI (never includes secrets)
+    """
+
+    provider = (provider or "").strip().lower()
+
+    if config is None:
+        config = {}
+    if isinstance(config, str):
+        try:
+            config = json.loads(config) or {}
+        except Exception:
+            config = {}
+    if not isinstance(config, dict):
+        config = {}
+
+    errors: list[str] = []
+    details: dict = {"provider": provider}
+
+    if provider == "telegram":
+        token = str(config.get("bot_token") or "").strip()
+        chat_id = str(config.get("chat_id") or "").strip()
+
+        if not token:
+            errors.append("Telegram: bot token is required.")
+        if not chat_id:
+            errors.append("Telegram: chat/channel id is required.")
+        if errors:
+            return False, errors, details
+
+        base = f"https://api.telegram.org/bot{token}"
+
+        try:
+            async with aiohttp.ClientSession() as sess:
+
+                async with sess.get(f"{base}/getMe", timeout=10) as resp:
+                    try:
+                        j = await resp.json()
+                    except Exception:
+                        j = None
+
+                    ok = (
+                        resp.status == 200 and isinstance(j, dict) and bool(j.get("ok"))
+                    )
+                    if not ok:
+                        desc = (
+                            (j or {}).get("description")
+                            if isinstance(j, dict)
+                            else None
+                        )
+                        errors.append(
+                            "Telegram: invalid bot token."
+                            + (f" ({desc})" if desc else "")
+                        )
+                        return False, errors, details
+
+                    me = (j or {}).get("result") or {}
+                    details["telegram_bot_username"] = me.get("username")
+                    details["telegram_bot_id"] = me.get("id")
+
+                async with sess.get(
+                    f"{base}/getChat", params={"chat_id": chat_id}, timeout=10
+                ) as resp:
+                    try:
+                        j = await resp.json()
+                    except Exception:
+                        j = None
+
+                    ok = (
+                        resp.status == 200 and isinstance(j, dict) and bool(j.get("ok"))
+                    )
+                    if not ok:
+                        desc = (
+                            (j or {}).get("description")
+                            if isinstance(j, dict)
+                            else None
+                        )
+                        errors.append(
+                            "Telegram: invalid chat/channel id, or the bot cannot access it."
+                            + (f" ({desc})" if desc else "")
+                        )
+                        return False, errors, details
+
+                    chat = (j or {}).get("result") or {}
+                    details["telegram_chat_title"] = chat.get("title")
+                    details["telegram_chat_type"] = chat.get("type")
+
+        except asyncio.TimeoutError:
+            errors.append("Telegram: validation timed out (check network/DNS).")
+            return False, errors, details
+        except Exception as e:
+            errors.append(f"Telegram: validation failed ({_safe(repr(e))}).")
+            return False, errors, details
+
+        return True, [], details
+
+    if provider == "pushover":
+        app_token = str(config.get("app_token") or "").strip()
+        user_key = str(config.get("user_key") or "").strip()
+
+        if not app_token:
+            errors.append("Pushover: application token is required.")
+        if not user_key:
+            errors.append("Pushover: user/group key is required.")
+        if errors:
+            return False, errors, details
+
+        url = "https://api.pushover.net/1/users/validate.json"
+        try:
+            async with aiohttp.ClientSession() as sess:
+                async with sess.post(
+                    url,
+                    data={"token": app_token, "user": user_key},
+                    timeout=10,
+                ) as resp:
+                    try:
+                        j = await resp.json()
+                    except Exception:
+                        j = None
+
+                    ok = (
+                        resp.status == 200
+                        and isinstance(j, dict)
+                        and int(j.get("status") or 0) == 1
+                    )
+                    if not ok:
+                        errs = []
+                        if isinstance(j, dict):
+                            raw_errs = j.get("errors")
+                            if isinstance(raw_errs, list):
+                                errs = [str(x) for x in raw_errs if str(x).strip()]
+                        msg = "Pushover: invalid token and/or user/group key."
+                        if errs:
+                            msg += " (" + "; ".join(errs[:5]) + ")"
+                        errors.append(msg)
+                        return False, errors, details
+
+        except asyncio.TimeoutError:
+            errors.append("Pushover: validation timed out (check network/DNS).")
+            return False, errors, details
+        except Exception as e:
+            errors.append(f"Pushover: validation failed ({_safe(repr(e))}).")
+            return False, errors, details
+
+        return True, [], details
+
+    return True, [], details
+
+
+@app.post("/api/forwarding/validate", response_class=JSONResponse)
+async def api_validate_forwarding(payload: dict = Body(...)):
+    """Validate provider credentials/config without saving a rule."""
+    provider = str(payload.get("provider") or "").strip().lower()
+    config = payload.get("config")
+
+    if provider not in ("pushover", "telegram", "discord"):
+        raise HTTPException(status_code=400, detail="invalid-provider")
+
+    ok, errors, details = await _validate_forwarding_provider_config(provider, config)
+    if not ok:
+        return JSONResponse(
+            {"ok": False, "errors": errors, "details": details}, status_code=400
+        )
+    return JSONResponse({"ok": True, "details": details})
+
+
 @app.get("/api/forwarding", response_class=JSONResponse)
 async def api_list_forwarding(guild_id: str | None = Query(default=None)):
     """
@@ -4070,6 +4243,14 @@ async def api_save_forwarding(payload: dict = Body(...)):
         raise HTTPException(status_code=400, detail="missing-guild-id")
     if provider not in ("pushover", "telegram", "discord"):
         raise HTTPException(status_code=400, detail="invalid-provider")
+
+    if provider in ("telegram", "pushover"):
+        ok, errors, _details = await _validate_forwarding_provider_config(
+            provider, config
+        )
+        if not ok:
+
+            return PlainTextResponse("\n".join(errors), status_code=400)
 
     try:
         db.upsert_message_forwarding_rule(
