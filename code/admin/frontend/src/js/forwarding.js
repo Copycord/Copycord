@@ -1291,6 +1291,74 @@ export class ForwardingSystem {
     this.splitCsv(value).forEach((v) => this.addChip(wrap, v));
   }
 
+  async validateProviderConfig(payload) {
+    const provider = (payload?.provider || "").toLowerCase().trim();
+    const cfg = payload?.config || {};
+
+    if (provider === "telegram") {
+      if (
+        !String(cfg.bot_token || "").trim() ||
+        !String(cfg.chat_id || "").trim()
+      ) {
+        this.showToast(
+          "Telegram requires both a Bot Token and a Chat/Channel ID.",
+          {
+            type: "warning",
+          }
+        );
+        return false;
+      }
+    }
+    if (provider === "pushover") {
+      if (
+        !String(cfg.app_token || "").trim() ||
+        !String(cfg.user_key || "").trim()
+      ) {
+        this.showToast(
+          "Pushover requires both an Application Token and a User/Group Key.",
+          { type: "warning" }
+        );
+        return false;
+      }
+    }
+
+    if (provider !== "telegram" && provider !== "pushover") return true;
+
+    try {
+      const res = await fetch("/api/forwarding/validate", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider, config: cfg }),
+      });
+
+      if (res.ok) return true;
+
+      let txt = "";
+      try {
+        txt = await res.text();
+      } catch {}
+
+      let msg = txt;
+      try {
+        const j = JSON.parse(txt);
+        if (j && Array.isArray(j.errors) && j.errors.length) {
+          msg = j.errors.join("\n");
+        } else if (j && typeof j.detail === "string") {
+          msg = j.detail;
+        }
+      } catch {}
+
+      this.showToast(msg || "Provider details are invalid.", { type: "error" });
+      return false;
+    } catch (e) {
+      this.showToast(`Validation failed: ${e?.message || "network error"}`, {
+        type: "error",
+      });
+      return false;
+    }
+  }
+
   async handleSubmit() {
     if (this.isSaving) return;
     this.isSaving = true;
@@ -1305,8 +1373,12 @@ export class ForwardingSystem {
       }
 
       const payload = this.buildPayloadFromForm();
-      await this.saveForwardingRule(payload, { silent: false });
-      this.closeModal();
+
+      const valid = await this.validateProviderConfig(payload);
+      if (!valid) return;
+
+      const saved = await this.saveForwardingRule(payload, { silent: false });
+      if (saved) this.closeModal();
     } finally {
       this.isSaving = false;
     }
@@ -1411,7 +1483,7 @@ export class ForwardingSystem {
           { type: "error" }
         );
       }
-      return;
+      return false;
     }
 
     const data = await res.json();
@@ -1428,6 +1500,7 @@ export class ForwardingSystem {
     }
 
     if (!silent) this.showToast("Forwarding rule saved.", { type: "success" });
+    return true;
   }
 
   async deleteForwardingRule(id) {

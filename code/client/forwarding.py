@@ -1316,10 +1316,8 @@ class ForwardingManager:
             if status != 200:
 
                 self.log.warning(
-                    "[⏩] Pushover forward failed | status=%s part=%s/%s body=%s",
+                    "[⏩] Pushover forward failed | status=%s body=%s",
                     status,
-                    idx,
-                    total,
                     (body_txt or "")[:300],
                 )
                 return
@@ -1486,10 +1484,8 @@ class ForwardingManager:
             # handle Telegram's ok=false even when status is 200
             if status != 200 or (isinstance(data, dict) and data.get("ok") is False):
                 self.log.warning(
-                    "[⏩] %s failed | part=%s/%s status=%s body=%s",
+                    "[⏩] %s failed | status=%s body=%s",
                     log_prefix,
-                    part_idx,
-                    part_total,
                     status,
                     (body_txt or "")[:300],
                 )

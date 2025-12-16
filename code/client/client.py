@@ -1029,6 +1029,10 @@ class ClientListener:
         """
         Handles incoming Discord messages and processes them for forwarding.
         """
+        asyncio.create_task(self.forwarding.handle_new_message(
+            discord_message=message
+        ))
+        
         g = getattr(message, "guild", None)
         if not g or not self._is_mapped_origin(g.id):
             return
@@ -1228,9 +1232,6 @@ class ClientListener:
             message.author.name,
         )
         
-        asyncio.create_task(self.forwarding.handle_new_message(
-            discord_message=src_msg
-        ))
 
 
     def _is_meaningful_edit(
