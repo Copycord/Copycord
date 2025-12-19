@@ -2466,6 +2466,38 @@ class ClientListener:
         with contextlib.suppress(Exception):
             await self.bot.close()
         logger.info("Client shutdown complete.")
+        
+    def _try_backup_token(self, loop: asyncio.AbstractEventLoop) -> bool:
+        """
+        Attempt to find and use any backup token stored in the database.
+        """
+        try:
+            for row in self.db.get_backup_tokens():
+                token = (row.get("token_value") or "").strip()
+                if not token:
+                    continue
+
+                try:
+                    logger.info("[🔁] Trying backup token %s", row["token_id"])
+                    loop.run_until_complete(self.bot.start(token))
+                    self.db.mark_backup_token_used(row["token_id"])
+                    logger.info("[✅] Backup token succeeded: %s", row["token_id"])
+                    return True
+
+                except LoginFailure:
+                    logger.warning("[⚠️] Backup token invalid: %s", row["token_id"])
+                    continue
+
+                except Exception:
+                    logger.exception("[⛔] Unexpected error while using backup token %s", row["token_id"])
+                    continue
+
+            return False
+
+        except Exception:
+            logger.exception("[backup] failed to switch to a backup token")
+            return False
+
 
     def _run_client_gracefully(self, loop: asyncio.AbstractEventLoop) -> None:
         """
@@ -2484,11 +2516,10 @@ class ClientListener:
             loop.run_until_complete(self.bot.start(token))
 
         except LoginFailure as e:
-            logger.error(
-                "[⛔] Discord login failed (LoginFailure): %s. "
-                "Check CLIENT_TOKEN in your config.",
-                e,
-            )
+            logger.error("[⛔] Discord login failed (LoginFailure): %s", e)
+            backup = self._try_backup_token(loop)
+            if not backup:
+                logger.error("[⛔] No valid backup token available.")
 
         except ConnectionClosed as e:
             code = getattr(e, "code", None)
@@ -2497,12 +2528,18 @@ class ClientListener:
                 logger.error(
                     "[⛔] Discord gateway closed the connection with 4004 "
                     "(Authentication failed). Your CLIENT_TOKEN is invalid or "
-                    "no longer usable. Please update it in the config."
+                    "no longer usable. Attempting backup tokens..."
                 )
+                backup = self._try_backup_token(loop)
+                if not backup:
+                    logger.error("[⛔] No valid backup token available after disconnection.")
             else:
-                logger.exception(
-                    "[⛔] Discord gateway connection closed (code=%s)", code
-                )
+                logger.exception("[⛔] Discord gateway connection closed (code=%s)", code)
+                backup = self._try_backup_token(loop)
+                if backup:
+                    logger.info("[✅] Backup token restored client after unexpected close.")
+                else:
+                    logger.error("[⛔] No valid backup token available after connection close.")
 
         except Exception:
             logger.exception("[⛔] Unexpected error while running client")

@@ -72,7 +72,8 @@
             <span class="mi" aria-hidden="true">
               <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"
                 stroke-width="1.5" aria-hidden="true" focusable="false">
-                <path stroke-linecap="round" stroke-linejoin="round" d="m3.75 13.5 10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75Z" />
+                <path stroke-linecap="round" stroke-linejoin="round"
+                  d="m3.75 13.5 10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75Z" />
               </svg>
             </span>
             <span class="mi-label">Forwarding</span>
@@ -265,7 +266,29 @@
           {% for k in text_keys if k != 'COMMAND_USERS' %}
           {% set is_token = 'TOKEN' in k %}
           <div class="field field-token">
-            <label for="{{ k }}" class="has-tip">
+            <label for="{{ k }}" class="has-tip{% if k == 'CLIENT_TOKEN' %} token-label{% endif %}">
+              {% if k == 'CLIENT_TOKEN' %}
+              <span class="label-left">
+                <span class="label-text">{{ k }}</span>
+                {% if FIELD_TIPS.get(k) %}
+                <button type="button" class="info-dot" aria-label="What is {{ k }}?"
+                  aria-describedby="tip-{{ k }}"></button>
+                <span id="tip-{{ k }}" role="tooltip" class="tip-bubble">
+                  {{ FIELD_TIPS[k] }}
+                </span>
+                {% endif %}
+              </span>
+
+              <button type="button" class="token-label-btn" id="backupTokensBtn"
+                aria-label="Manage backup CLIENT_TOKENs" title="Manage backup CLIENT_TOKENs">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor"
+                  stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"
+                  aria-hidden="true">
+                  <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                  <circle cx="12" cy="7" r="4" />
+                </svg>
+              </button>
+              {% else %}
               <span class="label-text">{{ k }}</span>
               {% if FIELD_TIPS.get(k) %}
               <button type="button" class="info-dot" aria-label="What is {{ k }}?"
@@ -273,6 +296,7 @@
               <span id="tip-{{ k }}" role="tooltip" class="tip-bubble">
                 {{ FIELD_TIPS[k] }}
               </span>
+              {% endif %}
               {% endif %}
             </label>
 
@@ -302,7 +326,6 @@
             {% endif %}
           </div>
           {% endfor %}
-
 
           <div class="field field-chips">
             <label for="cmd_users_input" class="has-tip">
@@ -393,6 +416,66 @@
         </div>
       </div>
     </div>
+
+    <div id="backup-token-modal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+
+      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="backup-token-title">
+        <div class="modal-header">
+          <div class="modal-title-wrap">
+            <div class="modal-title-main" id="backup-token-title">Backup Tokens</div>
+            <div class="modal-title-subtle">Used as fallbacks if the primary token fails.</div>
+          </div>
+          <button type="button" id="backup-token-close" class="icon-btn verify-close" aria-label="Close">✕</button>
+        </div>
+
+        <div class="padded backup-token-body" style="padding-top: 14px;">
+          <div class="backup-token-gutter">
+
+            <div class="field field-token" style="margin-bottom: 14px;">
+              <label for="backup_token_value" class="has-tip">
+                <span class="label-text">Add backup token</span>
+              </label>
+
+              <div class="token-wrap">
+                <input type="password" id="backup_token_value" name="backup_token_value" autocomplete="off"
+                  spellcheck="false" class="token-input" placeholder="Paste a CLIENT_TOKEN" />
+
+                <button type="button" class="reveal-btn" data-target="backup_token_value" aria-pressed="false"
+                  title="Show">
+                  <svg class="icon-eye" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                    viewBox="0 0 24 24">
+                    <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+
+                  <svg class="icon-eye-off" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none"
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                    viewBox="0 0 24 24" style="display:none">
+                    <path
+                      d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.4 18.4 0 0 1 5.06-5.94M9.9 9.9A3 3 0 0 0 9 12a3 3 0 0 0 3 3 3 3 0 0 0 2.1-.9M1 1l22 22" />
+                  </svg>
+                </button>
+              </div>
+
+              <div class="field" style="margin: 10px 0 0 0;">
+                <input type="text" id="backup_token_note" name="backup_token_note" maxlength="120"
+                  placeholder="Optional note (e.g. alt account, backup account)" />
+              </div>
+
+              <div class="btns" style="display:flex; justify-content:flex-start; margin-top:10px;">
+                <button type="button" id="backup-token-add" class="btn btn-ghost" style="margin-left: 6px;">Add</button>
+              </div>
+            </div>
+
+            <div id="backupTokensList" class="backup-tokens-scroll" style="margin-top: 10px;"></div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+
 
     <div id="mapping-modal" class="modal" aria-hidden="true">
       <div class="modal-backdrop"></div>
@@ -489,7 +572,6 @@
       </div>
     </div>
 
-
     <div id="filters-modal" class="modal" aria-hidden="true">
       <div class="modal-backdrop"></div>
 
@@ -501,372 +583,10 @@
 
         <form id="form-filters" class="padded" method="post" action="" autocomplete="off">
           <input type="hidden" id="filters_mapping_id" name="mapping_id" value="">
-
-          <div class="filters-grid">
-            <fieldset class="filters-col">
-              <legend>Whitelist (Allow-list)</legend>
-
-              <div class="field">
-                <div class="filters-roles-label-row">
-                  <label for="wl_categories_input" class="has-tip">
-                    <span class="label-text">Allowed Category IDs</span>
-                    <button type="button" class="info-dot" aria-label="Only sync channels inside these category IDs."
-                      aria-describedby="tip-wl_categories"></button>
-                    <span id="tip-wl_categories" role="tooltip" class="tip-bubble">
-                      Only these categories (and their channels) will sync.
-                      Leave empty to allow all categories.
-                    </span>
-                  </label>
-
-                  <button type="button" class="role-fetch-btn filter-fetch-btn" data-filter-target="wl_categories"
-                    data-filter-kind="category" aria-label="Browse categories for this host"
-                    title="Browse categories for this host">
-                    <span class="role-fetch-circle">
-                      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                        <path
-                          d="M7 2a5 5 0 1 1-3.536 8.536l-1.95 1.95a.75.75 0 1 0 1.06 1.06l1.95-1.95A5 5 0 0 1 7 2zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
-                      </svg>
-                    </span>
-                  </button>
-                </div>
-
-                <div class="chips" data-chips="wl_categories">
-                  <span class="chip-input-wrap">
-                    <input class="chip-input" id="wl_categories_input" type="text" inputmode="numeric"
-                      placeholder="Add category ID(s)…" />
-                  </span>
-                </div>
-
-                <input type="hidden" id="wl_categories" name="wl_categories" value="">
-              </div>
-
-              <div class="field">
-                <div class="filters-roles-label-row">
-                  <label for="wl_channels_input" class="has-tip">
-                    <span class="label-text">Allowed Channel IDs</span>
-                    <button type="button" class="info-dot" aria-label="Only sync these specific text channels."
-                      aria-describedby="tip-wl_channels"></button>
-                    <span id="tip-wl_channels" role="tooltip" class="tip-bubble">
-                      Only these channels will be cloned.
-                    </span>
-                  </label>
-
-                  <button type="button" class="role-fetch-btn filter-fetch-btn" data-filter-target="wl_channels"
-                    data-filter-kind="channel" aria-label="Browse channels for this host"
-                    title="Browse channels for this host">
-                    <span class="role-fetch-circle">
-                      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                        <path
-                          d="M7 2a5 5 0 1 1-3.536 8.536l-1.95 1.95a.75.75 0 1 0 1.06 1.06l1.95-1.95A5 5 0 0 1 7 2zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
-                      </svg>
-                    </span>
-                  </button>
-                </div>
-
-                <div class="chips" data-chips="wl_channels">
-                  <span class="chip-input-wrap">
-                    <input class="chip-input" id="wl_channels_input" type="text" inputmode="numeric"
-                      placeholder="Add channel ID(s)…" />
-                  </span>
-                </div>
-
-                <input type="hidden" id="wl_channels" name="wl_channels" value="">
-              </div>
-            </fieldset>
-
-            <fieldset class="filters-col">
-              <legend>Exclude (Deny-list)</legend>
-
-              <div class="field">
-                <div class="filters-roles-label-row">
-                  <label for="ex_categories_input" class="has-tip">
-                    <span class="label-text">Blocked Category IDs</span>
-                    <button type="button" class="info-dot" aria-label="Skip any channels in these categories."
-                      aria-describedby="tip-ex_categories"></button>
-                    <span id="tip-ex_categories" role="tooltip" class="tip-bubble">
-                      Channels inside these categories will be blocked from being cloned.
-                    </span>
-                  </label>
-
-                  <button type="button" class="role-fetch-btn filter-fetch-btn" data-filter-target="ex_categories"
-                    data-filter-kind="category" aria-label="Browse categories to block for this host"
-                    title="Browse categories to block for this host">
-                    <span class="role-fetch-circle">
-                      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                        <path
-                          d="M7 2a5 5 0 1 1-3.536 8.536l-1.95 1.95a.75.75 0 1 0 1.06 1.06l1.95-1.95A5 5 0 0 1 7 2zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
-                      </svg>
-                    </span>
-                  </button>
-                </div>
-
-                <div class="chips" data-chips="ex_categories">
-                  <span class="chip-input-wrap">
-                    <input class="chip-input" id="ex_categories_input" type="text" inputmode="numeric"
-                      placeholder="Add category ID(s)…" />
-                  </span>
-                </div>
-
-                <input type="hidden" id="ex_categories" name="ex_categories" value="">
-              </div>
-
-              <div class="field">
-                <div class="filters-roles-label-row">
-                  <label for="ex_channels_input" class="has-tip">
-                    <span class="label-text">Blocked Channel IDs</span>
-                    <button type="button" class="info-dot" aria-label="Never sync these specific channels."
-                      aria-describedby="tip-ex_channels"></button>
-                    <span id="tip-ex_channels" role="tooltip" class="tip-bubble">
-                      These channels will never sync, even if their category is allowed.
-                    </span>
-                  </label>
-
-                  <button type="button" class="role-fetch-btn filter-fetch-btn" data-filter-target="ex_channels"
-                    data-filter-kind="channel" aria-label="Browse channels to block for this host"
-                    title="Browse channels to block for this host">
-                    <span class="role-fetch-circle">
-                      <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                        <path
-                          d="M7 2a5 5 0 1 1-3.536 8.536l-1.95 1.95a.75.75 0 1 0 1.06 1.06l1.95-1.95A5 5 0 0 1 7 2zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
-                      </svg>
-                    </span>
-                  </button>
-                </div>
-
-                <div class="chips" data-chips="ex_channels">
-                  <span class="chip-input-wrap">
-                    <input class="chip-input" id="ex_channels_input" type="text" inputmode="numeric"
-                      placeholder="Add channel ID(s)…" />
-                  </span>
-                </div>
-
-                <input type="hidden" id="ex_channels" name="ex_channels" value="">
-              </div>
-            </fieldset>
-          </div>
-
-          <fieldset class="filters-col filters-roles">
-            <legend>Role Blocks</legend>
-
-            <input type="hidden" id="blocked_role_ids" name="blocked_role_ids" value="">
-
-            <div class="field field-chips mt-2">
-
-              <div class="filters-roles-label-row">
-                <label class="has-tip">
-                  <span class="label-text">Blocked roles</span>
-                  <button type="button" class="info-dot" aria-label="Which roles does this affect?"
-                    aria-describedby="tip-blocked_roles"></button>
-                  <span id="tip-blocked_roles" role="tooltip" class="tip-bubble">
-                    List of role IDs to block from being cloned.
-                  </span>
-                </label>
-
-                <button type="button" class="role-fetch-btn" id="filters-role-refresh"
-                  aria-label="Fetch roles from Discord" title="Fetch Discord roles">
-                  <span class="role-fetch-circle">
-                    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
-                      <path
-                        d="M7 2a5 5 0 1 1-3.536 8.536l-1.95 1.95a.75.75 0 0 1-1.06-1.06l1.95-1.95A5 5 0 0 1 7 2zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6z" />
-                    </svg>
-                  </span>
-                </button>
-
-                <span class="filters-roles-status" id="filters-role-status" aria-live="polite"></span>
-              </div>
-
-              <div class="chips chips-compact" data-chips="blocked_roles">
-                <div class="chip-input-wrap">
-                  <input id="blocked_role_ids_input" class="chip-input" type="text" inputmode="numeric"
-                    autocomplete="off" placeholder="Add role ID(s)…" />
-                </div>
-              </div>
-            </div>
-          </fieldset>
-
-
-          <fieldset class="filters-col filters-words">
-            <legend>Word Filters</legend>
-
-            <div class="field">
-              <label for="blocked_words_input" class="has-tip">
-                <span class="label-text">Blocked Words / Phrases</span>
-                <button type="button" class="info-dot"
-                  aria-label="Messages containing these words will NOT sync for this mapping."
-                  aria-describedby="tip-blocked_words"></button>
-                <span id="tip-blocked_words" role="tooltip" class="tip-bubble">
-                  Any message that contains one of these words will NOT
-                  be forwarded for this guild mapping.
-                </span>
-              </label>
-
-              <div class="chips" data-chips="blocked_words">
-                <span class="chip-input-wrap">
-                  <input class="chip-input" id="blocked_words_input" type="text" inputmode="text"
-                    placeholder="Add word or phrase…" />
-                </span>
-              </div>
-
-              <input type="hidden" id="blocked_words" name="blocked_words" value="">
-            </div>
-          </fieldset>
-
-          <fieldset class="filters-col filters-users">
-            <legend>User Filters</legend>
-
-            <div class="field">
-              <label for="wl_users_input" class="has-tip">
-                <span class="label-text">Whitelisted User IDs</span>
-                <button type="button" class="info-dot" aria-label="Only messages from these users will be cloned"
-                  aria-describedby="tip-wl_users"></button>
-                <span id="tip-wl_users" role="tooltip" class="tip-bubble">
-                  When set, ONLY messages from these user IDs will be cloned.
-                  Leave empty to clone all users (unless blacklisted).
-                </span>
-              </label>
-
-              <div class="chips" data-chips="wl_users">
-                <span class="chip-input-wrap">
-                  <input class="chip-input" id="wl_users_input" type="text" inputmode="numeric"
-                    placeholder="Add user ID(s)…" />
-                </span>
-              </div>
-
-              <input type="hidden" id="wl_users" name="wl_users" value="">
-            </div>
-
-            <div class="field">
-              <label for="bl_users_input" class="has-tip">
-                <span class="label-text">Blacklisted User IDs</span>
-                <button type="button" class="info-dot" aria-label="Messages from these users will NOT be cloned"
-                  aria-describedby="tip-bl_users"></button>
-                <span id="tip-bl_users" role="tooltip" class="tip-bubble">
-                  Messages from these user IDs will be blocked from cloning.
-                </span>
-              </label>
-
-              <div class="chips" data-chips="bl_users">
-                <span class="chip-input-wrap">
-                  <input class="chip-input" id="bl_users_input" type="text" inputmode="numeric"
-                    placeholder="Add user ID(s)…" />
-                </span>
-              </div>
-
-              <input type="hidden" id="bl_users" name="bl_users" value="">
-            </div>
-          </fieldset>
-
-          <div class="btns modal-footer-row">
-            <button id="filters-save-btn" type="submit" class="btn btn-ghost">
-              Save Filters
-            </button>
-
-            <button id="btn-cancel-filters" type="button" class="btn btn-ghost-red" hidden>
-              Cancel
-            </button>
-          </div>
         </form>
       </div>
     </div>
 
-    <div id="roleBlocksModal" class="modal" aria-hidden="true">
-      <div class="modal-backdrop"></div>
-
-      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="roleBlocksTitle">
-        <div class="modal-header">
-          <h3 class="modal-title" id="roleBlocksTitle">Role Blocks</h3>
-          <button class="icon-btn verify-close" id="roleBlocksCloseBtn" type="button" aria-label="Close">✕</button>
-        </div>
-
-        <div class="modal-body">
-          <p class="text-muted small">
-            Select which roles you want to block for this mapping.
-          </p>
-
-          <div class="mb-2 role-blocks-search">
-            <input type="text" id="roleBlocksSearch" class="log-search-input" placeholder="Search roles by name or ID…"
-              autocomplete="off" />
-          </div>
-
-          <div class="role-table-wrap">
-            <table class="role-table">
-              <thead>
-                <tr>
-                  <th class="role-table-select-col">
-                    <label class="checkbox-inline" title="Select / deselect all roles">
-                      <input type="checkbox" id="roleBlocksSelectAll" class="role-block-toggle role-block-select-all"
-                        aria-label="Select or deselect all roles" />
-                    </label>
-                  </th>
-                  <th>Role</th>
-                  <th>ID</th>
-                </tr>
-              </thead>
-              <tbody id="roleBlocksTableBody"></tbody>
-            </table>
-          </div>
-
-          <div class="modal-footer">
-            <button class="btn btn-ghost" id="roleBlocksCancel" type="button">
-              Cancel
-            </button>
-            <button class="btn btn-ghost" id="roleBlocksApply" type="button">
-              Apply
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div id="filterObjectsModal" class="modal" aria-hidden="true">
-      <div class="modal-backdrop"></div>
-
-      <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="filterObjectsTitle">
-        <div class="modal-header">
-          <h3 class="modal-title" id="filterObjectsTitle">Browse</h3>
-          <button class="icon-btn verify-close" id="filterObjectsCloseBtn" type="button" aria-label="Close">✕</button>
-        </div>
-
-        <div class="modal-body">
-          <p class="text-muted small" id="filterObjectsHelp">
-            Select items for this mapping.
-          </p>
-
-          <div class="mb-2 filter-objects-search">
-            <input type="text" id="filterObjectsSearch" class="log-search-input"
-              placeholder="Search by name, cat, or ID…" autocomplete="off" />
-          </div>
-
-          <div class="role-table-wrap">
-            <table id="filterObjectsTable" class="role-table">
-              <thead>
-                <tr>
-                  <th class="role-table-select-col">
-                    <label class="checkbox-inline" title="Select / deselect all items">
-                      <input type="checkbox" id="filterObjectsSelectAll" class="role-block-toggle role-block-select-all"
-                        aria-label="Select or deselect all items" />
-                    </label>
-                  </th>
-                  <th id="filterObjectsNameHeader">Name</th>
-                  <th id="filterObjectsCategoryHeader">Category</th>
-                  <th>ID</th>
-                </tr>
-              </thead>
-              <tbody id="filterObjectsTableBody"></tbody>
-            </table>
-          </div>
-
-          <div class="modal-footer">
-            <button class="btn btn-ghost" id="filterObjectsCancel" type="button">
-              Cancel
-            </button>
-            <button class="btn btn-ghost" id="filterObjectsApply" type="button">
-              Apply
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
 
     <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
 

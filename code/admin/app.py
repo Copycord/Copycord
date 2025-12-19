@@ -1802,6 +1802,89 @@ async def api_validate_tokens():
     )
 
 
+def _mask_token(val: str) -> str:
+    v = (val or "").strip()
+    if not v:
+        return ""
+    if len(v) <= 10:
+        return "•" * len(v)
+    return f"{v[:4]}…{v[-4:]}"
+
+
+@app.get("/api/backup-tokens", response_class=JSONResponse)
+async def api_backup_tokens():
+    """List backup CLIENT_TOKEN entries (masked) for the Admin UI."""
+    try:
+        rows = db.list_backup_tokens()
+        tokens = []
+        for r in rows:
+            tokens.append(
+                {
+                    "token_id": r.get("token_id"),
+                    "masked": _mask_token(r.get("token_value") or ""),
+                    "note": r.get("note") or "",
+                    "added_at": r.get("added_at") or None,
+                    "last_used": r.get("last_used") or None,
+                }
+            )
+        return JSONResponse({"ok": True, "tokens": tokens})
+    except Exception:
+        LOGGER.exception("backup tokens: list failed")
+        return JSONResponse({"ok": False, "tokens": []}, status_code=500)
+
+
+@app.post("/api/backup-tokens/add", response_class=JSONResponse)
+async def api_backup_tokens_add(
+    token_value: str = Form(...),
+    note: str = Form(""),
+):
+    token_value = (token_value or "").strip()
+    if not token_value:
+        raise HTTPException(status_code=400, detail="token_value is required")
+
+    if not await _check_client_token_valid(token_value):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid backup token. It must be a valid Discord user token.",
+        )
+
+    try:
+        for r in db.list_backup_tokens() or []:
+            if (r.get("token_value") or "").strip() == token_value:
+                raise HTTPException(
+                    status_code=400, detail="That backup token is already stored."
+                )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    try:
+        token_id = db.add_backup_token(token_value, (note or "").strip() or None)
+        return JSONResponse({"ok": True, "token_id": token_id})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        LOGGER.exception("backup tokens: add failed")
+        return JSONResponse({"ok": False}, status_code=500)
+
+
+@app.post("/api/backup-tokens/delete", response_class=JSONResponse)
+async def api_backup_tokens_delete(token_id: str = Form(...)):
+    token_id = (token_id or "").strip()
+    if not token_id:
+        raise HTTPException(status_code=400, detail="token_id is required")
+
+    try:
+        ok = db.delete_backup_token(token_id)
+        if not ok:
+            return JSONResponse({"ok": False, "not_found": True})
+        return JSONResponse({"ok": True})
+    except Exception:
+        LOGGER.exception("backup tokens: delete failed")
+        return JSONResponse({"ok": False}, status_code=500)
+
+
 @app.api_route("/admin/backup-now", methods=["GET", "POST"])
 async def backup_now():
     out_path = await backup_scheduler.run_now()
