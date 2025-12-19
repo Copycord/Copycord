@@ -669,7 +669,8 @@
         const id = el.id || "";
         const isSave = id === "cfg-save-btn";
         const isCancel = id === "cfg-cancel-btn";
-        const isReveal = el.classList.contains("reveal-btn");
+        const isTokenUser = el.classList.contains("token-user-btn");
+        const isReveal = el.classList.contains("reveal-btn") && !isTokenUser;
 
         if (isSave || isCancel) {
           el.disabled = running;
@@ -682,6 +683,13 @@
           el.disabled = running;
           el.classList.toggle("disabled-btn", running);
           el.title = running ? "Stop the bot to view token values" : "";
+          return;
+        }
+
+        if (isTokenUser) {
+          el.disabled = running;
+          el.classList.toggle("disabled-btn", running);
+          el.title = running ? "Stop the bot to manage backup tokens" : "";
           return;
         }
 
@@ -1920,39 +1928,360 @@
     };
   }
 
-  document.querySelectorAll(".reveal-btn").forEach((btn) => {
-    btn.removeAttribute("title");
+  document;
+  document
+    .querySelectorAll(".reveal-btn:not(.token-user-btn)")
+    .forEach((btn) => {
+      btn.removeAttribute("title");
 
-    btn.addEventListener("click", () => {
+      btn.addEventListener("click", () => {
+        const cfgForm = document.getElementById("cfg-form");
+        if (cfgForm && cfgForm.classList.contains("cfg-locked")) {
+          return;
+        }
+
+        const targetId = btn.getAttribute("data-target");
+        const input = document.getElementById(targetId);
+        if (!input) return;
+
+        const eyeOn = btn.querySelector(".icon-eye");
+        const eyeOff = btn.querySelector(".icon-eye-off");
+
+        if (input.type === "password") {
+          input.type = "text";
+          btn.setAttribute("aria-pressed", "true");
+          btn.setAttribute("aria-label", "Hide " + targetId);
+
+          if (eyeOn) eyeOn.style.display = "none";
+          if (eyeOff) eyeOff.style.display = "";
+        } else {
+          input.type = "password";
+          btn.setAttribute("aria-pressed", "false");
+          btn.setAttribute("aria-label", "Show " + targetId);
+
+          if (eyeOn) eyeOn.style.display = "";
+          if (eyeOff) eyeOff.style.display = "none";
+        }
+      });
+    });
+
+  function syncBodyScrollLock() {
+    const anyOpen = document.querySelector(".modal.show");
+    document.body.classList.toggle("body-lock-scroll", !!anyOpen);
+  }
+
+  let lastFocusBackupTokens = null;
+
+  function fmtUnix(ts) {
+    const n = Number(ts);
+    if (!n || n <= 0) return "";
+    try {
+      return new Date(n * 1000).toLocaleString();
+    } catch {
+      return String(n);
+    }
+  }
+
+  async function fetchBackupTokens() {
+    const res = await fetch("/api/backup-tokens", {
+      headers: { "X-Requested-With": "XMLHttpRequest" },
+    });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch backup tokens: ${res.status}`);
+    }
+    return await res.json();
+  }
+
+  function renderBackupTokensList(tokens) {
+    const list = document.getElementById("backupTokensList");
+    if (!list) return;
+
+    const rows = Array.isArray(tokens) ? tokens : [];
+    if (!rows.length) {
+      list.innerHTML =
+        '<div class="text-subtle" style="padding:10px 0;">No backup tokens saved yet.</div>';
+      return;
+    }
+
+    list.innerHTML = rows
+      .map((t) => {
+        const id = escapeHtml(String(t.token_id || ""));
+        const masked = escapeHtml(String(t.masked || ""));
+        const note = escapeHtml(String(t.note || ""));
+        const added = fmtUnix(t.added_at) || "";
+        const used = fmtUnix(t.last_used) || "Never";
+
+        return `
+        <div class="card" data-token-id="${id}" style="padding:10px 12px; margin-bottom:10px;">
+          <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px;">
+            <div style="min-width:0;">
+              <div style="font-weight:700; letter-spacing:.2px;">${
+                masked || "(hidden)"
+              }</div>
+              ${
+                note
+                  ? `<div class="text-subtle" style="margin-top:4px;">${note}</div>`
+                  : ""
+              }
+              <div class="text-subtle" style="margin-top:6px; font-size:.85rem;">
+                <span>Added: ${escapeHtml(added || "—")}</span>
+                <span style="margin:0 8px; opacity:.6;">•</span>
+                <span>Last used: ${escapeHtml(used || "Never")}</span>
+              </div>
+            </div>
+
+            <button type="button"
+              class="btn-icon delete-token-btn"
+              data-token-id="${id}"
+              aria-label="Remove backup token"
+              title="Remove">
+              ${ICONS.trash}
+            </button>
+          </div>
+        </div>
+      `;
+      })
+      .join("");
+  }
+
+  function _getBackupListAnchor(listEl) {
+    if (!listEl) return null;
+
+    const cards = listEl.querySelectorAll(".card[data-token-id]");
+    const y = listEl.scrollTop;
+
+    for (const c of cards) {
+      if (c.offsetTop + c.offsetHeight > y + 4) {
+        return c.getAttribute("data-token-id");
+      }
+    }
+    return null;
+  }
+
+  async function refreshBackupTokensList(opts = {}) {
+    const { keepScroll = true } = opts;
+
+    const list = document.getElementById("backupTokensList");
+    const prevScrollTop = list ? list.scrollTop : 0;
+    const anchorId = keepScroll ? _getBackupListAnchor(list) : null;
+
+    const payload = await fetchBackupTokens();
+    if (!payload || !payload.ok)
+      throw new Error("Backup tokens request failed");
+
+    renderBackupTokensList(payload.tokens || []);
+
+    if (!keepScroll || !list) return;
+
+    requestAnimationFrame(() => {
+      if (anchorId) {
+        const safe = window.CSS && CSS.escape ? CSS.escape(anchorId) : anchorId;
+        const anchorCard = list.querySelector(`.card[data-token-id="${safe}"]`);
+        if (anchorCard) {
+          list.scrollTop = Math.max(0, anchorCard.offsetTop - 6);
+          return;
+        }
+      }
+
+      const maxTop = Math.max(0, list.scrollHeight - list.clientHeight);
+      list.scrollTop = Math.min(prevScrollTop, maxTop);
+    });
+  }
+
+  function openBackupTokensModal() {
+    const modal = document.getElementById("backup-token-modal");
+    if (!modal) return;
+
+    lastFocusBackupTokens = document.activeElement;
+
+    setInert(modal, false);
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+    document.body.classList.add("body-lock-scroll");
+
+    refreshBackupTokensList().catch((e) => {
+      console.warn(e);
+      showToast("Failed to load backup tokens.", { type: "error" });
+    });
+
+    const tokenInput = document.getElementById("backup_token_value");
+    if (tokenInput && typeof tokenInput.focus === "function") {
+      setTimeout(() => {
+        try {
+          tokenInput.focus();
+        } catch {}
+      }, 0);
+    }
+  }
+
+  function closeBackupTokensModal() {
+    const modal = document.getElementById("backup-token-modal");
+    if (!modal) return;
+
+    const active = document.activeElement;
+    if (active && modal.contains(active)) {
+      try {
+        active.blur();
+      } catch {}
+    }
+
+    setInert(modal, true);
+    modal.classList.remove("show");
+    modal.setAttribute("aria-hidden", "true");
+
+    const anyOtherOpen = document.querySelector(
+      "#filters-modal.show, " +
+        "#mapping-modal.show, " +
+        "#log-modal.show, " +
+        "#backup-token-modal.show, " +
+        "#roleBlocksModal.show, " +
+        "#filterObjectsModal.show, " +
+        "#confirm-modal.show"
+    );
+    if (!anyOtherOpen) {
+      document.body.classList.remove("body-lock-scroll");
+    }
+
+    if (
+      lastFocusBackupTokens &&
+      typeof lastFocusBackupTokens.focus === "function"
+    ) {
+      try {
+        lastFocusBackupTokens.focus();
+      } catch {}
+    }
+    lastFocusBackupTokens = null;
+  }
+
+  const backupBtn = document.getElementById("backupTokensBtn");
+  if (backupBtn) {
+    backupBtn.addEventListener("click", (e) => {
+      e.preventDefault();
       const cfgForm = document.getElementById("cfg-form");
       if (cfgForm && cfgForm.classList.contains("cfg-locked")) {
         return;
       }
+      openBackupTokensModal();
+    });
+  }
 
-      const targetId = btn.getAttribute("data-target");
-      const input = document.getElementById(targetId);
-      if (!input) return;
+  const backupClose = document.getElementById("backup-token-close");
+  if (backupClose)
+    backupClose.addEventListener("click", closeBackupTokensModal);
 
-      const eyeOn = btn.querySelector(".icon-eye");
-      const eyeOff = btn.querySelector(".icon-eye-off");
+  const backupAdd = document.getElementById("backup-token-add");
+  if (backupAdd) {
+    backupAdd.addEventListener("click", async () => {
+      const tokenEl = document.getElementById("backup_token_value");
+      const noteEl = document.getElementById("backup_token_note");
 
-      if (input.type === "password") {
-        input.type = "text";
-        btn.setAttribute("aria-pressed", "true");
-        btn.setAttribute("aria-label", "Hide " + targetId);
+      const tokenValue = (tokenEl?.value || "").trim();
+      const noteValue = (noteEl?.value || "").trim();
 
-        if (eyeOn) eyeOn.style.display = "none";
-        if (eyeOff) eyeOff.style.display = "";
-      } else {
-        input.type = "password";
-        btn.setAttribute("aria-pressed", "false");
-        btn.setAttribute("aria-label", "Show " + targetId);
+      if (!tokenValue) {
+        showToast("Paste a token first.", { type: "error" });
+        return;
+      }
 
-        if (eyeOn) eyeOn.style.display = "";
-        if (eyeOff) eyeOff.style.display = "none";
+      backupAdd.disabled = true;
+      backupAdd.classList.add("disabled-btn");
+
+      try {
+        const fd = new FormData();
+        fd.append("token_value", tokenValue);
+        fd.append("note", noteValue);
+
+        const res = await fetch("/api/backup-tokens/add", {
+          method: "POST",
+          body: fd,
+          headers: { "X-Requested-With": "XMLHttpRequest" },
+        });
+
+        const payload = await res.json().catch(() => ({}));
+
+        if (!res.ok || !payload.ok) {
+          const msg = payload?.detail || "Failed to add backup token.";
+          throw new Error(msg);
+        }
+
+        if (tokenEl) tokenEl.value = "";
+        if (noteEl) noteEl.value = "";
+
+        showToast("Backup token added.", { type: "success" });
+        await refreshBackupTokensList();
+      } catch (e) {
+        console.warn(e);
+
+        const msg =
+          e &&
+          typeof e === "object" &&
+          "message" in e &&
+          String(e.message).trim()
+            ? String(e.message).trim()
+            : "Failed to add backup token.";
+
+        showToast(msg, { type: "error" });
+      } finally {
+        backupAdd.disabled = false;
+        backupAdd.classList.remove("disabled-btn");
       }
     });
+  }
+
+  document.addEventListener("click", async (e) => {
+    const btn = e.target && e.target.closest(".delete-token-btn");
+    if (!btn) return;
+
+    const tokenId = (btn.getAttribute("data-token-id") || "").trim();
+    if (!tokenId) return;
+
+    if (typeof openConfirm === "function") {
+      openConfirm({
+        title: "Remove backup token?",
+        body: "This will delete the backup token from the database.",
+        confirmText: "Remove",
+        confirmClass: "btn-ghost-red",
+        showCancel: true,
+        onConfirm: async () => {
+          try {
+            const fd = new FormData();
+            fd.append("token_id", tokenId);
+
+            const res = await fetch("/api/backup-tokens/delete", {
+              method: "POST",
+              body: fd,
+              headers: { "X-Requested-With": "XMLHttpRequest" },
+            });
+            const payload = await res.json().catch(() => ({}));
+            if (!res.ok || !payload.ok) {
+              throw new Error("delete failed");
+            }
+
+            showToast("Backup token removed.", { type: "success" });
+            await refreshBackupTokensList({ keepScroll: true });
+          } catch (err) {
+            console.warn(err);
+            showToast("Failed to remove backup token.", { type: "error" });
+          }
+        },
+      });
+    }
   });
+
+  const backupModal = document.getElementById("backup-token-modal");
+  if (backupModal) {
+    const backdrop = backupModal.querySelector(".modal-backdrop");
+    if (backdrop) {
+      backdrop.addEventListener("click", closeBackupTokensModal);
+    }
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      if (!backupModal.classList.contains("show")) return;
+      if (cModal && cModal.classList.contains("show")) return;
+      closeBackupTokensModal();
+    });
+  }
 
   function closeMappingModal() {
     const modal = document.getElementById("mapping-modal");
@@ -1973,6 +2302,8 @@
     setInert(modal, true);
     modal.classList.remove("show");
     modal.setAttribute("aria-hidden", "true");
+
+    syncBodyScrollLock();
 
     document.body.classList.remove("body-lock-scroll");
 
@@ -2022,19 +2353,14 @@
       el.classList.remove("is-invalid", "flash");
     });
 
-    // 🔧 New: support modes: "edit" | "clone" | "create"
     const mode = opts.mode || (mapping ? "edit" : "create");
     const isEdit = mode === "edit";
     const cloneFrom = mode === "clone" && mapping ? mapping : null;
 
-    // ID field: only filled in edit mode
     if (idInput) {
       idInput.value = isEdit && mapping?.mapping_id ? mapping.mapping_id : "";
     }
 
-    // Name + guild ids:
-    // - edit: use mapping values
-    // - clone/create: blank, user fills them in
     if (nameInput) {
       nameInput.value =
         isEdit && mapping?.mapping_name ? mapping.mapping_name : "";
@@ -2049,13 +2375,11 @@
     }
 
     if (!isEdit) {
-      // For clone + create, we want these empty
       if (nameInput) nameInput.value = "";
       if (hostInput) hostInput.value = "";
       if (cloneInput) cloneInput.value = "";
     }
 
-    // Subtle mapping ID display only on edit
     if (subtleEl) {
       if (isEdit && mapping?.mapping_id) {
         subtleEl.hidden = false;
@@ -2066,9 +2390,6 @@
       }
     }
 
-    // Host / clone read-only:
-    // - edit: locked
-    // - clone/create: editable
     if (hostInput) {
       if (isEdit) {
         hostInput.readOnly = true;
@@ -2099,10 +2420,6 @@
       }
     }
 
-    // ⚙️ Settings:
-    // - edit: use mapping.settings
-    // - clone: use cloneFrom.settings
-    // - create: use DEFAULT_MAPPING_SETTINGS
     document
       .querySelectorAll("#mapping-form select[id^='map_']")
       .forEach((sel) => {
@@ -2110,7 +2427,6 @@
 
         let rawVal;
         if (cloneFrom && cloneFrom.settings && key in cloneFrom.settings) {
-          // Clone mode: copy from source mapping
           rawVal = cloneFrom.settings[key];
         } else if (isEdit && mapping?.settings && key in mapping.settings) {
           rawVal = mapping.settings[key];
@@ -2179,7 +2495,6 @@
       }
     }, 0);
 
-    // Close on outside click
     if (modal._outsideClickHandler) {
       modal.removeEventListener("mousedown", modal._outsideClickHandler);
     }
@@ -2319,17 +2634,7 @@
     cModal.classList.remove("show");
     cModal.setAttribute("aria-hidden", "true");
 
-    const anyOtherOpen = document.querySelector(
-      "#filters-modal.show, " +
-        "#mapping-modal.show, " +
-        "#log-modal.show, " +
-        "#roleBlocksModal.show, " +
-        "#filterObjectsModal.show, " +
-        "#confirm-modal.show"
-    );
-    if (!anyOtherOpen) {
-      document.body.classList.remove("body-lock-scroll");
-    }
+    syncBodyScrollLock();
 
     if (lastFocusConfirm && typeof lastFocusConfirm.blur === "function") {
       try {
@@ -2356,6 +2661,8 @@
     setInert(modal, true);
     modal.classList.remove("show");
     modal.setAttribute("aria-hidden", "true");
+
+    syncBodyScrollLock();
 
     document.body.classList.remove("body-lock-scroll");
 
@@ -2748,6 +3055,7 @@
       "#filters-modal.show, " +
         "#mapping-modal.show, " +
         "#log-modal.show, " +
+        "#backup-token-modal.show, " +
         "#roleBlocksModal.show, " +
         "#confirm-modal.show"
     );
@@ -3212,7 +3520,7 @@
     modal.setAttribute("aria-hidden", "true");
 
     const anyOtherOpen = document.querySelector(
-      "#filters-modal.show, #mapping-modal.show, #log-modal.show, #confirm-modal.show"
+      "#filters-modal.show, #mapping-modal.show, #log-modal.show, #backup-token-modal.show, #confirm-modal.show"
     );
     if (!anyOtherOpen) {
       document.body.classList.remove("body-lock-scroll");
@@ -3480,7 +3788,7 @@
         const mapId = ev.currentTarget.getAttribute("data-id");
         const mapping = findMappingById(mapId);
         if (!mapping) return;
-        // Open as a *new* mapping, but copy settings from this one
+
         openMappingModal(mapping, { mode: "clone" });
       });
     });

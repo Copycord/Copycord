@@ -9939,3 +9939,120 @@ body.page-forwarding .fwd-no-match-sub {
 #fixed-footer {
   margin-top: auto;
 }
+
+.field label.token-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.field label.token-label .label-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.token-label-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  cursor: pointer;
+  opacity: 0.9;
+}
+
+.token-label-btn:hover,
+.token-label-btn:focus-visible {
+  opacity: 1;
+  border-color: var(--accent);
+  outline: 0;
+}
+
+#backup-token-modal .backup-token-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#backup-token-modal .backup-tokens-scroll {
+  flex: 1;
+  overflow: auto;
+  min-height: 140px;
+  max-height: 100%;
+  padding: 10px;
+
+  border: none;
+  background: transparent;
+
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+
+#backup-token-modal .backup-tokens-scroll::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+#backup-token-modal .backup-tokens-scroll::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 12px;
+}
+
+#backup-token-modal .backup-tokens-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--primary), var(--primary-700));
+  border: 2px solid transparent;
+  border-radius: 12px;
+  background-clip: padding-box;
+}
+
+#backup-token-modal .backup-tokens-scroll::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--primary-600), var(--primary-700));
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+#backup-token-modal .btn-icon.delete-token-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+}
+
+#backup-token-modal .btn-icon.delete-token-btn:hover,
+#backup-token-modal .btn-icon.delete-token-btn:focus {
+  background: rgba(255, 76, 76, 0.1);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+#backup-token-modal .backup-token-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#backup-token-modal .backup-token-gutter {
+  flex: 1;
+  min-height: 0;
+  padding: 0 14px;
+  display: flex;
+  flex-direction: column;
+}
+
+#backup-token-modal .backup-tokens-scroll {
+  flex: 1;
+  min-height: 140px;
+  overflow: auto;
+}

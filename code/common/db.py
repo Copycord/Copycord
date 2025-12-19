@@ -1,3 +1,12 @@
+# =============================================================================
+#  Copycord
+#  Copyright (C) 2025 github.com/Copycord
+#
+#  This source code is released under the GNU Affero General Public License
+#  version 3.0. A copy of the license is available at:
+#  https://www.gnu.org/licenses/agpl-3.0.en.html
+# =============================================================================
+
 from datetime import datetime
 import json
 import sqlite3, threading
@@ -893,6 +902,35 @@ class DBManager:
                 "CREATE INDEX IF NOT EXISTS idx_forwarding_events_rule ON forwarding_events(rule_id);",
                 "CREATE INDEX IF NOT EXISTS idx_forwarding_events_guild ON forwarding_events(guild_id);",
                 "CREATE INDEX IF NOT EXISTS idx_forwarding_events_created ON forwarding_events(created_at);",
+            ],
+        )
+        self._ensure_table(
+            name="backup_tokens",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    token_id       TEXT PRIMARY KEY,
+                    token_value    TEXT NOT NULL,
+                    added_at       INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+                    last_used      INTEGER,
+                    note           TEXT
+                );
+            """,
+            required_columns={
+                "token_id",
+                "token_value",
+                "added_at",
+                "last_used",
+                "note",
+            },
+            copy_map={
+                "token_id": "token_id",
+                "token_value": "token_value",
+                "added_at": "added_at",
+                "last_used": "last_used",
+                "note": "note",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_backup_added ON backup_tokens(added_at);",
             ],
         )
 
@@ -4857,3 +4895,60 @@ class DBManager:
                 """
             ).fetchall()
             return {str(r["rule_id"]): int(r["cnt"]) for r in rows}
+
+    def get_backup_tokens(self) -> list[dict]:
+        cur = self.conn.execute(
+            "SELECT token_id, token_value FROM backup_tokens ORDER BY added_at DESC"
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+    def list_backup_tokens(self) -> list[dict]:
+        """
+        Return backup tokens for the Admin UI.
+
+        Note: Includes token_value so the API layer can mask it.
+        """
+        cur = self.conn.execute(
+            """
+            SELECT token_id, token_value, note, added_at, last_used
+            FROM backup_tokens
+            ORDER BY added_at DESC
+            """
+        )
+        return [dict(row) for row in cur.fetchall()]
+
+    def add_backup_token(self, token_value: str, note: Optional[str] = None) -> str:
+        """Insert a new backup token and return its token_id."""
+        token_value = (token_value or "").strip()
+        if not token_value:
+            raise ValueError("token_value is required")
+
+        token_id = uuid.uuid4().hex
+        note = (note or "").strip() or None
+
+        with self.lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO backup_tokens(token_id, token_value, note) VALUES (?,?,?)",
+                (token_id, token_value, note),
+            )
+        return token_id
+
+    def delete_backup_token(self, token_id: str) -> bool:
+        """Delete a backup token by id. Returns True if a row was removed."""
+        token_id = (token_id or "").strip()
+        if not token_id:
+            return False
+
+        with self.lock, self.conn:
+            cur = self.conn.execute(
+                "DELETE FROM backup_tokens WHERE token_id = ?",
+                (token_id,),
+            )
+            return bool(cur.rowcount and cur.rowcount > 0)
+
+    def mark_backup_token_used(self, token_id: str) -> None:
+        with self.lock, self.conn:
+            self.conn.execute(
+                "UPDATE backup_tokens SET last_used = CAST(strftime('%s','now') AS INTEGER) WHERE token_id = ?",
+                (token_id,),
+            )
