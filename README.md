@@ -202,6 +202,7 @@ This will pull the latest images and start the web ui: http://localhost:8080
    - This will download the latest Copycord build and set up everything in the same folder.
 5. To start Copycord, double-click **`Copycord.exe`** and select the run option.  
    - This will start Copycord and the web UI: <http://localhost:8080>
+   -  You can customize the Web UI settings and password in /code/.env
 6. When a new Copycord version is released, double-click **`Copycord.exe`** and select the update option.
 
 ---
