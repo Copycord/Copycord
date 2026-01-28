@@ -118,6 +118,97 @@ def _clip(s: str, limit: int) -> str:
     return s if len(s) <= limit else (s[: limit - 3] + "...")
 
 
+def _sanitize_discord_embed_for_webhook(e: dict) -> dict | None:
+    """
+    Keep only fields that Discord webhooks accept for outgoing embeds.
+    Drops keys that are commonly present in incoming embeds but not useful/accepted.
+    """
+    if not isinstance(e, dict):
+        return None
+
+    out: dict = {}
+
+    def _str(v: object) -> str | None:
+        if v is None:
+            return None
+        s = str(v).strip()
+        return s if s else None
+
+    for k in ("title", "description", "url", "timestamp"):
+        v = _str(e.get(k))
+        if v:
+            out[k] = v
+
+    c = e.get("color")
+    if isinstance(c, int):
+        out["color"] = c
+
+    footer = e.get("footer")
+    if isinstance(footer, dict):
+        ft = _str(footer.get("text"))
+        fi = _str(footer.get("icon_url"))
+        if ft or fi:
+            out["footer"] = {}
+            if ft:
+                out["footer"]["text"] = ft
+            if fi:
+                out["footer"]["icon_url"] = fi
+
+    author = e.get("author")
+    if isinstance(author, dict):
+        an = _str(author.get("name"))
+        au = _str(author.get("url"))
+        ai = _str(author.get("icon_url"))
+        if an or au or ai:
+            out["author"] = {}
+            if an:
+                out["author"]["name"] = an
+            if au:
+                out["author"]["url"] = au
+            if ai:
+                out["author"]["icon_url"] = ai
+
+    for k in ("image", "thumbnail"):
+        obj = e.get(k)
+        if isinstance(obj, dict):
+            u = _str(obj.get("url"))
+            if u:
+                out[k] = {"url": u}
+
+    fields_in = e.get("fields")
+    if isinstance(fields_in, list):
+        fields_out: list[dict] = []
+        for f in fields_in:
+            if not isinstance(f, dict):
+                continue
+            n = _str(f.get("name"))
+            v = _str(f.get("value"))
+            if not (n and v):
+                continue
+            fo = {"name": n, "value": v}
+            if isinstance(f.get("inline"), bool):
+                fo["inline"] = f["inline"]
+            fields_out.append(fo)
+        if fields_out:
+            out["fields"] = fields_out
+
+    return out or None
+
+
+def _extract_embed_image_urls(embeds: list[dict]) -> set[str]:
+    urls: set[str] = set()
+    for e in embeds or []:
+        if not isinstance(e, dict):
+            continue
+        for k in ("image", "thumbnail"):
+            obj = e.get(k)
+            if isinstance(obj, dict):
+                u = (obj.get("url") or "").strip()
+                if u:
+                    urls.add(u)
+    return urls
+
+
 @dataclass
 class ForwardingFilters:
     include_channels: list[int]
@@ -262,10 +353,28 @@ class ForwardingFilters:
         content = attrs.get("content") or ""
         if self.include_embeds:
             for e in attrs.get("embeds") or []:
-                if isinstance(e, dict):
-                    desc = e.get("description") or ""
-                    if desc:
-                        content += "\n" + desc
+                if not isinstance(e, dict):
+                    continue
+
+                title = (e.get("title") or "").strip()
+                desc = (e.get("description") or "").strip()
+
+                if title:
+                    content += "\n" + title
+                if desc:
+                    content += "\n" + desc
+
+                for f in e.get("fields") or []:
+                    if not isinstance(f, dict):
+                        continue
+                    n = (f.get("name") or "").strip()
+                    v = (f.get("value") or "").strip()
+                    if n and v:
+                        content += f"\n{n}: {v}"
+                    elif n:
+                        content += "\n" + n
+                    elif v:
+                        content += "\n" + v
 
         attachments = attrs.get("attachments") or []
         for att in attachments:
@@ -1549,7 +1658,6 @@ class ForwardingManager:
                     body=body_txt,
                 )
 
-            # handle Telegram's ok=false even when status is 200
             if status != 200 or (isinstance(data, dict) and data.get("ok") is False):
                 self.log.warning(
                     "[⏩] %s failed | status=%s body=%s",
@@ -1711,9 +1819,6 @@ class ForwardingManager:
 
         content = (attrs.get("content") or "").strip()
 
-        image_urls = self._extract_image_urls(attrs)
-        embeds = [{"image": {"url": u}} for u in image_urls[:10]]
-
         non_image_links: list[str] = []
         for a in attrs.get("attachments") or []:
             if not isinstance(a, dict):
@@ -1737,16 +1842,45 @@ class ForwardingManager:
 
         text = _clip("\n".join(lines).strip(), 2000)
 
+        raw_embeds = [e for e in (attrs.get("embeds") or []) if isinstance(e, dict)]
+        forwarded_embeds: list[dict] = []
+        for e in raw_embeds:
+            se = _sanitize_discord_embed_for_webhook(e)
+            if se:
+                forwarded_embeds.append(se)
+
+        forwarded_embeds = forwarded_embeds[:10]
+
+        existing_img_urls = _extract_embed_image_urls(forwarded_embeds)
+
+        att_image_urls: list[str] = []
+        for a in attrs.get("attachments") or []:
+            if not isinstance(a, dict):
+                continue
+            if not self._is_image_att(a):
+                continue
+            u = (a.get("url") or "").strip()
+            if u and u not in existing_img_urls:
+                att_image_urls.append(u)
+
+        remaining = max(0, 10 - len(forwarded_embeds))
+        if remaining > 0 and att_image_urls:
+            forwarded_embeds.extend(
+                {"image": {"url": u}} for u in att_image_urls[:remaining]
+            )
+
         payload = {
-            "embeds": embeds,
             "allowed_mentions": {"parse": []},
         }
 
         if text:
             payload["content"] = text
-        else:
-            if not embeds:
-                payload["content"] = "New message"
+
+        if forwarded_embeds:
+            payload["embeds"] = forwarded_embeds
+
+        if not payload.get("content") and not payload.get("embeds"):
+            payload["content"] = "New message"
 
         uname = (
             (rule.config.get("username") or "")
@@ -1771,7 +1905,9 @@ class ForwardingManager:
                     rule.rule_id,
                 )
 
-        status, body, retry_after = await _post_with_discord_429_retry(session, url, payload)
+        status, body, retry_after = await _post_with_discord_429_retry(
+            session, url, payload
+        )
 
         if status == 429:
             raise RetryableForwardingError(
@@ -1808,7 +1944,6 @@ class ForwardingManager:
             )
         except Exception:
             self.log.debug("[⏩] failed to record discord webhook event", exc_info=True)
-
 
 
 async def _post_with_discord_429_retry(
