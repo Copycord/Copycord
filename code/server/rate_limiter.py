@@ -96,6 +96,7 @@ class RateLimitManager:
             ActionType.STICKER_CREATE: (1, 60.0),
         }
         self._cfg = cfg
+        self._proxy_bypass: bool = False
 
         self._webhook_config = cfg[ActionType.WEBHOOK_MESSAGE]
         self._webhook_limiters: Dict[str, RateLimiter] = {}
@@ -133,12 +134,29 @@ class RateLimitManager:
             bucket[scope] = lim
         return lim
 
+    def set_proxy_bypass(self, on: bool) -> None:
+        """When *on*, ``acquire`` / ``acquire_for_guild`` become no-ops.
+
+        This is used during structure sync while proxies are active so that
+        requests are not throttled — each proxy uses a different IP, so the
+        per-IP rate limits imposed by Discord don't apply.
+        """
+        self._proxy_bypass = bool(on)
+
+    @property
+    def proxy_bypass(self) -> bool:
+        return self._proxy_bypass
+
     async def acquire(self, action: ActionType, key: str | None = None):
+        if self._proxy_bypass:
+            return
         lim = self._get(action, key)
         if lim:
             await lim.acquire()
 
     async def acquire_for_guild(self, action: ActionType, clone_guild_id: int):
+        if self._proxy_bypass:
+            return
         await self.acquire(action, key=str(int(clone_guild_id)))
 
     def penalize(self, action: ActionType, seconds: float, key: str | None = None):

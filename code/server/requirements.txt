@@ -1,6 +1,7 @@
 py-cord==2.6.1
 websockets==11.0.3
 aiohttp>=3.9,<4
+aiohttp-socks>=0.8,<1
 Pillow==11.3.0
 PyYAML==6.0.2
 tzdata==2025.2

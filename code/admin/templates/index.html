@@ -400,6 +400,41 @@
       <div id="guild-mapping-list" class="guild-mapping-list"></div>
     </div>
 
+    <!-- ─── Server Proxy Rotation ─── -->
+    <details class="card srv-proxy-card" id="srv-proxy-card">
+      <summary class="srv-proxy-summary">
+        <h3>Proxy Rotation</h3>
+        <span class="srv-proxy-status" id="srv-proxy-status"></span>
+        <span class="srv-proxy-count" id="srv-proxy-count"></span>
+      </summary>
+      <div class="srv-proxy-body">
+        <div class="srv-proxy-toggle-row">
+          <label class="srv-proxy-toggle-label" for="srv-proxy-toggle">
+            <input type="checkbox" id="srv-proxy-toggle" />
+            <span>Enable proxy rotation for structure sync</span>
+          </label>
+        </div>
+        <p class="srv-proxy-hint">
+          When enabled, every Discord API call during structure sync
+          (channel create, webhook create, guild edit, etc.) is routed through a
+          rotating proxy and rate limiting is bypassed — syncs complete much faster.<br>
+          Paste one proxy per line. Examples:
+          <code>host:port</code>, <code>host:port:user:pass</code>,
+          <code>user:pass@host:port</code>
+        </p>
+        <textarea class="input srv-proxy-textarea" id="srv-proxy-textarea"
+                  placeholder="82.27.104.216:25208:user:pass&#10;1.2.3.4:8080&#10;user:pass@5.6.7.8:3128"
+                  rows="5" spellcheck="false"></textarea>
+        <div class="srv-proxy-actions">
+          <button class="btn btn-primary btn-xs" id="srv-proxy-save" type="button">Save</button>
+          <button class="btn btn-ghost btn-xs" id="srv-proxy-clear" type="button">Clear</button>
+          <span class="srv-proxy-separator"></span>
+          <button class="btn btn-outline btn-xs" id="srv-proxy-prepend-http" type="button">+ http://</button>
+          <button class="btn btn-outline btn-xs" id="srv-proxy-prepend-socks5" type="button">+ socks5://</button>
+        </div>
+      </div>
+    </details>
+
     <div id="log-modal" class="modal" aria-hidden="true">
       <div class="modal-backdrop"></div>
       <div class="modal-content" role="dialog" aria-modal="true" aria-labelledby="log-title">
@@ -970,17 +1005,8 @@
       <div class="footer-bar">
         <span class="footer-brand" aria-label="Copycord version {{ version or 'dev' }}">
           <span class="brand-name">Copycord</span>
-          <span class="brand-sep" aria-hidden="true"></span>
-          <bdi class="brand-version" id="footer-version">
-            {% if version %}
-            <a id="footer-version-link" href="{{ links.github }}/releases/tag/{{ version }}" target="_blank"
-              rel="noopener" class="footer-link" data-default-href="{{ links.github }}/releases/tag/{{ version }}">
-              {{ version }}
-            </a>
-            {% else %}
-            <span id="footer-version-text">dev</span>
-            {% endif %}
-          </bdi>
+          <span class="brand-sep" aria-hidden="true">&middot;</span>
+          <bdi class="brand-version" id="footer-version">{% if version %}<a id="footer-version-link" href="{{ links.github }}/releases/tag/{{ version }}" target="_blank" rel="noopener" class="footer-link" data-default-href="{{ links.github }}/releases/tag/{{ version }}">{{ version }}</a>{% else %}<span id="footer-version-text">dev</span>{% endif %}</bdi>
         </span>
 
         <div class="footer-links" role="group" aria-label="Links">
