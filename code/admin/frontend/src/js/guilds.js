@@ -10,9 +10,6 @@
   let sortBy = "name";
   let sortDir = "asc";
 
-  let scrapeRunning = false;
-  let activeScrapeGuildId = null;
-
   function closeModal(root) {
     if (!root) return;
 
@@ -174,139 +171,6 @@
     window.addEventListener("resize", onWin, true);
   }
 
-  let wsOut = null;
-  function ensureOut() {
-    if (
-      wsOut &&
-      (wsOut.readyState === WebSocket.OPEN ||
-        wsOut.readyState === WebSocket.CONNECTING)
-    )
-      return;
-    const url = location.origin.replace(/^http/, "ws") + "/ws/out";
-    wsOut = new WebSocket(url);
-
-    wsOut.onmessage = (ev) => {
-      let raw;
-      try {
-        raw = JSON.parse(ev.data);
-      } catch {
-        return;
-      }
-      const p = raw?.payload ?? raw;
-      const kind = raw?.kind ?? p?.kind ?? "client";
-      if (kind !== "client") return;
-
-      const t = p?.type;
-      const gid = String(
-        p?.data?.guild_id || p?.guild_id || activeScrapeGuildId || ""
-      );
-
-      const key = `scrape:${gid}`;
-
-      if (t === "scrape_started" || t === "scrape_busy") {
-        setScrapeState(true, gid);
-        render();
-        window.toast.wsGate({
-          key,
-          msg:
-            t === "scrape_busy"
-              ? "A scrape is already running."
-              : "Scrape started.",
-          type: t === "scrape_busy" ? "warning" : "success",
-        });
-      }
-
-      if (t === "scrape_done") {
-        setScrapeState(false);
-        render();
-        window.toast.wsGate({ key, msg: "Scrape completed.", type: "success" });
-        window.toast.clearLaunch(key);
-      }
-
-      if (t === "scrape_cancelled") {
-        setScrapeState(false, gid);
-        render();
-        window.toast.wsGate({ key, msg: "Scrape cancelled.", type: "warning" });
-        window.toast.clearLaunch(key);
-      }
-
-      if (t === "scrape_failed") {
-        const err = p?.data?.error || "Unknown error";
-        setScrapeState(false, gid);
-        render();
-        window.toast.wsGate({
-          key,
-          msg: `Scrape failed: ${err}`,
-          type: "error",
-        });
-        window.toast.clearLaunch(key);
-      }
-    };
-  }
-
-  async function cancelScrape(g) {
-    try {
-      const res = await fetch("/api/scrape/cancel", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ guild_id: g?.id || activeScrapeGuildId }),
-      });
-      if (!res.ok) {
-        const err = await safeErr(res);
-        window.showToast(`Could not cancel: ${err}`, { type: "error" });
-        return;
-      }
-      setScrapeState(true, g?.id || activeScrapeGuildId);
-      render();
-    } catch (e) {
-      console.error("cancel scrape failed", e);
-      window.showToast("Failed to cancel scrape.", { type: "error" });
-    }
-  }
-
-  function setScrapeState(running, gid = activeScrapeGuildId) {
-    scrapeRunning = !!running;
-    activeScrapeGuildId = scrapeRunning
-      ? String(gid || activeScrapeGuildId || "")
-      : null;
-
-    const toggleButtonsForMenu = (menuEl, onThis) => {
-      if (!menuEl) return;
-      const btnScrape = menuEl.querySelector('button[data-act="scrape"]');
-      const btnCancel = menuEl.querySelector('button[data-act="cancel"]');
-      if (btnScrape) btnScrape.hidden = !!onThis;
-      if (btnCancel) btnCancel.hidden = !onThis;
-    };
-
-    root.querySelectorAll(".guild-card").forEach((c) => {
-      const onThis = scrapeRunning && activeScrapeGuildId === c.dataset.gid;
-      c.classList.toggle("scraping", onThis);
-      const badge = c.querySelector(".scrape-badge");
-      if (badge) {
-        if (onThis) badge.removeAttribute("hidden");
-        else badge.setAttribute("hidden", "hidden");
-      }
-      toggleButtonsForMenu(
-        c.querySelector(".guild-actions .action-menu"),
-        onThis
-      );
-    });
-
-    document.querySelectorAll("#popover-layer .action-menu").forEach((m) => {
-      const onThis = scrapeRunning && activeScrapeGuildId === m.dataset.gid;
-      toggleButtonsForMenu(m, onThis);
-    });
-
-    const badgeExists = !!document.querySelector(".scrape-badge-global");
-    if (running && !badgeExists) {
-      const b = document.createElement("div");
-      b.className = "scrape-badge-global";
-      document.body.appendChild(b);
-    } else if (!running && badgeExists) {
-      document.querySelector(".scrape-badge-global")?.remove();
-    }
-  }
-
   const norm = (s) => String(s || "").toLowerCase();
 
   function sortData() {
@@ -342,13 +206,12 @@
 
     switch (item.dataset.act) {
       case "scrape":
-        openScraperDialog(g);
+        window.location.href = "/scraper";
         break;
       case "export":
         openExportDialog(g);
         break;
       case "cancel":
-        cancelScrape(g);
         break;
       case "view":
         openGuildDetails(g);
@@ -386,9 +249,7 @@
         <div class="guild-actions">
           <div class="action-menu" role="menu" hidden>
             <button role="menuitem" data-act="view">View details</button>
-            <button role="menuitem" data-act="scrape">Scrape members</button>
             <button role="menuitem" data-act="export">Export messages</button>
-            <button role="menuitem" data-act="cancel" hidden>Cancel scrape</button>
           </div>
         </div>
       `;
@@ -398,7 +259,6 @@
         <div class="guild-card-body">
           <div class="guild-icon-wrap">${icon}</div>
           <div class="guild-name">${escapeHtml(g.name)}</div>
-          <div class="scrape-badge" hidden>Scraping…</div>
         </div>
       `;
 
@@ -464,17 +324,11 @@
       hideAllCardMenus();
 
       switch (item.dataset.act) {
-        case "scrape":
-          openScraperDialog(g);
-          break;
-        case "cancel":
-          cancelScrape(g);
-          break;
         case "view":
           openGuildDetails(g);
           break;
-        case "sync":
-          window.showToast("Sync settings (soon)", { type: "info" });
+        case "export":
+          openExportDialog(g);
           break;
       }
     });
@@ -485,8 +339,6 @@
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") hideAllCardMenus();
     });
-
-    setScrapeState(scrapeRunning);
   }
 
   function ensureDetailsModal() {
@@ -1127,192 +979,6 @@
     }
   }
 
-  function openScraperDialog(guild) {
-    if (!guild) return;
-    if (scrapeRunning) {
-      window.showToast(
-        "A scrape is already running. Please wait for it to finish.",
-        {
-          type: "warning",
-        }
-      );
-      return;
-    }
-
-    document.querySelectorAll(".scraper-modal").forEach((el) => el.remove());
-
-    const modal = document.createElement("div");
-    modal.className = "scraper-modal";
-    modal.innerHTML = `
-      <div class="modal-backdrop" aria-hidden="true"></div>
-      <div class="modal-content scraper-card" role="dialog" aria-modal="true" aria-label="Scrape members">
-        <header class="scraper-head">
-          <div class="scraper-title-wrap">
-            <img class="scraper-icon" alt="" src="${
-              guild.icon_url ? encodeURI(guild.icon_url) : "/static/logo.png"
-            }">
-            <h3 class="scraper-title">Scraper — ${escapeHtml(guild.name)}</h3>
-          </div>
-          <button type="button" class="icon-btn verify-close" aria-label="Close"><span aria-hidden="true">✕</span></button>
-        </header>
-
-        <div class="scraper-body">
-          <fieldset class="scrape-opts">
-            <label class="check">
-              <input type="checkbox" id="scr-inc-username">
-              <span>Username</span>
-            </label>
-
-            <label class="check">
-              <input type="checkbox" id="scr-inc-avatar">
-              <span>Avatar</span>
-            </label>
-
-            <label class="check has-tip">
-              <input type="checkbox" id="scr-inc-roles">
-              <span>Roles</span>
-            </label>
-
-          <label class="check has-tip">
-            <input type="checkbox" id="scr-inc-bio">
-            <span class="label-text">Bio</span>
-            <button type="button" class="info-dot" aria-expanded="false" aria-controls="scr-bio-tip"></button>
-            <span id="scr-bio-tip" class="tip-bubble" hidden>
-              Fetching bios is slow — Discord rate-limits these requests heavily, so fetching all user bios can take a long time.
-            </span>
-          </label>
-
-            <p class="hint">If none are selected, we’ll scrape <b>IDs only</b>.</p>
-          </fieldset>
-
-          <div class="field compact">
-            <label for="scr-sessions">Sessions</label>
-            <input id="scr-sessions" class="input" type="number" min="1" max="5" value="1">
-          </div>
-
-          <p class="note">Output is saved to <code>/data/scrapes/</code></p>
-        </div>
-
-        <footer class="scraper-actions">
-          <button class="btn btn-ghost" data-act="start">Start scrape</button>
-        </footer>
-      </div>
-    `;
-    document.body.appendChild(modal);
-
-    (() => {
-      const dots = modal.querySelectorAll(".check.has-tip .info-dot");
-
-      dots.forEach((dot) => {
-        const bubbleId = dot.getAttribute("aria-controls");
-        const bubble =
-          (bubbleId && modal.querySelector(`#${CSS.escape(bubbleId)}`)) ||
-          dot.nextElementSibling;
-
-        if (!bubble) return;
-
-        const closeOutside = (ev) => {
-          if (ev.target === dot || bubble.contains(ev.target)) return;
-          dot.setAttribute("aria-expanded", "false");
-          bubble.hidden = true;
-          document.removeEventListener("click", closeOutside, true);
-        };
-
-        dot.addEventListener("click", (ev) => {
-          ev.stopPropagation();
-          const expanded = dot.getAttribute("aria-expanded") === "true";
-          const nextState = !expanded;
-
-          dot.setAttribute("aria-expanded", String(nextState));
-          bubble.hidden = !nextState;
-
-          document.removeEventListener("click", closeOutside, true);
-          if (nextState)
-            setTimeout(
-              () => document.addEventListener("click", closeOutside, true),
-              0
-            );
-        });
-
-        dot.addEventListener("keydown", (ev) => {
-          if (ev.key === "Escape") {
-            dot.setAttribute("aria-expanded", "false");
-            bubble.hidden = true;
-            dot.blur();
-          }
-        });
-      });
-    })();
-
-    const onEsc = (e) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        document.removeEventListener("keydown", onEsc);
-      }
-    };
-    document.addEventListener("keydown", onEsc);
-
-    modal
-      .querySelector('[data-act="start"]')
-      .addEventListener("click", async () => {
-        const ns = clampInt(
-          modal.querySelector("#scr-sessions")?.value,
-          2,
-          1,
-          5
-        );
-        const include_username =
-          !!modal.querySelector("#scr-inc-username")?.checked;
-        const include_avatar_url =
-          !!modal.querySelector("#scr-inc-avatar")?.checked;
-        const include_bio = !!modal.querySelector("#scr-inc-bio")?.checked;
-        const include_roles = !!modal.querySelector("#scr-inc-roles")?.checked;
-
-        try {
-          modal.remove();
-          window.toast.markLaunched(`scrape:${guild.id}`);
-          const res = await fetch("/api/scrape", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              guild_id: guild.id,
-              num_sessions: ns,
-              include_username,
-              include_avatar_url,
-              include_bio,
-              include_roles,
-            }),
-          });
-
-          if (res.status === 409) {
-            window.showToast("A scrape is already running.", {
-              type: "warning",
-            });
-            setScrapeState(true, guild.id);
-            render();
-            return;
-          }
-          if (!res.ok) {
-            const err = await safeErr(res);
-            console.error("SCRAPE ERROR", res.status);
-            window.showToast(`Could not start scrape: ${err}`, {
-              type: "error",
-            });
-            window.toast?.clearLaunch?.(`scrape:${guild.id}`);
-            setScrapeState(false, guild.id);
-            render();
-            return;
-          }
-        } catch (e) {
-          console.error("scrape start failed", e);
-          window.toast?.clearLaunch?.(`scrape:${guild.id}`);
-          window.showToast("Failed to start scrape.", { type: "error" });
-          setScrapeState(false, guild.id);
-          render();
-        }
-      });
-  }
-
   function formatNumber(n) {
     if (n == null || isNaN(n)) return "0";
     return new Intl.NumberFormat("en-US").format(n);
@@ -1416,20 +1082,6 @@
     if (bootedAfterGate) return;
     bootedAfterGate = true;
 
-    ensureOut();
     await load();
-
-    try {
-      const r = await fetch("/api/scrape/state", { cache: "no-store" });
-      if (!r.ok) return;
-      const s = await r.json();
-      if (s?.running && s?.guild_id) {
-        setScrapeState(true, String(s.guild_id));
-        render();
-      } else {
-        setScrapeState(false);
-        render();
-      }
-    } catch {}
   }
 })();

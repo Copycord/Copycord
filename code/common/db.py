@@ -7,9 +7,11 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
+
 from datetime import datetime
 import json
 import sqlite3, threading
+import time
 from typing import Dict, List, Optional
 import uuid
 import secrets
@@ -931,6 +933,52 @@ class DBManager:
             },
             post_sql=[
                 "CREATE INDEX IF NOT EXISTS idx_backup_added ON backup_tokens(added_at);",
+            ],
+        )
+
+        self._ensure_table(
+            name="scraper_tokens",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    token_id        TEXT PRIMARY KEY,
+                    token_value     TEXT NOT NULL UNIQUE,
+                    label           TEXT,
+                    is_valid        INTEGER DEFAULT 0,
+                    last_validated  INTEGER,
+                    username        TEXT,
+                    user_id         TEXT,
+                    added_at        INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+                    last_used       INTEGER,
+                    use_count       INTEGER DEFAULT 0
+                );
+            """,
+            required_columns={
+                "token_id",
+                "token_value",
+                "label",
+                "is_valid",
+                "last_validated",
+                "username",
+                "user_id",
+                "added_at",
+                "last_used",
+                "use_count",
+            },
+            copy_map={
+                "token_id": "token_id",
+                "token_value": "token_value",
+                "label": "label",
+                "is_valid": "is_valid",
+                "last_validated": "last_validated",
+                "username": "username",
+                "user_id": "user_id",
+                "added_at": "added_at",
+                "last_used": "last_used",
+                "use_count": "use_count",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_scraper_tokens_valid ON scraper_tokens(is_valid);",
+                "CREATE INDEX IF NOT EXISTS idx_scraper_tokens_added ON scraper_tokens(added_at);",
             ],
         )
 
@@ -4916,6 +4964,125 @@ class DBManager:
             """
         )
         return [dict(row) for row in cur.fetchall()]
+
+    def add_scraper_token(self, token_value: str, label: str = None) -> str:
+        """Add a new scraper token and return its token_id."""
+        token_id = str(uuid.uuid4())
+        with self.lock:
+            self.conn.execute(
+                """
+                INSERT INTO scraper_tokens (token_id, token_value, label)
+                VALUES (?, ?, ?)
+                """,
+                (token_id, token_value, label),
+            )
+            self.conn.commit()
+        return token_id
+
+    def list_scraper_tokens(self) -> list[dict]:
+        """Return all scraper tokens with metadata."""
+        with self.lock:
+            cur = self.conn.execute(
+                """
+                SELECT token_id, token_value, label, is_valid, last_validated,
+                       username, user_id, added_at, last_used, use_count
+                FROM scraper_tokens
+                ORDER BY added_at DESC
+                """
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    def get_scraper_token(self, token_id: str) -> dict | None:
+        """Get a single scraper token by ID."""
+        with self.lock:
+            cur = self.conn.execute(
+                """
+                SELECT token_id, token_value, label, is_valid, last_validated,
+                       username, user_id, added_at, last_used, use_count
+                FROM scraper_tokens
+                WHERE token_id = ?
+                """,
+                (token_id,),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def update_scraper_token(
+        self,
+        token_id: str,
+        *,
+        label: str = None,
+        is_valid: bool = None,
+        username: str = None,
+        user_id: str = None,
+    ) -> bool:
+        """Update scraper token metadata."""
+        updates = []
+        params = []
+
+        if label is not None:
+            updates.append("label = ?")
+            params.append(label)
+        if is_valid is not None:
+            updates.append("is_valid = ?")
+            updates.append("last_validated = ?")
+            params.append(1 if is_valid else 0)
+            params.append(int(time.time()))
+        if username is not None:
+            updates.append("username = ?")
+            params.append(username)
+        if user_id is not None:
+            updates.append("user_id = ?")
+            params.append(user_id)
+
+        if not updates:
+            return False
+
+        params.append(token_id)
+
+        with self.lock:
+            self.conn.execute(
+                f"UPDATE scraper_tokens SET {', '.join(updates)} WHERE token_id = ?",
+                params,
+            )
+            self.conn.commit()
+        return True
+
+    def delete_scraper_token(self, token_id: str) -> bool:
+        """Delete a scraper token."""
+        with self.lock:
+            cur = self.conn.execute(
+                "DELETE FROM scraper_tokens WHERE token_id = ?", (token_id,)
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def increment_scraper_token_usage(self, token_id: str) -> None:
+        """Increment usage counter and update last_used timestamp."""
+        with self.lock:
+            self.conn.execute(
+                """
+                UPDATE scraper_tokens 
+                SET use_count = use_count + 1,
+                    last_used = ?
+                WHERE token_id = ?
+                """,
+                (int(time.time()), token_id),
+            )
+            self.conn.commit()
+
+    def get_valid_scraper_tokens(self) -> list[dict]:
+        """Return only validated scraper tokens."""
+        with self.lock:
+            cur = self.conn.execute(
+                """
+                SELECT token_id, token_value, label, username, user_id
+                FROM scraper_tokens
+                WHERE is_valid = 1
+                ORDER BY use_count ASC, added_at ASC
+                """
+            )
+            return [dict(row) for row in cur.fetchall()]
 
     def add_backup_token(self, token_value: str, note: Optional[str] = None) -> str:
         """Insert a new backup token and return its token_id."""
