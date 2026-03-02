@@ -2058,6 +2058,124 @@ async def system_page(request: Request):
     )
 
 
+# ── Event Logs ───────────────────────────────────────────────────────
+
+@app.get("/event-logs")
+async def event_logs_page(request: Request):
+    return templates.TemplateResponse(
+        "logs.html",
+        {
+            "request": request,
+            "title": f"Logs · {APP_TITLE}",
+            "version": CURRENT_VERSION,
+        },
+    )
+
+
+@app.get("/api/event-log-types")
+async def api_get_event_log_types():
+    """Lightweight endpoint that returns only the distinct event types."""
+    types = db.get_event_log_types()
+    return JSONResponse(
+        content={"ok": True, "types": types},
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.get("/api/event-logs")
+async def api_get_event_logs(
+    event_type: Optional[str] = None,
+    guild_id: Optional[int] = None,
+    search: Optional[str] = None,
+    limit: int = Query(200, ge=1, le=10000),
+    offset: int = Query(0, ge=0),
+):
+    logs = db.get_event_logs(
+        event_type=event_type,
+        guild_id=guild_id,
+        search=search,
+        limit=limit,
+        offset=offset,
+    )
+    total = db.count_event_logs(
+        event_type=event_type,
+        guild_id=guild_id,
+        search=search,
+    )
+    types = db.get_event_log_types()
+    return JSONResponse(
+        content={"ok": True, "logs": logs, "total": total, "types": types},
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "Expires": "0",
+        },
+    )
+
+
+@app.delete("/api/event-logs/{log_id}")
+async def api_delete_event_log(log_id: str):
+    ok = db.delete_event_log(log_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Log not found")
+    return {"ok": True}
+
+
+@app.post("/api/event-logs/delete-bulk")
+async def api_delete_event_logs_bulk(body: dict = Body(...)):
+    ids = body.get("ids") or []
+    if not ids:
+        raise HTTPException(status_code=400, detail="No ids provided")
+    deleted = db.delete_event_logs_bulk(ids)
+    return {"ok": True, "deleted": deleted}
+
+
+@app.delete("/api/event-logs")
+async def api_clear_event_logs():
+    deleted = db.clear_event_logs()
+    return {"ok": True, "deleted": deleted}
+
+
+@app.post("/api/event-logs")
+async def api_add_event_log(body: dict = Body(...)):
+    """Receive event log entries from server/client agents."""
+    event_type = body.get("event_type") or "unknown"
+    details = body.get("details") or ""
+    log_id = db.add_event_log(
+        event_type=event_type,
+        details=details,
+        guild_id=body.get("guild_id"),
+        guild_name=body.get("guild_name"),
+        channel_id=body.get("channel_id"),
+        channel_name=body.get("channel_name"),
+        category_id=body.get("category_id"),
+        category_name=body.get("category_name"),
+        extra=body.get("extra"),
+    )
+    # Broadcast the new log to all connected UI clients
+    await hub.broadcast({
+        "kind": "event_log",
+        "role": "server",
+        "payload": {
+            "log_id": log_id,
+            "event_type": event_type,
+            "details": details,
+            "guild_id": body.get("guild_id"),
+            "guild_name": body.get("guild_name"),
+            "channel_id": body.get("channel_id"),
+            "channel_name": body.get("channel_name"),
+            "category_id": body.get("category_id"),
+            "category_name": body.get("category_name"),
+            "extra": body.get("extra"),
+        },
+    })
+    return {"ok": True, "log_id": log_id}
+
+
 @app.get("/forwarding")
 async def forwarding_page(request: Request):
     """
