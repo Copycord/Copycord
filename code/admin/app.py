@@ -35,6 +35,7 @@ from admin.logging_setup import (
     client_var,
     REDACT_KEYS,
 )
+from admin.standalone_scraper import StandaloneScraper, ScraperConfig, ScraperResult
 from fastapi import (
     FastAPI,
     Request,
@@ -499,6 +500,16 @@ agent_sockets: Set[WebSocket] = set()
 bus_sockets: Set[WebSocket] = set()
 
 
+scraper_state = {
+    "running": False,
+    "scraper": None,
+    "task": None,
+    "result": None,
+    "guild_id": None,
+}
+scraper_lock = asyncio.Lock()
+
+
 class BackfillLocks:
     def __init__(self, ttl_launching_sec: float = 20.0):
         self._launching_ttl = ttl_launching_sec
@@ -778,7 +789,9 @@ async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
     """
     Returns True if the user account (CLIENT_TOKEN / self bot)
     is a member of guild_id.
-    Strategy: GET /users/@me/guilds using the user token.
+    Strategy: Paginate GET /users/@me/guilds?limit=200&after=<last_id>
+              until we find the guild or run out of pages.
+    Handles 429 rate-limits by sleeping and retrying.
     """
     if not client_token or not guild_id:
         LOGGER.debug(
@@ -788,46 +801,73 @@ async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
         )
         return False
 
-    url = f"{DISCORD_API_BASE}/users/@me/guilds"
+    base_url = f"{DISCORD_API_BASE}/users/@me/guilds"
     headers = {
         "Authorization": client_token,
     }
+    wanted = str(guild_id)
 
     try:
         async with aiohttp.ClientSession() as sess:
-            async with sess.get(url, headers=headers, timeout=10) as resp:
-                status = resp.status
-                if status != 200:
-                    LOGGER.warning(
-                        "_selfbot_in_guild | discord status=%s token=%s guild_id=%s -> not_member",
-                        status,
-                        _redact_token(client_token),
-                        guild_id,
-                    )
-                    return False
+            after = "0"
+            total_checked = 0
 
-                data = await resp.json()
+            while True:
+                url = f"{base_url}?limit=200&after={after}"
+                async with sess.get(url, headers=headers, timeout=10) as resp:
+                    status = resp.status
 
-                wanted = str(guild_id)
-                match = False
-                guild_ids = []
+                    if status == 429:
+                        try:
+                            body = await resp.json()
+                            retry_after = float(body.get("retry_after", 2))
+                        except Exception:
+                            retry_after = 2.0
+                        LOGGER.info(
+                            "_selfbot_in_guild | rate limited, retrying in %.1fs token=%s",
+                            retry_after,
+                            _redact_token(client_token),
+                        )
+                        await asyncio.sleep(retry_after + 0.25)
+                        continue
 
-                for g in data:
-                    gid = str(g.get("id", ""))
-                    guild_ids.append(gid)
-                    if gid == wanted:
-                        match = True
+                    if status != 200:
+                        LOGGER.warning(
+                            "_selfbot_in_guild | discord status=%s token=%s guild_id=%s -> not_member",
+                            status,
+                            _redact_token(client_token),
+                            guild_id,
+                        )
+                        return False
 
-                LOGGER.debug(
-                    "_selfbot_in_guild | status=%s token=%s guild_id=%s match=%s guild_count=%s sample_ids=%s",
-                    status,
-                    _redact_token(client_token),
-                    guild_id,
-                    match,
-                    len(guild_ids),
-                    guild_ids[:10],
-                )
-                return match
+                    data = await resp.json()
+                    if not data:
+                        break
+
+                    for g in data:
+                        gid = str(g.get("id", ""))
+                        if gid == wanted:
+                            LOGGER.debug(
+                                "_selfbot_in_guild | found guild_id=%s for token=%s after checking %d guilds",
+                                guild_id,
+                                _redact_token(client_token),
+                                total_checked + 1,
+                            )
+                            return True
+
+                    total_checked += len(data)
+                    after = str(data[-1].get("id", "0"))
+
+                    if len(data) < 200:
+                        break
+
+            LOGGER.debug(
+                "_selfbot_in_guild | guild_id=%s NOT found for token=%s total_guilds_checked=%d",
+                guild_id,
+                _redact_token(client_token),
+                total_checked,
+            )
+            return False
     except Exception as e:
         LOGGER.warning(
             "_selfbot_in_guild | exception=%s token=%s guild_id=%s",
@@ -2041,6 +2081,8 @@ async def logs_stream(which: str, request: Request, tail_bytes: int = 50000):
         candidates = ["server.out", "server.log"]
     elif which == "client":
         candidates = ["client.out", "client.log"]
+    elif which == "scraper":
+        candidates = ["scraper.out", "scraper.log"]
     else:
         return PlainTextResponse("invalid", status_code=400)
 
@@ -3261,155 +3303,692 @@ async def guilds_api():
 CLIENT_AGENT_TIMEOUT = int(os.getenv("CLIENT_AGENT_TIMEOUT", "10"))
 
 
-@app.post("/api/scrape", response_class=JSONResponse)
-async def api_scrape(request: Request):
+@app.get("/scraper")
+async def scraper_page(request: Request):
+    """Render the standalone scraper page."""
+    env = _read_env()
+    return templates.TemplateResponse(
+        "scraper.html",
+        {
+            "request": request,
+            "title": APP_TITLE,
+            "version": CURRENT_VERSION,
+            "log_level": env.get("LOG_LEVEL", "INFO"),
+        },
+    )
+
+
+@app.get("/api/scraper/tokens", response_class=JSONResponse)
+async def api_scraper_tokens_list():
+    """List all scraper tokens with masked values."""
+    try:
+        tokens = db.list_scraper_tokens()
+        masked_tokens = []
+        for t in tokens:
+            masked_tokens.append(
+                {
+                    "token_id": t["token_id"],
+                    "label": t.get("label") or "Unlabeled",
+                    "masked": _mask_token(t["token_value"]),
+                    "is_valid": bool(t.get("is_valid")),
+                    "last_validated": t.get("last_validated"),
+                    "username": t.get("username"),
+                    "user_id": t.get("user_id"),
+                    "added_at": t.get("added_at"),
+                    "last_used": t.get("last_used"),
+                    "use_count": t.get("use_count", 0),
+                }
+            )
+        return JSONResponse({"ok": True, "tokens": masked_tokens})
+    except Exception as e:
+        LOGGER.exception("Failed to list scraper tokens: %s", e)
+        return JSONResponse({"ok": False, "error": "server-error"}, status_code=500)
+
+
+@app.post("/api/scraper/tokens/add", response_class=JSONResponse)
+async def api_scraper_tokens_add(
+    token_value: str = Form(...),
+    label: str = Form(""),
+):
+    """Add and validate a new scraper token."""
+    token_value = (token_value or "").strip()
+    label = (label or "").strip()
+
+    if not token_value:
+        raise HTTPException(status_code=400, detail="token_value is required")
+
+    try:
+        existing = db.list_scraper_tokens()
+        for t in existing:
+            if t["token_value"] == token_value:
+                raise HTTPException(400, detail="Token already exists")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    is_valid = await _check_client_token_valid(token_value)
+
+    username = None
+    user_id = None
+    if is_valid:
+        try:
+            async with aiohttp.ClientSession() as sess:
+                async with sess.get(
+                    f"{DISCORD_API_BASE}/users/@me",
+                    headers={"Authorization": token_value},
+                    timeout=5,
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        username = data.get("username")
+                        user_id = str(data.get("id"))
+        except Exception:
+            pass
+
+    try:
+        token_id = db.add_scraper_token(token_value, label)
+        db.update_scraper_token(
+            token_id,
+            is_valid=is_valid,
+            username=username,
+            user_id=user_id,
+        )
+
+        return JSONResponse(
+            {
+                "ok": True,
+                "token_id": token_id,
+                "is_valid": is_valid,
+                "username": username,
+                "user_id": user_id,
+            }
+        )
+    except Exception as e:
+        LOGGER.exception("Failed to add scraper token: %s", e)
+        return JSONResponse({"ok": False, "error": "server-error"}, status_code=500)
+
+
+@app.post("/api/scraper/tokens/{token_id}/validate", response_class=JSONResponse)
+async def api_scraper_tokens_validate(token_id: str):
+    """Validate a scraper token."""
+    token = db.get_scraper_token(token_id)
+    if not token:
+        raise HTTPException(404, detail="Token not found")
+
+    is_valid = await _check_client_token_valid(token["token_value"])
+
+    username = None
+    user_id = None
+    if is_valid:
+        try:
+            async with aiohttp.ClientSession() as sess:
+                async with sess.get(
+                    f"{DISCORD_API_BASE}/users/@me",
+                    headers={"Authorization": token["token_value"]},
+                    timeout=5,
+                ) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        username = data.get("username")
+                        user_id = str(data.get("id"))
+        except Exception:
+            pass
+
+    db.update_scraper_token(
+        token_id,
+        is_valid=is_valid,
+        username=username,
+        user_id=user_id,
+    )
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "is_valid": is_valid,
+            "username": username,
+            "user_id": user_id,
+        }
+    )
+
+
+@app.post("/api/scraper/tokens/{token_id}/update", response_class=JSONResponse)
+async def api_scraper_tokens_update(token_id: str, label: str = Form(...)):
+    """Update a scraper token's label."""
+    if not db.get_scraper_token(token_id):
+        raise HTTPException(404, detail="Token not found")
+
+    db.update_scraper_token(token_id, label=label.strip())
+    return JSONResponse({"ok": True})
+
+
+@app.delete("/api/scraper/tokens/{token_id}", response_class=JSONResponse)
+async def api_scraper_tokens_delete(token_id: str):
+    """Delete a scraper token."""
+    if not db.delete_scraper_token(token_id):
+        raise HTTPException(404, detail="Token not found")
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/scraper/validate-setup", response_class=JSONResponse)
+async def api_scraper_validate_setup(guild_id: str = Form(...)):
+    """Validate that all tokens have access to the specified guild."""
+    try:
+        gid = int(guild_id)
+    except ValueError:
+        raise HTTPException(400, detail="Invalid guild_id")
+
+    tokens = db.get_valid_scraper_tokens()
+    if not tokens:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "No valid tokens configured",
+                "tokens_in_guild": 0,
+                "tokens_missing": 0,
+            },
+            status_code=400,
+        )
+
+    results = []
+    in_guild = 0
+    missing = 0
+
+    for token in tokens:
+        has_access = await _selfbot_in_guild(token["token_value"], gid)
+        results.append(
+            {
+                "token_id": token["token_id"],
+                "label": token.get("label") or token.get("username") or "Unknown",
+                "has_access": has_access,
+            }
+        )
+        if has_access:
+            in_guild += 1
+        else:
+            missing += 1
+
+    return JSONResponse(
+        {
+            "ok": in_guild > 0,
+            "tokens_in_guild": in_guild,
+            "tokens_missing": missing,
+            "results": results,
+        }
+    )
+
+
+_PROXY_FILE = DATA_DIR / "proxies.txt"
+
+
+@app.get("/api/scraper/proxies", response_class=JSONResponse)
+async def api_scraper_proxies_get():
+    """Return saved proxy list."""
+    try:
+        if _PROXY_FILE.exists():
+            text = _PROXY_FILE.read_text(encoding="utf-8").strip()
+            lines = [l.strip() for l in text.splitlines() if l.strip()]
+        else:
+            lines = []
+        return JSONResponse({"ok": True, "proxies": lines})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/scraper/proxies", response_class=JSONResponse)
+async def api_scraper_proxies_put(request: Request):
+    """Save proxy list."""
     try:
         payload = await request.json()
-        LOGGER.debug("SCRAPE request payload: %s", payload)
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    proxies = payload.get("proxies", [])
+    if not isinstance(proxies, list):
+        raise HTTPException(400, detail="proxies must be a list")
+    lines = [l.strip() for l in proxies if isinstance(l, str) and l.strip()]
+    try:
+        _PROXY_FILE.write_text(
+            "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8"
+        )
+        return JSONResponse({"ok": True, "count": len(lines)})
     except Exception as e:
-        LOGGER.exception("Failed to parse JSON body: %s", e)
-        return JSONResponse({"ok": False, "error": "invalid-json"}, status_code=400)
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
-    include_username = bool(payload.get("include_username", False))
-    include_avatar_url = bool(payload.get("include_avatar_url", False))
+
+@app.post("/api/scraper/start", response_class=JSONResponse)
+async def api_scraper_start(request: Request):
+    """Start standalone scraper with multiple tokens."""
+    global scraper_state
+
+    async with scraper_lock:
+        if scraper_state["running"]:
+            return JSONResponse(
+                {"ok": False, "error": "Scraper is already running"}, status_code=409
+            )
+
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+
+    try:
+        guild_id = int(payload.get("guild_id"))
+    except (ValueError, TypeError):
+        raise HTTPException(400, detail="Invalid guild_id")
+
+    include_username = bool(payload.get("include_username", True))
+    include_avatar_url = bool(payload.get("include_avatar_url", True))
     include_bio = bool(payload.get("include_bio", False))
     include_roles = bool(payload.get("include_roles", False))
+    proxy_list = [
+        p.strip()
+        for p in (payload.get("proxies") or [])
+        if isinstance(p, str) and p.strip()
+    ]
 
-    if payload.get("include_names") and not (
-        payload.get("include_username")
-        or payload.get("include_avatar_url")
-        or payload.get("include_bio")
-    ):
-        include_username = True
-        include_avatar_url = True
+    tokens = db.get_valid_scraper_tokens()
+    if not tokens:
+        return JSONResponse(
+            {"ok": False, "error": "No valid tokens configured"}, status_code=400
+        )
 
-    def clamp(v, lo, hi):
+    accessible_tokens = []
+    for token in tokens:
+        if await _selfbot_in_guild(token["token_value"], guild_id):
+            accessible_tokens.append(token)
+
+            db.increment_scraper_token_usage(token["token_id"])
+
+    if not accessible_tokens:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "None of the configured tokens have access to this guild",
+            },
+            status_code=400,
+        )
+
+    token_values = [t["token_value"] for t in accessible_tokens]
+
+    def progress_callback(current: int, total: Optional[int], message: str):
+        """Broadcast progress to websocket clients."""
+        asyncio.create_task(
+            hub.broadcast(
+                {
+                    "kind": "scraper",
+                    "role": "standalone",
+                    "payload": {
+                        "type": "progress",
+                        "current": current,
+                        "total": total,
+                        "message": message,
+                    },
+                }
+            )
+        )
+
+    _scraper_log_path = DATA_DIR / "scraper.out"
+
+    def log_callback(message: str, level: str):
+        """Write log line to scraper.out AND broadcast to websocket clients."""
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        line = f"[{ts}] [{level.upper()}] {message}\n"
         try:
-            return max(lo, min(hi, int(v)))
+            with open(_scraper_log_path, "a", encoding="utf-8") as f:
+                f.write(line)
         except Exception:
-            return lo
+            pass
+        asyncio.create_task(
+            hub.broadcast(
+                {
+                    "kind": "scraper",
+                    "role": "standalone",
+                    "payload": {
+                        "type": "log",
+                        "message": message,
+                        "level": level,
+                    },
+                }
+            )
+        )
 
-    ns = clamp(payload.get("num_sessions", 2), 1, 5)
-    mpps_raw = payload.get("max_parallel_per_session")
-    if mpps_raw is None:
-        mpps = clamp(max(1, 8 // ns), 1, 5)
-    else:
-        mpps = clamp(mpps_raw, 1, 5)
+    try:
+        _scraper_log_path.write_text("", encoding="utf-8")
+    except Exception:
+        pass
 
-    gid = payload.get("guild_id")
+    config = ScraperConfig(
+        guild_id=guild_id,
+        tokens=token_values,
+        proxies=proxy_list,
+        include_username=include_username,
+        include_avatar_url=include_avatar_url,
+        include_bio=include_bio,
+        include_roles=include_roles,
+        progress_callback=progress_callback,
+        log_callback=log_callback,
+    )
 
-    LOGGER.debug(
-        "Dispatching scrape to agent: gid=%s ns=%s mpps=%s username=%s avatar=%s bio=%s roles=%s",
-        gid,
-        ns,
-        mpps,
+    scraper = StandaloneScraper(config)
+
+    async def run_scraper():
+        global scraper_state
+
+        def _save_results_to_disk(members, metadata, total_count, elapsed_seconds):
+            """Save results to /data/scrapes/{guild_id}/ — returns filename or None."""
+            if not members:
+                return None
+            try:
+                guild_dir = DATA_DIR / "scrapes" / str(guild_id)
+                guild_dir.mkdir(parents=True, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                g_name = (metadata or {}).get("guild_name") or ""
+                fname = f"scrape_{guild_id}_{ts}.json"
+                save_data = {
+                    "guild_id": str(guild_id),
+                    "guild_name": g_name,
+                    "total_count": total_count,
+                    "elapsed_seconds": round(elapsed_seconds, 2),
+                    "scraped_at": datetime.now().isoformat(),
+                    "metadata": metadata,
+                    "members": members,
+                }
+                (guild_dir / fname).write_text(
+                    json.dumps(save_data, indent=2), encoding="utf-8"
+                )
+                LOGGER.info("Scrape results saved to %s/%s", guild_id, fname)
+                return f"{guild_id}/{fname}"
+            except Exception as save_err:
+                LOGGER.exception("Failed to save scrape results: %s", save_err)
+                return None
+
+        try:
+            result = await scraper.scrape()
+            async with scraper_lock:
+                scraper_state["result"] = result
+                scraper_state["running"] = False
+                scraper_state["scraper"] = None
+                scraper_state["task"] = None
+                scraper_state["started_at"] = None
+
+            saved_filename = _save_results_to_disk(
+                result.members,
+                result.metadata,
+                result.total_count,
+                result.elapsed_seconds,
+            )
+
+            await hub.broadcast(
+                {
+                    "kind": "scraper",
+                    "role": "standalone",
+                    "payload": {
+                        "type": "complete",
+                        "success": result.success,
+                        "total_count": result.total_count,
+                        "error": result.error,
+                        "elapsed_seconds": result.elapsed_seconds,
+                        "saved_filename": saved_filename,
+                    },
+                }
+            )
+        except asyncio.CancelledError:
+            LOGGER.info("Scraper task cancelled")
+            members = list(scraper._members.values()) if scraper._members else []
+            elapsed = 0
+
+            saved_filename = _save_results_to_disk(members, {}, len(members), elapsed)
+            async with scraper_lock:
+                scraper_state["result"] = ScraperResult(
+                    success=False,
+                    error="Cancelled",
+                    members=members,
+                    total_count=len(members),
+                    elapsed_seconds=elapsed,
+                )
+                scraper_state["running"] = False
+                scraper_state["scraper"] = None
+                scraper_state["task"] = None
+                scraper_state["started_at"] = None
+            await hub.broadcast(
+                {
+                    "kind": "scraper",
+                    "role": "standalone",
+                    "payload": {
+                        "type": "complete",
+                        "success": False,
+                        "total_count": len(members),
+                        "error": "Cancelled",
+                        "elapsed_seconds": elapsed,
+                        "saved_filename": saved_filename,
+                    },
+                }
+            )
+        except Exception as e:
+            LOGGER.exception("Scraper task failed: %s", e)
+            async with scraper_lock:
+                scraper_state["running"] = False
+                scraper_state["scraper"] = None
+                scraper_state["task"] = None
+                scraper_state["started_at"] = None
+
+    async with scraper_lock:
+        scraper_state["running"] = True
+        scraper_state["scraper"] = scraper
+        scraper_state["result"] = None
+        scraper_state["guild_id"] = guild_id
+        scraper_state["started_at"] = time.time()
+
+    task = asyncio.create_task(run_scraper())
+
+    async with scraper_lock:
+        scraper_state["task"] = task
+
+    LOGGER.info(
+        "Starting standalone scraper: guild=%s tokens=%d proxies=%d username=%s avatar=%s bio=%s roles=%s",
+        guild_id,
+        len(accessible_tokens),
+        len(proxy_list),
         include_username,
         include_avatar_url,
         include_bio,
         include_roles,
     )
 
-    try:
-        res = await _ws_cmd(
-            CLIENT_AGENT_URL,
+    return JSONResponse(
+        {
+            "ok": True,
+            "message": "Scraper started",
+            "tokens_used": len(accessible_tokens),
+            "proxies_used": len(proxy_list),
+            "guild_id": guild_id,
+        }
+    )
+
+
+@app.get("/api/scraper/status", response_class=JSONResponse)
+async def api_scraper_status():
+    """Get current scraper status."""
+    async with scraper_lock:
+        return JSONResponse(
             {
-                "type": "scrape_members",
-                "data": {
-                    "guild_id": gid,
-                    "num_sessions": ns,
-                    "max_parallel_per_session": mpps,
-                    "include_username": include_username,
-                    "include_avatar_url": include_avatar_url,
-                    "include_bio": include_bio,
-                    "include_roles": include_roles,
-                },
-            },
-            timeout=CLIENT_AGENT_TIMEOUT,
-        )
-        LOGGER.debug("Agent response: %s", res)
-    except asyncio.TimeoutError:
-        LOGGER.error("Timeout waiting for client agent (>%ss)", CLIENT_AGENT_TIMEOUT)
-        return JSONResponse(
-            {"ok": False, "error": "client-agent-timeout"},
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-        )
-    except ConnectionRefusedError as e:
-        LOGGER.error("Connection to client agent refused: %s", e)
-        return JSONResponse(
-            {"ok": False, "error": "client-agent-unreachable"},
-            status_code=status.HTTP_502_BAD_GATEWAY,
-        )
-    except Exception as e:
-        LOGGER.exception("Unexpected client agent error: %s", e)
-        return JSONResponse(
-            {"ok": False, "error": f"client-agent-error: {type(e).__name__}: {e}"},
-            status_code=status.HTTP_502_BAD_GATEWAY,
+                "running": scraper_state["running"],
+                "guild_id": scraper_state.get("guild_id"),
+                "started_at": scraper_state.get("started_at"),
+            }
         )
 
-    if not res.get("ok", True):
-        err = (res.get("error") or "").strip()
 
-        if not err:
-            LOGGER.warning(
-                "Agent returned not-ok with empty error; returning 202 Accepted: %s",
-                res,
-            )
+@app.post("/api/scraper/cancel", response_class=JSONResponse)
+async def api_scraper_cancel():
+    """Cancel running scraper."""
+    async with scraper_lock:
+        if not scraper_state["running"]:
             return JSONResponse(
-                {"ok": True, "accepted": True}, status_code=status.HTTP_202_ACCEPTED
+                {"ok": False, "error": "No scraper running"}, status_code=400
             )
 
-        if "already" in err and "running" in err:
+        scraper = scraper_state.get("scraper")
+        if scraper:
+            scraper.stop()
+
+        return JSONResponse({"ok": True})
+
+
+@app.get("/api/scraper/results", response_class=JSONResponse)
+async def api_scraper_results():
+    """Get scraper results."""
+    async with scraper_lock:
+        result = scraper_state.get("result")
+        if not result:
             return JSONResponse(
-                {"ok": False, "error": "scrape-already-running"}, status_code=409
+                {"ok": False, "error": "No results available"}, status_code=404
             )
 
         return JSONResponse(
-            {"ok": False, "error": err or "client-agent-failed"}, status_code=502
+            {
+                "ok": True,
+                "members": result.members,
+                "total_count": result.total_count,
+                "success": result.success,
+                "error": result.error,
+                "elapsed_seconds": result.elapsed_seconds,
+                "metadata": result.metadata,
+            }
         )
 
 
-@app.get("/api/scrape/state", response_class=JSONResponse)
-async def api_scrape_state():
-    try:
-        res = await _ws_cmd(CLIENT_AGENT_URL, {"type": "scrape_status"}, timeout=2.0)
-        if not res.get("ok", True):
-            return {"running": False, "guild_id": None}
-        return {"running": bool(res.get("running")), "guild_id": res.get("guild_id")}
-    except Exception:
-        return {"running": False, "guild_id": None}
+@app.get("/api/scraper/scrapes", response_class=JSONResponse)
+async def api_scraper_scrapes_list():
+    """List all saved scrape files with metadata (without the full members array).
+
+    Walks data/scrapes/{guild_id}/ subdirectories.
+    """
+    scrapes_dir = DATA_DIR / "scrapes"
+    if not scrapes_dir.is_dir():
+        return JSONResponse({"ok": True, "scrapes": []})
+
+    scrapes = []
+
+    for guild_folder in sorted(scrapes_dir.iterdir(), reverse=True):
+        if not guild_folder.is_dir():
+
+            if guild_folder.suffix == ".json" and guild_folder.name.startswith(
+                "scrape_"
+            ):
+                try:
+                    raw = guild_folder.read_text(encoding="utf-8")
+                    data = json.loads(raw)
+                    scrapes.append(
+                        {
+                            "filename": guild_folder.name,
+                            "path": guild_folder.name,
+                            "guild_id": data.get("guild_id"),
+                            "guild_name": data.get("guild_name", ""),
+                            "total_count": data.get("total_count", 0),
+                            "elapsed_seconds": data.get("elapsed_seconds"),
+                            "scraped_at": data.get("scraped_at"),
+                            "metadata": data.get("metadata", {}),
+                            "file_size": guild_folder.stat().st_size,
+                        }
+                    )
+                except Exception:
+                    scrapes.append(
+                        {
+                            "filename": guild_folder.name,
+                            "path": guild_folder.name,
+                            "error": "unreadable",
+                        }
+                    )
+            continue
+
+        guild_id_str = guild_folder.name
+        for fp in sorted(guild_folder.glob("scrape_*.json"), reverse=True):
+            try:
+                raw = fp.read_text(encoding="utf-8")
+                data = json.loads(raw)
+                scrapes.append(
+                    {
+                        "filename": fp.name,
+                        "path": f"{guild_id_str}/{fp.name}",
+                        "guild_id": data.get("guild_id", guild_id_str),
+                        "guild_name": data.get("guild_name", ""),
+                        "total_count": data.get("total_count", 0),
+                        "elapsed_seconds": data.get("elapsed_seconds"),
+                        "scraped_at": data.get("scraped_at"),
+                        "metadata": data.get("metadata", {}),
+                        "file_size": fp.stat().st_size,
+                    }
+                )
+            except Exception:
+                scrapes.append(
+                    {
+                        "filename": fp.name,
+                        "path": f"{guild_id_str}/{fp.name}",
+                        "error": "unreadable",
+                    }
+                )
+
+    scrapes.sort(key=lambda s: s.get("scraped_at") or "", reverse=True)
+    return JSONResponse({"ok": True, "scrapes": scrapes})
 
 
-@app.post("/api/scrape/cancel", response_class=JSONResponse)
-async def api_scrape_cancel(request: Request):
-    try:
-        payload = await request.json()
-    except Exception:
-        payload = {}
-    gid = payload.get("guild_id")
+@app.get("/api/scraper/scrapes/{filepath:path}")
+async def api_scraper_scrape_download(filepath: str):
+    """Download a saved scrape file. Accepts guild_id/filename or just filename."""
+
+    parts = Path(filepath).parts
+    if len(parts) > 2 or ".." in filepath:
+        raise HTTPException(400, detail="Invalid path")
+
+    fp = DATA_DIR / "scrapes" / filepath
+    if not fp.is_file():
+        raise HTTPException(404, detail="File not found")
+
+    return FileResponse(
+        path=str(fp),
+        filename=fp.name,
+        media_type="application/json",
+    )
+
+
+@app.delete("/api/scraper/scrapes/{filepath:path}", response_class=JSONResponse)
+async def api_scraper_scrape_delete(filepath: str):
+    """Delete a saved scrape file. Accepts guild_id/filename or just filename."""
+    parts = Path(filepath).parts
+    if len(parts) > 2 or ".." in filepath:
+        raise HTTPException(400, detail="Invalid path")
+
+    fp = DATA_DIR / "scrapes" / filepath
+    if not fp.is_file():
+        raise HTTPException(404, detail="File not found")
 
     try:
-        res = await _ws_cmd(
-            CLIENT_AGENT_URL,
-            {"type": "scrape_cancel", "data": {"guild_id": gid}},
-            timeout=2.0,
-        )
-    except ConnectionRefusedError:
-        return JSONResponse(
-            {"ok": False, "error": "client-agent-unreachable"}, status_code=502
-        )
+        fp.unlink()
+
+        parent = fp.parent
+        if (
+            parent != DATA_DIR / "scrapes"
+            and parent.is_dir()
+            and not any(parent.iterdir())
+        ):
+            parent.rmdir()
+        return JSONResponse({"ok": True})
     except Exception as e:
-        return JSONResponse(
-            {"ok": False, "error": f"client-agent-error: {type(e).__name__}: {e}"},
-            status_code=502,
-        )
+        LOGGER.exception("Failed to delete scrape file %s: %s", filepath, e)
+        return JSONResponse({"ok": False, "error": "delete-failed"}, status_code=500)
 
-    if not res.get("ok", True):
-        return JSONResponse(
-            {"ok": False, "error": res.get("error") or "client-agent-failed"},
-            status_code=502,
-        )
 
-    return JSONResponse({"ok": True})
+@app.post("/api/scraper/logs/clear", response_class=JSONResponse)
+async def api_scraper_logs_clear():
+    """Clear the scraper.out log file on disk."""
+    log_path = DATA_DIR / "scraper.out"
+    try:
+        log_path.write_text("", encoding="utf-8")
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        LOGGER.exception("Failed to clear scraper log: %s", e)
+        return JSONResponse({"ok": False, "error": "clear-failed"}, status_code=500)
 
 
 @app.get("/api/guilds/{guild_id}", response_class=JSONResponse)

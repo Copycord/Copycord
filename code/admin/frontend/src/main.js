@@ -6,3 +6,4 @@ import "./js/channels.js";
 import "./js/guilds.js";
 import "./js/system.js";
 import "./js/forwarding.js";
+import "./js/scraper.js";
