@@ -3555,6 +3555,60 @@ async def api_scraper_proxies_put(request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+
+
+@app.get("/api/server/proxies", response_class=JSONResponse)
+async def api_server_proxies_get():
+    """Return server proxy list and enabled state."""
+    try:
+        if _PROXY_FILE.exists():
+            text = _PROXY_FILE.read_text(encoding="utf-8").strip()
+            lines = [l.strip() for l in text.splitlines() if l.strip()]
+        else:
+            lines = []
+        enabled = (db.get_config("ENABLE_SERVER_PROXIES", "") or "").strip().lower() in (
+            "1", "true", "yes",
+        )
+        return JSONResponse({"ok": True, "proxies": lines, "enabled": enabled})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/server/proxies", response_class=JSONResponse)
+async def api_server_proxies_put(request: Request):
+    """Save server proxy list (shared file with scraper)."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    proxies = payload.get("proxies", [])
+    if not isinstance(proxies, list):
+        raise HTTPException(400, detail="proxies must be a list")
+    lines = [l.strip() for l in proxies if isinstance(l, str) and l.strip()]
+    try:
+        _PROXY_FILE.write_text(
+            "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8"
+        )
+        return JSONResponse({"ok": True, "count": len(lines)})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/server/proxies/toggle", response_class=JSONResponse)
+async def api_server_proxies_toggle(request: Request):
+    """Enable or disable server proxy rotation."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    enabled = bool(payload.get("enabled", False))
+    try:
+        db.set_config("ENABLE_SERVER_PROXIES", "true" if enabled else "false")
+        return JSONResponse({"ok": True, "enabled": enabled})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.post("/api/scraper/start", response_class=JSONResponse)
 async def api_scraper_start(request: Request):
     """Start standalone scraper with multiple tokens."""

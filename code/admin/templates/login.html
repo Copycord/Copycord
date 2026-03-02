@@ -62,18 +62,8 @@
         <div class="footer-bar">
             <span class="footer-brand" aria-label="Copycord version {{ version or 'dev' }}">
                 <span class="brand-name">Copycord</span>
-                <span class="brand-sep" aria-hidden="true"></span>
-                <bdi class="brand-version" id="footer-version">
-                    {% if version %}
-                    <a id="footer-version-link" href="{{ links.github }}/releases/tag/{{ version }}" target="_blank"
-                        rel="noopener" class="footer-link"
-                        data-default-href="{{ links.github }}/releases/tag/{{ version }}">
-                        {{ version }}
-                    </a>
-                    {% else %}
-                    <span id="footer-version-text">dev</span>
-                    {% endif %}
-                </bdi>
+                <span class="brand-sep" aria-hidden="true">&middot;</span>
+                <bdi class="brand-version" id="footer-version">{% if version %}<a id="footer-version-link" href="{{ links.github }}/releases/tag/{{ version }}" target="_blank" rel="noopener" class="footer-link" data-default-href="{{ links.github }}/releases/tag/{{ version }}">{{ version }}</a>{% else %}<span id="footer-version-text">dev</span>{% endif %}</bdi>
             </span>
 
             <div class="footer-links" role="group" aria-label="Links">

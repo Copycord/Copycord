@@ -45,6 +45,7 @@ from common.websockets import WebsocketManager, AdminBus
 from common.db import DBManager
 from server.rate_limiter import RateLimitManager, ActionType
 from server.discord_hooks import install_discord_rl_probe
+from server.proxy_rotator import ProxyRotator, patch_discord_http
 from server.emojis import EmojiManager
 from server.stickers import StickerManager
 from server.roles import RoleManager
@@ -245,6 +246,9 @@ class ServerReceiver:
         self.onjoin = OnJoinService(self.bot, self.db, logger.getChild("OnJoin"))
         install_discord_rl_probe(self.ratelimit)
 
+        self.proxy_rotator = ProxyRotator()
+        self._init_proxy_rotator()
+
         self.MAX_GUILD_CHANNELS = 500
         self.MAX_CATEGORIES = 50
         self.MAX_CHANNELS_PER_CATEGORY = 50
@@ -260,6 +264,20 @@ class ServerReceiver:
 
         self.bot.on_connect = _command_sync
         self.bot.load_extension("server.commands")
+
+    def _init_proxy_rotator(self) -> None:
+        """Load proxy list and check the ENABLE_SERVER_PROXIES db flag.
+
+        Proxies are loaded but kept **disabled** — they are only activated
+        for the duration of a ``sync_structure`` call so that login,
+        slash-command sync, message forwarding, etc. always go direct.
+        """
+        self.proxy_rotator.reload()
+        self._proxy_wanted = (
+            self.db.get_config("ENABLE_SERVER_PROXIES", "") or ""
+        ).strip().lower() in ("1", "true", "yes")
+
+        self.proxy_rotator.set_enabled(False)
 
     def _target_clone_gid_for_origin(self, host_guild_id: int | None) -> int | None:
         return self.guild_resolver.resolve_target_clone(host_guild_id=host_guild_id)
@@ -738,6 +756,10 @@ class ServerReceiver:
         asyncio.create_task(self.config.setup_release_watcher(self))
         self.session = aiohttp.ClientSession()
         self.webhook_exporter = WebhookDMExporter(self.session, logger)
+
+        self._init_proxy_rotator()
+        patch_discord_http(self.bot, self.proxy_rotator)
+
         mapped = set(self.db.get_all_clone_guild_ids())
         present = (
             {g.id for g in self.bot.guilds} & mapped
@@ -1632,6 +1654,15 @@ class ServerReceiver:
         """
         Synchronizes the structure of a clone based on the provided sitemap.
         """
+
+        self._init_proxy_rotator()
+        if self._proxy_wanted and self.proxy_rotator.count:
+            self.proxy_rotator.set_enabled(True)
+            self.ratelimit.set_proxy_bypass(True)
+            self.proxy_rotator.on_all_dead = (
+                lambda _rot: self.ratelimit.set_proxy_bypass(False)
+            )
+
         logger.debug(f"Sync Task #{task_id}: Processing sitemap {sitemap}")
 
         host_guild_id_raw = (sitemap.get("guild") or {}).get("id")
@@ -1794,6 +1825,8 @@ class ServerReceiver:
             return main_summary
 
         finally:
+            self.proxy_rotator.set_enabled(False)
+            self.ratelimit.set_proxy_bypass(False)
             logctx.sync_host_name.reset(_host_token)
             logctx.sync_display_id.reset(_id_token)
 
@@ -6230,7 +6263,6 @@ class ServerReceiver:
                     continue
 
         return text, embeds
-
 
     def _sanitize_inline(
         self,
