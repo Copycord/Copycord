@@ -29,6 +29,7 @@ class StickerManager:
         ratelimit,
         clone_guild_id: int | None = None,
         session=None,
+        emit_event_log=None,
     ):
         self.bot = bot
         self.db = db
@@ -36,11 +37,31 @@ class StickerManager:
         self.clone_guild_id = int(clone_guild_id or 0)
         self.session = session
         self.guild_resolver = guild_resolver
+        self._emit_event_log = emit_event_log
         self._state: dict[int, dict] = {}
         self._tasks: dict[int, asyncio.Task] = {}
         self._locks: dict[int, asyncio.Lock] = {}
         self._std_ok: set[int] = set()
         self._std_bad: set[int] = set()
+
+    async def _emit_log(
+        self,
+        event_type: str,
+        details: str,
+        guild_id: int = None,
+        guild_name: str = None,
+        **kwargs,
+    ):
+        """Fire the event-log callback if wired up."""
+        if self._emit_event_log:
+            try:
+                await self._emit_event_log(
+                    event_type, details,
+                    guild_id=guild_id, guild_name=guild_name,
+                    **kwargs,
+                )
+            except Exception:
+                pass
 
     def _log(self, level: str, msg: str, *args):
         """
@@ -238,6 +259,13 @@ class StickerManager:
                     "[🎟️] Sticker sync complete: %s",
                     summary_text,
                 )
+                if summary_parts:
+                    await self._emit_log(
+                        "sticker_synced",
+                        f"Sticker sync complete: {summary_text}",
+                        guild_id=guild.id,
+                        guild_name=getattr(guild, "name", None),
+                    )
 
             except asyncio.CancelledError:
                 self._log("debug", "[🎟️] Sticker sync canceled before completion.")
@@ -305,6 +333,12 @@ class StickerManager:
                         "[🎟️] Deleted sticker %s",
                         row["cloned_sticker_name"],
                     )
+                    await self._emit_log(
+                        "sticker_deleted",
+                        f"Deleted sticker '{row['cloned_sticker_name']}'",
+                        guild_id=guild.id,
+                        guild_name=getattr(guild, "name", None),
+                    )
 
                 except discord.Forbidden:
                     self._log(
@@ -362,6 +396,12 @@ class StickerManager:
                         "[🎟️] Renamed sticker %s → %s",
                         mapping["original_sticker_name"],
                         name,
+                    )
+                    await self._emit_log(
+                        "sticker_renamed",
+                        f"Renamed sticker '{mapping['original_sticker_name']}' → '{name}'",
+                        guild_id=guild.id,
+                        guild_name=getattr(guild, "name", None),
                     )
 
                 except discord.HTTPException as e:
@@ -447,6 +487,12 @@ class StickerManager:
                     "info",
                     "[🎟️] Created sticker %s",
                     name,
+                )
+                await self._emit_log(
+                    "sticker_created",
+                    f"Created sticker '{name}'",
+                    guild_id=guild.id,
+                    guild_name=getattr(guild, "name", None),
                 )
 
             except discord.HTTPException as e:

@@ -27,6 +27,7 @@ class EmojiManager:
         ratelimit,
         clone_guild_id: int | None = None,
         session=None,
+        emit_event_log=None,
     ):
         self.bot = bot
         self.db = db
@@ -34,10 +35,30 @@ class EmojiManager:
         self.clone_guild_id = int(clone_guild_id or 0)
         self.session = session
         self.guild_resolver = guild_resolver
+        self._emit_event_log = emit_event_log
 
         self._tasks: dict[int, asyncio.Task] = {}
 
         self._locks: dict[int, asyncio.Lock] = {}
+
+    async def _emit_log(
+        self,
+        event_type: str,
+        details: str,
+        guild_id: int = None,
+        guild_name: str = None,
+        **kwargs,
+    ):
+        """Fire the event-log callback if wired up."""
+        if self._emit_event_log:
+            try:
+                await self._emit_event_log(
+                    event_type, details,
+                    guild_id=guild_id, guild_name=guild_name,
+                    **kwargs,
+                )
+            except Exception:
+                pass
 
     def _log(self, level: str, msg: str, *args):
         """
@@ -166,10 +187,17 @@ class EmojiManager:
                     changes.append(f"Created {c} emojis")
 
                 if changes:
+                    summary = "; ".join(changes)
                     self._log(
                         "info",
                         "[😊] Emoji sync complete: %s",
-                        "; ".join(changes),
+                        summary,
+                    )
+                    await self._emit_log(
+                        "emoji_synced",
+                        f"Emoji sync complete: {summary}",
+                        guild_id=guild.id,
+                        guild_name=getattr(guild, "name", None),
                     )
                 else:
                     self._log(
@@ -231,6 +259,12 @@ class EmojiManager:
                         "[😊] Deleted emoji %s",
                         row["cloned_emoji_name"],
                     )
+                    await self._emit_log(
+                        "emoji_deleted",
+                        f"Deleted emoji '{row['cloned_emoji_name']}'",
+                        guild_id=guild.id,
+                        guild_name=getattr(guild, "name", None),
+                    )
                 except discord.Forbidden:
                     self._log(
                         "warning",
@@ -274,6 +308,12 @@ class EmojiManager:
                         cloned.name,
                         name,
                     )
+                    await self._emit_log(
+                        "emoji_renamed",
+                        f"Renamed emoji '{cloned.name}' → '{name}'",
+                        guild_id=guild.id,
+                        guild_name=getattr(guild, "name", None),
+                    )
                     self.db.upsert_emoji_mapping(
                         orig_id,
                         name,
@@ -301,6 +341,12 @@ class EmojiManager:
                         "[😊] Renamed emoji %s → %s",
                         mapping["original_emoji_name"],
                         name,
+                    )
+                    await self._emit_log(
+                        "emoji_renamed",
+                        f"Renamed emoji '{mapping['original_emoji_name']}' → '{name}'",
+                        guild_id=guild.id,
+                        guild_name=getattr(guild, "name", None),
                     )
                     self.db.upsert_emoji_mapping(
                         orig_id,
@@ -364,6 +410,12 @@ class EmojiManager:
                     "info",
                     "[😊] Created emoji %s",
                     name,
+                )
+                await self._emit_log(
+                    "emoji_created",
+                    f"Created emoji '{name}'",
+                    guild_id=guild.id,
+                    guild_name=getattr(guild, "name", None),
                 )
                 self.db.upsert_emoji_mapping(
                     orig_id,

@@ -27,6 +27,7 @@ class RoleManager:
         clone_guild_id: int | None = None,
         delete_roles: bool | None = None,
         mirror_permissions: bool | None = None,
+        emit_event_log=None,
     ):
         self.bot = bot
         self.db = db
@@ -37,11 +38,31 @@ class RoleManager:
         self.mirror_permissions = (
             bool(mirror_permissions) if mirror_permissions is not None else False
         )
+        self._emit_event_log = emit_event_log
 
         self._tasks: dict[int, asyncio.Task] = {}
         self._locks: dict[int, asyncio.Lock] = {}
 
         self.MAX_ROLES = 250
+
+    async def _emit_log(
+        self,
+        event_type: str,
+        details: str,
+        guild_id: int = None,
+        guild_name: str = None,
+        **kwargs,
+    ):
+        """Fire the event-log callback if wired up."""
+        if self._emit_event_log:
+            try:
+                await self._emit_event_log(
+                    event_type, details,
+                    guild_id=guild_id, guild_name=guild_name,
+                    **kwargs,
+                )
+            except Exception:
+                pass
 
     def _log(self, level: str, msg: str, *args) -> None:
         """
@@ -388,6 +409,12 @@ class RoleManager:
                         cloned_role.name,
                         cloned_role.id,
                     )
+                    await self._emit_log(
+                        "role_deleted",
+                        f"Deleted role '{cloned_role.name}'",
+                        guild_id=clone_id,
+                        guild_name=getattr(guild, "name", None),
+                    )
 
                 except Exception as e:
                     self._log(
@@ -525,6 +552,12 @@ class RoleManager:
                         "[🧩] Created role %s",
                         new_role.name,
                     )
+                    await self._emit_log(
+                        "role_created",
+                        f"Created role '{new_role.name}'",
+                        guild_id=clone_id,
+                        guild_name=getattr(guild, "name", None),
+                    )
 
                     can_create = len(guild.roles) < self.MAX_ROLES
                     continue
@@ -636,6 +669,12 @@ class RoleManager:
                             "info",
                             "[🧩] Updated role %s",
                             cloned_role.name,
+                        )
+                        await self._emit_log(
+                            "role_updated",
+                            f"Updated role '{cloned_role.name}' ({'; '.join(changes)})",
+                            guild_id=clone_id,
+                            guild_name=getattr(guild, "name", None),
                         )
 
                     except Exception as e:

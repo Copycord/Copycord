@@ -982,6 +982,56 @@ class DBManager:
             ],
         )
 
+        self._ensure_table(
+            name="event_logs",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    log_id          TEXT PRIMARY KEY,
+                    event_type      TEXT NOT NULL,
+                    guild_id        INTEGER,
+                    guild_name      TEXT,
+                    channel_id      INTEGER,
+                    channel_name    TEXT,
+                    category_id     INTEGER,
+                    category_name   TEXT,
+                    details         TEXT NOT NULL DEFAULT '',
+                    extra_json      TEXT,
+                    created_at      INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER))
+                );
+            """,
+            required_columns={
+                "log_id",
+                "event_type",
+                "guild_id",
+                "guild_name",
+                "channel_id",
+                "channel_name",
+                "category_id",
+                "category_name",
+                "details",
+                "extra_json",
+                "created_at",
+            },
+            copy_map={
+                "log_id": "log_id",
+                "event_type": "event_type",
+                "guild_id": "guild_id",
+                "guild_name": "guild_name",
+                "channel_id": "channel_id",
+                "channel_name": "channel_name",
+                "category_id": "category_id",
+                "category_name": "category_name",
+                "details": "details",
+                "extra_json": "extra_json",
+                "created_at": "created_at",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_event_logs_type ON event_logs(event_type);",
+                "CREATE INDEX IF NOT EXISTS idx_event_logs_guild ON event_logs(guild_id);",
+                "CREATE INDEX IF NOT EXISTS idx_event_logs_created ON event_logs(created_at);",
+            ],
+        )
+
     def _table_exists(self, name: str) -> bool:
         row = self.conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -5070,6 +5120,147 @@ class DBManager:
                 (int(time.time()), token_id),
             )
             self.conn.commit()
+
+    # ── event_logs CRUD ──────────────────────────────────────────────
+
+    def add_event_log(
+        self,
+        event_type: str,
+        details: str,
+        guild_id: Optional[int] = None,
+        guild_name: Optional[str] = None,
+        channel_id: Optional[int] = None,
+        channel_name: Optional[str] = None,
+        category_id: Optional[int] = None,
+        category_name: Optional[str] = None,
+        extra: Optional[dict] = None,
+    ) -> str:
+        """Insert a new event log entry and return its log_id."""
+        log_id = uuid.uuid4().hex[:12]
+        extra_json = json.dumps(extra, separators=(",", ":")) if extra else None
+        with self.lock:
+            self.conn.execute(
+                """
+                INSERT INTO event_logs
+                    (log_id, event_type, guild_id, guild_name, channel_id,
+                     channel_name, category_id, category_name, details, extra_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(strftime('%s','now') AS INTEGER))
+                """,
+                (
+                    log_id,
+                    event_type,
+                    guild_id,
+                    guild_name,
+                    channel_id,
+                    channel_name,
+                    category_id,
+                    category_name,
+                    details,
+                    extra_json,
+                ),
+            )
+            self.conn.commit()
+        return log_id
+
+    def get_event_logs(
+        self,
+        event_type: Optional[str] = None,
+        guild_id: Optional[int] = None,
+        search: Optional[str] = None,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> List[dict]:
+        """Return event logs filtered by optional type, guild, and search text."""
+        clauses = []
+        params: list = []
+
+        if event_type:
+            clauses.append("event_type = ?")
+            params.append(event_type)
+        if guild_id is not None:
+            clauses.append("guild_id = ?")
+            params.append(guild_id)
+        if search:
+            clauses.append(
+                "(details LIKE ? OR channel_name LIKE ? OR category_name LIKE ? OR guild_name LIKE ?)"
+            )
+            pat = f"%{search}%"
+            params.extend([pat, pat, pat, pat])
+
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        sql = f"SELECT * FROM event_logs{where} ORDER BY created_at DESC, log_id DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+
+        with self.lock:
+            rows = self.conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_event_logs(
+        self,
+        event_type: Optional[str] = None,
+        guild_id: Optional[int] = None,
+        search: Optional[str] = None,
+    ) -> int:
+        """Return total count matching the given filters."""
+        clauses = []
+        params: list = []
+
+        if event_type:
+            clauses.append("event_type = ?")
+            params.append(event_type)
+        if guild_id is not None:
+            clauses.append("guild_id = ?")
+            params.append(guild_id)
+        if search:
+            clauses.append(
+                "(details LIKE ? OR channel_name LIKE ? OR category_name LIKE ? OR guild_name LIKE ?)"
+            )
+            pat = f"%{search}%"
+            params.extend([pat, pat, pat, pat])
+
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        sql = f"SELECT COUNT(*) FROM event_logs{where}"
+
+        with self.lock:
+            row = self.conn.execute(sql, params).fetchone()
+        return row[0] if row else 0
+
+    def get_event_log_types(self) -> List[str]:
+        """Return distinct event types present in the log."""
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT DISTINCT event_type FROM event_logs ORDER BY event_type"
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def delete_event_log(self, log_id: str) -> bool:
+        """Delete a single event log entry."""
+        with self.lock:
+            cur = self.conn.execute(
+                "DELETE FROM event_logs WHERE log_id = ?", (log_id,)
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def delete_event_logs_bulk(self, log_ids: List[str]) -> int:
+        """Delete multiple event log entries. Returns count deleted."""
+        if not log_ids:
+            return 0
+        placeholders = ",".join("?" for _ in log_ids)
+        with self.lock:
+            cur = self.conn.execute(
+                f"DELETE FROM event_logs WHERE log_id IN ({placeholders})",
+                log_ids,
+            )
+            self.conn.commit()
+            return cur.rowcount
+
+    def clear_event_logs(self) -> int:
+        """Delete all event log entries. Returns count deleted."""
+        with self.lock:
+            cur = self.conn.execute("DELETE FROM event_logs")
+            self.conn.commit()
+            return cur.rowcount
 
     def get_valid_scraper_tokens(self) -> list[dict]:
         """Return only validated scraper tokens."""

@@ -10962,3 +10962,462 @@ body.page-forwarding .fwd-no-match-sub {
 .spin {
   animation: spin-icon 0.8s linear infinite;
 }
+
+/* ═══════════════════════════════════════════════════════════
+   Event Logs Page — table layout
+   ═══════════════════════════════════════════════════════════ */
+
+.logs-wide {
+  max-width: 1200px;
+}
+
+/* ── Header row ──────────────────────────────────────────── */
+.logs-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+.logs-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0;
+}
+
+/* ── Filters toolbar ─────────────────────────────────────── */
+.logs-filters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(27, 16, 48, 0.6) 0%, rgba(20, 10, 40, 0.4) 100%);
+  border: 1px solid var(--border);
+}
+.logs-filter-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.logs-filter-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Search */
+.logs-search-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.logs-search-icon {
+  position: absolute;
+  left: 10px;
+  color: var(--muted);
+  pointer-events: none;
+}
+.logs-search {
+  padding: 7px 12px 7px 30px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(20, 10, 40, 0.6);
+  color: var(--text);
+  font-size: 13px;
+  width: 200px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.logs-search:focus {
+  border-color: var(--accent);
+}
+.logs-search::placeholder {
+  color: var(--muted);
+  opacity: 0.6;
+}
+
+/* Filter select (native <select> is hidden; .dd wrapper inherits size) */
+.logs-select {
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(20, 10, 40, 0.6);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s;
+  width: 300px;
+  min-width: 300px;
+  max-width: 300px;
+}
+.logs-select:focus {
+  border-color: var(--accent);
+}
+.logs-select option {
+  background: #1b1030;
+  color: var(--text);
+}
+
+/* Override custom .dd dropdown when used in logs filter */
+.logs-filter-group .dd {
+  width: 300px;
+  min-width: 300px;
+}
+.logs-filter-group .dd-toggle {
+  width: 300px;
+  min-width: 300px;
+}
+.logs-filter-group .dd-menu {
+  width: 300px;
+  min-width: 300px;
+  max-height: 360px;
+}
+.logs-filter-group .dd-option {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+/* Count label */
+.logs-count {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Clear Filters button */
+.btn-clear-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  font-size: 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(139, 92, 246, 0.3);
+  background: rgba(139, 92, 246, 0.1);
+  color: #c4b5fd;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  white-space: nowrap;
+}
+.btn-clear-filters:hover {
+  background: rgba(139, 92, 246, 0.2);
+  border-color: rgba(139, 92, 246, 0.5);
+}
+
+/* Delete-all icon button */
+.btn-icon-sm {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.2s, background 0.2s, border-color 0.2s;
+}
+.btn-icon-sm:hover {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+/* ── Table wrapper with scroll ───────────────────────────── */
+.logs-table-wrap {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(27, 16, 48, 0.5) 0%, rgba(15, 8, 30, 0.6) 100%);
+  overflow: hidden;
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
+}
+
+/* Custom scrollbar */
+.logs-table-wrap::-webkit-scrollbar {
+  width: 6px;
+}
+.logs-table-wrap::-webkit-scrollbar-track {
+  background: transparent;
+}
+.logs-table-wrap::-webkit-scrollbar-thumb {
+  background: rgba(139, 92, 246, 0.25);
+  border-radius: 3px;
+}
+.logs-table-wrap::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 92, 246, 0.4);
+}
+
+/* ── Table ────────────────────────────────────────────────── */
+.logs-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.logs-table thead {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+.logs-table thead tr {
+  background: rgba(20, 10, 40, 0.95);
+  backdrop-filter: blur(8px);
+}
+.logs-table th {
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+/* Column widths */
+.lt-col-time    { width: 200px; min-width: 200px; }
+.lt-col-type    { width: 160px; }
+.lt-col-guild   { width: 140px; }
+.lt-col-details { width: auto; }
+.lt-col-actions { width: 44px; text-align: center; }
+
+/* ── Table rows ──────────────────────────────────────────── */
+.log-row {
+  transition: background 0.15s;
+}
+.log-row:hover {
+  background: rgba(139, 92, 246, 0.06);
+}
+.log-row td {
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--text);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  vertical-align: middle;
+}
+
+/* Timestamp */
+.log-ts {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* Guild label */
+.log-guild-label {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+/* Detail text */
+.log-detail-text {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 13px;
+}
+
+/* ── Type badge ──────────────────────────────────────────── */
+.log-type-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 6px;
+  text-transform: capitalize;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+}
+
+/* Color themes per type */
+.log-type-badge.log-created {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.log-type-badge.log-deleted {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border: 1px solid rgba(239, 68, 68, 0.25);
+}
+.log-type-badge.log-renamed {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+  border: 1px solid rgba(251, 191, 36, 0.25);
+}
+.log-type-badge.log-moved {
+  background: rgba(96, 165, 250, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(96, 165, 250, 0.25);
+}
+.log-type-badge.log-converted {
+  background: rgba(167, 139, 250, 0.15);
+  color: #a78bfa;
+  border: 1px solid rgba(167, 139, 250, 0.25);
+}
+.log-type-badge.log-thread {
+  background: rgba(244, 114, 182, 0.15);
+  color: #f472b6;
+  border: 1px solid rgba(244, 114, 182, 0.25);
+}
+.log-type-badge.log-role {
+  background: rgba(251, 146, 60, 0.15);
+  color: #fb923c;
+  border: 1px solid rgba(251, 146, 60, 0.25);
+}
+.log-type-badge.log-emoji {
+  background: rgba(34, 211, 238, 0.15);
+  color: #22d3ee;
+  border: 1px solid rgba(34, 211, 238, 0.25);
+}
+.log-type-badge.log-sticker {
+  background: rgba(232, 121, 249, 0.15);
+  color: #e879f9;
+  border: 1px solid rgba(232, 121, 249, 0.25);
+}
+.log-type-badge.log-guild {
+  background: rgba(192, 132, 252, 0.15);
+  color: #c084fc;
+  border: 1px solid rgba(192, 132, 252, 0.25);
+}
+.log-type-badge.log-permissions {
+  background: rgba(253, 186, 116, 0.15);
+  color: #fdba74;
+  border: 1px solid rgba(253, 186, 116, 0.25);
+}
+.log-type-badge.log-metadata {
+  background: rgba(56, 189, 248, 0.15);
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+.log-type-badge.log-webhook {
+  background: rgba(139, 92, 246, 0.15);
+  color: #a78bfa;
+  border: 1px solid rgba(139, 92, 246, 0.25);
+}
+.log-type-badge.log-error {
+  background: rgba(239, 68, 68, 0.2);
+  color: #fca5a5;
+  border: 1px solid rgba(239, 68, 68, 0.35);
+}
+.log-type-badge.log-default {
+  background: rgba(148, 163, 184, 0.15);
+  color: #94a3b8;
+  border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+/* ── Delete button in row ────────────────────────────────── */
+.log-delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 4px;
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.2s, background 0.2s;
+  opacity: 0;
+}
+.log-row:hover .log-delete-btn {
+  opacity: 1;
+}
+.log-delete-btn:hover {
+  color: #f87171;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+/* ── Empty state ─────────────────────────────────────────── */
+.logs-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 50px 20px;
+  color: var(--muted);
+  text-align: center;
+  gap: 6px;
+}
+.logs-empty p {
+  margin: 0;
+}
+
+/* ── Animations ──────────────────────────────────────────── */
+@keyframes log-fade-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(20px);
+  }
+}
+.log-removing {
+  animation: log-fade-out 0.25s ease-in forwards;
+}
+
+/* ── Sortable Headers ────────────────────────────────────── */
+.sortable {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+}
+.sortable:hover {
+  color: var(--text);
+}
+.sort-arrow {
+  font-size: 11px;
+  margin-left: 4px;
+  opacity: 0.3;
+  transition: opacity 0.15s;
+}
+.sortable.sorted .sort-arrow {
+  opacity: 1;
+  color: var(--accent, #5865f2);
+}
+
+/* ── Responsive ──────────────────────────────────────────── */
+@media (max-width: 768px) {
+  .logs-filters {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .logs-filter-group {
+    flex-direction: column;
+  }
+  .logs-search {
+    width: 100%;
+  }
+  .logs-select {
+    width: 100%;
+  }
+  .logs-table-wrap {
+    max-height: calc(100vh - 320px);
+  }
+  .lt-col-guild {
+    display: none;
+  }
+  .lt-col-time {
+    width: 130px;
+  }
+  .log-delete-btn {
+    opacity: 1;
+  }
+}
+
+

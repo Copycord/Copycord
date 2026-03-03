@@ -33,6 +33,7 @@ class ChannelPermissionSync:
         logger=None,
         ratelimit=None,
         rate_limiter_action=None,
+        emit_event_log=None,
     ) -> None:
         self.config = config
         self.db = db
@@ -46,6 +47,7 @@ class ChannelPermissionSync:
         self.log = logger
         self.ratelimit = ratelimit
         self.rate_limiter_action = rate_limiter_action
+        self._emit_event_log = emit_event_log
 
     def _log(self, level: str, msg: str, *args) -> None:
         """
@@ -99,10 +101,11 @@ class ChannelPermissionSync:
                 )
                 parts = await self._sync_permissions(guild, sitemap, src_everyone_id)
                 if parts:
+                    summary = "; ".join(parts)
                     self._log(
                         "info",
                         "[🔐] Channel permission sync complete: %s",
-                        "; ".join(parts),
+                        summary,
                     )
                 else:
                     self._log(
@@ -499,6 +502,18 @@ class ChannelPermissionSync:
                 getattr(ch, "name", "?"),
                 len(desired_role_map),
             )
+            if self._emit_event_log:
+                try:
+                    await self._emit_event_log(
+                        "permissions_synced",
+                        f"Applied permissions on '#{getattr(ch, 'name', ch.id)}' ({len(desired_role_map)} roles)",
+                        guild_id=guild.id,
+                        guild_name=getattr(guild, "name", None),
+                        channel_id=ch.id,
+                        channel_name=getattr(ch, "name", None),
+                    )
+                except Exception:
+                    pass
             return True
         except Exception as e:
             self._log(

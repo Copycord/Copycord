@@ -394,4 +394,4 @@ def patch_discord_http(bot, rotator: ProxyRotator) -> None:
 
     http_client.request = _proxy_request
     http_client._proxy_patched = True
-    logger.info("[🔀] Patched discord HTTP client for proxy rotation")
+    logger.debug("[🔀] Patched discord HTTP client for proxy rotation")
