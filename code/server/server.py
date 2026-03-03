@@ -245,6 +245,7 @@ class ServerReceiver:
             logger=logger.getChild("perm-sync"),
             ratelimit=self.ratelimit,
             rate_limiter_action=ActionType.EDIT_CHANNEL,
+            emit_event_log=self._emit_event_log,
         )
         self.onjoin = OnJoinService(self.bot, self.db, logger.getChild("OnJoin"))
         install_discord_rl_probe(self.ratelimit)
@@ -1778,13 +1779,6 @@ class ServerReceiver:
 
                 self._load_mappings()
 
-                await self._emit_event_log(
-                    "sync_started",
-                    f"Structure sync started for guild '{guild.name}'",
-                    guild_id=guild.id,
-                    guild_name=guild.name,
-                )
-
                 with self._clone_log_label(int(target_clone_gid)):
                     self.stickers.set_last_sitemap(
                         clone_guild_id=int(target_clone_gid),
@@ -1872,13 +1866,6 @@ class ServerReceiver:
             main_summary = "; ".join(parts) if parts else "No structure changes needed"
 
             self._schedule_flush()
-
-            await self._emit_event_log(
-                "sync_completed",
-                f"Structure sync completed: {main_summary}",
-                guild_id=guild.id,
-                guild_name=guild.name,
-            )
 
             return main_summary
 
@@ -2147,6 +2134,12 @@ class ServerReceiver:
             )
             parts.append(
                 "Updated guild metadata: " + ", ".join(sorted(set(changed_fields)))
+            )
+            await self._emit_event_log(
+                "guild_metadata",
+                f"Updated guild metadata: {', '.join(sorted(set(changed_fields)))}",
+                guild_id=guild.id,
+                guild_name=guild.name,
             )
         except Exception:
             logger.warning(
@@ -3461,12 +3454,28 @@ class ServerReceiver:
                         ch.id,
                         log_str,
                     )
+                    await self._emit_event_log(
+                        "voice_metadata_updated",
+                        f"Updated voice metadata for '{ch.name}': {log_str}",
+                        guild_id=guild.id,
+                        guild_name=getattr(guild, "name", None),
+                        channel_id=ch.id,
+                        channel_name=ch.name,
+                    )
                 elif is_stage_ch and stage_changed_here:
                     logger.info(
                         "[🎭] Updated stage metadata for '%s' #%d: %s",
                         ch.name,
                         ch.id,
                         log_str,
+                    )
+                    await self._emit_event_log(
+                        "stage_metadata_updated",
+                        f"Updated stage metadata for '{ch.name}': {log_str}",
+                        guild_id=guild.id,
+                        guild_name=getattr(guild, "name", None),
+                        channel_id=ch.id,
+                        channel_name=ch.name,
                     )
                 elif is_forum_ch and forum_changed_here:
                     logger.info(
@@ -3475,12 +3484,28 @@ class ServerReceiver:
                         ch.id,
                         log_str,
                     )
+                    await self._emit_event_log(
+                        "forum_metadata_updated",
+                        f"Updated forum metadata for '{ch.name}': {log_str}",
+                        guild_id=guild.id,
+                        guild_name=getattr(guild, "name", None),
+                        channel_id=ch.id,
+                        channel_name=ch.name,
+                    )
                 else:
                     logger.info(
                         "[📝] Updated channel metadata for '%s' #%d: %s",
                         ch.name,
                         ch.id,
                         log_str,
+                    )
+                    await self._emit_event_log(
+                        "channel_metadata_updated",
+                        f"Updated channel metadata for '{ch.name}': {log_str}",
+                        guild_id=guild.id,
+                        guild_name=getattr(guild, "name", None),
+                        channel_id=ch.id,
+                        channel_name=ch.name,
                     )
 
             except Exception as e:
@@ -3684,6 +3709,16 @@ class ServerReceiver:
                 )
                 logger.info("[➕] Created forum channel '%s' #%d", name, ch.id)
                 created += 1
+                await self._emit_event_log(
+                    "forum_created",
+                    f"Created forum channel '{name}'",
+                    guild_id=guild.id,
+                    guild_name=getattr(guild, "name", None),
+                    channel_id=ch.id,
+                    channel_name=name,
+                    category_id=cloned_parent_id,
+                    category_name=_cat_name_from_sitemap(parent_id),
+                )
 
                 await _ensure_forum_webhook_url(
                     orig_id=orig_id,
@@ -5073,6 +5108,16 @@ class ServerReceiver:
                                 getattr(ch, "name", ch.id),
                                 getattr(clone_cat, "name", clone_cat.id),
                             )
+                            await self._emit_event_log(
+                                "channel_deleted",
+                                f"Deleted channel '#{getattr(ch, 'name', ch.id)}' (category '{getattr(clone_cat, 'name', clone_cat.id)}' removed)",
+                                guild_id=guild.id,
+                                guild_name=getattr(guild, "name", None),
+                                channel_id=getattr(ch, "id", None),
+                                channel_name=getattr(ch, "name", None),
+                                category_id=clone_cat_id,
+                                category_name=getattr(clone_cat, "name", None),
+                            )
                         except Exception:
                             logger.debug(
                                 "Failed to delete channel %s under category %s",
@@ -5510,6 +5555,14 @@ class ServerReceiver:
         await self.ratelimit.acquire_for_guild(ActionType.CREATE_CHANNEL, guild.id)
         cat = await guild.create_category(name)
         logger.info("[➕] Created category '%s' #%d", name, cat.id)
+        await self._emit_event_log(
+            "category_created",
+            f"Created category '{name}'",
+            guild_id=guild.id,
+            guild_name=getattr(guild, "name", None),
+            category_id=int(cat.id),
+            category_name=name,
+        )
 
         self.db.upsert_category_mapping(
             orig_id=original_id,
@@ -5548,6 +5601,14 @@ class ServerReceiver:
                 pass
             webhook = await ch.create_webhook(name=name, avatar=avatar_bytes)
             logger.info("[➕] Created webhook '%s' in channel #%s", name, ch.id)
+            await self._emit_event_log(
+                "webhook_created",
+                f"Created webhook in #{getattr(ch, 'name', ch.id)}",
+                guild_id=ch.guild.id,
+                guild_name=getattr(ch.guild, "name", None),
+                channel_id=ch.id,
+                channel_name=getattr(ch, "name", None),
+            )
             if hasattr(self, "_wh_meta"):
                 self._wh_meta.clear()
             return webhook
@@ -6170,6 +6231,14 @@ class ServerReceiver:
                         clone_gid,
                         getattr(getattr(t, "parent", None), "id", None),
                     )
+                    await self._emit_event_log(
+                        "thread_deleted",
+                        f"Deleted cloned thread '{getattr(t, 'name', cloned_tid)}'",
+                        guild_id=clone_gid,
+                        guild_name=getattr(g, "name", None),
+                        channel_id=cloned_tid,
+                        channel_name=getattr(t, "name", None),
+                    )
                 else:
                     logger.debug(
                         "[threads] delete: cloned thread not found (gid=%s tid=%s) — will drop mapping",
@@ -6289,6 +6358,14 @@ class ServerReceiver:
                     (ch.parent.name if getattr(ch, "parent", None) else "Unknown"),
                     old_name,
                     new_name,
+                )
+                await self._emit_event_log(
+                    "thread_renamed",
+                    f"Renamed thread from '{old_name}' to '{new_name}'",
+                    guild_id=clone_gid,
+                    guild_name=getattr(guild, "name", None),
+                    channel_id=cloned_id,
+                    channel_name=new_name,
                 )
             except Exception as e:
                 logger.error(
@@ -9923,6 +10000,16 @@ class ServerReceiver:
                                 original_guild_id=int(data.get("guild_id") or 0),
                                 cloned_guild_id=int(guild.id),
                             )
+
+                            if created:
+                                await self._emit_event_log(
+                                    "thread_created",
+                                    f"Created thread '{data['thread_name']}' in #{getattr(cloned_parent, 'name', cloned_id)}",
+                                    guild_id=guild.id,
+                                    guild_name=getattr(guild, "name", None),
+                                    channel_id=new_id,
+                                    channel_name=data["thread_name"],
+                                )
 
                         if not created and clone_thread is not None:
                             meta = await self._get_webhook_meta(parent_id, webhook_url)

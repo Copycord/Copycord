@@ -259,6 +259,13 @@ class StickerManager:
                     "[🎟️] Sticker sync complete: %s",
                     summary_text,
                 )
+                if summary_parts:
+                    await self._emit_log(
+                        "sticker_synced",
+                        f"Sticker sync complete: {summary_text}",
+                        guild_id=guild.id,
+                        guild_name=getattr(guild, "name", None),
+                    )
 
             except asyncio.CancelledError:
                 self._log("debug", "[🎟️] Sticker sync canceled before completion.")

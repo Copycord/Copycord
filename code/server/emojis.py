@@ -187,10 +187,17 @@ class EmojiManager:
                     changes.append(f"Created {c} emojis")
 
                 if changes:
+                    summary = "; ".join(changes)
                     self._log(
                         "info",
                         "[😊] Emoji sync complete: %s",
-                        "; ".join(changes),
+                        summary,
+                    )
+                    await self._emit_log(
+                        "emoji_synced",
+                        f"Emoji sync complete: {summary}",
+                        guild_id=guild.id,
+                        guild_name=getattr(guild, "name", None),
                     )
                 else:
                     self._log(

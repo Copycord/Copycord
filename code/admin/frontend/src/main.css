@@ -11298,15 +11298,10 @@ body.page-forwarding .fwd-no-match-sub {
   color: #fdba74;
   border: 1px solid rgba(253, 186, 116, 0.25);
 }
-.log-type-badge.log-sync {
-  background: rgba(96, 165, 250, 0.15);
-  color: #93c5fd;
-  border: 1px solid rgba(96, 165, 250, 0.25);
-}
-.log-type-badge.log-sync-done {
-  background: rgba(16, 185, 129, 0.15);
-  color: #6ee7b7;
-  border: 1px solid rgba(16, 185, 129, 0.25);
+.log-type-badge.log-metadata {
+  background: rgba(56, 189, 248, 0.15);
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.25);
 }
 .log-type-badge.log-webhook {
   background: rgba(139, 92, 246, 0.15);
