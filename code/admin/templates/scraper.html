@@ -168,7 +168,7 @@
           </svg>
           Member Scraper
         </h2>
-        <p class="scraper-subtitle">Scrape Discord server members using multiple tokens via gateway</p>
+        <p class="scraper-subtitle">Scrape Discord server members</p>
       </div>
       <span class="scraper-status-pill" id="sc-status-pill" data-status="idle">
         <span class="pill-dot"></span>
@@ -257,6 +257,10 @@
               Validate
             </button>
             <div class="sc-actions-right">
+              <button class="btn btn-outline" id="sc-queue-btn" type="button" title="Add to queue">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 0 1 0 3.75H5.625a1.875 1.875 0 0 1 0-3.75Z" /></svg>
+                Add to Queue
+              </button>
               <button class="btn btn-primary" id="sc-start-btn" type="button">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347a1.125 1.125 0 0 1-1.667-.986V5.653Z" /></svg>
                 Start Scrape
@@ -291,6 +295,24 @@
         </div>
       </div>
     </details>
+
+    <!-- ─── Scrape Queue ─── -->
+    <section class="card scraper-card" id="sc-queue-card" hidden>
+      <div class="card-titlebar">
+        <h3>Queue</h3>
+        <div class="titlebar-actions">
+          <span class="sc-queue-count" id="sc-queue-count"></span>
+          <button class="btn btn-ghost btn-xs" id="sc-queue-clear" type="button" title="Clear pending">Clear</button>
+          <button class="btn btn-ghost-red btn-xs" id="sc-cancel-all-btn" type="button" title="Cancel all">Cancel All</button>
+        </div>
+      </div>
+      <div class="sc-queue-body" id="sc-queue-body">
+        <div class="sc-queue-empty" id="sc-queue-empty" hidden>
+          <p>Queue is empty</p>
+        </div>
+        <div class="sc-queue-list" id="sc-queue-list"></div>
+      </div>
+    </section>
 
     <!-- ─── Progress Section ─── -->
     <section class="card scraper-card" id="sc-progress-card" hidden>

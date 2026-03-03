@@ -43,6 +43,14 @@
   const proxyClearBtn = $("#sc-proxy-clear");
   const proxyPrependHttp = $("#sc-proxy-prepend-http");
   const proxyPrependSocks5 = $("#sc-proxy-prepend-socks5");
+  const queueCard = $("#sc-queue-card");
+  const queueBody = $("#sc-queue-body");
+  const queueList = $("#sc-queue-list");
+  const queueEmpty = $("#sc-queue-empty");
+  const queueCount = $("#sc-queue-count");
+  const queueClearBtn = $("#sc-queue-clear");
+  const cancelAllBtn = $("#sc-cancel-all-btn");
+  const queueBtn = $("#sc-queue-btn");
 
   let tokens = [];
   let running = false;
@@ -56,6 +64,7 @@
   let elapsedTimer = null;
   let startTime = null;
   let lastProgress = { current: 0, total: 0, time: 0 };
+  let queueItems = [];
 
   const loader = document.getElementById("app-loader");
 
@@ -379,6 +388,8 @@
           onProgress(p.current, p.total, p.message);
         } else if (p.type === "complete") {
           onComplete(p);
+        } else if (p.type === "queue_update") {
+          onQueueUpdate(p);
         }
       } catch {}
     };
@@ -457,7 +468,97 @@
     prependScheme("socks5://")
   );
 
-  startBtn.addEventListener("click", async () => {
+  /* ── Queue helpers ── */
+
+  function getScraperPayload() {
+    const proxies = getProxyLines();
+    return {
+      guild_id: guildIdIn.value.trim(),
+      include_username: $("#sc-opt-username").checked,
+      include_avatar_url: $("#sc-opt-avatar").checked,
+      include_bio: $("#sc-opt-bio").checked,
+      include_roles: $("#sc-opt-roles").checked,
+      proxies: proxies.length > 0 ? proxies : undefined,
+    };
+  }
+
+  function renderQueue() {
+    if (!queueList || !queueCard) return;
+
+    if (queueItems.length === 0) {
+      queueCard.hidden = true;
+      return;
+    }
+
+    queueCard.hidden = false;
+    queueCount.textContent = `${queueItems.length} item${queueItems.length !== 1 ? "s" : ""}`;
+    queueList.innerHTML = "";
+    queueEmpty.hidden = queueItems.length > 0;
+
+    for (const item of queueItems) {
+      const el = document.createElement("div");
+      el.className = "sc-queue-item";
+      el.dataset.id = item.id;
+
+      const statusClass = item.status === "running" ? "running" : "pending";
+      const statusIcon = item.status === "running"
+        ? `<svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182"/></svg>`
+        : `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/></svg>`;
+
+      el.innerHTML = `
+        <div class="sc-queue-info">
+          <span class="sc-queue-badge ${statusClass}">${statusIcon}</span>
+          <div class="sc-queue-meta">
+            <span class="sc-queue-guild">${esc(String(item.guild_id))}</span>
+            <span class="sc-queue-status">${item.status === "running" ? "Scraping…" : "Pending"}</span>
+          </div>
+        </div>
+        <div class="sc-queue-actions">
+          ${item.status !== "running" ? `<button class="btn btn-ghost btn-xs sc-queue-remove" data-id="${item.id}" title="Remove from queue">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12"/></svg>
+          </button>` : ""}
+        </div>`;
+
+      queueList.appendChild(el);
+    }
+  }
+
+  queueList.addEventListener("click", async (e) => {
+    const removeBtn = e.target.closest(".sc-queue-remove");
+    if (!removeBtn) return;
+    const id = removeBtn.dataset.id;
+    removeBtn.disabled = true;
+    const j = await api(`/api/scraper/queue/${id}`, { method: "DELETE" });
+    if (j.ok) {
+      toast("Removed from queue", { type: "success" });
+    } else {
+      toast(j.error || "Failed to remove", { type: "error" });
+      removeBtn.disabled = false;
+    }
+  });
+
+  queueClearBtn.addEventListener("click", async () => {
+    const j = await api("/api/scraper/queue/clear", { method: "POST" });
+    if (j.ok) {
+      toast("Queue cleared", { type: "success" });
+    } else {
+      toast(j.error || "Failed to clear queue", { type: "error" });
+    }
+  });
+
+  cancelAllBtn.addEventListener("click", async () => {
+    if (!confirm("Cancel the current scrape and clear the entire queue?")) return;
+    cancelAllBtn.disabled = true;
+    const j = await api("/api/scraper/cancel-all", { method: "POST" });
+    cancelAllBtn.disabled = false;
+    if (j.ok) {
+      toast("All cancelled", { type: "warning" });
+    } else {
+      toast(j.error || "Cancel failed", { type: "error" });
+    }
+  });
+
+  queueBtn.addEventListener("click", async () => {
     const gid = guildIdIn.value.trim();
     if (!gid) {
       toast("Enter a Guild ID", { type: "warning" });
@@ -468,16 +569,53 @@
       return;
     }
 
+    queueBtn.disabled = true;
+    const payload = getScraperPayload();
+
+    const j = await api("/api/scraper/queue/add", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    queueBtn.disabled = false;
+
+    if (j.ok) {
+      toast(`Guild ${gid} added to queue (position ${j.queue_position})`, { type: "success" });
+      guildIdIn.value = "";
+    } else {
+      toast(j.error || "Failed to add to queue", { type: "error" });
+    }
+  });
+
+  startBtn.addEventListener("click", async () => {
+    const gid = guildIdIn.value.trim();
+
+    // If no guild ID but there are queued items, just start the queue
+    if (!gid && queueItems.length > 0) {
+      startBtn.disabled = true;
+      const j = await api("/api/scraper/queue/start", { method: "POST" });
+      startBtn.disabled = false;
+      if (j.ok) {
+        toast("Queue started", { type: "success" });
+        enterRunningState();
+      } else {
+        toast(j.error || "Failed to start queue", { type: "error" });
+      }
+      return;
+    }
+
+    if (!gid) {
+      toast("Enter a Guild ID or add guilds to the queue", { type: "warning" });
+      return;
+    }
+    if (!tokens.length) {
+      toast("Add tokens first", { type: "warning" });
+      return;
+    }
+
     startBtn.disabled = true;
-    const proxies = getProxyLines();
-    const payload = {
-      guild_id: gid,
-      include_username: $("#sc-opt-username").checked,
-      include_avatar_url: $("#sc-opt-avatar").checked,
-      include_bio: $("#sc-opt-bio").checked,
-      include_roles: $("#sc-opt-roles").checked,
-      proxies: proxies.length > 0 ? proxies : undefined,
-    };
+    const payload = getScraperPayload();
 
     const j = await api("/api/scraper/start", {
       method: "POST",
@@ -488,7 +626,11 @@
     startBtn.disabled = false;
 
     if (j.ok) {
-      toast(`Scraper started — ${j.tokens_used} token(s)`, { type: "success" });
+      const msg = j.queue_position > 1
+        ? `Queued — position ${j.queue_position} (${j.tokens_used} token(s))`
+        : `Scraper started — ${j.tokens_used} token(s)`;
+      toast(msg, { type: "success" });
+      guildIdIn.value = "";
       enterRunningState();
     } else {
       toast(j.error || "Failed to start", { type: "error" });
@@ -576,19 +718,42 @@
   function onComplete(data) {
     if (!running) return;
 
-    exitRunningState();
-
     if (data.success) {
-      setStatus("done", "Complete");
       toast(
-        `Scrape complete — ${data.total_count} members in ${fmtSec(
+        `Scrape complete${data.guild_id ? ` (${data.guild_id})` : ""} — ${data.total_count} members in ${fmtSec(
           data.elapsed_seconds
         )}`,
         { type: "success" }
       );
     } else {
-      setStatus("error", "Error");
       toast(data.error || "Scrape failed", { type: "error" });
+    }
+
+    // If there are more items in the queue, keep running state
+    const hasPending = queueItems.some(q => q.status === "pending");
+    if (hasPending) {
+      // Reset progress for the next item
+      progressFill.style.width = "0%";
+      progressText.textContent = "Starting next in queue…";
+      progressPct.textContent = "0%";
+      memberCountEl.textContent = "";
+      etaEl.textContent = "";
+      startTime = Date.now();
+      setStatus("running", "Running Queue");
+
+      if (data.success && data.total_count > 0) {
+        loadScrapes();
+      }
+      return;
+    }
+
+    // No more items — fully exit running state
+    exitRunningState();
+
+    if (data.success) {
+      setStatus("done", "Complete");
+    } else {
+      setStatus("error", "Error");
     }
 
     progressText.textContent = data.success
@@ -614,6 +779,21 @@
       }
       progressCard.hidden = true;
     }, 3000);
+  }
+
+  function onQueueUpdate(data) {
+    queueItems = data.queue || [];
+    renderQueue();
+
+    // If the queue is now empty and nothing is running, ensure we exit running state
+    if (!data.running && running) {
+      exitRunningState();
+      setStatus("idle", "Idle");
+    }
+    // If something is running and we weren't in running state, enter it
+    if (data.running && !running) {
+      enterRunningState();
+    }
   }
 
   function fmtSec(s) {
@@ -724,6 +904,13 @@
 
   async function checkStatus() {
     const j = await api("/api/scraper/status");
+
+    // Restore queue
+    if (j.queue && j.queue.length > 0) {
+      queueItems = j.queue;
+      renderQueue();
+    }
+
     if (j.running) {
       guildIdIn.value = j.guild_id || "";
 
