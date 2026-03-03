@@ -506,8 +506,19 @@ scraper_state = {
     "task": None,
     "result": None,
     "guild_id": None,
+    "started_at": None,
+    "queue": [],          # list of dicts: {id, guild_id, include_username, include_avatar_url, include_bio, include_roles, proxies, status, added_at}
+    "queue_task": None,   # the asyncio.Task running the queue processor
+    "queue_running": False,
 }
 scraper_lock = asyncio.Lock()
+_queue_id_counter = 0
+
+
+def _next_queue_id():
+    global _queue_id_counter
+    _queue_id_counter += 1
+    return _queue_id_counter
 
 
 class BackfillLocks:
@@ -3729,14 +3740,8 @@ async def api_server_proxies_toggle(request: Request):
 
 @app.post("/api/scraper/start", response_class=JSONResponse)
 async def api_scraper_start(request: Request):
-    """Start standalone scraper with multiple tokens."""
+    """Start standalone scraper with multiple tokens (single guild, immediate start)."""
     global scraper_state
-
-    async with scraper_lock:
-        if scraper_state["running"]:
-            return JSONResponse(
-                {"ok": False, "error": "Scraper is already running"}, status_code=409
-            )
 
     try:
         payload = await request.json()
@@ -3768,7 +3773,6 @@ async def api_scraper_start(request: Request):
     for token in tokens:
         if await _selfbot_in_guild(token["token_value"], guild_id):
             accessible_tokens.append(token)
-
             db.increment_scraper_token_usage(token["token_id"])
 
     if not accessible_tokens:
@@ -3779,6 +3783,283 @@ async def api_scraper_start(request: Request):
             },
             status_code=400,
         )
+
+    # Build a queue item and add it
+    item = {
+        "id": _next_queue_id(),
+        "guild_id": guild_id,
+        "include_username": include_username,
+        "include_avatar_url": include_avatar_url,
+        "include_bio": include_bio,
+        "include_roles": include_roles,
+        "proxies": proxy_list,
+        "status": "pending",
+        "added_at": time.time(),
+    }
+
+    async with scraper_lock:
+        scraper_state["queue"].append(item)
+
+    # Ensure the queue processor is running
+    await _ensure_queue_processor()
+
+    await _broadcast_queue_update()
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "message": "Scraper queued" if scraper_state["running"] else "Scraper started",
+            "tokens_used": len(accessible_tokens),
+            "proxies_used": len(proxy_list),
+            "guild_id": guild_id,
+            "queue_id": item["id"],
+            "queue_position": len(scraper_state["queue"]),
+        }
+    )
+
+
+@app.post("/api/scraper/queue/add", response_class=JSONResponse)
+async def api_scraper_queue_add(request: Request):
+    """Add a guild to the scraper queue."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+
+    try:
+        guild_id = int(payload.get("guild_id"))
+    except (ValueError, TypeError):
+        raise HTTPException(400, detail="Invalid guild_id")
+
+    include_username = bool(payload.get("include_username", True))
+    include_avatar_url = bool(payload.get("include_avatar_url", True))
+    include_bio = bool(payload.get("include_bio", False))
+    include_roles = bool(payload.get("include_roles", False))
+    proxy_list = [
+        p.strip()
+        for p in (payload.get("proxies") or [])
+        if isinstance(p, str) and p.strip()
+    ]
+
+    item = {
+        "id": _next_queue_id(),
+        "guild_id": guild_id,
+        "include_username": include_username,
+        "include_avatar_url": include_avatar_url,
+        "include_bio": include_bio,
+        "include_roles": include_roles,
+        "proxies": proxy_list,
+        "status": "pending",
+        "added_at": time.time(),
+    }
+
+    async with scraper_lock:
+        scraper_state["queue"].append(item)
+
+    await _broadcast_queue_update()
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "queue_id": item["id"],
+            "queue_position": len(scraper_state["queue"]),
+        }
+    )
+
+
+@app.get("/api/scraper/queue", response_class=JSONResponse)
+async def api_scraper_queue_list():
+    """Get the current scraper queue."""
+    async with scraper_lock:
+        queue_items = [
+            {
+                "id": item["id"],
+                "guild_id": item["guild_id"],
+                "status": item["status"],
+                "include_username": item.get("include_username", True),
+                "include_avatar_url": item.get("include_avatar_url", True),
+                "include_bio": item.get("include_bio", False),
+                "include_roles": item.get("include_roles", False),
+                "added_at": item.get("added_at"),
+            }
+            for item in scraper_state["queue"]
+        ]
+        return JSONResponse({"ok": True, "queue": queue_items})
+
+
+@app.delete("/api/scraper/queue/{queue_id}", response_class=JSONResponse)
+async def api_scraper_queue_remove(queue_id: int):
+    """Remove an item from the scraper queue (only if not currently running)."""
+    async with scraper_lock:
+        for i, item in enumerate(scraper_state["queue"]):
+            if item["id"] == queue_id:
+                if item["status"] == "running":
+                    return JSONResponse(
+                        {"ok": False, "error": "Cannot remove a running scrape. Use cancel instead."},
+                        status_code=409,
+                    )
+                scraper_state["queue"].pop(i)
+                break
+        else:
+            return JSONResponse(
+                {"ok": False, "error": "Queue item not found"}, status_code=404
+            )
+
+    await _broadcast_queue_update()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/scraper/queue/clear", response_class=JSONResponse)
+async def api_scraper_queue_clear():
+    """Clear all pending items from the queue (does not cancel the running one)."""
+    async with scraper_lock:
+        scraper_state["queue"] = [
+            item for item in scraper_state["queue"] if item["status"] == "running"
+        ]
+
+    await _broadcast_queue_update()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/scraper/queue/start", response_class=JSONResponse)
+async def api_scraper_queue_start():
+    """Start processing the queue."""
+    async with scraper_lock:
+        if not scraper_state["queue"]:
+            return JSONResponse(
+                {"ok": False, "error": "Queue is empty"}, status_code=400
+            )
+
+    await _ensure_queue_processor()
+    return JSONResponse({"ok": True})
+
+
+async def _broadcast_queue_update():
+    """Broadcast the current queue state to all websocket clients."""
+    async with scraper_lock:
+        queue_items = [
+            {
+                "id": item["id"],
+                "guild_id": item["guild_id"],
+                "status": item["status"],
+                "added_at": item.get("added_at"),
+            }
+            for item in scraper_state["queue"]
+        ]
+    await hub.broadcast(
+        {
+            "kind": "scraper",
+            "role": "standalone",
+            "payload": {
+                "type": "queue_update",
+                "queue": queue_items,
+                "running": scraper_state["running"],
+            },
+        }
+    )
+
+
+async def _ensure_queue_processor():
+    """Start the queue processor task if not already running."""
+    global scraper_state
+    async with scraper_lock:
+        if scraper_state.get("queue_running"):
+            return
+        scraper_state["queue_running"] = True
+
+    task = asyncio.create_task(_queue_processor())
+    async with scraper_lock:
+        scraper_state["queue_task"] = task
+
+
+async def _queue_processor():
+    """Process the scraper queue sequentially — one guild at a time."""
+    global scraper_state
+
+    try:
+        while True:
+            # Find the next pending item
+            next_item = None
+            async with scraper_lock:
+                for item in scraper_state["queue"]:
+                    if item["status"] == "pending":
+                        next_item = item
+                        break
+
+            if next_item is None:
+                # No more pending items — stop the processor
+                break
+
+            await _run_single_scrape(next_item)
+
+    except asyncio.CancelledError:
+        LOGGER.info("Queue processor cancelled")
+    except Exception as e:
+        LOGGER.exception("Queue processor error: %s", e)
+    finally:
+        async with scraper_lock:
+            scraper_state["queue_running"] = False
+            scraper_state["queue_task"] = None
+        await _broadcast_queue_update()
+
+
+async def _run_single_scrape(queue_item: dict):
+    """Run a single scrape for one queue item."""
+    global scraper_state
+
+    guild_id = queue_item["guild_id"]
+    include_username = queue_item.get("include_username", True)
+    include_avatar_url = queue_item.get("include_avatar_url", True)
+    include_bio = queue_item.get("include_bio", False)
+    include_roles = queue_item.get("include_roles", False)
+    proxy_list = queue_item.get("proxies", [])
+
+    tokens = db.get_valid_scraper_tokens()
+    if not tokens:
+        queue_item["status"] = "error"
+        await hub.broadcast(
+            {
+                "kind": "scraper",
+                "role": "standalone",
+                "payload": {
+                    "type": "complete",
+                    "success": False,
+                    "total_count": 0,
+                    "error": "No valid tokens configured",
+                    "elapsed_seconds": 0,
+                    "guild_id": guild_id,
+                    "queue_id": queue_item["id"],
+                },
+            }
+        )
+        await _broadcast_queue_update()
+        return
+
+    accessible_tokens = []
+    for token in tokens:
+        if await _selfbot_in_guild(token["token_value"], guild_id):
+            accessible_tokens.append(token)
+            db.increment_scraper_token_usage(token["token_id"])
+
+    if not accessible_tokens:
+        queue_item["status"] = "error"
+        await hub.broadcast(
+            {
+                "kind": "scraper",
+                "role": "standalone",
+                "payload": {
+                    "type": "complete",
+                    "success": False,
+                    "total_count": 0,
+                    "error": f"No tokens have access to guild {guild_id}",
+                    "elapsed_seconds": 0,
+                    "guild_id": guild_id,
+                    "queue_id": queue_item["id"],
+                },
+            }
+        )
+        await _broadcast_queue_update()
+        return
 
     token_values = [t["token_value"] for t in accessible_tokens]
 
@@ -3794,6 +4075,8 @@ async def api_scraper_start(request: Request):
                         "current": current,
                         "total": total,
                         "message": message,
+                        "guild_id": guild_id,
+                        "queue_id": queue_item["id"],
                     },
                 }
             )
@@ -3804,7 +4087,7 @@ async def api_scraper_start(request: Request):
     def log_callback(message: str, level: str):
         """Write log line to scraper.out AND broadcast to websocket clients."""
         ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        line = f"[{ts}] [{level.upper()}] {message}\n"
+        line = f"[{ts}] [{level.upper()}] [Guild {guild_id}] {message}\n"
         try:
             with open(_scraper_log_path, "a", encoding="utf-8") as f:
                 f.write(line)
@@ -3819,6 +4102,7 @@ async def api_scraper_start(request: Request):
                         "type": "log",
                         "message": message,
                         "level": level,
+                        "guild_id": guild_id,
                     },
                 }
             )
@@ -3843,118 +4127,16 @@ async def api_scraper_start(request: Request):
 
     scraper = StandaloneScraper(config)
 
-    async def run_scraper():
-        global scraper_state
-
-        def _save_results_to_disk(members, metadata, total_count, elapsed_seconds):
-            """Save results to /data/scrapes/{guild_id}/ — returns filename or None."""
-            if not members:
-                return None
-            try:
-                guild_dir = DATA_DIR / "scrapes" / str(guild_id)
-                guild_dir.mkdir(parents=True, exist_ok=True)
-                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                g_name = (metadata or {}).get("guild_name") or ""
-                fname = f"scrape_{guild_id}_{ts}.json"
-                save_data = {
-                    "guild_id": str(guild_id),
-                    "guild_name": g_name,
-                    "total_count": total_count,
-                    "elapsed_seconds": round(elapsed_seconds, 2),
-                    "scraped_at": datetime.now().isoformat(),
-                    "metadata": metadata,
-                    "members": members,
-                }
-                (guild_dir / fname).write_text(
-                    json.dumps(save_data, indent=2), encoding="utf-8"
-                )
-                LOGGER.info("Scrape results saved to %s/%s", guild_id, fname)
-                return f"{guild_id}/{fname}"
-            except Exception as save_err:
-                LOGGER.exception("Failed to save scrape results: %s", save_err)
-                return None
-
-        try:
-            result = await scraper.scrape()
-            async with scraper_lock:
-                scraper_state["result"] = result
-                scraper_state["running"] = False
-                scraper_state["scraper"] = None
-                scraper_state["task"] = None
-                scraper_state["started_at"] = None
-
-            saved_filename = _save_results_to_disk(
-                result.members,
-                result.metadata,
-                result.total_count,
-                result.elapsed_seconds,
-            )
-
-            await hub.broadcast(
-                {
-                    "kind": "scraper",
-                    "role": "standalone",
-                    "payload": {
-                        "type": "complete",
-                        "success": result.success,
-                        "total_count": result.total_count,
-                        "error": result.error,
-                        "elapsed_seconds": result.elapsed_seconds,
-                        "saved_filename": saved_filename,
-                    },
-                }
-            )
-        except asyncio.CancelledError:
-            LOGGER.info("Scraper task cancelled")
-            members = list(scraper._members.values()) if scraper._members else []
-            elapsed = 0
-
-            saved_filename = _save_results_to_disk(members, {}, len(members), elapsed)
-            async with scraper_lock:
-                scraper_state["result"] = ScraperResult(
-                    success=False,
-                    error="Cancelled",
-                    members=members,
-                    total_count=len(members),
-                    elapsed_seconds=elapsed,
-                )
-                scraper_state["running"] = False
-                scraper_state["scraper"] = None
-                scraper_state["task"] = None
-                scraper_state["started_at"] = None
-            await hub.broadcast(
-                {
-                    "kind": "scraper",
-                    "role": "standalone",
-                    "payload": {
-                        "type": "complete",
-                        "success": False,
-                        "total_count": len(members),
-                        "error": "Cancelled",
-                        "elapsed_seconds": elapsed,
-                        "saved_filename": saved_filename,
-                    },
-                }
-            )
-        except Exception as e:
-            LOGGER.exception("Scraper task failed: %s", e)
-            async with scraper_lock:
-                scraper_state["running"] = False
-                scraper_state["scraper"] = None
-                scraper_state["task"] = None
-                scraper_state["started_at"] = None
-
+    # Mark as running
     async with scraper_lock:
+        queue_item["status"] = "running"
         scraper_state["running"] = True
         scraper_state["scraper"] = scraper
         scraper_state["result"] = None
         scraper_state["guild_id"] = guild_id
         scraper_state["started_at"] = time.time()
 
-    task = asyncio.create_task(run_scraper())
-
-    async with scraper_lock:
-        scraper_state["task"] = task
+    await _broadcast_queue_update()
 
     LOGGER.info(
         "Starting standalone scraper: guild=%s tokens=%d proxies=%d username=%s avatar=%s bio=%s roles=%s",
@@ -3967,33 +4149,162 @@ async def api_scraper_start(request: Request):
         include_roles,
     )
 
-    return JSONResponse(
-        {
-            "ok": True,
-            "message": "Scraper started",
-            "tokens_used": len(accessible_tokens),
-            "proxies_used": len(proxy_list),
-            "guild_id": guild_id,
-        }
-    )
+    def _save_results_to_disk(members, metadata, total_count, elapsed_seconds):
+        """Save results to /data/scrapes/{guild_id}/ — returns filename or None."""
+        if not members:
+            return None
+        try:
+            guild_dir = DATA_DIR / "scrapes" / str(guild_id)
+            guild_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            g_name = (metadata or {}).get("guild_name") or ""
+            fname = f"scrape_{guild_id}_{ts}.json"
+            save_data = {
+                "guild_id": str(guild_id),
+                "guild_name": g_name,
+                "total_count": total_count,
+                "elapsed_seconds": round(elapsed_seconds, 2),
+                "scraped_at": datetime.now().isoformat(),
+                "metadata": metadata,
+                "members": members,
+            }
+            (guild_dir / fname).write_text(
+                json.dumps(save_data, indent=2), encoding="utf-8"
+            )
+            LOGGER.info("Scrape results saved to %s/%s", guild_id, fname)
+            return f"{guild_id}/{fname}"
+        except Exception as save_err:
+            LOGGER.exception("Failed to save scrape results: %s", save_err)
+            return None
+
+    try:
+        result = await scraper.scrape()
+        async with scraper_lock:
+            scraper_state["result"] = result
+            scraper_state["running"] = False
+            scraper_state["scraper"] = None
+            scraper_state["started_at"] = None
+            queue_item["status"] = "done"
+
+        saved_filename = _save_results_to_disk(
+            result.members,
+            result.metadata,
+            result.total_count,
+            result.elapsed_seconds,
+        )
+
+        await hub.broadcast(
+            {
+                "kind": "scraper",
+                "role": "standalone",
+                "payload": {
+                    "type": "complete",
+                    "success": result.success,
+                    "total_count": result.total_count,
+                    "error": result.error,
+                    "elapsed_seconds": result.elapsed_seconds,
+                    "saved_filename": saved_filename,
+                    "guild_id": guild_id,
+                    "queue_id": queue_item["id"],
+                },
+            }
+        )
+    except asyncio.CancelledError:
+        LOGGER.info("Scraper task cancelled for guild %s", guild_id)
+        members = list(scraper._members.values()) if scraper._members else []
+        elapsed = 0
+
+        saved_filename = _save_results_to_disk(members, {}, len(members), elapsed)
+        async with scraper_lock:
+            scraper_state["result"] = ScraperResult(
+                success=False,
+                error="Cancelled",
+                members=members,
+                total_count=len(members),
+                elapsed_seconds=elapsed,
+            )
+            scraper_state["running"] = False
+            scraper_state["scraper"] = None
+            scraper_state["started_at"] = None
+            queue_item["status"] = "cancelled"
+
+        await hub.broadcast(
+            {
+                "kind": "scraper",
+                "role": "standalone",
+                "payload": {
+                    "type": "complete",
+                    "success": False,
+                    "total_count": len(members),
+                    "error": "Cancelled",
+                    "elapsed_seconds": elapsed,
+                    "saved_filename": saved_filename,
+                    "guild_id": guild_id,
+                    "queue_id": queue_item["id"],
+                },
+            }
+        )
+        # Re-raise so the queue processor knows it was cancelled
+        raise
+    except Exception as e:
+        LOGGER.exception("Scraper task failed for guild %s: %s", guild_id, e)
+        async with scraper_lock:
+            scraper_state["running"] = False
+            scraper_state["scraper"] = None
+            scraper_state["started_at"] = None
+            queue_item["status"] = "error"
+
+        await hub.broadcast(
+            {
+                "kind": "scraper",
+                "role": "standalone",
+                "payload": {
+                    "type": "complete",
+                    "success": False,
+                    "total_count": 0,
+                    "error": str(e),
+                    "elapsed_seconds": 0,
+                    "guild_id": guild_id,
+                    "queue_id": queue_item["id"],
+                },
+            }
+        )
+    finally:
+        # Remove completed/error/cancelled item from queue
+        async with scraper_lock:
+            scraper_state["queue"] = [
+                it for it in scraper_state["queue"] if it["id"] != queue_item["id"]
+            ]
+        await _broadcast_queue_update()
 
 
 @app.get("/api/scraper/status", response_class=JSONResponse)
 async def api_scraper_status():
-    """Get current scraper status."""
+    """Get current scraper status including queue."""
     async with scraper_lock:
+        queue_items = [
+            {
+                "id": item["id"],
+                "guild_id": item["guild_id"],
+                "status": item["status"],
+                "added_at": item.get("added_at"),
+            }
+            for item in scraper_state["queue"]
+        ]
         return JSONResponse(
             {
                 "running": scraper_state["running"],
                 "guild_id": scraper_state.get("guild_id"),
                 "started_at": scraper_state.get("started_at"),
+                "queue": queue_items,
+                "queue_running": scraper_state.get("queue_running", False),
             }
         )
 
 
 @app.post("/api/scraper/cancel", response_class=JSONResponse)
 async def api_scraper_cancel():
-    """Cancel running scraper."""
+    """Cancel the currently running scrape and optionally stop the entire queue."""
     async with scraper_lock:
         if not scraper_state["running"]:
             return JSONResponse(
@@ -4005,6 +4316,29 @@ async def api_scraper_cancel():
             scraper.stop()
 
         return JSONResponse({"ok": True})
+
+
+@app.post("/api/scraper/cancel-all", response_class=JSONResponse)
+async def api_scraper_cancel_all():
+    """Cancel the current scrape AND clear the entire pending queue."""
+    async with scraper_lock:
+        # Clear all pending items
+        scraper_state["queue"] = [
+            item for item in scraper_state["queue"] if item["status"] == "running"
+        ]
+
+        # Stop the current scraper
+        scraper = scraper_state.get("scraper")
+        if scraper:
+            scraper.stop()
+
+        # Cancel the queue processor task
+        qt = scraper_state.get("queue_task")
+        if qt and not qt.done():
+            qt.cancel()
+
+    await _broadcast_queue_update()
+    return JSONResponse({"ok": True})
 
 
 @app.get("/api/scraper/results", response_class=JSONResponse)

@@ -10880,6 +10880,91 @@ body.page-forwarding .fwd-no-match-sub {
   flex-shrink: 0;
 }
 
+/* ── Queue Card ── */
+.sc-queue-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sc-queue-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.sc-queue-empty {
+  text-align: center;
+  padding: 20px;
+  color: var(--muted);
+  font-size: 13px;
+}
+.sc-queue-count {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: rgba(139, 92, 246, 0.12);
+}
+.sc-queue-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(20, 11, 38, 0.4);
+  border: 1px solid var(--border);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.sc-queue-item:hover {
+  border-color: rgba(139, 92, 246, 0.25);
+  background: rgba(20, 11, 38, 0.7);
+}
+.sc-queue-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.sc-queue-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+.sc-queue-badge.running {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+}
+.sc-queue-badge.pending {
+  background: rgba(139, 92, 246, 0.12);
+  color: var(--muted);
+}
+.sc-queue-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.sc-queue-guild {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.sc-queue-status {
+  font-size: 11px;
+  color: var(--muted);
+}
+.sc-queue-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .sc-results-body {
   margin-top: 12px;
 }
