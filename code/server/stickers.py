@@ -458,7 +458,10 @@ class StickerManager:
             fname = f"{name}.json" if fmt == 3 else f"{name}.png"
             file = discord.File(io.BytesIO(raw), filename=fname)
             tag = (info.get("tags") or "🙂")[:50]
-            desc = (info.get("description") or "")[:100]
+            desc = (info.get("description") or "")[:200]
+            # Discord requires description to be 2-200 characters
+            if len(desc) < 2:
+                desc = name[:200] if len(name) >= 2 else (name or "sticker").ljust(2)
 
             try:
                 await self.ratelimit.acquire_for_guild(
