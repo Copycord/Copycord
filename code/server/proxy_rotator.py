@@ -272,6 +272,7 @@ def _mask_proxy_url(url: str) -> str:
 
 _PROXY_ERRORS = (
     aiohttp.ClientProxyConnectionError,
+    aiohttp.ClientHttpProxyError,
     aiohttp.ClientConnectorError,
     aiohttp.ClientOSError,
     ConnectionRefusedError,
