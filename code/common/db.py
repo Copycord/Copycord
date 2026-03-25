@@ -460,6 +460,35 @@ class DBManager:
         )
 
         self._ensure_table(
+            name="channel_name_blacklist",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    pattern            TEXT NOT NULL,
+                    original_guild_id  INTEGER,
+                    cloned_guild_id    INTEGER,
+                    added_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (pattern, original_guild_id, cloned_guild_id)
+                )
+            """,
+            required_columns={
+                "pattern",
+                "original_guild_id",
+                "cloned_guild_id",
+                "added_at",
+            },
+            copy_map={
+                "pattern": "pattern",
+                "original_guild_id": "original_guild_id",
+                "cloned_guild_id": "cloned_guild_id",
+                "added_at": "COALESCE(added_at, CURRENT_TIMESTAMP)",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_chan_bl_orig ON channel_name_blacklist(original_guild_id)",
+                "CREATE INDEX IF NOT EXISTS idx_chan_bl_clone ON channel_name_blacklist(cloned_guild_id)",
+            ],
+        )
+
+        self._ensure_table(
             name="announcement_subscriptions",
             create_sql_template="""
                 CREATE TABLE {table} (
@@ -3641,6 +3670,69 @@ class DBManager:
                     )
                     """,
                     (w, host_gid, clone_gid),
+                )
+
+    def get_channel_name_blacklist_for_mapping(
+        self, original_guild_id: int, cloned_guild_id: int
+    ) -> list[str]:
+        rows = self.conn.execute(
+            """
+            SELECT pattern
+            FROM channel_name_blacklist
+            WHERE original_guild_id=? AND cloned_guild_id=?
+            ORDER BY pattern COLLATE NOCASE ASC
+            """,
+            (int(original_guild_id), int(cloned_guild_id)),
+        ).fetchall()
+        return [
+            str(r["pattern"]).strip()
+            for r in rows
+            if str(r["pattern"]).strip()
+        ]
+
+    def replace_channel_name_blacklist_for_mapping(
+        self,
+        mapping_id: str,
+        patterns: list[str],
+    ) -> None:
+        if not mapping_id:
+            return
+
+        mapping_row = self.get_mapping_by_id(mapping_id)
+        if not mapping_row:
+            return
+
+        host_gid = int(mapping_row["original_guild_id"])
+        clone_gid = int(mapping_row["cloned_guild_id"])
+
+        cleaned: list[str] = []
+        for p in patterns or []:
+            p2 = (p or "").strip()
+            if not p2:
+                continue
+            if p2 not in cleaned:
+                cleaned.append(p2)
+
+        with self.conn:
+            self.conn.execute(
+                """
+                DELETE FROM channel_name_blacklist
+                WHERE original_guild_id=? AND cloned_guild_id=?
+                """,
+                (host_gid, clone_gid),
+            )
+
+            for p in cleaned:
+                self.conn.execute(
+                    """
+                    INSERT OR IGNORE INTO channel_name_blacklist
+                    (pattern, original_guild_id, cloned_guild_id, added_at)
+                    VALUES (
+                        ?, ?, ?,
+                        strftime('%Y-%m-%d %H:%M:%S','now')
+                    )
+                    """,
+                    (p, host_gid, clone_gid),
                 )
 
     def get_clone_guild_ids_for_origin(self, original_guild_id: int) -> list[int]:

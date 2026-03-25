@@ -15,7 +15,7 @@ from typing import Optional
 from common.db import DBManager
 
 logger = logging.getLogger(__name__)
-CURRENT_VERSION = "v3.13.1"
+CURRENT_VERSION = "v3.14.0"
 
 
 class Config:
@@ -103,6 +103,7 @@ class Config:
             "CLONE_EMOJI": True,
             "CLONE_STICKER": True,
             "EDIT_MESSAGES": True,
+            "RESEND_EDITED_MESSAGES": True,
             "MIRROR_ROLE_PERMISSIONS": False,
             "REPOSITION_CHANNELS": True,
             "RENAME_CHANNELS": True,

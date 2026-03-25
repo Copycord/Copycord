@@ -63,6 +63,7 @@ from server.helpers import (
 from server.permission_sync import ChannelPermissionSync
 from server.guild_resolver import GuildResolver
 from server import logctx
+from fnmatch import fnmatch as _fnmatch
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -101,6 +102,25 @@ for lib in (
 logging.getLogger("discord.client").setLevel(logging.ERROR)
 
 logger = logging.getLogger("server")
+
+
+def _channel_name_blacklisted(name: str, patterns: list[str]) -> bool:
+    """Check if a channel name matches any blacklist pattern (case-insensitive).
+
+    Supports fnmatch-style wildcards (* and ?).
+    Plain strings without wildcards use substring matching.
+    """
+    if not patterns or not name:
+        return False
+    name_lower = name.lower()
+    for p in patterns:
+        if "*" in p or "?" in p:
+            if _fnmatch(name_lower, p):
+                return True
+        else:
+            if p in name_lower:
+                return True
+    return False
 
 
 class _GuildPrefixFilter(logging.Filter):
@@ -154,6 +174,8 @@ class ServerReceiver:
             tuple[int, int], list[tuple[re.Pattern, str]]
         ] = {}
         self._blocked_keywords_lock = asyncio.Lock()
+        self._channel_name_blacklist_cache: dict[tuple[int, int], list[str]] = {}
+        self._channel_name_blacklist_lock = asyncio.Lock()
         self._user_filters_cache: dict[tuple[int, int], dict[str, set[int]]] = {}
         self._word_rewrites_cache: dict[
             tuple[int, int], list[tuple[re.Pattern, str]]
@@ -792,6 +814,7 @@ class ServerReceiver:
             self.verify.start()
         self._verify_task = asyncio.create_task(self._verify_listen_loop())
         await self._load_blocked_keywords_cache()
+        await self._load_channel_name_blacklist_cache()
         await self._load_user_filters_cache()
         await self._load_word_rewrites_cache()
         await self.bus.log("Boot completed")
@@ -1520,6 +1543,9 @@ class ServerReceiver:
 
             elif typ == "export_messages_done":
                 await self.webhook_exporter.handle_ws_export_messages_done(data)
+            elif typ == "reload_channel_name_blacklist":
+                await self._load_channel_name_blacklist_cache()
+                logger.info("[chan-blacklist] Cache reloaded from DB")
         finally:
             if token is not None:
                 logctx.guild_name.reset(token)
@@ -3601,6 +3627,11 @@ class ServerReceiver:
         if not forums:
             return parts
 
+        channel_name_blacklist = self._get_channel_name_blacklist(
+            host_guild_id or 0,
+            int(guild.id),
+        )
+
         def _cat_name_from_sitemap(cat_id: int | None) -> str | None:
             if not cat_id:
                 return None
@@ -3671,6 +3702,14 @@ class ServerReceiver:
             name = f.get("name") or "forum"
             parent_id = int(f.get("category_id") or 0) or None
             parent_nm = _cat_name_from_sitemap(parent_id) or "Text Channels"
+
+            if _channel_name_blacklisted(name, channel_name_blacklist):
+                logger.debug(
+                    "[🚫] Skipping forum '%s' for clone_g=%s (matches CHANNEL_NAME_BLACKLIST)",
+                    name,
+                    guild.id,
+                )
+                continue
 
             row = per_clone.get(orig_id)
             if row is None:
@@ -4183,6 +4222,11 @@ class ServerReceiver:
         clone_stage = settings.get("CLONE_STAGE", False)
         clone_stage_properties = settings.get("CLONE_STAGE_PROPERTIES", False)
 
+        channel_name_blacklist = self._get_channel_name_blacklist(
+            int(host_guild_id) if host_guild_id else 0,
+            int(guild.id),
+        )
+
         has_community = "COMMUNITY" in guild.features
 
         rem = 0
@@ -4202,6 +4246,14 @@ class ServerReceiver:
                 item["parent_name"],
                 item["type"],
             )
+
+            if _channel_name_blacklisted(name, channel_name_blacklist):
+                logger.debug(
+                    "[🚫] Skipping channel '%s' for clone_g=%s (matches CHANNEL_NAME_BLACKLIST)",
+                    name,
+                    guild.id,
+                )
+                continue
 
             per = self.chan_map_by_clone.setdefault(int(guild.id), {})
             mrow = per.get(
@@ -8144,6 +8196,20 @@ class ServerReceiver:
                         )
                         continue
 
+                    _fwd_blacklist = self._get_channel_name_blacklist(
+                        orig_gid, clone_gid
+                    )
+                    if _channel_name_blacklisted(
+                        msg.get("channel_name") or "", _fwd_blacklist
+                    ):
+                        logger.debug(
+                            "[forward] Skipping clone %s for src #%s — channel '%s' matches CHANNEL_NAME_BLACKLIST",
+                            mapping.get("cloned_guild_id"),
+                            source_id,
+                            msg.get("channel_name"),
+                        )
+                        continue
+
                     try:
                         orig_gid = int(
                             mapping.get("original_guild_id") or host_guild_id or 0
@@ -8584,8 +8650,10 @@ class ServerReceiver:
                     original_guild_id=host_gid,
                     cloned_guild_id=clone_gid,
                 )
-                if settings.get("ENABLE_CLONING", True) and settings.get(
-                    "EDIT_MESSAGES", True
+                if (
+                    settings.get("ENABLE_CLONING", True)
+                    and settings.get("EDIT_MESSAGES", True)
+                    and settings.get("RESEND_EDITED_MESSAGES", True)
                 ):
                     allowed.add(clone_gid)
             except Exception:
@@ -8593,7 +8661,7 @@ class ServerReceiver:
 
         if not allowed:
             logger.info(
-                "[✏️] Fallback edit skipped for channel %s (no clones allow EDIT_MESSAGES)",
+                "[✏️] Edited message not resent — EDIT_MESSAGES or RESEND_EDITED_MESSAGES is disabled for all clones of channel %s",
                 source_id,
             )
             return
@@ -8683,9 +8751,10 @@ class ServerReceiver:
                 edited_any = edited_any or ok
             if not edited_any:
                 logger.debug(
-                    "[✏️] No edits performed for orig %s (all disabled or failed).",
+                    "[✏️] No edits performed for orig %s (all disabled or failed). Attempting resend.",
                     orig_mid,
                 )
+                await self._fallback_resend_edit(payload, orig_mid)
             return
 
         ev = self._inflight_events.get(orig_mid)
@@ -11127,6 +11196,53 @@ class ServerReceiver:
         key_global = (0, 0)
         patterns.extend(self._blocked_keywords_cache.get(key_global, []))
 
+        return patterns
+
+    async def _load_channel_name_blacklist_cache(self) -> None:
+        async with self._channel_name_blacklist_lock:
+            self._channel_name_blacklist_cache.clear()
+
+            logger.debug("[chan-blacklist] Loading channel name blacklist from database...")
+
+            try:
+                rows = self.db.conn.execute(
+                    """
+                    SELECT pattern, original_guild_id, cloned_guild_id
+                    FROM channel_name_blacklist
+                    ORDER BY original_guild_id, cloned_guild_id, pattern
+                    """
+                ).fetchall()
+            except Exception:
+                logger.exception("[chan-blacklist] Failed to load from DB")
+                return
+
+            if not rows:
+                logger.debug("[chan-blacklist] No patterns found in database")
+                return
+
+            for row in rows:
+                pattern = (row["pattern"] or "").strip().lower()
+                if not pattern:
+                    continue
+
+                orig_gid = int(row["original_guild_id"] or 0)
+                clone_gid = int(row["cloned_guild_id"] or 0)
+
+                key = (orig_gid, clone_gid)
+                self._channel_name_blacklist_cache.setdefault(key, []).append(pattern)
+
+            logger.debug(
+                "[chan-blacklist] Loaded %d patterns across %d mapping scopes",
+                sum(len(v) for v in self._channel_name_blacklist_cache.values()),
+                len(self._channel_name_blacklist_cache),
+            )
+
+    def _get_channel_name_blacklist(
+        self, original_guild_id: int, cloned_guild_id: int
+    ) -> list[str]:
+        patterns: list[str] = []
+        key = (int(original_guild_id), int(cloned_guild_id))
+        patterns.extend(self._channel_name_blacklist_cache.get(key, []))
         return patterns
 
     async def _load_word_rewrites_cache(self) -> None:

@@ -10,10 +10,25 @@
 from __future__ import annotations
 import asyncio
 import inspect
+from fnmatch import fnmatch as _fnmatch
 from typing import Dict, List, Optional, Tuple, Any
 import discord
 from discord.channel import CategoryChannel, TextChannel
 from server import logctx
+
+
+def _channel_name_blacklisted(name: str, patterns: list[str]) -> bool:
+    if not patterns or not name:
+        return False
+    name_lower = name.lower()
+    for p in patterns:
+        if "*" in p or "?" in p:
+            if _fnmatch(name_lower, p):
+                return True
+        else:
+            if p in name_lower:
+                return True
+    return False
 
 
 class ChannelPermissionSync:
@@ -187,6 +202,15 @@ class ChannelPermissionSync:
     ) -> List[str]:
         cat_map, chan_map = self._reload_maps_from_db_for_clone(int(guild.id))
 
+        host_guild_id = int((sitemap.get("guild") or {}).get("id") or 0)
+        try:
+            _bl_patterns = self.db.get_channel_name_blacklist_for_mapping(
+                host_guild_id, int(guild.id)
+            )
+            _bl_patterns = [p.lower() for p in _bl_patterns if p]
+        except Exception:
+            _bl_patterns = []
+
         changed_cat = 0
         changed_ch = 0
 
@@ -208,6 +232,8 @@ class ChannelPermissionSync:
                     changed_cat += 1
 
             for ch in cat.get("channels", []) or []:
+                if _channel_name_blacklisted(ch.get("name", ""), _bl_patterns):
+                    continue
                 crow = chan_map.get(int(ch["id"]))
                 if not crow:
                     self._log(
@@ -225,6 +251,8 @@ class ChannelPermissionSync:
                         changed_ch += 1
 
         for ch in sitemap.get("standalone_channels", []) or []:
+            if _channel_name_blacklisted(ch.get("name", ""), _bl_patterns):
+                continue
             crow = chan_map.get(int(ch["id"]))
             if not crow:
                 self._log(
@@ -248,6 +276,8 @@ class ChannelPermissionSync:
                 if ch_type not in (2, 13):
                     continue
 
+                if _channel_name_blacklisted(ch.get("name", ""), _bl_patterns):
+                    continue
                 crow = chan_map.get(int(ch["id"]))
                 if not crow:
                     self._log(
@@ -288,6 +318,8 @@ class ChannelPermissionSync:
                     changed_ch += 1
 
         for fm in sitemap.get("forums", []) or []:
+            if _channel_name_blacklisted(fm.get("name", ""), _bl_patterns):
+                continue
             fm_id = int(fm["id"])
             crow = chan_map.get(fm_id)
             if not crow:

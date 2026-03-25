@@ -243,6 +243,7 @@
     freely edit them in the clone.",
     "MIRROR_ROLE_PERMISSIONS": "When enabled, mirror role permissions from the host to the clone.",
     "EDIT_MESSAGES": "Messages that are edited in the host will be edited in the clone.",
+    "RESEND_EDITED_MESSAGES": "When enabled, if a message edited in the host does not exist in the clone, it will be resent as a new message. Requires EDIT_MESSAGES to be enabled.",
     "DELETE_MESSAGES": "Messages that are deleted in the host will be deleted in the clone.",
     "DELETE_THREADS": "When enabled, delete in the clone any threads that were removed in the host.",
     "DELETE_CHANNELS": "When enabled, delete in the clone any channels that were removed in the host.",
@@ -787,6 +788,35 @@
               </div>
             </fieldset>
           </div>
+
+          <fieldset class="filters-col filters-channel-names">
+            <legend>Channel Name Blacklist</legend>
+
+            <div class="field">
+              <label for="channel_name_blacklist_input" class="has-tip">
+                <span class="label-text">Blocked Channel Name Patterns</span>
+                <button type="button" class="info-dot"
+                  aria-label="Channels matching these patterns will not be cloned."
+                  aria-describedby="tip-channel_name_blacklist"></button>
+                <span id="tip-channel_name_blacklist" role="tooltip" class="tip-bubble">
+                  Channels whose name matches a pattern will be skipped during
+                  cloning and messages will not be forwarded. Supports wildcards:
+                  * matches any characters, ? matches one character.
+                  Plain text uses substring matching.
+                  Examples: ticket-*, *-ticket, *-log-*
+                </span>
+              </label>
+
+              <div class="chips" data-chips="channel_name_blacklist">
+                <span class="chip-input-wrap">
+                  <input class="chip-input" id="channel_name_blacklist_input" type="text" inputmode="text"
+                    placeholder="Add pattern… e.g. ticket-*" />
+                </span>
+              </div>
+
+              <input type="hidden" id="channel_name_blacklist" name="channel_name_blacklist" value="">
+            </div>
+          </fieldset>
 
           <fieldset class="filters-col filters-roles">
             <legend>Role Blocks</legend>

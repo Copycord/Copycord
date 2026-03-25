@@ -484,6 +484,10 @@ class ForwardingManager:
         self._max_attempts = int(os.getenv("FORWARDING_QUEUE_MAX_ATTEMPTS", "3"))
         self._retry_max_delay = float(os.getenv("FORWARDING_RETRY_MAX_DELAY", "60"))
 
+        self._dedup_ttl = float(os.getenv("FORWARDING_DEDUP_TTL", "60"))
+        self._dedup_cache: Dict[tuple, float] = {}
+        self._dedup_max_size = 10_000
+
         self._workers_per_provider: Dict[str, int] = {
             "telegram": int(os.getenv("FORWARDING_WORKERS_TELEGRAM", "1")),
             "pushover": int(os.getenv("FORWARDING_WORKERS_PUSHOVER", "1")),
@@ -904,6 +908,23 @@ class ForwardingManager:
             "jump_url": jump_url,
         }
 
+    def _dedup_seen(self, message_id: Any, rule_id: str) -> bool:
+        now = time.monotonic()
+        key = (message_id, rule_id)
+
+        # Evict expired entries when cache is large
+        if len(self._dedup_cache) >= self._dedup_max_size:
+            expired = [k for k, ts in self._dedup_cache.items() if now - ts > self._dedup_ttl]
+            for k in expired:
+                del self._dedup_cache[k]
+
+        ts = self._dedup_cache.get(key)
+        if ts is not None and now - ts < self._dedup_ttl:
+            return True
+
+        self._dedup_cache[key] = now
+        return False
+
     async def _dispatch_forwarding(self, rule: ForwardingRule, attrs: dict) -> None:
         if self._closing:
             return
@@ -913,6 +934,14 @@ class ForwardingManager:
             return
 
         msg_id = attrs.get("message_id") or "message"
+
+        if msg_id and msg_id != "message" and self._dedup_seen(msg_id, rule.rule_id):
+            self.log.debug(
+                "[⏩] Dedup skip | rule_id=%s message_id=%s",
+                rule.rule_id,
+                msg_id,
+            )
+            return
         job = ForwardingJob(
             provider_queue=queue_name,
             rule=rule,
