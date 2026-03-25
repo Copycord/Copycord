@@ -2442,6 +2442,18 @@ async def api_get_filters(mapping_id: str):
 
     user_filters = db.get_user_filters_for_mapping(mapping_id)
 
+    channel_name_blacklist: list[str] = []
+    if mapping:
+        try:
+            host_gid = int(mapping["original_guild_id"] or 0)
+            clone_gid_val = int(mapping["cloned_guild_id"] or 0)
+            if host_gid and clone_gid_val:
+                channel_name_blacklist = db.get_channel_name_blacklist_for_mapping(
+                    host_gid, clone_gid_val
+                )
+        except Exception:
+            pass
+
     return JSONResponse(
         {
             "wl_categories": filters["whitelist"]["category"],
@@ -2452,6 +2464,7 @@ async def api_get_filters(mapping_id: str):
             "blocked_role_ids": [str(x) for x in blocked_role_ids],
             "wl_users": [str(x) for x in user_filters["whitelist"]],
             "bl_users": [str(x) for x in user_filters["blacklist"]],
+            "channel_name_blacklist": channel_name_blacklist,
         }
     )
 
@@ -2487,6 +2500,7 @@ async def api_save_filters(mapping_id: str, request: Request):
 
     blocked_words = _split_csv_words(form.get("blocked_words", ""))
     blocked_role_ids = _split_csv_ids(form.get("blocked_role_ids", ""))
+    channel_name_blacklist = _split_csv_words(form.get("channel_name_blacklist", ""))
 
     wl_users = _split_csv_ids(form.get("wl_users", ""))
     bl_users = _split_csv_ids(form.get("bl_users", ""))
@@ -2514,6 +2528,22 @@ async def api_save_filters(mapping_id: str, request: Request):
         whitelist_users=wl_users,
         blacklist_users=bl_users,
     )
+
+    db.replace_channel_name_blacklist_for_mapping(
+        mapping_id=mapping_id,
+        patterns=channel_name_blacklist,
+    )
+
+    try:
+        asyncio.create_task(
+            _ws_cmd(
+                SERVER_AGENT_URL,
+                {"type": "reload_channel_name_blacklist"},
+                timeout=1.0,
+            )
+        )
+    except Exception:
+        LOGGER.warning("reload_channel_name_blacklist ws send failed", exc_info=True)
 
     return JSONResponse({"ok": True})
 

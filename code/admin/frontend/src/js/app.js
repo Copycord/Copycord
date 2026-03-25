@@ -1588,6 +1588,7 @@
       ["ex_categories", "ex_categories", "ids"],
       ["ex_channels", "ex_channels", "ids"],
       ["blocked_words", "blocked_words", "words"],
+      ["channel_name_blacklist", "channel_name_blacklist", "words"],
       ["cmd_users", "COMMAND_USERS", "ids"],
       ["blocked_roles", "blocked_role_ids", "ids"],
       ["wl_users", "wl_users", "ids"],
@@ -3903,6 +3904,7 @@
 
     const wlUsers = document.getElementById("wl_users");
     const blUsers = document.getElementById("bl_users");
+    const chanBl = document.getElementById("channel_name_blacklist");
 
     if (wlCats) wlCats.value = "";
     if (wlCh) wlCh.value = "";
@@ -3912,12 +3914,14 @@
     if (hiddenBlockedRoles) hiddenBlockedRoles.value = "";
     if (wlUsers) wlUsers.value = "";
     if (blUsers) blUsers.value = "";
+    if (chanBl) chanBl.value = "";
 
     if (CHIPS.wl_categories) CHIPS.wl_categories.set([]);
     if (CHIPS.wl_channels) CHIPS.wl_channels.set([]);
     if (CHIPS.ex_categories) CHIPS.ex_categories.set([]);
     if (CHIPS.ex_channels) CHIPS.ex_channels.set([]);
     if (CHIPS.blocked_words) CHIPS.blocked_words.set([]);
+    if (CHIPS.channel_name_blacklist) CHIPS.channel_name_blacklist.set([]);
     if (CHIPS.blocked_roles) CHIPS.blocked_roles.set([]);
     if (CHIPS.wl_users) CHIPS.wl_users.set([]);
     if (CHIPS.bl_users) CHIPS.bl_users.set([]);
@@ -3948,6 +3952,9 @@
         }
         if (Array.isArray(data.blocked_words) && CHIPS.blocked_words) {
           CHIPS.blocked_words.set(data.blocked_words);
+        }
+        if (Array.isArray(data.channel_name_blacklist) && CHIPS.channel_name_blacklist) {
+          CHIPS.channel_name_blacklist.set(data.channel_name_blacklist);
         }
 
         let roleIds = [];
