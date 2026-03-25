@@ -104,6 +104,7 @@ def resolve_mapping_settings(
             "DELETE_ROLES",
             "DELETE_THREADS",
             "EDIT_MESSAGES",
+            "RESEND_EDITED_MESSAGES",
             "MIRROR_ROLE_PERMISSIONS",
             "MIRROR_CHANNEL_PERMISSIONS",
         ):

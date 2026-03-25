@@ -103,6 +103,7 @@ class Config:
             "CLONE_EMOJI": True,
             "CLONE_STICKER": True,
             "EDIT_MESSAGES": True,
+            "RESEND_EDITED_MESSAGES": True,
             "MIRROR_ROLE_PERMISSIONS": False,
             "REPOSITION_CHANNELS": True,
             "RENAME_CHANNELS": True,

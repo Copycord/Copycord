@@ -8584,8 +8584,10 @@ class ServerReceiver:
                     original_guild_id=host_gid,
                     cloned_guild_id=clone_gid,
                 )
-                if settings.get("ENABLE_CLONING", True) and settings.get(
-                    "EDIT_MESSAGES", True
+                if (
+                    settings.get("ENABLE_CLONING", True)
+                    and settings.get("EDIT_MESSAGES", True)
+                    and settings.get("RESEND_EDITED_MESSAGES", True)
                 ):
                     allowed.add(clone_gid)
             except Exception:
