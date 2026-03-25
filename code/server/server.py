@@ -8595,7 +8595,7 @@ class ServerReceiver:
 
         if not allowed:
             logger.info(
-                "[✏️] Fallback edit skipped for channel %s (no clones allow EDIT_MESSAGES)",
+                "[✏️] Edited message not resent — EDIT_MESSAGES or RESEND_EDITED_MESSAGES is disabled for all clones of channel %s",
                 source_id,
             )
             return
@@ -8685,9 +8685,10 @@ class ServerReceiver:
                 edited_any = edited_any or ok
             if not edited_any:
                 logger.debug(
-                    "[✏️] No edits performed for orig %s (all disabled or failed).",
+                    "[✏️] No edits performed for orig %s (all disabled or failed). Attempting resend.",
                     orig_mid,
                 )
+                await self._fallback_resend_edit(payload, orig_mid)
             return
 
         ev = self._inflight_events.get(orig_mid)
