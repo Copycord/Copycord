@@ -908,7 +908,8 @@ class ForwardingManager:
             "jump_url": jump_url,
         }
 
-    def _dedup_seen(self, message_id: Any, rule_id: str) -> bool:
+    def _dedup_seen(self, message_id: Any, rule_id: str) -> float | None:
+        """Return the age in seconds of the existing entry, or None if not seen."""
         now = time.monotonic()
         key = (message_id, rule_id)
 
@@ -920,10 +921,16 @@ class ForwardingManager:
 
         ts = self._dedup_cache.get(key)
         if ts is not None and now - ts < self._dedup_ttl:
-            return True
+            return now - ts
 
         self._dedup_cache[key] = now
-        return False
+        return None
+
+    def _dedup_touch(self, message_id: Any, rule_id: str) -> None:
+        """Refresh the dedup timestamp so the entry stays alive while a job is in-flight."""
+        key = (message_id, rule_id)
+        if key in self._dedup_cache:
+            self._dedup_cache[key] = time.monotonic()
 
     async def _dispatch_forwarding(self, rule: ForwardingRule, attrs: dict) -> None:
         if self._closing:
@@ -935,13 +942,16 @@ class ForwardingManager:
 
         msg_id = attrs.get("message_id") or "message"
 
-        if msg_id and msg_id != "message" and self._dedup_seen(msg_id, rule.rule_id):
-            self.log.debug(
-                "[⏩] Dedup skip | rule_id=%s message_id=%s",
-                rule.rule_id,
-                msg_id,
-            )
-            return
+        if msg_id and msg_id != "message":
+            dedup_age = self._dedup_seen(msg_id, rule.rule_id)
+            if dedup_age is not None:
+                self.log.warning(
+                    "[⏩] Dedup blocked duplicate | rule_id=%s message_id=%s age=%.1fs",
+                    rule.rule_id,
+                    msg_id,
+                    dedup_age,
+                )
+                return
         job = ForwardingJob(
             provider_queue=queue_name,
             rule=rule,
@@ -1102,8 +1112,8 @@ class ForwardingManager:
         else:
             delay = 0.5 * (2 ** (job.attempts - 1))
 
-        delay = min(float(self._retry_max_delay), delay)
         delay *= 0.8 + random.random() * 0.4
+        delay = min(float(self._retry_max_delay), delay)
 
         self.log.warning(
             "[⏩] Requeueing job | provider=%s message_id=%s attempt=%s delay=%.2fs",
@@ -1113,6 +1123,7 @@ class ForwardingManager:
             delay,
         )
 
+        self._dedup_touch(job.message_id, job.rule.rule_id)
         asyncio.create_task(self._requeue_later(provider, job, delay))
 
     async def _requeue_later(
@@ -1961,7 +1972,13 @@ class ForwardingManager:
             )
             return
 
-        self.log.info("[⏩] Discord webhook forward OK")
+        self.log.info(
+            "[⏩] Discord webhook forward OK | rule_id=%s label=%s message_id=%s channel=%s",
+            rule.rule_id,
+            rule.label,
+            attrs.get("message_id"),
+            attrs.get("channel_name"),
+        )
         try:
             self.db.record_forwarding_event(
                 provider="discord",
