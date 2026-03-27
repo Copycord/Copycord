@@ -1077,7 +1077,8 @@ class ForwardingManager:
             return
         if provider == "discord":
             await self._send_discord_webhook(
-                rule=job.rule, attrs=job.attrs, session=session
+                rule=job.rule, attrs=job.attrs, session=session,
+                attempt=job.attempts,
             )
             return
 
@@ -1112,8 +1113,8 @@ class ForwardingManager:
         else:
             delay = 0.5 * (2 ** (job.attempts - 1))
 
-        delay *= 0.8 + random.random() * 0.4
         delay = min(float(self._retry_max_delay), delay)
+        delay *= 0.8 + random.random() * 0.4
 
         self.log.warning(
             "[⏩] Requeueing job | provider=%s message_id=%s attempt=%s delay=%.2fs",
@@ -1133,6 +1134,7 @@ class ForwardingManager:
             await asyncio.sleep(max(0.0, float(delay)))
             if self._closing:
                 return
+            self._dedup_touch(job.message_id, job.rule.rule_id)
             q = self._queues.get(provider)
             if not q:
                 return
@@ -1843,6 +1845,7 @@ class ForwardingManager:
         rule: ForwardingRule,
         attrs: dict,
         session: aiohttp.ClientSession,
+        attempt: int = 0,
     ) -> None:
         url = (rule.config.get("url") or "").strip()
         if not url:
@@ -1973,11 +1976,12 @@ class ForwardingManager:
             return
 
         self.log.info(
-            "[⏩] Discord webhook forward OK | rule_id=%s label=%s message_id=%s channel=%s",
+            "[⏩] Discord webhook forward OK | rule_id=%s label=%s message_id=%s channel=%s attempt=%s",
             rule.rule_id,
             rule.label,
             attrs.get("message_id"),
             attrs.get("channel_name"),
+            attempt,
         )
         try:
             self.db.record_forwarding_event(
