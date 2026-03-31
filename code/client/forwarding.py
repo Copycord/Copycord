@@ -1948,6 +1948,25 @@ class ForwardingManager:
                     rule.rule_id,
                 )
 
+        msg_id = attrs.get("message_id")
+        if msg_id and self.db:
+            try:
+                if self.db.has_forwarding_event(
+                    rule_id=rule.rule_id,
+                    source_message_id=int(msg_id),
+                ):
+                    self.log.warning(
+                        "[⏩] DB dedup blocked duplicate webhook | rule_id=%s label=%s message_id=%s channel=%s attempt=%s",
+                        rule.rule_id,
+                        rule.label,
+                        msg_id,
+                        attrs.get("channel_name"),
+                        attempt,
+                    )
+                    return
+            except Exception:
+                self.log.debug("[⏩] DB dedup check failed, proceeding", exc_info=True)
+
         status, body, retry_after = await _post_with_discord_429_retry(
             session, url, payload
         )
