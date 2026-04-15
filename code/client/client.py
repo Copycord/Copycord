@@ -2467,6 +2467,29 @@ class ClientListener:
             await self.bot.close()
         logger.info("Client shutdown complete.")
         
+    def _mask_token(self, token: str) -> str:
+        t = (token or "").strip()
+        if not t:
+            return "(empty)"
+        if len(t) <= 10:
+            return t[:2] + "***"
+        return f"{t[:6]}...{t[-4:]}"
+
+    async def _notify_token_dead(self, reason: str, token: str, kind: str = "primary") -> None:
+        payload = {
+            "type": "token_dead",
+            "data": {
+                "reason": reason,
+                "kind": kind,
+                "token_preview": self._mask_token(token),
+            },
+        }
+        try:
+            await self.ws.send(payload)
+            logger.info("[📨] Notified server of dead %s token.", kind)
+        except Exception as e:
+            logger.warning("[⚠️] Failed to notify server of dead token: %s", e)
+
     def _try_backup_token(self, loop: asyncio.AbstractEventLoop) -> bool:
         """
         Attempt to find and use any backup token stored in the database.
@@ -2517,9 +2540,17 @@ class ClientListener:
 
         except LoginFailure as e:
             logger.error("[⛔] Discord login failed (LoginFailure): %s", e)
+            loop.run_until_complete(
+                self._notify_token_dead(f"LoginFailure: {e}", token, kind="primary")
+            )
             backup = self._try_backup_token(loop)
             if not backup:
                 logger.error("[⛔] No valid backup token available.")
+                loop.run_until_complete(
+                    self._notify_token_dead(
+                        "All tokens exhausted (no valid backup).", token, kind="exhausted"
+                    )
+                )
 
         except ConnectionClosed as e:
             code = getattr(e, "code", None)
@@ -2530,9 +2561,19 @@ class ClientListener:
                     "(Authentication failed). Your CLIENT_TOKEN is invalid or "
                     "no longer usable. Attempting backup tokens..."
                 )
+                loop.run_until_complete(
+                    self._notify_token_dead(
+                        "Gateway 4004 (Authentication failed).", token, kind="primary"
+                    )
+                )
                 backup = self._try_backup_token(loop)
                 if not backup:
                     logger.error("[⛔] No valid backup token available after disconnection.")
+                    loop.run_until_complete(
+                        self._notify_token_dead(
+                            "All tokens exhausted after gateway 4004.", token, kind="exhausted"
+                        )
+                    )
             else:
                 logger.exception("[⛔] Discord gateway connection closed (code=%s)", code)
                 backup = self._try_backup_token(loop)
