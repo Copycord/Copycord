@@ -8277,6 +8277,10 @@ class ServerReceiver:
                         )
                         continue
 
+                    orig_gid = int(
+                        mapping.get("original_guild_id") or host_guild_id or 0
+                    )
+
                     _fwd_blacklist = self._get_channel_name_blacklist(
                         orig_gid, clone_gid
                     )
@@ -8292,9 +8296,6 @@ class ServerReceiver:
                         continue
 
                     try:
-                        orig_gid = int(
-                            mapping.get("original_guild_id") or host_guild_id or 0
-                        )
                         content_to_check = msg.get("content", "") or ""
 
                         should_block, blocked_keyword = self._should_block_for_mapping(

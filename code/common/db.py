@@ -933,6 +933,7 @@ class DBManager:
                 "CREATE INDEX IF NOT EXISTS idx_forwarding_events_rule ON forwarding_events(rule_id);",
                 "CREATE INDEX IF NOT EXISTS idx_forwarding_events_guild ON forwarding_events(guild_id);",
                 "CREATE INDEX IF NOT EXISTS idx_forwarding_events_created ON forwarding_events(created_at);",
+                "CREATE INDEX IF NOT EXISTS idx_forwarding_events_rule_msg ON forwarding_events(rule_id, source_message_id);",
             ],
         )
         self._ensure_table(
@@ -5042,6 +5043,20 @@ class DBManager:
                 ),
             )
         return eid
+
+    def has_forwarding_event(
+        self,
+        *,
+        rule_id: str,
+        source_message_id: int,
+    ) -> bool:
+        """Check whether a forwarding event already exists for this rule + message."""
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT 1 FROM forwarding_events WHERE rule_id=? AND source_message_id=? LIMIT 1",
+                (rule_id, int(source_message_id)),
+            ).fetchone()
+        return row is not None
 
     def count_forwarded_messages(self) -> int:
         """
