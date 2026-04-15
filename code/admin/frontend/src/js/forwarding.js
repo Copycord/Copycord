@@ -673,6 +673,7 @@ export class ForwardingSystem {
                   <button type="button" class="btn btn-ghost fwd-toggle-btn">
                     ${enabled ? "Disable" : "Enable"}
                   </button>
+                  <button type="button" class="btn btn-ghost fwd-duplicate-btn">Duplicate</button>
                   <button type="button" class="btn btn-ghost-red fwd-delete-btn">Delete</button>
 
                   <div class="fwd-card-footer-stats" style="margin-left:auto;display:flex;align-items:center;gap:8px">
@@ -763,6 +764,15 @@ export class ForwardingSystem {
         this.saveForwardingRule(updated, { silent: false }).catch(
           console.error
         );
+      });
+    });
+
+    this.listEl.querySelectorAll(".fwd-duplicate-btn").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        const card = ev.currentTarget.closest(".fwd-card");
+        const id = card?.getAttribute("data-id");
+        const item = this.currentItems.find((x) => x.rule_id === id);
+        if (item) this.openDuplicateModal(item);
       });
     });
 
@@ -1044,6 +1054,18 @@ export class ForwardingSystem {
       !!filters.has_attachments;
 
     this.setAdvancedFiltersOpen(anyAdvancedOn);
+  }
+
+  openDuplicateModal(item) {
+    const copy = {
+      ...item,
+      rule_id: "",
+      label: `${item.label || ""} (Copy)`.trim(),
+      config: { ...(item.config || {}) },
+      filters: { ...(item.filters || {}) },
+    };
+    this.openEditModal(copy);
+    this.setModalTitle("Duplicate Forwarding Rule");
   }
 
   setModalTitle(text) {

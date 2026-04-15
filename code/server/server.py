@@ -1329,6 +1329,9 @@ class ServerReceiver:
             elif typ == "announce":
                 asyncio.create_task(self.handle_announce(data))
 
+            elif typ == "token_dead":
+                asyncio.create_task(self.handle_token_dead(data))
+
             elif typ == "backfill_started":
                 data = msg.get("data") or {}
                 cid_raw = data.get("channel_id")
@@ -1612,6 +1615,84 @@ class ServerReceiver:
 
         except Exception as e:
             logger.exception("Unexpected error in handle_announce: %s", e)
+
+    async def handle_token_dead(self, data: dict) -> None:
+        """
+        DM the bot owner(s) when the client reports a dead/invalid Discord token.
+        Recipients: COMMAND_USERS if configured, otherwise all unique guild owners.
+        """
+        if self._shutting_down:
+            return
+
+        try:
+            await self.bot.wait_until_ready()
+
+            reason = str((data or {}).get("reason") or "unknown").strip()
+            kind = str((data or {}).get("kind") or "primary").strip()
+            token_preview = str((data or {}).get("token_preview") or "").strip()
+
+            if kind == "exhausted":
+                title = "⛔ Copycord client is offline: all tokens dead"
+                description = (
+                    "Your primary client token is invalid **and no backup token worked**. "
+                    "The client is offline until you add a working token."
+                )
+            else:
+                title = "⚠️ Copycord client token appears dead"
+                description = (
+                    "The primary client token failed to authenticate. "
+                    "Copycord will attempt backup tokens next."
+                )
+
+            embed = discord.Embed(
+                title=title,
+                description=description,
+                timestamp=datetime.now(timezone.utc),
+            )
+            if token_preview:
+                embed.add_field(name="Token", value=f"`{token_preview}`", inline=True)
+            embed.add_field(name="Kind", value=f"`{kind}`", inline=True)
+            embed.add_field(name="Reason", value=f"```{reason[:1000]}```", inline=False)
+
+            recipient_ids: list[int] = []
+            try:
+                recipient_ids = [int(x) for x in (self.config.COMMAND_USERS or [])]
+            except Exception:
+                recipient_ids = []
+
+            if recipient_ids:
+                sent = 0
+                for uid in recipient_ids:
+                    try:
+                        user = self.bot.get_user(uid) or await self.bot.fetch_user(uid)
+                        await user.send(embed=embed)
+                        sent += 1
+                        logger.info("[🛑] Token-dead DM sent to %s", uid)
+                    except Exception as e:
+                        logger.warning("[⚠️] Failed token-dead DM to %s: %s", uid, e)
+                if sent == 0:
+                    logger.warning("[⚠️] No COMMAND_USERS reachable for token-dead DM.")
+                return
+
+            seen: set[int] = set()
+            for g in list(self.bot.guilds):
+                try:
+                    owner = g.owner or await g.fetch_member(g.owner_id)
+                except Exception as e:
+                    logger.warning("[⚠️] Could not resolve owner for guild %s: %s", g.id, e)
+                    continue
+                owner_id = getattr(owner, "id", None)
+                if not owner_id or owner_id in seen:
+                    continue
+                seen.add(owner_id)
+                try:
+                    await owner.send(embed=embed)
+                    logger.info("[🛑] Token-dead DM sent to guild owner %s (g=%s)", owner_id, g.id)
+                except Exception as e:
+                    logger.warning("[⚠️] Failed token-dead DM to owner %s: %s", owner_id, e)
+
+        except Exception as e:
+            logger.exception("Unexpected error in handle_token_dead: %s", e)
 
     def _load_mappings(self) -> None:
         """
