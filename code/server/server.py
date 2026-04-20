@@ -3708,6 +3708,17 @@ class ServerReceiver:
         if not forums:
             return parts
 
+        try:
+            _forum_settings = resolve_mapping_settings(
+                self.db,
+                self.config,
+                original_guild_id=host_guild_id or None,
+                cloned_guild_id=int(guild.id),
+            )
+        except Exception:
+            _forum_settings = self.config.default_mapping_settings()
+        clone_messages = _forum_settings.get("CLONE_MESSAGES", True)
+
         channel_name_blacklist = self._get_channel_name_blacklist(
             host_guild_id or 0,
             int(guild.id),
@@ -3740,7 +3751,7 @@ class ServerReceiver:
             existing_url: str | None,
         ) -> str | None:
             url = existing_url
-            if not url:
+            if not url and clone_messages:
 
                 wh = await self._create_webhook_safely(
                     ch, "Copycord", await self._get_default_avatar_bytes()
@@ -3938,6 +3949,7 @@ class ServerReceiver:
         user_limit: Optional[int] = None,
         rtc_region: Optional[str] = None,
         video_quality: str | int | None = None,
+        clone_messages: bool = True,
     ) -> Tuple[int, int, str]:
         """
         Ensure a voice channel exists with webhook for its text chat.
@@ -3971,7 +3983,7 @@ class ServerReceiver:
             ch = guild.get_channel(clone_id) if clone_id else None
 
             if ch:
-                if not wh_url:
+                if not wh_url and clone_messages:
                     wh = await self._create_webhook_safely(
                         ch, "Copycord", await self._get_default_avatar_bytes()
                     )
@@ -4009,7 +4021,7 @@ class ServerReceiver:
                     chan_ids={int(original_id)}, thread_parent_ids={int(original_id)}
                 )
                 self._unmapped_warned.discard(int(original_id))
-                return int(original_id), int(clone_id), str(wh_url)
+                return int(original_id), int(clone_id), str(wh_url or "")
 
             try:
                 self.db.delete_channel_mapping_pair(int(original_id), int(guild.id))
@@ -4050,10 +4062,12 @@ class ServerReceiver:
                     e,
                 )
 
-        wh = await self._create_webhook_safely(
-            ch, "Copycord", await self._get_default_avatar_bytes()
-        )
-        url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
+        url = None
+        if clone_messages:
+            wh = await self._create_webhook_safely(
+                ch, "Copycord", await self._get_default_avatar_bytes()
+            )
+            url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
 
         self.db.upsert_channel_mapping(
             int(original_id),
@@ -4102,6 +4116,7 @@ class ServerReceiver:
         rtc_region: Optional[str] = None,
         topic: Optional[str] = None,
         video_quality: str | int | None = None,
+        clone_messages: bool = True,
     ) -> Tuple[int, int, str]:
         """
         Ensure a stage channel exists with webhook for its text chat.
@@ -4144,7 +4159,7 @@ class ServerReceiver:
             ch = guild.get_channel(clone_id) if clone_id else None
 
             if ch:
-                if not wh_url:
+                if not wh_url and clone_messages:
                     wh = await self._create_webhook_safely(
                         ch, "Copycord", await self._get_default_avatar_bytes()
                     )
@@ -4182,7 +4197,7 @@ class ServerReceiver:
                     chan_ids={int(original_id)}, thread_parent_ids={int(original_id)}
                 )
                 self._unmapped_warned.discard(int(original_id))
-                return int(original_id), int(clone_id), str(wh_url)
+                return int(original_id), int(clone_id), str(wh_url or "")
 
             try:
                 self.db.delete_channel_mapping_pair(int(original_id), int(guild.id))
@@ -4235,10 +4250,12 @@ class ServerReceiver:
                     e,
                 )
 
-        wh = await self._create_webhook_safely(
-            ch, "Copycord", await self._get_default_avatar_bytes()
-        )
-        url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
+        url = None
+        if clone_messages:
+            wh = await self._create_webhook_safely(
+                ch, "Copycord", await self._get_default_avatar_bytes()
+            )
+            url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
 
         self.db.upsert_channel_mapping(
             int(original_id),
@@ -4298,6 +4315,7 @@ class ServerReceiver:
         except Exception:
             settings = self.config.default_mapping_settings()
 
+        clone_messages = settings.get("CLONE_MESSAGES", True)
         clone_voice = settings.get("CLONE_VOICE", False)
         clone_voice_properties = settings.get("CLONE_VOICE_PROPERTIES", False)
         clone_stage = settings.get("CLONE_STAGE", False)
@@ -4387,6 +4405,7 @@ class ServerReceiver:
                     user_limit=user_limit,
                     rtc_region=rtc_region,
                     video_quality=video_quality,
+                    clone_messages=clone_messages,
                 )
 
                 if is_new:
@@ -4448,6 +4467,7 @@ class ServerReceiver:
                     rtc_region=rtc_region,
                     topic=topic,
                     video_quality=video_quality,
+                    clone_messages=clone_messages,
                 )
 
                 if result is None or result == (None, None, None):
@@ -4469,7 +4489,8 @@ class ServerReceiver:
 
             else:
                 _, clone_id, _ = await self._ensure_channel_and_webhook(
-                    host_guild_id, guild, orig, name, pid, pname, ctype
+                    host_guild_id, guild, orig, name, pid, pname, ctype,
+                    clone_messages=clone_messages,
                 )
                 if is_new:
                     created += 1
@@ -5755,6 +5776,8 @@ class ServerReceiver:
         parent_id: Optional[int],
         parent_name: Optional[str],
         channel_type: int,
+        *,
+        clone_messages: bool = True,
     ) -> Tuple[int, int, str]:
         if self._shutting_down:
             return
@@ -5785,7 +5808,7 @@ class ServerReceiver:
             ch = guild.get_channel(clone_id) if clone_id else None
 
             if ch:
-                if not wh_url:
+                if not wh_url and clone_messages:
                     wh = await self._create_webhook_safely(
                         ch, "Copycord", await self._get_default_avatar_bytes()
                     )
@@ -5823,7 +5846,7 @@ class ServerReceiver:
                     chan_ids={int(original_id)}, thread_parent_ids={int(original_id)}
                 )
                 self._unmapped_warned.discard(int(original_id))
-                return int(original_id), int(clone_id), str(wh_url)
+                return int(original_id), int(clone_id), str(wh_url or "")
 
             try:
                 self.db.delete_channel_mapping_pair(int(original_id), int(guild.id))
@@ -5837,10 +5860,13 @@ class ServerReceiver:
 
         kind = "news" if int(channel_type) == discord.ChannelType.news.value else "text"
         ch = await self._create_channel(guild, kind, original_name, category)
-        wh = await self._create_webhook_safely(
-            ch, "Copycord", await self._get_default_avatar_bytes()
-        )
-        url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
+
+        url = None
+        if clone_messages:
+            wh = await self._create_webhook_safely(
+                ch, "Copycord", await self._get_default_avatar_bytes()
+            )
+            url = f"https://discord.com/api/webhooks/{wh.id}/{wh.token}"
 
         self.db.upsert_channel_mapping(
             int(original_id),

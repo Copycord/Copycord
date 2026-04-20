@@ -138,7 +138,7 @@ copycord/
 ```yaml
 services:
   admin:
-    image: ghcr.io/copycord/copycord:v3.15.0
+    image: ghcr.io/copycord/copycord:v3.16.0
     container_name: copycord-admin
     environment:
       - ROLE=admin
@@ -150,7 +150,7 @@ services:
     restart: unless-stopped
 
   server:
-    image: ghcr.io/copycord/copycord:v3.15.0
+    image: ghcr.io/copycord/copycord:v3.16.0
     container_name: copycord-server
     environment:
       - ROLE=server
@@ -161,7 +161,7 @@ services:
     restart: unless-stopped
 
   client:
-    image: ghcr.io/copycord/copycord:v3.15.0
+    image: ghcr.io/copycord/copycord:v3.16.0
     container_name: copycord-client
     environment:
       - ROLE=client
@@ -305,7 +305,7 @@ Once started, open the web UI in your browser:
 | Option                         | Default | Description                                                                                    |
 | ------------------------------ | ------- | ---------------------------------------------------------------------------------------------- |
 | `ENABLE_CLONING`               | true    | Master switch for cloning                                                                      |
-| `CLONE_MESSAGES`               | true    | Clone messages in real-time                                                                    |
+| `CLONE_MESSAGES`               | true    | Clone messages in real-time. When disabled, webhook creation is also skipped during sync       |
 | `DELETE_CHANNELS`              | true    | Delete channels/categories removed in the host                                                 |
 | `DELETE_THREADS`               | true    | Delete threads removed in the host                                                             |
 | `DELETE_ROLES`                 | true    | Delete roles that no longer exist in the host                                                  |
