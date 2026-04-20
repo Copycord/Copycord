@@ -11,6 +11,7 @@
 from __future__ import annotations
 from collections import deque
 import contextlib
+import mimetypes
 import json
 import os
 import sqlite3
@@ -276,6 +277,8 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
 }
 
 app = FastAPI(title=APP_TITLE)
+mimetypes.add_type("application/javascript", ".js")
+mimetypes.add_type("text/css", ".css")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 templates.env.globals.setdefault("links", {})
