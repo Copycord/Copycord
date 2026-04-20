@@ -687,6 +687,7 @@ class RoleManager:
         rearranged = 0
         if rearrange_roles:
             try:
+                await guild.fetch_roles()
                 rearranged = await self._rearrange_roles(
                     guild=guild,
                     incoming=incoming,
@@ -695,7 +696,10 @@ class RoleManager:
                 )
             except Exception as e:
                 self._log(
-                    "warning", "[⚠️] Role rearrangement failed: %s", e, exc_info=True
+                    "warning",
+                    "[⚠️] Role rearrangement failed: %s",
+                    e,
+                    exc_info=True,
                 )
 
         return deleted, updated, created, rearranged
@@ -730,11 +734,16 @@ class RoleManager:
         """
         Rearrange cloned roles to match the host server's role order.
 
-        Logic:
-        1. Check if bot role is the highest role
-        2. Position non-cloned roles directly under bot role
-        3. Arrange cloned roles in host order below non-cloned roles
-        4. Subtract non-cloned role positions when calculating cloned role positions
+        Only roles below the bot's top role are reordered. Roles above the
+        bot (including any cloned roles manually moved there) are left
+        untouched.
+
+        Resulting hierarchy (top → bottom):
+        1. Roles above bot        — untouched
+        2. Bot role               — anchor point
+        3. Non-cloned roles       — preserve their relative order
+        4. Cloned roles           — mirroring host server order
+        5. @everyone              — bottom
 
         Returns:
             Number of roles repositioned
@@ -750,17 +759,6 @@ class RoleManager:
             return 0
 
         bot_position = bot_role.position
-
-        highest_position = max(
-            (r.position for r in guild.roles if not r.is_default()), default=0
-        )
-        if bot_position < highest_position:
-            self._log(
-                "warning",
-                "[⚠️] Cannot rearrange roles: my role '%s' is not the highest role. Please position my role above all others. Skipping operation.",
-                bot_role.name,
-            )
-            return 0
 
         rows = self.db.get_all_role_mappings()
         cloned_role_ids = set()
@@ -778,6 +776,29 @@ class RoleManager:
                     cloned_role_ids.add(cloned_id)
                     original_to_cloned[orig_id] = cloned_id
 
+        # Check for cloned roles above the bot — skip them with a warning
+        skipped_above = []
+        for cloned_id in list(cloned_role_ids):
+            cloned_role = guild.get_role(cloned_id)
+            if cloned_role and cloned_role.position > bot_position:
+                skipped_above.append(cloned_role)
+                cloned_role_ids.discard(cloned_id)
+                # Remove from mapping so it won't be included in ordering
+                original_to_cloned = {
+                    k: v
+                    for k, v in original_to_cloned.items()
+                    if v != cloned_id
+                }
+
+        for role in skipped_above:
+            self._log(
+                "warning",
+                "[⚠️] Cloned role '%s' is above my role — skipping reorder for it. "
+                "Move it below my role to include it in reordering.",
+                role.name,
+            )
+
+        # Collect non-cloned roles that are BELOW the bot role
         non_cloned_roles = []
         for role in guild.roles:
             if (
@@ -785,6 +806,7 @@ class RoleManager:
                 and not role.is_default()
                 and not role.managed
                 and role.id != bot_role.id
+                and role.position <= bot_position
             ):
                 non_cloned_roles.append(role)
 
@@ -809,20 +831,38 @@ class RoleManager:
 
         positions = {}
 
-        current_pos = bot_position - 1
-        for role in non_cloned_roles:
-            if role.position != current_pos:
-                positions[role] = current_pos
-            current_pos -= 1
+        # Assign positions starting from 1 upward.  We avoid using
+        # bot_position-1 downward because Discord's reported position
+        # for the bot role can be stale after role creation — the
+        # server-side position may be much lower than fetch_roles()
+        # reports, causing moves to high positions to fail with 50013.
+        # Relative order is what matters for the visual hierarchy.
+        #
+        # Layout (bottom → top):
+        #   1  = lowest cloned role  (lowest host position)
+        #   …
+        #   N  = highest cloned role (highest host position)
+        #   N+1 … = non-cloned roles (preserve relative order)
+        current_pos = 1
 
-        for role in reversed(cloned_roles_ordered):
-            if role.position != current_pos:
-                positions[role] = current_pos
-            current_pos -= 1
+        # Place cloned roles first (lowest positions)
+        for role in cloned_roles_ordered:  # ascending host position
+            positions[role] = current_pos
+            current_pos += 1
+
+        # Place non-cloned roles above cloned roles
+        for role in reversed(non_cloned_roles):  # lowest first
+            positions[role] = current_pos
+            current_pos += 1
 
         if not positions:
             self._log("debug", "[🧩] All roles already in correct positions")
             return 0
+
+        # Build raw payload with string snowflake IDs
+        payload = []
+        for role, pos in positions.items():
+            payload.append({"id": str(role.id), "position": pos})
 
         try:
             await self.ratelimit.acquire_for_guild(ActionType.ROLE, clone_id)
@@ -847,6 +887,9 @@ class RoleManager:
             return 0
         except Exception as e:
             self._log(
-                "error", "[⚠️] Unexpected error rearranging roles: %s", e, exc_info=True
+                "error",
+                "[⚠️] Unexpected error rearranging roles: %s",
+                e,
+                exc_info=True,
             )
             return 0
