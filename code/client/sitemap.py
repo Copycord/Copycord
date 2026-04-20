@@ -617,6 +617,8 @@ class SitemapService:
                         "managed": r.managed,
                         "everyone": (r == r.guild.default_role),
                         "position": r.position,
+                        "icon_url": str(r.icon.url) if getattr(r, "icon", None) else None,
+                        "unicode_emoji": getattr(r, "unicode_emoji", None),
                     }
                     for r in guild.roles
                 ],
@@ -827,12 +829,22 @@ class SitemapService:
             if not isinstance(thr, discord.Thread):
                 continue
 
+            applied_tag_ids = []
+            try:
+                applied_tag_ids = [t.id for t in (thr.applied_tags or [])]
+            except Exception:
+                try:
+                    applied_tag_ids = list(getattr(thr, "_applied_tags", []))
+                except Exception:
+                    pass
+
             sitemap["threads"].append(
                 {
                     "id": thr.id,
                     "forum_id": forum_orig,
                     "name": thr.name,
                     "archived": thr.archived,
+                    "applied_tag_ids": applied_tag_ids,
                 }
             )
 

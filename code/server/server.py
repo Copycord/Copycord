@@ -1326,6 +1326,9 @@ class ServerReceiver:
 
                 asyncio.create_task(self.handle_thread_rename(data))
 
+            elif typ == "thread_tags_update":
+                asyncio.create_task(self.handle_thread_tags_update(data))
+
             elif typ == "announce":
                 asyncio.create_task(self.handle_announce(data))
 
@@ -1919,6 +1922,7 @@ class ServerReceiver:
                             ),
                             update_roles=settings.get("UPDATE_ROLES", True),
                             rearrange_roles=settings.get("REARRANGE_ROLES", False),
+                            clone_role_icons=settings.get("CLONE_ROLE_ICONS", False),
                         )
                         bg_jobs.append("roles")
 
@@ -3049,13 +3053,13 @@ class ServerReceiver:
                     continue
                 moderated = bool(tm.get("moderated", False))
                 emoji_name = tm.get("emoji_name") or ""
-                emoji_str = emoji_name or "🏷️"
+                emoji_str = emoji_name
                 out.append((name, moderated, emoji_str))
                 if not moderated:
                     has_unmod = True
 
             if desired_req and not has_unmod:
-                out.append(("general", False, "🏷️"))
+                out.append(("general", False, ""))
 
             out.sort()
             return out
@@ -3436,23 +3440,36 @@ class ServerReceiver:
                         moderated = bool(tmeta.get("moderated", False))
 
                         emoji_name = tmeta.get("emoji_name") or ""
-                        emoji_str = emoji_name or "🏷️"
 
                         try:
-                            new_tag_obj = discord.ForumTag(
-                                name=name,
-                                emoji=emoji_str,
-                                moderated=moderated,
-                            )
-                        except Exception:
-                            try:
+                            if emoji_name:
                                 new_tag_obj = discord.ForumTag(
                                     name=name,
-                                    emoji="🏷️",
+                                    emoji=emoji_name,
                                     moderated=moderated,
                                 )
-                            except Exception:
-                                new_tag_obj = None
+                            else:
+                                # py-cord may require `emoji` kwarg and
+                                # may crash on None emoji in to_dict().
+                                # Build manually and patch to_dict.
+                                new_tag_obj = discord.ForumTag.__new__(
+                                    discord.ForumTag
+                                )
+                                new_tag_obj._state = None
+                                new_tag_obj._channel_id = None
+                                new_tag_obj.name = name
+                                new_tag_obj.id = 0
+                                new_tag_obj.moderated = moderated
+                                new_tag_obj.emoji = None
+
+                                def _safe_to_dict(tag=new_tag_obj):
+                                    d = {"name": tag.name, "moderated": tag.moderated}
+                                    if tag.id:
+                                        d["id"] = tag.id
+                                    return d
+                                new_tag_obj.to_dict = _safe_to_dict
+                        except Exception:
+                            new_tag_obj = None
 
                         if new_tag_obj is not None:
                             desired_tags.append(new_tag_obj)
@@ -3473,11 +3490,23 @@ class ServerReceiver:
                             for t in desired_tags
                         }
                         if "general" not in existing_names:
-                            fallback_tag = discord.ForumTag(
-                                name="General",
-                                emoji="🏷️",
-                                moderated=False,
+                            fallback_tag = discord.ForumTag.__new__(
+                                discord.ForumTag
                             )
+                            fallback_tag._state = None
+                            fallback_tag._channel_id = None
+                            fallback_tag.name = "General"
+                            fallback_tag.id = 0
+                            fallback_tag.moderated = False
+                            fallback_tag.emoji = None
+
+                            def _safe_to_dict_fb(tag=fallback_tag):
+                                d = {"name": tag.name, "moderated": tag.moderated,
+                                     "emoji_id": None, "emoji_name": None}
+                                if tag.id:
+                                    d["id"] = tag.id
+                                return d
+                            fallback_tag.to_dict = _safe_to_dict_fb
                             desired_tags.append(fallback_tag)
                             tags_changed = True
                     except Exception as tag_err:
@@ -3489,8 +3518,43 @@ class ServerReceiver:
                         )
 
                 if tags_changed:
+                    # Build raw tag payloads directly from source
+                    # metadata — py-cord's ForumTag breaks for tags
+                    # without emojis on some versions.
+                    #
+                    # Preserve existing clone tag IDs by matching on
+                    # name so Discord updates in-place rather than
+                    # replacing — this keeps thread tag references
+                    # intact.
+                    clone_tag_id_by_name = {}
+                    for ct in clone_tags:
+                        ct_name = (getattr(ct, "name", "") or "").strip().lower()
+                        ct_id = getattr(ct, "id", 0)
+                        if ct_name and ct_id:
+                            clone_tag_id_by_name[ct_name] = ct_id
+
+                    raw_tag_payloads = []
+                    for tmeta in src_tags_meta[:20]:
+                        tname = (tmeta.get("name") or "").strip()
+                        if not tname:
+                            continue
+                        td = {
+                            "name": tname,
+                            "moderated": bool(tmeta.get("moderated", False)),
+                        }
+                        # Reuse existing clone tag ID if name matches
+                        existing_id = clone_tag_id_by_name.get(tname.lower())
+                        if existing_id:
+                            td["id"] = existing_id
+                        eid = tmeta.get("emoji_id")
+                        ename = tmeta.get("emoji_name")
+                        if eid or ename:
+                            td["emoji_id"] = eid
+                            td["emoji_name"] = ename
+                        raw_tag_payloads.append(td)
+                    changes["_raw_available_tags"] = raw_tag_payloads
+                    # Keep desired_tags for require_tag check below
                     final_tags = desired_tags[:20]
-                    changes["available_tags"] = final_tags
                     forum_changed_here = True
                 else:
                     final_tags = desired_tags or clone_tags
@@ -3531,8 +3595,9 @@ class ServerReceiver:
                 forum_updated += 1
 
             raw_forum_layout = changes.pop("_raw_forum_layout", None)
+            raw_available_tags = changes.pop("_raw_available_tags", None)
 
-            if not changes and raw_forum_layout is None:
+            if not changes and raw_forum_layout is None and raw_available_tags is None:
                 continue
 
             try:
@@ -3543,15 +3608,53 @@ class ServerReceiver:
                 if changes:
                     await ch.edit(**changes)
 
+                tag_log_parts = []
+                if raw_available_tags is not None:
+                    # Compute tag diff for logging
+                    old_names = set(
+                        (getattr(t, "name", "") or "").strip()
+                        for t in (clone_tags if is_forum_ch else [])
+                    )
+                    new_names = set(
+                        t.get("name", "") for t in raw_available_tags
+                    )
+                    added = sorted(new_names - old_names)
+                    removed = sorted(old_names - new_names)
+
+                    # Detect likely renames (paired add+remove)
+                    if added and removed and len(added) == len(removed):
+                        for old_n, new_n in zip(removed, added):
+                            tag_log_parts.append(f"'{old_n}' -> '{new_n}'")
+                    else:
+                        if added:
+                            tag_log_parts.append(f"+{added}")
+                        if removed:
+                            tag_log_parts.append(f"-{removed}")
+                    if not added and not removed:
+                        tag_log_parts.append(f"synced {len(new_names)} tags")
+
+                    http_client, Route = _get_http_client_and_route()
+                    if http_client and Route:
+                        route = Route(
+                            "PATCH", "/channels/{channel_id}",
+                            channel_id=ch.id,
+                        )
+                        await http_client.request(
+                            route,
+                            json={"available_tags": raw_available_tags},
+                        )
+
                 if raw_forum_layout is not None and is_forum_ch:
                     await _raw_patch_forum_layout(ch.id, int(raw_forum_layout))
 
                 log_items = list(changes.items())
                 if raw_forum_layout is not None:
                     log_items.append(("default_forum_layout", raw_forum_layout))
+                if tag_log_parts:
+                    log_items.append(("tags", "; ".join(tag_log_parts)))
                 log_str = (
                     ", ".join(f"{k}={v}" for k, v in log_items)
-                    or "(raw default_forum_layout only)"
+                    or "(no changes)"
                 )
 
                 if is_voice_ch and voice_changed_here:
@@ -6546,6 +6649,101 @@ class ServerReceiver:
                 )
             except Exception:
                 logger.exception("[db] upsert_forum_thread_mapping failed on rename")
+
+    async def handle_thread_tags_update(self, data: dict):
+        """
+        Sync applied forum tags from the host thread to all cloned threads.
+        Tags are matched by name between host and clone forums.
+        """
+        if self._shutting_down:
+            return
+
+        try:
+            orig_thread_id = int(data.get("thread_id") or 0)
+            host_gid = int(data.get("guild_id") or 0) or 0
+            host_tag_names = data.get("applied_tag_names") or []
+        except Exception:
+            return
+        if not orig_thread_id:
+            return
+
+        try:
+            rows = self.db.get_thread_mappings_for_original(orig_thread_id) or []
+        except Exception:
+            rows = []
+
+        if not rows:
+            return
+
+        for row in rows:
+            r = self._rowdict(row)
+            cloned_id = int(r.get("cloned_thread_id") or 0)
+            clone_gid = int(r.get("cloned_guild_id") or 0)
+            if not (cloned_id and clone_gid):
+                continue
+
+            try:
+                settings = resolve_mapping_settings(
+                    self.db,
+                    self.config,
+                    original_guild_id=int(r.get("original_guild_id") or host_gid or 0),
+                    cloned_guild_id=clone_gid,
+                )
+            except Exception:
+                settings = self.config.default_mapping_settings()
+
+            if not settings.get("ENABLE_CLONING", True):
+                continue
+
+            if not settings.get("SYNC_FORUM_PROPERTIES", False):
+                continue
+
+            guild = self.bot.get_guild(clone_gid)
+            if not guild:
+                continue
+
+            ch = guild.get_channel(cloned_id)
+            if not ch:
+                try:
+                    ch = await self.bot.fetch_channel(cloned_id)
+                except Exception:
+                    continue
+
+            if not isinstance(ch, discord.Thread):
+                continue
+
+            parent = ch.parent
+            if not isinstance(parent, ForumChannel):
+                continue
+
+            # Resolve host tag names to clone ForumTag objects
+            clone_tags_by_name = {
+                t.name.strip().lower(): t
+                for t in (getattr(parent, "available_tags", []) or [])
+            }
+            resolved_tags = []
+            for name in host_tag_names:
+                ct = clone_tags_by_name.get(name.strip().lower())
+                if ct:
+                    resolved_tags.append(ct)
+
+            try:
+                await self.ratelimit.acquire_for_guild(
+                    ActionType.EDIT_CHANNEL, guild.id
+                )
+                await ch.edit(applied_tags=resolved_tags)
+                logger.info(
+                    "[🏷️] Updated tags on cloned thread %s in guild %s: %s",
+                    cloned_id,
+                    clone_gid,
+                    [t.name for t in resolved_tags],
+                )
+            except Exception as e:
+                logger.warning(
+                    "[⚠️] Failed to update tags on cloned thread %s: %s",
+                    cloned_id,
+                    e,
+                )
 
     async def _enforce_thread_limit(self, guild: discord.Guild):
         """
@@ -9563,6 +9761,67 @@ class ServerReceiver:
                                         self._pending_thread_msgs.append(data)
                                         continue
 
+                        # Sync applied tags on existing forum threads
+                        # when a message comes through — catches threads
+                        # cloned before tag sync was implemented.
+                        # Only if SYNC_FORUM_PROPERTIES is enabled.
+                        _sync_forum = False
+                        try:
+                            _s = resolve_mapping_settings(
+                                self.db, self.config,
+                                original_guild_id=int(host_guild_id or 0),
+                                cloned_guild_id=int(guild.id),
+                            )
+                            _sync_forum = _s.get("SYNC_FORUM_PROPERTIES", False)
+                        except Exception:
+                            pass
+                        if (
+                            _sync_forum
+                            and clone_thread
+                            and isinstance(clone_thread, discord.Thread)
+                            and isinstance(
+                                getattr(clone_thread, "parent", None), ForumChannel
+                            )
+                        ):
+                            host_tag_names = data.get("applied_tag_names") or []
+                            if host_tag_names:
+                                forum_parent = clone_thread.parent
+                                clone_tags_by_name = {
+                                    t.name.strip().lower(): t
+                                    for t in (
+                                        getattr(forum_parent, "available_tags", [])
+                                        or []
+                                    )
+                                }
+                                desired = [
+                                    clone_tags_by_name[n.strip().lower()]
+                                    for n in host_tag_names
+                                    if n.strip().lower() in clone_tags_by_name
+                                ]
+                                try:
+                                    current_ids = set(
+                                        t.id for t in (clone_thread.applied_tags or [])
+                                    )
+                                except Exception:
+                                    current_ids = set(
+                                        getattr(clone_thread, "_applied_tags", [])
+                                    )
+                                desired_ids = set(t.id for t in desired)
+                                if desired and current_ids != desired_ids:
+                                    try:
+                                        await clone_thread.edit(applied_tags=desired)
+                                        logger.info(
+                                            "[🏷️] Backfilled tags on thread %s: %s",
+                                            clone_thread.id,
+                                            [t.name for t in desired],
+                                        )
+                                    except Exception as e:
+                                        logger.debug(
+                                            "[🏷️] Could not backfill tags on thread %s: %s",
+                                            clone_thread.id,
+                                            e,
+                                        )
+
                         if not thr_map:
 
                             async def _try_resolve_thread_from_message(
@@ -9905,28 +10164,143 @@ class ServerReceiver:
                                     final_uname = None
                                     final_av = None
 
+                                # Resolve applied forum tags by name
+                                # (only if SYNC_FORUM_PROPERTIES enabled)
+                                clone_applied_tags = []
+                                _sfp = False
+                                try:
+                                    _sfp_s = resolve_mapping_settings(
+                                        self.db, self.config,
+                                        original_guild_id=int(host_guild_id or 0),
+                                        cloned_guild_id=int(guild.id),
+                                    )
+                                    _sfp = _sfp_s.get("SYNC_FORUM_PROPERTIES", False)
+                                except Exception:
+                                    pass
+                                host_tag_names = data.get("applied_tag_names") or []
+                                if _sfp and host_tag_names and isinstance(
+                                    cloned_parent, ForumChannel
+                                ):
+                                    clone_tags_by_name = {
+                                        t.name.strip().lower(): t
+                                        for t in (
+                                            getattr(cloned_parent, "available_tags", [])
+                                            or []
+                                        )
+                                    }
+                                    for name in host_tag_names:
+                                        ct = clone_tags_by_name.get(
+                                            name.strip().lower()
+                                        )
+                                        if ct:
+                                            clone_applied_tags.append(ct)
+
+                                    # If host has tags but clone forum has
+                                    # none matching, sync the forum's tag
+                                    # definitions first (handles pre-existing
+                                    # forums that were cloned before tag sync).
+                                    if not clone_applied_tags:
+                                        try:
+                                            from discord.http import Route as _Route
+
+                                            http_c = getattr(self.bot, "http", None)
+                                            if http_c:
+                                                host_tags_raw = []
+                                                for sm_tag_name in host_tag_names:
+                                                    host_tags_raw.append(
+                                                        {"name": sm_tag_name.strip(), "moderated": False}
+                                                    )
+                                                # Merge with existing clone tags
+                                                existing = [
+                                                    {
+                                                        "name": t.name, "moderated": t.moderated,
+                                                        "id": t.id,
+                                                        **({"emoji_id": t.emoji.id, "emoji_name": t.emoji.name}
+                                                           if t.emoji else {}),
+                                                    }
+                                                    for t in (getattr(cloned_parent, "available_tags", []) or [])
+                                                ]
+                                                existing_names = {
+                                                    d["name"].strip().lower() for d in existing
+                                                }
+                                                for ht in host_tags_raw:
+                                                    if ht["name"].strip().lower() not in existing_names:
+                                                        existing.append(ht)
+                                                route = _Route(
+                                                    "PATCH", "/channels/{channel_id}",
+                                                    channel_id=cloned_parent.id,
+                                                )
+                                                await http_c.request(
+                                                    route,
+                                                    json={"available_tags": existing[:20]},
+                                                )
+                                                # Re-fetch forum tags from API
+                                                try:
+                                                    tag_route = _Route(
+                                                        "GET", "/channels/{channel_id}",
+                                                        channel_id=cloned_parent.id,
+                                                    )
+                                                    ch_data = await http_c.request(tag_route)
+                                                    refreshed_tags = []
+                                                    for td in ch_data.get("available_tags", []):
+                                                        ft = discord.ForumTag.__new__(discord.ForumTag)
+                                                        ft._state = None
+                                                        ft._channel_id = cloned_parent.id
+                                                        ft.name = td.get("name", "")
+                                                        ft.id = int(td.get("id", 0))
+                                                        ft.moderated = td.get("moderated", False)
+                                                        ft.emoji = None
+                                                        ename = td.get("emoji_name")
+                                                        eid = td.get("emoji_id")
+                                                        if ename or eid:
+                                                            ft.emoji = discord.PartialEmoji(
+                                                                name=ename, id=eid
+                                                            )
+                                                        refreshed_tags.append(ft)
+                                                except Exception:
+                                                    refreshed_tags = list(
+                                                        getattr(cloned_parent, "available_tags", []) or []
+                                                    )
+                                                # Re-resolve tags
+                                                clone_tags_by_name = {
+                                                    t.name.strip().lower(): t
+                                                    for t in refreshed_tags
+                                                }
+                                                for name in host_tag_names:
+                                                    ct = clone_tags_by_name.get(name.strip().lower())
+                                                    if ct:
+                                                        clone_applied_tags.append(ct)
+                                                logger.info(
+                                                    "[🏷️] Auto-synced missing forum tags to #%s, resolved %d tags",
+                                                    cloned_parent.name,
+                                                    len(clone_applied_tags),
+                                                )
+                                        except Exception as e:
+                                            logger.debug(
+                                                "[🏷️] Could not auto-sync forum tags: %s", e
+                                            )
+
+                                wh_kwargs = dict(
+                                    content=(tmp.get("content") or None),
+                                    embeds=tmp.get("embeds"),
+                                    username=final_uname,
+                                    avatar_url=final_av,
+                                    thread_name=data["thread_name"],
+                                    wait=True,
+                                )
+
                                 if sem:
                                     async with sem:
                                         if is_backfill:
                                             await self._bf_gate(int(cloned_id))
                                         sent_msg = await thread_webhook.send(
-                                            content=(tmp.get("content") or None),
-                                            embeds=tmp.get("embeds"),
-                                            username=final_uname,
-                                            avatar_url=final_av,
-                                            thread_name=data["thread_name"],
-                                            wait=True,
+                                            **wh_kwargs
                                         )
                                 else:
                                     if is_backfill:
                                         await self._bf_gate(int(cloned_id))
                                     sent_msg = await thread_webhook.send(
-                                        content=(tmp.get("content") or None),
-                                        embeds=tmp.get("embeds"),
-                                        username=final_uname,
-                                        avatar_url=final_av,
-                                        thread_name=data["thread_name"],
-                                        wait=True,
+                                        **wh_kwargs
                                     )
 
                                 t = await _try_resolve_thread_from_message(
@@ -9960,6 +10334,21 @@ class ServerReceiver:
                                         "[🧵] could not set auto_archive_duration for thread_id=%s",
                                         t.id,
                                     )
+                                # Apply forum tags after thread creation
+                                if clone_applied_tags:
+                                    try:
+                                        await t.edit(applied_tags=clone_applied_tags)
+                                        logger.info(
+                                            "[🏷️] Applied tags to new thread %s: %s",
+                                            t.id,
+                                            [ct.name for ct in clone_applied_tags],
+                                        )
+                                    except Exception as tag_err:
+                                        logger.debug(
+                                            "[🏷️] Could not apply tags to thread %s: %s",
+                                            t.id,
+                                            tag_err,
+                                        )
                                 if is_backfill and hasattr(self, "backfill"):
                                     self.backfill.note_checkpoint(
                                         parent_id,

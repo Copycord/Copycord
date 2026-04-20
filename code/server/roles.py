@@ -9,7 +9,7 @@
 
 
 from __future__ import annotations
-import asyncio, logging, discord
+import asyncio, logging, discord, aiohttp
 from typing import List, Dict, Tuple, Optional
 from server.rate_limiter import ActionType
 from server import logctx
@@ -102,6 +102,7 @@ class RoleManager:
         mirror_permissions: bool | None = None,
         update_roles: bool | None = None,
         rearrange_roles: bool | None = None,
+        clone_role_icons: bool | None = None,
     ) -> None:
         clone_gid = int(target_clone_guild_id or self.clone_guild_id)
 
@@ -147,6 +148,9 @@ class RoleManager:
         eff_rearrange_roles = (
             False if rearrange_roles is None else bool(rearrange_roles)
         )
+        eff_clone_role_icons = (
+            False if clone_role_icons is None else bool(clone_role_icons)
+        )
 
         logger.debug(
             "[🧩] Scheduling role sync task host=%s → clone=%s (delete_roles=%s mirror_perms=%s rearrange=%s)",
@@ -167,6 +171,7 @@ class RoleManager:
                 mirror_permissions=eff_mirror_perms,
                 update_roles=eff_update_roles,
                 rearrange_roles=eff_rearrange_roles,
+                clone_role_icons=eff_clone_role_icons,
             )
         )
 
@@ -184,6 +189,7 @@ class RoleManager:
         mirror_permissions: bool,
         update_roles: bool,
         rearrange_roles: bool,
+        clone_role_icons: bool = False,
     ) -> None:
         lock = self._get_lock_for_clone(clone_id)
         async with lock:
@@ -197,6 +203,7 @@ class RoleManager:
                     mirror_permissions=mirror_permissions,
                     update_roles=update_roles,
                     rearrange_roles=rearrange_roles,
+                    clone_role_icons=clone_role_icons,
                 )
 
                 parts = []
@@ -248,6 +255,9 @@ class RoleManager:
         original_guild_id: int | None,
         cloned_guild_id: int | None,
         mirror_permissions: bool,
+        clone_role_icons: bool = False,
+        icon_url: str | None = None,
+        unicode_emoji: str | None = None,
     ) -> Tuple[Optional[discord.Role], int, bool, bool]:
         """
         (unchanged logic, still per-clone safe)
@@ -275,6 +285,13 @@ class RoleManager:
             )
             if mirror_permissions:
                 kwargs["permissions"] = want_perms
+            if clone_role_icons:
+                if icon_url:
+                    icon_bytes = await self._fetch_icon_bytes(icon_url)
+                    if icon_bytes:
+                        kwargs["display_icon"] = icon_bytes
+                elif unicode_emoji:
+                    kwargs["display_icon"] = unicode_emoji
 
             cloned = await guild.create_role(**kwargs)
 
@@ -320,6 +337,7 @@ class RoleManager:
         mirror_permissions: bool,
         update_roles: bool,
         rearrange_roles: bool,
+        clone_role_icons: bool = False,
     ) -> Tuple[int, int, int]:
         """
         Mirror roles (name/color/hoist/mentionable + permissions if enabled)
@@ -488,6 +506,8 @@ class RoleManager:
             want_color = discord.Color(info.get("color", 0))
             want_hoist = bool(info.get("hoist", False))
             want_mention = bool(info.get("mentionable", False))
+            want_icon_url = info.get("icon_url")
+            want_unicode_emoji = info.get("unicode_emoji")
 
             if mapping and not cloned_role:
                 cloned_role, add, can_create, create_suppressed_logged = (
@@ -505,6 +525,9 @@ class RoleManager:
                         original_guild_id=host_id,
                         cloned_guild_id=clone_id,
                         mirror_permissions=mirror_permissions,
+                        clone_role_icons=clone_role_icons,
+                        icon_url=want_icon_url,
+                        unicode_emoji=want_unicode_emoji,
                     )
                 )
                 created += add
@@ -533,6 +556,13 @@ class RoleManager:
                     )
                     if mirror_permissions:
                         kwargs["permissions"] = want_perms
+                    if clone_role_icons:
+                        if want_icon_url:
+                            icon_bytes = await self._fetch_icon_bytes(want_icon_url)
+                            if icon_bytes:
+                                kwargs["display_icon"] = icon_bytes
+                        elif want_unicode_emoji:
+                            kwargs["display_icon"] = want_unicode_emoji
 
                     new_role = await guild.create_role(**kwargs)
                     created += 1
@@ -632,6 +662,19 @@ class RoleManager:
                         f"mentionable: {cloned_role.mentionable} -> {want_mention}"
                     )
 
+                if clone_role_icons:
+                    current_emoji = getattr(cloned_role, "unicode_emoji", None)
+                    has_icon = getattr(cloned_role, "_icon", None) is not None
+
+                    if want_icon_url and not has_icon:
+                        changes.append("icon: added")
+                    elif want_unicode_emoji and current_emoji != want_unicode_emoji:
+                        changes.append(
+                            f"emoji: {current_emoji!r} -> {want_unicode_emoji!r}"
+                        )
+                    elif not want_icon_url and not want_unicode_emoji and (has_icon or current_emoji):
+                        changes.append("icon: removed")
+
                 if changes:
                     self._log(
                         "debug",
@@ -653,6 +696,15 @@ class RoleManager:
                         )
                         if mirror_permissions:
                             kwargs["permissions"] = want_perms
+                        if clone_role_icons:
+                            if want_icon_url:
+                                icon_bytes = await self._fetch_icon_bytes(want_icon_url)
+                                if icon_bytes:
+                                    kwargs["display_icon"] = icon_bytes
+                            elif want_unicode_emoji:
+                                kwargs["display_icon"] = want_unicode_emoji
+                            elif not want_icon_url and not want_unicode_emoji:
+                                kwargs["display_icon"] = None
 
                         await cloned_role.edit(**kwargs)
                         updated += 1
@@ -703,6 +755,17 @@ class RoleManager:
                 )
 
         return deleted, updated, created, rearranged
+
+    async def _fetch_icon_bytes(self, url: str) -> Optional[bytes]:
+        """Download a role icon from a URL and return the raw bytes."""
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    if resp.status == 200:
+                        return await resp.read()
+        except Exception as e:
+            self._log("debug", "[🧩] Failed to download role icon: %s", e)
+        return None
 
     def _color_int(self, c) -> int:
         try:
@@ -829,35 +892,32 @@ class RoleManager:
             self._log("debug", "[🧩] No cloned roles to rearrange")
             return 0
 
-        positions = {}
+        # Build the desired order: cloned roles (ascending host pos),
+        # then non-cloned roles (preserve relative order).
+        desired_order = list(cloned_roles_ordered)
+        desired_order.extend(reversed(non_cloned_roles))
+
+        # Check if the current relative order already matches.
+        # Sort roles below the bot by their current position and
+        # compare the ID sequence to the desired order.
+        current_below_bot = sorted(
+            [r for r in desired_order],
+            key=lambda r: r.position,
+        )
+        if [r.id for r in current_below_bot] == [r.id for r in desired_order]:
+            self._log("debug", "[🧩] All roles already in correct positions")
+            return 0
 
         # Assign positions starting from 1 upward.  We avoid using
         # bot_position-1 downward because Discord's reported position
         # for the bot role can be stale after role creation — the
         # server-side position may be much lower than fetch_roles()
         # reports, causing moves to high positions to fail with 50013.
-        # Relative order is what matters for the visual hierarchy.
-        #
-        # Layout (bottom → top):
-        #   1  = lowest cloned role  (lowest host position)
-        #   …
-        #   N  = highest cloned role (highest host position)
-        #   N+1 … = non-cloned roles (preserve relative order)
+        positions = {}
         current_pos = 1
-
-        # Place cloned roles first (lowest positions)
-        for role in cloned_roles_ordered:  # ascending host position
+        for role in desired_order:
             positions[role] = current_pos
             current_pos += 1
-
-        # Place non-cloned roles above cloned roles
-        for role in reversed(non_cloned_roles):  # lowest first
-            positions[role] = current_pos
-            current_pos += 1
-
-        if not positions:
-            self._log("debug", "[🧩] All roles already in correct positions")
-            return 0
 
         # Build raw payload with string snowflake IDs
         payload = []
