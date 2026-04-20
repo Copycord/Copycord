@@ -1,4 +1,4 @@
-py-cord==2.6.1
+py-cord==2.7.2
 websockets==11.0.3
 aiohttp>=3.9,<4
 aiohttp-socks>=0.8,<1
