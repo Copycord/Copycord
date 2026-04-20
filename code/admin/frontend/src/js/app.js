@@ -199,6 +199,7 @@
     SYNC_CHANNEL_TOPIC: false,
     SYNC_CHANNEL_SLOWMODE: false,
     REARRANGE_ROLES: false,
+    CLONE_ROLE_ICONS: false,
     CLONE_VOICE: true,
     CLONE_VOICE_PROPERTIES: false,
     CLONE_STAGE: true,

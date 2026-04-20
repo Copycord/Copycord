@@ -1207,16 +1207,23 @@ class ClientListener:
         if is_thread:
             parent = getattr(target_chan, "parent", None)
             if parent is not None:
-                data_block.update(
-                    {
-                        "thread_parent_id": parent.id,
-                        "thread_parent_name": getattr(parent, "name", str(parent.id)),
-                        "thread_id": target_chan.id,
-                        "thread_name": getattr(
-                            target_chan, "name", str(target_chan.id)
-                        ),
-                    }
-                )
+                thread_data = {
+                    "thread_parent_id": parent.id,
+                    "thread_parent_name": getattr(parent, "name", str(parent.id)),
+                    "thread_id": target_chan.id,
+                    "thread_name": getattr(
+                        target_chan, "name", str(target_chan.id)
+                    ),
+                }
+                # Include applied forum tag names if this is a forum thread
+                if isinstance(parent, discord.ForumChannel):
+                    try:
+                        tag_names = [t.name for t in (target_chan.applied_tags or []) if t.name]
+                    except Exception:
+                        tag_names = []
+                    if tag_names:
+                        thread_data["applied_tag_names"] = tag_names
+                data_block.update(thread_data)
 
         payload = {
             "type": "thread_message" if is_thread else "message",
@@ -1792,6 +1799,34 @@ class ClientListener:
                 f"[✏️] Forwarded thread rename from {g.name}: {before.id} {before.name!r} → {after.name!r}"
             )
             await self.ws.send(payload)
+
+        # Detect applied tag changes on forum threads
+        if isinstance(getattr(after, "parent", None), discord.ForumChannel):
+            try:
+                before_names = sorted(t.name for t in (before.applied_tags or []) if t.name)
+                after_names = sorted(t.name for t in (after.applied_tags or []) if t.name)
+            except Exception:
+                before_names = []
+                after_names = []
+
+            if before_names != after_names:
+                payload = {
+                    "type": "thread_tags_update",
+                    "data": {
+                        "guild_id": before.guild.id,
+                        "thread_id": after.id,
+                        "parent_id": getattr(after.parent, "id", None),
+                        "applied_tag_names": after_names,
+                    },
+                }
+                logger.info(
+                    "[🏷️] Forwarded thread tag change from %s: thread %s tags %s → %s",
+                    g.name,
+                    after.id,
+                    before_names,
+                    after_names,
+                )
+                await self.ws.send(payload)
 
     async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
         """

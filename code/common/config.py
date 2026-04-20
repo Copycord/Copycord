@@ -111,6 +111,7 @@ class Config:
             "SYNC_CHANNEL_TOPIC": False,
             "SYNC_CHANNEL_SLOWMODE": False,
             "REARRANGE_ROLES": False,
+            "CLONE_ROLE_ICONS": False,
             "CLONE_VOICE": True,
             "CLONE_VOICE_PROPERTIES": False,
             "CLONE_STAGE": True,

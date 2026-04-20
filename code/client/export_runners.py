@@ -33,7 +33,7 @@ from typing import (
     TypeAlias,
     AsyncIterator,
 )
-from discord import ChannelType, MessageType, Object as DiscordObject
+from discord import ChannelType, ForumChannel, MessageType, Object as DiscordObject
 from discord.errors import HTTPException, Forbidden
 from client.message_utils import _resolve_forward, _resolve_forward_via_snapshot
 
@@ -1665,6 +1665,20 @@ class BackfillEngine:
                             "thread_parent_name": wrapper_parent_name,
                             "thread_id": wrapper_channel_id,
                             "thread_name": wrapper_channel_name,
+                            **(
+                                {
+                                    "applied_tag_names": [
+                                        t.name
+                                        for t in (wrapper_channel.applied_tags or [])
+                                        if t.name
+                                    ],
+                                }
+                                if (
+                                    isinstance(wrapper_parent, ForumChannel)
+                                    and getattr(wrapper_channel, "applied_tags", None)
+                                )
+                                else {}
+                            ),
                         }
                         if is_thread
                         else {}
