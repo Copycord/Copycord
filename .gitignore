@@ -7,3 +7,9 @@ __pycache__/
 *.pyc
 .env
 compose.yml
+
+# Docusaurus
+website/node_modules/
+website/build/
+website/.docusaurus/
+website/.cache-loader/

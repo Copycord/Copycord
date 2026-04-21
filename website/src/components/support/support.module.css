@@ -1,0 +1,534 @@
+/* ── Page ─────────────────────────────────────────── */
+.supportPage {
+  width: 100%;
+}
+
+.contentContainer {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+}
+
+/* ── Hero ─────────────────────────────────────────── */
+.hero {
+  background: linear-gradient(135deg, #3b82f6, #10b981);
+  padding: 4rem 1.5rem;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  animation: fadeIn 0.6s ease-out;
+}
+
+[data-theme='dark'] .hero {
+  background: linear-gradient(135deg, #1e40af, #059669);
+}
+
+.heroContent {
+  max-width: 700px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 1;
+}
+
+.heroTitle {
+  font-size: 2.8rem;
+  font-weight: 800;
+  color: #fff;
+  margin: 0 0 1rem;
+  animation: fadeInUp 0.6s ease-out;
+}
+
+.heroSubtitle {
+  font-size: 1.2rem;
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.7;
+  margin: 0;
+  animation: fadeInUp 0.6s ease-out 0.1s both;
+}
+
+/* ── Section titles ──────────────────────────────── */
+.sectionTitle {
+  font-size: 1.8rem;
+  font-weight: 700;
+  text-align: center;
+  margin: 0 0 2rem;
+  color: var(--ifm-heading-color);
+}
+
+/* ── Donation grid ───────────────────────────────── */
+.donationSection {
+  margin-bottom: 3rem;
+}
+
+.donationGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1.5rem;
+}
+
+/* ── Donation card ───────────────────────────────── */
+.donationCard {
+  position: relative;
+  background: var(--ifm-card-background-color, #fff);
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 16px;
+  padding: 2rem 1.5rem;
+  text-align: center;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
+  animation: fadeInUp 0.5s ease-out both;
+  overflow: hidden;
+}
+
+.donationCard::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: var(--card-accent-color);
+  transition: height 0.25s ease;
+}
+
+.donationCard:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.12);
+}
+
+.donationCard:hover::before {
+  height: 8px;
+}
+
+[data-theme='dark'] .donationCard {
+  background: var(--ifm-card-background-color, #1e1e2e);
+  border-color: var(--ifm-color-emphasis-300);
+}
+
+[data-theme='dark'] .donationCard:hover {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
+}
+
+/* Featured card */
+.featured {
+  border-color: var(--card-accent-color);
+  border-width: 2px;
+}
+
+.featuredBadge {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: var(--card-accent-color);
+  color: #fff;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.cardIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--card-accent-color) 12%, transparent);
+  color: var(--card-accent-color);
+  margin-bottom: 1rem;
+}
+
+.cardTitle {
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+}
+
+.cardDescription {
+  font-size: 0.95rem;
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.6;
+  margin: 0 0 1.5rem;
+}
+
+/* Buttons */
+.cardButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.7rem 1.8rem;
+  border: none;
+  border-radius: 10px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+}
+
+.cardButton:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+}
+
+.cardButton:active {
+  transform: translateY(0);
+}
+
+.kofiBtn {
+  background: linear-gradient(135deg, #ff5e5b, #ff2d2d);
+}
+
+.cryptoBtn {
+  background: linear-gradient(135deg, #f7931a, #e8850f);
+}
+
+/* ── Crypto modal ────────────────────────────────── */
+.modalOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: fadeIn 0.2s ease-out;
+  padding: 1rem;
+}
+
+.modal {
+  position: relative;
+  background: var(--ifm-background-color);
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 20px;
+  padding: 2.5rem;
+  max-width: 520px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: slideInUp 0.3s ease-out;
+}
+
+.modalClose {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: none;
+  border: none;
+  font-size: 1.6rem;
+  color: var(--ifm-color-emphasis-600);
+  cursor: pointer;
+  line-height: 1;
+  padding: 4px 8px;
+  border-radius: 8px;
+  transition: background 0.15s;
+}
+
+.modalClose:hover {
+  background: var(--ifm-color-emphasis-100);
+}
+
+.modalTitle {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.modalSubtitle {
+  font-size: 0.95rem;
+  color: var(--ifm-color-emphasis-700);
+  margin: 0 0 1.5rem;
+}
+
+.backButton {
+  background: none;
+  border: none;
+  color: var(--ifm-color-primary);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  margin-bottom: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.backButton:hover {
+  text-decoration: underline;
+}
+
+/* Crypto selection grid */
+.cryptoGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+}
+
+.cryptoOption {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 1.2rem 1rem;
+  background: var(--ifm-color-emphasis-50, #f9f9f9);
+  border: 2px solid var(--ifm-color-emphasis-200);
+  border-radius: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+}
+
+.cryptoOption:hover {
+  border-color: var(--crypto-color);
+  transform: translateY(-4px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] .cryptoOption {
+  background: var(--ifm-color-emphasis-100);
+}
+
+.cryptoIcon {
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
+.cryptoName {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.cryptoSymbol {
+  font-size: 0.8rem;
+  color: var(--ifm-color-emphasis-600);
+}
+
+/* Wallet address display */
+.addressContainer {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  background: var(--ifm-color-emphasis-50, #f5f5f5);
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.5rem;
+}
+
+[data-theme='dark'] .addressContainer {
+  background: var(--ifm-color-emphasis-100);
+}
+
+.walletAddress {
+  flex: 1;
+  font-size: 0.8rem;
+  word-break: break-all;
+  color: var(--ifm-font-color-base);
+  background: none;
+  padding: 0;
+}
+
+.copyButton {
+  flex-shrink: 0;
+  padding: 0.5rem 1rem;
+  background: var(--ifm-color-primary);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.copyButton:hover {
+  opacity: 0.85;
+}
+
+.copied {
+  background: #10b981;
+}
+
+.qrContainer {
+  display: flex;
+  justify-content: center;
+}
+
+.qrCode {
+  border-radius: 12px;
+  border: 4px solid #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme='dark'] .qrCode {
+  border-color: var(--ifm-color-emphasis-200);
+}
+
+/* ── Alternative support ────���────────────────────── */
+.alternativeSection {
+  margin-top: 1rem;
+}
+
+.alternativeGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.alternativeItem {
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 12px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  overflow: hidden;
+}
+
+.alternativeItem:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme='dark'] .alternativeItem:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.alternativeLink {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1.25rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.alternativeLink:hover {
+  color: inherit;
+  text-decoration: none;
+}
+
+.alternativeIcon {
+  font-size: 1.5rem;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.alternativeTitle {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.25rem;
+}
+
+.alternativeDescription {
+  font-size: 0.85rem;
+  color: var(--ifm-color-emphasis-700);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Thank you box */
+.thankYou {
+  text-align: center;
+  background: linear-gradient(135deg, rgba(59, 130, 246, 0.08), rgba(16, 185, 129, 0.08));
+  border: 1px solid var(--ifm-color-emphasis-200);
+  border-radius: 16px;
+  padding: 2rem 1.5rem;
+}
+
+[data-theme='dark'] .thankYou {
+  background: linear-gradient(135deg, rgba(30, 64, 175, 0.15), rgba(5, 150, 105, 0.15));
+}
+
+.thankYouTitle {
+  font-size: 1.4rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+}
+
+.thankYouText {
+  font-size: 0.95rem;
+  color: var(--ifm-color-emphasis-700);
+  line-height: 1.7;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* ── Animations ──────────────────────────────────── */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hero,
+  .heroTitle,
+  .heroSubtitle,
+  .donationCard,
+  .modalOverlay,
+  .modal {
+    animation: none;
+  }
+  .donationCard:hover,
+  .alternativeItem:hover,
+  .cryptoOption:hover {
+    transform: none;
+  }
+}
+
+/* ── Responsive ──────────────────────────────────── */
+@media (max-width: 768px) {
+  .heroTitle {
+    font-size: 2rem;
+  }
+  .heroSubtitle {
+    font-size: 1.05rem;
+  }
+  .donationGrid {
+    grid-template-columns: 1fr;
+  }
+  .modal {
+    padding: 1.5rem;
+    margin: 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .hero {
+    padding: 2.5rem 1rem;
+  }
+  .addressContainer {
+    flex-direction: column;
+    text-align: center;
+  }
+  .walletAddress {
+    font-size: 0.75rem;
+  }
+}
