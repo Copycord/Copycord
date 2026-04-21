@@ -1,11 +1,13 @@
-[![Release](https://img.shields.io/github/v/release/Copycord/Copycord?label=Release&color=2E7D32&labelColor=2E7D32&logo=github&logoColor=FFFFFF)](https://github.com/Copycord/Copycord/releases/latest)
-[![Discord](https://img.shields.io/discord/1406152440377638952?label=Discord&logo=discord&color=C62828&labelColor=C62828&logoColor=FFFFFF)](https://discord.gg/ArFdqrJHBj)
+_⭐️ Love Copycord? Give us a star and join the conversation in our Discord community!_
 
 # <img width="24px" src="logo/logo.png" alt="Copycord"></img> Copycord
 
-Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multiple servers at once including channels, roles, emojis, and history while keeping everything in perfect sync with real-time message forwarding and structure updates. With powerful filters, custom branding options, DM and export tools, and a sleek web dashboard, Copycord gives you complete control to replicate, manage, and customize servers your way.
+![Version](https://img.shields.io/github/v/release/Copycord/Copycord?logo=git&label=version&color=blue)
+![Total Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fghcr-badge.elias.eu.org%2Fapi%2FCopycord%2FCopycord%2Fcopycord&query=%24.downloadCount&style=flat&logo=docker&label=Total%20Downloads&color=blue)
 
-_⭐️ Love Copycord? Give us a star and join the conversation in our Discord community!_
+[![Discord](https://img.shields.io/discord/1406152440377638952?color=7289DA&label=Discord&style=for-the-badge&logo=discord)](https://discord.gg/ArFdqrJHBj)
+
+Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multiple servers at once including channels, roles, emojis, and history while keeping everything in perfect sync with real-time message forwarding and structure updates. With powerful filters, custom branding options, DM and export tools, and a sleek web dashboard, Copycord gives you complete control to replicate, manage, and customize servers your way.
 
 <br>
 
