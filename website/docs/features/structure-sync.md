@@ -1,0 +1,96 @@
+---
+sidebar_position: 2
+title: Structure Sync
+---
+
+# Dynamic Structure Sync
+
+Copycord continuously watches source servers for structural changes and mirrors them to your clone server in real time.
+
+## What gets synced
+
+### Channels
+
+| Event | Action in clone | Configurable |
+|-------|----------------|-------------|
+| Channel created | New channel created in clone | Always on |
+| Channel deleted | Clone channel deleted | `DELETE_CHANNELS` |
+| Channel renamed | Clone channel renamed | `RENAME_CHANNELS` |
+| Channel repositioned | Clone channel repositioned | `REPOSITION_CHANNELS` |
+| Topic changed | Clone topic updated | `SYNC_CHANNEL_TOPIC` |
+| NSFW toggled | Clone NSFW updated | `SYNC_CHANNEL_NSFW` |
+| Slowmode changed | Clone slowmode updated | `SYNC_CHANNEL_SLOWMODE` |
+| Permissions changed | Clone permissions updated | `MIRROR_CHANNEL_PERMISSIONS` |
+
+### Threads
+
+| Event | Action in clone |
+|-------|----------------|
+| Thread created | Matching thread created |
+| Thread deleted | Clone thread removed (`DELETE_THREADS`) |
+| Thread renamed | Clone thread renamed |
+| Thread archived/unarchived | Clone thread updated |
+
+### Roles
+
+| Event | Action in clone | Configurable |
+|-------|----------------|-------------|
+| Role created | New role created in clone | `CLONE_ROLES` |
+| Role deleted | Clone role deleted | `DELETE_ROLES` |
+| Role renamed | Clone role renamed | `UPDATE_ROLES` |
+| Color changed | Clone role color updated | `UPDATE_ROLES` |
+| Permissions changed | Clone permissions updated | `MIRROR_ROLE_PERMISSIONS` |
+| Hoist toggled | Clone hoist updated | `UPDATE_ROLES` |
+| Position changed | Clone position updated | `REARRANGE_ROLES` |
+| Icon changed | Clone icon updated | `CLONE_ROLE_ICONS` |
+
+### Emojis and Stickers
+
+| Event | Action in clone |
+|-------|----------------|
+| Emoji added | New emoji cloned | `CLONE_EMOJI` |
+| Emoji removed | Clone emoji deleted | `CLONE_EMOJI` |
+| Sticker added | New sticker cloned | `CLONE_STICKER` |
+| Sticker removed | Clone sticker deleted | `CLONE_STICKER` |
+
+### Guild-level properties
+
+| Event | Configurable |
+|-------|-------------|
+| Server icon changed | `CLONE_GUILD_ICON` |
+| Server banner changed | `CLONE_GUILD_BANNER` |
+| Splash screen changed | `CLONE_GUILD_SPLASH` |
+| Description changed | `SYNC_GUILD_DESCRIPTION` |
+
+## How it works
+
+Copycord uses two methods to keep the clone in sync:
+
+### 1. Real-time gateway events
+
+The client self-bot receives Discord gateway events for every change in the source server. These are processed immediately:
+
+- `GUILD_CHANNEL_CREATE/DELETE/UPDATE`
+- `GUILD_ROLE_CREATE/DELETE/UPDATE`
+- `GUILD_EMOJIS_UPDATE`
+- `GUILD_STICKERS_UPDATE`
+- `GUILD_UPDATE`
+- `THREAD_CREATE/DELETE/UPDATE`
+
+### 2. Periodic full sync
+
+A comprehensive structure comparison runs periodically (default: every 60 minutes). This catches any changes that might have been missed during downtime or network interruptions.
+
+## Rate limiting
+
+Structure operations are rate-limited to respect Discord's API limits:
+
+| Operation | Rate |
+|-----------|------|
+| Channel creation | 2 per 15 seconds |
+| Channel editing | 3 per 15 seconds |
+| Role operations | 1 per 10 seconds |
+| Emoji operations | 1 per 60 seconds |
+| Sticker operations | 1 per 60 seconds |
+
+Copycord queues operations and processes them within these limits automatically.

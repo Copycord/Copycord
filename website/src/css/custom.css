@@ -1,0 +1,117 @@
+:root {
+  --ifm-color-primary: #5865f2;
+  --ifm-color-primary-dark: #3949ef;
+  --ifm-color-primary-darker: #2c3ded;
+  --ifm-color-primary-darkest: #1425d4;
+  --ifm-color-primary-light: #7781f5;
+  --ifm-color-primary-lighter: #848df6;
+  --ifm-color-primary-lightest: #b0b6f9;
+  --ifm-code-font-size: 95%;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.1);
+  --ifm-font-family-base: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #7289da;
+  --ifm-color-primary-dark: #5b76d3;
+  --ifm-color-primary-darker: #5070d0;
+  --ifm-color-primary-darkest: #3558c4;
+  --ifm-color-primary-light: #899ce1;
+  --ifm-color-primary-lighter: #94a5e4;
+  --ifm-color-primary-lightest: #bac4ef;
+  --docusaurus-highlighted-code-line-bg: rgba(0, 0, 0, 0.3);
+}
+
+/* Hero section */
+.hero {
+  padding: 4rem 0;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+[data-theme='dark'] .hero {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+}
+
+[data-theme='light'] .hero {
+  background: linear-gradient(135deg, #f0f2ff 0%, #e8ecff 50%, #dde4ff 100%);
+}
+
+.hero__title {
+  font-size: 3rem;
+  font-weight: 800;
+}
+
+.hero__subtitle {
+  font-size: 1.3rem;
+  opacity: 0.85;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* Feature cards */
+.features {
+  display: flex;
+  align-items: stretch;
+  padding: 2rem 0;
+  width: 100%;
+}
+
+.feature-card {
+  padding: 1.5rem;
+  border-radius: 12px;
+  border: 1px solid var(--ifm-color-emphasis-200);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  height: 100%;
+}
+
+.feature-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(88, 101, 242, 0.15);
+}
+
+.feature-card h3 {
+  margin-top: 0.5rem;
+}
+
+.feature-icon {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Admonition tweaks */
+.admonition {
+  border-radius: 8px;
+}
+
+/* Code blocks */
+.prism-code {
+  border-radius: 8px;
+}
+
+/* Sidebar category */
+.menu__list-item-collapsible {
+  border-radius: 6px;
+}
+
+/* Table styling */
+table {
+  display: table;
+  width: 100%;
+}
+
+table th {
+  background: var(--ifm-color-emphasis-100);
+}
+
+/* Responsive hero */
+@media (max-width: 768px) {
+  .hero__title {
+    font-size: 2rem;
+  }
+
+  .hero__subtitle {
+    font-size: 1.1rem;
+  }
+}
