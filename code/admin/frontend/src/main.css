@@ -1495,6 +1495,23 @@ body {
 .site-header .header-right {
   margin-left: auto;
 }
+.header-docs-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 8px;
+  background: rgba(139, 92, 246, .15);
+  color: var(--accent, #a78bfa);
+  font-size: .82rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background .2s, color .2s;
+}
+.header-docs-btn:hover {
+  background: rgba(139, 92, 246, .28);
+  color: #c4b5fd;
+}
 .side-menu-header {
   border-bottom: 0 !important;
   box-shadow: none !important;
