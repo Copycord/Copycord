@@ -3287,6 +3287,14 @@ async def api_backfill_start(payload: dict = Body(...)):
         if after_ts and not data.get("after_iso"):
             data["after_iso"] = str(after_ts)
 
+    if payload.get("ignore_cloned"):
+        try:
+            exclude = db.get_cloned_original_ids_for_channel(channel_id, cloned_guild_id)
+            if exclude:
+                data["exclude_ids"] = [str(mid) for mid in exclude]
+        except Exception:
+            pass
+
     res = await _ws_cmd(CLIENT_AGENT_URL, {"type": "clone_messages", "data": data})
     if not res.get("ok", True):
         await locks.release(channel_id, cloned_guild_id)
@@ -3368,6 +3376,13 @@ async def api_backfill_start_batch(payload: dict = Body(...)):
                 data["after_id"] = str(after_id)
             if after_ts and not data.get("after_iso"):
                 data["after_iso"] = str(after_ts)
+        if payload.get("ignore_cloned"):
+            try:
+                exclude = db.get_cloned_original_ids_for_channel(cid, cloned_guild_id)
+                if exclude:
+                    data["exclude_ids"] = [str(mid) for mid in exclude]
+            except Exception:
+                pass
         return data
 
     results, started, locked, failed = [], 0, 0, 0

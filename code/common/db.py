@@ -2445,6 +2445,20 @@ class DBManager:
             (int(original_message_id), int(cloned_guild_id)),
         ).fetchone()
 
+    def get_cloned_original_ids_for_channel(
+        self, original_channel_id: int, cloned_guild_id: int
+    ) -> list[int]:
+        """
+        Return all original_message_id values that have already been cloned
+        for the given original channel into the given clone guild.
+        """
+        rows = self.conn.execute(
+            "SELECT original_message_id FROM messages "
+            "WHERE original_channel_id = ? AND cloned_guild_id = ?",
+            (int(original_channel_id), int(cloned_guild_id)),
+        ).fetchall()
+        return [r["original_message_id"] if isinstance(r, dict) else r[0] for r in rows]
+
     def delete_old_messages(
         self,
         older_than_seconds: int = 7 * 24 * 3600,

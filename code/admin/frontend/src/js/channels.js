@@ -202,16 +202,22 @@
     form.reset();
 
     const sinceEl = dlg.querySelector("#bf-batch-since");
+    const sinceTimeEl = dlg.querySelector("#bf-batch-since-time");
     const lastEl = dlg.querySelector("#bf-batch-lastn");
     const fromEl = dlg.querySelector("#bf-batch-from");
+    const fromTimeEl = dlg.querySelector("#bf-batch-from-time");
     const toEl = dlg.querySelector("#bf-batch-to");
+    const toTimeEl = dlg.querySelector("#bf-batch-to-time");
     const rowBetween = dlg.querySelector(".bf-row-between");
 
     const setMode = (mode) => {
       if (sinceEl) sinceEl.disabled = mode !== "since";
+      if (sinceTimeEl) sinceTimeEl.disabled = mode !== "since";
       if (lastEl) lastEl.disabled = mode !== "last";
       if (fromEl) fromEl.disabled = mode !== "between";
+      if (fromTimeEl) fromTimeEl.disabled = mode !== "between";
       if (toEl) toEl.disabled = mode !== "between";
+      if (toTimeEl) toTimeEl.disabled = mode !== "between";
       rowBetween?.classList.toggle("is-active", mode === "between");
     };
 
@@ -5040,10 +5046,17 @@
     const day = String(d.getDate()).padStart(2, "0");
     return `${y}-${m}-${day}`;
   }
-  function startOfDayIsoLocal(dateStr) {
-    return `${dateStr}T00:00`;
+  function combineDateAndTime(dateStr, timeStr) {
+    if (!dateStr) return "";
+    const t = (timeStr || "").trim();
+    return t ? `${dateStr}T${t}` : `${dateStr}T00:00`;
   }
-  function nextDayStartIsoLocal(dateStr) {
+  function startOfDayIsoLocal(dateStr, timeStr) {
+    return combineDateAndTime(dateStr, timeStr);
+  }
+  function nextDayStartIsoLocal(dateStr, timeStr) {
+    const t = (timeStr || "").trim();
+    if (t) return `${dateStr}T${t}`;
     const d = new Date(`${dateStr}T00:00`);
     d.setDate(d.getDate() + 1);
     return `${fmtYYYYMMDD(d)}T00:00`;
@@ -5240,9 +5253,12 @@
 
     const radios = dlg.querySelectorAll('input[name="mode"]');
     const sinceEl = dlg.querySelector("#bf-since");
+    const sinceTimeEl = dlg.querySelector("#bf-since-time");
     const lastEl = dlg.querySelector("#bf-lastn");
     const fromEl = dlg.querySelector("#bf-from");
+    const fromTimeEl = dlg.querySelector("#bf-from-time");
     const toEl = dlg.querySelector("#bf-to");
+    const toTimeEl = dlg.querySelector("#bf-to-time");
 
     const rowSince = sinceEl?.closest(".indent");
     const rowLast = lastEl?.closest(".indent");
@@ -5264,9 +5280,12 @@
       const mode =
         dlg.querySelector('input[name="mode"]:checked')?.value || "all";
       if (sinceEl) sinceEl.disabled = mode !== "since";
+      if (sinceTimeEl) sinceTimeEl.disabled = mode !== "since";
       if (lastEl) lastEl.disabled = mode !== "last";
       if (fromEl) fromEl.disabled = mode !== "between";
+      if (fromTimeEl) fromTimeEl.disabled = mode !== "between";
       if (toEl) toEl.disabled = mode !== "between";
+      if (toTimeEl) toTimeEl.disabled = mode !== "between";
 
       rowSince?.classList.toggle("is-active", mode === "since");
       rowLast?.classList.toggle("is-active", mode === "last");
@@ -5309,9 +5328,12 @@
       const mode =
         dlg.querySelector('input[name="mode"]:checked')?.value || "all";
       const sinceRaw = (sinceEl?.value || "").trim();
+      const sinceTimeRaw = (sinceTimeEl?.value || "").trim();
       const lastRaw = (lastEl?.value || "").trim();
       const fromRaw = (fromEl?.value || "").trim();
+      const fromTimeRaw = (fromTimeEl?.value || "").trim();
       const toRaw = (toEl?.value || "").trim();
+      const toTimeRaw = (toTimeEl?.value || "").trim();
 
       const lastVal = Number.parseInt(lastRaw, 10);
       const lastOk = Number.isFinite(lastVal) && lastVal > 0;
@@ -5348,18 +5370,20 @@
       setCloneLaunching(cloneId, true);
 
       const mappingId = mappingSel?.value || "";
+      const ignoreCloned = !!dlg.querySelector("#bf-ignore-cloned")?.checked;
       const body = {
         channel_id: cloneId,
         mapping_id: mappingId,
         mode,
-        ...(mode === "since" ? { since: startOfDayIsoLocal(sinceRaw) } : {}),
+        ...(mode === "since" ? { since: startOfDayIsoLocal(sinceRaw, sinceTimeRaw) } : {}),
         ...(mode === "last" ? { last_n: lastVal } : {}),
         ...(mode === "between"
           ? {
-              since: startOfDayIsoLocal(fromRaw),
-              before_iso: nextDayStartIsoLocal(toRaw),
+              since: startOfDayIsoLocal(fromRaw, fromTimeRaw),
+              before_iso: nextDayStartIsoLocal(toRaw, toTimeRaw),
             }
           : {}),
+        ...(ignoreCloned ? { ignore_cloned: true } : {}),
       };
 
       dbg("[REST] POST /api/backfill/start →", body);
@@ -5473,22 +5497,25 @@
             <input type="radio" name="mode" value="since">
             Since date/time
           </label>
-          <div class="indent">
+          <div class="indent bf-date-time-row">
             <input class="input" type="date" id="bf-batch-since" name="since" disabled>
+            <input class="input bf-time" type="time" id="bf-batch-since-time" disabled>
           </div>
-  
+
           <label class="radio">
             <input type="radio" name="mode" value="between">
             Between dates
           </label>
           <div class="indent bf-row-between">
-            <div class="bf-dual">
+            <div class="bf-dual bf-date-time-row">
               <label class="sr-only" for="bf-batch-from">From</label>
               <input class="input" type="date" id="bf-batch-from" disabled>
+              <input class="input bf-time" type="time" id="bf-batch-from-time" disabled>
             </div>
-            <div class="bf-dual" style="margin-top:8px">
+            <div class="bf-dual bf-date-time-row" style="margin-top:8px">
               <label class="sr-only" for="bf-batch-to">To</label>
               <input class="input" type="date" id="bf-batch-to" disabled>
+              <input class="input bf-time" type="time" id="bf-batch-to-time" disabled>
             </div>
           </div>
   
@@ -5501,7 +5528,19 @@
           </div>
         </fieldset>
 
-    <fieldset class="field bf-field" style="margin-top:12px">
+    <fieldset class="field bf-field" style="margin-top:8px">
+      <legend>Settings</legend>
+      <label class="checkbox-label has-tip">
+        <input type="checkbox" id="bf-batch-ignore-cloned" name="ignore_cloned">
+        <span>Ignore cloned messages</span>
+        <button class="info-dot" type="button" aria-describedby="tip-bf-batch-ignore"></button>
+        <div id="tip-bf-batch-ignore" class="tip-bubble" role="tooltip" aria-hidden="true">
+          Filters out already-cloned messages using the local DB. Disable DB_CLEANUP_MSG in mapping settings to keep records intact.
+        </div>
+      </label>
+    </fieldset>
+
+    <fieldset class="field bf-field" style="margin-top:8px">
       <legend>Mode</legend>
 
       <label class="radio has-tip">
@@ -5605,18 +5644,27 @@
         "resume";
 
       const sinceEl = dlg.querySelector("#bf-batch-since");
+      const sinceTimeEl = dlg.querySelector("#bf-batch-since-time");
       const lastEl = dlg.querySelector("#bf-batch-lastn");
       const fromEl = dlg.querySelector("#bf-batch-from");
+      const fromTimeEl = dlg.querySelector("#bf-batch-from-time");
       const toEl = dlg.querySelector("#bf-batch-to");
+      const toTimeEl = dlg.querySelector("#bf-batch-to-time");
 
-      const _startOfDayIsoLocal = (d) =>
+      const _combine = (d, t) => {
+        const time = (t || "").trim();
+        return time ? `${d}T${time}` : `${d}T00:00`;
+      };
+      const _startIso = (d, t) =>
         typeof startOfDayIsoLocal === "function"
-          ? startOfDayIsoLocal(d)
-          : `${d}T00:00`;
-      const _nextDayStartIsoLocal = (d) =>
+          ? startOfDayIsoLocal(d, t)
+          : _combine(d, t);
+      const _endIso = (d, t) =>
         typeof nextDayStartIsoLocal === "function"
-          ? nextDayStartIsoLocal(d)
+          ? nextDayStartIsoLocal(d, t)
           : (() => {
+              const time = (t || "").trim();
+              if (time) return `${d}T${time}`;
               const dt = new Date(`${d}T00:00`);
               dt.setDate(dt.getDate() + 1);
               const y = dt.getFullYear(),
@@ -5633,7 +5681,7 @@
           sinceEl?.focus();
           return;
         }
-        base.after_iso = _startOfDayIsoLocal(since);
+        base.after_iso = _startIso(since, (sinceTimeEl?.value || "").trim());
       } else if (mode === "last") {
         const n = parseInt((lastEl?.value || "").trim(), 10);
         if (!Number.isFinite(n) || n <= 0) {
@@ -5660,9 +5708,12 @@
         ) {
           return;
         }
-        base.after_iso = _startOfDayIsoLocal(from);
-        base.before_iso = _nextDayStartIsoLocal(to);
+        base.after_iso = _startIso(from, (fromTimeEl?.value || "").trim());
+        base.before_iso = _endIso(to, (toTimeEl?.value || "").trim());
       }
+
+      const ignoreCloned = !!dlg.querySelector("#bf-batch-ignore-cloned")?.checked;
+      if (ignoreCloned) base.ignore_cloned = true;
 
       startBtn.disabled = true;
 

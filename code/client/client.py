@@ -266,6 +266,8 @@ class ClientListener:
             resume = bool(data.get("resume"))
             after_id = data.get("after_id")
 
+            exclude_ids = data.get("exclude_ids")
+
             params = {
                 "after_iso": after_iso,
                 "before_iso": before_iso,
@@ -275,6 +277,7 @@ class ClientListener:
                 "mapping_id": data.get("mapping_id"),
                 "cloned_guild_id": data.get("cloned_guild_id"),
                 "original_guild_id": data.get("original_guild_id"),
+                **({"exclude_ids": exclude_ids} if exclude_ids else {}),
             }
             return await self._enqueue_backfill(chan_id, params)
 
