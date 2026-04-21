@@ -258,21 +258,24 @@
               <input type="radio" name="mode" value="since">
               Since date/time
             </label>
-            <div class="indent">
+            <div class="indent bf-date-time-row">
               <input class="input" type="date" id="bf-since" name="since" disabled>
+              <input class="input bf-time" type="time" id="bf-since-time" disabled placeholder="00:00">
             </div>
             <label class="radio">
               <input type="radio" name="mode" value="between">
               Between dates
             </label>
             <div class="indent bf-row-between">
-              <div class="bf-dual">
+              <div class="bf-dual bf-date-time-row">
                 <label class="sr-only" for="bf-from">From</label>
                 <input class="input" type="date" id="bf-from" disabled>
+                <input class="input bf-time" type="time" id="bf-from-time" disabled>
               </div>
-              <div class="bf-dual" style="margin-top:8px">
+              <div class="bf-dual bf-date-time-row" style="margin-top:8px">
                 <label class="sr-only" for="bf-to">To</label>
                 <input class="input" type="date" id="bf-to" disabled>
+                <input class="input bf-time" type="time" id="bf-to-time" disabled>
               </div>
             </div>
             <label class="radio">
@@ -284,6 +287,17 @@
             </div>
           </fieldset>
 
+          <fieldset class="field bf-field" style="margin-top:12px">
+            <legend>Settings</legend>
+            <label class="checkbox-label has-tip">
+              <input type="checkbox" id="bf-ignore-cloned" name="ignore_cloned">
+              <span>Ignore cloned messages</span>
+              <button class="info-dot" type="button" aria-describedby="tip-bf-ignore"></button>
+              <div id="tip-bf-ignore" class="tip-bubble" role="tooltip" aria-hidden="true">
+                Filters out already-cloned messages using the local DB. Disable DB_CLEANUP_MSG in mapping settings to keep records intact.
+              </div>
+            </label>
+          </fieldset>
 
           <div class="buttons">
             <button type="submit" id="bf-start" class="btn btn-ghost">Start</button>

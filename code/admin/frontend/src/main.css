@@ -2733,9 +2733,20 @@ body {
   color: var(--muted, #c9c3ff);
   font-size: 0.95rem;
 }
-.bf-card .input[type='datetime-local'],
 .bf-card .input[type='number'] {
-  width: 260px;
+  width: 160px;
+}
+.bf-date-time-row {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap !important;
+}
+.bf-card .input[type='date'] {
+  width: 160px;
+}
+.bf-card .input.bf-time {
+  width: 120px;
 }
 .indent {
   margin: 6px 0 12px 28px;
@@ -2745,6 +2756,15 @@ body {
   align-items: center;
   gap: 8px;
   margin: 6px 0;
+}
+.bf-card .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+.bf-card .checkbox-label input[type="checkbox"] {
+  margin: 0;
 }
 .modal.bf-modal {
   display: none;
@@ -3780,10 +3800,17 @@ body {
   gap: 8px;
   margin: 8px 0 12px;
 }
+#backfill-dialog input[type='date'] {
+  width: 160px;
+  max-width: 160px;
+}
+#backfill-dialog input[type='time'] {
+  width: 120px;
+  max-width: 120px;
+}
 #backfill-dialog input[type='date'],
+#backfill-dialog input[type='time'],
 #backfill-dialog input[type='number'] {
-  width: min(100%, var(--bf-input-w));
-  max-width: var(--bf-input-w);
   background: var(--bf-input);
   color: var(--bf-text);
   border: 1px solid var(--bf-border);
@@ -6370,10 +6397,17 @@ body.modal-open #bf-batchbar {
   -webkit-backdrop-filter: none !important;
 }
 
+#backfill-batch-dialog input[type='date'] {
+  width: 160px;
+  max-width: 160px;
+}
+#backfill-batch-dialog input[type='time'] {
+  width: 120px;
+  max-width: 120px;
+}
 #backfill-batch-dialog input[type='date'],
+#backfill-batch-dialog input[type='time'],
 #backfill-batch-dialog input[type='number'] {
-  width: min(100%, var(--bf-input-w));
-  max-width: var(--bf-input-w);
   background: var(--bf-input);
   color: var(--bf-text);
   border: 1px solid var(--bf-border);
@@ -6446,20 +6480,36 @@ body.modal-open #bf-batchbar {
 }
 
 #backfill-batch-dialog label.radio {
-  margin: 18px 0;
+  margin: 8px 0;
   display: flex;
   align-items: center;
 }
 #backfill-batch-dialog label.radio > input[type='radio'] {
   margin-right: 8px;
 }
+#backfill-batch-dialog .checkbox-label {
+  margin: 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+#backfill-batch-dialog .checkbox-label input[type="checkbox"] {
+  margin: 0;
+}
 
 #backfill-batch-dialog .bf-field .indent {
   margin: 6px 0 10px 1.75rem;
 }
 
-.bf-field .radio.has-tip .info-dot {
+.bf-field .radio.has-tip .info-dot,
+.bf-field .checkbox-label.has-tip .info-dot {
   margin-left: 2px;
+}
+.bf-field .tip-bubble {
+  white-space: normal;
+  word-break: break-word;
+  overflow-x: hidden;
+  max-width: min(340px, calc(100vw - 32px));
 }
 
 .side-menu .menu-list li a {

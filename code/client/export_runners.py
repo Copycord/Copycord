@@ -1335,6 +1335,7 @@ class BackfillEngine:
         mapping_id: str | None = None,
         original_guild_id: int | None = None,
         cloned_guild_id: int | None = None,
+        exclude_ids: list | None = None,
     ):
         """
         Primary entry point used by client code to backfill a single channel.
@@ -1371,12 +1372,13 @@ class BackfillEngine:
         )
 
         self.logger.info(
-            "[backfill] ▶ START requested | channel_id=%s mode=%s after=%r before=%r last_n=%r — large channels can take a while to pull history",
+            "[backfill] ▶ START requested | channel_id=%s mode=%s after=%r before=%r last_n=%r exclude=%d — large channels can take a while to pull history",
             original_channel_id,
             mode,
             after_iso,
             before_iso,
             last_n,
+            len(exclude_ids or []),
         )
 
         self.logger.debug(
@@ -1509,8 +1511,15 @@ class BackfillEngine:
                 before_iso,
             )
 
+        _exclude_set = set(str(x) for x in (exclude_ids or []))
+        excluded = 0
+
         async def _emit_msg(m):
-            nonlocal sent, skipped, last_ping, last_log
+            nonlocal sent, skipped, excluded, last_ping, last_log
+
+            if _exclude_set and str(getattr(m, "id", None)) in _exclude_set:
+                excluded += 1
+                return
 
             if not _is_normal(m):
                 skipped += 1
@@ -2059,12 +2068,13 @@ class BackfillEngine:
                 pass
 
             dur = loop.time() - t0
-            self.logger.debug(
-                "[backfill] STREAM END | channel=%s mode=%s sent=%d skipped=%d dur=%.1fs",
+            self.logger.info(
+                "[backfill] ✅ DONE | channel=%s mode=%s sent=%d skipped=%d excluded=%d dur=%.1fs",
                 original_channel_id,
                 mode,
                 sent,
                 skipped,
+                excluded,
                 dur,
             )
             await self._safe_ws_send(
