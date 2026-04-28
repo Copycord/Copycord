@@ -139,7 +139,7 @@ class EmojiManager:
             return
 
         async def _run_one():
-            await self._run_sync_for_guild(
+            return await self._run_sync_for_guild(
                 guild=guild,
                 emoji_data=emojis or [],
                 host_guild_id=host_id,
@@ -199,11 +199,13 @@ class EmojiManager:
                         guild_id=guild.id,
                         guild_name=getattr(guild, "name", None),
                     )
+                    return f"Emojis: {summary}"
                 else:
                     self._log(
                         "info",
                         "[😊] Emoji sync complete: no changes needed"
                     )
+                    return ""
 
             except asyncio.CancelledError:
                 self._log(

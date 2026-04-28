@@ -236,7 +236,6 @@
 
         <button type="button" class="btn btn-ghost push-right" data-log="server">View server logs</button>
         <button type="button" class="btn btn-ghost" data-log="client">View client logs</button>
-        <form method="post" action="/logs/clear"><button class="btn btn-ghost">Clear all logs</button></form>
       </div>
     </div>
 
@@ -293,7 +292,10 @@
     "DISABLE_ROLE_MENTIONS": "When enabled, role mentions will be disabled in mirrored messages to stop role pings.",
     "TAG_REPLY_MSG": "When enabled, messages that are replies will include a tag of the message being replied to.",
     "DB_CLEANUP_MSG": "When enabled, runs an hourly task to delete messages stored in the database that are older than 7
-    days."
+    days.",
+    "ON_DEMAND_WEBHOOKS": "When enabled, webhooks are only created when a channel receives its first message, instead of during sync. This makes server cloning much faster by skipping upfront webhook creation.",
+    "COPYCORD_AUTOSTART": "Automatically start the server and client when Copycord launches. Valid tokens are required.",
+    "LOG_MAX_SIZE_MB": "Maximum size of each log file in megabytes before older entries are pruned. Set to 0 to disable pruning."
     } %}
 
     <div class="card" id="global-config-card">
@@ -400,6 +402,36 @@
             </div>
           </div>
 
+          <div class="field">
+            <label for="COPYCORD_AUTOSTART" class="has-tip">
+              <span class="label-text">AUTO_START</span>
+              <button type="button" class="info-dot" aria-label="What is AUTO_START?"
+                aria-describedby="tip-COPYCORD_AUTOSTART"></button>
+              <span id="tip-COPYCORD_AUTOSTART" role="tooltip" class="tip-bubble">
+                {{ FIELD_TIPS['COPYCORD_AUTOSTART'] }}
+              </span>
+            </label>
+            <div class="select">
+              <select id="COPYCORD_AUTOSTART" name="COPYCORD_AUTOSTART">
+                <option value="false" {{ 'selected' if (env.get('COPYCORD_AUTOSTART','false')|lower)=='false' else '' }}>False</option>
+                <option value="true" {{ 'selected' if (env.get('COPYCORD_AUTOSTART','false')|lower)=='true' else '' }}>True</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="LOG_MAX_SIZE_MB" class="has-tip">
+              <span class="label-text">MAX_LOG_SIZE_MB</span>
+              <button type="button" class="info-dot" aria-label="What is MAX_LOG_SIZE_MB?"
+                aria-describedby="tip-LOG_MAX_SIZE_MB"></button>
+              <span id="tip-LOG_MAX_SIZE_MB" role="tooltip" class="tip-bubble">
+                {{ FIELD_TIPS['LOG_MAX_SIZE_MB'] }}
+              </span>
+            </label>
+            <input type="number" id="LOG_MAX_SIZE_MB" name="LOG_MAX_SIZE_MB"
+              value="{{ env.get('LOG_MAX_SIZE_MB','10') }}" min="0" step="1" />
+          </div>
+
           <div class="btns">
             <button class="btn btn-ghost" type="submit" id="cfg-save-btn">Save</button>
             <button type="button" class="btn btn-ghost" id="cfg-cancel-btn">Cancel</button>
@@ -470,6 +502,9 @@
           <button type="button" id="log-close" class="icon-btn verify-close" aria-label="Close">✕</button>
         </div>
         <pre id="log-body" class="log-output"></pre>
+        <div class="btns" style="padding: 8px 16px; justify-content: flex-end;">
+          <button type="button" id="log-clear-btn" class="btn btn-ghost">Clear logs</button>
+        </div>
       </div>
     </div>
 

@@ -217,16 +217,19 @@ class RoleManager:
                     parts.append(f"Repositioned {rearranged} roles")
 
                 if parts:
+                    summary = "; ".join(parts)
                     self._log(
                         "info",
                         "[🧩] Role sync complete: %s",
-                        "; ".join(parts),
+                        summary,
                     )
+                    return f"Roles: {summary}"
                 else:
                     self._log(
                         "info",
                         "[🧩] Role sync complete: no changes needed",
                     )
+                    return ""
 
             except asyncio.CancelledError:
                 self._log("warning", "[🧩] Role sync canceled.")

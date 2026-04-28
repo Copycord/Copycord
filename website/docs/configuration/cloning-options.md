@@ -13,6 +13,7 @@ These settings control what Copycord syncs between the source and clone servers.
 |--------|---------|-------------|
 | `ENABLE_CLONING` | `true` | Master switch — disables all cloning when off |
 | `CLONE_MESSAGES` | `true` | Clone messages in real time via webhooks. When disabled, webhook creation is also skipped during sync |
+| `ON_DEMAND_WEBHOOKS` | `true` | When enabled, webhooks are only created when a channel receives its first message instead of during sync. This makes server cloning much faster by skipping upfront webhook creation |
 
 ## Message sync
 

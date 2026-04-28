@@ -4161,11 +4161,18 @@ body {
   background-image: none;
 }
 
+#log-modal .modal-content {
+  height: 80vh;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
 #log-modal .modal-header {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
+  flex-shrink: 0;
 }
 
 .log-search-input {
@@ -7085,6 +7092,20 @@ body.modal-open {
   scrollbar-gutter: stable;
 }
 
+#cfg-form .tip-bubble {
+  white-space: normal;
+  word-break: break-word;
+  overflow-x: hidden;
+  max-width: min(380px, calc(100vw - 32px));
+}
+#cfg-form input[type='number']::-webkit-inner-spin-button,
+#cfg-form input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+#cfg-form input[type='number'] {
+  -moz-appearance: textfield;
+}
 #cfg-form .select {
   width: 100%;
   max-width: 100%;

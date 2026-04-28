@@ -190,7 +190,7 @@ class StickerManager:
         stickers = st["sitemap"] or []
 
         async def _run_one():
-            await self._run_sync(
+            return await self._run_sync(
                 guild=guild,
                 stickers=stickers,
                 host_id=host_id,
@@ -266,6 +266,9 @@ class StickerManager:
                         guild_id=guild.id,
                         guild_name=getattr(guild, "name", None),
                     )
+                    return f"Stickers: {summary_text}"
+                else:
+                    return ""
 
             except asyncio.CancelledError:
                 self._log("debug", "[🎟️] Sticker sync canceled before completion.")

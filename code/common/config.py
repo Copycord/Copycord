@@ -15,7 +15,7 @@ from typing import Optional
 from common.db import DBManager
 
 logger = logging.getLogger(__name__)
-CURRENT_VERSION = "v3.19.0"
+CURRENT_VERSION = "v3.20.0"
 
 
 class Config:
@@ -127,6 +127,7 @@ class Config:
             "DISABLE_ROLE_MENTIONS": False,
             "TAG_REPLY_MSG": False,
             "DB_CLEANUP_MSG": True,
+            "ON_DEMAND_WEBHOOKS": True,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):

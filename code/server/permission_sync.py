@@ -122,11 +122,13 @@ class ChannelPermissionSync:
                         "[🔐] Channel permission sync complete: %s",
                         summary,
                     )
+                    return f"Permissions: {summary}"
                 else:
                     self._log(
                         "info",
                         "[🔐] Channel permission sync complete: no changes needed",
                     )
+                    return ""
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -136,7 +138,7 @@ class ChannelPermissionSync:
                     e,
                 )
 
-        asyncio.create_task(_runner(), name=task_name)
+        return asyncio.create_task(_runner(), name=task_name)
 
     async def _await_roles_done(self, roles_manager, handle, timeout: float) -> None:
         try:
@@ -518,10 +520,6 @@ class ChannelPermissionSync:
             )
 
         try:
-            if self.ratelimit and self.rate_limiter_action is not None:
-                await self.ratelimit.acquire_for_guild(
-                    self.rate_limiter_action, int(guild.id)
-                )
             await ch._state.http.edit_channel(
                 ch.id,
                 permission_overwrites=payload_overwrites,

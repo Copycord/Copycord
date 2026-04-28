@@ -46,6 +46,26 @@ The dashboard provides **Start** and **Stop** buttons for both the server and cl
 - **Server** (green indicator) — The Discord bot in your clone server
 - **Client** (green indicator) — The self-bot monitoring source servers
 
+Valid tokens are required to start.
+
+## Global configuration
+
+The Global Configuration card lets you set core settings:
+
+- **SERVER_TOKEN** / **CLIENT_TOKEN** — Your Discord bot and account tokens
+- **COMMAND_USERS** — User IDs allowed to run slash commands
+- **LOG_LEVEL** — `INFO` or `DEBUG`
+- **AUTO_START** — Automatically start bots when Copycord launches (requires valid tokens)
+- **MAX_LOG_SIZE_MB** — Maximum log file size before old entries are pruned (default: 10 MB, set to 0 to disable)
+
+## Log viewer
+
+Click **View server logs** or **View client logs** on the Bots card to open the log viewer. Features:
+
+- Real-time log streaming
+- Search/filter logs
+- **Clear logs** button to wipe the selected log file (with confirmation)
+
 ## Real-time updates
 
 The dashboard uses WebSocket connections for real-time updates. You'll see live status changes, log streaming, and operation progress without needing to refresh the page.

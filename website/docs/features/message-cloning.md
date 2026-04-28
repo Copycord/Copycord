@@ -74,6 +74,7 @@ This hides the real identity of users in the source server.
 
 Copycord uses Discord webhooks to post cloned messages. Webhooks allow messages to appear with custom usernames and avatars, making them look like they were posted by the original author.
 
-- Webhooks are created automatically for each channel
+- By default (`ON_DEMAND_WEBHOOKS: true`), webhooks are created on-demand when a channel receives its first message
+- If `ON_DEMAND_WEBHOOKS` is disabled, webhooks are batch-created in the background after structure sync
 - A webhook pool is maintained for performance
 - Custom webhook identities can be set per-channel via the `/channel_webhook` commands

@@ -81,16 +81,25 @@ The client self-bot receives Discord gateway events for every change in the sour
 
 A comprehensive structure comparison runs periodically (default: every 60 minutes). This catches any changes that might have been missed during downtime or network interruptions.
 
-## Rate limiting
+## Sync architecture
 
-Structure operations are rate-limited to respect Discord's API limits:
+Structure sync is designed to be as fast as possible while respecting Discord's API limits.
 
-| Operation | Rate |
-|-----------|------|
-| Channel creation | 2 per 15 seconds |
-| Channel editing | 3 per 15 seconds |
-| Role operations | 1 per 10 seconds |
-| Emoji operations | 1 per 60 seconds |
-| Sticker operations | 1 per 60 seconds |
+### Two-phase channel sync
 
-Copycord queues operations and processes them within these limits automatically.
+Channel and category creation runs first without any artificial delays — Discord's built-in rate limit handling (via `Retry-After` headers) is used automatically. Webhook creation is handled separately:
+
+- **`ON_DEMAND_WEBHOOKS: true` (default)** — Webhooks are not created during sync at all. Instead, they are created lazily when the first message arrives for a channel. This makes initial server cloning near-instant for the structure phase.
+- **`ON_DEMAND_WEBHOOKS: false`** — Webhooks are batch-created in the background after structure sync completes, with a small delay between each to avoid hitting rate limits.
+
+### Parallel background tasks
+
+Roles, emojis, and stickers sync in parallel as background tasks while structure sync runs. The sync is only reported as complete once all background tasks have finished.
+
+### Cancel and restart
+
+If a new sitemap arrives while a sync is already running for the same clone guild, the running sync is canceled and a new one starts with the latest data. Background tasks (roles, emojis, stickers, webhooks) from the canceled sync continue running independently — they are not interrupted.
+
+### Rate limiting
+
+Copycord relies on discord.py's native rate limit handling for all structure sync operations. When Discord returns a `429 Too Many Requests` response, the library automatically waits the required `Retry-After` duration before retrying.
