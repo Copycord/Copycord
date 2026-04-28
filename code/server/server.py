@@ -8482,11 +8482,12 @@ class ServerReceiver:
             bf_targets = _bf_targets_for_source(source_id)
 
         if not rows:
-
+            msg["__buffered__"] = True
+            self._pending_msgs.setdefault(source_id, []).append(msg)
             async with self._warn_lock:
                 if source_id not in self._unmapped_warned:
                     logger.debug(
-                        "[🚫] No mapping for channel %s (%s); dropping message from %s",
+                        "[⌛] No mapping yet for channel %s (%s); queued message from %s",
                         msg.get("channel_name"),
                         msg.get("channel_id"),
                         msg.get("author"),
