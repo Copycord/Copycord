@@ -32,13 +32,19 @@ Copycord automatically prunes log files to prevent them from growing indefinitel
 
 The **Event Logs** page provides a structured audit trail of all Copycord operations:
 
-- Message forwarding events
-- Structure sync events (channel/role creation, deletion, rename)
-- Backfill progress
+- Structure sync events (channel/role/emoji/sticker creation, deletion, rename)
+- Permission sync events
+- Webhook creation events
+- Guild metadata updates
+- Thread operations
 - Error events
-- System events
 
-You can filter by event type, browse pages, and delete individual or bulk entries.
+### Features
+
+- **Filter by type** — Dropdown only shows event types that have actual logs
+- **Expandable rows** — Click any log entry to see detailed metadata (source/clone IDs, sync task ID, category info)
+- **Refresh** — Refresh button to reload the current view
+- **Delete** — Delete individual entries or clear all logs
 
 ## Version information
 

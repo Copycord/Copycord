@@ -100,9 +100,9 @@ Copycord automatically prunes log files to prevent them from growing indefinitel
 - Default: `10` MB
 - Set to `0` to disable pruning
 - Checks run every 5 minutes
-- Applies to both `server.log` and `client.log`
+- Applies to `server.out` and `client.out`
 
-When a log file exceeds the limit, older entries are trimmed while preserving the most recent logs.
+The pruner uses memory-efficient seek-based reading — only the tail of the file is loaded into memory, even for very large log files. Writes are atomic (via temp file) to prevent data loss.
 
 ## Rate limit behavior
 

@@ -100,6 +100,14 @@ Roles, emojis, and stickers sync in parallel as background tasks while structure
 
 If a new sitemap arrives while a sync is already running for the same clone guild, the running sync is canceled and a new one starts with the latest data. Background tasks (roles, emojis, stickers, webhooks) from the canceled sync continue running independently — they are not interrupted.
 
+### Message buffering
+
+Messages that arrive for channels not yet cloned are automatically queued. Once the sync creates the channel and its webhook (on-demand or batch), buffered messages are replayed in order. No messages are dropped during sync.
+
+### Emoji and sticker limits
+
+When cloning emojis or stickers, if the clone guild hits Discord's limit (e.g., 50 emojis for unboosted servers), the sync stops. The limit is re-evaluated on each sync cycle.
+
 ### Rate limiting
 
-Copycord relies on discord.py's native rate limit handling for all structure sync operations. When Discord returns a `429 Too Many Requests` response, the library automatically waits the required `Retry-After` duration before retrying.
+Copycord uses discord.py's native rate limit handling for all structure sync operations. When Discord returns a `429 Too Many Requests` response, the library automatically waits the required `Retry-After` duration before retrying.
