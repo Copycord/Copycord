@@ -454,7 +454,7 @@ class ChannelPermissionSync:
                 clone_role_id = self._extract_cloned_role_id(row) or 0
                 if not clone_role_id:
                     self._log(
-                        "info",
+                        "debug",
                         "[perm-sync] #%s skip role %s: no cloned mapping",
                         getattr(ch, "id", "?"),
                         orig_role_id,

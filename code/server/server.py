@@ -129,7 +129,7 @@ class _GuildPrefixFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         try:
-            prefix = logctx.guild_prefix()
+            prefix = logctx.format_prefix()
         except Exception:
             prefix = ""
 
@@ -1992,12 +1992,11 @@ class ServerReceiver:
                         if perm_task:
                             bg_tasks.append(perm_task)
 
-            struct_detail = "; ".join(parts) if parts else ""
-            struct_log = struct_detail or "No changes needed"
+                    struct_detail = "; ".join(parts) if parts else ""
+                    struct_log = struct_detail or "No changes needed"
+                    logger.info("[🏗️] Structure sync complete: %s", struct_log)
 
             with self._clone_log_label(int(target_clone_gid)):
-                logger.info("[🏗️] Structure sync complete: %s", struct_log)
-
                 self._schedule_flush()
 
                 pending_wh = self._pending_webhook_channels.pop(int(target_clone_gid), [])

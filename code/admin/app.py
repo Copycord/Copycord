@@ -1817,7 +1817,7 @@ async def _maybe_autostart():
 
 async def _autostart_if_ready():
     """Auto-start server and client if enabled, tokens are valid, and mappings exist."""
-    await asyncio.sleep(5)  # wait for controllers to boot
+    await asyncio.sleep(1)
 
     try:
         autostart = db.get_config("COPYCORD_AUTOSTART", "false")
@@ -1857,6 +1857,13 @@ async def _autostart_if_ready():
             srv.get("status", "unknown"),
             cli.get("status", "unknown"),
         )
+
+        for role in ("server", "client"):
+            await hub.broadcast({
+                "type": "status",
+                "source": role,
+                "data": {"running": True},
+            })
     except Exception:
         LOGGER.exception("Auto-start failed")
 

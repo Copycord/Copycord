@@ -4581,6 +4581,7 @@
           };
           if (source === "server") renderStatusRow("server", common);
           if (source === "client") renderStatusRow("client", common);
+          fetchAndRenderStatus();
         }
         if (msg.kind === "agent" && msg.type === "status") {
           const prefix = msg.role === "server" ? "server" : "client";
