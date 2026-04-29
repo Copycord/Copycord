@@ -328,6 +328,11 @@ class ServerReceiver:
     ):
         """Persist an event log entry and broadcast it to the admin UI."""
         try:
+            merged_extra = dict(extra) if extra else {}
+            sync_id = logctx.sync_display_id.get()
+            if sync_id:
+                merged_extra.setdefault("sync_task_id", sync_id)
+
             log_id = self.db.add_event_log(
                 event_type=event_type,
                 details=details,
@@ -337,7 +342,7 @@ class ServerReceiver:
                 channel_name=channel_name,
                 category_id=category_id,
                 category_name=category_name,
-                extra=extra,
+                extra=merged_extra if merged_extra else None,
             )
             await self.bus.publish("event_log", {
                 "log_id": log_id,
@@ -671,6 +676,8 @@ class ServerReceiver:
                             try:
                                 res = fut.result()
                             except asyncio.CancelledError:
+                                if getattr(self, "_shutting_down", False):
+                                    return
                                 logger.info(
                                     "[♻️] Sync task %s superseded by newer sitemap", _did
                                 )
@@ -1994,7 +2001,7 @@ class ServerReceiver:
 
                     struct_detail = "; ".join(parts) if parts else ""
                     struct_log = struct_detail or "No changes needed"
-                    logger.info("[🏗️] Structure sync complete: %s", struct_log)
+                    logger.info("[🛠️] Structure sync complete: %s", struct_log)
 
             with self._clone_log_label(int(target_clone_gid)):
                 self._schedule_flush()
@@ -2296,6 +2303,7 @@ class ServerReceiver:
                 f"Updated guild metadata: {', '.join(sorted(set(changed_fields)))}",
                 guild_id=guild.id,
                 guild_name=guild.name,
+                extra={"changed_fields": changed_fields},
             )
         except Exception:
             logger.warning(
@@ -2595,9 +2603,9 @@ class ServerReceiver:
 
                 if not cat_obj:
                     try:
-                        cat_obj = await guild.create_category(
+                        cat_obj = await asyncio.shield(guild.create_category(
                             upstream_name or "Category"
-                        )
+                        ))
                         created += 1
                         logger.info(
                             "[➕] Created category '%s' #%d",
@@ -3693,6 +3701,7 @@ class ServerReceiver:
                         guild_name=getattr(guild, "name", None),
                         channel_id=ch.id,
                         channel_name=ch.name,
+                        extra={"original_channel_id": int(orig_id), "clone_channel_id": int(ch.id)},
                     )
                 elif is_stage_ch and stage_changed_here:
                     logger.info(
@@ -3708,6 +3717,7 @@ class ServerReceiver:
                         guild_name=getattr(guild, "name", None),
                         channel_id=ch.id,
                         channel_name=ch.name,
+                        extra={"original_channel_id": int(orig_id), "clone_channel_id": int(ch.id)},
                     )
                 elif is_forum_ch and forum_changed_here:
                     logger.info(
@@ -3723,6 +3733,7 @@ class ServerReceiver:
                         guild_name=getattr(guild, "name", None),
                         channel_id=ch.id,
                         channel_name=ch.name,
+                        extra={"original_channel_id": int(orig_id), "clone_channel_id": int(ch.id)},
                     )
                 else:
                     logger.info(
@@ -3738,6 +3749,7 @@ class ServerReceiver:
                         guild_name=getattr(guild, "name", None),
                         channel_id=ch.id,
                         channel_name=ch.name,
+                        extra={"original_channel_id": int(orig_id), "clone_channel_id": int(ch.id)},
                     )
 
             except Exception as e:
@@ -3950,14 +3962,14 @@ class ServerReceiver:
 
             if not ch:
 
-                ch = await guild.create_forum_channel(
+                ch = await asyncio.shield(guild.create_forum_channel(
                     name=name,
                     category=(
                         guild.get_channel(cloned_parent_id)
                         if cloned_parent_id
                         else None
                     ),
-                )
+                ))
                 logger.info("[➕] Created forum channel '%s' #%d", name, ch.id)
                 created += 1
                 await self._emit_event_log(
@@ -3969,6 +3981,7 @@ class ServerReceiver:
                     channel_name=name,
                     category_id=cloned_parent_id,
                     category_name=_cat_name_from_sitemap(parent_id),
+                    extra={"original_channel_id": orig_id, "clone_channel_id": int(ch.id)},
                 )
 
                 await _ensure_forum_webhook_url(
@@ -3993,6 +4006,7 @@ class ServerReceiver:
                         guild_name=getattr(guild, "name", None),
                         channel_id=ch.id,
                         channel_name=name,
+                        extra={"original_channel_id": orig_id, "clone_channel_id": int(ch.id)},
                     )
 
                 want_parent = (
@@ -4014,6 +4028,7 @@ class ServerReceiver:
                         channel_name=getattr(ch, "name", None),
                         category_id=cloned_parent_id,
                         category_name=getattr(want_parent, "name", None),
+                        extra={"original_channel_id": orig_id, "clone_channel_id": int(ch.id)},
                     )
 
                 await _ensure_forum_webhook_url(
@@ -4136,7 +4151,9 @@ class ServerReceiver:
                 self.db.delete_channel_mapping(int(original_id))
             per.pop(int(original_id), None)
 
-        ch = await self._create_channel(guild, "voice", original_name, category)
+        ch = await asyncio.shield(
+            self._create_channel(guild, "voice", original_name, category, original_channel_id=original_id)
+        )
 
         voice_changes: dict[str, object] = {}
         if bitrate is not None:
@@ -4308,9 +4325,9 @@ class ServerReceiver:
                 self.db.delete_channel_mapping(int(original_id))
             per.pop(int(original_id), None)
 
-        ch = await self._create_channel(
-            guild, "stage", original_name, category, topic=topic
-        )
+        ch = await asyncio.shield(self._create_channel(
+            guild, "stage", original_name, category, topic=topic, original_channel_id=original_id
+        ))
 
         if ch is None:
             logger.warning(
@@ -4621,6 +4638,7 @@ class ServerReceiver:
                             guild_name=getattr(guild, "name", None),
                             channel_id=ch.id,
                             channel_name=ch.name,
+                            extra={"original_channel_id": int(orig), "clone_channel_id": int(ch.id)},
                         )
 
                         mrow = per.get(int(orig)) or mrow or {}
@@ -5077,6 +5095,7 @@ class ServerReceiver:
         name: str,
         category: CategoryChannel | None,
         topic: str | None = None,
+        original_channel_id: int | None = None,
     ) -> Union[TextChannel, ForumChannel, discord.VoiceChannel, discord.StageChannel]:
         """
         Create a channel of `kind` ('text'|'news'|'forum'|'voice'|'stage') named `name` under
@@ -5126,6 +5145,7 @@ class ServerReceiver:
             channel_name=name,
             category_id=getattr(category, "id", None) if category else None,
             category_name=getattr(category, "name", None) if category else None,
+            extra={"original_channel_id": original_channel_id, "clone_channel_id": int(ch.id)} if original_channel_id else None,
         )
 
         if kind == "news":
@@ -5140,6 +5160,7 @@ class ServerReceiver:
                         guild_name=getattr(guild, "name", None),
                         channel_id=ch.id,
                         channel_name=name,
+                        extra={"original_channel_id": original_channel_id, "clone_channel_id": int(ch.id)} if original_channel_id else None,
                     )
                 except HTTPException as e:
                     logger.warning(
@@ -5254,6 +5275,7 @@ class ServerReceiver:
                     guild_name=getattr(ch.guild, "name", None),
                     channel_id=ch.id,
                     channel_name=target,
+                    extra={"original_channel_id": int(orig_source_id), "clone_channel_id": int(ch.id)},
                 )
                 return True, "pinned_enforced"
             else:
@@ -5265,6 +5287,7 @@ class ServerReceiver:
                     guild_name=getattr(ch.guild, "name", None),
                     channel_id=ch.id,
                     channel_name=target,
+                    extra={"original_channel_id": int(orig_source_id), "clone_channel_id": int(ch.id)},
                 )
                 return True, "match_upstream"
 
@@ -5345,6 +5368,7 @@ class ServerReceiver:
                                 getattr(ch, "name", ch.id),
                                 getattr(clone_cat, "name", clone_cat.id),
                             )
+                            _ch_orig_id = next((k for k, v in ((self.chan_map_by_clone or {}).get(int(guild.id), {}) or {}).items() if int((v if isinstance(v, dict) else dict(v)).get("cloned_channel_id", 0)) == int(ch.id)), None)
                             await self._emit_event_log(
                                 "channel_deleted",
                                 f"Deleted channel '#{getattr(ch, 'name', ch.id)}' (category '{getattr(clone_cat, 'name', clone_cat.id)}' removed)",
@@ -5354,6 +5378,7 @@ class ServerReceiver:
                                 channel_name=getattr(ch, "name", None),
                                 category_id=clone_cat_id,
                                 category_name=getattr(clone_cat, "name", None),
+                                extra={"original_channel_id": int(_ch_orig_id), "clone_channel_id": int(ch.id)} if _ch_orig_id is not None else None,
                             )
                         except Exception:
                             logger.debug(
@@ -5385,6 +5410,7 @@ class ServerReceiver:
                         guild_name=getattr(guild, "name", None),
                         category_id=clone_cat_id,
                         category_name=getattr(clone_cat, "name", None),
+                        extra={"original_category_id": int(orig_id), "clone_category_id": int(clone_cat_id)},
                     )
                 except Exception:
                     logger.debug(
@@ -5549,6 +5575,7 @@ class ServerReceiver:
                             guild_name=getattr(guild, "name", None),
                             channel_id=ch.id,
                             channel_name=getattr(ch, "name", None),
+                            extra={"original_channel_id": int(orig_id), "clone_channel_id": int(ch.id)},
                         )
                         deleted_here = True
                     except discord.HTTPException as e:
@@ -5780,7 +5807,7 @@ class ServerReceiver:
                     self.cat_map[int(original_id)] = dict(entry)
                     return cat, False
 
-        cat = await guild.create_category(name)
+        cat = await asyncio.shield(guild.create_category(name))
         logger.info("[➕] Created category '%s' #%d", name, cat.id)
         await self._emit_event_log(
             "category_created",
@@ -5832,6 +5859,7 @@ class ServerReceiver:
                 guild_name=getattr(ch.guild, "name", None),
                 channel_id=ch.id,
                 channel_name=getattr(ch, "name", None),
+                extra={"clone_channel_id": int(ch.id)},
             )
             if hasattr(self, "_wh_meta"):
                 self._wh_meta.clear()
@@ -5915,6 +5943,13 @@ class ServerReceiver:
         *,
         clone_messages: bool = True,
     ) -> Tuple[int, int, str]:
+        if host_guild_id and int(host_guild_id) == int(guild.id):
+            logger.error(
+                "[BUG] host_guild_id == clone guild_id (%s) for channel '%s' (orig=%s). "
+                "This would create a bad mapping. Skipping.",
+                host_guild_id, original_name, original_id,
+            )
+            return
         if self._shutting_down:
             return
 
@@ -5988,7 +6023,9 @@ class ServerReceiver:
             per.pop(int(original_id), None)
 
         kind = "news" if int(channel_type) == discord.ChannelType.news.value else "text"
-        ch = await self._create_channel(guild, kind, original_name, category)
+        ch = await asyncio.shield(
+            self._create_channel(guild, kind, original_name, category, original_channel_id=original_id)
+        )
 
         self.db.upsert_channel_mapping(
             int(original_id),
@@ -6163,6 +6200,7 @@ class ServerReceiver:
                     channel_name=getattr(ch, "name", None),
                     category_id=desired_parent_clone_id,
                     category_name=getattr(desired_parent, "name", None),
+                    extra={"original_channel_id": int(orig_id), "clone_channel_id": int(ch.id)},
                 )
             except Exception:
                 logger.warning(
@@ -6365,8 +6403,8 @@ class ServerReceiver:
                     fresh["original_parent_category_id"],
                     fresh["cloned_parent_category_id"],
                     ctype,
-                    original_guild_id=host_guild_id,
-                    cloned_guild_id=guild.id,
+                    original_guild_id=fresh.get("original_guild_id"),
+                    cloned_guild_id=fresh.get("cloned_guild_id") or guild.id,
                 )
 
                 logger.debug(
@@ -6529,6 +6567,7 @@ class ServerReceiver:
                         guild_name=getattr(g, "name", None),
                         channel_id=cloned_tid,
                         channel_name=getattr(t, "name", None),
+                        extra={"original_thread_id": int(orig_tid), "clone_thread_id": int(cloned_tid)},
                     )
                 else:
                     logger.debug(
@@ -8607,6 +8646,9 @@ class ServerReceiver:
                         ctx_gid = host_guild_id or None
 
                     role_mentions = []
+                    clone_cid = mapping.get("cloned_channel_id") or mapping.get(
+                        "clone_channel_id"
+                    )
                     if not is_backfill:
                         try:
 
@@ -10993,10 +11035,10 @@ class ServerReceiver:
 
         row = self._bf_pick_mapping_for_target(original_id)
         if not row:
-            logger.warning(
+            logger.debug(
                 "[bf] no mapping for channel=%s; using live forward", original_id
             )
-            await self.handle_message(data)
+            await self.forward_message(data)
             return
 
         clone_id = None
@@ -11017,10 +11059,10 @@ class ServerReceiver:
                 break
 
         if not primary_url:
-            logger.warning(
-                "[bf] mapping found but no webhook URL | ch=%s row=%s", original_id, row
+            logger.debug(
+                "[bf] mapping found but no webhook URL | ch=%s; forwarding for on-demand webhook creation", original_id
             )
-            await self.handle_message(data)
+            await self.forward_message(data)
             return
 
         st = self.backfill._progress.get(int(original_id))

@@ -111,9 +111,13 @@ class ChannelPermissionSync:
 
         async def _runner():
             try:
+                if self.bot.is_closed():
+                    return
                 await self._await_roles_done(
                     roles_manager, roles_handle_or_none, await_timeout
                 )
+                if self.bot.is_closed():
+                    return
                 parts = await self._sync_permissions(guild, sitemap, src_everyone_id)
                 if parts:
                     summary = "; ".join(parts)
@@ -431,7 +435,7 @@ class ChannelPermissionSync:
         role_items: List[dict],
         src_everyone_id: Optional[int],
     ) -> bool:
-        if not role_items:
+        if not role_items or self.bot.is_closed():
             return False
 
         guild = ch.guild
@@ -541,6 +545,7 @@ class ChannelPermissionSync:
                         guild_name=getattr(guild, "name", None),
                         channel_id=ch.id,
                         channel_name=getattr(ch, "name", None),
+                        extra={"clone_channel_id": int(ch.id)},
                     )
                 except Exception:
                     pass

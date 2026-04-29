@@ -11403,6 +11403,44 @@ body.page-forwarding .fwd-no-match-sub {
   color: rgba(255, 255, 255, 0.8);
   font-size: 13px;
 }
+tr.log-expandable {
+  cursor: pointer;
+}
+tr.log-expandable:hover td {
+  background: rgba(139, 92, 246, 0.06);
+}
+tr.log-expanded td {
+  border-bottom-color: transparent;
+}
+.log-detail-row td {
+  padding: 0 !important;
+  border-top: none !important;
+}
+.log-meta-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px 24px;
+  padding: 12px 20px 16px;
+  background: rgba(15, 8, 30, 0.5);
+  border-bottom: 1px solid var(--border);
+}
+.log-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.log-meta-label {
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.log-meta-value {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.85);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  word-break: break-all;
+}
 
 /* ── Type badge ──────────────────────────────────────────── */
 .log-type-badge {

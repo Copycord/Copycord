@@ -38,7 +38,11 @@ config = Config(logger=logger)
 
 _db_boot = DBManager(config.DB_PATH)
 try:
-    _ids = _db_boot.get_all_clone_guild_ids()
+    _ids = [
+        int(m["cloned_guild_id"])
+        for m in _db_boot.list_guild_mappings()
+        if m.get("cloned_guild_id")
+    ]
 except Exception:
     _ids = []
 
@@ -163,12 +167,24 @@ class CloneCommands(commands.Cog):
 
         Returns the new guild_ids list.
         """
+        new_ids = []
         try:
-            ids = self.db.get_all_clone_guild_ids() or []
+            mappings = self.db.list_guild_mappings()
+            for m in mappings:
+                raw = m.get("cloned_guild_id")
+                if raw:
+                    try:
+                        new_ids.append(int(raw))
+                    except (ValueError, TypeError):
+                        pass
+            new_ids = sorted(set(new_ids))
+            logger.debug(
+                "[commands] Refreshed command guilds: %d mapping(s), guild_ids=%s",
+                len(mappings),
+                new_ids,
+            )
         except Exception:
-            ids = []
-
-        new_ids = sorted({int(g) for g in ids if g})
+            logger.exception("[commands] Failed to refresh command guilds")
 
         for cmd in self.bot.application_commands:
             if getattr(cmd, "guild_ids", None) is not None:
@@ -210,7 +226,7 @@ class CloneCommands(commands.Cog):
         try:
             new_ids = self._refresh_command_guilds()
             await self.bot.sync_commands()
-            logger.debug("[✅] Server slash commands synced for: %s", new_ids)
+            logger.debug("[✅] Slash commands synced for guilds: %s", new_ids)
         except Exception:
             logger.exception("Slash command sync failed")
 
@@ -993,10 +1009,6 @@ class CloneCommands(commands.Cog):
         if not guild:
             return await ctx.followup.send("No guild context.", ephemeral=True)
 
-        RL_EMOJI = getattr(ActionType, "EMOJI", "EMOJI")
-        RL_STICKER = getattr(ActionType, "STICKER", "STICKER")
-        RL_ROLE = getattr(ActionType, "ROLE", "ROLE")
-
         deleted = skipped = failed = 0
         deleted_ids: list[int] = []
 
@@ -1075,7 +1087,6 @@ class CloneCommands(commands.Cog):
                         continue
 
                     try:
-                        await self.ratelimit.acquire(RL_EMOJI)
                         await em.delete(reason=f"Purge by {ctx.user.id}")
                         deleted += 1
                         deleted_ids.append(int(em.id))
@@ -1158,7 +1169,6 @@ class CloneCommands(commands.Cog):
                         continue
 
                     try:
-                        await self.ratelimit.acquire(RL_STICKER)
                         await st.delete(reason=f"Purge by {ctx.user.id}")
                         deleted += 1
                         deleted_ids.append(int(st.id))
@@ -1261,7 +1271,6 @@ class CloneCommands(commands.Cog):
                         continue
 
                     try:
-                        await self.ratelimit.acquire(RL_ROLE)
                         await role.delete(reason=f"Purge by {ctx.user.id}")
                         deleted += 1
                         deleted_ids.append(int(role.id))

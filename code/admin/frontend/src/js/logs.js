@@ -190,10 +190,89 @@
     }
   }
 
+  function parseExtra(log) {
+    if (!log.extra_json) return null;
+    try {
+      return typeof log.extra_json === "string" ? JSON.parse(log.extra_json) : log.extra_json;
+    } catch {
+      return null;
+    }
+  }
+
+  function hasMetadata(log) {
+    return !!(log.channel_id || log.channel_name || log.category_id || log.category_name || log.guild_id || parseExtra(log));
+  }
+
+  const EXTRA_LABELS = {
+    sync_task_id: "Sync Task",
+    original_channel_id: "Source Channel ID",
+    clone_channel_id: "Clone Channel ID",
+    original_category_id: "Source Category ID",
+    clone_category_id: "Clone Category ID",
+    original_role_id: "Source Role ID",
+    clone_role_id: "Clone Role ID",
+    original_emoji_id: "Source Emoji ID",
+    clone_emoji_id: "Clone Emoji ID",
+    original_sticker_id: "Source Sticker ID",
+    clone_sticker_id: "Clone Sticker ID",
+    original_thread_id: "Source Thread ID",
+    clone_thread_id: "Clone Thread ID",
+    clone_channel_id: "Clone Channel ID",
+    changed_fields: "Changed Fields",
+    changes: "Changes",
+  };
+
+  function buildMetadataHtml(log) {
+    const extra = parseExtra(log);
+    const rows = [];
+    const handled = new Set();
+
+    if (extra && extra.sync_task_id) {
+      rows.push(["Sync Task", extra.sync_task_id]);
+      handled.add("sync_task_id");
+    }
+    if (log.guild_id) rows.push(["Guild ID", log.guild_id]);
+    if (log.channel_name) rows.push(["Channel", log.channel_name]);
+    if (log.category_name) rows.push(["Category", log.category_name]);
+    if (log.category_id) rows.push(["Category ID", log.category_id]);
+
+    if (extra) {
+      const orderedKeys = [
+        "original_channel_id", "clone_channel_id",
+        "original_category_id", "clone_category_id",
+        "original_role_id", "clone_role_id",
+        "original_emoji_id", "clone_emoji_id",
+        "original_sticker_id", "clone_sticker_id",
+        "original_thread_id", "clone_thread_id",
+        "changed_fields", "changes",
+      ];
+      for (const k of orderedKeys) {
+        if (extra[k] != null) {
+          const val = Array.isArray(extra[k]) ? extra[k].join(", ") : extra[k];
+          rows.push([EXTRA_LABELS[k] || k, val]);
+          handled.add(k);
+        }
+      }
+      for (const [k, v] of Object.entries(extra)) {
+        if (handled.has(k)) continue;
+        const label = EXTRA_LABELS[k] || k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+        const val = Array.isArray(v) ? v.join(", ") : v;
+        rows.push([label, val]);
+      }
+    }
+
+    if (!rows.length) return "";
+    return rows
+      .map(([label, val]) => `<div class="log-meta-item"><span class="log-meta-label">${esc(String(label))}</span><span class="log-meta-value">${esc(String(val))}</span></div>`)
+      .join("");
+  }
+
   function renderRow(log) {
     const meta = getMeta(log.event_type);
+    const frag = document.createDocumentFragment();
+
     const tr = document.createElement("tr");
-    tr.className = "log-row";
+    tr.className = "log-row" + (hasMetadata(log) ? " log-expandable" : "");
     tr.dataset.logId = log.log_id;
 
     const guildText =
@@ -217,7 +296,18 @@
       `<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />` +
       `</svg></button></td>`;
 
-    return tr;
+    frag.appendChild(tr);
+
+    if (hasMetadata(log)) {
+      const detailTr = document.createElement("tr");
+      detailTr.className = "log-detail-row";
+      detailTr.dataset.detailFor = log.log_id;
+      detailTr.hidden = true;
+      detailTr.innerHTML = `<td colspan="5"><div class="log-meta-panel">${buildMetadataHtml(log)}</div></td>`;
+      frag.appendChild(detailTr);
+    }
+
+    return frag;
   }
 
   function esc(s) {
@@ -401,23 +491,35 @@
 
   tbody.addEventListener("click", async (e) => {
     const btn = e.target.closest(".log-delete-btn");
-    if (!btn) return;
-    const logId = btn.dataset.logId;
-    if (!logId) return;
-
-    btn.disabled = true;
-    try {
-      const res = await fetch(`/api/event-logs/${logId}`, {
-        method: "DELETE",
-        credentials: "same-origin",
-      });
-      if (res.ok) {
-        totalLogs = Math.max(0, totalLogs - 1);
-        loadLogs();
+    if (btn) {
+      const logId = btn.dataset.logId;
+      if (!logId) return;
+      btn.disabled = true;
+      try {
+        const res = await fetch(`/api/event-logs/${logId}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+        });
+        if (res.ok) {
+          totalLogs = Math.max(0, totalLogs - 1);
+          loadLogs();
+        }
+      } catch (err) {
+        console.error("Delete log failed:", err);
+        btn.disabled = false;
       }
-    } catch (err) {
-      console.error("Delete log failed:", err);
-      btn.disabled = false;
+      return;
+    }
+
+    const row = e.target.closest("tr.log-expandable");
+    if (row) {
+      const logId = row.dataset.logId;
+      const detailRow = tbody.querySelector(`tr[data-detail-for="${logId}"]`);
+      if (detailRow) {
+        const isOpen = !detailRow.hidden;
+        detailRow.hidden = isOpen;
+        row.classList.toggle("log-expanded", !isOpen);
+      }
     }
   });
 

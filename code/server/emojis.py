@@ -266,6 +266,7 @@ class EmojiManager:
                         f"Deleted emoji '{row['cloned_emoji_name']}'",
                         guild_id=guild.id,
                         guild_name=getattr(guild, "name", None),
+                        extra={"original_emoji_id": int(orig_id), "clone_emoji_id": int(row["cloned_emoji_id"])},
                     )
                 except discord.Forbidden:
                     self._log(
@@ -315,6 +316,7 @@ class EmojiManager:
                         f"Renamed emoji '{cloned.name}' → '{name}'",
                         guild_id=guild.id,
                         guild_name=getattr(guild, "name", None),
+                        extra={"original_emoji_id": int(orig_id), "clone_emoji_id": int(cloned.id)},
                     )
                     self.db.upsert_emoji_mapping(
                         orig_id,
@@ -349,6 +351,7 @@ class EmojiManager:
                         f"Renamed emoji '{mapping['original_emoji_name']}' → '{name}'",
                         guild_id=guild.id,
                         guild_name=getattr(guild, "name", None),
+                        extra={"original_emoji_id": int(orig_id), "clone_emoji_id": int(cloned.id)},
                     )
                     self.db.upsert_emoji_mapping(
                         orig_id,
@@ -418,6 +421,7 @@ class EmojiManager:
                     f"Created emoji '{name}'",
                     guild_id=guild.id,
                     guild_name=getattr(guild, "name", None),
+                    extra={"original_emoji_id": int(orig_id), "clone_emoji_id": int(created_emo.id)},
                 )
                 self.db.upsert_emoji_mapping(
                     orig_id,
@@ -432,7 +436,14 @@ class EmojiManager:
                 else:
                     static_count += 1
             except discord.HTTPException as e:
-                if "50138" in str(e):
+                if "30008" in str(e):
+                    self._log(
+                        "warning",
+                        "[😊] Emoji limit reached; stopping emoji sync (%d created so far)",
+                        created,
+                    )
+                    break
+                elif "50138" in str(e):
                     size_failed += 1
                 else:
                     self._log(
@@ -444,16 +455,17 @@ class EmojiManager:
 
         if skipped_limit_static or skipped_limit_animated:
             self._log(
-                "info",
-                "[😊] Skipped %d static and %d animated due to limit (%d). Consider boosting.",
+                "debug",
+                "[😊] Skipped %d static and %d animated due to limit (%d).",
                 skipped_limit_static,
                 skipped_limit_animated,
                 limit,
             )
         if size_failed:
             self._log(
-                "info",
-                "[😊] Skipped some emojis because they still exceed 256 KiB after conversion."
+                "debug",
+                "[😊] Skipped %d emojis that still exceed 256 KiB after conversion.",
+                size_failed,
             )
         return deleted, renamed, created
 
