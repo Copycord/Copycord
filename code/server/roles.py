@@ -232,7 +232,7 @@ class RoleManager:
                     return ""
 
             except asyncio.CancelledError:
-                self._log("warning", "[🧩] Role sync canceled.")
+                self._log("debug", "[🧩] Role sync canceled.")
             except Exception as e:
                 self._log("error", "[🧩] Role sync failed: %s", e)
             finally:
