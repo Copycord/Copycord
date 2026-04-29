@@ -18,18 +18,17 @@ The main dashboard page gives you an at-a-glance view of your entire setup:
 
 ## Navigation
 
-The dashboard is organized into these pages:
+The dashboard sidebar has these pages:
 
 | Page | Purpose |
 |------|---------|
-| **Dashboard** | Main control center — status, mappings, start/stop |
-| **Guilds** | Create and manage source → clone server mappings |
-| **Channels** | View and customize cloned channel names |
-| **Filters** | Configure channel/category whitelist and exclusion filters |
+| **Configuration** | Bot status, global config, guild mappings, start/stop |
+| **Channels** | View and customize cloned channel names, orphan detection, backfill |
+| **Guilds** | Browse all servers your self-bot is in, export messages |
 | **Forwarding** | Set up message forwarding to Telegram, Pushover, etc. |
 | **Scraper** | Member scraper tool for exporting user data |
-| **System** | System settings, logs, database backups, configuration |
-| **Event Logs** | Browse the activity/audit log |
+| **System** | Version info, database backups |
+| **Logs** | Event logs  |
 
 ## Authentication
 
