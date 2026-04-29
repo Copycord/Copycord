@@ -7827,10 +7827,12 @@ class ServerReceiver:
 
             if not rows:
                 try:
-                    rows = list(
-                        self.db.get_channel_mappings_for_original(origin_channel_id)
-                        or []
-                    )
+                    rows = [
+                        dict(r) for r in (
+                            self.db.get_channel_mappings_for_original(origin_channel_id)
+                            or []
+                        )
+                    ]
                 except Exception:
                     rows = []
             return rows
@@ -8707,7 +8709,7 @@ class ServerReceiver:
 
                         lock = self._guild_sync_locks.get(clone_gid)
                         if lock and lock.locked():
-                            logger.info(
+                            logger.debug(
                                 "[⌛] Sync in progress; message in #%s from %s is queued and will be sent after sync",
                                 msg.get("channel_name"),
                                 msg.get("author"),
@@ -8996,8 +8998,8 @@ class ServerReceiver:
                 continue
 
         if not allowed:
-            logger.info(
-                "[✏️] Edited message not resent — EDIT_MESSAGES or RESEND_EDITED_MESSAGES is disabled for all clones of channel %s",
+            logger.debug(
+                "Edited message not resent — EDIT_MESSAGES or RESEND_EDITED_MESSAGES is disabled for all clones of channel %s",
                 source_id,
             )
             return

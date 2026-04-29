@@ -11313,7 +11313,8 @@ body.page-forwarding .fwd-no-match-sub {
   border: 1px solid var(--border);
   background: linear-gradient(180deg, rgba(27, 16, 48, 0.5) 0%, rgba(15, 8, 30, 0.6) 100%);
   overflow: hidden;
-  max-height: calc(100vh - 280px);
+  height: calc(100vh - 280px);
+  min-height: 400px;
   overflow-y: auto;
 }
 
@@ -11617,7 +11618,8 @@ body.page-forwarding .fwd-no-match-sub {
     width: 100%;
   }
   .logs-table-wrap {
-    max-height: calc(100vh - 320px);
+    height: calc(100vh - 320px);
+    min-height: 300px;
   }
   .lt-col-guild {
     display: none;
