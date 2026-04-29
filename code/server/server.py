@@ -2305,12 +2305,21 @@ class ServerReceiver:
                 guild_name=guild.name,
                 extra={"changed_fields": changed_fields},
             )
-        except Exception:
-            logger.warning(
-                "[⚠️] Failed to update guild metadata for clone guild %s",
-                guild.id,
-                exc_info=True,
-            )
+        except Exception as e:
+            msg = str(e)
+            if "cannot be larger than" in msg.lower() or "10240" in msg:
+                logger.warning(
+                    "[⚠️] Guild icon/banner too large for clone guild %s — "
+                    "the clone server's boost level doesn't support this file size. "
+                    "Boost the clone server or set CLONE_GUILD_ICON/CLONE_GUILD_BANNER to false.",
+                    guild.id,
+                )
+            else:
+                logger.warning(
+                    "[⚠️] Failed to update guild metadata for clone guild %s: %s",
+                    guild.id,
+                    e,
+                )
 
         return parts
 
@@ -3753,9 +3762,21 @@ class ServerReceiver:
                     )
 
             except Exception as e:
-                logger.warning(
-                    "[⚠️] Failed to update metadata for channel #%d: %s", ch.id, e
-                )
+                msg = str(e)
+                if "emoji you do not have access to" in msg.lower():
+                    logger.debug(
+                        "[⚠️] Channel #%d topic contains custom emojis not available in the clone server; skipping topic sync",
+                        ch.id,
+                    )
+                elif "96000" in msg or "less than or equal to" in msg.lower():
+                    logger.warning(
+                        "[⚠️] Bitrate too high for clone channel #%d — boost the clone server or disable voice/stage properties.",
+                        ch.id,
+                    )
+                else:
+                    logger.warning(
+                        "[⚠️] Failed to update metadata for channel #%d: %s", ch.id, e
+                    )
 
         for ch, desired_req in require_tag_ops:
             try:
@@ -4177,11 +4198,20 @@ class ServerReceiver:
                     ", ".join(f"{k}={v}" for k, v in voice_changes.items()),
                 )
             except Exception as e:
-                logger.warning(
-                    "[⚠️] Failed to set voice properties for new channel #%d: %s",
-                    ch.id,
-                    e,
-                )
+                msg = str(e)
+                if "96000" in msg or "less than or equal to" in msg.lower():
+                    logger.warning(
+                        "[⚠️] Voice bitrate too high for clone channel #%d — "
+                        "the clone server's boost level doesn't support this bitrate. "
+                        "Boost the clone server or set CLONE_VOICE_PROPERTIES to false.",
+                        ch.id,
+                    )
+                else:
+                    logger.warning(
+                        "[⚠️] Failed to set voice properties for channel #%d: %s",
+                        ch.id,
+                        e,
+                    )
 
         self.db.upsert_channel_mapping(
             int(original_id),
@@ -4361,11 +4391,20 @@ class ServerReceiver:
                     ", ".join(f"{k}={v}" for k, v in stage_changes.items()),
                 )
             except Exception as e:
-                logger.warning(
-                    "[⚠️] Failed to set stage properties for new channel #%d: %s",
-                    ch.id,
-                    e,
-                )
+                msg = str(e)
+                if "96000" in msg or "less than or equal to" in msg.lower():
+                    logger.warning(
+                        "[⚠️] Stage bitrate too high for clone channel #%d — "
+                        "the clone server's boost level doesn't support this bitrate. "
+                        "Boost the clone server or set CLONE_STAGE_PROPERTIES to false.",
+                        ch.id,
+                    )
+                else:
+                    logger.warning(
+                        "[⚠️] Failed to set stage properties for channel #%d: %s",
+                        ch.id,
+                        e,
+                    )
 
         self.db.upsert_channel_mapping(
             int(original_id),
