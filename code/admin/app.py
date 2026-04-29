@@ -1884,46 +1884,55 @@ async def _start_log_pruner():
 
 
 async def _log_prune_loop():
-    """Periodically check log file sizes and truncate to the configured max."""
-    LOG_FILES = [
-        ("server.log", "server.out"),
-        ("client.log", "client.out"),
-    ]
+    """Periodically check log file sizes and truncate to the configured max.
+
+    Uses seek-based reading so only the tail is loaded into memory,
+    even if the file is hundreds of MB.
+    """
+    LOG_FILES = ("server.out", "client.out")
     LOGGER.info("Log pruning task started (checks every 5 minutes)")
     while True:
-        await asyncio.sleep(300)  # check every 5 minutes
+        await asyncio.sleep(300)
         try:
             max_mb_str = db.get_config("LOG_MAX_SIZE_MB", "10")
             max_bytes = int(max_mb_str) * 1024 * 1024
             if max_bytes <= 0:
                 continue
 
-            for names in LOG_FILES:
-                for name in names:
-                    p = DATA_DIR / name
-                    try:
-                        if not p.exists():
-                            continue
-                        size = p.stat().st_size
-                        if size <= max_bytes:
-                            continue
+            for name in LOG_FILES:
+                p = DATA_DIR / name
+                try:
+                    if not p.exists():
+                        continue
+                    size = p.stat().st_size
+                    if size <= max_bytes:
+                        continue
 
-                        # Keep the last max_bytes worth of content
-                        text = p.read_text(encoding="utf-8", errors="ignore")
-                        trimmed = text[-max_bytes:]
-                        # Cut at the first newline to avoid partial lines
-                        nl = trimmed.find("\n")
-                        if nl != -1:
-                            trimmed = trimmed[nl + 1:]
-                        p.write_text(trimmed, encoding="utf-8")
-                        LOGGER.info(
-                            "Pruned %s: %.1fMB → %.1fMB",
-                            name,
-                            size / (1024 * 1024),
-                            len(trimmed.encode("utf-8")) / (1024 * 1024),
-                        )
-                    except Exception:
-                        LOGGER.debug("Log prune failed for %s", name, exc_info=True)
+                    # Only read the tail we want to keep
+                    with open(p, "rb") as f:
+                        f.seek(size - max_bytes)
+                        tail = f.read()
+
+                    # Decode and cut at the first newline to avoid a partial line
+                    text = tail.decode("utf-8", errors="ignore")
+                    nl = text.find("\n")
+                    if nl != -1:
+                        text = text[nl + 1:]
+
+                    # Write back atomically via temp file
+                    tmp = p.with_suffix(".tmp")
+                    tmp.write_text(text, encoding="utf-8")
+                    tmp.replace(p)
+
+                    new_size = p.stat().st_size
+                    LOGGER.info(
+                        "Pruned %s: %.1fMB -> %.1fMB",
+                        name,
+                        size / (1024 * 1024),
+                        new_size / (1024 * 1024),
+                    )
+                except Exception:
+                    LOGGER.debug("Log prune failed for %s", name, exc_info=True)
         except Exception:
             LOGGER.debug("Log prune loop error", exc_info=True)
 
