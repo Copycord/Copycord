@@ -17,6 +17,7 @@
   const filterEl = document.getElementById("logs-filter-type");
   const searchEl = document.getElementById("logs-search");
   const clearAllBtn = document.getElementById("logs-clear-all");
+  const refreshBtn = document.getElementById("logs-refresh");
   const clearFiltersBtn = document.getElementById("logs-clear-filters");
   const paginationEl = document.getElementById("logs-pagination");
 
@@ -400,26 +401,39 @@
 
       renderPagination();
       updateClearFilters();
+      populateFilterDropdown(data.types || []);
     } catch (err) {
       console.error("Failed to load event logs:", err);
     }
   }
 
-  function populateFilterDropdown() {
+  let rebuildingDropdown = false;
+
+  function populateFilterDropdown(activeTypes) {
+    rebuildingDropdown = true;
+    const prev = filterEl.value;
     while (filterEl.options.length > 1) filterEl.remove(1);
 
-    const sorted = Object.keys(TYPE_META).sort((a, b) => {
-      const la = TYPE_META[a].label.toLowerCase();
-      const lb = TYPE_META[b].label.toLowerCase();
-      return la < lb ? -1 : la > lb ? 1 : 0;
-    });
+    const sorted = activeTypes
+      .map((t) => ({ key: t, label: getMeta(t).label }))
+      .sort((a, b) => a.label.toLowerCase() < b.label.toLowerCase() ? -1 : 1);
 
-    sorted.forEach((t) => {
+    sorted.forEach(({ key, label }) => {
       const opt = document.createElement("option");
-      opt.value = t;
-      opt.textContent = TYPE_META[t].label;
+      opt.value = key;
+      opt.textContent = label;
       filterEl.appendChild(opt);
     });
+
+    if (prev && Array.from(filterEl.options).some(o => o.value === prev)) {
+      filterEl.value = prev;
+    } else {
+      filterEl.value = "";
+      currentType = "";
+    }
+    rebuildingDropdown = true;
+    filterEl.dispatchEvent(new Event("change", { bubbles: true }));
+    setTimeout(() => { rebuildingDropdown = false; }, 0);
   }
 
   function updateClearFilters() {
@@ -452,6 +466,7 @@
   });
 
   filterEl.addEventListener("change", () => {
+    if (rebuildingDropdown) return;
     currentType = filterEl.value;
     currentPage = 1;
     loadLogs();
@@ -523,6 +538,12 @@
     }
   });
 
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", () => {
+      loadLogs();
+    });
+  }
+
   clearAllBtn.addEventListener("click", () => {
     openConfirm({
       title: "Delete All Logs",
@@ -551,6 +572,5 @@
     });
   });
 
-  populateFilterDropdown();
   loadLogs();
 })();
