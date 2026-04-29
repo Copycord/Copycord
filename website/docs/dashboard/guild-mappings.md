@@ -43,6 +43,42 @@ Copycord supports multiple guild mappings simultaneously. You can:
 
 Each mapping operates independently with its own filters and settings.
 
+## Export messages
+
+The Guilds page includes a message export tool. Click the **export** button on any guild card to open the export modal.
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| **Channel ID** | Export only a specific channel (leave blank for all channels) |
+| **Filter by User ID** | Export only messages from a specific user |
+| **Forward to webhook** | Send each exported message to a Discord webhook in real time |
+| **Date Range** | Filter by "After" and "Before" dates |
+| **Download media** | Save attachments locally (images, videos, audio, other files) |
+
+### Filters
+
+The **Filters** section lets you narrow down which messages are exported:
+
+- Content types: text, embeds, attachments, links, emojis, stickers, mentions
+- Attachment types: images, videos, audio, other
+- Message types: replies, bot messages, system messages, pinned messages
+- Thread types: threads, forum threads, private threads
+- Keyword search: include only messages containing a specific word
+- Minimum message length and minimum total reactions
+
+### Output
+
+- **JSON file** — Saved to `/data/exports/<guild_id>/<timestamp>/messages.json` with all matched messages
+- **Webhook forwarding** — Each message is forwarded to the provided webhook URL with a small delay between sends
+- **Media files** — Downloaded attachments are organized by type in `/data/exports/<guild_id>/<timestamp>/media/`
+
+:::info
+Only one export per guild can run at a time. Exports run asynchronously — you can close the modal and the export continues in the background.
+:::
+
+
 ## How syncing works
 
 When a mapping is active, Copycord continuously:
