@@ -195,6 +195,8 @@ ALLOWED_ENV = [
     "CLIENT_TOKEN",
     "COMMAND_USERS",
     "LOG_LEVEL",
+    "COPYCORD_AUTOSTART",
+    "LOG_MAX_SIZE_MB",
 ]
 
 REQUIRED = ["SERVER_TOKEN", "CLIENT_TOKEN"]
@@ -202,6 +204,7 @@ REQUIRED = ["SERVER_TOKEN", "CLIENT_TOKEN"]
 BOOL_KEYS = [
     "ENABLE_CLONING",
     "CLONE_MESSAGES",
+    "ON_DEMAND_WEBHOOKS",
     "DELETE_CHANNELS",
     "DELETE_THREADS",
     "DELETE_MESSAGES",
@@ -276,6 +279,9 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "DISABLE_ROLE_MENTIONS": False,
     "TAG_REPLY_MSG": False,
     "DB_CLEANUP_MSG": True,
+    "ON_DEMAND_WEBHOOKS": True,
+    "COPYCORD_AUTOSTART": "false",
+    "LOG_MAX_SIZE_MB": "10",
 }
 
 app = FastAPI(title=APP_TITLE)
@@ -1447,7 +1453,7 @@ async def index(request: Request):
 
     both_running = bool(s_server.get("running")) and bool(s_client.get("running"))
 
-    text_keys = [k for k in ALLOWED_ENV if k != "LOG_LEVEL"]
+    text_keys = [k for k in ALLOWED_ENV if k not in ("LOG_LEVEL", "COPYCORD_AUTOSTART", "LOG_MAX_SIZE_MB")]
 
     bool_keys = BOOL_KEYS
     guild_mappings = db.list_guild_mappings()
@@ -1695,6 +1701,28 @@ async def clear_logs():
     return RedirectResponse("/", status_code=303)
 
 
+@app.post("/logs/clear/{which}")
+async def clear_logs_which(which: str):
+    if which == "server":
+        names = ("server.log", "server.out")
+    elif which == "client":
+        names = ("client.log", "client.out")
+    else:
+        return PlainTextResponse("invalid", status_code=400)
+    cleared = []
+    for name in names:
+        p = DATA_DIR / name
+        try:
+            if p.exists():
+                with open(p, "w", encoding="utf-8"):
+                    pass
+                cleared.append(name)
+        except Exception:
+            pass
+    LOGGER.info("POST /logs/clear/%s done | cleared=%s", which, cleared)
+    return PlainTextResponse("ok")
+
+
 @app.get("/logs/{which}", response_class=PlainTextResponse)
 async def logs(which: str, tail: int = 20000):
     if which == "server":
@@ -1783,6 +1811,64 @@ async def _start_bg_tasks():
 
 
 @app.on_event("startup")
+async def _maybe_autostart():
+    asyncio.create_task(_autostart_if_ready())
+
+
+async def _autostart_if_ready():
+    """Auto-start server and client if enabled, tokens are valid, and mappings exist."""
+    await asyncio.sleep(1)
+
+    try:
+        autostart = db.get_config("COPYCORD_AUTOSTART", "false")
+        if autostart.lower() not in ("1", "true", "yes", "on"):
+            return
+
+        env = _read_env()
+        server_token = (env.get("SERVER_TOKEN") or "").strip()
+        client_token = (env.get("CLIENT_TOKEN") or "").strip()
+        if not server_token or not client_token:
+            LOGGER.info("Auto-start skipped: missing tokens")
+            return
+
+        token_errs = await _verify_tokens_for_save(
+            {"CLIENT_TOKEN": client_token, "SERVER_TOKEN": server_token}
+        )
+        if token_errs:
+            LOGGER.info("Auto-start skipped: invalid tokens (%s)", "; ".join(token_errs))
+            return
+
+        srv_ok, srv_reason, _ = await _check_controller("Server", SERVER_CTRL_URL)
+        cli_ok, cli_reason, _ = await _check_controller("Client", CLIENT_CTRL_URL)
+        if not srv_ok or not cli_ok:
+            reasons = []
+            if not srv_ok:
+                reasons.append(f"Server: {srv_reason}")
+            if not cli_ok:
+                reasons.append(f"Client: {cli_reason}")
+            LOGGER.info("Auto-start skipped: controllers not reachable (%s)", "; ".join(reasons))
+            return
+
+        srv = await _ws_cmd(SERVER_CTRL_URL, {"cmd": "start"})
+        cli = await _ws_cmd(CLIENT_CTRL_URL, {"cmd": "start"})
+
+        LOGGER.info(
+            "Auto-start complete: server=%s, client=%s",
+            srv.get("status", "unknown"),
+            cli.get("status", "unknown"),
+        )
+
+        for role in ("server", "client"):
+            await hub.broadcast({
+                "type": "status",
+                "source": role,
+                "data": {"running": True},
+            })
+    except Exception:
+        LOGGER.exception("Auto-start failed")
+
+
+@app.on_event("startup")
 async def _start_release_watcher():
     asyncio.create_task(_release_watch_loop())
 
@@ -1790,6 +1876,65 @@ async def _start_release_watcher():
 @app.on_event("startup")
 async def _start_backup_scheduler():
     backup_scheduler.start()
+
+
+@app.on_event("startup")
+async def _start_log_pruner():
+    asyncio.create_task(_log_prune_loop())
+
+
+async def _log_prune_loop():
+    """Periodically check log file sizes and truncate to the configured max.
+
+    Uses seek-based reading so only the tail is loaded into memory,
+    even if the file is hundreds of MB.
+    """
+    LOG_FILES = ("server.out", "client.out")
+    LOGGER.info("Log pruning task started (checks every 5 minutes)")
+    while True:
+        await asyncio.sleep(300)
+        try:
+            max_mb_str = db.get_config("LOG_MAX_SIZE_MB", "10")
+            max_bytes = int(max_mb_str) * 1024 * 1024
+            if max_bytes <= 0:
+                continue
+
+            for name in LOG_FILES:
+                p = DATA_DIR / name
+                try:
+                    if not p.exists():
+                        continue
+                    size = p.stat().st_size
+                    if size <= max_bytes:
+                        continue
+
+                    # Only read the tail we want to keep
+                    with open(p, "rb") as f:
+                        f.seek(size - max_bytes)
+                        tail = f.read()
+
+                    # Decode and cut at the first newline to avoid a partial line
+                    text = tail.decode("utf-8", errors="ignore")
+                    nl = text.find("\n")
+                    if nl != -1:
+                        text = text[nl + 1:]
+
+                    # Write back atomically via temp file
+                    tmp = p.with_suffix(".tmp")
+                    tmp.write_text(text, encoding="utf-8")
+                    tmp.replace(p)
+
+                    new_size = p.stat().st_size
+                    LOGGER.info(
+                        "Pruned %s: %.1fMB -> %.1fMB",
+                        name,
+                        size / (1024 * 1024),
+                        new_size / (1024 * 1024),
+                    )
+                except Exception:
+                    LOGGER.debug("Log prune failed for %s", name, exc_info=True)
+        except Exception:
+            LOGGER.debug("Log prune loop error", exc_info=True)
 
 
 @app.on_event("startup")
@@ -2862,6 +3007,14 @@ def _write_env(values: Dict[str, str]) -> None:
             v = _norm_bool_str(v)
         if k == "LOG_LEVEL":
             v = "DEBUG" if str(v).upper() == "DEBUG" else "INFO"
+        if k == "COPYCORD_AUTOSTART":
+            v = "true" if str(v).lower() in ("1", "true", "yes", "on") else "false"
+            os.environ["COPYCORD_AUTOSTART"] = v
+        if k == "LOG_MAX_SIZE_MB":
+            try:
+                v = str(max(0, int(v)))
+            except (ValueError, TypeError):
+                v = "10"
         db.set_config(k, v)
     LOGGER.info("Config saved | %s", _redact_dict(values))
 
@@ -2888,13 +3041,6 @@ def _validate(values: Dict[str, str], *, for_start: bool = False) -> List[str]:
                 errs.append("HOST_GUILD_ID must be a positive integer")
         except Exception:
             errs.append("HOST_GUILD_ID must be an integer")
-
-    if not errs and for_start:
-        try:
-            if len(db.list_guild_mappings()) == 0:
-                errs.append("At least one guild_mapping is required")
-        except Exception:
-            errs.append("At least one guild_mapping is required")
 
     if errs:
         LOGGER.warning("Config validation failed | errs=%s", errs)

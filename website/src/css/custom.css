@@ -105,6 +105,52 @@ table th {
   background: var(--ifm-color-emphasis-100);
 }
 
+/* Search bar */
+.navbar__search-input {
+  border-radius: 8px !important;
+  font-size: 0.85rem !important;
+  padding: 6px 36px 6px 32px !important;
+  transition: border-color 0.2s, box-shadow 0.2s, background 0.2s !important;
+}
+
+.navbar__search-input:focus {
+  box-shadow: 0 0 0 2px rgba(114, 137, 218, 0.25) !important;
+}
+
+[data-theme='dark'] .navbar__search-input {
+  background-color: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: #e0e0e0 !important;
+}
+
+[data-theme='dark'] .navbar__search-input::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+[data-theme='dark'] .navbar__search-input:focus {
+  background-color: rgba(255, 255, 255, 0.1) !important;
+  border-color: var(--ifm-color-primary) !important;
+}
+
+/* Center search bar in navbar */
+.navbar {
+  position: relative;
+}
+
+.navbar .navbar__search {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+@media (max-width: 996px) {
+  .navbar .navbar__search {
+    position: static;
+    transform: none;
+  }
+}
+
 /* Responsive hero */
 @media (max-width: 768px) {
   .hero__title {

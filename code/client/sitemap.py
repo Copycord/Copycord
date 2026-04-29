@@ -313,7 +313,7 @@ class SitemapService:
             origin_ids = self._mapped_original_ids()
 
             if not origin_ids:
-                self.logger.info("[⚠️] No active guild mappings to clone. Please check your configuration.")
+                self.logger.info("[⚠️] No guild mappings found. Server cloning is disabled.")
                 return
 
             await self._build_and_send_selected(

@@ -190,7 +190,7 @@ class StickerManager:
         stickers = st["sitemap"] or []
 
         async def _run_one():
-            await self._run_sync(
+            return await self._run_sync(
                 guild=guild,
                 stickers=stickers,
                 host_id=host_id,
@@ -266,6 +266,9 @@ class StickerManager:
                         guild_id=guild.id,
                         guild_name=getattr(guild, "name", None),
                     )
+                    return f"Stickers: {summary_text}"
+                else:
+                    return ""
 
             except asyncio.CancelledError:
                 self._log("debug", "[🎟️] Sticker sync canceled before completion.")
@@ -338,6 +341,7 @@ class StickerManager:
                         f"Deleted sticker '{row['cloned_sticker_name']}'",
                         guild_id=guild.id,
                         guild_name=getattr(guild, "name", None),
+                        extra={"original_sticker_id": int(orig_id), "clone_sticker_id": int(row["cloned_sticker_id"])},
                     )
 
                 except discord.Forbidden:
@@ -402,6 +406,7 @@ class StickerManager:
                         f"Renamed sticker '{mapping['original_sticker_name']}' → '{name}'",
                         guild_id=guild.id,
                         guild_name=getattr(guild, "name", None),
+                        extra={"original_sticker_id": int(orig_id), "clone_sticker_id": int(cloned.id)},
                     )
 
                 except discord.HTTPException as e:
@@ -496,16 +501,18 @@ class StickerManager:
                     f"Created sticker '{name}'",
                     guild_id=guild.id,
                     guild_name=getattr(guild, "name", None),
+                    extra={"original_sticker_id": int(orig_id), "clone_sticker_id": int(created_stk.id)},
                 )
 
             except discord.HTTPException as e:
 
                 if getattr(e, "code", None) == 30039 or "30039" in str(e):
-                    skipped_limit += 1
                     self._log(
-                        "info",
-                        "[🎟️] Skipped creating sticker due to clone guild sticker limit.",
+                        "warning",
+                        "[🎟️] Sticker limit reached; stopping sticker sync (%d created so far)",
+                        created,
                     )
+                    break
 
                 else:
                     self._log(

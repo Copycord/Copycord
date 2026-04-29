@@ -83,18 +83,31 @@ DATA_DIR=/custom/path
 Make sure the directory exists and is writable. For Docker, mount the appropriate volume.
 :::
 
+## Auto-start
+
+By default, Copycord does not automatically start the server and client bots when it launches. To enable auto-start:
+
+1. Go to **Global Configuration** in the dashboard
+2. Set **AUTO_START** to `True`
+3. Click **Save**
+
+On the next launch, Copycord will validate your tokens and start both bots automatically if they are valid.
+
+## Log pruning
+
+Copycord automatically prunes log files to prevent them from growing indefinitely. Configure the maximum size via **MAX_LOG_SIZE_MB** in Global Configuration:
+
+- Default: `10` MB
+- Set to `0` to disable pruning
+- Checks run every 5 minutes
+- Applies to `server.out` and `client.out`
+
+The pruner uses memory-efficient seek-based reading — only the tail of the file is loaded into memory, even for very large log files. Writes are atomic (via temp file) to prevent data loss.
+
 ## Rate limit behavior
 
-Copycord has built-in rate limiters that respect Discord's API limits:
+Copycord relies on discord.py's native rate limit handling for structure sync operations (channel creation, editing, role operations, etc.). When Discord returns a `429 Too Many Requests` response, the library automatically waits the required `Retry-After` duration before retrying.
 
-| Action | Rate | Notes |
-|--------|------|-------|
-| Webhook messages | 5 per 2.5s | Per webhook |
-| Channel creation | 2 per 15s | Per guild |
-| Webhook creation | 1 per 30s | Per guild |
-| Channel editing | 3 per 15s | Per guild |
-| Role operations | 1 per 10s | Per guild |
-| Emoji operations | 1 per 60s | Per guild |
-| Sticker operations | 1 per 60s | Per guild |
+For webhook message sending, Copycord uses a lightweight rate limiter (5 per 2.5s per webhook) to stay within Discord's message rate limits.
 
-These limits are handled automatically. If you're using proxies, some limits can be relaxed.
+If you're using proxies, requests are distributed across different IPs, allowing higher throughput.

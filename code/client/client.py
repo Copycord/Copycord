@@ -2645,7 +2645,7 @@ class ClientListener:
 def _autostart_enabled() -> bool:
     import os
 
-    return os.getenv("COPYCORD_AUTOSTART", "true").lower() in ("1", "true", "yes", "on")
+    return os.getenv("COPYCORD_AUTOSTART", "false").lower() in ("1", "true", "yes", "on")
 
 
 if __name__ == "__main__":

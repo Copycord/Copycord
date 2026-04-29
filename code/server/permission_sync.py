@@ -111,9 +111,13 @@ class ChannelPermissionSync:
 
         async def _runner():
             try:
+                if self.bot.is_closed():
+                    return
                 await self._await_roles_done(
                     roles_manager, roles_handle_or_none, await_timeout
                 )
+                if self.bot.is_closed():
+                    return
                 parts = await self._sync_permissions(guild, sitemap, src_everyone_id)
                 if parts:
                     summary = "; ".join(parts)
@@ -122,11 +126,13 @@ class ChannelPermissionSync:
                         "[🔐] Channel permission sync complete: %s",
                         summary,
                     )
+                    return f"Permissions: {summary}"
                 else:
                     self._log(
                         "info",
                         "[🔐] Channel permission sync complete: no changes needed",
                     )
+                    return ""
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -136,7 +142,7 @@ class ChannelPermissionSync:
                     e,
                 )
 
-        asyncio.create_task(_runner(), name=task_name)
+        return asyncio.create_task(_runner(), name=task_name)
 
     async def _await_roles_done(self, roles_manager, handle, timeout: float) -> None:
         try:
@@ -429,7 +435,7 @@ class ChannelPermissionSync:
         role_items: List[dict],
         src_everyone_id: Optional[int],
     ) -> bool:
-        if not role_items:
+        if not role_items or self.bot.is_closed():
             return False
 
         guild = ch.guild
@@ -452,7 +458,7 @@ class ChannelPermissionSync:
                 clone_role_id = self._extract_cloned_role_id(row) or 0
                 if not clone_role_id:
                     self._log(
-                        "info",
+                        "debug",
                         "[perm-sync] #%s skip role %s: no cloned mapping",
                         getattr(ch, "id", "?"),
                         orig_role_id,
@@ -518,10 +524,6 @@ class ChannelPermissionSync:
             )
 
         try:
-            if self.ratelimit and self.rate_limiter_action is not None:
-                await self.ratelimit.acquire_for_guild(
-                    self.rate_limiter_action, int(guild.id)
-                )
             await ch._state.http.edit_channel(
                 ch.id,
                 permission_overwrites=payload_overwrites,
@@ -543,6 +545,7 @@ class ChannelPermissionSync:
                         guild_name=getattr(guild, "name", None),
                         channel_id=ch.id,
                         channel_name=getattr(ch, "name", None),
+                        extra={"clone_channel_id": int(ch.id)},
                     )
                 except Exception:
                     pass

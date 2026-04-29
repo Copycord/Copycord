@@ -160,6 +160,7 @@ class ControlService:
             return {"ok": True, "status": "already-running", "pid": self._child.pid}
 
         env = self._load_env_for_child()
+        env["COPYCORD_AUTOSTART"] = "true"
 
         self._child = subprocess.Popen(
             [sys.executable, "-u", "-m", self.module],

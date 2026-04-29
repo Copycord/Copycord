@@ -215,6 +215,7 @@
     DISABLE_ROLE_MENTIONS: false,
     TAG_REPLY_MSG: false,
     DB_CLEANUP_MSG: true,
+    ON_DEMAND_WEBHOOKS: true,
   };
 
   let lastFocusLog = null;
@@ -848,8 +849,11 @@
     renderLogView({ preserveScroll: true });
   }
 
+  let currentLogType = null;
+
   function openLogs(which) {
     if (!modal || !logBody) return;
+    currentLogType = which;
     if (es) {
       try {
         es.close();
@@ -979,6 +983,34 @@
     if (e.key === "Escape" && modal && modal.classList.contains("show"))
       closeLogs();
   });
+
+  const logClearBtn = document.getElementById("log-clear-btn");
+  if (logClearBtn) {
+    logClearBtn.addEventListener("click", () => {
+      if (!currentLogType) return;
+      const label = currentLogType === "server" ? "Server" : "Client";
+      openConfirm({
+        title: "Clear logs?",
+        body: `This will permanently delete all ${label.toLowerCase()} logs. This cannot be undone.`,
+        confirmText: "Clear logs",
+        confirmClass: "btn-ghost-red",
+        onConfirm: async () => {
+          try {
+            const resp = await fetch(`/logs/clear/${currentLogType}`, { method: "POST" });
+            if (resp.ok) {
+              LOG_LINES = [];
+              renderLogView();
+              showToast(`${label} logs cleared`, { type: "success", timeout: 2000 });
+            } else {
+              showToast("Failed to clear logs", { type: "error" });
+            }
+          } catch {
+            showToast("Failed to clear logs", { type: "error" });
+          }
+        },
+      });
+    });
+  }
 
   function enhanceAllSelects() {
     document
@@ -1745,15 +1777,12 @@
     const vals = Object.fromEntries(REQUIRED_KEYS.map((k) => [k, get(k)]));
 
     const hasTokens = !!(vals.SERVER_TOKEN && vals.CLIENT_TOKEN);
-    const hasAtLeastOneMapping =
-      Array.isArray(GUILD_MAPPINGS) && GUILD_MAPPINGS.length > 0;
 
-    const ok = hasTokens && hasAtLeastOneMapping;
+    const ok = hasTokens;
 
     const missing = [];
     if (!vals.SERVER_TOKEN) missing.push("SERVER_TOKEN");
     if (!vals.CLIENT_TOKEN) missing.push("CLIENT_TOKEN");
-    if (!hasAtLeastOneMapping) missing.push("GUILD_MAPPINGS");
 
     return { ok, missing };
   }
@@ -1878,7 +1907,7 @@
         "Saved tokens are no longer valid. Please update SERVER_TOKEN and CLIENT_TOKEN to start.";
     } else if (!ok) {
       btn.title =
-        "Provide SERVER_TOKEN, CLIENT_TOKEN, and at least one Guild Mapping to start.";
+        "Provide SERVER_TOKEN and CLIENT_TOKEN to start.";
     } else {
       btn.title = "";
     }
@@ -4552,6 +4581,7 @@
           };
           if (source === "server") renderStatusRow("server", common);
           if (source === "client") renderStatusRow("client", common);
+          fetchAndRenderStatus();
         }
         if (msg.kind === "agent" && msg.type === "status") {
           const prefix = msg.role === "server" ? "server" : "client";
@@ -4904,7 +4934,7 @@
         "Saved tokens are no longer valid. Please update SERVER_TOKEN and CLIENT_TOKEN to start.";
     } else if (!ok) {
       btn.title =
-        "Provide SERVER_TOKEN, CLIENT_TOKEN, and at least one Guild Mapping to start.";
+        "Provide SERVER_TOKEN and CLIENT_TOKEN to start.";
     } else {
       btn.title = "";
     }

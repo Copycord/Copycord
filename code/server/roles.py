@@ -11,7 +11,6 @@
 from __future__ import annotations
 import asyncio, logging, discord, aiohttp
 from typing import List, Dict, Tuple, Optional
-from server.rate_limiter import ActionType
 from server import logctx
 
 logger = logging.getLogger("server.roles")
@@ -44,6 +43,7 @@ class RoleManager:
         self._locks: dict[int, asyncio.Lock] = {}
 
         self.MAX_ROLES = 250
+        self._ROLE_OP_DELAY = 1.5
 
     async def _emit_log(
         self,
@@ -193,6 +193,8 @@ class RoleManager:
     ) -> None:
         lock = self._get_lock_for_clone(clone_id)
         async with lock:
+            if self.bot.is_closed():
+                return
             try:
                 deleted, updated, created, rearranged = await self._sync(
                     guild=guild,
@@ -217,19 +219,31 @@ class RoleManager:
                     parts.append(f"Repositioned {rearranged} roles")
 
                 if parts:
+                    summary = "; ".join(parts)
                     self._log(
                         "info",
                         "[🧩] Role sync complete: %s",
-                        "; ".join(parts),
+                        summary,
                     )
+                    return f"Roles: {summary}"
                 else:
                     self._log(
                         "info",
                         "[🧩] Role sync complete: no changes needed",
                     )
+                    return ""
 
             except asyncio.CancelledError:
-                self._log("warning", "[🧩] Role sync canceled.")
+                if self.bot.is_closed():
+                    return
+                task = asyncio.current_task()
+                if task and task.cancelled():
+                    self._log("debug", "[🧩] Role sync canceled (task canceled).")
+                else:
+                    self._log(
+                        "warning",
+                        "[🧩] Role sync interrupted by discord.py reconnect; will retry next sync cycle",
+                    )
             except Exception as e:
                 self._log("error", "[🧩] Role sync failed: %s", e)
             finally:
@@ -275,7 +289,6 @@ class RoleManager:
             return None, 0, can_create, create_suppressed_logged
 
         try:
-            await self.ratelimit.acquire_for_guild(ActionType.ROLE, cloned_guild_id)
             kwargs = dict(
                 name=want_name,
                 colour=want_color,
@@ -294,6 +307,7 @@ class RoleManager:
                     kwargs["display_icon"] = unicode_emoji
 
             cloned = await guild.create_role(**kwargs)
+            await asyncio.sleep(self._ROLE_OP_DELAY)
 
             self.db.upsert_role_mapping(
                 orig_id,
@@ -418,8 +432,8 @@ class RoleManager:
                     continue
 
                 try:
-                    await self.ratelimit.acquire_for_guild(ActionType.ROLE, clone_id)
                     await cloned_role.delete()
+                    await asyncio.sleep(self._ROLE_OP_DELAY)
                     deleted += 1
                     self._log(
                         "info",
@@ -432,6 +446,7 @@ class RoleManager:
                         f"Deleted role '{cloned_role.name}'",
                         guild_id=clone_id,
                         guild_name=getattr(guild, "name", None),
+                        extra={"original_role_id": int(orig_id), "clone_role_id": int(cloned_role.id)},
                     )
 
                 except Exception as e:
@@ -478,12 +493,10 @@ class RoleManager:
                     and cloned_role.position < bot_top
                 ):
                     try:
-                        await self.ratelimit.acquire_for_guild(
-                            ActionType.ROLE, clone_id
-                        )
                         await cloned_role.delete(
                             reason="Blocked by Copycord role blocklist"
                         )
+                        await asyncio.sleep(self._ROLE_OP_DELAY)
                         self._log(
                             "info",
                             "[🧩] Deleted blocked role %s (%d)",
@@ -546,7 +559,6 @@ class RoleManager:
                     continue
 
                 try:
-                    await self.ratelimit.acquire_for_guild(ActionType.ROLE, clone_id)
                     kwargs = dict(
                         name=want_name,
                         colour=want_color,
@@ -565,6 +577,7 @@ class RoleManager:
                             kwargs["display_icon"] = want_unicode_emoji
 
                     new_role = await guild.create_role(**kwargs)
+                    await asyncio.sleep(self._ROLE_OP_DELAY)
                     created += 1
 
                     self.db.upsert_role_mapping(
@@ -587,6 +600,7 @@ class RoleManager:
                         f"Created role '{new_role.name}'",
                         guild_id=clone_id,
                         guild_name=getattr(guild, "name", None),
+                        extra={"original_role_id": int(orig_id), "clone_role_id": int(new_role.id)},
                     )
 
                     can_create = len(guild.roles) < self.MAX_ROLES
@@ -684,9 +698,6 @@ class RoleManager:
                         "; ".join(changes),
                     )
                     try:
-                        await self.ratelimit.acquire_for_guild(
-                            ActionType.ROLE, clone_id
-                        )
                         kwargs = dict(
                             name=want_name,
                             colour=want_color,
@@ -707,6 +718,7 @@ class RoleManager:
                                 kwargs["display_icon"] = None
 
                         await cloned_role.edit(**kwargs)
+                        await asyncio.sleep(self._ROLE_OP_DELAY)
                         updated += 1
 
                         self.db.upsert_role_mapping(
@@ -727,6 +739,7 @@ class RoleManager:
                             f"Updated role '{cloned_role.name}' ({'; '.join(changes)})",
                             guild_id=clone_id,
                             guild_name=getattr(guild, "name", None),
+                            extra={"clone_role_id": int(cloned_role.id), "changes": changes},
                         )
 
                     except Exception as e:
@@ -925,8 +938,6 @@ class RoleManager:
             payload.append({"id": str(role.id), "position": pos})
 
         try:
-            await self.ratelimit.acquire_for_guild(ActionType.ROLE, clone_id)
-
             await guild.edit_role_positions(
                 positions=positions, reason="Copycord role order sync"
             )

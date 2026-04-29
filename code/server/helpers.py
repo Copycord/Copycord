@@ -347,7 +347,7 @@ class VerifyController:
         if act == "list":
             ct0 = time.perf_counter()
             cats, chs = self._compute_orphans(guild)
-            self.log.info(
+            self.log.debug(
                 "Orphans listed | req_id=%s guild=%s cats=%d chs=%d took=%.1fms",
                 req_id,
                 guild.id,
@@ -566,18 +566,12 @@ class VerifyController:
                         )
                         continue
 
-                    wait_t0 = time.perf_counter()
-                    await self.ratelimit.acquire(self._AT_DELETE)
-                    wait_ms = self._ms_since(wait_t0)
-                    op_t0 = time.perf_counter()
                     await ch.delete()
                     self.log.info(
-                        "[🗑️] Deleted orphan Category | req_id=%s name=%s id=%d wait_ms=%.1f op_ms=%.1f",
+                        "[🗑️] Deleted orphan Category | req_id=%s name=%s id=%d",
                         req_id,
                         ch.name,
                         ch.id,
-                        wait_ms,
-                        self._ms_since(op_t0),
                     )
                     results.append(
                         {
@@ -625,19 +619,13 @@ class VerifyController:
                         )
                         continue
 
-                    wait_t0 = time.perf_counter()
-                    await self.ratelimit.acquire(self._AT_DELETE)
-                    wait_ms = self._ms_since(wait_t0)
-                    op_t0 = time.perf_counter()
                     await ch.delete()
                     self.log.info(
-                        "[🗑️] Deleted orphan %s | req_id=%s name=%s id=%d wait_ms=%.1f op_ms=%.1f",
+                        "[🗑️] Deleted orphan %s | req_id=%s name=%s id=%d",
                         type(ch).__name__,
                         req_id,
                         getattr(ch, "name", "?"),
                         ch.id,
-                        wait_ms,
-                        self._ms_since(op_t0),
                     )
                     results.append(
                         {

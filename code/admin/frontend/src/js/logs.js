@@ -2,7 +2,9 @@
   const root = document.getElementById("logs-root");
   if (!root) return;
 
-  let allLogs = [];
+  const PAGE_SIZE = 50;
+  let currentPage = 1;
+  let totalLogs = 0;
   let currentType = "";
   let currentSearch = "";
   let sortColumn = "created_at";
@@ -15,7 +17,9 @@
   const filterEl = document.getElementById("logs-filter-type");
   const searchEl = document.getElementById("logs-search");
   const clearAllBtn = document.getElementById("logs-clear-all");
+  const refreshBtn = document.getElementById("logs-refresh");
   const clearFiltersBtn = document.getElementById("logs-clear-filters");
+  const paginationEl = document.getElementById("logs-pagination");
 
   function blurActive() {
     const ae = document.activeElement;
@@ -187,10 +191,89 @@
     }
   }
 
+  function parseExtra(log) {
+    if (!log.extra_json) return null;
+    try {
+      return typeof log.extra_json === "string" ? JSON.parse(log.extra_json) : log.extra_json;
+    } catch {
+      return null;
+    }
+  }
+
+  function hasMetadata(log) {
+    return !!(log.channel_id || log.channel_name || log.category_id || log.category_name || log.guild_id || parseExtra(log));
+  }
+
+  const EXTRA_LABELS = {
+    sync_task_id: "Sync Task",
+    original_channel_id: "Source Channel ID",
+    clone_channel_id: "Clone Channel ID",
+    original_category_id: "Source Category ID",
+    clone_category_id: "Clone Category ID",
+    original_role_id: "Source Role ID",
+    clone_role_id: "Clone Role ID",
+    original_emoji_id: "Source Emoji ID",
+    clone_emoji_id: "Clone Emoji ID",
+    original_sticker_id: "Source Sticker ID",
+    clone_sticker_id: "Clone Sticker ID",
+    original_thread_id: "Source Thread ID",
+    clone_thread_id: "Clone Thread ID",
+    clone_channel_id: "Clone Channel ID",
+    changed_fields: "Changed Fields",
+    changes: "Changes",
+  };
+
+  function buildMetadataHtml(log) {
+    const extra = parseExtra(log);
+    const rows = [];
+    const handled = new Set();
+
+    if (extra && extra.sync_task_id) {
+      rows.push(["Sync Task", extra.sync_task_id]);
+      handled.add("sync_task_id");
+    }
+    if (log.guild_id) rows.push(["Guild ID", log.guild_id]);
+    if (log.channel_name) rows.push(["Channel", log.channel_name]);
+    if (log.category_name) rows.push(["Category", log.category_name]);
+    if (log.category_id) rows.push(["Category ID", log.category_id]);
+
+    if (extra) {
+      const orderedKeys = [
+        "original_channel_id", "clone_channel_id",
+        "original_category_id", "clone_category_id",
+        "original_role_id", "clone_role_id",
+        "original_emoji_id", "clone_emoji_id",
+        "original_sticker_id", "clone_sticker_id",
+        "original_thread_id", "clone_thread_id",
+        "changed_fields", "changes",
+      ];
+      for (const k of orderedKeys) {
+        if (extra[k] != null) {
+          const val = Array.isArray(extra[k]) ? extra[k].join(", ") : extra[k];
+          rows.push([EXTRA_LABELS[k] || k, val]);
+          handled.add(k);
+        }
+      }
+      for (const [k, v] of Object.entries(extra)) {
+        if (handled.has(k)) continue;
+        const label = EXTRA_LABELS[k] || k.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+        const val = Array.isArray(v) ? v.join(", ") : v;
+        rows.push([label, val]);
+      }
+    }
+
+    if (!rows.length) return "";
+    return rows
+      .map(([label, val]) => `<div class="log-meta-item"><span class="log-meta-label">${esc(String(label))}</span><span class="log-meta-value">${esc(String(val))}</span></div>`)
+      .join("");
+  }
+
   function renderRow(log) {
     const meta = getMeta(log.event_type);
+    const frag = document.createDocumentFragment();
+
     const tr = document.createElement("tr");
-    tr.className = "log-row";
+    tr.className = "log-row" + (hasMetadata(log) ? " log-expandable" : "");
     tr.dataset.logId = log.log_id;
 
     const guildText =
@@ -214,7 +297,18 @@
       `<path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />` +
       `</svg></button></td>`;
 
-    return tr;
+    frag.appendChild(tr);
+
+    if (hasMetadata(log)) {
+      const detailTr = document.createElement("tr");
+      detailTr.className = "log-detail-row";
+      detailTr.dataset.detailFor = log.log_id;
+      detailTr.hidden = true;
+      detailTr.innerHTML = `<td colspan="5"><div class="log-meta-panel">${buildMetadataHtml(log)}</div></td>`;
+      frag.appendChild(detailTr);
+    }
+
+    return frag;
   }
 
   function esc(s) {
@@ -226,63 +320,59 @@
       .replace(/"/g, "&quot;");
   }
 
-  function getFilteredSorted() {
-    let filtered = allLogs;
-
-    if (currentType) {
-      filtered = filtered.filter((l) => l.event_type === currentType);
-    }
-    if (currentSearch) {
-      const q = currentSearch.toLowerCase();
-      filtered = filtered.filter(
-        (l) =>
-          (l.details || "").toLowerCase().includes(q) ||
-          (l.guild_name || "").toLowerCase().includes(q) ||
-          (l.channel_name || "").toLowerCase().includes(q) ||
-          (l.event_type || "").toLowerCase().includes(q)
-      );
-    }
-
-    filtered.sort((a, b) => {
-      let va = a[sortColumn];
-      let vb = b[sortColumn];
-
-      if (va == null) va = "";
-      if (vb == null) vb = "";
-
-      if (typeof va === "string") va = va.toLowerCase();
-      if (typeof vb === "string") vb = vb.toLowerCase();
-
-      let cmp = 0;
-      if (va < vb) cmp = -1;
-      else if (va > vb) cmp = 1;
-
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-
-    return filtered;
+  function buildQueryParams() {
+    const params = new URLSearchParams();
+    params.set("limit", PAGE_SIZE);
+    params.set("offset", (currentPage - 1) * PAGE_SIZE);
+    if (currentType) params.set("event_type", currentType);
+    if (currentSearch) params.set("search", currentSearch);
+    return params.toString();
   }
 
-  function renderAll() {
-    const logs = getFilteredSorted();
-    tbody.innerHTML = "";
+  function renderPagination() {
+    if (!paginationEl) return;
+    const totalPages = Math.max(1, Math.ceil(totalLogs / PAGE_SIZE));
 
-    if (logs.length === 0) {
-      emptyEl.style.display = "";
-      countEl.textContent = "";
-    } else {
-      emptyEl.style.display = "none";
-      countEl.textContent = `Showing ${logs.length} of ${allLogs.length} logs`;
-      const frag = document.createDocumentFragment();
-      logs.forEach((log) => frag.appendChild(renderRow(log)));
-      tbody.appendChild(frag);
+    if (totalPages <= 1) {
+      paginationEl.innerHTML = "";
+      return;
     }
-    updateClearFilters();
+
+    const btns = [];
+
+    btns.push(
+      `<button class="pg-btn" data-page="${currentPage - 1}" ${currentPage <= 1 ? "disabled" : ""} aria-label="Previous page">&laquo;</button>`
+    );
+
+    const range = [];
+    range.push(1);
+    for (let i = Math.max(2, currentPage - 2); i <= Math.min(totalPages - 1, currentPage + 2); i++) {
+      range.push(i);
+    }
+    if (totalPages > 1) range.push(totalPages);
+
+    const unique = [...new Set(range)].sort((a, b) => a - b);
+    let last = 0;
+    for (const p of unique) {
+      if (last && p - last > 1) {
+        btns.push(`<span class="pg-ellipsis">&hellip;</span>`);
+      }
+      btns.push(
+        `<button class="pg-btn${p === currentPage ? " pg-active" : ""}" data-page="${p}">${p}</button>`
+      );
+      last = p;
+    }
+
+    btns.push(
+      `<button class="pg-btn" data-page="${currentPage + 1}" ${currentPage >= totalPages ? "disabled" : ""} aria-label="Next page">&raquo;</button>`
+    );
+
+    paginationEl.innerHTML = btns.join("");
   }
 
   async function loadLogs() {
     try {
-      const res = await fetch("/api/event-logs?limit=10000&offset=0", {
+      const res = await fetch(`/api/event-logs?${buildQueryParams()}`, {
         credentials: "same-origin",
         cache: "no-store",
         headers: { "Cache-Control": "no-cache" },
@@ -290,28 +380,60 @@
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
 
-      allLogs = data.logs || [];
-      renderAll();
+      totalLogs = data.total || 0;
+      const logs = data.logs || [];
+
+      tbody.innerHTML = "";
+      if (logs.length === 0) {
+        emptyEl.style.display = "";
+        countEl.textContent = totalLogs > 0
+          ? `No results for current filters (${totalLogs} total)`
+          : "";
+      } else {
+        emptyEl.style.display = "none";
+        const start = (currentPage - 1) * PAGE_SIZE + 1;
+        const end = start + logs.length - 1;
+        countEl.textContent = `Showing ${start}-${end} of ${totalLogs}`;
+        const frag = document.createDocumentFragment();
+        logs.forEach((log) => frag.appendChild(renderRow(log)));
+        tbody.appendChild(frag);
+      }
+
+      renderPagination();
+      updateClearFilters();
+      populateFilterDropdown(data.types || []);
     } catch (err) {
       console.error("Failed to load event logs:", err);
     }
   }
 
-  function populateFilterDropdown() {
+  let rebuildingDropdown = false;
+
+  function populateFilterDropdown(activeTypes) {
+    rebuildingDropdown = true;
+    const prev = filterEl.value;
     while (filterEl.options.length > 1) filterEl.remove(1);
 
-    const sorted = Object.keys(TYPE_META).sort((a, b) => {
-      const la = TYPE_META[a].label.toLowerCase();
-      const lb = TYPE_META[b].label.toLowerCase();
-      return la < lb ? -1 : la > lb ? 1 : 0;
-    });
+    const sorted = activeTypes
+      .map((t) => ({ key: t, label: getMeta(t).label }))
+      .sort((a, b) => a.label.toLowerCase() < b.label.toLowerCase() ? -1 : 1);
 
-    sorted.forEach((t) => {
+    sorted.forEach(({ key, label }) => {
       const opt = document.createElement("option");
-      opt.value = t;
-      opt.textContent = TYPE_META[t].label;
+      opt.value = key;
+      opt.textContent = label;
       filterEl.appendChild(opt);
     });
+
+    if (prev && Array.from(filterEl.options).some(o => o.value === prev)) {
+      filterEl.value = prev;
+    } else {
+      filterEl.value = "";
+      currentType = "";
+    }
+    rebuildingDropdown = true;
+    filterEl.dispatchEvent(new Event("change", { bubbles: true }));
+    setTimeout(() => { rebuildingDropdown = false; }, 0);
   }
 
   function updateClearFilters() {
@@ -338,21 +460,25 @@
           arrow.textContent = "";
         }
       });
-      renderAll();
+      currentPage = 1;
+      loadLogs();
     });
   });
 
   filterEl.addEventListener("change", () => {
+    if (rebuildingDropdown) return;
     currentType = filterEl.value;
-    renderAll();
+    currentPage = 1;
+    loadLogs();
   });
 
   searchEl.addEventListener("input", () => {
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       currentSearch = searchEl.value.trim();
-      renderAll();
-    }, 200);
+      currentPage = 1;
+      loadLogs();
+    }, 300);
   });
 
   clearFiltersBtn.addEventListener("click", () => {
@@ -361,47 +487,62 @@
     searchEl.value = "";
     filterEl.value = "";
     filterEl.dispatchEvent(new Event("change", { bubbles: true }));
-    renderAll();
+    currentPage = 1;
+    loadLogs();
   });
+
+  if (paginationEl) {
+    paginationEl.addEventListener("click", (e) => {
+      const btn = e.target.closest("[data-page]");
+      if (!btn || btn.disabled) return;
+      const page = parseInt(btn.dataset.page, 10);
+      if (page >= 1 && page <= Math.ceil(totalLogs / PAGE_SIZE)) {
+        currentPage = page;
+        loadLogs();
+        root.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  }
 
   tbody.addEventListener("click", async (e) => {
     const btn = e.target.closest(".log-delete-btn");
-    if (!btn) return;
-    const logId = btn.dataset.logId;
-    if (!logId) return;
-
-    btn.disabled = true;
-    try {
-      const res = await fetch(`/api/event-logs/${logId}`, {
-        method: "DELETE",
-        credentials: "same-origin",
-      });
-      if (res.ok) {
-        const row = tbody.querySelector(`tr[data-log-id="${logId}"]`);
-        if (row) {
-          row.classList.add("log-removing");
-          row.addEventListener(
-            "animationend",
-            () => {
-              row.remove();
-              allLogs = allLogs.filter((l) => l.log_id !== logId);
-              if (allLogs.length === 0) {
-                emptyEl.style.display = "";
-                countEl.textContent = "";
-              } else {
-                const visible = tbody.querySelectorAll("tr").length;
-                countEl.textContent = `Showing ${visible} of ${allLogs.length} logs`;
-              }
-            },
-            { once: true }
-          );
+    if (btn) {
+      const logId = btn.dataset.logId;
+      if (!logId) return;
+      btn.disabled = true;
+      try {
+        const res = await fetch(`/api/event-logs/${logId}`, {
+          method: "DELETE",
+          credentials: "same-origin",
+        });
+        if (res.ok) {
+          totalLogs = Math.max(0, totalLogs - 1);
+          loadLogs();
         }
+      } catch (err) {
+        console.error("Delete log failed:", err);
+        btn.disabled = false;
       }
-    } catch (err) {
-      console.error("Delete log failed:", err);
-      btn.disabled = false;
+      return;
+    }
+
+    const row = e.target.closest("tr.log-expandable");
+    if (row) {
+      const logId = row.dataset.logId;
+      const detailRow = tbody.querySelector(`tr[data-detail-for="${logId}"]`);
+      if (detailRow) {
+        const isOpen = !detailRow.hidden;
+        detailRow.hidden = isOpen;
+        row.classList.toggle("log-expanded", !isOpen);
+      }
     }
   });
+
+  if (refreshBtn) {
+    refreshBtn.addEventListener("click", () => {
+      loadLogs();
+    });
+  }
 
   clearAllBtn.addEventListener("click", () => {
     openConfirm({
@@ -417,8 +558,9 @@
             credentials: "same-origin",
           });
           if (res.ok) {
-            allLogs = [];
-            renderAll();
+            totalLogs = 0;
+            currentPage = 1;
+            loadLogs();
             window.showToast?.("All logs cleared", { type: "success" });
           }
         } catch (err) {
@@ -430,6 +572,5 @@
     });
   });
 
-  populateFilterDropdown();
   loadLogs();
 })();

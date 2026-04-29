@@ -18,18 +18,17 @@ The main dashboard page gives you an at-a-glance view of your entire setup:
 
 ## Navigation
 
-The dashboard is organized into these pages:
+The dashboard sidebar has these pages:
 
 | Page | Purpose |
 |------|---------|
-| **Dashboard** | Main control center — status, mappings, start/stop |
-| **Guilds** | Create and manage source → clone server mappings |
-| **Channels** | View and customize cloned channel names |
-| **Filters** | Configure channel/category whitelist and exclusion filters |
+| **Configuration** | Bot status, global config, guild mappings, start/stop |
+| **Channels** | View and customize cloned channel names, orphan detection, backfill |
+| **Guilds** | Browse all servers your self-bot is in, export messages |
 | **Forwarding** | Set up message forwarding to Telegram, Pushover, etc. |
 | **Scraper** | Member scraper tool for exporting user data |
-| **System** | System settings, logs, database backups, configuration |
-| **Event Logs** | Browse the activity/audit log |
+| **System** | Version info, database backups |
+| **Logs** | Event logs  |
 
 ## Authentication
 
@@ -45,6 +44,26 @@ The dashboard provides **Start** and **Stop** buttons for both the server and cl
 
 - **Server** (green indicator) — The Discord bot in your clone server
 - **Client** (green indicator) — The self-bot monitoring source servers
+
+Valid tokens are required to start.
+
+## Global configuration
+
+The Global Configuration card lets you set core settings:
+
+- **SERVER_TOKEN** / **CLIENT_TOKEN** — Your Discord bot and account tokens
+- **COMMAND_USERS** — User IDs allowed to run slash commands
+- **LOG_LEVEL** — `INFO` or `DEBUG`
+- **AUTO_START** — Automatically start bots when Copycord launches (requires valid tokens)
+- **MAX_LOG_SIZE_MB** — Maximum log file size before old entries are pruned (default: 10 MB, set to 0 to disable)
+
+## Log viewer
+
+Click **View server logs** or **View client logs** on the Bots card to open the log viewer. Features:
+
+- Real-time log streaming
+- Search/filter logs
+- **Clear logs** button to wipe the selected log file (with confirmation)
 
 ## Real-time updates
 

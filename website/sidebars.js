@@ -20,6 +20,7 @@ const sidebars = {
       items: [
         'dashboard/overview',
         'dashboard/guild-mappings',
+        'dashboard/guilds',
         'dashboard/channels',
         'dashboard/filters',
         'dashboard/backfill',
