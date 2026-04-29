@@ -11529,6 +11529,43 @@ body.page-forwarding .fwd-no-match-sub {
   margin: 0;
 }
 
+/* ── Pagination ─────────────────────────────────────────── */
+.logs-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 16px 0;
+}
+.pg-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  transition: background 0.15s, border-color 0.15s;
+}
+.pg-btn:hover:not(:disabled) {
+  background: rgba(139, 92, 246, 0.15);
+  border-color: var(--accent);
+}
+.pg-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.pg-btn.pg-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.pg-ellipsis {
+  color: var(--muted);
+  padding: 0 4px;
+  font-size: 0.85rem;
+}
+
 /* ── Animations ──────────────────────────────────────────── */
 @keyframes log-fade-out {
   from {
