@@ -224,7 +224,7 @@ class ChannelPermissionSync:
             row = cat_map.get(int(cat["id"]))
             if not row:
                 self._log(
-                    "info",
+                    "debug",
                     "[perm-sync] skip category %s: no cat_map",
                     cat.get("id"),
                 )
@@ -243,8 +243,8 @@ class ChannelPermissionSync:
                 crow = chan_map.get(int(ch["id"]))
                 if not crow:
                     self._log(
-                        "info",
-                        "[perm-sync] skip channel %s: no chan_map",
+                        "debug",
+                        "[perm-sync] skip channel %s: no chan_map (excluded or not cloned)",
                         ch.get("id"),
                     )
                     continue
@@ -262,7 +262,7 @@ class ChannelPermissionSync:
             crow = chan_map.get(int(ch["id"]))
             if not crow:
                 self._log(
-                    "info",
+                    "debug",
                     "[perm-sync] skip channel %s: no chan_map (standalone)",
                     ch.get("id"),
                 )
@@ -287,7 +287,7 @@ class ChannelPermissionSync:
                 crow = chan_map.get(int(ch["id"]))
                 if not crow:
                     self._log(
-                        "info",
+                        "debug",
                         "[perm-sync] skip voice/stage channel %s: no chan_map",
                         ch.get("id"),
                     )
@@ -310,7 +310,7 @@ class ChannelPermissionSync:
             crow = chan_map.get(int(ch["id"]))
             if not crow:
                 self._log(
-                    "info",
+                    "debug",
                     "[perm-sync] skip voice/stage channel %s: no chan_map (standalone)",
                     ch.get("id"),
                 )
@@ -330,7 +330,7 @@ class ChannelPermissionSync:
             crow = chan_map.get(fm_id)
             if not crow:
                 self._log(
-                    "info",
+                    "debug",
                     "[perm-sync] skip forum %s: no chan_map",
                     fm.get("id"),
                 )
@@ -339,7 +339,7 @@ class ChannelPermissionSync:
             cch = guild.get_channel(int(crow.get("cloned_channel_id") or 0))
             if cch is None:
                 self._log(
-                    "info",
+                    "debug",
                     "[perm-sync] skip forum %s: cloned channel not found",
                     fm.get("id"),
                 )
@@ -348,7 +348,7 @@ class ChannelPermissionSync:
             ch_type_name = getattr(getattr(cch, "type", None), "name", "")
             if ch_type_name != "forum":
                 self._log(
-                    "info",
+                    "debug",
                     "[perm-sync] skip forum %s: cloned channel is not a forum (%r)",
                     fm.get("id"),
                     type(cch),

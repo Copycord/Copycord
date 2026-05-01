@@ -332,12 +332,34 @@ class RoleManager:
             return cloned, 1, can_create, create_suppressed_logged
 
         except Exception as e:
-            self._log(
-                "warning",
-                "[⚠️] Failed recreating missing cloned role for %r: %s",
-                want_name,
-                e,
-            )
+            if "display_icon" in str(e):
+                kwargs.pop("display_icon", None)
+                try:
+                    cloned = await guild.create_role(**kwargs)
+                    await asyncio.sleep(self._ROLE_OP_DELAY)
+                    self.db.upsert_role_mapping(
+                        orig_id, want_name, cloned.id, cloned.name,
+                        original_guild_id=original_guild_id,
+                        cloned_guild_id=cloned_guild_id,
+                    )
+                    clone_by_id[cloned.id] = cloned
+                    self._log(
+                        "warning",
+                        "[⚠️] Created role '%s' without icon — clone server doesn't support role icons. "
+                        "Boost to Level 2+ or set CLONE_ROLE_ICONS to false.",
+                        want_name,
+                    )
+                    can_create = len(guild.roles) < self.MAX_ROLES
+                    return cloned, 1, can_create, create_suppressed_logged
+                except Exception as e2:
+                    self._log("warning", "[⚠️] Failed creating role %r: %s", want_name, e2)
+            else:
+                self._log(
+                    "warning",
+                    "[⚠️] Failed recreating missing cloned role for %r: %s",
+                    want_name,
+                    e,
+                )
             return None, 0, can_create, create_suppressed_logged
 
     async def _sync(
@@ -607,12 +629,34 @@ class RoleManager:
                     continue
 
                 except Exception as e:
-                    self._log(
-                        "warning",
-                        "[⚠️] Failed creating role %s: %s",
-                        want_name,
-                        e,
-                    )
+                    if "display_icon" in str(e):
+                        kwargs.pop("display_icon", None)
+                        try:
+                            new_role = await guild.create_role(**kwargs)
+                            await asyncio.sleep(self._ROLE_OP_DELAY)
+                            created += 1
+                            self.db.upsert_role_mapping(
+                                orig_id, want_name, new_role.id, new_role.name,
+                                original_guild_id=host_id, cloned_guild_id=clone_id,
+                            )
+                            clone_by_id[new_role.id] = new_role
+                            self._log(
+                                "warning",
+                                "[⚠️] Created role '%s' without icon — clone server doesn't support role icons. "
+                                "Boost to Level 2+ or set CLONE_ROLE_ICONS to false.",
+                                want_name,
+                            )
+                            can_create = len(guild.roles) < self.MAX_ROLES
+                            continue
+                        except Exception as e2:
+                            self._log("warning", "[⚠️] Failed creating role %s: %s", want_name, e2)
+                    else:
+                        self._log(
+                            "warning",
+                            "[⚠️] Failed creating role %s: %s",
+                            want_name,
+                            e,
+                        )
                     continue
 
             if (
@@ -743,12 +787,33 @@ class RoleManager:
                         )
 
                     except Exception as e:
-                        self._log(
-                            "warning",
-                            "[⚠️] Failed updating role %s: %s",
-                            getattr(cloned_role, "name", "?"),
-                            e,
-                        )
+                        msg = str(e)
+                        if "display_icon" in msg:
+                            kwargs.pop("display_icon", None)
+                            try:
+                                await cloned_role.edit(**kwargs)
+                                await asyncio.sleep(self._ROLE_OP_DELAY)
+                                updated += 1
+                                self._log(
+                                    "warning",
+                                    "[⚠️] Role '%s' updated without icon — clone server doesn't support role icons. "
+                                    "Boost to Level 2+ or set CLONE_ROLE_ICONS to false.",
+                                    getattr(cloned_role, "name", "?"),
+                                )
+                            except Exception as e2:
+                                self._log(
+                                    "warning",
+                                    "[⚠️] Failed updating role %s: %s",
+                                    getattr(cloned_role, "name", "?"),
+                                    e2,
+                                )
+                        else:
+                            self._log(
+                                "warning",
+                                "[⚠️] Failed updating role %s: %s",
+                                getattr(cloned_role, "name", "?"),
+                                e,
+                            )
         rearranged = 0
         if rearrange_roles:
             try:
