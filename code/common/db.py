@@ -3306,6 +3306,7 @@ class DBManager:
                 cloned_guild_id,
                 cloned_guild_name,
                 settings,
+                status,
                 created_at,
                 last_updated
             FROM guild_mappings
@@ -3332,6 +3333,7 @@ class DBManager:
             "cloned_guild_id": str(row["cloned_guild_id"] or ""),
             "cloned_guild_name": row["cloned_guild_name"] or "",
             "settings": settings_obj,
+            "status": row["status"] or "active",
         }
 
     def get_channel_mapping_for_mapping(
@@ -3770,12 +3772,6 @@ class DBManager:
             (int(original_guild_id),),
         ).fetchall()
 
-    def get_mapping_by_id(self, mapping_id: str):
-        return self.conn.execute(
-            "SELECT * FROM guild_mappings WHERE mapping_id = ? LIMIT 1",
-            (str(mapping_id),),
-        ).fetchone()
-
     def get_mapping_by_original_and_clone(
         self, original_guild_id: int, cloned_guild_id: int
     ):
@@ -3851,15 +3847,6 @@ class DBManager:
                 (int(original_thread_id), int(cloned_guild_id)),
             )
             self.conn.commit()
-
-    def delete_category_mapping_pair(
-        self, original_category_id: int, cloned_guild_id: int
-    ):
-        with self.lock, self.conn:
-            self.conn.execute(
-                "DELETE FROM category_mappings WHERE original_category_id=? AND cloned_guild_id=?",
-                (int(original_category_id), int(cloned_guild_id)),
-            )
 
     def delete_message_mapping_pair(
         self, original_message_id: int, cloned_guild_id: int

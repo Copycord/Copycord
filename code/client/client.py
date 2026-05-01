@@ -2372,12 +2372,12 @@ class ClientListener:
     async def on_guild_emojis_update(self, guild, before, after):
         if not self._is_mapped_origin(guild.id):
             return
-        self.schedule_sync(guild_id=g.id)
+        self.schedule_sync(guild_id=guild.id)
 
     async def on_guild_stickers_update(self, guild, before, after):
         if not self._is_mapped_origin(guild.id):
             return
-        self.schedule_sync(guild_id=g.id)
+        self.schedule_sync(guild_id=guild.id)
 
     def _guild_row_from_obj(self, g: discord.Guild) -> dict:
         try:

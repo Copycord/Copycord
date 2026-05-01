@@ -680,31 +680,6 @@ class ForwardingManager:
 
         return resolved
 
-        guild = message.guild
-        if not guild:
-            return
-
-        guild_id = int(guild.id)
-        rules = await self._get_rules_for_guild(guild_id)
-        if not rules:
-            return
-
-        attrs = self._get_message_attributes(message)
-
-        for rule in rules:
-            if not rule.enabled:
-                continue
-
-            try:
-                if rule.filters.apply(attrs):
-                    await self._dispatch_forwarding(rule, attrs)
-            except Exception:
-                self.log.exception(
-                    "[⏩] Error while applying rule %s for guild %s",
-                    rule.rule_id,
-                    guild_id,
-                )
-
     async def _get_rules_for_guild(self, guild_id: int) -> List[ForwardingRule]:
         async with self._cache_lock:
             cached = self._rules_cache.get(guild_id)

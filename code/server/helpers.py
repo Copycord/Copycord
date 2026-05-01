@@ -1180,7 +1180,7 @@ class OnCloneJoin:
     Also exposes a 'sync' helper that the slash command can reuse.
     """
 
-    def __init__(self, bot: commands.Bot, db: "DBManager"):
+    def __init__(self, bot: commands.Bot, db):
         self.bot = bot
         self.db = db
         self.log = logging.getLogger("onclonejoin")

@@ -7,7 +7,8 @@
       "Bash(PYTHONPATH=code python -m pytest tests/test_api.py -v)",
       "Bash(PYTHONPATH=code python -m pytest tests/ -v)",
       "Bash(ruff check *)",
-      "Bash(python -m ruff check code/)"
+      "Bash(python -m ruff check code/)",
+      "Bash(xargs -0 python -m py_compile)"
     ]
   }
 }

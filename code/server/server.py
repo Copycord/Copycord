@@ -21,14 +21,12 @@ import json
 import re
 from discord import (
     ForumChannel,
-    NotFound,
     Webhook,
     ChannelType,
     Embed,
     Guild,
     TextChannel,
     CategoryChannel,
-    HTTPException,
 )
 from discord.errors import HTTPException, Forbidden, NotFound
 import os
