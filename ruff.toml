@@ -1,0 +1,13 @@
+# Ruff linter configuration for Copycord
+# Runs on PRs to catch syntax errors, undefined names, and unused imports
+
+target-version = "py311"
+
+[lint]
+select = [
+    "E9",    # Runtime errors — syntax errors, IO errors
+    "W6",    # Deprecated features
+    "F821",  # Undefined names
+    "F811"   # Redefinitions
+]
+ignore = []

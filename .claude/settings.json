@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/test_db.py -v)",
+      "Bash(pip install *)",
+      "Bash(PYTHONPATH=code python -m pytest tests/test_db.py -v)",
+      "Bash(PYTHONPATH=code python -m pytest tests/test_api.py -v)",
+      "Bash(PYTHONPATH=code python -m pytest tests/ -v)",
+      "Bash(ruff check *)",
+      "Bash(python -m ruff check code/)"
+    ]
+  }
+}
