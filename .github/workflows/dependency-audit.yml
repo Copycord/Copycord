@@ -28,7 +28,36 @@ jobs:
         run: pip install pip-audit
 
       - name: Audit ${{ matrix.component }} dependencies
-        run: pip-audit -r code/${{ matrix.component }}/requirements.txt
+        id: audit
+        run: |
+          pip-audit -r code/${{ matrix.component }}/requirements.txt -f json 2>/dev/null \
+            | tee /tmp/audit.json || true
+          pip-audit -r code/${{ matrix.component }}/requirements.txt 2>&1 \
+            | tee /tmp/audit.txt
+        continue-on-error: true
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## Python Dependency Audit — ${{ matrix.component }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          if grep -q "No known vulnerabilities found" /tmp/audit.txt 2>/dev/null; then
+            echo "No known vulnerabilities found." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "| Package | Version | CVE | Fix Version |" >> "$GITHUB_STEP_SUMMARY"
+            echo "|---------|---------|-----|-------------|" >> "$GITHUB_STEP_SUMMARY"
+            # Parse the table output from pip-audit (skip header lines)
+            grep -E "^[a-zA-Z]" /tmp/audit.txt | grep -v "^Name" | grep -v "^---" | while read -r name version cve fix rest; do
+              echo "| $name | $version | $cve | $fix |" >> "$GITHUB_STEP_SUMMARY"
+            done
+          fi
+
+      - name: Fail if vulnerabilities found
+        run: |
+          if ! grep -q "No known vulnerabilities found" /tmp/audit.txt 2>/dev/null; then
+            exit 1
+          fi
 
   npm-audit:
     name: npm audit (frontend)
@@ -41,7 +70,24 @@ jobs:
           node-version: "20"
 
       - name: Install & audit
+        id: npm-audit
         working-directory: code/admin/frontend
         run: |
           npm ci
-          npm audit --omit=dev
+          npm audit --omit=dev 2>&1 | tee /tmp/npm-audit.txt
+        continue-on-error: true
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## npm Audit (frontend)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat /tmp/npm-audit.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fail if vulnerabilities found
+        run: |
+          if grep -qE "found [1-9]" /tmp/npm-audit.txt 2>/dev/null; then
+            exit 1
+          fi

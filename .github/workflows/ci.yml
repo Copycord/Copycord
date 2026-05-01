@@ -6,6 +6,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -27,12 +31,45 @@ jobs:
         run: pip install ruff
 
       - name: Ruff lint
-        run: ruff check code/
+        id: ruff
+        run: |
+          ruff check code/ 2>&1 | tee /tmp/ruff.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Python syntax check (py_compile)
+        id: pycompile
         run: |
           find code/ -name '*.py' -print0 \
-            | xargs -0 python -m py_compile
+            | xargs -0 python -m py_compile 2>&1 | tee /tmp/pycompile.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## Lint & Syntax Check" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          ruff_out=$(cat /tmp/ruff.txt)
+          if [ -z "$ruff_out" ]; then
+            echo "**Ruff:** All checks passed" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "**Ruff:** Found issues" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/ruff.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          pyc_out=$(cat /tmp/pycompile.txt)
+          if [ -z "$pyc_out" ]; then
+            echo "**py_compile:** All files compile OK" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "**py_compile:** Found errors" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            cat /tmp/pycompile.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   # -----------------------------------------------------------------------
   # 2. DB unit tests
@@ -53,7 +90,16 @@ jobs:
       - name: Run DB tests
         env:
           PYTHONPATH: code
-        run: pytest tests/test_db.py -v
+        run: python -m pytest tests/test_db.py -v 2>&1 | tee /tmp/db-tests.txt
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## DB Unit Tests" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -20 /tmp/db-tests.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
   # -----------------------------------------------------------------------
   # 3. API endpoint tests
@@ -76,7 +122,16 @@ jobs:
       - name: Run API tests
         env:
           PYTHONPATH: code
-        run: pytest tests/test_api.py -v
+        run: python -m pytest tests/test_api.py -v 2>&1 | tee /tmp/api-tests.txt
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## API Endpoint Tests" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -20 /tmp/api-tests.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
 
   # -----------------------------------------------------------------------
   # 4. Frontend build check
@@ -97,4 +152,13 @@ jobs:
         working-directory: code/admin/frontend
         run: |
           npm ci
-          npm run build
+          npm run build 2>&1 | tee /tmp/frontend-build.txt
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## Frontend Build" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -15 /tmp/frontend-build.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"

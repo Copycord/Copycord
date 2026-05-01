@@ -4,6 +4,7 @@ _⭐️ Love Copycord? Give us a star and join the conversation in our Discord c
 
 ![Version](https://img.shields.io/github/v/release/Copycord/Copycord?logo=git&label=version&color=blue)
 ![Total Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fghcr-badge.elias.eu.org%2Fapi%2FCopycord%2FCopycord%2Fcopycord&query=%24.downloadCount&style=flat&logo=docker&label=Total%20Downloads&color=blue)
+![Tests](https://github.com/Copycord/Copycord/actions/workflows/ci.yml/badge.svg)
 
 [![Discord](https://img.shields.io/discord/1406152440377638952?color=7289DA&label=Discord&style=for-the-badge&logo=discord)](https://discord.gg/ArFdqrJHBj)
 

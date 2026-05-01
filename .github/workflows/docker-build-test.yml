@@ -22,6 +22,7 @@ jobs:
       - uses: docker/setup-buildx-action@v3
 
       - name: Build image (no push)
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -31,3 +32,15 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## Docker Build Smoke Test" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Detail | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|--------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Platform** | \`${{ github.event.inputs.platform || 'linux/amd64' }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Dockerfile** | \`code/Dockerfile\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Result** | ${{ steps.build.outcome == 'success' && 'Build succeeded' || 'Build failed' }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Commit** | \`${{ github.sha }}\` |" >> "$GITHUB_STEP_SUMMARY"
