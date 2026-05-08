@@ -100,7 +100,7 @@ Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multi
 ```yaml
 services:
   admin:
-    image: ghcr.io/copycord/copycord:v3.20.0
+    image: ghcr.io/copycord/copycord:v3.20.2
     container_name: copycord-admin
     environment:
       - ROLE=admin
@@ -112,7 +112,7 @@ services:
     restart: unless-stopped
 
   server:
-    image: ghcr.io/copycord/copycord:v3.20.0
+    image: ghcr.io/copycord/copycord:v3.20.2
     container_name: copycord-server
     environment:
       - ROLE=server
@@ -123,7 +123,7 @@ services:
     restart: unless-stopped
 
   client:
-    image: ghcr.io/copycord/copycord:v3.20.0
+    image: ghcr.io/copycord/copycord:v3.20.2
     container_name: copycord-client
     environment:
       - ROLE=client
