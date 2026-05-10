@@ -17,7 +17,7 @@ Before installing Copycord, you'll need a few things ready.
 
 ### For manual install
 
-- **Python 3.11** or newer
+- **Any version of Python 3.11**
 - **Node.js** (LTS) + **npm**
 - A Discord **bot token**
 - A Discord **user token**
