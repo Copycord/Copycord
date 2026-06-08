@@ -39,6 +39,7 @@ from client.export_runners import (
     DmHistoryExporter,
 )
 from client.forwarding import ForwardingManager
+from client.proxy_rotator import ProxyRotator, patch_discord_http
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -92,6 +93,7 @@ class ClientListener:
         self.msg = MessageUtils(self.bot)
         self._sync_task: Optional[asyncio.Task] = None
         self._ws_task: Optional[asyncio.Task] = None
+        self._proxy_rotation_task: Optional[asyncio.Task] = None
         self._m_user = re.compile(r"<@!?(\d+)>")
         self.scraper = getattr(self, "scraper", None)
         self._scrape_lock = getattr(self, "_scrape_lock", asyncio.Lock())
@@ -153,6 +155,9 @@ class ClientListener:
         self.runner = ExportMessagesRunner(
             bot=self.bot, ws=self.ws, msg_serializer=self.msg.serialize, logger=logger
         )
+        self.proxy_rotator = ProxyRotator()
+        self._init_proxy_rotator()
+
         self.backfill = BackfillEngine(self, logger=logger)
         self._bf_max = int(os.getenv("BACKFILL_MAX_CONCURRENT", "2"))
         self._bf_queue: asyncio.Queue[tuple[int, dict]] = asyncio.Queue(
@@ -188,6 +193,23 @@ class ClientListener:
             )
         except Exception:
             logger.exception("Failed reloading mapped origins")
+
+    def _init_proxy_rotator(self) -> None:
+        """Load proxy list and configure rotation from DB flags."""
+        self.proxy_rotator.reload()
+        enabled = (
+            self.db.get_config("ENABLE_CLIENT_PROXIES", "") or ""
+        ).strip().lower() in ("1", "true", "yes")
+        self.proxy_rotator.set_enabled(enabled)
+
+        interval_raw = (
+            self.db.get_config("PROXY_ROTATION_INTERVAL", "") or ""
+        ).strip()
+        try:
+            interval_sec = int(interval_raw) if interval_raw else 0
+        except (ValueError, TypeError):
+            interval_sec = 0
+        self.proxy_rotator.set_rotation_interval(interval_sec)
 
     async def _on_ws(self, msg: dict) -> dict | None:
         """
@@ -883,6 +905,12 @@ class ClientListener:
     async def on_ready(self):
         await self.forwarding.start()
         self._reload_mapped_ids()
+
+        patch_discord_http(self.bot, self.proxy_rotator)
+        if self._proxy_rotation_task is None:
+            self._proxy_rotation_task = asyncio.create_task(
+                self.proxy_rotator.run_rotation_loop()
+            )
 
         asyncio.create_task(self.config.setup_release_watcher(self, should_dm=False))
         self.ui_controller.start()
@@ -2628,6 +2656,8 @@ class ClientListener:
         Runs the Copycord client.
         """
         logger.info("[✨] Starting Copycord Client %s", CURRENT_VERSION)
+        if self.proxy_rotator.enabled:
+            self.proxy_rotator.next()
         loop = asyncio.get_event_loop()
 
         try:

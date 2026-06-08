@@ -26,7 +26,7 @@ try:
 except ImportError:
     ProxyConnector = None
 
-logger = logging.getLogger("server.proxy_rotator")
+logger = logging.getLogger("client.proxy_rotator")
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 _PROXY_FILE = DATA_DIR / "proxies.txt"
@@ -66,7 +66,14 @@ def _normalise_proxy_url(raw: str) -> Optional[str]:
 
 class ProxyRotator:
     """
-    Thread-safe, round-robin proxy rotator with health tracking.
+    Proxy rotator with health tracking and optional timed rotation.
+
+    By default one proxy is selected and used for all requests.  It only
+    switches when the current proxy is suspended due to failures.
+
+    When ``rotation_interval`` is set (> 0 seconds), the proxy
+    automatically rotates to the next healthy one after the interval
+    elapses.
 
     Proxies that fail repeatedly are temporarily suspended and
     automatically re-tested after a cooldown period.
@@ -93,6 +100,11 @@ class ProxyRotator:
 
         self._health: Dict[str, Dict] = {}
 
+        # Time-based rotation (0 = per-request round-robin)
+        self._rotation_interval: int = 0
+        self._current_proxy: Optional[str] = None
+        self._current_proxy_since: float = 0.0
+
         self.on_all_dead: Optional[callable] = None
 
     @property
@@ -113,6 +125,30 @@ class ProxyRotator:
     def proxies(self) -> List[str]:
         return list(self._proxies)
 
+    @property
+    def rotation_interval(self) -> int:
+        """Rotation interval in seconds (0 = per-request)."""
+        return self._rotation_interval
+
+    def set_rotation_interval(self, seconds: int) -> None:
+        """Set the time-based rotation interval in seconds.
+
+        ``0`` disables timed rotation (sticky — one proxy used until it
+        fails).
+        """
+        seconds = max(0, int(seconds))
+        if seconds != self._rotation_interval:
+            self._rotation_interval = seconds
+            # Reset current assignment so the next call picks fresh
+            self._current_proxy = None
+            self._current_proxy_since = 0.0
+            if seconds:
+                logger.debug(
+                    "[🔀] Proxy rotation interval set to %d seconds", seconds
+                )
+            else:
+                logger.debug("[🔀] Timed rotation disabled (sticky mode)")
+
     def set_enabled(self, on: bool) -> None:
         prev = self._enabled
         self._enabled = bool(on)
@@ -121,12 +157,14 @@ class ProxyRotator:
             return
         if on and self._proxies:
             logger.debug(
-                "[🔀] Server proxy rotation ENABLED (%d proxies)", len(self._proxies)
+                "[🔀] Client proxy rotation ENABLED (%d proxies)", len(self._proxies)
             )
         elif on:
-            logger.warning("[⚠️] Server proxy rotation enabled but NO proxies loaded")
+            logger.warning("[⚠️] Client proxy rotation enabled but NO proxies loaded")
         else:
-            logger.debug("[🔀] Server proxy rotation DISABLED")
+            logger.debug("[🔀] Client proxy rotation DISABLED")
+            self._current_proxy = None
+            self._current_proxy_since = 0.0
 
     def reload(self, proxy_lines: Optional[List[str]] = None) -> int:
         """
@@ -148,16 +186,28 @@ class ProxyRotator:
 
         self._health = {k: v for k, v in self._health.items() if k in normalised}
 
-        logger.debug("[🔀] Loaded %d server proxies", len(normalised))
+        # Reset time-based assignment when proxy list changes
+        self._current_proxy = None
+        self._current_proxy_since = 0.0
+
+        logger.debug("[🔀] Loaded %d client proxies", len(normalised))
         return len(normalised)
 
     def next(self, *, exclude: Optional[set] = None) -> Optional[str]:
-        """Return the next healthy proxy URL (round-robin), or *None*.
+        """Return the next healthy proxy URL, or *None*.
+
+        Default behaviour (``rotation_interval == 0``): pick one proxy and
+        stick with it indefinitely — only switch when it is suspended.
+
+        When ``rotation_interval > 0``: use one proxy for the configured
+        duration, then advance to the next healthy proxy.
 
         Parameters
         ----------
         exclude:
             Set of proxy URLs to skip (e.g. already tried this request).
+            When provided, a temporary fallback is returned *without*
+            changing the sticky ``_current_proxy`` assignment.
         """
         if not self._proxies:
             return None
@@ -165,6 +215,89 @@ class ProxyRotator:
         exclude = exclude or set()
         now = time.monotonic()
 
+        # Check if the current proxy is still usable
+        if (
+            self._current_proxy
+            and self._current_proxy not in exclude
+            and not self._is_suspended(self._current_proxy, now)
+        ):
+            # With timed rotation, check if the interval has expired
+            if self._rotation_interval > 0:
+                if (now - self._current_proxy_since) < self._rotation_interval:
+                    return self._current_proxy
+                # Interval expired — fall through to assign a new one
+            else:
+                # No rotation — stick with this proxy forever
+                return self._current_proxy
+
+        # ── Retry / fallback (exclude is non-empty) ──
+        # Return a temporary alternative without changing the sticky proxy.
+        if exclude:
+            return self._next_healthy(exclude, now)
+
+        # ── Genuine rotation or first assignment ──
+        proxy = self._next_healthy(exclude, now)
+        if proxy:
+            old = self._current_proxy
+            self._current_proxy = proxy
+            self._current_proxy_since = now
+            safe = _mask_proxy_url(proxy)
+            if old is None:
+                logger.info("[🔀] Using proxy %s", safe)
+            elif old != proxy:
+                logger.info("[🔀] Switched to proxy %s", safe)
+        return proxy
+
+    def rotate_now(self) -> Optional[str]:
+        """Force an immediate rotation to the next healthy proxy.
+
+        Returns the new proxy URL, or *None* if no healthy proxy is
+        available.  Used by the background rotation timer.
+        """
+        if not self._proxies or not self._enabled:
+            return None
+
+        now = time.monotonic()
+        exclude = {self._current_proxy} if self._current_proxy else set()
+        proxy = self._next_healthy(exclude, now)
+
+        # If all other proxies are dead, stick with the current one
+        if not proxy:
+            proxy = self._current_proxy
+
+        if proxy and proxy != self._current_proxy:
+            self._current_proxy = proxy
+            self._current_proxy_since = now
+            logger.info("[🔀] Switched to proxy %s", _mask_proxy_url(proxy))
+        elif proxy and self._current_proxy is None:
+            self._current_proxy = proxy
+            self._current_proxy_since = now
+
+        return proxy
+
+    async def run_rotation_loop(self) -> None:
+        """Background task that rotates the proxy on the configured interval.
+
+        Runs forever; safe to wrap in ``asyncio.create_task``.
+        Sleeps for ``rotation_interval`` seconds, then calls
+        ``rotate_now()``.  Automatically adapts if the interval changes
+        or rotation is disabled.
+        """
+        while True:
+            interval = self._rotation_interval
+            if interval <= 0 or not self._enabled:
+                # No timed rotation — check again in 5s in case settings change
+                await asyncio.sleep(5)
+                continue
+
+            await asyncio.sleep(interval)
+
+            # Re-check after sleep — settings may have changed
+            if self._rotation_interval > 0 and self._enabled:
+                self.rotate_now()
+
+    def _next_healthy(self, exclude: set, now: float) -> Optional[str]:
+        """Advance the round-robin cycle and return the next healthy proxy."""
         for _ in range(len(self._proxies)):
             try:
                 url = next(self._cycle)
@@ -211,11 +344,16 @@ class ProxyRotator:
                 info["failures"],
             )
 
+            # If the suspended proxy was the current time-based proxy, force rotation
+            if self._current_proxy == proxy_url:
+                self._current_proxy = None
+                self._current_proxy_since = 0.0
+
             if self._enabled and self.healthy_count == 0:
                 self._enabled = False
                 logger.warning(
                     "[🔀] All %d proxies dead — proxy rotation auto-disabled, "
-                    "falling back to direct for remainder of sync",
+                    "falling back to direct connection",
                     len(self._proxies),
                 )
                 if self.on_all_dead:

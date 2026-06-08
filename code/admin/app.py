@@ -3885,24 +3885,34 @@ async def api_scraper_proxies_put(request: Request):
 
 @app.get("/api/server/proxies", response_class=JSONResponse)
 async def api_server_proxies_get():
-    """Return server proxy list and enabled state."""
+    """Return client proxy list, enabled state, and rotation interval."""
     try:
         if _PROXY_FILE.exists():
             text = _PROXY_FILE.read_text(encoding="utf-8").strip()
             lines = [l.strip() for l in text.splitlines() if l.strip()]
         else:
             lines = []
-        enabled = (db.get_config("ENABLE_SERVER_PROXIES", "") or "").strip().lower() in (
+        enabled = (db.get_config("ENABLE_CLIENT_PROXIES", "") or "").strip().lower() in (
             "1", "true", "yes",
         )
-        return JSONResponse({"ok": True, "proxies": lines, "enabled": enabled})
+        interval_raw = (db.get_config("PROXY_ROTATION_INTERVAL", "") or "").strip()
+        try:
+            rotation_interval = int(interval_raw) if interval_raw else 0
+        except (ValueError, TypeError):
+            rotation_interval = 0
+        return JSONResponse({
+            "ok": True,
+            "proxies": lines,
+            "enabled": enabled,
+            "rotation_interval": rotation_interval,
+        })
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @app.put("/api/server/proxies", response_class=JSONResponse)
 async def api_server_proxies_put(request: Request):
-    """Save server proxy list (shared file with scraper)."""
+    """Save client proxy list (shared file with scraper)."""
     try:
         payload = await request.json()
     except Exception:
@@ -3922,15 +3932,33 @@ async def api_server_proxies_put(request: Request):
 
 @app.put("/api/server/proxies/toggle", response_class=JSONResponse)
 async def api_server_proxies_toggle(request: Request):
-    """Enable or disable server proxy rotation."""
+    """Enable or disable client proxy rotation."""
     try:
         payload = await request.json()
     except Exception:
         raise HTTPException(400, detail="Invalid JSON")
     enabled = bool(payload.get("enabled", False))
     try:
-        db.set_config("ENABLE_SERVER_PROXIES", "true" if enabled else "false")
+        db.set_config("ENABLE_CLIENT_PROXIES", "true" if enabled else "false")
         return JSONResponse({"ok": True, "enabled": enabled})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/server/proxies/rotation-interval", response_class=JSONResponse)
+async def api_server_proxies_rotation_interval(request: Request):
+    """Set the proxy rotation interval in seconds (0 = per-request)."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    try:
+        interval = max(0, int(payload.get("interval", 0)))
+    except (ValueError, TypeError):
+        raise HTTPException(400, detail="interval must be an integer")
+    try:
+        db.set_config("PROXY_ROTATION_INTERVAL", str(interval))
+        return JSONResponse({"ok": True, "rotation_interval": interval})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 

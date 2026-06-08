@@ -4762,41 +4762,195 @@
 
     refreshGuildMappings();
 
-    // ─── Server Proxy Rotation ─────────────────────────────────────────────
+    // ─── Client Proxy Rotation ──────────────────────────────────────────────
     const srvProxyCard    = document.getElementById("srv-proxy-card");
     const srvProxyToggle  = document.getElementById("srv-proxy-toggle");
-    const srvProxyTa      = document.getElementById("srv-proxy-textarea");
-    const srvProxyCount   = document.getElementById("srv-proxy-count");
+    const srvProxyChips   = document.getElementById("srv-proxy-chips");
+    const srvProxyInput   = document.getElementById("srv-proxy-chips-input");
     const srvProxyStatus  = document.getElementById("srv-proxy-status");
-    const srvProxySave    = document.getElementById("srv-proxy-save");
     const srvProxyClear   = document.getElementById("srv-proxy-clear");
-    const srvPrependHttp  = document.getElementById("srv-proxy-prepend-http");
-    const srvPrependSocks = document.getElementById("srv-proxy-prepend-socks5");
 
-    function srvProxyLines() {
-      if (!srvProxyTa) return [];
-      return srvProxyTa.value.split("\n").map(l => l.trim()).filter(Boolean);
+    const srvRotationToggle   = document.getElementById("srv-proxy-rotation-toggle");
+    const srvRotationControls = document.getElementById("srv-proxy-rotation-controls");
+    const srvIntervalInput    = document.getElementById("srv-proxy-interval");
+    const srvIntervalUnit     = document.getElementById("srv-proxy-interval-unit");
+
+    // ── Proxy chip helpers ──
+
+    function getProxyChipValues() {
+      if (!srvProxyChips) return [];
+      return Array.from(srvProxyChips.querySelectorAll(".srv-proxy-chip-item"))
+        .map(el => el.dataset.proxy)
+        .filter(Boolean);
     }
 
-    function updateSrvProxyCount() {
-      if (!srvProxyCount) return;
-      const n = srvProxyLines().length;
-      srvProxyCount.textContent = n > 0 ? `${n} proxy${n !== 1 ? "ies" : ""}` : "";
+    function createProxyChip(proxy) {
+      const el = document.createElement("span");
+      el.className = "srv-proxy-chip-item";
+      el.dataset.proxy = proxy;
+      el.innerHTML = `<span class="srv-proxy-chip-text">${escapeHtml(proxy)}</span><span class="srv-proxy-chip-x">×</span>`;
+      el.querySelector(".srv-proxy-chip-x").addEventListener("click", () => {
+        el.remove();
+        refreshStatusChip();
+        scheduleProxySave();
+      });
+      return el;
     }
 
-    function updateSrvProxyStatus(enabled, count) {
-      if (!srvProxyStatus) return;
-      if (enabled && count > 0) {
-        srvProxyStatus.textContent = `Enabled · ${count} proxy${count !== 1 ? "ies" : ""}`;
-        srvProxyStatus.className = "srv-proxy-status is-on";
-      } else if (enabled) {
-        srvProxyStatus.textContent = "Enabled · no proxies loaded";
-        srvProxyStatus.className = "srv-proxy-status is-warn";
-      } else {
-        srvProxyStatus.textContent = "Disabled";
-        srvProxyStatus.className = "srv-proxy-status";
+    function escapeHtml(s) {
+      const d = document.createElement("div");
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    function addProxies(text) {
+      if (!srvProxyChips || !text) return;
+      const existing = new Set(getProxyChipValues());
+      const lines = text.split(/[\n\r,]+/).map(l => l.trim()).filter(Boolean);
+      let added = false;
+      for (const line of lines) {
+        if (!existing.has(line)) {
+          existing.add(line);
+          srvProxyChips.insertBefore(createProxyChip(line), srvProxyInput);
+          added = true;
+        }
+      }
+      if (added) {
+        refreshStatusChip();
+        scheduleProxySave();
       }
     }
+
+    function setProxyChips(proxies) {
+      if (!srvProxyChips) return;
+      srvProxyChips.querySelectorAll(".srv-proxy-chip-item").forEach(el => el.remove());
+      for (const p of proxies) {
+        srvProxyChips.insertBefore(createProxyChip(p), srvProxyInput);
+      }
+      refreshStatusChip();
+    }
+
+    function pluralProxy(n) {
+      return n === 1 ? "1 proxy" : `${n} proxies`;
+    }
+
+    function refreshStatusChip() {
+      updateSrvProxyChip(srvProxyToggle?.checked, getProxyChipValues().length);
+    }
+
+    function updateSrvProxyChip(enabled, count) {
+      if (!srvProxyStatus) return;
+      if (enabled && count > 0) {
+        srvProxyStatus.textContent = `Enabled · ${pluralProxy(count)}`;
+        srvProxyStatus.className = "srv-proxy-chip is-on";
+      } else if (enabled) {
+        srvProxyStatus.textContent = "Enabled · no proxies";
+        srvProxyStatus.className = "srv-proxy-chip is-warn";
+      } else {
+        srvProxyStatus.textContent = "Disabled";
+        srvProxyStatus.className = "srv-proxy-chip";
+      }
+    }
+
+    function updateRotationControls(intervalSec) {
+      if (!srvRotationControls || !srvRotationToggle) return;
+      const on = intervalSec > 0;
+      srvRotationToggle.checked = on;
+      srvRotationControls.classList.toggle("is-hidden", !on);
+      if (on && srvIntervalInput && srvIntervalUnit) {
+        if (intervalSec >= 3600 && intervalSec % 3600 === 0) {
+          srvIntervalInput.value = intervalSec / 3600;
+          srvIntervalUnit.value = "3600";
+        } else {
+          srvIntervalInput.value = Math.max(1, Math.round(intervalSec / 60));
+          srvIntervalUnit.value = "60";
+        }
+      }
+    }
+
+    function getRotationIntervalSec() {
+      if (!srvRotationToggle || !srvRotationToggle.checked) return 0;
+      if (!srvIntervalInput || !srvIntervalUnit) return 0;
+      const val = Math.max(1, parseInt(srvIntervalInput.value, 10) || 1);
+      const multiplier = parseInt(srvIntervalUnit.value, 10) || 60;
+      return val * multiplier;
+    }
+
+    // ── Input handling ──
+
+    if (srvProxyInput) {
+      srvProxyInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const val = srvProxyInput.value.trim();
+          if (val) {
+            addProxies(val);
+            srvProxyInput.value = "";
+          }
+        }
+        // Backspace on empty input removes last chip
+        if (e.key === "Backspace" && !srvProxyInput.value) {
+          const chips = srvProxyChips.querySelectorAll(".srv-proxy-chip-item");
+          if (chips.length) {
+            chips[chips.length - 1].remove();
+            refreshStatusChip();
+            scheduleProxySave();
+          }
+        }
+      });
+      srvProxyInput.addEventListener("paste", (e) => {
+        e.preventDefault();
+        const text = (e.clipboardData || window.clipboardData).getData("text");
+        if (text) {
+          addProxies(text);
+          srvProxyInput.value = "";
+        }
+      });
+    }
+
+    // Click on container focuses input
+    if (srvProxyChips && srvProxyInput) {
+      srvProxyChips.addEventListener("click", (e) => {
+        if (e.target === srvProxyChips) srvProxyInput.focus();
+      });
+    }
+
+    // ── Auto-save (debounced) ──
+
+    let _proxySaveTimer = null;
+    function scheduleProxySave() {
+      clearTimeout(_proxySaveTimer);
+      _proxySaveTimer = setTimeout(saveProxySettings, 400);
+    }
+
+    async function saveProxySettings() {
+      const lines = getProxyChipValues();
+      const intervalSec = getRotationIntervalSec();
+      try {
+        const [rProxies, rInterval] = await Promise.all([
+          fetch("/api/server/proxies", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ proxies: lines }),
+          }),
+          fetch("/api/server/proxies/rotation-interval", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ interval: intervalSec }),
+          }),
+        ]);
+        const jProxies = await rProxies.json();
+        const jInterval = await rInterval.json();
+        if (!jProxies.ok) showToast(jProxies.error || "Failed to save proxies", { type: "error" });
+        if (!jInterval.ok) showToast(jInterval.error || "Failed to save rotation", { type: "error" });
+        updateSrvProxyChip(srvProxyToggle?.checked, lines.length);
+      } catch (e) {
+        console.error(e);
+        showToast("Failed to save proxy settings", { type: "error" });
+      }
+    }
+
+    // ── API calls ──
 
     async function loadSrvProxies() {
       if (!srvProxyCard) return;
@@ -4804,35 +4958,13 @@
         const r = await fetch("/api/server/proxies");
         const j = await r.json();
         if (j.ok) {
-          if (srvProxyTa) srvProxyTa.value = (j.proxies || []).join("\n");
+          setProxyChips(j.proxies || []);
           if (srvProxyToggle) srvProxyToggle.checked = !!j.enabled;
-          updateSrvProxyCount();
-          updateSrvProxyStatus(!!j.enabled, (j.proxies || []).length);
+          updateSrvProxyChip(!!j.enabled, (j.proxies || []).length);
+          updateRotationControls(j.rotation_interval || 0);
         }
       } catch (e) {
-        console.error("Failed to load server proxies:", e);
-      }
-    }
-
-    async function saveSrvProxies() {
-      const lines = srvProxyLines();
-      try {
-        const r = await fetch("/api/server/proxies", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ proxies: lines }),
-        });
-        const j = await r.json();
-        if (j.ok) {
-          showToast(`Saved ${lines.length} server prox${lines.length !== 1 ? "ies" : "y"}`, { type: "success" });
-          updateSrvProxyCount();
-          updateSrvProxyStatus(srvProxyToggle?.checked, lines.length);
-        } else {
-          showToast(j.error || "Failed to save proxies", { type: "error" });
-        }
-      } catch (e) {
-        console.error(e);
-        showToast("Failed to save proxies", { type: "error" });
+        console.error("Failed to load client proxies:", e);
       }
     }
 
@@ -4845,39 +4977,62 @@
         });
         const j = await r.json();
         if (j.ok) {
-          const count = srvProxyLines().length;
+          const count = getProxyChipValues().length;
           showToast(
             enabled
-              ? `Proxy rotation enabled (${count} prox${count !== 1 ? "ies" : "y"})`
-              : "Proxy rotation disabled",
+              ? `Client proxies enabled (${pluralProxy(count)})`
+              : "Client proxies disabled",
             { type: "success" }
           );
-          updateSrvProxyStatus(enabled, count);
+          updateSrvProxyChip(enabled, count);
         } else {
           showToast(j.error || "Failed to toggle", { type: "error" });
         }
       } catch (e) {
         console.error(e);
-        showToast("Failed to toggle proxy rotation", { type: "error" });
+        showToast("Failed to toggle client proxies", { type: "error" });
       }
     }
 
-    function srvPrependScheme(scheme) {
-      if (!srvProxyTa) return;
-      srvProxyTa.value = srvProxyTa.value.split("\n").map(line => {
-        const l = line.trim();
-        if (!l || l.includes("://")) return line;
-        return `${scheme}${l}`;
-      }).join("\n");
-      updateSrvProxyCount();
+    function toggleRotation(enabled) {
+      if (srvRotationControls) {
+        srvRotationControls.classList.toggle("is-hidden", !enabled);
+      }
+      scheduleProxySave();
     }
 
-    if (srvProxySave)    srvProxySave.addEventListener("click", () => saveSrvProxies());
-    if (srvProxyClear)   srvProxyClear.addEventListener("click", async () => { if (srvProxyTa) srvProxyTa.value = ""; await saveSrvProxies(); });
-    if (srvProxyTa)      srvProxyTa.addEventListener("input", updateSrvProxyCount);
-    if (srvProxyToggle)  srvProxyToggle.addEventListener("change", () => toggleSrvProxies(srvProxyToggle.checked));
-    if (srvPrependHttp)  srvPrependHttp.addEventListener("click", () => srvPrependScheme("http://"));
-    if (srvPrependSocks) srvPrependSocks.addEventListener("click", () => srvPrependScheme("socks5://"));
+    if (srvProxyClear)      srvProxyClear.addEventListener("click", () => {
+      if (!getProxyChipValues().length) return;
+      openConfirm({
+        title: "Clear all proxies?",
+        body: "This will remove all proxies from the list.",
+        confirmText: "Clear",
+        confirmClass: "btn-ghost-red",
+        showCancel: true,
+        onConfirm: () => { setProxyChips([]); saveProxySettings(); },
+      });
+    });
+    if (srvProxyToggle)     srvProxyToggle.addEventListener("change", () => toggleSrvProxies(srvProxyToggle.checked));
+    if (srvRotationToggle)  srvRotationToggle.addEventListener("change", () => toggleRotation(srvRotationToggle.checked));
+    if (srvIntervalInput) {
+      srvIntervalInput.addEventListener("input", () => {
+        const v = parseInt(srvIntervalInput.value, 10);
+        if (v < 1 && srvIntervalInput.value !== "") srvIntervalInput.value = 1;
+      });
+      srvIntervalInput.addEventListener("change", () => {
+        if (!srvIntervalInput.value || parseInt(srvIntervalInput.value, 10) < 1) srvIntervalInput.value = 1;
+        scheduleProxySave();
+      });
+    }
+    if (srvIntervalUnit)    srvIntervalUnit.addEventListener("change", () => scheduleProxySave());
+
+    // Persist open/closed state
+    if (srvProxyCard) {
+      if (localStorage.getItem("cpc.proxy-card-open") === "1") srvProxyCard.open = true;
+      srvProxyCard.addEventListener("toggle", () => {
+        localStorage.setItem("cpc.proxy-card-open", srvProxyCard.open ? "1" : "0");
+      });
+    }
 
     loadSrvProxies();
   });

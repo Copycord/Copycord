@@ -457,37 +457,51 @@
       <div id="guild-mapping-list" class="guild-mapping-list"></div>
     </div>
 
-    <!-- ─── Server Proxy Rotation ─── -->
+    <!-- ─── Proxy ─── -->
     <details class="card srv-proxy-card" id="srv-proxy-card">
       <summary class="srv-proxy-summary">
-        <h3>Proxy Rotation</h3>
-        <span class="srv-proxy-status" id="srv-proxy-status"></span>
-        <span class="srv-proxy-count" id="srv-proxy-count"></span>
+        <h3>Proxy</h3>
+        <span class="srv-proxy-chip" id="srv-proxy-status"></span>
       </summary>
       <div class="srv-proxy-body">
         <div class="srv-proxy-toggle-row">
-          <label class="srv-proxy-toggle-label" for="srv-proxy-toggle">
+          <label class="srv-proxy-check" for="srv-proxy-toggle">
             <input type="checkbox" id="srv-proxy-toggle" />
-            <span>Enable proxy rotation for structure sync</span>
+            <span>Enable proxies for client</span>
           </label>
         </div>
-        <p class="srv-proxy-hint">
-          When enabled, every Discord API call during structure sync
-          (channel create, webhook create, guild edit, etc.) is routed through a
-          rotating proxy and rate limiting is bypassed — syncs complete much faster.<br>
-          Paste one proxy per line. Examples:
-          <code>host:port</code>, <code>host:port:user:pass</code>,
-          <code>user:pass@host:port</code>
-        </p>
-        <textarea class="input srv-proxy-textarea" id="srv-proxy-textarea"
-                  placeholder="82.27.104.216:25208:user:pass&#10;1.2.3.4:8080&#10;user:pass@5.6.7.8:3128"
-                  rows="5" spellcheck="false"></textarea>
-        <div class="srv-proxy-actions">
-          <button class="btn btn-primary btn-xs" id="srv-proxy-save" type="button">Save</button>
+        <div class="srv-proxy-hint-row">
+          <p class="srv-proxy-hint">
+            Paste one or more proxies &mdash;
+            <code>host:port</code> &middot; <code>host:port:user:pass</code> &middot;
+            <code>user:pass@host:port</code>
+          </p>
           <button class="btn btn-ghost btn-xs" id="srv-proxy-clear" type="button">Clear</button>
-          <span class="srv-proxy-separator"></span>
-          <button class="btn btn-outline btn-xs" id="srv-proxy-prepend-http" type="button">+ http://</button>
-          <button class="btn btn-outline btn-xs" id="srv-proxy-prepend-socks5" type="button">+ socks5://</button>
+        </div>
+        <div class="srv-proxy-chips" id="srv-proxy-chips">
+          <input type="text" class="srv-proxy-chips-input" id="srv-proxy-chips-input"
+                 placeholder="Paste or type a proxy and press Enter" spellcheck="false" />
+        </div>
+
+        <div class="srv-proxy-rotation-section">
+          <div class="srv-proxy-rotation-row">
+            <label class="srv-proxy-check" for="srv-proxy-rotation-toggle">
+              <input type="checkbox" id="srv-proxy-rotation-toggle" />
+              <span>Rotate every</span>
+            </label>
+            <div class="srv-proxy-interval-inline" id="srv-proxy-rotation-controls">
+              <input type="number" id="srv-proxy-interval" class="input srv-proxy-interval-input"
+                     min="1" max="1440" value="30" />
+              <select id="srv-proxy-interval-unit" class="input srv-proxy-interval-select">
+                <option value="60" selected>minutes</option>
+                <option value="3600">hours</option>
+              </select>
+            </div>
+          </div>
+          <p class="srv-proxy-hint srv-proxy-rotation-hint">
+            Automatically switches to the next proxy after the set duration.
+            When off, one proxy is used until it fails.
+          </p>
         </div>
       </div>
     </details>
