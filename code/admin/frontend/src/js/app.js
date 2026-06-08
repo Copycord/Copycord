@@ -3588,7 +3588,7 @@
     lastFocusConfirm = document.activeElement;
 
     cTitle.textContent = title || "Confirm";
-    cBody.textContent = body || "Are you sure?";
+    cBody.innerHTML = body || "Are you sure?";
     cBtnOk.textContent = confirmText || "OK";
 
     cBtnOk.classList.remove(
@@ -4525,6 +4525,10 @@
         location.host +
         "/ws/out";
       const ws = new WebSocket(url);
+      let wsReady = false;
+
+      // Ignore replayed history — only process live events after a short delay
+      setTimeout(() => { wsReady = true; }, 1500);
 
       ws.onmessage = (ev) => {
         try {
@@ -4532,6 +4536,9 @@
           if (msg.kind === "agent" && msg.type === "status") {
             const prefix = msg.role === "server" ? "server" : "client";
             renderStatusRow(prefix, msg.data || {});
+          }
+          if (msg.kind === "proxy_test" && msg.payload && wsReady) {
+            handleProxyTestEvent(msg.payload);
           }
           if (msg.type === "info")
             showToast(msg.data?.msg || "Info", { type: "success" });
@@ -4769,6 +4776,7 @@
     const srvProxyInput   = document.getElementById("srv-proxy-chips-input");
     const srvProxyStatus  = document.getElementById("srv-proxy-status");
     const srvProxyClear   = document.getElementById("srv-proxy-clear");
+    const srvProxyTest    = document.getElementById("srv-proxy-test");
 
     const srvRotationToggle   = document.getElementById("srv-proxy-rotation-toggle");
     const srvRotationControls = document.getElementById("srv-proxy-rotation-controls");
@@ -5001,6 +5009,266 @@
       scheduleProxySave();
     }
 
+    const SLOW_THRESHOLD_MS = 3000;
+    const proxyProgress     = document.getElementById("srv-proxy-progress");
+    const proxyProgressFill = document.getElementById("srv-proxy-progress-fill");
+    const proxyProgressText = document.getElementById("srv-proxy-progress-text");
+
+    function maskProxy(p) {
+      return p.includes("@") ? p.replace(/\/\/[^@]+@/, "//***@") : p;
+    }
+
+    function buildProxyResultRow(r, category) {
+      const masked = escapeHtml(maskProxy(r.proxy));
+      const color = category === "failed" ? "#ff6b6b" : category === "slow" ? "#ff9800" : "#4caf50";
+      const icon = category === "failed" ? "✗" : category === "slow" ? "⚠" : "✓";
+      const detail = r.ok ? `${r.ms}ms` : (r.error || "failed");
+      return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">`
+        + `<span style="color:${color};flex-shrink:0">${icon}</span>`
+        + `<span style="color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${masked}</span>`
+        + `<span style="color:${color};flex-shrink:0;font-size:11px">${escapeHtml(detail)}</span>`
+        + `</div>`;
+    }
+
+    function showProxyProgress(current, total) {
+      if (!proxyProgress) return;
+      proxyProgress.style.display = "flex";
+      const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+      if (proxyProgressFill) proxyProgressFill.style.width = pct + "%";
+      if (proxyProgressText) proxyProgressText.textContent = `${current} / ${total}`;
+    }
+
+    function hideProxyProgress() {
+      if (proxyProgress) proxyProgress.style.display = "none";
+      if (proxyProgressFill) proxyProgressFill.style.width = "0%";
+    }
+
+    function applyBatchResultsToChips(results) {
+      const chipEls = srvProxyChips.querySelectorAll(".srv-proxy-chip-item");
+      for (const result of results) {
+        const chip = Array.from(chipEls).find(el => el.dataset.proxy === result.proxy);
+        if (!chip) continue;
+        chip.classList.remove("test-loading");
+        const msEl = chip.querySelector(".srv-proxy-chip-ms");
+        if (!result.ok) {
+          chip.classList.add("test-fail");
+          if (msEl) msEl.textContent = result.error || "failed";
+        } else if (result.ms >= SLOW_THRESHOLD_MS) {
+          chip.classList.add("test-slow");
+          if (msEl) msEl.textContent = `${result.ms}ms`;
+        } else {
+          chip.classList.add("test-pass");
+          if (msEl) msEl.textContent = `${result.ms}ms`;
+        }
+      }
+    }
+
+    function showTestResultsModal(allResults) {
+      const good = [], slow = [], failed = [];
+      for (const r of allResults) {
+        if (!r.ok) failed.push(r);
+        else if (r.ms >= SLOW_THRESHOLD_MS) slow.push(r);
+        else good.push(r);
+      }
+
+      const hasIssues = failed.length > 0 || slow.length > 0;
+      if (!hasIssues) {
+        showToast(`All ${good.length} proxies passed`, { type: "success" });
+        return;
+      }
+
+      const stats = `
+        <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+          <div style="flex:1;min-width:70px;text-align:center;padding:10px 8px;border-radius:10px;background:rgba(76,175,80,0.1)">
+            <div style="font-size:22px;font-weight:700;color:#4caf50">${good.length}</div>
+            <div style="font-size:11px;color:var(--muted)">healthy</div>
+          </div>
+          ${slow.length ? `<div style="flex:1;min-width:70px;text-align:center;padding:10px 8px;border-radius:10px;background:rgba(255,152,0,0.1)">
+            <div style="font-size:22px;font-weight:700;color:#ff9800">${slow.length}</div>
+            <div style="font-size:11px;color:var(--muted)">slow</div>
+          </div>` : ""}
+          ${failed.length ? `<div style="flex:1;min-width:70px;text-align:center;padding:10px 8px;border-radius:10px;background:rgba(255,80,80,0.1)">
+            <div style="font-size:22px;font-weight:700;color:#ff6b6b">${failed.length}</div>
+            <div style="font-size:11px;color:var(--muted)">failed</div>
+          </div>` : ""}
+        </div>`;
+
+      let listHtml = "";
+      if (failed.length) {
+        listHtml += `<div style="font-size:11px;font-weight:600;color:#ff6b6b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Failed</div>`;
+        listHtml += failed.map(r => buildProxyResultRow(r, "failed")).join("");
+      }
+      if (slow.length) {
+        listHtml += `<div style="font-size:11px;font-weight:600;color:#ff9800;text-transform:uppercase;letter-spacing:0.5px;margin:${failed.length ? "10px" : "0"} 0 4px">Slow (&gt;${SLOW_THRESHOLD_MS / 1000}s)</div>`;
+        listHtml += slow.map(r => buildProxyResultRow(r, "slow")).join("");
+      }
+
+      const resultsBox = `
+        <div class="srv-proxy-results-scroll">
+          ${listHtml}
+        </div>`;
+
+      const checkboxes = `
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${failed.length ? `<label class="srv-proxy-check" style="cursor:pointer">
+            <input type="checkbox" id="ptr-remove-failed" checked />
+            <span>Remove <strong>${failed.length}</strong> failed proxy${failed.length !== 1 ? "es" : ""}</span>
+          </label>` : ""}
+          ${slow.length ? `<label class="srv-proxy-check" style="cursor:pointer">
+            <input type="checkbox" id="ptr-remove-slow" />
+            <span>Remove <strong>${slow.length}</strong> slow proxy${slow.length !== 1 ? "es" : ""}</span>
+          </label>` : ""}
+        </div>`;
+
+      openConfirm({
+        title: "Proxy Test Results",
+        body: stats + resultsBox + checkboxes,
+        confirmText: "Remove Selected",
+        confirmClass: "btn-ghost-red",
+        showCancel: true,
+        onConfirm: () => {
+          const removeFailed = document.getElementById("ptr-remove-failed")?.checked;
+          const removeSlow = document.getElementById("ptr-remove-slow")?.checked;
+          const toRemove = new Set();
+          if (removeFailed) failed.forEach(r => toRemove.add(r.proxy));
+          if (removeSlow) slow.forEach(r => toRemove.add(r.proxy));
+          if (toRemove.size) {
+            const chipEls = srvProxyChips.querySelectorAll(".srv-proxy-chip-item");
+            chipEls.forEach(el => { if (toRemove.has(el.dataset.proxy)) el.remove(); });
+            refreshStatusChip();
+            saveProxySettings();
+            showToast(`Removed ${toRemove.size} proxy${toRemove.size !== 1 ? "es" : ""}`, { type: "success" });
+          }
+        },
+      });
+    }
+
+    // ── Proxy test streaming state ──
+    let _proxyTestRunning = false;
+    let _proxyTestResults = [];
+
+    function setTestButton(mode) {
+      if (!srvProxyTest) return;
+      if (mode === "running") {
+        _proxyTestRunning = true;
+        srvProxyTest.disabled = false;
+        srvProxyTest.textContent = "Stop";
+        srvProxyTest.classList.add("btn-ghost-red");
+        srvProxyTest.classList.remove("btn-outline");
+      } else {
+        _proxyTestRunning = false;
+        srvProxyTest.disabled = false;
+        srvProxyTest.textContent = "Test All";
+        srvProxyTest.classList.remove("btn-ghost-red");
+        srvProxyTest.classList.add("btn-outline");
+      }
+    }
+
+    function handleProxyTestEvent(payload) {
+      if (payload.type === "started") {
+        _proxyTestResults = [];
+        setTestButton("running");
+        showProxyProgress(0, payload.total);
+        const chipEls = srvProxyChips.querySelectorAll(".srv-proxy-chip-item");
+        chipEls.forEach(el => {
+          el.classList.remove("test-pass", "test-fail", "test-slow");
+          el.classList.add("test-loading");
+          const ms = el.querySelector(".srv-proxy-chip-ms");
+          if (ms) ms.textContent = "testing…";
+          else {
+            const badge = document.createElement("span");
+            badge.className = "srv-proxy-chip-ms";
+            badge.textContent = "testing…";
+            el.insertBefore(badge, el.querySelector(".srv-proxy-chip-x"));
+          }
+        });
+      }
+
+      if (payload.type === "progress") {
+        showProxyProgress(payload.current, payload.total);
+        if (payload.results) {
+          _proxyTestResults.push(...payload.results);
+          applyBatchResultsToChips(payload.results);
+        }
+      }
+
+      if (payload.type === "complete") {
+        setTestButton("idle");
+        hideProxyProgress();
+        const allResults = payload.results || _proxyTestResults;
+        showTestResultsModal(allResults);
+      }
+
+      if (payload.type === "stopped") {
+        setTestButton("idle");
+        hideProxyProgress();
+        // Clear loading state from untested chips
+        srvProxyChips.querySelectorAll(".srv-proxy-chip-item.test-loading").forEach(el => {
+          el.classList.remove("test-loading");
+          const ms = el.querySelector(".srv-proxy-chip-ms");
+          if (ms) ms.remove();
+        });
+        if (_proxyTestResults.length) {
+          showTestResultsModal(_proxyTestResults);
+        } else {
+          showToast("Proxy test stopped", { type: "success" });
+        }
+      }
+    }
+
+    async function testAllProxies() {
+      const proxies = getProxyChipValues();
+      if (!proxies.length) { showToast("No proxies to test", { type: "error" }); return; }
+
+      srvProxyTest.disabled = true;
+      try {
+        const r = await fetch("/api/server/proxies/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ proxies }),
+        });
+        const j = await r.json();
+        if (!j.ok) {
+          showToast(j.error || "Failed to start test", { type: "error" });
+          setTestButton("idle");
+        }
+      } catch (e) {
+        console.error(e);
+        showToast("Failed to start proxy test", { type: "error" });
+        setTestButton("idle");
+      }
+    }
+
+    async function stopProxyTest() {
+      srvProxyTest.disabled = true;
+      try {
+        await fetch("/api/server/proxies/test/stop", { method: "POST" });
+      } catch (e) {
+        console.error(e);
+        setTestButton("idle");
+        hideProxyProgress();
+      }
+    }
+
+    // Check if a test is already running on page load
+    async function checkProxyTestStatus() {
+      try {
+        const r = await fetch("/api/server/proxies/test/status");
+        const j = await r.json();
+        if (j.ok && j.running) {
+          setTestButton("running");
+          showProxyProgress(0, 0);
+          if (proxyProgressText) proxyProgressText.textContent = "resuming…";
+        }
+      } catch {}
+    }
+
+    if (srvProxyTest) {
+      srvProxyTest.addEventListener("click", () => {
+        if (_proxyTestRunning) stopProxyTest();
+        else testAllProxies();
+      });
+    }
     if (srvProxyClear)      srvProxyClear.addEventListener("click", () => {
       if (!getProxyChipValues().length) return;
       openConfirm({
@@ -5035,6 +5303,7 @@
     }
 
     loadSrvProxies();
+    checkProxyTestStatus();
   });
 
   ["server", "client"].forEach((role) => {

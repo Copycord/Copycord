@@ -19,13 +19,6 @@ import time
 from pathlib import Path
 from typing import List, Optional, Dict
 
-import aiohttp
-
-try:
-    from aiohttp_socks import ProxyConnector
-except ImportError:
-    ProxyConnector = None
-
 logger = logging.getLogger("client.proxy_rotator")
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
@@ -106,6 +99,7 @@ class ProxyRotator:
         self._current_proxy_since: float = 0.0
 
         self.on_all_dead: Optional[callable] = None
+        self.on_rotate: Optional[callable] = None
 
     @property
     def enabled(self) -> bool:
@@ -269,6 +263,11 @@ class ProxyRotator:
             self._current_proxy = proxy
             self._current_proxy_since = now
             logger.info("[🔀] Switched to proxy %s", _mask_proxy_url(proxy))
+            if self.on_rotate:
+                try:
+                    self.on_rotate(proxy)
+                except Exception:
+                    pass
         elif proxy and self._current_proxy is None:
             self._current_proxy = proxy
             self._current_proxy_since = now
@@ -387,12 +386,6 @@ class ProxyRotator:
             return []
 
 
-def _is_socks(url: str) -> bool:
-    return url.lower().startswith(
-        ("socks4://", "socks5://", "socks4a://", "socks5h://")
-    )
-
-
 def _mask_proxy_url(url: str) -> str:
     """Mask credentials in a proxy URL for safe logging."""
 
@@ -406,131 +399,3 @@ def _mask_proxy_url(url: str) -> str:
     except Exception:
         pass
     return url[:40] + "…" if len(url) > 40 else url
-
-
-_PROXY_ERRORS = (
-    aiohttp.ClientProxyConnectionError,
-    aiohttp.ClientHttpProxyError,
-    aiohttp.ClientConnectorError,
-    aiohttp.ClientOSError,
-    ConnectionRefusedError,
-    ConnectionResetError,
-    OSError,
-)
-
-
-def _make_connector_for_proxy(proxy_url: str) -> Optional[aiohttp.BaseConnector]:
-    """
-    Build a connector suitable for *proxy_url*.
-    - SOCKS proxies require ``aiohttp_socks.ProxyConnector``.
-    - HTTP proxies just use the ``proxy=`` parameter on each request.
-    """
-    if _is_socks(proxy_url):
-        if ProxyConnector is None:
-            logger.error(
-                "[⛔] aiohttp_socks is required for SOCKS proxies but not installed"
-            )
-            return None
-        return ProxyConnector.from_url(proxy_url)
-    return None  # HTTP proxy – use aiohttp's native proxy= kwarg
-
-
-_MAX_PROXY_RETRIES = 3
-
-
-def patch_discord_http(bot, rotator: ProxyRotator) -> None:
-    """
-    Monkey-patch the py-cord ``HTTPClient.request`` so every outgoing call
-    goes through the next proxy in the rotation (when enabled).
-
-    If a proxy connection fails, automatically retries with the next proxy
-    up to ``_MAX_PROXY_RETRIES`` times.  If all proxied attempts fail,
-    falls back to a direct (no-proxy) request.
-
-    Safe to call multiple times – only patches once.
-    """
-    http_client = bot.http
-
-    # Idempotency guard: don't double-patch on reconnects
-    if getattr(http_client, "_proxy_patched", False):
-        logger.debug("[🔀] Discord HTTP client already patched, skipping")
-        return
-
-    original_request = http_client.request
-
-    async def _do_socks_request(proxy_url, route, **kwargs):
-        """Execute a single request through a SOCKS proxy."""
-        connector = ProxyConnector.from_url(proxy_url)
-        old_session = http_client._HTTPClient__session
-        if old_session and not old_session.closed:
-            new_session = aiohttp.ClientSession(
-                connector=connector,
-                headers=old_session._default_headers,
-            )
-            http_client._HTTPClient__session = new_session
-            try:
-                return await original_request(route, **kwargs)
-            finally:
-                http_client._HTTPClient__session = old_session
-                await new_session.close()
-
-        return await original_request(route, **kwargs)
-
-    async def _proxy_request(route, **kwargs):
-        if not rotator.enabled:
-            return await original_request(route, **kwargs)
-
-        tried: set = set()
-        last_exc = None
-        max_attempts = min(_MAX_PROXY_RETRIES, rotator.count)
-
-        for attempt in range(max_attempts):
-            proxy_url = rotator.next(exclude=tried)
-            if not proxy_url:
-
-                break
-
-            tried.add(proxy_url)
-
-            try:
-                if _is_socks(proxy_url):
-                    if ProxyConnector is not None:
-                        result = await _do_socks_request(proxy_url, route, **kwargs)
-                        rotator.report_success(proxy_url)
-                        return result
-                else:
-                    kwargs["proxy"] = proxy_url
-                    result = await original_request(route, **kwargs)
-                    rotator.report_success(proxy_url)
-                    return result
-
-            except _PROXY_ERRORS as exc:
-                last_exc = exc
-                safe = _mask_proxy_url(proxy_url)
-                logger.debug(
-                    "[🔀] Proxy %s failed (attempt %d/%d): %s",
-                    safe,
-                    attempt + 1,
-                    max_attempts,
-                    type(exc).__name__,
-                )
-                rotator.report_failure(proxy_url)
-
-                if not rotator.enabled:
-                    break
-
-                kwargs.pop("proxy", None)
-                continue
-
-        if last_exc is not None and rotator._enabled:
-            logger.debug(
-                "[🔀] %d proxy attempt(s) failed, falling back to direct connection",
-                len(tried),
-            )
-        kwargs.pop("proxy", None)
-
-        return await original_request(route, **kwargs)
-
-    http_client.request = _proxy_request
-    http_client._proxy_patched = True
-    logger.debug("[🔀] Patched discord HTTP client for proxy rotation")

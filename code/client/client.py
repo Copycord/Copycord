@@ -39,7 +39,7 @@ from client.export_runners import (
     DmHistoryExporter,
 )
 from client.forwarding import ForwardingManager
-from client.proxy_rotator import ProxyRotator, patch_discord_http
+from client.proxy_rotator import ProxyRotator
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -89,7 +89,11 @@ class ClientListener:
         self.db = DBManager(self.config.DB_PATH)
         self._mapped_original_ids: set[int] = set(self.db.get_all_original_guild_ids())
         self.start_time = datetime.now(timezone.utc)
-        self.bot = commands.Bot(command_prefix="!", self_bot=True)
+        self.proxy_rotator = ProxyRotator()
+        self._init_proxy_rotator()
+        self._initial_proxy = self.proxy_rotator.next() if self.proxy_rotator.enabled else None
+        self.bot = commands.Bot(command_prefix="!", self_bot=True, proxy=self._initial_proxy)
+        self.proxy_rotator.on_rotate = self._on_proxy_rotate
         self.msg = MessageUtils(self.bot)
         self._sync_task: Optional[asyncio.Task] = None
         self._ws_task: Optional[asyncio.Task] = None
@@ -155,9 +159,6 @@ class ClientListener:
         self.runner = ExportMessagesRunner(
             bot=self.bot, ws=self.ws, msg_serializer=self.msg.serialize, logger=logger
         )
-        self.proxy_rotator = ProxyRotator()
-        self._init_proxy_rotator()
-
         self.backfill = BackfillEngine(self, logger=logger)
         self._bf_max = int(os.getenv("BACKFILL_MAX_CONCURRENT", "2"))
         self._bf_queue: asyncio.Queue[tuple[int, dict]] = asyncio.Queue(
@@ -210,6 +211,13 @@ class ClientListener:
         except (ValueError, TypeError):
             interval_sec = 0
         self.proxy_rotator.set_rotation_interval(interval_sec)
+
+    def _on_proxy_rotate(self, proxy_url: str) -> None:
+        """Called by the proxy rotator when the active proxy changes."""
+        try:
+            self.bot.http.proxy = proxy_url
+        except Exception:
+            pass
 
     async def _on_ws(self, msg: dict) -> dict | None:
         """
@@ -906,7 +914,6 @@ class ClientListener:
         await self.forwarding.start()
         self._reload_mapped_ids()
 
-        patch_discord_http(self.bot, self.proxy_rotator)
         if self._proxy_rotation_task is None:
             self._proxy_rotation_task = asyncio.create_task(
                 self.proxy_rotator.run_rotation_loop()
