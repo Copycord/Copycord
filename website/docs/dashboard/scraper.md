@@ -35,11 +35,7 @@ Each token must belong to an account that is a member of the server you want to 
 
 ### Configure proxies (optional)
 
-For large servers, you can add proxy servers to distribute requests:
-
-1. On the Scraper page, click the proxy settings
-2. Add proxy URLs (one per line)
-3. Save
+For large servers, add proxies to distribute requests. The scraper uses the shared proxy list from the **Proxy** card on the [Configuration](/docs/configuration/advanced#proxy-support) page.
 
 ## Running a scrape
 
