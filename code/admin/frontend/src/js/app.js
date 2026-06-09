@@ -214,6 +214,8 @@
     DISABLE_EVERYONE_MENTIONS: false,
     DISABLE_ROLE_MENTIONS: false,
     TAG_REPLY_MSG: false,
+    APPEND_TIMESTAMP: false,
+    APPEND_AUTHOR: false,
     DB_CLEANUP_MSG: true,
     ON_DEMAND_WEBHOOKS: true,
   };
@@ -1943,12 +1945,19 @@
       .value.trim();
 
     const settings = {};
+    // Hidden selects (message features from sub-modal)
     document
       .querySelectorAll("#mapping-form select[id^='map_']")
       .forEach((sel) => {
         const key = sel.id.replace(/^map_/, "");
-        const val = sel.value;
-        settings[key] = String(val).toLowerCase() === "true";
+        settings[key] = String(sel.value).toLowerCase() === "true";
+      });
+    // Toggle checkboxes (main settings)
+    document
+      .querySelectorAll("#mapping-form input[data-map-toggle]")
+      .forEach((cb) => {
+        const key = cb.name;
+        if (key) settings[key] = cb.checked;
       });
 
     return {
@@ -2482,6 +2491,23 @@
         sel.dispatchEvent(new Event("change", { bubbles: true }));
       });
 
+    // Populate toggle checkboxes
+    document
+      .querySelectorAll("#mapping-form input[data-map-toggle]")
+      .forEach((cb) => {
+        const key = cb.name;
+        let rawVal;
+        if (cloneFrom && cloneFrom.settings && key in cloneFrom.settings) {
+          rawVal = cloneFrom.settings[key];
+        } else if (isEdit && mapping?.settings && key in mapping.settings) {
+          rawVal = mapping.settings[key];
+        } else {
+          rawVal = DEFAULT_MAPPING_SETTINGS[key];
+        }
+        if (typeof rawVal === "string") rawVal = rawVal.toLowerCase() === "true";
+        cb.checked = !!rawVal;
+      });
+
     const mappingFormEl = document.getElementById("mapping-form");
     if (mappingFormEl) {
       MAPPING_BASELINE = snapshotForm(mappingFormEl);
@@ -2540,6 +2566,111 @@
   }
 
   window.openMappingModal = openMappingModal;
+
+  // ─── Message Features Modal ──────────────────────────────────────────
+  const msgFeaturesModal = document.getElementById("msg-features-modal");
+  const msgFeaturesOpen  = document.getElementById("msg-features-open");
+  const msgFeaturesClose = document.getElementById("msg-features-close");
+  const msgFeaturesPreview = document.getElementById("msg-features-preview-footer");
+  const msgFeatureToggles = msgFeaturesModal
+    ? msgFeaturesModal.querySelectorAll(".msg-feature-toggle[data-key]")
+    : [];
+
+  function openMsgFeatures() {
+    if (!msgFeaturesModal) return;
+    // Sync toggle state from mapping form hidden values
+    for (const toggle of msgFeatureToggles) {
+      const key = toggle.dataset.key;
+      const formEl = document.getElementById(`map_${key}`);
+      const checked = formEl ? formEl.value === "True" : false;
+      toggle.querySelector("input").checked = checked;
+    }
+    updateMsgFeaturesPreview();
+    msgFeaturesModal.classList.add("show");
+    msgFeaturesModal.setAttribute("aria-hidden", "false");
+  }
+
+  function closeMsgFeatures() {
+    if (!msgFeaturesModal) return;
+    msgFeaturesModal.classList.remove("show");
+    msgFeaturesModal.setAttribute("aria-hidden", "true");
+  }
+
+  function getMsgFeatureState(key) {
+    const toggle = msgFeaturesModal?.querySelector(`.msg-feature-toggle[data-key="${key}"] input`);
+    return toggle?.checked || false;
+  }
+
+  function updateMsgFeaturesPreview() {
+    if (!msgFeaturesPreview) return;
+    const box = msgFeaturesPreview.closest(".msg-features-preview-box");
+    const replyEl = document.getElementById("msg-features-preview-reply");
+    const contentEl = document.getElementById("msg-features-preview-content");
+    const usernameEl = box?.querySelector(".msg-preview-username");
+    const avatarEl = box?.querySelector(".msg-preview-avatar");
+    const isAnon = getMsgFeatureState("ANONYMIZE_USERS");
+    const noEveryone = getMsgFeatureState("DISABLE_EVERYONE_MENTIONS");
+    const noRoles = getMsgFeatureState("DISABLE_ROLE_MENTIONS");
+
+    // Reply
+    if (replyEl) {
+      if (getMsgFeatureState("TAG_REPLY_MSG")) {
+        replyEl.innerHTML = `<span class="msg-reply-icon">↩</span> In reply to: <a class="msg-reply-link">Copycord is the best!</a>`;
+      } else {
+        replyEl.innerHTML = "";
+      }
+    }
+
+    // Anonymize
+    if (usernameEl) usernameEl.textContent = isAnon ? "SwiftFox123" : "Copycord";
+    if (avatarEl) {
+      if (isAnon) {
+        avatarEl.src = "https://picsum.photos/seed/preview42/200";
+        avatarEl.onerror = () => { avatarEl.src = "/static/logo.png"; avatarEl.onerror = null; };
+      } else {
+        avatarEl.src = "/static/logo.png";
+        avatarEl.onerror = null;
+      }
+    }
+
+    // Message content with mention previews
+    if (contentEl) {
+      const everyone = noEveryone
+        ? ` <span class="msg-mention-plain">@everyone</span>`
+        : ` <span class="msg-mention">@everyone</span>`;
+      const role = noRoles
+        ? ` <span class="msg-mention-plain">@Moderator</span>`
+        : ` <span class="msg-mention msg-mention--role">@Moderator</span>`;
+      contentEl.innerHTML = `Hey${everyone} check this out${role}`;
+    }
+
+    // Footer
+    const parts = [];
+    if (getMsgFeatureState("APPEND_TIMESTAMP")) parts.push("Oct 15, 2025 3:42 PM");
+    if (getMsgFeatureState("APPEND_AUTHOR")) {
+      const name = isAnon ? "SwiftFox123" : "Copycord";
+      parts.push(`<strong>${name}</strong>`);
+    }
+    msgFeaturesPreview.innerHTML = parts.length ? parts.join(" · ") : "";
+  }
+
+  // Toggle change handler — sync to hidden form field
+  for (const toggle of msgFeatureToggles) {
+    const input = toggle.querySelector("input");
+    if (!input) continue;
+    input.addEventListener("change", () => {
+      const key = toggle.dataset.key;
+      const formEl = document.getElementById(`map_${key}`);
+      if (formEl) formEl.value = input.checked ? "True" : "False";
+      updateMsgFeaturesPreview();
+    });
+  }
+
+  if (msgFeaturesOpen)  msgFeaturesOpen.addEventListener("click", openMsgFeatures);
+  if (msgFeaturesClose) msgFeaturesClose.addEventListener("click", closeMsgFeatures);
+  if (msgFeaturesModal) {
+    msgFeaturesModal.querySelector(".modal-backdrop")?.addEventListener("click", closeMsgFeatures);
+  }
 
   function setMappingSaveBusy(isBusy) {
     const btn = document.getElementById("mapping-save-btn");
@@ -4046,13 +4177,39 @@
 
       fields.forEach((field) => {
         const key = (field.dataset.settingKey || "").toLowerCase();
-        const label = (
-          field.querySelector(".label-text")?.textContent || ""
+        const name = (
+          field.querySelector(".mapping-toggle-name")?.textContent || ""
+        ).toLowerCase();
+        const desc = (
+          field.querySelector(".mapping-toggle-desc")?.textContent || ""
         ).toLowerCase();
 
-        const match = !q || key.includes(q) || label.includes(q);
+        const match = !q || key.includes(q) || name.includes(q) || desc.includes(q);
         field.style.display = match ? "" : "none";
       });
+
+      // Hide sections with no matches, auto-expand when searching
+      let anyMatchTotal = false;
+      document.querySelectorAll("#mapping-form .mapping-settings-section").forEach((section) => {
+        const rows = section.querySelectorAll(".mapping-setting-field");
+        const anyVisible = Array.from(rows).some(r => r.style.display !== "none");
+        section.style.display = anyVisible ? "" : "none";
+        if (anyVisible) anyMatchTotal = true;
+        if (q && anyVisible) section.open = true;
+        if (!q) section.open = false;
+      });
+
+      // Show/hide no results message
+      let noResults = document.getElementById("mapping-no-results");
+      if (!noResults) {
+        noResults = document.createElement("div");
+        noResults.id = "mapping-no-results";
+        noResults.className = "mapping-no-results";
+        noResults.textContent = "No settings match your search";
+        const toolbar = document.querySelector(".mapping-toolbar");
+        if (toolbar) toolbar.after(noResults);
+      }
+      noResults.style.display = (q && !anyMatchTotal) ? "" : "none";
     }
 
     input.addEventListener("input", applyFilter);
