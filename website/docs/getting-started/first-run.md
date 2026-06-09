@@ -36,11 +36,15 @@ In the dashboard settings, add your Discord user ID to **Command Users**. This a
 3. Click **Copy User ID**
 :::
 
-## 4. Start the bots
+## 4. Add your bot to the clone server
 
-Click the **Start** buttons to launch both the server bot and client bot. The status indicators will turn green when both are connected.
+Once your tokens are saved and validated, an **Add Bot to Server** button appears on the dashboard. Click it to invite your bot to your clone server with the right permissions — no need to manually build an invite URL.
 
-## 5. Create a guild mapping
+## 5. Start the bots
+
+Click the **Start** button to launch both the server bot and client bot. The status chips will show green "running" when both are connected.
+
+## 6. Create a guild mapping
 
 A **guild mapping** links a source server to your clone server:
 
@@ -49,7 +53,7 @@ A **guild mapping** links a source server to your clone server:
 3. Select the **Clone Server** — the empty server where your bot is
 4. Click **Create**
 
-## 6. Watch the magic
+## 7. Watch the magic
 
 Once the mapping is created and both bots are running, Copycord will:
 

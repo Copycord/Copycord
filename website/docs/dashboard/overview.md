@@ -40,12 +40,13 @@ To change or remove the password:
 
 ## Starting and stopping bots
 
-The dashboard provides **Start** and **Stop** buttons for both the server and client bots. Both must be running for cloning to work:
-
-- **Server** (green indicator) — The Discord bot in your clone server
-- **Client** (green indicator) — The self-bot monitoring source servers
+The dashboard provides a **Start** button for both the server and client bots. Both must be running for cloning to work. Status chips show green "running" or red "stopped" with live uptime tracking.
 
 Valid tokens are required to start.
+
+### Add Bot to Server
+
+Once your bot token is validated, an **Add Bot to Server** button appears next to the Start button. Click it to open Discord's bot authorization page with the correct permissions pre-configured — no need to manually build an invite URL.
 
 ## Global configuration
 
