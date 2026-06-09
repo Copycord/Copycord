@@ -9,53 +9,41 @@
   let FILTER_OBJECTS_KIND = null;
   let FILTER_OBJECTS_CATMAP = null;
   let lastRunning = null;
-  let tooltipEl = null;
   let cModal, cTitle, cBody, cBtnOk, cBtnX, cBtnCa, cBack;
   let confirmResolve = null;
   let confirmReject = null;
   const UPTIME_KEY = (role) => `cpc:uptime:${role}`;
   const ICONS = {
     trash: `
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round"
-          d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
       </svg>
     `,
     settings: `
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round"
-          d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
-        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/>
       </svg>
     `,
     filters: `
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round"
-          d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z" />
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M10 20a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341L21.74 4.67A1 1 0 0 0 21 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14z"/>
       </svg>
     `,
     pause: `
-      <svg viewBox="0 0 24 24" width="20" height="20"
-          fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-        <rect x="7" y="5" width="3.5" height="14" rx="1"></rect>
-        <rect x="13.5" y="5" width="3.5" height="14" rx="1"></rect>
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="14" y="3" width="5" height="18" rx="1"/><rect x="5" y="3" width="5" height="18" rx="1"/>
       </svg>
     `,
     play: `
-      <svg viewBox="0 0 24 24" width="20" height="20"
-          fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round"
-              d="M8 5.75v12.5a.75.75 0 0 0 1.137.624l8-6.25a.75.75 0 0 0 0-1.248l-8-6.25A.75.75 0 0 0 8 5.75z" />
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>
       </svg>
     `,
-
     clone: `
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
-          stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-      <rect x="9" y="9" width="10" height="10" rx="2"></rect>
-      <rect x="5" y="5" width="10" height="10" rx="2"></rect>
-    </svg>
-  `,
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+      </svg>
+    `,
   };
 
   let mapValidated = false;
@@ -581,80 +569,6 @@
   let uiSockTimer = null;
   let currentInterval = 4000;
 
-  function ensureTooltipEl() {
-    if (!tooltipEl) {
-      tooltipEl = document.createElement("div");
-      tooltipEl.className = "lock-tooltip";
-      tooltipEl.innerHTML = `
-      <div class="lock-tooltip-text">Stop the bot to edit server mappings</div>
-      <div class="lock-tooltip-arrow"></div>
-    `;
-      document.body.appendChild(tooltipEl);
-    }
-    return tooltipEl;
-  }
-
-  let lastTooltipUpdate = 0;
-  function showTooltip(x, y, force) {
-    const now = Date.now();
-    if (!force && now - lastTooltipUpdate < 50) return;
-    lastTooltipUpdate = now;
-
-    const tip = ensureTooltipEl();
-
-    const offsetY = 16;
-    tip.style.left = x + "px";
-    tip.style.top = y - offsetY + "px";
-    tip.style.opacity = "1";
-  }
-
-  function hideTooltip() {
-    if (tooltipEl) {
-      tooltipEl.style.opacity = "0";
-    }
-  }
-
-  function attachLockOverlay(card) {
-    if (card.querySelector(".guild-card-lock-overlay")) return;
-
-    const cs = window.getComputedStyle(card);
-    if (cs.position === "static") {
-      card.style.position = "relative";
-    }
-
-    const overlay = document.createElement("div");
-    overlay.className = "guild-card-lock-overlay";
-
-    const kill = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-    };
-    overlay.addEventListener("click", kill);
-    overlay.addEventListener("mousedown", kill);
-    overlay.addEventListener("mouseup", kill);
-    overlay.addEventListener("touchstart", kill);
-    overlay.addEventListener("touchend", kill);
-
-    overlay.addEventListener("mouseenter", (e) => {
-      showTooltip(e.clientX, e.clientY, true);
-    });
-
-    overlay.addEventListener("mousemove", (e) => {
-      showTooltip(e.clientX, e.clientY, false);
-    });
-
-    overlay.addEventListener("mouseleave", () => {
-      hideTooltip();
-    });
-
-    card.appendChild(overlay);
-  }
-
-  function detachLockOverlay(card) {
-    const overlay = card.querySelector(".guild-card-lock-overlay");
-    if (overlay) overlay.remove();
-  }
-
   function setGlobalConfigLocked(running) {
     const cfgForm = document.getElementById("cfg-form");
     const saveBtn = document.getElementById("cfg-save-btn");
@@ -739,13 +653,12 @@
     cards.forEach((card) => {
       if (running) {
         card.classList.add("locked");
-        attachLockOverlay(card);
+        card.title = "Stop the bots to edit mappings";
       } else {
         card.classList.remove("locked");
-        detachLockOverlay(card);
+        card.title = "";
       }
     });
-    if (!running) hideTooltip();
   }
 
   async function fetchAndRenderStatus() {
@@ -3857,80 +3770,70 @@
           : "Pause cloning for this mapping";
 
         const statusBadgeHtml = isPaused
-          ? `<span class="status-pill status-pill-paused">Paused</span>`
+          ? `<span class="guild-card-paused-icon" title="Paused"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M17 17H4a1 1 0 0 1-.74-1.673C4.59 13.956 6 12.499 6 8a6 6 0 0 1 .258-1.742"/><path d="m2 2 20 20"/><path d="M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05"/></svg></span>`
           : "";
+
+        const hostName = escapeHtml(m.original_guild_name || `ID: ${m.original_guild_id}`);
 
         return `
       <div class="guild-card ${isPaused ? "is-paused" : "is-active"}"
            data-id="${m.mapping_id}"
            data-status="${statusRaw}">
-        <div class="guild-card-logo">
-          <img src="${iconSrc}" alt="" class="guild-card-logo-img">
-        </div>
 
         <div class="guild-card-inner">
-          <div class="guild-card-main">
-            <div class="guild-card-name">
-              <div class="guild-card-name-title"
-                   title="${escapeHtml(m.mapping_name || "")}">
+          <div class="guild-card-header">
+            <img src="${iconSrc}" alt="" class="guild-card-avatar">
+            <div class="guild-card-info">
+              <div class="guild-card-name-title" title="${escapeHtml(m.mapping_name || "")}">
                 ${escapeHtml(m.mapping_name || "")}
               </div>
+              <div class="guild-card-route">${hostName}</div>
             </div>
-
-            <div class="guild-card-actions">
-              <button class="btn-icon edit-mapping-btn"
-                      data-id="${m.mapping_id}"
-                      aria-label="Edit mapping"
-                      title="Settings">
-                ${ICONS.settings}
-              </button>
-
-              <button class="btn-icon mapping-filters-btn"
-                      data-id="${m.mapping_id}"
-                      aria-label="Filters for this mapping"
-                      title="Filters">
-                ${ICONS.filters}
-              </button>
-
-              <button class="btn-icon mapping-status-btn ${
-                isPaused ? "is-paused" : "is-active"
-              }"
-                      data-id="${m.mapping_id}"
-                      type="button"
-                      aria-pressed="${isPaused ? "true" : "false"}"
-                      aria-label="${statusLabel}"
-                      title="${statusLabel}">
-                ${statusIcon}
-              </button>
-
-              <button class="btn-icon clone-mapping-btn"
-                      data-id="${m.mapping_id}"
-                      aria-label="Clone mapping"
-                      title="Clone mapping">
-                ${ICONS.clone}
-              </button>
-
-              <button
-                class="btn-icon delete-mapping-btn"
-                type="button"
-                data-action="delete"
-                data-id="${m.mapping_id}"
-                aria-label="Delete mapping"
-                title="Delete mapping">
-                ${ICONS.trash}
-              </button>
-            </div>
+            ${statusBadgeHtml}
           </div>
 
-          ${
-            statusBadgeHtml
-              ? `
-            <div class="guild-card-status">
-              ${statusBadgeHtml}
-            </div>
-          `
-              : ""
-          }
+          <div class="guild-card-actions">
+            <button class="btn-icon edit-mapping-btn"
+                    data-id="${m.mapping_id}"
+                    aria-label="Edit mapping"
+                    title="Settings">
+              ${ICONS.settings}
+            </button>
+
+            <button class="btn-icon mapping-filters-btn"
+                    data-id="${m.mapping_id}"
+                    aria-label="Filters for this mapping"
+                    title="Filters">
+              ${ICONS.filters}
+            </button>
+
+            <button class="btn-icon mapping-status-btn ${isPaused ? "is-paused" : "is-active"}"
+                    data-id="${m.mapping_id}"
+                    type="button"
+                    aria-pressed="${isPaused ? "true" : "false"}"
+                    aria-label="${statusLabel}"
+                    title="${statusLabel}">
+              ${statusIcon}
+            </button>
+
+            <button class="btn-icon clone-mapping-btn"
+                    data-id="${m.mapping_id}"
+                    aria-label="Clone mapping"
+                    title="Clone mapping">
+              ${ICONS.clone}
+            </button>
+
+            <span class="guild-card-action-spacer"></span>
+
+            <button class="btn-icon delete-mapping-btn"
+                    type="button"
+                    data-action="delete"
+                    data-id="${m.mapping_id}"
+                    aria-label="Delete mapping"
+                    title="Delete mapping">
+              ${ICONS.trash}
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -3946,8 +3849,7 @@
         title="Add new mapping"
       >
         <div class="new-card-inner">
-          <div class="new-card-plus">+</div>
-          <div class="new-card-label">Add Mapping</div>
+          <div class="new-card-plus"><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m11 19-1.106-.552a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0l4.212 2.106a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619V12"/><path d="M15 5.764V12"/><path d="M18 15v6"/><path d="M21 18h-6"/><path d="M9 3.236v15"/></svg></div>
         </div>
       </button>
     `;

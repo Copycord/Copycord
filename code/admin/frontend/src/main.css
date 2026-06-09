@@ -6657,29 +6657,35 @@ body.modal-open #bf-batchbar {
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 16px;
   margin-top: 16px;
-
-  max-height: 520px;
+  min-height: 180px;
+  max-height: 320px;
   overflow-y: auto;
-  padding-top: 8px;
-  padding-bottom: 8px;
-}
-
-.guild-mapping-list {
-  scrollbar-color: var(--accent) transparent;
+  padding: 8px 4px 8px 0;
   scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
 }
-
+.guild-mapping-list:hover {
+  scrollbar-color: var(--accent) transparent;
+}
 .guild-mapping-list::-webkit-scrollbar {
-  width: 8px;
+  width: 12px;
+  height: 12px;
 }
-
 .guild-mapping-list::-webkit-scrollbar-track {
   background: transparent;
+  border-radius: 12px;
 }
-
 .guild-mapping-list::-webkit-scrollbar-thumb {
-  background-color: var(--accent);
-  border-radius: 999px;
+  background: transparent;
+  border-radius: 12px;
+  transition: background 0.2s ease;
+}
+.guild-mapping-list:hover::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--primary), var(--primary-700));
+  border: 2px solid transparent;
+}
+.guild-mapping-list::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, var(--primary-600), var(--primary-700));
 }
 
 .guild-card {
@@ -6687,20 +6693,16 @@ body.modal-open #bf-batchbar {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  min-height: 120px;
-  padding: 14px 14px 12px;
+  padding: 12px;
 
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;
   color: var(--text);
 
-  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.6);
-
-  isolation: isolate;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   overflow: hidden;
   text-align: left;
-  align-items: stretch;
 
   transition: border-color 0.15s ease, box-shadow 0.15s ease,
     transform 0.15s ease, background-color 0.15s ease;
@@ -6710,100 +6712,88 @@ body.modal-open #bf-batchbar {
   transform: translateY(-2px);
   border-color: var(--accent);
   background: rgba(27, 16, 48, 0.6);
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.75);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6);
 }
 
 .guild-card-inner {
-  position: relative;
-  z-index: 2;
   display: flex;
   flex-direction: column;
-  min-height: 100%;
+  gap: 10px;
+  height: 100%;
 }
 
-.guild-card-logo {
-  position: absolute;
-  inset: 0;
+.guild-card-header {
   display: flex;
   align-items: center;
-  justify-content: center;
-  pointer-events: none;
-  z-index: 1;
-
-  opacity: 1;
-  filter: none;
-  mix-blend-mode: normal;
+  gap: 10px;
 }
 
-.guild-card-logo img {
-  width: 52px;
-  height: 52px;
-  max-width: 52px;
-  max-height: 52px;
-  opacity: 1;
-  object-fit: contain;
+.guild-card-avatar {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
 }
 
-.guild-card-main {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  min-height: 38px;
-  margin-bottom: 0 !important;
-  width: 100%;
-}
-
-.guild-card-name {
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 6px;
-  width: 100%;
+.guild-card-info {
+  flex: 1;
+  min-width: 0;
 }
 
 .guild-card-name-title {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  overflow: hidden;
-  max-width: 100%;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.3;
   color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
-  word-break: break-word;
-  white-space: normal;
+.guild-card-route {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.7;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 1px;
 }
 
 .guild-card-actions {
   display: flex;
-  gap: 6px;
-  flex-shrink: 0;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+}
+
+.guild-card-action-spacer {
+  flex: 1;
 }
 
 .guild-card .btn-icon {
-  width: 24px;
-  height: 24px;
-  min-height: 24px;
+  width: 28px;
+  height: 28px;
+  min-height: 28px;
   border-radius: 6px;
   font-size: 12px;
   line-height: 1;
   cursor: pointer;
 
   border: none;
-  background: #ffffff08;
-  color: var(--accent);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--muted);
 
   box-shadow: none;
-  transition: background-color 0.12s ease, border-color 0.12s ease,
-    color 0.12s ease, transform 0.08s ease;
+  transition: background-color 0.12s ease, color 0.12s ease, transform 0.08s ease;
 }
 
 .guild-card .btn-icon svg {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   display: block;
   stroke: currentColor;
   fill: none;
@@ -6814,9 +6804,8 @@ body.modal-open #bf-batchbar {
 }
 
 .guild-card .btn-icon:hover {
-  background: rgba(167, 139, 250, 0.08);
-  border-color: var(--accent);
-  color: var(--text);
+  background: rgba(167, 139, 250, 0.12);
+  color: var(--accent);
 }
 
 .guild-card .btn-icon:active {
@@ -6876,7 +6865,6 @@ body.modal-open #bf-batchbar {
 }
 
 .guild-card--new {
-  min-height: 140px;
   padding: 16px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px dashed var(--border);
@@ -6904,11 +6892,9 @@ body.modal-open #bf-batchbar {
 }
 
 .guild-card--new .new-card-plus {
-  font-size: 56px;
-  font-weight: 600;
-  line-height: 1;
   color: var(--accent);
   user-select: none;
+  line-height: 0;
 }
 
 .guild-card--new:hover,
@@ -6942,8 +6928,9 @@ body.modal-open #bf-batchbar {
     padding: 14px;
   }
 
-  .guild-card--new .new-card-plus {
-    font-size: 48px;
+  .guild-card--new .new-card-plus svg {
+    width: 32px;
+    height: 32px;
   }
 }
 
@@ -7316,7 +7303,9 @@ body.modal-open {
 .guild-card.locked {
   opacity: 0.5;
   filter: grayscale(0.4);
-  cursor: default;
+  cursor: not-allowed;
+}
+.guild-card.locked .guild-card-inner {
   pointer-events: none;
 }
 
@@ -8420,18 +8409,24 @@ body.login-page {
   transform: none;
 }
 
-.guild-card.is-paused .guild-card-logo {
+.guild-card.is-paused .guild-card-avatar {
   opacity: 0.5;
-}
-
-.guild-card.is-paused:hover .guild-card-logo {
-  opacity: 0.6;
-}
-
-.guild-card.is-paused img,
-.guild-card.is-paused .guild-card-icon {
   filter: grayscale(60%);
 }
+.guild-card-paused-icon {
+  flex-shrink: 0;
+  color: var(--muted);
+  opacity: 0.4;
+  display: inline-flex;
+}
+.guild-card-paused-icon svg {
+  width: 20px;
+  height: 20px;
+}
+.guild-card.is-paused .guild-card-actions {
+  border-top-color: rgba(255, 255, 255, 0.06);
+}
+
 
 .status-pill {
   display: inline-flex;
