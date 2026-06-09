@@ -27,19 +27,63 @@ Edit `ADMIN_PORT` in `code/.env`:
 ADMIN_PORT=9060
 ```
 
-## Proxy support for scraping
+## Proxy support
 
-Copycord supports proxy rotation for the member scraper and server bot operations. Configure proxies through the dashboard:
+Copycord routes all client (self bot) traffic through a proxy when enabled — including login, REST API calls, and the gateway WebSocket connection. This means your real IP never touches Discord.
 
-1. Go to the **Scraper** page → Proxy settings
-2. Add proxy URLs (one per line), e.g.:
+### Configuring client proxies
+
+1. Go to the **Configuration** page → **Proxy** card
+2. Enable **"Enable proxies for client"**
+3. Paste one or more proxies — supported formats:
    ```
+   host:port
+   host:port:user:pass
+   user:pass@host:port
    http://user:pass@proxy1.example.com:8080
    socks5://user:pass@proxy2.example.com:1080
    ```
-3. Save
+4. Proxies auto-save as you add or remove them
 
 Both HTTP and SOCKS5 proxies are supported.
+
+### Proxy rotation
+
+By default, one proxy is selected and used for all traffic. It only switches if the proxy fails.
+
+To rotate proxies on a schedule, enable **"Rotate every"** and set an interval (e.g. 1 hour). The client will automatically switch to the next healthy proxy after the set duration.
+
+:::tip
+Longer rotation intervals (1-4 hours) are recommended. Rotating too frequently can itself be a detection signal. Residential proxies are strongly preferred over datacenter IPs.
+:::
+
+### Testing proxies
+
+Click **Test All** to verify your proxies. Each proxy is tested by connecting to Discord's API through it. Results show which proxies are healthy, slow, or failed. You can remove failed and slow proxies directly from the results.
+
+For large proxy lists, the test runs as a background task with a live progress bar. You can stop it at any time.
+
+### Failover
+
+If the active proxy drops or goes down, the client detects it automatically via the Discord gateway connection and switches to the next available proxy. No polling or extra API calls are made — detection is fully reactive.
+
+A failed proxy is temporarily suspended so the client doesn't reconnect to it immediately. After the suspend duration expires, the proxy becomes eligible again.
+
+### Proxy settings
+
+Click the **Settings** button on the Proxy card to configure advanced options:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| **Suspend duration** | 300s | How long a failed proxy stays blocked before retrying |
+| **Batch size** | 50 | Number of proxies tested concurrently during "Test All" |
+| **Slow threshold** | 3s | Proxies slower than this are flagged in test results |
+
+All settings are saved to the database. Suspend duration takes effect on next client restart. Test settings apply immediately.
+
+### Scraper proxies
+
+The member scraper shares the same proxy list. When proxies are configured, the scraper automatically uses them to distribute requests across different IPs.
 
 ## Message retention
 
@@ -110,4 +154,4 @@ Copycord relies on discord.py's native rate limit handling for structure sync op
 
 For webhook message sending, Copycord uses a lightweight rate limiter (5 per 2.5s per webhook) to stay within Discord's message rate limits.
 
-If you're using proxies, requests are distributed across different IPs, allowing higher throughput.
+If you're using proxies for the client, traffic is routed through the proxy IP, keeping your real IP hidden from Discord.

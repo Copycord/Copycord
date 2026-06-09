@@ -3885,24 +3885,34 @@ async def api_scraper_proxies_put(request: Request):
 
 @app.get("/api/server/proxies", response_class=JSONResponse)
 async def api_server_proxies_get():
-    """Return server proxy list and enabled state."""
+    """Return client proxy list, enabled state, and rotation interval."""
     try:
         if _PROXY_FILE.exists():
             text = _PROXY_FILE.read_text(encoding="utf-8").strip()
             lines = [l.strip() for l in text.splitlines() if l.strip()]
         else:
             lines = []
-        enabled = (db.get_config("ENABLE_SERVER_PROXIES", "") or "").strip().lower() in (
+        enabled = (db.get_config("ENABLE_CLIENT_PROXIES", "") or "").strip().lower() in (
             "1", "true", "yes",
         )
-        return JSONResponse({"ok": True, "proxies": lines, "enabled": enabled})
+        interval_raw = (db.get_config("PROXY_ROTATION_INTERVAL", "") or "").strip()
+        try:
+            rotation_interval = int(interval_raw) if interval_raw else 0
+        except (ValueError, TypeError):
+            rotation_interval = 0
+        return JSONResponse({
+            "ok": True,
+            "proxies": lines,
+            "enabled": enabled,
+            "rotation_interval": rotation_interval,
+        })
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @app.put("/api/server/proxies", response_class=JSONResponse)
 async def api_server_proxies_put(request: Request):
-    """Save server proxy list (shared file with scraper)."""
+    """Save client proxy list (shared file with scraper)."""
     try:
         payload = await request.json()
     except Exception:
@@ -3922,17 +3932,237 @@ async def api_server_proxies_put(request: Request):
 
 @app.put("/api/server/proxies/toggle", response_class=JSONResponse)
 async def api_server_proxies_toggle(request: Request):
-    """Enable or disable server proxy rotation."""
+    """Enable or disable client proxy rotation."""
     try:
         payload = await request.json()
     except Exception:
         raise HTTPException(400, detail="Invalid JSON")
     enabled = bool(payload.get("enabled", False))
     try:
-        db.set_config("ENABLE_SERVER_PROXIES", "true" if enabled else "false")
+        db.set_config("ENABLE_CLIENT_PROXIES", "true" if enabled else "false")
         return JSONResponse({"ok": True, "enabled": enabled})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/server/proxies/rotation-interval", response_class=JSONResponse)
+async def api_server_proxies_rotation_interval(request: Request):
+    """Set the proxy rotation interval in seconds (0 = per-request)."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    try:
+        interval = max(0, int(payload.get("interval", 0)))
+    except (ValueError, TypeError):
+        raise HTTPException(400, detail="interval must be an integer")
+    try:
+        db.set_config("PROXY_ROTATION_INTERVAL", str(interval))
+        return JSONResponse({"ok": True, "rotation_interval": interval})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+_PROXY_SETTINGS_KEYS = {
+    "PROXY_SUSPEND_DURATION": 300,
+    "PROXY_TEST_BATCH_SIZE": 50,
+    "PROXY_SLOW_THRESHOLD": 3,
+}
+
+
+@app.get("/api/server/proxies/settings", response_class=JSONResponse)
+async def api_proxy_settings_get():
+    """Return proxy settings."""
+    try:
+        settings = {}
+        for key, default in _PROXY_SETTINGS_KEYS.items():
+            raw = (db.get_config(key, "") or "").strip()
+            try:
+                settings[key] = int(raw) if raw else default
+            except (ValueError, TypeError):
+                settings[key] = default
+        return JSONResponse({"ok": True, "settings": settings})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/server/proxies/settings", response_class=JSONResponse)
+async def api_proxy_settings_put(request: Request):
+    """Save proxy settings."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    settings = payload.get("settings", {})
+    if not isinstance(settings, dict):
+        raise HTTPException(400, detail="settings must be an object")
+    try:
+        for key, default in _PROXY_SETTINGS_KEYS.items():
+            if key in settings:
+                val = max(1, int(settings[key]))
+                db.set_config(key, str(val))
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+_proxy_test_task: Optional[asyncio.Task] = None
+
+
+@app.post("/api/server/proxies/test", response_class=JSONResponse)
+async def api_server_proxies_test(request: Request):
+    """Start a background proxy test task. Results streamed via hub broadcast."""
+    global _proxy_test_task
+    import re as _re
+
+    if _proxy_test_task and not _proxy_test_task.done():
+        return JSONResponse({"ok": False, "error": "Test already running"}, status_code=409)
+
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    proxies = payload.get("proxies", [])
+    if not isinstance(proxies, list) or not proxies:
+        raise HTTPException(400, detail="proxies must be a non-empty list")
+
+    _HP_UP = _re.compile(r"^(?P<host>[^:]+):(?P<port>\d+):(?P<user>[^:]+):(?P<pass>.+)$")
+    _UP_HP = _re.compile(r"^(?P<user>[^:@]+):(?P<pass>[^@]+)@(?P<host>[^:]+):(?P<port>\d+)$")
+
+    def _normalise(raw: str):
+        raw = raw.strip()
+        if not raw:
+            return None
+        scheme = "http"
+        if "://" in raw:
+            scheme, _, raw = raw.partition("://")
+        m = _HP_UP.match(raw)
+        if m:
+            return f"{scheme}://{m.group('user')}:{m.group('pass')}@{m.group('host')}:{m.group('port')}"
+        m = _UP_HP.match(raw)
+        if m:
+            return f"{scheme}://{raw}"
+        if ":" in raw:
+            return f"{scheme}://{raw}"
+        return None
+
+    def _is_socks(url: str) -> bool:
+        return url.lower().startswith(("socks4://", "socks5://", "socks4a://", "socks5h://"))
+
+    try:
+        from aiohttp_socks import ProxyConnector
+    except ImportError:
+        ProxyConnector = None
+
+    test_url = "https://discord.com/api/v9/gateway"
+    _batch_raw = (db.get_config("PROXY_TEST_BATCH_SIZE", "") or "").strip()
+    batch_size = int(_batch_raw) if _batch_raw else 50
+    _timeout = aiohttp.ClientTimeout(total=5)
+
+    async def _test_one(raw_proxy: str):
+        url = _normalise(raw_proxy)
+        if not url:
+            return {"proxy": raw_proxy, "ok": False, "error": "Invalid format", "ms": None}
+        import time as _time
+        t0 = _time.monotonic()
+        try:
+            if _is_socks(url):
+                if ProxyConnector is None:
+                    return {"proxy": raw_proxy, "ok": False, "error": "aiohttp_socks not installed", "ms": None}
+                connector = ProxyConnector.from_url(url)
+                async with aiohttp.ClientSession(connector=connector) as sess:
+                    async with sess.get(test_url, timeout=_timeout) as resp:
+                        ms = round((_time.monotonic() - t0) * 1000)
+                        return {"proxy": raw_proxy, "ok": resp.status == 200, "status": resp.status, "ms": ms}
+            else:
+                async with aiohttp.ClientSession() as sess:
+                    async with sess.get(test_url, proxy=url, timeout=_timeout) as resp:
+                        ms = round((_time.monotonic() - t0) * 1000)
+                        return {"proxy": raw_proxy, "ok": resp.status == 200, "status": resp.status, "ms": ms}
+        except Exception as e:
+            ms = round((_time.monotonic() - t0) * 1000)
+            return {"proxy": raw_proxy, "ok": False, "error": type(e).__name__, "ms": ms}
+
+    async def _run_test(proxy_list: list):
+        import time as _time
+        total = len(proxy_list)
+        all_results = []
+        completed = 0
+        t_start = _time.monotonic()
+
+        LOGGER.info("[🔀] Proxy test started: %d proxies (batch=%d, timeout=%ds)", total, batch_size, 5)
+
+        await hub.broadcast({
+            "kind": "proxy_test", "role": "admin",
+            "payload": {"type": "started", "total": total},
+        })
+
+        try:
+            for i in range(0, total, batch_size):
+                batch = proxy_list[i : i + batch_size]
+                batch_num = (i // batch_size) + 1
+                total_batches = (total + batch_size - 1) // batch_size
+                LOGGER.info("[🔀] Proxy test batch %d/%d (%d proxies)", batch_num, total_batches, len(batch))
+
+                batch_results = await asyncio.gather(*[_test_one(p) for p in batch])
+                all_results.extend(batch_results)
+                completed += len(batch_results)
+
+                batch_passed = sum(1 for r in batch_results if r.get("ok"))
+                batch_failed = len(batch_results) - batch_passed
+                LOGGER.info("[🔀] Proxy test batch %d/%d done: %d passed, %d failed", batch_num, total_batches, batch_passed, batch_failed)
+
+                await hub.broadcast({
+                    "kind": "proxy_test", "role": "admin",
+                    "payload": {
+                        "type": "progress",
+                        "current": completed,
+                        "total": total,
+                        "results": list(batch_results),
+                    },
+                })
+
+            elapsed = round(_time.monotonic() - t_start, 1)
+            total_passed = sum(1 for r in all_results if r.get("ok"))
+            total_failed = total - total_passed
+            LOGGER.info("[🔀] Proxy test complete: %d/%d passed, %d failed (%.1fs)", total_passed, total, total_failed, elapsed)
+
+            await hub.broadcast({
+                "kind": "proxy_test", "role": "admin",
+                "payload": {
+                    "type": "complete",
+                    "total": total,
+                    "results": all_results,
+                },
+            })
+        except asyncio.CancelledError:
+            elapsed = round(_time.monotonic() - t_start, 1)
+            LOGGER.info("[🔀] Proxy test stopped after %d/%d proxies (%.1fs)", completed, total, elapsed)
+
+    _proxy_test_task = asyncio.create_task(_run_test(proxies))
+    return JSONResponse({"ok": True, "total": len(proxies)})
+
+
+@app.get("/api/server/proxies/test/status", response_class=JSONResponse)
+async def api_server_proxies_test_status():
+    """Check if a proxy test is currently running."""
+    running = _proxy_test_task is not None and not _proxy_test_task.done()
+    return JSONResponse({"ok": True, "running": running})
+
+
+@app.post("/api/server/proxies/test/stop", response_class=JSONResponse)
+async def api_server_proxies_test_stop():
+    """Stop a running proxy test."""
+    global _proxy_test_task
+    if _proxy_test_task and not _proxy_test_task.done():
+        _proxy_test_task.cancel()
+        LOGGER.info("[🔀] Proxy test stopped by user")
+        await hub.broadcast({
+            "kind": "proxy_test", "role": "admin",
+            "payload": {"type": "stopped"},
+        })
+        return JSONResponse({"ok": True})
+    return JSONResponse({"ok": False, "error": "No test running"})
 
 
 @app.post("/api/scraper/start", response_class=JSONResponse)
