@@ -214,6 +214,8 @@
     DISABLE_EVERYONE_MENTIONS: false,
     DISABLE_ROLE_MENTIONS: false,
     TAG_REPLY_MSG: false,
+    APPEND_TIMESTAMP: false,
+    APPEND_AUTHOR: false,
     DB_CLEANUP_MSG: true,
     ON_DEMAND_WEBHOOKS: true,
   };
@@ -2540,6 +2542,99 @@
   }
 
   window.openMappingModal = openMappingModal;
+
+  // ─── Message Features Modal ──────────────────────────────────────────
+  const msgFeaturesModal = document.getElementById("msg-features-modal");
+  const msgFeaturesOpen  = document.getElementById("msg-features-open");
+  const msgFeaturesClose = document.getElementById("msg-features-close");
+  const msgFeaturesPreview = document.getElementById("msg-features-preview-footer");
+  const msgFeatureToggles = msgFeaturesModal
+    ? msgFeaturesModal.querySelectorAll(".msg-feature-toggle[data-key]")
+    : [];
+
+  function openMsgFeatures() {
+    if (!msgFeaturesModal) return;
+    // Sync toggle state from mapping form hidden values
+    for (const toggle of msgFeatureToggles) {
+      const key = toggle.dataset.key;
+      const formEl = document.getElementById(`map_${key}`);
+      const checked = formEl ? formEl.value === "True" : false;
+      toggle.querySelector("input").checked = checked;
+    }
+    updateMsgFeaturesPreview();
+    msgFeaturesModal.classList.add("show");
+    msgFeaturesModal.setAttribute("aria-hidden", "false");
+  }
+
+  function closeMsgFeatures() {
+    if (!msgFeaturesModal) return;
+    msgFeaturesModal.classList.remove("show");
+    msgFeaturesModal.setAttribute("aria-hidden", "true");
+  }
+
+  function getMsgFeatureState(key) {
+    const toggle = msgFeaturesModal?.querySelector(`.msg-feature-toggle[data-key="${key}"] input`);
+    return toggle?.checked || false;
+  }
+
+  function updateMsgFeaturesPreview() {
+    if (!msgFeaturesPreview) return;
+    const box = msgFeaturesPreview.closest(".msg-features-preview-box");
+    const replyEl = document.getElementById("msg-features-preview-reply");
+    const contentEl = document.getElementById("msg-features-preview-content");
+    const usernameEl = box?.querySelector(".msg-preview-username");
+    const avatarEl = box?.querySelector(".msg-preview-avatar");
+    const isAnon = getMsgFeatureState("ANONYMIZE_USERS");
+    const noEveryone = getMsgFeatureState("DISABLE_EVERYONE_MENTIONS");
+    const noRoles = getMsgFeatureState("DISABLE_ROLE_MENTIONS");
+
+    // Reply
+    if (replyEl) {
+      if (getMsgFeatureState("TAG_REPLY_MSG")) {
+        replyEl.innerHTML = `<span class="msg-reply-icon">↩</span> In reply to: <a class="msg-reply-link">Copycord is the best!</a>`;
+      } else {
+        replyEl.innerHTML = "";
+      }
+    }
+
+    // Anonymize
+    if (usernameEl) usernameEl.textContent = isAnon ? "SwiftFox123" : "Copycord";
+    if (avatarEl) avatarEl.style.filter = isAnon ? "hue-rotate(180deg) saturate(1.5)" : "";
+
+    // Message content with mention previews
+    if (contentEl) {
+      const everyone = noEveryone ? "" : ` <span class="msg-mention">@everyone</span>`;
+      const role = noRoles ? "" : ` <span class="msg-mention msg-mention--role">@Moderator</span>`;
+      contentEl.innerHTML = `Hey${everyone} check this out${role}`;
+    }
+
+    // Footer
+    const parts = [];
+    if (getMsgFeatureState("APPEND_TIMESTAMP")) parts.push("Oct 15, 2025 3:42 PM");
+    if (getMsgFeatureState("APPEND_AUTHOR")) {
+      const name = isAnon ? "SwiftFox123" : "Copycord";
+      parts.push(`by <strong>${name}</strong>`);
+    }
+    msgFeaturesPreview.innerHTML = parts.length ? parts.join(" · ") : "";
+  }
+
+  // Toggle change handler — sync to hidden form field
+  for (const toggle of msgFeatureToggles) {
+    const input = toggle.querySelector("input");
+    if (!input) continue;
+    input.addEventListener("change", () => {
+      const key = toggle.dataset.key;
+      const formEl = document.getElementById(`map_${key}`);
+      if (formEl) formEl.value = input.checked ? "True" : "False";
+      updateMsgFeaturesPreview();
+    });
+  }
+
+  if (msgFeaturesOpen)  msgFeaturesOpen.addEventListener("click", openMsgFeatures);
+  if (msgFeaturesClose) msgFeaturesClose.addEventListener("click", closeMsgFeatures);
+  if (msgFeaturesModal) {
+    msgFeaturesModal.querySelector(".modal-backdrop")?.addEventListener("click", closeMsgFeatures);
+  }
 
   function setMappingSaveBusy(isBusy) {
     const btn = document.getElementById("mapping-save-btn");

@@ -126,6 +126,8 @@ class Config:
             "DISABLE_EVERYONE_MENTIONS": False,
             "DISABLE_ROLE_MENTIONS": False,
             "TAG_REPLY_MSG": False,
+            "APPEND_TIMESTAMP": False,
+            "APPEND_AUTHOR": False,
             "DB_CLEANUP_MSG": True,
             "ON_DEMAND_WEBHOOKS": True,
         }

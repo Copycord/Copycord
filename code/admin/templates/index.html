@@ -291,6 +291,8 @@
     "DISABLE_EVERYONE_MENTIONS": "When enabled, @everyone and @here mentions will be disabled in mirrored messages.",
     "DISABLE_ROLE_MENTIONS": "When enabled, role mentions will be disabled in mirrored messages to stop role pings.",
     "TAG_REPLY_MSG": "When enabled, messages that are replies will include a tag of the message being replied to.",
+    "APPEND_TIMESTAMP": "When enabled, the original message timestamp is appended below the cloned message in unix format.",
+    "APPEND_AUTHOR": "When enabled, the original author's username is appended below the cloned message.",
     "DB_CLEANUP_MSG": "When enabled, runs an hourly task to delete messages stored in the database that are older than 7
     days.",
     "ON_DEMAND_WEBHOOKS": "When enabled, webhooks are only created when a channel receives its first message, instead of during sync. This makes server cloning much faster by skipping upfront webhook creation.",
@@ -706,78 +708,116 @@
           <button type="button" id="mapping-close" class="icon-btn verify-close" aria-label="Close">✕</button>
         </div>
 
-        <form id="mapping-form" class="padded" autocomplete="off">
+        <form id="mapping-form" class="mapping-form" autocomplete="off">
           <input type="hidden" id="map_mapping_id" name="mapping_id" />
+          <!-- Hidden selects for message features (managed by sub-modal) -->
+          <select id="map_TAG_REPLY_MSG" name="TAG_REPLY_MSG" data-dd style="display:none">
+            <option value="True">True</option><option value="False" selected>False</option>
+          </select>
+          <select id="map_ANONYMIZE_USERS" name="ANONYMIZE_USERS" data-dd style="display:none">
+            <option value="True">True</option><option value="False" selected>False</option>
+          </select>
+          <select id="map_DISABLE_EVERYONE_MENTIONS" name="DISABLE_EVERYONE_MENTIONS" data-dd style="display:none">
+            <option value="True">True</option><option value="False" selected>False</option>
+          </select>
+          <select id="map_DISABLE_ROLE_MENTIONS" name="DISABLE_ROLE_MENTIONS" data-dd style="display:none">
+            <option value="True">True</option><option value="False" selected>False</option>
+          </select>
+          <select id="map_APPEND_TIMESTAMP" name="APPEND_TIMESTAMP" data-dd style="display:none">
+            <option value="True">True</option><option value="False" selected>False</option>
+          </select>
+          <select id="map_APPEND_AUTHOR" name="APPEND_AUTHOR" data-dd style="display:none">
+            <option value="True">True</option><option value="False" selected>False</option>
+          </select>
 
-          <div class="field">
-            <label for="map_mapping_name" class="has-tip">
-              <span class="label-text">Mapping Name</span>
-              <button type="button" class="info-dot" aria-label="What is Mapping Name?"
-                aria-describedby="tip-mapping_name"></button>
-              <span id="tip-mapping_name" role="tooltip" class="tip-bubble">
-                A friendly label for this clone pair. Shown on the dashboard cards.
-              </span>
-            </label>
-            <input type="text" id="map_mapping_name" name="mapping_name" maxlength="64" />
+          <div class="mapping-section">
+            <div class="field">
+              <label for="map_mapping_name" class="has-tip">
+                <span class="label-text">Mapping Name</span>
+                <button type="button" class="info-dot" aria-label="What is Mapping Name?"
+                  aria-describedby="tip-mapping_name"></button>
+                <span id="tip-mapping_name" role="tooltip" class="tip-bubble">
+                  A friendly label for this clone pair. Shown on the dashboard cards.
+                </span>
+              </label>
+              <input type="text" id="map_mapping_name" name="mapping_name" maxlength="64" />
+            </div>
+
+            <div class="mapping-guild-row">
+              <div class="field">
+                <label for="map_original_guild_id" class="has-tip">
+                  <span class="label-text">Host Guild</span>
+                  <button type="button" class="info-dot" aria-label="What is HOST_GUILD_ID?"
+                    aria-describedby="tip-HOST_GUILD_ID"></button>
+                  <span id="tip-HOST_GUILD_ID" role="tooltip" class="tip-bubble">
+                    {{ FIELD_TIPS['HOST_GUILD_ID'] }}
+                  </span>
+                </label>
+                <input type="text" id="map_original_guild_id" name="original_guild_id" inputmode="numeric"
+                       placeholder="Server ID to mirror from" />
+              </div>
+              <div class="field">
+                <label for="map_cloned_guild_id" class="has-tip">
+                  <span class="label-text">Clone Guild</span>
+                  <button type="button" class="info-dot" aria-label="What is CLONE_GUILD_ID?"
+                    aria-describedby="tip-CLONE_GUILD_ID"></button>
+                  <span id="tip-CLONE_GUILD_ID" role="tooltip" class="tip-bubble">
+                    {{ FIELD_TIPS['CLONE_GUILD_ID'] }}
+                  </span>
+                </label>
+                <input type="text" id="map_cloned_guild_id" name="cloned_guild_id" inputmode="numeric"
+                       placeholder="Server ID to mirror to" />
+              </div>
+            </div>
           </div>
 
-          <div class="grid">
-            <div class="field">
-              <label for="map_original_guild_id" class="has-tip">
-                <span class="label-text">HOST_GUILD_ID</span>
-                <button type="button" class="info-dot" aria-label="What is HOST_GUILD_ID?"
-                  aria-describedby="tip-HOST_GUILD_ID"></button>
-                <span id="tip-HOST_GUILD_ID" role="tooltip" class="tip-bubble">
-                  {{ FIELD_TIPS['HOST_GUILD_ID'] }}
-                </span>
-              </label>
-              <input type="text" id="map_original_guild_id" name="original_guild_id" inputmode="numeric" />
+          <div class="mapping-section">
+            <div class="mapping-search-row">
+              <input id="mappingSettingsSearch" class="mapping-search-input" type="text"
+                placeholder="Search settings…" autocomplete="off" />
             </div>
+          </div>
 
-            <div class="field">
-              <label for="map_cloned_guild_id" class="has-tip">
-                <span class="label-text">CLONE_GUILD_ID</span>
-                <button type="button" class="info-dot" aria-label="What is CLONE_GUILD_ID?"
-                  aria-describedby="tip-CLONE_GUILD_ID"></button>
-                <span id="tip-CLONE_GUILD_ID" role="tooltip" class="tip-bubble">
-                  {{ FIELD_TIPS['CLONE_GUILD_ID'] }}
-                </span>
-              </label>
-              <input type="text" id="map_cloned_guild_id" name="cloned_guild_id" inputmode="numeric" />
-            </div>
+          {% set sections = {
+            "General": ["ENABLE_CLONING", "CLONE_MESSAGES", "ON_DEMAND_WEBHOOKS", "DB_CLEANUP_MSG"],
+            "Channels": ["DELETE_CHANNELS", "DELETE_THREADS", "REPOSITION_CHANNELS", "RENAME_CHANNELS", "SYNC_CHANNEL_NSFW", "SYNC_CHANNEL_TOPIC", "SYNC_CHANNEL_SLOWMODE", "SYNC_FORUM_PROPERTIES", "MIRROR_CHANNEL_PERMISSIONS"],
+            "Messages": ["DELETE_MESSAGES", "EDIT_MESSAGES", "RESEND_EDITED_MESSAGES"],
+            "Roles": ["CLONE_ROLES", "DELETE_ROLES", "UPDATE_ROLES", "REARRANGE_ROLES", "CLONE_ROLE_ICONS", "MIRROR_ROLE_PERMISSIONS"],
+            "Assets": ["CLONE_EMOJI", "CLONE_STICKER", "CLONE_VOICE", "CLONE_VOICE_PROPERTIES", "CLONE_STAGE", "CLONE_STAGE_PROPERTIES"],
+            "Server Identity": ["CLONE_GUILD_ICON", "CLONE_GUILD_BANNER", "CLONE_GUILD_SPLASH", "CLONE_GUILD_DISCOVERY_SPLASH", "SYNC_GUILD_DESCRIPTION"],
+          } %}
 
-            <div class="field field-search-settings">
-              <label for="mappingSettingsSearch" class="has-tip">
-                <span class="label-text">Search Settings</span>
-              </label>
-
-              <input id="mappingSettingsSearch" class="log-search-input" type="text"
-                placeholder="Search messages, clone_roles, etc…" autocomplete="off" />
-            </div>
-
-            {% for k in mapping_bool_keys %}
-            <div class="field mapping-setting-field" data-setting-key="{{ k | lower }}">
-              <label for="map_{{ k }}" class="has-tip">
-                <span class="label-text">{{ k }}</span>
+          {% for section_name, keys in sections.items() %}
+          <div class="mapping-section mapping-settings-section">
+            <div class="mapping-section-header">{{ section_name }}</div>
+            {% for k in keys %}
+            <div class="mapping-toggle-row mapping-setting-field" data-setting-key="{{ k | lower }}">
+              <div class="mapping-toggle-info">
+                <span class="mapping-toggle-name">{{ k }}</span>
                 {% if FIELD_TIPS.get(k) %}
-                <button type="button" class="info-dot" aria-label="What is {{ k }}?"
-                  aria-describedby="tip-{{ k }}"></button>
-                <span id="tip-{{ k }}" role="tooltip" class="tip-bubble">
-                  {{ FIELD_TIPS[k] }}
-                </span>
+                <span class="mapping-toggle-desc">{{ FIELD_TIPS[k] }}</span>
                 {% endif %}
-              </label>
-              <div class="select">
-                <select id="map_{{ k }}" name="{{ k }}">
-                  <option value="True">True</option>
-                  <option value="False">False</option>
-                </select>
               </div>
+              <label class="toggle mapping-toggle-switch">
+                <input type="checkbox" id="map_{{ k }}" name="{{ k }}" data-map-toggle />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
             </div>
             {% endfor %}
           </div>
+          {% endfor %}
 
-          <div class="btns">
+          <div class="mapping-section">
+            <button type="button" class="msg-features-open-btn" id="msg-features-open">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              Optional Message Features
+            </button>
+          </div>
+
+          <div class="mapping-form-footer">
             <button class="btn btn-ghost" type="button" id="mapping-cancel-btn" hidden>
               Cancel
             </button>
@@ -786,6 +826,109 @@
             </button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <!-- ─── Message Features Modal ─── -->
+    <div id="msg-features-modal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content msg-features-content" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h4 class="modal-title">Optional Message Features</h4>
+          <button type="button" id="msg-features-close" class="icon-btn verify-close" aria-label="Close">&#10005;</button>
+        </div>
+        <div class="msg-features-body">
+          <p class="msg-features-desc">
+            Customize how cloned messages appear in the clone server. Toggle features on or off per mapping.
+          </p>
+
+          <div class="msg-features-list">
+            <div class="msg-feature-item">
+              <div class="msg-feature-info">
+                <span class="msg-feature-name">Tag Replies</span>
+                <span class="msg-feature-desc">When a message is a reply, prepend a link to the original message being replied to.</span>
+              </div>
+              <label class="toggle msg-feature-toggle" data-key="TAG_REPLY_MSG">
+                <input type="checkbox" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+            </div>
+
+            <div class="msg-feature-item">
+              <div class="msg-feature-info">
+                <span class="msg-feature-name">Anonymize Users</span>
+                <span class="msg-feature-desc">Replace usernames and avatars with random names and images.</span>
+              </div>
+              <label class="toggle msg-feature-toggle" data-key="ANONYMIZE_USERS">
+                <input type="checkbox" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+            </div>
+
+            <div class="msg-feature-item">
+              <div class="msg-feature-info">
+                <span class="msg-feature-name">Disable @everyone</span>
+                <span class="msg-feature-desc">Strip @everyone and @here mentions so they don't ping in the clone.</span>
+              </div>
+              <label class="toggle msg-feature-toggle" data-key="DISABLE_EVERYONE_MENTIONS">
+                <input type="checkbox" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+            </div>
+
+            <div class="msg-feature-item">
+              <div class="msg-feature-info">
+                <span class="msg-feature-name">Disable Role Mentions</span>
+                <span class="msg-feature-desc">Strip role mentions so they don't ping in the clone.</span>
+              </div>
+              <label class="toggle msg-feature-toggle" data-key="DISABLE_ROLE_MENTIONS">
+                <input type="checkbox" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+            </div>
+
+            <div class="msg-feature-item">
+              <div class="msg-feature-info">
+                <span class="msg-feature-name">Append Timestamp</span>
+                <span class="msg-feature-desc">Shows when the original message was sent using Discord's native timestamp format.</span>
+              </div>
+              <label class="toggle msg-feature-toggle" data-key="APPEND_TIMESTAMP">
+                <input type="checkbox" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+            </div>
+
+            <div class="msg-feature-item">
+              <div class="msg-feature-info">
+                <span class="msg-feature-name">Append Author</span>
+                <span class="msg-feature-desc">Shows the original author's username below the cloned message.</span>
+              </div>
+              <label class="toggle msg-feature-toggle" data-key="APPEND_AUTHOR">
+                <input type="checkbox" />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+            </div>
+          </div>
+
+          <div class="msg-features-preview">
+            <div class="msg-features-preview-label">Preview</div>
+            <div class="msg-features-preview-box">
+              <div class="msg-preview-msg">
+                <img src="/static/logo.png" alt="" class="msg-preview-avatar" draggable="false" />
+                <div class="msg-preview-body">
+                  <div class="msg-preview-header">
+                    <span class="msg-preview-username">Copycord</span>
+                    <span class="msg-preview-bot-tag">APP</span>
+                    <span class="msg-preview-time">Today at 3:42 PM</span>
+                  </div>
+                  <div class="msg-preview-reply" id="msg-features-preview-reply"></div>
+                  <div class="msg-preview-content" id="msg-features-preview-content">Hello world</div>
+                  <div class="msg-preview-footer" id="msg-features-preview-footer"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 

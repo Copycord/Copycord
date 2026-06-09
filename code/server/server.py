@@ -7678,6 +7678,37 @@ class ServerReceiver:
                             else:
                                 text = header
 
+            # ── Append metadata (timestamp / author) ──
+            append_parts = []
+            if mapping_settings.get("APPEND_TIMESTAMP", False):
+                ts = msg.get("timestamp")
+                if ts:
+                    try:
+                        from datetime import datetime as _dt, timezone as _tz
+                        if isinstance(ts, str):
+                            dt = _dt.fromisoformat(ts.replace("Z", "+00:00"))
+                        elif isinstance(ts, (int, float)):
+                            dt = _dt.fromtimestamp(ts, tz=_tz.utc)
+                        else:
+                            dt = None
+                        if dt:
+                            unix_ts = int(dt.timestamp())
+                            append_parts.append(f"<t:{unix_ts}:f>")
+                    except Exception:
+                        pass
+
+            if mapping_settings.get("APPEND_AUTHOR", False):
+                author = msg.get("author")
+                if author:
+                    append_parts.append(f"by **{author}**")
+
+            if append_parts:
+                footer = "-# " + " · ".join(append_parts)
+                if text:
+                    text = f"{text}\n{footer}"
+                else:
+                    text = footer
+
             if mapping_settings.get("DISABLE_EVERYONE_MENTIONS", False):
 
                 text = text.replace("@everyone", "@\u200beveryone")
