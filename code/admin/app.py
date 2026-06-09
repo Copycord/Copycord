@@ -3963,6 +3963,49 @@ async def api_server_proxies_rotation_interval(request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+_PROXY_SETTINGS_KEYS = {
+    "PROXY_SUSPEND_DURATION": 300,
+    "PROXY_TEST_BATCH_SIZE": 50,
+    "PROXY_SLOW_THRESHOLD": 3,
+}
+
+
+@app.get("/api/server/proxies/settings", response_class=JSONResponse)
+async def api_proxy_settings_get():
+    """Return proxy settings."""
+    try:
+        settings = {}
+        for key, default in _PROXY_SETTINGS_KEYS.items():
+            raw = (db.get_config(key, "") or "").strip()
+            try:
+                settings[key] = int(raw) if raw else default
+            except (ValueError, TypeError):
+                settings[key] = default
+        return JSONResponse({"ok": True, "settings": settings})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/server/proxies/settings", response_class=JSONResponse)
+async def api_proxy_settings_put(request: Request):
+    """Save proxy settings."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    settings = payload.get("settings", {})
+    if not isinstance(settings, dict):
+        raise HTTPException(400, detail="settings must be an object")
+    try:
+        for key, default in _PROXY_SETTINGS_KEYS.items():
+            if key in settings:
+                val = max(1, int(settings[key]))
+                db.set_config(key, str(val))
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 _proxy_test_task: Optional[asyncio.Task] = None
 
 
@@ -4012,7 +4055,8 @@ async def api_server_proxies_test(request: Request):
         ProxyConnector = None
 
     test_url = "https://discord.com/api/v9/gateway"
-    batch_size = int(os.getenv("PROXY_TEST_BATCH_SIZE", "50"))
+    _batch_raw = (db.get_config("PROXY_TEST_BATCH_SIZE", "") or "").strip()
+    batch_size = int(_batch_raw) if _batch_raw else 50
     _timeout = aiohttp.ClientTimeout(total=5)
 
     async def _test_one(raw_proxy: str):

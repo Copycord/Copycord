@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import re
 import signal
+import time
 from datetime import datetime, timezone
 import logging
 from typing import Optional, Any
@@ -39,7 +40,7 @@ from client.export_runners import (
     DmHistoryExporter,
 )
 from client.forwarding import ForwardingManager
-from client.proxy_rotator import ProxyRotator
+from client.proxy_rotator import ProxyRotator, _mask_proxy_url
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -110,6 +111,8 @@ class ClientListener:
         self._dm_export_task: asyncio.Task | None = None
         self._dm_export_running: bool = False
         self.bot.event(self.on_ready)
+        self.bot.event(self.on_disconnect)
+        self.bot.event(self.on_resumed)
         self.bot.event(self.on_message)
         self.bot.event(self.on_message_edit)
         self.bot.event(self.on_raw_message_edit)
@@ -203,14 +206,17 @@ class ClientListener:
         ).strip().lower() in ("1", "true", "yes")
         self.proxy_rotator.set_enabled(enabled)
 
-        interval_raw = (
-            self.db.get_config("PROXY_ROTATION_INTERVAL", "") or ""
-        ).strip()
-        try:
-            interval_sec = int(interval_raw) if interval_raw else 0
-        except (ValueError, TypeError):
-            interval_sec = 0
-        self.proxy_rotator.set_rotation_interval(interval_sec)
+        def _db_int(key, default):
+            raw = (self.db.get_config(key, "") or "").strip()
+            try:
+                return int(raw) if raw else default
+            except (ValueError, TypeError):
+                return default
+
+        self.proxy_rotator.set_rotation_interval(
+            _db_int("PROXY_ROTATION_INTERVAL", 0)
+        )
+        self.proxy_rotator.SUSPEND_SECONDS = _db_int("PROXY_SUSPEND_DURATION", 300)
 
     def _on_proxy_rotate(self, proxy_url: str) -> None:
         """Called by the proxy rotator when the active proxy changes."""
@@ -909,6 +915,27 @@ class ClientListener:
             self.sitemap.schedule_sync(None, delay=delay)
         except Exception:
             logger.exception("[sitemap] failed to schedule sync for %s", guild_id)
+
+    async def on_disconnect(self):
+        """Fired when the gateway WebSocket drops."""
+        if not self.proxy_rotator.enabled or not self._initial_proxy:
+            return
+        self.proxy_rotator.report_failure(self.proxy_rotator._current_proxy or "")
+        if self.proxy_rotator._current_proxy and self.proxy_rotator._is_suspended(
+            self.proxy_rotator._current_proxy, time.monotonic()
+        ):
+            safe = _mask_proxy_url(self.proxy_rotator._current_proxy)
+            logger.warning("[🔀] Proxy %s dropped connection, switching", safe)
+            new_proxy = self.proxy_rotator.rotate_now()
+            if new_proxy:
+                self.bot.http.proxy = new_proxy
+            else:
+                logger.warning("[🔀] No healthy proxies available")
+
+    async def on_resumed(self):
+        """Fired when the gateway successfully reconnects."""
+        if self.proxy_rotator.enabled and self.proxy_rotator._current_proxy:
+            self.proxy_rotator.report_success(self.proxy_rotator._current_proxy)
 
     async def on_ready(self):
         await self.forwarding.start()
@@ -2655,8 +2682,53 @@ class ClientListener:
                 else:
                     logger.error("[⛔] No valid backup token available after connection close.")
 
-        except Exception:
-            logger.exception("[⛔] Unexpected error while running client")
+        except Exception as e:
+            if not self._try_next_proxy_on_error(e, token, loop):
+                logger.exception("[⛔] Unexpected error while running client")
+
+    def _is_proxy_error(self, exc: Exception) -> bool:
+        """Check if an exception is a proxy connection failure."""
+        # curl_cffi.requests.exceptions.RequestException inherits OSError
+        if isinstance(exc, (ConnectionError, OSError)):
+            err = str(exc).lower()
+            return "proxy" in err or "curl" in err or "connect" in err or "aborted" in err
+        return False
+
+    def _try_next_proxy_on_error(self, exc: Exception, token: str, loop) -> bool:
+        """If the error is proxy-related, try connecting through other proxies.
+        Returns True if handled (logged), False if caller should handle it."""
+        if not self.proxy_rotator.enabled or not self._initial_proxy:
+            return False
+        if not self._is_proxy_error(exc):
+            return False
+
+        current = self.proxy_rotator._current_proxy or self._initial_proxy
+        safe = _mask_proxy_url(current)
+        logger.warning("[🔀] Proxy %s failed to connect: %s", safe, type(exc).__name__)
+        self.proxy_rotator.report_failure(current)
+
+        for _ in range(self.proxy_rotator.count - 1):
+            new_proxy = self.proxy_rotator.rotate_now()
+            if not new_proxy:
+                break
+            self.bot.http.proxy = new_proxy
+            try:
+                loop.run_until_complete(self.bot.start(token))
+                return True
+            except LoginFailure:
+                logger.error("[⛔] Discord login failed — not a proxy issue")
+                return True
+            except Exception as retry_e:
+                if self._is_proxy_error(retry_e):
+                    safe = _mask_proxy_url(new_proxy)
+                    logger.warning("[🔀] Proxy %s also failed: %s", safe, type(retry_e).__name__)
+                    self.proxy_rotator.report_failure(new_proxy)
+                else:
+                    logger.exception("[⛔] Unexpected error while running client")
+                    return True
+
+        logger.error("[⛔] All proxies failed to connect")
+        return True
 
     def run(self):
         """

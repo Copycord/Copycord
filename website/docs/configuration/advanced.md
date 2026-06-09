@@ -59,17 +59,27 @@ Longer rotation intervals (1-4 hours) are recommended. Rotating too frequently c
 
 ### Testing proxies
 
-Click **Test All** to verify your proxies. Each proxy is tested by connecting to Discord's API through it. Results show which proxies are healthy, slow (>3s), or failed. You can remove failed and slow proxies directly from the results.
+Click **Test All** to verify your proxies. Each proxy is tested by connecting to Discord's API through it. Results show which proxies are healthy, slow, or failed. You can remove failed and slow proxies directly from the results.
 
 For large proxy lists, the test runs as a background task with a live progress bar. You can stop it at any time.
 
-The test batch size defaults to 50 concurrent and can be configured via environment variable:
+### Failover
 
-```yaml
-admin:
-  environment:
-    PROXY_TEST_BATCH_SIZE: 100
-```
+If the active proxy drops or goes down, the client detects it automatically via the Discord gateway connection and switches to the next available proxy. No polling or extra API calls are made — detection is fully reactive.
+
+A failed proxy is temporarily suspended so the client doesn't reconnect to it immediately. After the suspend duration expires, the proxy becomes eligible again.
+
+### Proxy settings
+
+Click the **Settings** button on the Proxy card to configure advanced options:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| **Suspend duration** | 300s | How long a failed proxy stays blocked before retrying |
+| **Batch size** | 50 | Number of proxies tested concurrently during "Test All" |
+| **Slow threshold** | 3s | Proxies slower than this are flagged in test results |
+
+All settings are saved to the database. Suspend duration takes effect on next client restart. Test settings apply immediately.
 
 ### Scraper proxies
 

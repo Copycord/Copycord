@@ -10,9 +10,9 @@
 
 from __future__ import annotations
 
-import itertools
 import logging
 import os
+import random
 import re
 import asyncio
 import time
@@ -86,10 +86,8 @@ class ProxyRotator:
 
     def __init__(self) -> None:
         self._proxies: List[str] = []
-        self._cycle = itertools.cycle([])
         self._lock = asyncio.Lock()
         self._enabled: bool = False
-        self._index: int = 0
 
         self._health: Dict[str, Dict] = {}
 
@@ -175,8 +173,6 @@ class ProxyRotator:
                 normalised.append(url)
 
         self._proxies = normalised
-        self._cycle = itertools.cycle(normalised) if normalised else itertools.cycle([])
-        self._index = 0
 
         self._health = {k: v for k, v in self._health.items() if k in normalised}
 
@@ -275,41 +271,33 @@ class ProxyRotator:
         return proxy
 
     async def run_rotation_loop(self) -> None:
-        """Background task that rotates the proxy on the configured interval.
+        """Background task that handles timed proxy rotation.
 
         Runs forever; safe to wrap in ``asyncio.create_task``.
-        Sleeps for ``rotation_interval`` seconds, then calls
-        ``rotate_now()``.  Automatically adapts if the interval changes
-        or rotation is disabled.
+        Health monitoring is handled reactively via ``on_disconnect``
+        / ``on_resumed`` events in the client — no polling needed.
         """
         while True:
-            interval = self._rotation_interval
-            if interval <= 0 or not self._enabled:
-                # No timed rotation — check again in 5s in case settings change
+            if not self._enabled or self._rotation_interval <= 0:
                 await asyncio.sleep(5)
                 continue
 
-            await asyncio.sleep(interval)
+            if self._current_proxy:
+                elapsed = time.monotonic() - self._current_proxy_since
+                if elapsed >= self._rotation_interval:
+                    self.rotate_now()
 
-            # Re-check after sleep — settings may have changed
-            if self._rotation_interval > 0 and self._enabled:
-                self.rotate_now()
+            await asyncio.sleep(5)
 
     def _next_healthy(self, exclude: set, now: float) -> Optional[str]:
-        """Advance the round-robin cycle and return the next healthy proxy."""
-        for _ in range(len(self._proxies)):
-            try:
-                url = next(self._cycle)
-                self._index = (self._index + 1) % len(self._proxies)
-            except StopIteration:
-                return None
-
-            if url in exclude:
-                continue
-            if not self._is_suspended(url, now):
-                return url
-
-        return None
+        """Pick a random healthy proxy that isn't excluded or suspended."""
+        candidates = [
+            url for url in self._proxies
+            if url not in exclude and not self._is_suspended(url, now)
+        ]
+        if not candidates:
+            return None
+        return random.choice(candidates)
 
     def report_success(self, proxy_url: str) -> None:
         """Mark a proxy as healthy after a successful request."""
@@ -349,10 +337,8 @@ class ProxyRotator:
                 self._current_proxy_since = 0.0
 
             if self._enabled and self.healthy_count == 0:
-                self._enabled = False
                 logger.warning(
-                    "[🔀] All %d proxies dead — proxy rotation auto-disabled, "
-                    "falling back to direct connection",
+                    "[🔀] All %d proxies dead — no healthy proxies available",
                     len(self._proxies),
                 )
                 if self.on_all_dead:

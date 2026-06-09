@@ -5009,7 +5009,7 @@
       scheduleProxySave();
     }
 
-    const SLOW_THRESHOLD_MS = 3000;
+    let SLOW_THRESHOLD_MS = 3000;
     const proxyProgress     = document.getElementById("srv-proxy-progress");
     const proxyProgressFill = document.getElementById("srv-proxy-progress-fill");
     const proxyProgressText = document.getElementById("srv-proxy-progress-text");
@@ -5302,8 +5302,113 @@
       });
     }
 
+    // ─── Proxy Settings Modal ──────────────────────────────────────────────
+    const psModal     = document.getElementById("proxy-settings-modal");
+    const psClose     = document.getElementById("proxy-settings-close");
+    const psBtn       = document.getElementById("srv-proxy-settings-btn");
+    const psFields    = {
+      PROXY_SUSPEND_DURATION: document.getElementById("ps-suspend-duration"),
+      PROXY_TEST_BATCH_SIZE:  document.getElementById("ps-test-batch"),
+      PROXY_SLOW_THRESHOLD:   document.getElementById("ps-slow-threshold"),
+    };
+
+    let _psLoaded = false;
+
+    function openProxySettings() {
+      if (!psModal) return;
+      psModal.classList.add("show");
+      psModal.setAttribute("aria-hidden", "false");
+      document.body.classList.add("body-lock-scroll");
+      if (!_psLoaded) loadProxySettings();
+    }
+
+    function closeProxySettings() {
+      if (!psModal) return;
+      psModal.classList.remove("show");
+      psModal.setAttribute("aria-hidden", "true");
+      const anyOther = document.querySelector(
+        "#confirm-modal.show, #log-modal.show, #mapping-modal.show, #filters-modal.show"
+      );
+      if (!anyOther) document.body.classList.remove("body-lock-scroll");
+    }
+
+    async function loadProxySettings() {
+      try {
+        const r = await fetch("/api/server/proxies/settings");
+        const j = await r.json();
+        if (j.ok && j.settings) {
+          for (const [key, el] of Object.entries(psFields)) {
+            if (el && j.settings[key] !== undefined) el.value = j.settings[key];
+          }
+          // Sync slow threshold to test UI
+          if (j.settings.PROXY_SLOW_THRESHOLD) {
+            SLOW_THRESHOLD_MS = j.settings.PROXY_SLOW_THRESHOLD * 1000;
+          }
+          _psLoaded = true;
+        }
+      } catch (e) {
+        console.error("Failed to load proxy settings:", e);
+      }
+    }
+
+    let _psSaveTimer = null;
+    function scheduleProxySettingsSave() {
+      clearTimeout(_psSaveTimer);
+      _psSaveTimer = setTimeout(saveProxySettings_modal, 600);
+    }
+
+    async function saveProxySettings_modal() {
+      const settings = {};
+      for (const [key, el] of Object.entries(psFields)) {
+        if (el) settings[key] = parseInt(el.value, 10) || 1;
+      }
+      // Sync slow threshold immediately
+      if (settings.PROXY_SLOW_THRESHOLD) {
+        SLOW_THRESHOLD_MS = settings.PROXY_SLOW_THRESHOLD * 1000;
+      }
+      try {
+        const r = await fetch("/api/server/proxies/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ settings }),
+        });
+        const j = await r.json();
+        if (!j.ok) showToast(j.error || "Failed to save settings", { type: "error" });
+      } catch (e) {
+        console.error(e);
+        showToast("Failed to save proxy settings", { type: "error" });
+      }
+    }
+
+    if (psBtn) psBtn.addEventListener("click", openProxySettings);
+    if (psClose) psClose.addEventListener("click", closeProxySettings);
+    if (psModal) {
+      psModal.querySelector(".modal-backdrop")?.addEventListener("click", closeProxySettings);
+    }
+    for (const el of Object.values(psFields)) {
+      if (el) el.addEventListener("change", scheduleProxySettingsSave);
+    }
+
+    const PS_DEFAULTS = {
+      PROXY_SUSPEND_DURATION: 300,
+      PROXY_TEST_BATCH_SIZE: 50,
+      PROXY_SLOW_THRESHOLD: 3,
+    };
+    const psResetBtn = document.getElementById("ps-reset-defaults");
+    if (psResetBtn) {
+      psResetBtn.addEventListener("click", () => {
+        for (const [key, el] of Object.entries(psFields)) {
+          if (el && PS_DEFAULTS[key] !== undefined) el.value = PS_DEFAULTS[key];
+        }
+        SLOW_THRESHOLD_MS = PS_DEFAULTS.PROXY_SLOW_THRESHOLD * 1000;
+        saveProxySettings_modal();
+        showToast("Proxy settings reset to defaults", { type: "success" });
+      });
+    }
+
     loadSrvProxies();
     checkProxyTestStatus();
+    loadProxySettings();
   });
 
   ["server", "client"].forEach((role) => {

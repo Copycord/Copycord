@@ -462,6 +462,14 @@
       <summary class="srv-proxy-summary">
         <h3>Proxy</h3>
         <span class="srv-proxy-chip" id="srv-proxy-status"></span>
+        <button type="button" class="srv-proxy-settings-btn" id="srv-proxy-settings-btn" title="Proxy Settings" onclick="event.preventDefault()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/>
+            <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
+          </svg>
+          Settings
+        </button>
       </summary>
       <div class="srv-proxy-body">
         <div class="srv-proxy-toggle-row">
@@ -514,6 +522,84 @@
         </div>
       </div>
     </details>
+
+    <!-- ─── Proxy Settings Modal ─── -->
+    <div id="proxy-settings-modal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content proxy-settings-content" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h4 class="modal-title">Proxy Settings</h4>
+          <button type="button" id="proxy-settings-close" class="icon-btn verify-close" aria-label="Close">&#10005;</button>
+        </div>
+        <div class="proxy-settings-body">
+          <div class="proxy-settings-group">
+            <div class="proxy-settings-group-header">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>
+              </svg>
+              <h5 class="proxy-settings-group-title">Failover</h5>
+            </div>
+            <p class="proxy-settings-desc">If your proxy drops or goes down, the client detects it automatically and switches to the next available proxy. A failed proxy is temporarily blocked to avoid reconnecting to it immediately.</p>
+            <div class="proxy-settings-fields">
+              <label class="proxy-settings-field">
+                <div class="proxy-settings-label">
+                  <span>Suspend duration</span>
+                  <span class="proxy-settings-sublabel">How long a failed proxy stays blocked before retrying</span>
+                </div>
+                <div class="proxy-settings-input-wrap">
+                  <input type="number" id="ps-suspend-duration" class="input ps-input" min="10" max="3600" value="300" />
+                  <span class="proxy-settings-unit">sec</span>
+                </div>
+              </label>
+            </div>
+          </div>
+          <div class="proxy-settings-group">
+            <div class="proxy-settings-group-header">
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m15 6 2 2 4-4"/>
+                <path d="M2 12h20A10 10 0 1 1 12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 4-10"/>
+              </svg>
+              <h5 class="proxy-settings-group-title">Proxy Testing</h5>
+            </div>
+            <p class="proxy-settings-desc">When you click "Test All", every proxy in your list is checked by connecting to Discord through it. These settings control how many are tested at once and what counts as too slow.</p>
+            <div class="proxy-settings-fields">
+              <label class="proxy-settings-field">
+                <div class="proxy-settings-label">
+                  <span>Batch size</span>
+                  <span class="proxy-settings-sublabel">Proxies tested at the same time</span>
+                </div>
+                <div class="proxy-settings-input-wrap">
+                  <input type="number" id="ps-test-batch" class="input ps-input" min="5" max="500" value="50" />
+                  <span class="proxy-settings-unit">concurrent</span>
+                </div>
+              </label>
+              <label class="proxy-settings-field">
+                <div class="proxy-settings-label">
+                  <span>Slow threshold</span>
+                  <span class="proxy-settings-sublabel">Flag proxies slower than this</span>
+                </div>
+                <div class="proxy-settings-input-wrap">
+                  <input type="number" id="ps-slow-threshold" class="input ps-input" min="1" max="30" value="3" />
+                  <span class="proxy-settings-unit">sec</span>
+                </div>
+              </label>
+            </div>
+          </div>
+          <div class="proxy-settings-footer-row">
+            <button type="button" class="ps-reset-btn" id="ps-reset-defaults">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+                <path d="M3 3v5h5"/>
+              </svg>
+              Reset to Defaults
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <div id="log-modal" class="modal" aria-hidden="true">
       <div class="modal-backdrop"></div>
