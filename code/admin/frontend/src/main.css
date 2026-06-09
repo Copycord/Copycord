@@ -10907,10 +10907,14 @@ body.page-forwarding .fwd-no-match-sub {
   gap: 14px;
   padding: 8px 10px;
   border-radius: 8px;
-  transition: background 0.12s ease;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  margin-bottom: 6px;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
 .mapping-toggle-row:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 .mapping-toggle-info {
   display: flex;
@@ -10951,7 +10955,7 @@ body.page-forwarding .fwd-no-match-sub {
 
 /* ─── Message Features Modal ─── */
 .msg-features-content {
-  width: min(560px, 92vw) !important;
+  width: min(620px, 92vw) !important;
 }
 .msg-features-body {
   padding: 0 20px 20px;
@@ -10978,8 +10982,8 @@ body.page-forwarding .fwd-no-match-sub {
   margin: 0 0 16px;
 }
 .msg-features-list {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-bottom: 18px;
 }
@@ -10987,11 +10991,16 @@ body.page-forwarding .fwd-no-match-sub {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 10px 14px;
-  border-radius: 10px;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+.msg-feature-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 .msg-feature-info {
   display: flex;
