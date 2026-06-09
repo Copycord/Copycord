@@ -14,20 +14,20 @@ Copycord continuously watches source servers for structural changes and mirrors 
 | Event | Action in clone | Configurable |
 |-------|----------------|-------------|
 | Channel created | New channel created in clone | Always on |
-| Channel deleted | Clone channel deleted | `DELETE_CHANNELS` |
-| Channel renamed | Clone channel renamed | `RENAME_CHANNELS` |
-| Channel repositioned | Clone channel repositioned | `REPOSITION_CHANNELS` |
-| Topic changed | Clone topic updated | `SYNC_CHANNEL_TOPIC` |
-| NSFW toggled | Clone NSFW updated | `SYNC_CHANNEL_NSFW` |
-| Slowmode changed | Clone slowmode updated | `SYNC_CHANNEL_SLOWMODE` |
-| Permissions changed | Clone permissions updated | `MIRROR_CHANNEL_PERMISSIONS` |
+| Channel deleted | Clone channel deleted | Delete Removed Channels |
+| Channel renamed | Clone channel renamed | Rename Channels |
+| Channel repositioned | Clone channel repositioned | Reposition Channels |
+| Topic changed | Clone topic updated | Sync Channel Topic |
+| NSFW toggled | Clone NSFW updated | Sync NSFW Flag |
+| Slowmode changed | Clone slowmode updated | Sync Slowmode |
+| Permissions changed | Clone permissions updated | Mirror Channel Permissions |
 
 ### Threads
 
 | Event | Action in clone |
 |-------|----------------|
 | Thread created | Matching thread created |
-| Thread deleted | Clone thread removed (`DELETE_THREADS`) |
+| Thread deleted | Clone thread removed (Delete Removed Threads) |
 | Thread renamed | Clone thread renamed |
 | Thread archived/unarchived | Clone thread updated |
 
@@ -35,32 +35,32 @@ Copycord continuously watches source servers for structural changes and mirrors 
 
 | Event | Action in clone | Configurable |
 |-------|----------------|-------------|
-| Role created | New role created in clone | `CLONE_ROLES` |
-| Role deleted | Clone role deleted | `DELETE_ROLES` |
-| Role renamed | Clone role renamed | `UPDATE_ROLES` |
-| Color changed | Clone role color updated | `UPDATE_ROLES` |
-| Permissions changed | Clone permissions updated | `MIRROR_ROLE_PERMISSIONS` |
-| Hoist toggled | Clone hoist updated | `UPDATE_ROLES` |
-| Position changed | Clone position updated | `REARRANGE_ROLES` |
-| Icon changed | Clone icon updated | `CLONE_ROLE_ICONS` |
+| Role created | New role created in clone | Clone Roles |
+| Role deleted | Clone role deleted | Delete Removed Roles |
+| Role renamed | Clone role renamed | Update Role Properties |
+| Color changed | Clone role color updated | Update Role Properties |
+| Permissions changed | Clone permissions updated | Mirror Role Permissions |
+| Hoist toggled | Clone hoist updated | Update Role Properties |
+| Position changed | Clone position updated | Rearrange Roles |
+| Icon changed | Clone icon updated | Clone Role Icons |
 
 ### Emojis and Stickers
 
-| Event | Action in clone |
-|-------|----------------|
-| Emoji added | New emoji cloned | `CLONE_EMOJI` |
-| Emoji removed | Clone emoji deleted | `CLONE_EMOJI` |
-| Sticker added | New sticker cloned | `CLONE_STICKER` |
-| Sticker removed | Clone sticker deleted | `CLONE_STICKER` |
+| Event | Action in clone | Configurable |
+|-------|----------------|-------------|
+| Emoji added | New emoji cloned | Clone Emoji |
+| Emoji removed | Clone emoji deleted | Clone Emoji |
+| Sticker added | New sticker cloned | Clone Stickers |
+| Sticker removed | Clone sticker deleted | Clone Stickers |
 
-### Guild-level properties
+### Server Identity
 
 | Event | Configurable |
 |-------|-------------|
-| Server icon changed | `CLONE_GUILD_ICON` |
-| Server banner changed | `CLONE_GUILD_BANNER` |
-| Splash screen changed | `CLONE_GUILD_SPLASH` |
-| Description changed | `SYNC_GUILD_DESCRIPTION` |
+| Server icon changed | Clone Server Icon |
+| Server banner changed | Clone Server Banner |
+| Splash screen changed | Clone Invite Splash |
+| Description changed | Sync Server Description |
 
 ## How it works
 
@@ -77,9 +77,9 @@ The client self-bot receives Discord gateway events for every change in the sour
 - `GUILD_UPDATE`
 - `THREAD_CREATE/DELETE/UPDATE`
 
-### 2. Periodic full sync
+### 2. Startup sync
 
-A comprehensive structure comparison runs periodically (default: every 60 minutes). This catches any changes that might have been missed during downtime or network interruptions.
+When the client starts, it builds and sends a full sitemap for each server. Servers are processed one at a time with a configurable delay between each (default 3 seconds) to avoid rate limits. After startup, all changes are handled by real-time events — no periodic re-syncing is needed.
 
 ## Sync architecture
 

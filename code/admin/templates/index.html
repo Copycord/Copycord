@@ -449,6 +449,41 @@
       <div id="guild-mapping-list" class="guild-mapping-list"></div>
     </div>
 
+    <!-- ─── Sync Settings ─── -->
+    <details class="card srv-proxy-card" id="sync-settings-card">
+      <summary class="srv-proxy-summary">
+        <h3>Sync Settings</h3>
+        <span class="card-chev" aria-hidden="true">&#9662;</span>
+      </summary>
+      <div class="srv-proxy-body">
+        <p class="srv-proxy-hint">
+          When the client starts, it scans each server you're cloning and sends the full structure (channels, roles, emojis) to the bot so it knows what to sync. These settings control how fast that happens. Slower is always safer if you have many servers. Changes apply on next client restart.
+        </p>
+        <div class="proxy-settings-fields" style="margin-top:10px">
+          <label class="proxy-settings-field">
+            <div class="proxy-settings-label">
+              <span>Startup Delay</span>
+              <span class="proxy-settings-sublabel">Wait time after login before sending sitemaps</span>
+            </div>
+            <div class="proxy-settings-input-wrap">
+              <input type="number" id="sync-startup-delay" class="input ps-input" min="1" max="120" value="15" />
+              <span class="proxy-settings-unit">sec</span>
+            </div>
+          </label>
+          <label class="proxy-settings-field">
+            <div class="proxy-settings-label">
+              <span>Inter-Guild Delay</span>
+              <span class="proxy-settings-sublabel">Pause between each server sitemap to help avoid rate limits.</span>
+            </div>
+            <div class="proxy-settings-input-wrap">
+              <input type="number" id="sync-guild-delay" class="input ps-input" min="1" max="30" value="3" />
+              <span class="proxy-settings-unit">sec</span>
+            </div>
+          </label>
+        </div>
+      </div>
+    </details>
+
     <!-- ─── Proxy ─── -->
     <details class="card srv-proxy-card" id="srv-proxy-card">
       <summary class="srv-proxy-summary">
@@ -462,6 +497,7 @@
           </svg>
           Settings
         </button>
+        <span class="card-chev" aria-hidden="true">&#9662;</span>
       </summary>
       <div class="srv-proxy-body">
         <div class="srv-proxy-toggle-row">

@@ -5566,6 +5566,51 @@
     loadSrvProxies();
     checkProxyTestStatus();
     loadProxySettings();
+
+    // ─── Sync Timing Settings ─────────────────────────────────────────────
+    const syncStartupDelay = document.getElementById("sync-startup-delay");
+    const syncGuildDelay   = document.getElementById("sync-guild-delay");
+    const syncCard         = document.getElementById("sync-settings-card");
+
+    async function loadSyncSettings() {
+      try {
+        const r = await fetch("/api/sync/settings");
+        const j = await r.json();
+        if (j.ok && j.settings) {
+          if (syncStartupDelay) syncStartupDelay.value = j.settings.SYNC_STARTUP_DELAY || 15;
+          if (syncGuildDelay) syncGuildDelay.value = j.settings.SYNC_INTER_GUILD_DELAY || 3;
+        }
+      } catch (e) { console.error("Failed to load sync settings:", e); }
+    }
+
+    let _syncSaveTimer = null;
+    function scheduleSyncSave() {
+      clearTimeout(_syncSaveTimer);
+      _syncSaveTimer = setTimeout(async () => {
+        const settings = {};
+        if (syncStartupDelay) settings.SYNC_STARTUP_DELAY = parseInt(syncStartupDelay.value, 10) || 15;
+        if (syncGuildDelay) settings.SYNC_INTER_GUILD_DELAY = parseInt(syncGuildDelay.value, 10) || 3;
+        try {
+          await fetch("/api/sync/settings", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ settings }),
+          });
+        } catch (e) { console.error(e); }
+      }, 600);
+    }
+
+    if (syncStartupDelay) syncStartupDelay.addEventListener("change", scheduleSyncSave);
+    if (syncGuildDelay) syncGuildDelay.addEventListener("change", scheduleSyncSave);
+
+    if (syncCard) {
+      if (localStorage.getItem("cpc.sync-card-open") === "1") syncCard.open = true;
+      syncCard.addEventListener("toggle", () => {
+        localStorage.setItem("cpc.sync-card-open", syncCard.open ? "1" : "0");
+      });
+    }
+
+    loadSyncSettings();
   });
 
   ["server", "client"].forEach((role) => {
