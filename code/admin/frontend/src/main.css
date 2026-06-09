@@ -10753,6 +10753,115 @@ body.page-forwarding .fwd-no-match-sub {
   background: var(--border, rgba(255, 255, 255, 0.12));
   margin: 0 2px;
 }
+#cfg-form .field-token,
+#cfg-form .field-chips {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  transition: background 0.12s ease;
+}
+#cfg-form .field-token:hover,
+#cfg-form .field-chips:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.gc-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0;
+}
+.gc-label-row .token-label-btn {
+  position: static;
+  margin: 0;
+}
+.gc-field-hint {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.7;
+  line-height: 1.4;
+  margin: 0 0 4px;
+}
+.gc-settings-section {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 22px;
+  grid-column: 1 / -1;
+  margin-top: -4px;
+}
+@media (max-width: 900px) {
+  .gc-settings-section {
+    grid-template-columns: 1fr;
+  }
+}
+.gc-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  transition: background 0.12s ease;
+}
+.gc-setting-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.gc-setting-row > .proxy-settings-label {
+  flex: 1 1 0%;
+  min-width: 0;
+  margin-right: auto;
+}
+.gc-setting-row .proxy-settings-label > span:first-child {
+  font-size: 13px;
+  font-weight: 500;
+}
+.gc-setting-row .proxy-settings-sublabel {
+  font-size: 11px;
+}
+.gc-setting-control {
+  flex-shrink: 0;
+  display: inline-flex !important;
+  align-items: center;
+  margin: 0;
+  margin-left: auto;
+}
+.gc-setting-control.toggle .toggle-track {
+  min-width: 38px;
+}
+.gc-setting-chips {
+  flex-direction: column;
+  align-items: stretch;
+}
+.gc-select {
+  width: 100px;
+  height: 34px;
+  padding: 0 28px 0 12px;
+  font-size: 13px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #140b26;
+  color: var(--text);
+  outline: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239e95b7' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  transition: border-color 0.15s ease;
+}
+.gc-select:focus {
+  border-color: var(--brand, var(--accent));
+}
+@media (max-width: 900px) {
+  .gc-settings-section {
+    grid-template-columns: 1fr;
+  }
+}
 
 /* ─── Mapping Modal ─── */
 .mapping-form {
@@ -11147,7 +11256,6 @@ body.page-forwarding .fwd-no-match-sub {
   gap: 10px;
   cursor: pointer;
   list-style: none;
-  user-select: none;
   padding: 0;
 }
 .srv-proxy-summary::-webkit-details-marker {
@@ -11181,6 +11289,8 @@ body.page-forwarding .fwd-no-match-sub {
 .srv-proxy-summary h3 {
   margin: 0;
   font-size: 15px;
+  user-select: text;
+  cursor: text;
 }
 .srv-proxy-chip {
   font-size: 11px;
@@ -11309,7 +11419,6 @@ body.page-forwarding .fwd-no-match-sub {
 .proxy-settings-unit {
   font-size: 11px;
   color: var(--muted);
-  min-width: 48px;
 }
 .proxy-settings-footer-row {
   display: flex;

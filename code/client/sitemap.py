@@ -11,6 +11,7 @@
 from __future__ import annotations
 import asyncio
 import logging
+import random
 from collections import deque
 from typing import Any, List, Dict, Optional, Set
 import discord
@@ -35,6 +36,7 @@ class SitemapService:
         self._queue_task: Optional[asyncio.Task] = None
         self._startup_delay: int = 15        # seconds before first sync
         self._inter_guild_delay: int = 3     # seconds between guilds
+        self._randomize_order: bool = True   # shuffle guild order
 
     def _pick_guild(self) -> Optional[discord.Guild]:
         return self.bot.guilds[0] if self.bot.guilds else None
@@ -133,11 +135,12 @@ class SitemapService:
 
     def enqueue_all(self) -> None:
         """Queue all mapped guilds for sitemap processing."""
-        for gid in self._mapped_original_ids():
-            gid = int(gid)
-            if gid not in self._queue_set:
-                self._queue.append(gid)
-                self._queue_set.add(gid)
+        ids = [int(gid) for gid in self._mapped_original_ids() if int(gid) not in self._queue_set]
+        if self._randomize_order and ids:
+            random.shuffle(ids)
+        for gid in ids:
+            self._queue.append(gid)
+            self._queue_set.add(gid)
         if self._queue:
             self.logger.info(
                 "[sitemap] Queued %d guilds for sync", len(self._queue)

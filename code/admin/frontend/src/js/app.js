@@ -723,6 +723,15 @@
         chipsEl.classList.remove("locked-field");
       }
     });
+
+    // Wire auto-start toggle to hidden select
+    const gcAutoToggle = document.getElementById("gc-autostart-toggle");
+    const gcAutoSelect = document.getElementById("COPYCORD_AUTOSTART");
+    if (gcAutoToggle && gcAutoSelect) {
+      gcAutoToggle.addEventListener("change", () => {
+        gcAutoSelect.value = gcAutoToggle.checked ? "true" : "false";
+      });
+    }
   }
 
   function setGuildCardsLocked(running) {
@@ -5570,6 +5579,7 @@
     // ─── Sync Timing Settings ─────────────────────────────────────────────
     const syncStartupDelay = document.getElementById("sync-startup-delay");
     const syncGuildDelay   = document.getElementById("sync-guild-delay");
+    const syncRandomize    = document.getElementById("sync-randomize");
     const syncCard         = document.getElementById("sync-settings-card");
 
     async function loadSyncSettings() {
@@ -5579,6 +5589,7 @@
         if (j.ok && j.settings) {
           if (syncStartupDelay) syncStartupDelay.value = j.settings.SYNC_STARTUP_DELAY || 15;
           if (syncGuildDelay) syncGuildDelay.value = j.settings.SYNC_INTER_GUILD_DELAY || 3;
+          if (syncRandomize) syncRandomize.checked = !!(j.settings.SYNC_RANDOMIZE_ORDER ?? 1);
         }
       } catch (e) { console.error("Failed to load sync settings:", e); }
     }
@@ -5590,6 +5601,7 @@
         const settings = {};
         if (syncStartupDelay) settings.SYNC_STARTUP_DELAY = parseInt(syncStartupDelay.value, 10) || 15;
         if (syncGuildDelay) settings.SYNC_INTER_GUILD_DELAY = parseInt(syncGuildDelay.value, 10) || 3;
+        if (syncRandomize) settings.SYNC_RANDOMIZE_ORDER = syncRandomize.checked ? 1 : 0;
         try {
           await fetch("/api/sync/settings", {
             method: "PUT",
@@ -5602,6 +5614,7 @@
 
     if (syncStartupDelay) syncStartupDelay.addEventListener("change", scheduleSyncSave);
     if (syncGuildDelay) syncGuildDelay.addEventListener("change", scheduleSyncSave);
+    if (syncRandomize) syncRandomize.addEventListener("change", scheduleSyncSave);
 
     if (syncCard) {
       if (localStorage.getItem("cpc.sync-card-open") === "1") syncCard.open = true;

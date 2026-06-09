@@ -4175,6 +4175,7 @@ async def api_server_proxies_test_stop():
 _SYNC_SETTINGS_KEYS = {
     "SYNC_STARTUP_DELAY": 15,
     "SYNC_INTER_GUILD_DELAY": 3,
+    "SYNC_RANDOMIZE_ORDER": 1,
 }
 
 

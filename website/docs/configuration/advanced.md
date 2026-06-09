@@ -160,6 +160,7 @@ Configure sync timing on the **Configuration** page under the **Sync Settings** 
 |---------|---------|-------------|
 | Startup Delay | 15s | Wait time after login before building sitemaps |
 | Inter-Guild Delay | 3s | Pause between each server during startup sync |
+| Randomize Order | On | Process servers in a random order each startup to avoid predictable patterns |
 
 ### Rate limit handling
 

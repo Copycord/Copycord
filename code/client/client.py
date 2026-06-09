@@ -161,6 +161,8 @@ class ClientListener:
                 return default
         self.sitemap._startup_delay = _db_int_sync("SYNC_STARTUP_DELAY", 15)
         self.sitemap._inter_guild_delay = _db_int_sync("SYNC_INTER_GUILD_DELAY", 3)
+        _rand_raw = (self.db.get_config("SYNC_RANDOMIZE_ORDER", "") or "").strip().lower()
+        self.sitemap._randomize_order = _rand_raw not in ("0", "false", "no") if _rand_raw else True
         self.ui_controller = ClientUiController(
             bus=self.bus,
             admin_base_url=self.config.ADMIN_WS_URL,
