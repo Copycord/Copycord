@@ -1945,12 +1945,19 @@
       .value.trim();
 
     const settings = {};
+    // Hidden selects (message features from sub-modal)
     document
       .querySelectorAll("#mapping-form select[id^='map_']")
       .forEach((sel) => {
         const key = sel.id.replace(/^map_/, "");
-        const val = sel.value;
-        settings[key] = String(val).toLowerCase() === "true";
+        settings[key] = String(sel.value).toLowerCase() === "true";
+      });
+    // Toggle checkboxes (main settings)
+    document
+      .querySelectorAll("#mapping-form input[data-map-toggle]")
+      .forEach((cb) => {
+        const key = cb.name;
+        if (key) settings[key] = cb.checked;
       });
 
     return {
@@ -2484,6 +2491,23 @@
         sel.dispatchEvent(new Event("change", { bubbles: true }));
       });
 
+    // Populate toggle checkboxes
+    document
+      .querySelectorAll("#mapping-form input[data-map-toggle]")
+      .forEach((cb) => {
+        const key = cb.name;
+        let rawVal;
+        if (cloneFrom && cloneFrom.settings && key in cloneFrom.settings) {
+          rawVal = cloneFrom.settings[key];
+        } else if (isEdit && mapping?.settings && key in mapping.settings) {
+          rawVal = mapping.settings[key];
+        } else {
+          rawVal = DEFAULT_MAPPING_SETTINGS[key];
+        }
+        if (typeof rawVal === "string") rawVal = rawVal.toLowerCase() === "true";
+        cb.checked = !!rawVal;
+      });
+
     const mappingFormEl = document.getElementById("mapping-form");
     if (mappingFormEl) {
       MAPPING_BASELINE = snapshotForm(mappingFormEl);
@@ -2599,12 +2623,24 @@
 
     // Anonymize
     if (usernameEl) usernameEl.textContent = isAnon ? "SwiftFox123" : "Copycord";
-    if (avatarEl) avatarEl.style.filter = isAnon ? "hue-rotate(180deg) saturate(1.5)" : "";
+    if (avatarEl) {
+      if (isAnon) {
+        avatarEl.src = "https://picsum.photos/seed/preview42/200";
+        avatarEl.onerror = () => { avatarEl.src = "/static/logo.png"; avatarEl.onerror = null; };
+      } else {
+        avatarEl.src = "/static/logo.png";
+        avatarEl.onerror = null;
+      }
+    }
 
     // Message content with mention previews
     if (contentEl) {
-      const everyone = noEveryone ? "" : ` <span class="msg-mention">@everyone</span>`;
-      const role = noRoles ? "" : ` <span class="msg-mention msg-mention--role">@Moderator</span>`;
+      const everyone = noEveryone
+        ? ` <span class="msg-mention-plain">@everyone</span>`
+        : ` <span class="msg-mention">@everyone</span>`;
+      const role = noRoles
+        ? ` <span class="msg-mention-plain">@Moderator</span>`
+        : ` <span class="msg-mention msg-mention--role">@Moderator</span>`;
       contentEl.innerHTML = `Hey${everyone} check this out${role}`;
     }
 
@@ -2613,7 +2649,7 @@
     if (getMsgFeatureState("APPEND_TIMESTAMP")) parts.push("Oct 15, 2025 3:42 PM");
     if (getMsgFeatureState("APPEND_AUTHOR")) {
       const name = isAnon ? "SwiftFox123" : "Copycord";
-      parts.push(`by <strong>${name}</strong>`);
+      parts.push(`<strong>${name}</strong>`);
     }
     msgFeaturesPreview.innerHTML = parts.length ? parts.join(" · ") : "";
   }
@@ -4141,13 +4177,39 @@
 
       fields.forEach((field) => {
         const key = (field.dataset.settingKey || "").toLowerCase();
-        const label = (
-          field.querySelector(".label-text")?.textContent || ""
+        const name = (
+          field.querySelector(".mapping-toggle-name")?.textContent || ""
+        ).toLowerCase();
+        const desc = (
+          field.querySelector(".mapping-toggle-desc")?.textContent || ""
         ).toLowerCase();
 
-        const match = !q || key.includes(q) || label.includes(q);
+        const match = !q || key.includes(q) || name.includes(q) || desc.includes(q);
         field.style.display = match ? "" : "none";
       });
+
+      // Hide sections with no matches, auto-expand when searching
+      let anyMatchTotal = false;
+      document.querySelectorAll("#mapping-form .mapping-settings-section").forEach((section) => {
+        const rows = section.querySelectorAll(".mapping-setting-field");
+        const anyVisible = Array.from(rows).some(r => r.style.display !== "none");
+        section.style.display = anyVisible ? "" : "none";
+        if (anyVisible) anyMatchTotal = true;
+        if (q && anyVisible) section.open = true;
+        if (!q) section.open = false;
+      });
+
+      // Show/hide no results message
+      let noResults = document.getElementById("mapping-no-results");
+      if (!noResults) {
+        noResults = document.createElement("div");
+        noResults.id = "mapping-no-results";
+        noResults.className = "mapping-no-results";
+        noResults.textContent = "No settings match your search";
+        const toolbar = document.querySelector(".mapping-toolbar");
+        if (toolbar) toolbar.after(noResults);
+      }
+      noResults.style.display = (q && !anyMatchTotal) ? "" : "none";
     }
 
     input.addEventListener("input", applyFilter);

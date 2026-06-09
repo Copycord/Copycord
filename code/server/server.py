@@ -7698,9 +7698,8 @@ class ServerReceiver:
                         pass
 
             if mapping_settings.get("APPEND_AUTHOR", False):
-                author = msg.get("author")
-                if author:
-                    append_parts.append(f"by **{author}**")
+                if custom_username:
+                    append_parts.append(f"**{custom_username}**")
 
             if append_parts:
                 footer = "-# " + " · ".join(append_parts)

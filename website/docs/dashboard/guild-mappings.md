@@ -27,7 +27,27 @@ Click the **toggle** button next to a mapping to pause or resume it.
 
 ### Edit settings
 
-Each mapping has its own set of [cloning options](/docs/configuration/cloning-options) that control what gets synced. Click on a mapping to view and edit its settings.
+Each mapping has its own set of [cloning options](/docs/configuration/cloning-options) that control what gets synced. Click on a mapping to view and edit its settings. Settings are organized into sections:
+
+- **General** — master cloning toggle, message cloning, webhooks
+- **Channels** — channel deletion, renaming, repositioning, permissions
+- **Messages** — message editing, deletion, resending
+- **Roles** — role cloning, deletion, permissions, icons
+- **Assets** — emoji, stickers, voice/stage channels
+- **Server Identity** — server icon, banner, splash, description
+
+### Message features
+
+Click **Optional Message Features** at the bottom of the mapping settings to customize how cloned messages appear:
+
+- **Tag Replies** — prepend a link when a message is a reply
+- **Anonymize Users** — replace usernames with random identities
+- **Disable @everyone** — strip @everyone and @here pings
+- **Disable Role Mentions** — strip role mention pings
+- **Append Timestamp** — show the original message timestamp
+- **Append Author** — show the original author's name
+
+A live preview shows how the combined settings affect the cloned message.
 
 ### Delete a mapping
 

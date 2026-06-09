@@ -248,53 +248,43 @@
     "HOST_GUILD_ID": "ID of the host server to mirror. Your account bot must be a member of this server.",
     "CLONE_GUILD_ID": "ID of the clone server. Your bot must be a member of this server.",
     "DELETE_ROLES": "When enabled, remove any roles in the clone that do not exist in the host.",
-    "UPDATE_ROLES": "When enabled, role properties (name, color, permissions) won't be synced after creation. You can
-    freely edit them in the clone.",
+    "UPDATE_ROLES": "Keep role properties (name, color, permissions) in sync after creation. When off, you can freely edit roles in the clone.",
     "MIRROR_ROLE_PERMISSIONS": "When enabled, mirror role permissions from the host to the clone.",
     "EDIT_MESSAGES": "Messages that are edited in the host will be edited in the clone.",
-    "RESEND_EDITED_MESSAGES": "When enabled, if a message edited in the host does not exist in the clone, it will be resent as a new message. Requires EDIT_MESSAGES to be enabled.",
+    "RESEND_EDITED_MESSAGES": "When enabled, if a message edited in the host does not exist in the clone, it will be resent as a new message. Requires Edit Messages to be enabled.",
     "DELETE_MESSAGES": "Messages that are deleted in the host will be deleted in the clone.",
     "DELETE_THREADS": "When enabled, delete in the clone any threads that were removed in the host.",
     "DELETE_CHANNELS": "When enabled, delete in the clone any channels that were removed in the host.",
     "CLONE_EMOJI": "When enabled, synchronize emojis from the host to the clone.",
     "CLONE_STICKER": "When enabled, synchronize stickers from the host to the clone.",
     "CLONE_ROLES": "When enabled, synchronize roles from the host to the clone.",
-    "MIRROR_CHANNEL_PERMISSIONS": "When enabled, channel permissions will sync with the host. CLONE_ROLES must be
-    enabled.",
-    "ENABLE_CLONING": "Master switch for cloning. Turn this off if you don't want Copycord to actively clone/sync
-    servers, but still want to use the other features.",
+    "MIRROR_CHANNEL_PERMISSIONS": "When enabled, channel permissions will sync with the host. Clone Roles must be enabled.",
+    "ENABLE_CLONING": "Master switch for cloning. Turn this off to stop all sync activity while keeping other features running.",
     "CLONE_MESSAGES": "When enabled, messages sent in the host will be copied to the clone in real-time. When disabled, webhook creation is also skipped during sync. Webhooks will be created automatically when re-enabled.",
     "REPOSITION_CHANNELS": "When enabled, channels moved in the host server will be repositioned in the clone.",
     "RENAME_CHANNELS": "When enabled, channels/categories renamed in the host server will be renamed in the clone.",
     "SYNC_CHANNEL_NSFW": "When enabled, NSFW flags for channels will be synchronized from the host to the clone.",
     "SYNC_CHANNEL_TOPIC": "When enabled, channel topics will be synchronized from the host to the clone.",
-    "SYNC_CHANNEL_SLOWMODE": "When enabled, slowmode settings for channels will be synchronized from the host to the
-    clone.",
+    "SYNC_CHANNEL_SLOWMODE": "When enabled, slowmode settings for channels will be synchronized from the host to the clone.",
     "CLONE_VOICE": "When enabled, voice channels will be cloned from the host to the clone.",
-    "CLONE_VOICE_PROPERTIES": "When enabled, voice channel properties (bitrate, user limit) will be synchronized from
-    the host to the clone.",
+    "CLONE_VOICE_PROPERTIES": "When enabled, voice channel properties (bitrate, user limit) will be synchronized from the host to the clone.",
     "CLONE_STAGE": "When enabled, stage channels will be cloned from the host to the clone.",
-    "CLONE_STAGE_PROPERTIES": "When enabled, stage channel properties (bitrate, user limit) will be synchronized from
-    the host to the clone.",
-    "CLONE_GUILD_ICON": "When enabled, the guild icon will be cloned from the host to the clone.",
-    "CLONE_GUILD_BANNER": "When enabled, the guild banner will be cloned from the host to the clone.",
-    "CLONE_GUILD_SPLASH": "When enabled, the guild splash will be cloned from the host to the clone.",
-    "CLONE_GUILD_DISCOVERY_SPLASH": "When enabled, the guild discovery splash will be cloned from the host to the
-    clone.",
-    "SYNC_GUILD_DESCRIPTION": "When enabled, the guild description will be synchronized from the host to the clone.",
-    "SYNC_FORUM_PROPERTIES": "When enabled, forum properties (topic, tags, etc.) will be synchronized from the host to
-    the clone.",
+    "CLONE_STAGE_PROPERTIES": "When enabled, stage channel properties (bitrate, user limit) will be synchronized from the host to the clone.",
+    "CLONE_GUILD_ICON": "Clone the server icon from the host to the clone.",
+    "CLONE_GUILD_BANNER": "Clone the server banner from the host to the clone.",
+    "CLONE_GUILD_SPLASH": "Clone the invite splash image from the host to the clone.",
+    "CLONE_GUILD_DISCOVERY_SPLASH": "Clone the discovery splash image from the host to the clone.",
+    "SYNC_GUILD_DESCRIPTION": "Sync the server description from the host to the clone.",
+    "SYNC_FORUM_PROPERTIES": "When enabled, forum properties (topic, tags, etc.) will be synchronized from the host to the clone.",
     "REARRANGE_ROLES": "When enabled, roles will be rearranged in the clone to match the host server's role hierarchy.",
-    "CLONE_ROLE_ICONS": "When enabled, role icons (custom images and unicode emoji) will be cloned from the host to the clone. Requires the clone server to have the ROLE_ICONS feature (Boost Level 2+).",
-    "ANONYMIZE_USERS": "When enabled, user identities will be anonymized with random names (e.g., SwiftFox123) and
-    random avatar images.",
+    "CLONE_ROLE_ICONS": "When enabled, role icons (custom images and unicode emoji) will be cloned from the host to the clone. Requires the clone server to have Boost Level 2+.",
+    "ANONYMIZE_USERS": "When enabled, user identities will be anonymized with random names and avatar images.",
     "DISABLE_EVERYONE_MENTIONS": "When enabled, @everyone and @here mentions will be disabled in mirrored messages.",
     "DISABLE_ROLE_MENTIONS": "When enabled, role mentions will be disabled in mirrored messages to stop role pings.",
     "TAG_REPLY_MSG": "When enabled, messages that are replies will include a tag of the message being replied to.",
     "APPEND_TIMESTAMP": "When enabled, the original message timestamp is appended below the cloned message in unix format.",
     "APPEND_AUTHOR": "When enabled, the original author's username is appended below the cloned message.",
-    "DB_CLEANUP_MSG": "When enabled, runs an hourly task to delete messages stored in the database that are older than 7
-    days.",
+    "DB_CLEANUP_MSG": "Automatically clean up message records older than 7 days from the database.",
     "ON_DEMAND_WEBHOOKS": "When enabled, webhooks are only created when a channel receives its first message, instead of during sync. This makes server cloning much faster by skipping upfront webhook creation.",
     "COPYCORD_AUTOSTART": "Automatically start the server and client when Copycord launches. Valid tokens are required.",
     "LOG_MAX_SIZE_MB": "Maximum size of each log file in megabytes before older entries are pruned. Set to 0 to disable pruning."
@@ -771,12 +761,55 @@
             </div>
           </div>
 
-          <div class="mapping-section">
+          <div class="mapping-toolbar">
             <div class="mapping-search-row">
               <input id="mappingSettingsSearch" class="mapping-search-input" type="text"
                 placeholder="Search settings…" autocomplete="off" />
             </div>
+            <button type="button" class="mapping-msg-features-btn" id="msg-features-open">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+              Message Features
+            </button>
           </div>
+
+          {% set FRIENDLY_NAMES = {
+            "ENABLE_CLONING": "Enable Cloning",
+            "CLONE_MESSAGES": "Clone Messages",
+            "ON_DEMAND_WEBHOOKS": "On-Demand Webhooks",
+            "DB_CLEANUP_MSG": "Auto-Clean Message DB",
+            "DELETE_CHANNELS": "Delete Removed Channels",
+            "DELETE_THREADS": "Delete Removed Threads",
+            "REPOSITION_CHANNELS": "Reposition Channels",
+            "RENAME_CHANNELS": "Rename Channels",
+            "SYNC_CHANNEL_NSFW": "Sync NSFW Flag",
+            "SYNC_CHANNEL_TOPIC": "Sync Channel Topic",
+            "SYNC_CHANNEL_SLOWMODE": "Sync Slowmode",
+            "SYNC_FORUM_PROPERTIES": "Sync Forum Properties",
+            "MIRROR_CHANNEL_PERMISSIONS": "Mirror Channel Permissions",
+            "DELETE_MESSAGES": "Delete Messages",
+            "EDIT_MESSAGES": "Edit Messages",
+            "RESEND_EDITED_MESSAGES": "Resend Edited Messages",
+            "CLONE_ROLES": "Clone Roles",
+            "DELETE_ROLES": "Delete Removed Roles",
+            "UPDATE_ROLES": "Update Role Properties",
+            "REARRANGE_ROLES": "Rearrange Roles",
+            "CLONE_ROLE_ICONS": "Clone Role Icons",
+            "MIRROR_ROLE_PERMISSIONS": "Mirror Role Permissions",
+            "CLONE_EMOJI": "Clone Emoji",
+            "CLONE_STICKER": "Clone Stickers",
+            "CLONE_VOICE": "Clone Voice Channels",
+            "CLONE_VOICE_PROPERTIES": "Sync Voice Properties",
+            "CLONE_STAGE": "Clone Stage Channels",
+            "CLONE_STAGE_PROPERTIES": "Sync Stage Properties",
+            "CLONE_GUILD_ICON": "Clone Server Icon",
+            "CLONE_GUILD_BANNER": "Clone Server Banner",
+            "CLONE_GUILD_SPLASH": "Clone Invite Splash",
+            "CLONE_GUILD_DISCOVERY_SPLASH": "Clone Discovery Splash",
+            "SYNC_GUILD_DESCRIPTION": "Sync Server Description",
+          } %}
 
           {% set sections = {
             "General": ["ENABLE_CLONING", "CLONE_MESSAGES", "ON_DEMAND_WEBHOOKS", "DB_CLEANUP_MSG"],
@@ -788,34 +821,29 @@
           } %}
 
           {% for section_name, keys in sections.items() %}
-          <div class="mapping-section mapping-settings-section">
-            <div class="mapping-section-header">{{ section_name }}</div>
-            {% for k in keys %}
-            <div class="mapping-toggle-row mapping-setting-field" data-setting-key="{{ k | lower }}">
-              <div class="mapping-toggle-info">
-                <span class="mapping-toggle-name">{{ k }}</span>
-                {% if FIELD_TIPS.get(k) %}
-                <span class="mapping-toggle-desc">{{ FIELD_TIPS[k] }}</span>
-                {% endif %}
+          <details class="mapping-section mapping-settings-section">
+            <summary class="mapping-section-header">
+              <span class="mapping-section-chev" aria-hidden="true">&#9662;</span>
+              <span>{{ section_name }}</span>
+            </summary>
+            <div class="mapping-section-body">
+              {% for k in keys %}
+              <div class="mapping-toggle-row mapping-setting-field" data-setting-key="{{ k | lower }}">
+                <div class="mapping-toggle-info">
+                  <span class="mapping-toggle-name">{{ FRIENDLY_NAMES.get(k, k) }}</span>
+                  {% if FIELD_TIPS.get(k) %}
+                  <span class="mapping-toggle-desc">{{ FIELD_TIPS[k] }}</span>
+                  {% endif %}
+                </div>
+                <label class="toggle mapping-toggle-switch">
+                  <input type="checkbox" id="map_{{ k }}" name="{{ k }}" data-map-toggle />
+                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                </label>
               </div>
-              <label class="toggle mapping-toggle-switch">
-                <input type="checkbox" id="map_{{ k }}" name="{{ k }}" data-map-toggle />
-                <span class="toggle-track"><span class="toggle-thumb"></span></span>
-              </label>
+              {% endfor %}
             </div>
-            {% endfor %}
-          </div>
+          </details>
           {% endfor %}
-
-          <div class="mapping-section">
-            <button type="button" class="msg-features-open-btn" id="msg-features-open">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-              </svg>
-              Optional Message Features
-            </button>
-          </div>
 
           <div class="mapping-form-footer">
             <button class="btn btn-ghost" type="button" id="mapping-cancel-btn" hidden>
