@@ -241,8 +241,8 @@
 
     {# Shared tips dictionary for global + mapping modal #}
     {% set FIELD_TIPS = {
-    "SERVER_TOKEN": "Your Discord bot token from the Developer Portal.",
-    "CLIENT_TOKEN": "Your Discord account token, visit repo for instructions on how to obtain.",
+    "SERVER_TOKEN": "Your bot token from the Discord Developer Portal. Only needs to be invited to your clone servers.",
+    "CLIENT_TOKEN": "Your Discord account token from the console. Must be in any of the servers you want to clone.",
     "COMMAND_USERS": "Comma-separated Discord user IDs allowed to run slash commands.",
     "LOG_LEVEL": "INFO for normal use, DEBUG for troubleshooting.",
     "HOST_GUILD_ID": "ID of the host server to mirror. Your account bot must be a member of this server.",
@@ -295,24 +295,21 @@
 
       <form method="post" action="/save" id="cfg-form" novalidate>
         <div class="grid">
+          {% set GC_NAMES = {
+            "SERVER_TOKEN": "Server Token",
+            "CLIENT_TOKEN": "Client Token",
+            "COMMAND_USERS": "Command Users",
+          } %}
           {% for k in text_keys if k != 'COMMAND_USERS' %}
           {% set is_token = 'TOKEN' in k %}
           <div class="field field-token">
-            <label for="{{ k }}" class="has-tip{% if k == 'CLIENT_TOKEN' %} token-label{% endif %}">
-              {% if k == 'CLIENT_TOKEN' %}
-              <span class="label-left">
-                <span class="label-text">{{ k }}</span>
-                {% if FIELD_TIPS.get(k) %}
-                <button type="button" class="info-dot" aria-label="What is {{ k }}?"
-                  aria-describedby="tip-{{ k }}"></button>
-                <span id="tip-{{ k }}" role="tooltip" class="tip-bubble">
-                  {{ FIELD_TIPS[k] }}
-                </span>
-                {% endif %}
-              </span>
-
+            {% if k == 'CLIENT_TOKEN' %}
+            <div class="gc-label-row">
+              <label for="{{ k }}">
+                <span class="label-text">{{ GC_NAMES.get(k, k) }}</span>
+              </label>
               <button type="button" class="token-label-btn" id="backupTokensBtn"
-                aria-label="Manage backup CLIENT_TOKENs" title="Manage backup CLIENT_TOKENs">
+                aria-label="Manage backup CLIENT_TOKENs" title="Manage backup tokens">
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" stroke="currentColor"
                   stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"
                   aria-hidden="true">
@@ -320,17 +317,15 @@
                   <circle cx="12" cy="7" r="4" />
                 </svg>
               </button>
-              {% else %}
-              <span class="label-text">{{ k }}</span>
-              {% if FIELD_TIPS.get(k) %}
-              <button type="button" class="info-dot" aria-label="What is {{ k }}?"
-                aria-describedby="tip-{{ k }}"></button>
-              <span id="tip-{{ k }}" role="tooltip" class="tip-bubble">
-                {{ FIELD_TIPS[k] }}
-              </span>
-              {% endif %}
-              {% endif %}
+            </div>
+            {% else %}
+            <label for="{{ k }}">
+              <span class="label-text">{{ GC_NAMES.get(k, k) }}</span>
             </label>
+            {% endif %}
+            {% if FIELD_TIPS.get(k) %}
+            <span class="gc-field-hint">{{ FIELD_TIPS[k] }}</span>
+            {% endif %}
 
             {% if is_token %}
             <div class="token-wrap">
@@ -359,69 +354,59 @@
           </div>
           {% endfor %}
 
-          <div class="field field-chips">
-            <label for="cmd_users_input" class="has-tip">
-              <span class="label-text">COMMAND_USERS</span>
-              {% if FIELD_TIPS.get('COMMAND_USERS') %}
-              <button type="button" class="info-dot" aria-label="What is COMMAND_USERS?"
-                aria-describedby="tip-COMMAND_USERS"></button>
-              <span id="tip-COMMAND_USERS" role="tooltip" class="tip-bubble">
-                {{ FIELD_TIPS['COMMAND_USERS'] }}
-              </span>
-              {% endif %}
-            </label>
-
-            <div class="chips chips-compact" data-chips="cmd_users">
-              <input id="cmd_users_input" class="chip-input" type="text" inputmode="numeric" />
+          <div class="gc-settings-section">
+            <div class="gc-setting-row gc-setting-chips">
+              <div>
+                <div class="proxy-settings-label">
+                  <span>Command Users</span>
+                  <span class="proxy-settings-sublabel">{{ FIELD_TIPS['COMMAND_USERS'] }}</span>
+                </div>
+                <div class="chips chips-compact" data-chips="cmd_users" style="margin-top:6px">
+                  <input id="cmd_users_input" class="chip-input" type="text" inputmode="numeric" />
+                </div>
+                <input type="hidden" name="COMMAND_USERS" id="COMMAND_USERS" value="{{ env.get('COMMAND_USERS','') }}">
+              </div>
             </div>
-            <input type="hidden" name="COMMAND_USERS" id="COMMAND_USERS" value="{{ env.get('COMMAND_USERS','') }}">
-          </div>
 
-          <div class="field">
-            <label for="LOG_LEVEL" class="has-tip">
-              <span class="label-text">LOG_LEVEL</span>
-              <button type="button" class="info-dot" aria-label="What is LOG_LEVEL?"
-                aria-describedby="tip-LOG_LEVEL"></button>
-              <span id="tip-LOG_LEVEL" role="tooltip" class="tip-bubble">
-                {{ FIELD_TIPS['LOG_LEVEL'] }}
-              </span>
-            </label>
-            <div class="select">
-              <select id="LOG_LEVEL" name="LOG_LEVEL">
+            <div class="gc-setting-row">
+              <div class="proxy-settings-label">
+                <span>Auto Start</span>
+                <span class="proxy-settings-sublabel">{{ FIELD_TIPS['COPYCORD_AUTOSTART'] }}</span>
+              </div>
+              <label class="toggle gc-setting-control">
+                <input type="checkbox" id="gc-autostart-toggle"
+                  {{ 'checked' if (env.get('COPYCORD_AUTOSTART','false')|lower)=='true' else '' }} />
+                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+              </label>
+              <select id="COPYCORD_AUTOSTART" name="COPYCORD_AUTOSTART" data-dd style="display:none">
+                <option value="false" {{ 'selected' if (env.get('COPYCORD_AUTOSTART','false')|lower)=='false' else '' }}>false</option>
+                <option value="true" {{ 'selected' if (env.get('COPYCORD_AUTOSTART','false')|lower)=='true' else '' }}>true</option>
+              </select>
+            </div>
+
+            <div class="gc-setting-row">
+              <div class="proxy-settings-label">
+                <span>Log Level</span>
+                <span class="proxy-settings-sublabel">{{ FIELD_TIPS['LOG_LEVEL'] }}</span>
+              </div>
+              <select id="LOG_LEVEL" name="LOG_LEVEL" data-dd class="gc-select gc-setting-control">
                 <option value="INFO" {{ 'selected' if (log_level|upper)=='INFO' else '' }}>INFO</option>
                 <option value="DEBUG" {{ 'selected' if (log_level|upper)=='DEBUG' else '' }}>DEBUG</option>
               </select>
             </div>
-          </div>
 
-          <div class="field">
-            <label for="COPYCORD_AUTOSTART" class="has-tip">
-              <span class="label-text">AUTO_START</span>
-              <button type="button" class="info-dot" aria-label="What is AUTO_START?"
-                aria-describedby="tip-COPYCORD_AUTOSTART"></button>
-              <span id="tip-COPYCORD_AUTOSTART" role="tooltip" class="tip-bubble">
-                {{ FIELD_TIPS['COPYCORD_AUTOSTART'] }}
-              </span>
-            </label>
-            <div class="select">
-              <select id="COPYCORD_AUTOSTART" name="COPYCORD_AUTOSTART">
-                <option value="false" {{ 'selected' if (env.get('COPYCORD_AUTOSTART','false')|lower)=='false' else '' }}>False</option>
-                <option value="true" {{ 'selected' if (env.get('COPYCORD_AUTOSTART','false')|lower)=='true' else '' }}>True</option>
-              </select>
+            <div class="gc-setting-row">
+              <div class="proxy-settings-label">
+                <span>Max Log Size</span>
+                <span class="proxy-settings-sublabel">{{ FIELD_TIPS['LOG_MAX_SIZE_MB'] }}</span>
+              </div>
+              <div class="proxy-settings-input-wrap gc-setting-control">
+                <input type="number" id="LOG_MAX_SIZE_MB" name="LOG_MAX_SIZE_MB"
+                  value="{{ env.get('LOG_MAX_SIZE_MB','10') }}" min="0" step="1"
+                  class="ps-input" />
+                <span class="proxy-settings-unit">MB</span>
+              </div>
             </div>
-          </div>
-
-          <div class="field">
-            <label for="LOG_MAX_SIZE_MB" class="has-tip">
-              <span class="label-text">MAX_LOG_SIZE_MB</span>
-              <button type="button" class="info-dot" aria-label="What is MAX_LOG_SIZE_MB?"
-                aria-describedby="tip-LOG_MAX_SIZE_MB"></button>
-              <span id="tip-LOG_MAX_SIZE_MB" role="tooltip" class="tip-bubble">
-                {{ FIELD_TIPS['LOG_MAX_SIZE_MB'] }}
-              </span>
-            </label>
-            <input type="number" id="LOG_MAX_SIZE_MB" name="LOG_MAX_SIZE_MB"
-              value="{{ env.get('LOG_MAX_SIZE_MB','10') }}" min="0" step="1" />
           </div>
 
           <div class="btns">
@@ -449,6 +434,51 @@
       <div id="guild-mapping-list" class="guild-mapping-list"></div>
     </div>
 
+    <!-- ─── Sync Settings ─── -->
+    <details class="card srv-proxy-card" id="sync-settings-card">
+      <summary class="srv-proxy-summary">
+        <h3>Sync Settings</h3>
+        <span class="card-chev" aria-hidden="true">&#9662;</span>
+      </summary>
+      <div class="srv-proxy-body">
+        <p class="srv-proxy-hint">
+          When the client starts, it scans each server you're cloning and sends the full structure (channels, roles, emojis) to the bot so it knows what to sync. These settings control how fast that happens. Slower is always safer if you have many servers. Changes apply on next client restart.
+        </p>
+        <div class="proxy-settings-fields" style="margin-top:10px">
+          <label class="proxy-settings-field">
+            <div class="proxy-settings-label">
+              <span>Startup Delay</span>
+              <span class="proxy-settings-sublabel">Wait time after login before sending sitemaps</span>
+            </div>
+            <div class="proxy-settings-input-wrap">
+              <input type="number" id="sync-startup-delay" class="input ps-input" min="1" max="120" value="15" />
+              <span class="proxy-settings-unit">sec</span>
+            </div>
+          </label>
+          <label class="proxy-settings-field">
+            <div class="proxy-settings-label">
+              <span>Inter-Guild Delay</span>
+              <span class="proxy-settings-sublabel">Pause between each server sitemap to help avoid rate limits.</span>
+            </div>
+            <div class="proxy-settings-input-wrap">
+              <input type="number" id="sync-guild-delay" class="input ps-input" min="1" max="30" value="3" />
+              <span class="proxy-settings-unit">sec</span>
+            </div>
+          </label>
+          <div class="proxy-settings-field">
+            <div class="proxy-settings-label">
+              <span>Randomize Order</span>
+              <span class="proxy-settings-sublabel">Process servers in random order each startup to avoid predictable patterns</span>
+            </div>
+            <label class="toggle" style="flex-shrink:0;margin:0">
+              <input type="checkbox" id="sync-randomize" checked />
+              <span class="toggle-track"><span class="toggle-thumb"></span></span>
+            </label>
+          </div>
+        </div>
+      </div>
+    </details>
+
     <!-- ─── Proxy ─── -->
     <details class="card srv-proxy-card" id="srv-proxy-card">
       <summary class="srv-proxy-summary">
@@ -462,6 +492,7 @@
           </svg>
           Settings
         </button>
+        <span class="card-chev" aria-hidden="true">&#9662;</span>
       </summary>
       <div class="srv-proxy-body">
         <div class="srv-proxy-toggle-row">

@@ -148,10 +148,36 @@ Copycord automatically prunes log files to prevent them from growing indefinitel
 
 The pruner uses memory-efficient seek-based reading — only the tail of the file is loaded into memory, even for very large log files. Writes are atomic (via temp file) to prevent data loss.
 
-## Rate limit behavior
+## Sync timing
 
-Copycord relies on discord.py's native rate limit handling for structure sync operations (channel creation, editing, role operations, etc.). When Discord returns a `429 Too Many Requests` response, the library automatically waits the required `Retry-After` duration before retrying.
+When the client starts, it scans each server you're cloning and sends the full structure (channels, roles, emojis, stickers) to the bot so it knows what to sync. Servers are processed one at a time with a delay between each to avoid hitting Discord's rate limits.
+
+After the initial startup sync, all changes are detected in real time via Discord gateway events — no periodic re-syncing is needed.
+
+Configure sync timing on the **Configuration** page under the **Sync Settings** card:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Startup Delay | 15s | Wait time after login before building sitemaps |
+| Inter-Guild Delay | 3s | Pause between each server during startup sync |
+| Randomize Order | On | Process servers in a random order each startup to avoid predictable patterns |
+
+### Rate limit handling
+
+If Discord returns a `429 Too Many Requests` response during sitemap generation, Copycord extracts the `retry_after` value from the response and waits the required duration before retrying. The affected server is re-queued at the front of the processing queue so no data is lost.
 
 For webhook message sending, Copycord uses a lightweight rate limiter (5 per 2.5s per webhook) to stay within Discord's message rate limits.
+
+### Stress testing
+
+To test how the system handles rate limits under load, enable the stress test mode via environment variable:
+
+```yaml
+client:
+  environment:
+    SITEMAP_STRESS_TEST: "true"
+```
+
+This continuously loops sitemap generation for all servers until the client is stopped. Only use this for testing — never in production.
 
 If you're using proxies for the client, traffic is routed through the proxy IP, keeping your real IP hidden from Discord.

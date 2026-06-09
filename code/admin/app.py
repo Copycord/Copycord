@@ -4172,6 +4172,49 @@ async def api_server_proxies_test_stop():
     return JSONResponse({"ok": False, "error": "No test running"})
 
 
+_SYNC_SETTINGS_KEYS = {
+    "SYNC_STARTUP_DELAY": 15,
+    "SYNC_INTER_GUILD_DELAY": 3,
+    "SYNC_RANDOMIZE_ORDER": 1,
+}
+
+
+@app.get("/api/sync/settings", response_class=JSONResponse)
+async def api_sync_settings_get():
+    """Return sync timing settings."""
+    try:
+        settings = {}
+        for key, default in _SYNC_SETTINGS_KEYS.items():
+            raw = (db.get_config(key, "") or "").strip()
+            try:
+                settings[key] = int(raw) if raw else default
+            except (ValueError, TypeError):
+                settings[key] = default
+        return JSONResponse({"ok": True, "settings": settings})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/sync/settings", response_class=JSONResponse)
+async def api_sync_settings_put(request: Request):
+    """Save sync timing settings."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    settings = payload.get("settings", {})
+    if not isinstance(settings, dict):
+        raise HTTPException(400, detail="settings must be an object")
+    try:
+        for key, default in _SYNC_SETTINGS_KEYS.items():
+            if key in settings:
+                val = max(1, int(settings[key]))
+                db.set_config(key, str(val))
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
 @app.post("/api/scraper/start", response_class=JSONResponse)
 async def api_scraper_start(request: Request):
     """Start standalone scraper with multiple tokens (single guild, immediate start)."""

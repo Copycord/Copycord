@@ -152,6 +152,17 @@ class ClientListener:
         self.sitemap = SitemapService(
             bot=self.bot, config=self.config, db=self.db, ws=self.ws, logger=logger
         )
+        # Load configurable sync timing from DB
+        def _db_int_sync(key, default):
+            raw = (self.db.get_config(key, "") or "").strip()
+            try:
+                return int(raw) if raw else default
+            except (ValueError, TypeError):
+                return default
+        self.sitemap._startup_delay = _db_int_sync("SYNC_STARTUP_DELAY", 15)
+        self.sitemap._inter_guild_delay = _db_int_sync("SYNC_INTER_GUILD_DELAY", 3)
+        _rand_raw = (self.db.get_config("SYNC_RANDOMIZE_ORDER", "") or "").strip().lower()
+        self.sitemap._randomize_order = _rand_raw not in ("0", "false", "no") if _rand_raw else True
         self.ui_controller = ClientUiController(
             bus=self.bus,
             admin_base_url=self.config.ADMIN_WS_URL,
@@ -891,15 +902,37 @@ class ClientListener:
 
         return channel, channel_id, guild
 
-    async def periodic_sync_loop(self):
+    async def _startup_sync(self):
+        """One-time sitemap sync on startup. Events handle changes after this."""
         await self.bot.wait_until_ready()
-        await asyncio.sleep(5)
-        while True:
+
+        startup_delay = self.sitemap._startup_delay
+        logger.info(
+            "[sitemap] Waiting %ds before startup sync", startup_delay
+        )
+        await asyncio.sleep(startup_delay)
+
+        stress_test = os.getenv("SITEMAP_STRESS_TEST", "").lower() in ("1", "true", "yes")
+
+        if stress_test:
+            cycle = 0
+            logger.warning("[sitemap] STRESS TEST enabled — will loop sitemaps continuously")
+            while True:
+                cycle += 1
+                logger.info("[sitemap] Stress test cycle %d", cycle)
+                try:
+                    await self.sitemap.build_and_send_all()
+                except Exception:
+                    logger.exception("[sitemap] Stress test cycle %d failed", cycle)
+                # Wait for the queue to finish before starting next cycle
+                while self.sitemap._queue:
+                    await asyncio.sleep(1)
+                await asyncio.sleep(2)
+        else:
             try:
                 await self.sitemap.build_and_send_all()
             except Exception:
-                logger.exception("Error in periodic sync loop")
-            await asyncio.sleep(self.config.SYNC_INTERVAL_SECONDS)
+                logger.exception("Error in startup sitemap sync")
 
     def schedule_sync(self, guild_id: int | None = None, delay: float = 1.0):
         """
@@ -958,8 +991,8 @@ class ClientListener:
         )
         logger.info("[🤖] %s", msg)
 
-        if self._sync_task is None:
-            self._sync_task = asyncio.create_task(self.periodic_sync_loop())
+        if self._sync_task is None or self._sync_task.done():
+            self._sync_task = asyncio.create_task(self._startup_sync())
 
         if self._ws_task is None:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
