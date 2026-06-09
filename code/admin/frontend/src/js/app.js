@@ -1866,6 +1866,13 @@
       } else {
         highlightTokenInputsFromErrors([]);
       }
+
+      // Enable invite button if bot client ID is available
+      const inviteBtn = document.getElementById("bot-invite-btn");
+      if (inviteBtn && data.bot_client_id) {
+        inviteBtn.href = `https://discord.com/oauth2/authorize?client_id=${data.bot_client_id}&permissions=8&integration_type=0&scope=bot`;
+        inviteBtn.classList.remove("bot-invite-disabled");
+      }
     } catch (err) {
       console.error("Token validation on load failed:", err);
     } finally {
@@ -5622,6 +5629,18 @@
         localStorage.setItem("cpc.sync-card-open", syncCard.open ? "1" : "0");
       });
     }
+
+    // Persist open/closed state for Global Config and Cloning Config
+    ["global-config-card", "guild-config-card"].forEach(id => {
+      const card = document.getElementById(id);
+      if (!card) return;
+      const key = `cpc.${id}-open`;
+      const saved = localStorage.getItem(key);
+      if (saved !== null) card.open = saved === "1";
+      card.addEventListener("toggle", () => {
+        localStorage.setItem(key, card.open ? "1" : "0");
+      });
+    });
 
     loadSyncSettings();
   });

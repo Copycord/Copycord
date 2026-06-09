@@ -202,6 +202,9 @@ th {
   flex-wrap: wrap;
   margin-top: 12px;
 }
+.flex-spacer {
+  flex: 1 1 0%;
+}
 .btns form {
   margin: 0;
   display: inline;
@@ -403,12 +406,6 @@ th {
   }
 }
 
-.badge-ok {
-  color: #c7f9cc;
-}
-.badge-stop {
-  color: #fecaca;
-}
 .small {
   font-size: 12px;
   opacity: 0.85;
@@ -1014,6 +1011,22 @@ table.runtime th:nth-child(3) {
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
   }
+}
+.status-chip {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--muted);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.status-chip:empty {
+  display: none;
 }
 .runtime-container {
   width: 100%;
@@ -11291,6 +11304,41 @@ body.page-forwarding .fwd-no-match-sub {
   font-size: 15px;
   user-select: text;
   cursor: text;
+}
+.card-doc-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  opacity: 0.5;
+  transition: opacity 0.15s ease, color 0.15s ease;
+  text-decoration: none;
+}
+.card-doc-link:hover {
+  opacity: 1;
+  color: var(--accent, #a78bfa);
+}
+.bot-invite-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent, #a78bfa);
+  text-decoration: none;
+  opacity: 0.8;
+  transition: opacity 0.15s ease;
+}
+.bot-invite-btn:hover {
+  opacity: 1;
+}
+.bot-invite-btn.bot-invite-disabled {
+  opacity: 0.3;
+  pointer-events: none;
+  cursor: default;
+}
+.bot-invite-btn svg {
+  flex-shrink: 0;
 }
 .srv-proxy-chip {
   font-size: 11px;

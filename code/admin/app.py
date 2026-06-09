@@ -704,15 +704,15 @@ async def _check_client_token_valid(raw_token: str) -> bool:
         return False
 
 
-async def _check_server_token_valid(bot_token: str) -> bool:
+async def _check_server_token_valid(bot_token: str) -> tuple[bool, Optional[str]]:
     """
-    Returns True if SERVER_TOKEN (bot token) is valid and actually a bot.
-    We hit /users/@me with Authorization: Bot <token>.
+    Returns (valid, bot_user_id) — checks if SERVER_TOKEN is valid and a bot.
+    The bot_user_id is the same as the application/client ID for invite URLs.
     """
     token = (bot_token or "").strip()
     if not token:
         LOGGER.debug("_check_server_token_valid | no token provided")
-        return False
+        return False, None
 
     url = f"{DISCORD_API_BASE}/users/@me"
     headers = {
@@ -757,14 +757,21 @@ async def _check_server_token_valid(bot_token: str) -> bool:
                         "_check_server_token_valid | token is not a bot user; rejecting for SERVER_TOKEN use"
                     )
 
-                return ok
+                # Store the bot ID for invite URL generation
+                if ok and uid:
+                    try:
+                        db.set_config("BOT_CLIENT_ID", str(uid))
+                    except Exception:
+                        pass
+
+                return ok, uid if ok else None
     except Exception as e:
         LOGGER.warning(
             "_check_server_token_valid | exception=%s bot_token=%s",
             repr(e),
             _redact_token(token),
         )
-        return False
+        return False, None
 
 
 async def _verify_tokens_for_save(values: dict[str, str]) -> list[str]:
@@ -794,12 +801,13 @@ async def _verify_tokens_for_save(values: dict[str, str]) -> list[str]:
         return errs
 
     client_ok = await _check_client_token_valid(raw_client)
-    server_ok = await _check_server_token_valid(raw_server)
+    server_ok, _bot_id = await _check_server_token_valid(raw_server)
 
     LOGGER.debug(
-        "_verify_tokens_for_save | results client_ok=%s server_ok=%s",
+        "_verify_tokens_for_save | results client_ok=%s server_ok=%s bot_id=%s",
         client_ok,
         server_ok,
+        _bot_id,
     )
 
     if not client_ok:
@@ -2002,11 +2010,18 @@ async def api_validate_tokens():
     )
     ok = not errs
 
+    bot_client_id = None
+    try:
+        bot_client_id = (db.get_config("BOT_CLIENT_ID", "") or "").strip() or None
+    except Exception:
+        pass
+
     return JSONResponse(
         {
             "ok": ok,
             "has_tokens": True,
             "errors": errs,
+            "bot_client_id": bot_client_id,
         }
     )
 
