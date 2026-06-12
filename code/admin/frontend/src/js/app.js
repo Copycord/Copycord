@@ -5544,7 +5544,79 @@
       });
     });
 
+    // ─── Notification Settings ──────────────────────────────────────────
+    const notifCard       = document.getElementById("notifications-card");
+    const notifWebhookUrl = document.getElementById("notif-webhook-url");
+    const notifTestBtn    = document.getElementById("notif-test-btn");
+    const notifToggles    = document.querySelectorAll(".notif-toggle input[data-event]");
+
+    async function loadNotifSettings() {
+      try {
+        const r = await fetch("/api/notifications/settings");
+        const j = await r.json();
+        if (!j.ok) return;
+        if (notifWebhookUrl) notifWebhookUrl.value = j.webhook_url || "";
+        notifToggles.forEach(cb => {
+          const key = cb.dataset.event;
+          if (key in j.events) cb.checked = j.events[key];
+        });
+      } catch (e) { console.error("Failed to load notification settings:", e); }
+    }
+
+    let _notifSaveTimer = null;
+    function scheduleNotifSave() {
+      clearTimeout(_notifSaveTimer);
+      _notifSaveTimer = setTimeout(async () => {
+        const events = {};
+        notifToggles.forEach(cb => { events[cb.dataset.event] = cb.checked; });
+        try {
+          await fetch("/api/notifications/settings", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              webhook_url: notifWebhookUrl ? notifWebhookUrl.value.trim() : "",
+              events,
+            }),
+          });
+        } catch (e) { console.error(e); }
+      }, 600);
+    }
+
+    if (notifWebhookUrl) notifWebhookUrl.addEventListener("input", scheduleNotifSave);
+    notifToggles.forEach(cb => cb.addEventListener("change", scheduleNotifSave));
+
+    if (notifTestBtn) {
+      notifTestBtn.addEventListener("click", async () => {
+        notifTestBtn.disabled = true;
+        notifTestBtn.textContent = "Sending…";
+        try {
+          const r = await fetch("/api/notifications/test", { method: "POST" });
+          const j = await r.json();
+          if (j.ok) {
+            showToast("Test notification sent!", { type: "success" });
+          } else {
+            showToast(j.error || "Failed to send test notification", { type: "error" });
+          }
+        } catch (e) {
+          showToast("Network error sending test", { type: "error" });
+        } finally {
+          notifTestBtn.disabled = false;
+          notifTestBtn.textContent = "Test";
+        }
+      });
+    }
+
+    if (notifCard) {
+      const nKey = "cpc.notifications-card-open";
+      const nSaved = localStorage.getItem(nKey);
+      if (nSaved !== null) notifCard.open = nSaved === "1";
+      notifCard.addEventListener("toggle", () => {
+        localStorage.setItem(nKey, notifCard.open ? "1" : "0");
+      });
+    }
+
     loadSyncSettings();
+    loadNotifSettings();
   });
 
   ["server", "client"].forEach((role) => {

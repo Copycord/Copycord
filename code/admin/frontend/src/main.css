@@ -11070,6 +11070,60 @@ body.page-forwarding .fwd-no-match-sub {
   z-index: 3;
 }
 
+/* ─── Notifications ─── */
+.notif-webhook-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.notif-webhook-input {
+  flex: 1;
+  padding: 7px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #140b26;
+  color: var(--text);
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  outline: 0;
+  transition: border-color 0.15s ease;
+}
+.notif-webhook-input:focus {
+  border-color: var(--brand, var(--accent));
+}
+.notif-webhook-input::placeholder {
+  color: var(--muted);
+  opacity: 0.4;
+}
+.notif-events-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.notif-event-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+  transition: background 0.12s ease;
+}
+.notif-event-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.notif-event-row .proxy-settings-label > span:first-child {
+  font-size: 13px;
+  font-weight: 500;
+}
+.notif-toggle {
+  flex-shrink: 0;
+  margin: 0;
+  display: inline-flex !important;
+}
+
 /* ─── Message Features Modal ─── */
 .msg-features-content {
   width: min(620px, 92vw) !important;

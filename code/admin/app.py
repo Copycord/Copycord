@@ -14,6 +14,7 @@ import contextlib
 import mimetypes
 import json
 import os
+import socket
 import sqlite3
 import uuid
 import asyncio
@@ -37,6 +38,7 @@ from admin.logging_setup import (
     REDACT_KEYS,
 )
 from admin.standalone_scraper import StandaloneScraper, ScraperConfig, ScraperResult
+from admin.notifications import notify, send_webhook, EVENTS as NOTIFICATION_EVENTS
 from fastapi import (
     FastAPI,
     Request,
@@ -395,12 +397,18 @@ class ConnCloseOnShutdownASGI:
 
 
 class BusHub:
+    WATCHDOG_INTERVAL = 30      # how often to check (seconds)
+    WATCHDOG_TIMEOUT = 90       # consider offline after this much silence
+
     def __init__(self):
         self.status = {"server": {}, "client": {}}
         self.subscribers: Set[asyncio.Queue[str]] = set()
         self.ui_sockets: Set[WebSocket] = set()
         self.lock = asyncio.Lock()
         self.recent = deque(maxlen=200)
+        self._last_seen: dict[str, float] = {}
+        self._watchdog_notified: dict[str, bool] = {}
+        self._watchdog_task: Optional[asyncio.Task] = None
 
     def subscribe(self) -> asyncio.Queue[str]:
         q = asyncio.Queue(maxsize=200)
@@ -430,8 +438,17 @@ class BusHub:
         return {"kind": kind, "role": role, "payload": payload or {}}
 
     async def publish(self, kind: str, role: str, payload: dict):
+        if role in ("server", "client"):
+            self._last_seen[role] = time.monotonic()
+            self._watchdog_notified[role] = False
+
         if kind == "status" and role in ("server", "client"):
+            prev = self.status.get(role) or {}
             self.status[role] = payload or {}
+            asyncio.ensure_future(self._check_notifications(kind, role, payload or {}, prev))
+
+        elif kind in ("proxies_dead", "token_dead"):
+            asyncio.ensure_future(self._check_notifications(kind, role, payload or {}, {}))
 
         rec = {"kind": kind, "role": role, "payload": payload or {}}
         self.recent.append(rec)
@@ -493,6 +510,83 @@ class BusHub:
             rec.get("role"),
             len(self.ui_sockets),
         )
+
+    async def _check_notifications(self, kind: str, role: str, payload: dict, prev: dict):
+        try:
+            if kind == "status":
+                was_running = _derive_state(prev) == "running" if prev else False
+                now_running = _derive_state(payload) == "running"
+                if was_running and not now_running:
+                    event = "CLIENT_OFFLINE" if role == "client" else "SERVER_OFFLINE"
+                    meta = NOTIFICATION_EVENTS.get(event, {})
+                    LOGGER.info("[notifications] %s went offline, sending %s notification", role, event)
+                    await notify(
+                        db, event,
+                        meta.get("title", f"{role.title()} Offline"),
+                        meta.get("description", f"The Copycord {role} bot has gone offline."),
+                        meta.get("color", 0xFF6B6B),
+                    )
+            elif kind == "proxies_dead":
+                meta = NOTIFICATION_EVENTS.get("PROXIES_DEAD", {})
+                total = payload.get("total", "?")
+                LOGGER.info("[notifications] All %s proxies dead, sending PROXIES_DEAD notification", total)
+                await notify(
+                    db, "PROXIES_DEAD",
+                    meta.get("title", "All Proxies Dead"),
+                    f"All {total} configured proxies have failed. The client may be exposed or unable to connect.",
+                    meta.get("color", 0xFF9800),
+                )
+            elif kind == "token_dead":
+                meta = NOTIFICATION_EVENTS.get("TOKEN_INVALID", {})
+                reason = payload.get("reason") or payload.get("data", {}).get("reason", "Unknown reason")
+                LOGGER.info("[notifications] Token invalid (%s), sending TOKEN_INVALID notification", reason)
+                await notify(
+                    db, "TOKEN_INVALID",
+                    meta.get("title", "Token Invalid"),
+                    f"A bot token has been invalidated: {reason}",
+                    meta.get("color", 0xFF6B6B),
+                )
+        except Exception:
+            LOGGER.warning("[notifications] Notification check failed", exc_info=True)
+
+    def start_watchdog(self):
+        if self._watchdog_task is None or self._watchdog_task.done():
+            self._watchdog_task = asyncio.ensure_future(self._watchdog_loop())
+
+    async def _watchdog_loop(self):
+        while True:
+            await asyncio.sleep(self.WATCHDOG_INTERVAL)
+            try:
+                now = time.monotonic()
+                for role in ("server", "client"):
+                    last = self._last_seen.get(role)
+                    if last is None:
+                        continue
+                    was_running = _derive_state(self.status.get(role) or {}) == "running"
+                    timed_out = (now - last) > self.WATCHDOG_TIMEOUT
+                    already_notified = self._watchdog_notified.get(role, False)
+
+                    if was_running and timed_out and not already_notified:
+                        event = "CLIENT_OFFLINE" if role == "client" else "SERVER_OFFLINE"
+                        meta = NOTIFICATION_EVENTS.get(event, {})
+                        LOGGER.info(
+                            "[notifications] Watchdog: no heartbeat from %s for %ds, sending %s",
+                            role, int(now - last), event,
+                        )
+                        self.status[role] = {"running": False, "status": "offline"}
+                        self._watchdog_notified[role] = True
+                        await notify(
+                            db, event,
+                            meta.get("title", f"{role.title()} Offline"),
+                            f"The Copycord {role} has not reported in for over {self.WATCHDOG_TIMEOUT}s and is presumed offline.",
+                            meta.get("color", 0xFF6B6B),
+                        )
+                        await self._broadcast_text(json.dumps(
+                            {"kind": "status", "role": role, "payload": self.status[role]},
+                            separators=(",", ":"),
+                        ))
+            except Exception:
+                LOGGER.warning("[notifications] Watchdog loop error", exc_info=True)
 
     async def _broadcast_text(self, text: str):
         dead = []
@@ -1895,6 +1989,33 @@ async def _start_backup_scheduler():
 @app.on_event("startup")
 async def _start_log_pruner():
     asyncio.create_task(_log_prune_loop())
+
+
+@app.on_event("startup")
+async def _start_watchdog():
+    hub.start_watchdog()
+
+
+@app.on_event("startup")
+async def _suppress_orphaned_dns_errors():
+    # websockets.connect() to stopped Docker containers leaves orphaned
+    # internal futures whose DNS resolution failed.  Our code already
+    # handles the error in _ws_cmd; this just silences the noisy
+    # "Future exception was never retrieved" stderr warnings.
+    loop = asyncio.get_running_loop()
+    _default_handler = loop.get_exception_handler()
+
+    def _handler(loop, context):
+        exc = context.get("exception")
+        if isinstance(exc, socket.gaierror):
+            LOGGER.debug("Suppressed orphaned DNS future: %s", exc)
+            return
+        if _default_handler:
+            _default_handler(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(_handler)
 
 
 async def _log_prune_loop():
@@ -4228,6 +4349,59 @@ async def api_sync_settings_put(request: Request):
         return JSONResponse({"ok": True})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+
+
+@app.get("/api/notifications/settings", response_class=JSONResponse)
+async def api_notifications_settings_get():
+    """Return webhook notification settings."""
+    try:
+        webhook_url = (db.get_config("NOTIFICATION_WEBHOOK_URL", "") or "").strip()
+        events = {}
+        for key, meta in NOTIFICATION_EVENTS.items():
+            raw = (db.get_config(f"NOTIFY_{key}", "") or "").strip().lower()
+            if raw:
+                events[key] = raw not in ("0", "false", "no")
+            else:
+                events[key] = meta.get("default", True)
+        return JSONResponse({"ok": True, "webhook_url": webhook_url, "events": events})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/notifications/settings", response_class=JSONResponse)
+async def api_notifications_settings_put(request: Request):
+    """Save webhook notification settings."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    try:
+        if "webhook_url" in payload:
+            db.set_config("NOTIFICATION_WEBHOOK_URL", (payload["webhook_url"] or "").strip())
+        events = payload.get("events", {})
+        for key in NOTIFICATION_EVENTS:
+            if key in events:
+                db.set_config(f"NOTIFY_{key}", "true" if events[key] else "false")
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/notifications/test", response_class=JSONResponse)
+async def api_notifications_test():
+    """Send a test notification."""
+    webhook_url = (db.get_config("NOTIFICATION_WEBHOOK_URL", "") or "").strip()
+    if not webhook_url:
+        return JSONResponse({"ok": False, "error": "No webhook URL configured"})
+    ok = await send_webhook(
+        webhook_url,
+        "Test Notification",
+        "If you see this, your Copycord webhook notifications are working!",
+        color=0x8B5CF6,
+    )
+    return JSONResponse({"ok": ok, "error": None if ok else "Failed to send"})
 
 
 @app.post("/api/scraper/start", response_class=JSONResponse)
