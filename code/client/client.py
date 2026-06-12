@@ -2624,27 +2624,15 @@ class ClientListener:
         return f"{t[:6]}...{t[-4:]}"
 
     async def _notify_token_dead(self, reason: str, token: str, kind: str = "primary") -> None:
-        payload = {
-            "type": "token_dead",
-            "data": {
-                "reason": reason,
-                "kind": kind,
-                "token_preview": self._mask_token(token),
-            },
-        }
-        try:
-            await self.ws.send(payload)
-            logger.info("[📨] Notified server of dead %s token.", kind)
-        except Exception as e:
-            logger.warning("[⚠️] Failed to notify server of dead token: %s", e)
         try:
             await self.bus.publish("token_dead", {
                 "reason": reason,
                 "kind": kind,
                 "token_preview": self._mask_token(token),
             })
-        except Exception:
-            pass
+            logger.info("[📨] Notified admin of dead %s token.", kind)
+        except Exception as e:
+            logger.warning("[⚠️] Failed to notify admin of dead token: %s", e)
 
     def _try_backup_token(self, loop: asyncio.AbstractEventLoop) -> bool:
         """
