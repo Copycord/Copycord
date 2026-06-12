@@ -37,6 +37,7 @@ from admin.logging_setup import (
     REDACT_KEYS,
 )
 from admin.standalone_scraper import StandaloneScraper, ScraperConfig, ScraperResult
+from admin.notifications import notify, send_webhook, EVENTS as NOTIFICATION_EVENTS
 from fastapi import (
     FastAPI,
     Request,
@@ -431,7 +432,12 @@ class BusHub:
 
     async def publish(self, kind: str, role: str, payload: dict):
         if kind == "status" and role in ("server", "client"):
+            prev = self.status.get(role) or {}
             self.status[role] = payload or {}
+            asyncio.ensure_future(self._check_notifications(kind, role, payload or {}, prev))
+
+        elif kind in ("proxies_dead", "token_dead"):
+            asyncio.ensure_future(self._check_notifications(kind, role, payload or {}, {}))
 
         rec = {"kind": kind, "role": role, "payload": payload or {}}
         self.recent.append(rec)
@@ -493,6 +499,41 @@ class BusHub:
             rec.get("role"),
             len(self.ui_sockets),
         )
+
+    async def _check_notifications(self, kind: str, role: str, payload: dict, prev: dict):
+        try:
+            if kind == "status":
+                was_running = _derive_state(prev) == "running" if prev else False
+                now_running = _derive_state(payload) == "running"
+                if was_running and not now_running:
+                    event = "CLIENT_OFFLINE" if role == "client" else "SERVER_OFFLINE"
+                    meta = NOTIFICATION_EVENTS.get(event, {})
+                    await notify(
+                        db, event,
+                        meta.get("title", f"{role.title()} Offline"),
+                        meta.get("description", f"The Copycord {role} bot has gone offline."),
+                        meta.get("color", 0xFF6B6B),
+                    )
+            elif kind == "proxies_dead":
+                meta = NOTIFICATION_EVENTS.get("PROXIES_DEAD", {})
+                total = payload.get("total", "?")
+                await notify(
+                    db, "PROXIES_DEAD",
+                    meta.get("title", "All Proxies Dead"),
+                    f"All {total} configured proxies have failed. The client may be exposed or unable to connect.",
+                    meta.get("color", 0xFF9800),
+                )
+            elif kind == "token_dead":
+                meta = NOTIFICATION_EVENTS.get("TOKEN_INVALID", {})
+                reason = payload.get("reason") or payload.get("data", {}).get("reason", "Unknown reason")
+                await notify(
+                    db, "TOKEN_INVALID",
+                    meta.get("title", "Token Invalid"),
+                    f"A bot token has been invalidated: {reason}",
+                    meta.get("color", 0xFF6B6B),
+                )
+        except Exception:
+            LOGGER.debug("Notification check failed", exc_info=True)
 
     async def _broadcast_text(self, text: str):
         dead = []
@@ -4228,6 +4269,59 @@ async def api_sync_settings_put(request: Request):
         return JSONResponse({"ok": True})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+
+
+@app.get("/api/notifications/settings", response_class=JSONResponse)
+async def api_notifications_settings_get():
+    """Return webhook notification settings."""
+    try:
+        webhook_url = (db.get_config("NOTIFICATION_WEBHOOK_URL", "") or "").strip()
+        events = {}
+        for key, meta in NOTIFICATION_EVENTS.items():
+            raw = (db.get_config(f"NOTIFY_{key}", "") or "").strip().lower()
+            if raw:
+                events[key] = raw not in ("0", "false", "no")
+            else:
+                events[key] = meta.get("default", True)
+        return JSONResponse({"ok": True, "webhook_url": webhook_url, "events": events})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/notifications/settings", response_class=JSONResponse)
+async def api_notifications_settings_put(request: Request):
+    """Save webhook notification settings."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    try:
+        if "webhook_url" in payload:
+            db.set_config("NOTIFICATION_WEBHOOK_URL", (payload["webhook_url"] or "").strip())
+        events = payload.get("events", {})
+        for key in NOTIFICATION_EVENTS:
+            if key in events:
+                db.set_config(f"NOTIFY_{key}", "true" if events[key] else "false")
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/notifications/test", response_class=JSONResponse)
+async def api_notifications_test():
+    """Send a test notification."""
+    webhook_url = (db.get_config("NOTIFICATION_WEBHOOK_URL", "") or "").strip()
+    if not webhook_url:
+        return JSONResponse({"ok": False, "error": "No webhook URL configured"})
+    ok = await send_webhook(
+        webhook_url,
+        "Test Notification",
+        "If you see this, your Copycord webhook notifications are working!",
+        color=0x8B5CF6,
+    )
+    return JSONResponse({"ok": ok, "error": None if ok else "Failed to send"})
 
 
 @app.post("/api/scraper/start", response_class=JSONResponse)

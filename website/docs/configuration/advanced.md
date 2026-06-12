@@ -181,3 +181,25 @@ client:
 This continuously loops sitemap generation for all servers until the client is stopped. Only use this for testing — never in production.
 
 If you're using proxies for the client, traffic is routed through the proxy IP, keeping your real IP hidden from Discord.
+
+## Notifications
+
+Copycord can send alerts to a Discord channel via webhooks when something goes wrong.
+
+### Setup
+
+1. Create a webhook in a Discord channel (Server Settings → Integrations → Webhooks)
+2. Open the **Notifications** card on the dashboard
+3. Paste the webhook URL
+4. Toggle which events you want to be notified about
+
+### Events
+
+| Event | Description |
+|---|---|
+| **Client Offline** | The self-bot client has disconnected or stopped |
+| **Server Offline** | The server bot has disconnected or stopped |
+| **All Proxies Dead** | Every configured proxy has failed |
+| **Token Invalid** | A bot token has been revoked or is no longer valid |
+
+Each event type has a 5-minute cooldown to prevent notification spam. Use the **Test** button to verify your webhook URL is working.

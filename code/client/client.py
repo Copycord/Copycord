@@ -95,6 +95,7 @@ class ClientListener:
         self._initial_proxy = self.proxy_rotator.next() if self.proxy_rotator.enabled else None
         self.bot = commands.Bot(command_prefix="!", self_bot=True, proxy=self._initial_proxy)
         self.proxy_rotator.on_rotate = self._on_proxy_rotate
+        self.proxy_rotator.on_all_dead = self._on_all_proxies_dead
         self.msg = MessageUtils(self.bot)
         self._sync_task: Optional[asyncio.Task] = None
         self._ws_task: Optional[asyncio.Task] = None
@@ -235,6 +236,20 @@ class ClientListener:
             self.bot.http.proxy = proxy_url
         except Exception:
             pass
+
+    def _on_all_proxies_dead(self, rotator) -> None:
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(self.bus.publish("proxies_dead", {
+                    "total": len(rotator._proxies),
+                }))
+            else:
+                loop.run_until_complete(self.bus.publish("proxies_dead", {
+                    "total": len(rotator._proxies),
+                }))
+        except Exception:
+            logger.debug("Failed to publish proxies_dead event", exc_info=True)
 
     async def _on_ws(self, msg: dict) -> dict | None:
         """
@@ -2622,6 +2637,14 @@ class ClientListener:
             logger.info("[📨] Notified server of dead %s token.", kind)
         except Exception as e:
             logger.warning("[⚠️] Failed to notify server of dead token: %s", e)
+        try:
+            await self.bus.publish("token_dead", {
+                "reason": reason,
+                "kind": kind,
+                "token_preview": self._mask_token(token),
+            })
+        except Exception:
+            pass
 
     def _try_backup_token(self, loop: asyncio.AbstractEventLoop) -> bool:
         """
