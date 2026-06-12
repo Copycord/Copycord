@@ -9,8 +9,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import socket
 import time
+from urllib.parse import urlparse
 
 import aiohttp
 
@@ -29,6 +32,20 @@ async def send_webhook(
 ) -> bool:
     """Send a Discord webhook embed notification. Returns True on success."""
     if not webhook_url or not webhook_url.startswith("http"):
+        return False
+
+    host = urlparse(webhook_url).hostname
+    if not host:
+        return False
+
+    # Pre-check DNS so a resolution failure doesn't leave orphaned futures
+    # inside aiohttp's connector (which spams "Future exception was never
+    # retrieved" warnings).
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.getaddrinfo(host, 443)
+    except (socket.gaierror, OSError) as exc:
+        logger.warning("[webhook] DNS resolution failed for %s: %s", host, exc)
         return False
 
     payload = {
@@ -101,10 +118,16 @@ async def notify(
     enabled_raw = (db.get_config(f"NOTIFY_{event.upper()}", "") or "").strip().lower()
     if enabled_raw in ("0", "false", "no"):
         return False
+    if not enabled_raw:
+        default = EVENTS.get(event.upper(), {}).get("default", True)
+        if not default:
+            return False
 
     ok = await send_webhook(webhook_url, title, description, color)
+    # Always update cooldown — on failure too — to prevent retry spam
+    # when the webhook endpoint is unreachable.
+    _last_sent[event] = now
     if ok:
-        _last_sent[event] = now
         logger.info("[webhook] Sent %s notification", event)
     return ok
 

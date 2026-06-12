@@ -239,15 +239,12 @@ class ClientListener:
 
     def _on_all_proxies_dead(self, rotator) -> None:
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
-                loop.create_task(self.bus.publish("proxies_dead", {
-                    "total": len(rotator._proxies),
-                }))
-            else:
-                loop.run_until_complete(self.bus.publish("proxies_dead", {
-                    "total": len(rotator._proxies),
-                }))
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.bus.publish("proxies_dead", {
+                "total": len(rotator._proxies),
+            }))
+        except RuntimeError:
+            pass
         except Exception:
             logger.debug("Failed to publish proxies_dead event", exc_info=True)
 
