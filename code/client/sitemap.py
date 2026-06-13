@@ -1006,7 +1006,10 @@ class SitemapService:
                 continue
 
             # Skip threads that don't belong to this guild
-            row_gid = row.get("original_guild_id")
+            try:
+                row_gid = row["original_guild_id"]
+            except (KeyError, IndexError):
+                row_gid = None
             if row_gid is not None and int(row_gid) != guild.id:
                 continue
 

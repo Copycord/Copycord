@@ -3477,8 +3477,12 @@ class ServerReceiver:
                             td["id"] = existing_id
                         eid = tmeta.get("emoji_id")
                         ename = tmeta.get("emoji_name")
-                        if eid or ename:
-                            td["emoji_id"] = eid
+                        if eid:
+                            clone_em = discord.utils.get(ch.guild.emojis, name=ename)
+                            if clone_em:
+                                td["emoji_id"] = clone_em.id
+                                td["emoji_name"] = clone_em.name
+                        elif ename:
                             td["emoji_name"] = ename
                         raw_tag_payloads.append(td)
                     changes["_raw_available_tags"] = raw_tag_payloads
@@ -3670,7 +3674,8 @@ class ServerReceiver:
                 flag_changes: Dict[str, object] = {}
 
                 if flags is not None and hasattr(discord, "ChannelFlags"):
-                    new_flags = discord.ChannelFlags._from_value(flags.value)
+                    flag_val = flags.value if hasattr(flags, "value") else int(flags)
+                    new_flags = discord.ChannelFlags._from_value(flag_val)
                     new_flags.require_tag = bool(desired_req)
                     flag_changes["flags"] = new_flags.value
                 else:
