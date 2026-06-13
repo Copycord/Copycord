@@ -17,6 +17,24 @@ from typing import Any, List, Dict, Optional, Set
 import discord
 
 
+def _row_get(row: Any, key: str, default: Any = None) -> Any:
+    if hasattr(row, "get"):
+        return row.get(key, default)
+
+    try:
+        keys = row.keys()
+    except AttributeError:
+        keys = ()
+
+    if key in keys:
+        try:
+            return row[key]
+        except (KeyError, IndexError, TypeError):
+            return default
+
+    return default
+
+
 class SitemapService:
     def __init__(self, bot, config, db, ws, logger=None):
         self.bot = bot
@@ -1006,7 +1024,7 @@ class SitemapService:
                 continue
 
             # Skip threads that don't belong to this guild
-            row_gid = row.get("original_guild_id")
+            row_gid = _row_get(row, "original_guild_id")
             if row_gid is not None and int(row_gid) != guild.id:
                 continue
 

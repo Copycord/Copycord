@@ -12,6 +12,24 @@ from __future__ import annotations
 from typing import Optional, Set
 
 
+def _row_get(row, key: str, default=None):
+    if hasattr(row, "get"):
+        return row.get(key, default)
+
+    try:
+        keys = row.keys()
+    except AttributeError:
+        keys = ()
+
+    if key in keys:
+        try:
+            return row[key]
+        except (KeyError, IndexError, TypeError):
+            return default
+
+    return default
+
+
 class GuildResolver:
     def __init__(self, db, config=None):
         self.db = db
@@ -31,10 +49,10 @@ class GuildResolver:
             active_ids: set[int] = set()
 
             for r in rows:
-                st = str(r.get("status", "active") or "active").strip().lower()
+                st = str(_row_get(r, "status", "active") or "active").strip().lower()
                 if st == "paused":
                     continue
-                if r.get("cloned_guild_id"):
+                if _row_get(r, "cloned_guild_id"):
                     active_ids.add(int(r["cloned_guild_id"]))
 
             return active_ids
@@ -45,7 +63,7 @@ class GuildResolver:
         row = self.db.get_mapping_by_clone(int(clone_guild_id))
         return (
             {int(row["original_guild_id"])}
-            if row and row.get("original_guild_id")
+            if row and _row_get(row, "original_guild_id")
             else set()
         )
 
@@ -75,8 +93,8 @@ class GuildResolver:
 
         if host_guild_id is not None:
             row = self.db.get_mapping_by_original(int(host_guild_id))
-            if row and row.get("cloned_guild_id"):
-                st = str(row.get("status", "active") or "active").strip().lower()
+            if row and _row_get(row, "cloned_guild_id"):
+                st = str(_row_get(row, "status", "active") or "active").strip().lower()
                 if st != "paused":
                     return int(row["cloned_guild_id"])
 
