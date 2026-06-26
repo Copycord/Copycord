@@ -124,3 +124,17 @@ class TestFanOut:
         )
         assert job.delivered_urls == {VALID_A}
         assert db.has_forwarding_event(rule_id="r1", source_message_id=9001) is True
+
+    @pytest.mark.asyncio
+    async def test_all_urls_dropped_records_event_no_exception(self, db, monkeypatch):
+        mgr = _manager(db)
+        rule = _rule([VALID_A, VALID_B])
+        job = _job(rule)
+        _install_fake_post(monkeypatch, {VALID_A: 404, VALID_B: 404})
+
+        # No exception: both dropped, nothing delivered, event still recorded.
+        await mgr._send_discord_webhook(
+            rule=rule, attrs=_attrs(), session=None, job=job, attempt=0
+        )
+        assert job.delivered_urls == set()
+        assert db.has_forwarding_event(rule_id="r1", source_message_id=9001) is True

@@ -445,7 +445,7 @@ class ForwardingJob:
     attrs: dict
     attempts: int = 0
     created_monotonic: float = 0.0
-    delivered_urls: set = field(default_factory=set)
+    delivered_urls: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         if not self.created_monotonic:
@@ -1964,7 +1964,7 @@ class ForwardingManager:
 
             if status == 429:
                 pending = True
-                pending_retry_after = retry_after
+                pending_retry_after = max(pending_retry_after or 0.0, retry_after or 0.0) or None
                 pending_status = status
                 pending_body = body
                 continue
