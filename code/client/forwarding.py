@@ -16,7 +16,7 @@ import os
 import logging
 import random
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
 import aiohttp
@@ -445,6 +445,7 @@ class ForwardingJob:
     attrs: dict
     attempts: int = 0
     created_monotonic: float = 0.0
+    delivered_urls: set = field(default_factory=set)
 
     def __post_init__(self) -> None:
         if not self.created_monotonic:
@@ -1063,7 +1064,10 @@ class ForwardingManager:
             return
         if provider == "discord":
             await self._send_discord_webhook(
-                rule=job.rule, attrs=job.attrs, session=session,
+                rule=job.rule,
+                attrs=job.attrs,
+                session=session,
+                job=job,
                 attempt=job.attempts,
             )
             return
@@ -1831,21 +1835,19 @@ class ForwardingManager:
         rule: ForwardingRule,
         attrs: dict,
         session: aiohttp.ClientSession,
+        job: "ForwardingJob",
         attempt: int = 0,
     ) -> None:
-        url = (rule.config.get("url") or "").strip()
-        if not url:
-            self.log.debug("[⏩] Discord webhook rule %s missing url", rule.rule_id)
+        urls = [
+            u
+            for u in discord_urls_from_config(rule.config)
+            if is_discord_webhook_url(u)
+        ]
+        if not urls:
+            self.log.debug("[⏩] Discord webhook rule %s has no valid url", rule.rule_id)
             return
 
-        if not DISCORD_WEBHOOK_RE.match(url):
-            self.log.warning(
-                "[⏩] Non-Discord webhook is not supported; skipping forward | rule_id=%s url=%s",
-                rule.rule_id,
-                (url[:80] + "...") if len(url) > 80 else url,
-            )
-            return
-
+        # ---- build payload once (UNCHANGED from previous single-URL logic) ----
         content = (attrs.get("content") or "").strip()
 
         non_image_links: list[str] = []
@@ -1862,7 +1864,6 @@ class ForwardingManager:
         lines: list[str] = []
         if content:
             lines.append(content)
-
         if non_image_links:
             if lines:
                 lines.append("")
@@ -1877,11 +1878,9 @@ class ForwardingManager:
             se = _sanitize_discord_embed_for_webhook(e)
             if se:
                 forwarded_embeds.append(se)
-
         forwarded_embeds = forwarded_embeds[:10]
 
         existing_img_urls = _extract_embed_image_urls(forwarded_embeds)
-
         att_image_urls: list[str] = []
         for a in attrs.get("attachments") or []:
             if not isinstance(a, dict):
@@ -1898,16 +1897,11 @@ class ForwardingManager:
                 {"image": {"url": u}} for u in att_image_urls[:remaining]
             )
 
-        payload = {
-            "allowed_mentions": {"parse": []},
-        }
-
+        payload = {"allowed_mentions": {"parse": []}}
         if text:
             payload["content"] = text
-
         if forwarded_embeds:
             payload["embeds"] = forwarded_embeds
-
         if not payload.get("content") and not payload.get("embeds"):
             payload["content"] = "New message"
 
@@ -1934,6 +1928,7 @@ class ForwardingManager:
                     rule.rule_id,
                 )
 
+        # ---- DB dedup: skip if this rule already fully forwarded this message ----
         msg_id = attrs.get("message_id")
         if msg_id and self.db:
             try:
@@ -1953,41 +1948,61 @@ class ForwardingManager:
             except Exception:
                 self.log.debug("[⏩] DB dedup check failed, proceeding", exc_info=True)
 
-        status, body, retry_after = await _post_with_discord_429_retry(
-            session, url, payload
-        )
+        # ---- fan out to every URL, tracking per-URL outcome on the job ----
+        pending = False
+        pending_retry_after: float | None = None
+        pending_status: int | None = None
+        pending_body: str = ""
 
-        if status == 429:
+        for url in urls:
+            if url in job.delivered_urls:
+                continue
+
+            status, body, retry_after = await _post_with_discord_429_retry(
+                session, url, payload
+            )
+
+            if status == 429:
+                pending = True
+                pending_retry_after = retry_after
+                pending_status = status
+                pending_body = body
+                continue
+
+            if status in (408, 500, 502, 503, 504):
+                pending = True
+                pending_status = status
+                pending_body = body
+                continue
+
+            if status >= 400:
+                self.log.warning(
+                    "[⏩] Discord webhook forward failed (dropping url) | rule_id=%s status=%s body=%s",
+                    rule.rule_id,
+                    status,
+                    (body or "")[:300],
+                )
+                continue
+
+            job.delivered_urls.add(url)
+            self.log.info(
+                "[⏩] Discord webhook forward OK | rule_id=%s label=%s message_id=%s channel=%s attempt=%s",
+                rule.rule_id,
+                rule.label,
+                attrs.get("message_id"),
+                attrs.get("channel_name"),
+                attempt,
+            )
+
+        if pending:
             raise RetryableForwardingError(
-                "Discord 429 rate limited",
-                delay=retry_after,
-                status=status,
-                body=body,
+                "Discord webhook(s) pending retry",
+                delay=pending_retry_after,
+                status=pending_status,
+                body=pending_body,
             )
 
-        if status in (408, 500, 502, 503, 504):
-            raise RetryableForwardingError(
-                "Discord transient HTTP error",
-                status=status,
-                body=body,
-            )
-
-        if status >= 400:
-            self.log.warning(
-                "[⏩] Discord webhook forward failed | status=%s body=%s",
-                status,
-                (body or "")[:300],
-            )
-            return
-
-        self.log.info(
-            "[⏩] Discord webhook forward OK | rule_id=%s label=%s message_id=%s channel=%s attempt=%s",
-            rule.rule_id,
-            rule.label,
-            attrs.get("message_id"),
-            attrs.get("channel_name"),
-            attempt,
-        )
+        # ---- all URLs delivered or dropped: record exactly one event ----
         try:
             self.db.record_forwarding_event(
                 provider="discord",
