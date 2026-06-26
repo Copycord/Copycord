@@ -57,13 +57,19 @@ def _job(rule):
 
 
 def _install_fake_post(monkeypatch, status_by_url):
-    """Patch _post_with_discord_429_retry to a recorder driven by status_by_url."""
+    """Patch _post_with_discord_429_retry to a recorder driven by status_by_url.
+
+    If the mapped value is an Exception instance, the fake raises it instead of
+    returning a status tuple.  Int values retain the original behavior.
+    """
     calls = []
 
     async def fake(session, url, payload):
         calls.append(url)
-        status = status_by_url[url]
-        return status, "", None
+        val = status_by_url[url]
+        if isinstance(val, Exception):
+            raise val
+        return val, "", None
 
     monkeypatch.setattr(fwd, "_post_with_discord_429_retry", fake)
     return calls
@@ -138,3 +144,23 @@ class TestFanOut:
         )
         assert job.delivered_urls == set()
         assert db.has_forwarding_event(rule_id="r1", source_message_id=9001) is True
+
+    @pytest.mark.asyncio
+    async def test_network_failure_on_one_url_still_attempts_others(self, db, monkeypatch):
+        mgr = _manager(db)
+        rule = _rule([VALID_A, VALID_B])
+        job = _job(rule)
+        # URL A raises a network error; URL B must still be attempted and delivered.
+        calls = _install_fake_post(
+            monkeypatch,
+            {VALID_A: RetryableForwardingError("network", status=None), VALID_B: 204},
+        )
+
+        with pytest.raises(RetryableForwardingError):
+            await mgr._send_discord_webhook(
+                rule=rule, attrs=_attrs(), session=None, job=job, attempt=0
+            )
+
+        assert VALID_A in calls and VALID_B in calls  # B attempted despite A raising
+        assert job.delivered_urls == {VALID_B}
+        assert db.has_forwarding_event(rule_id="r1", source_message_id=9001) is False

@@ -1958,9 +1958,15 @@ class ForwardingManager:
             if url in job.delivered_urls:
                 continue
 
-            status, body, retry_after = await _post_with_discord_429_retry(
-                session, url, payload
-            )
+            try:
+                status, body, retry_after = await _post_with_discord_429_retry(
+                    session, url, payload
+                )
+            except RetryableForwardingError as e:
+                pending = True
+                pending_status = e.status
+                pending_body = e.body or ""
+                continue
 
             if status == 429:
                 pending = True
