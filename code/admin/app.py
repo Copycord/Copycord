@@ -67,6 +67,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from common.config import CURRENT_VERSION
 from common.db import DBManager
 from common.backup_scheduler import BackupConfig, DailySQLiteBackupScheduler
+from common.common_helpers import (
+    discord_urls_from_config,
+    is_discord_webhook_url,
+    MAX_DISCORD_WEBHOOK_URLS,
+)
 from admin.web_config import router as links_router
 from admin.web_config import startup_links, shutdown_links
 from contextlib import suppress
@@ -5616,6 +5621,22 @@ async def api_save_forwarding(payload: dict = Body(...)):
         if not ok:
 
             return PlainTextResponse("\n".join(errors), status_code=400)
+
+    if provider == "discord":
+        raw_urls = discord_urls_from_config(config)
+        if not raw_urls:
+            return PlainTextResponse(
+                "Discord: at least one webhook URL is required.", status_code=400
+            )
+        invalid = [u for u in raw_urls if not is_discord_webhook_url(u)]
+        if invalid:
+            return PlainTextResponse(
+                "Discord: invalid webhook URL(s):\n" + "\n".join(invalid),
+                status_code=400,
+            )
+        config = dict(config)
+        config["urls"] = raw_urls[:MAX_DISCORD_WEBHOOK_URLS]
+        config.pop("url", None)
 
     try:
         db.upsert_message_forwarding_rule(
