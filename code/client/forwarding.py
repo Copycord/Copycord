@@ -24,12 +24,14 @@ import discord
 import re
 import html
 from client.message_utils import _resolve_forward, _resolve_forward_via_snapshot
+from common.common_helpers import (
+    DISCORD_WEBHOOK_RE,
+    MAX_DISCORD_WEBHOOK_URLS,
+    discord_urls_from_config,
+    is_discord_webhook_url,
+)
 
 log = logging.getLogger(__name__)
-
-DISCORD_WEBHOOK_RE = re.compile(
-    r"^https?://(canary\.|ptb\.)?discord(app)?\.com/api/webhooks/\d+/.+", re.I
-)
 
 
 class RetryableForwardingError(Exception):
@@ -759,15 +761,21 @@ class ForwardingManager:
             return None
 
         if provider in ("discord",):
-            url = (config.get("url") or "").strip()
-            if not url or not DISCORD_WEBHOOK_RE.match(url):
+            urls = [
+                u
+                for u in discord_urls_from_config(config)
+                if is_discord_webhook_url(u)
+            ][:MAX_DISCORD_WEBHOOK_URLS]
+            if not urls:
                 self.log.warning(
-                    "[⏩] Non-Discord webhook is not supported; skipping rule | rule_id=%s provider=%s url=%s",
+                    "[⏩] No valid Discord webhook URL; skipping rule | rule_id=%s provider=%s",
                     rule_id,
                     provider_raw,
-                    (url[:80] + "...") if len(url) > 80 else url,
                 )
                 return None
+            config = dict(config)
+            config["urls"] = urls
+            config.pop("url", None)
 
         filters = ForwardingFilters.from_dict(filters_raw)
 
@@ -960,14 +968,17 @@ class ForwardingManager:
         if p == "pushover":
             return "pushover"
         if p == "discord":
-            url = (rule.config.get("url") or "").strip()
-            if url and DISCORD_WEBHOOK_RE.match(url):
+            urls = [
+                u
+                for u in discord_urls_from_config(rule.config)
+                if is_discord_webhook_url(u)
+            ]
+            if urls:
                 return "discord"
             self.log.warning(
-                "[⏩] Non-Discord webhook is not supported; dropping job | rule_id=%s provider=%s url=%s",
+                "[⏩] Non-Discord webhook is not supported; dropping job | rule_id=%s provider=%s",
                 rule.rule_id,
                 p,
-                (url[:80] + "...") if len(url) > 80 else url,
             )
             return ""
         return ""
