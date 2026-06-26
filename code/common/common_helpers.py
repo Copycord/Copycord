@@ -9,6 +9,7 @@
 
 
 import json
+import re
 
 
 def resolve_mapping_settings(
@@ -111,3 +112,53 @@ def resolve_mapping_settings(
             eff[k] = False
 
     return eff
+
+
+DISCORD_WEBHOOK_RE = re.compile(
+    r"^https?://(canary\.|ptb\.)?discord(app)?\.com/api/webhooks/\d+/.+", re.I
+)
+
+MAX_DISCORD_WEBHOOK_URLS = 10
+
+
+def is_discord_webhook_url(url: str) -> bool:
+    """True if `url` is a Discord webhook URL."""
+    return bool(DISCORD_WEBHOOK_RE.match((url or "").strip()))
+
+
+def coerce_url_list(value) -> list[str]:
+    """Normalize a URL value into a clean, de-duplicated list of strings.
+
+    Accepts a comma/whitespace-separated string, or a list/tuple/set.
+    Trims each entry, drops empties, and removes duplicates while
+    preserving first-seen order. Does NOT validate URL format.
+    """
+    if isinstance(value, str):
+        tokens = re.split(r"[,\s]+", value.strip())
+    elif isinstance(value, (list, tuple, set)):
+        tokens = list(value)
+    else:
+        tokens = []
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for tok in tokens:
+        s = str(tok).strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
+def discord_urls_from_config(config: dict) -> list[str]:
+    """Extract the webhook URL list from a Discord forwarding rule config.
+
+    Prefers `config["urls"]`; falls back to legacy single `config["url"]`.
+    Returns a cleaned list (no validity filtering).
+    """
+    config = config or {}
+    urls = coerce_url_list(config.get("urls"))
+    if not urls:
+        urls = coerce_url_list(config.get("url"))
+    return urls
