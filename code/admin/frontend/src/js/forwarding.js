@@ -986,8 +986,18 @@ export class ForwardingSystem {
     if (pushoverApp) pushoverApp.value = cfg.app_token || "";
     if (pushoverUser) pushoverUser.value = cfg.user_key || "";
 
-    const discordWebhookUrl = document.getElementById("discord_webhook_url");
-    if (discordWebhookUrl) discordWebhookUrl.value = cfg.url || "";
+    const urlList =
+      Array.isArray(cfg.urls) && cfg.urls.length
+        ? cfg.urls
+        : cfg.url
+        ? [cfg.url]
+        : [];
+    const urlHidden = document.getElementById("discord_webhook_urls");
+    if (urlHidden) urlHidden.value = urlList.join(", ");
+    const urlWrap = document.querySelector(
+      '[data-chip-input="discord_webhook_urls"]'
+    );
+    if (urlWrap) this.setChipsFromValue(urlWrap, urlList.join(", "));
 
     this.ensureDiscordOptionalFields();
     const discordWebhookUsername = document.getElementById(
@@ -1095,7 +1105,7 @@ export class ForwardingSystem {
     [
       "pushover_app_token",
       "pushover_user_key",
-      "discord_webhook_url",
+      "discord_webhook_urls",
       "discord_webhook_username",
       "discord_webhook_avatar_url",
       "telegram_bot_token",
@@ -1180,7 +1190,7 @@ export class ForwardingSystem {
           "https://… (image URL)"
         );
 
-    const urlInput = document.getElementById("discord_webhook_url");
+    const urlInput = document.getElementById("discord_webhook_urls");
     const anchor =
       (urlInput &&
         (urlInput.closest(".field") || urlInput.closest(".form-row"))) ||
@@ -1267,6 +1277,7 @@ export class ForwardingSystem {
     chip.tabIndex = 0;
     chip.setAttribute("role", "button");
     chip.setAttribute("aria-label", `Remove ${value}`);
+    chip.title = value;
 
     chip.addEventListener("click", (e) => {
       e.preventDefault();
@@ -1342,6 +1353,28 @@ export class ForwardingSystem {
         );
         return false;
       }
+    }
+
+    if (provider === "discord") {
+      const urls = this.splitCsv(
+        document.getElementById("discord_webhook_urls")?.value
+      );
+      if (!urls.length) {
+        this.showToast("Discord requires at least one webhook URL.", {
+          type: "warning",
+        });
+        return false;
+      }
+      const re =
+        /^https?:\/\/(canary\.|ptb\.)?discord(app)?\.com\/api\/webhooks\/\d+\/.+/i;
+      const bad = urls.filter((u) => !re.test(u));
+      if (bad.length) {
+        this.showToast("Invalid Discord webhook URL(s):\n" + bad.join("\n"), {
+          type: "error",
+        });
+        return false;
+      }
+      return true;
     }
 
     if (provider !== "telegram" && provider !== "pushover") return true;
@@ -1431,8 +1464,9 @@ export class ForwardingSystem {
       cfg.user_key =
         document.getElementById("pushover_user_key")?.value.trim() || "";
     } else if (provider === "discord") {
-      cfg.url =
-        document.getElementById("discord_webhook_url")?.value.trim() || "";
+      cfg.urls = this.splitCsv(
+        document.getElementById("discord_webhook_urls")?.value
+      );
 
       const uname =
         document.getElementById("discord_webhook_username")?.value.trim() || "";
