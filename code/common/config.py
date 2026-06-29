@@ -15,7 +15,7 @@ from typing import Optional
 from common.db import DBManager
 
 logger = logging.getLogger(__name__)
-CURRENT_VERSION = "v3.20.2"
+CURRENT_VERSION = "v3.23.0"
 
 
 class Config:
@@ -126,6 +126,8 @@ class Config:
             "DISABLE_EVERYONE_MENTIONS": False,
             "DISABLE_ROLE_MENTIONS": False,
             "TAG_REPLY_MSG": False,
+            "APPEND_TIMESTAMP": False,
+            "APPEND_AUTHOR": False,
             "DB_CLEANUP_MSG": True,
             "ON_DEMAND_WEBHOOKS": True,
         }

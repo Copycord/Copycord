@@ -36,13 +36,6 @@
   const scrapesList = $("#sc-scrapes-list");
   const scrapesEmpty = $("#sc-scrapes-empty");
   const scrapesRefresh = $("#sc-scrapes-refresh");
-  const proxyCard = $("#sc-proxy-card");
-  const proxyTextarea = $("#sc-proxy-textarea");
-  const proxyCount = $("#sc-proxy-count");
-  const proxySaveBtn = $("#sc-proxy-save");
-  const proxyClearBtn = $("#sc-proxy-clear");
-  const proxyPrependHttp = $("#sc-proxy-prepend-http");
-  const proxyPrependSocks5 = $("#sc-proxy-prepend-socks5");
   const queueCard = $("#sc-queue-card");
   const queueBody = $("#sc-queue-body");
   const queueList = $("#sc-queue-list");
@@ -403,75 +396,17 @@
     };
   }
 
-  function getProxyLines() {
-    return proxyTextarea.value
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0);
+  async function getProxyLines() {
+    try {
+      const j = await api("/api/scraper/proxies");
+      return j.ok ? (j.proxies || []) : [];
+    } catch { return []; }
   }
-
-  function updateProxyCount() {
-    const n = getProxyLines().length;
-    proxyCount.textContent = n > 0 ? `${n} proxy${n !== 1 ? "ies" : ""}` : "";
-  }
-
-  async function loadProxies() {
-    const j = await api("/api/scraper/proxies");
-    if (j.ok) {
-      proxyTextarea.value = (j.proxies || []).join("\n");
-      updateProxyCount();
-    }
-  }
-
-  async function saveProxies() {
-    const lines = getProxyLines();
-    const j = await api("/api/scraper/proxies", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ proxies: lines }),
-    });
-    if (j.ok) {
-      toast(`Saved ${lines.length} prox${lines.length !== 1 ? "ies" : "y"}`, {
-        type: "success",
-      });
-      updateProxyCount();
-    } else {
-      toast(j.error || "Failed to save proxies", { type: "error" });
-    }
-  }
-
-  proxySaveBtn.addEventListener("click", saveProxies);
-
-  proxyClearBtn.addEventListener("click", async () => {
-    proxyTextarea.value = "";
-    await saveProxies();
-  });
-
-  proxyTextarea.addEventListener("input", updateProxyCount);
-
-  /** Prepend a scheme (http:// or socks5://) to every line that doesn't already have one. */
-  function prependScheme(scheme) {
-    const lines = proxyTextarea.value.split("\n");
-    proxyTextarea.value = lines
-      .map((line) => {
-        const l = line.trim();
-        if (!l) return l;
-        if (l.includes("://")) return l;
-        return `${scheme}${l}`;
-      })
-      .join("\n");
-    updateProxyCount();
-  }
-
-  proxyPrependHttp.addEventListener("click", () => prependScheme("http://"));
-  proxyPrependSocks5.addEventListener("click", () =>
-    prependScheme("socks5://")
-  );
 
   /* ── Queue helpers ── */
 
-  function getScraperPayload() {
-    const proxies = getProxyLines();
+  async function getScraperPayload() {
+    const proxies = await getProxyLines();
     return {
       guild_id: guildIdIn.value.trim(),
       include_username: $("#sc-opt-username").checked,
@@ -570,7 +505,7 @@
     }
 
     queueBtn.disabled = true;
-    const payload = getScraperPayload();
+    const payload = await getScraperPayload();
 
     const j = await api("/api/scraper/queue/add", {
       method: "POST",
@@ -615,7 +550,7 @@
     }
 
     startBtn.disabled = true;
-    const payload = getScraperPayload();
+    const payload = await getScraperPayload();
 
     const j = await api("/api/scraper/start", {
       method: "POST",
@@ -922,7 +857,6 @@
   async function init() {
     try {
       await loadTokens();
-      await loadProxies();
       await loadScrapes();
       await checkStatus();
     } catch (e) {

@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import re
 import signal
+import time
 from datetime import datetime, timezone
 import logging
 from typing import Optional, Any
@@ -39,6 +40,7 @@ from client.export_runners import (
     DmHistoryExporter,
 )
 from client.forwarding import ForwardingManager
+from client.proxy_rotator import ProxyRotator, _mask_proxy_url
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -88,10 +90,16 @@ class ClientListener:
         self.db = DBManager(self.config.DB_PATH)
         self._mapped_original_ids: set[int] = set(self.db.get_all_original_guild_ids())
         self.start_time = datetime.now(timezone.utc)
-        self.bot = commands.Bot(command_prefix="!", self_bot=True)
+        self.proxy_rotator = ProxyRotator()
+        self._init_proxy_rotator()
+        self._initial_proxy = self.proxy_rotator.next() if self.proxy_rotator.enabled else None
+        self.bot = commands.Bot(command_prefix="!", self_bot=True, proxy=self._initial_proxy)
+        self.proxy_rotator.on_rotate = self._on_proxy_rotate
+        self.proxy_rotator.on_all_dead = self._on_all_proxies_dead
         self.msg = MessageUtils(self.bot)
         self._sync_task: Optional[asyncio.Task] = None
         self._ws_task: Optional[asyncio.Task] = None
+        self._proxy_rotation_task: Optional[asyncio.Task] = None
         self._m_user = re.compile(r"<@!?(\d+)>")
         self.scraper = getattr(self, "scraper", None)
         self._scrape_lock = getattr(self, "_scrape_lock", asyncio.Lock())
@@ -104,6 +112,8 @@ class ClientListener:
         self._dm_export_task: asyncio.Task | None = None
         self._dm_export_running: bool = False
         self.bot.event(self.on_ready)
+        self.bot.event(self.on_disconnect)
+        self.bot.event(self.on_resumed)
         self.bot.event(self.on_message)
         self.bot.event(self.on_message_edit)
         self.bot.event(self.on_raw_message_edit)
@@ -143,6 +153,17 @@ class ClientListener:
         self.sitemap = SitemapService(
             bot=self.bot, config=self.config, db=self.db, ws=self.ws, logger=logger
         )
+        # Load configurable sync timing from DB
+        def _db_int_sync(key, default):
+            raw = (self.db.get_config(key, "") or "").strip()
+            try:
+                return int(raw) if raw else default
+            except (ValueError, TypeError):
+                return default
+        self.sitemap._startup_delay = _db_int_sync("SYNC_STARTUP_DELAY", 15)
+        self.sitemap._inter_guild_delay = _db_int_sync("SYNC_INTER_GUILD_DELAY", 3)
+        _rand_raw = (self.db.get_config("SYNC_RANDOMIZE_ORDER", "") or "").strip().lower()
+        self.sitemap._randomize_order = _rand_raw not in ("0", "false", "no") if _rand_raw else True
         self.ui_controller = ClientUiController(
             bus=self.bus,
             admin_base_url=self.config.ADMIN_WS_URL,
@@ -188,6 +209,44 @@ class ClientListener:
             )
         except Exception:
             logger.exception("Failed reloading mapped origins")
+
+    def _init_proxy_rotator(self) -> None:
+        """Load proxy list and configure rotation from DB flags."""
+        self.proxy_rotator.reload()
+        enabled = (
+            self.db.get_config("ENABLE_CLIENT_PROXIES", "") or ""
+        ).strip().lower() in ("1", "true", "yes")
+        self.proxy_rotator.set_enabled(enabled)
+
+        def _db_int(key, default):
+            raw = (self.db.get_config(key, "") or "").strip()
+            try:
+                return int(raw) if raw else default
+            except (ValueError, TypeError):
+                return default
+
+        self.proxy_rotator.set_rotation_interval(
+            _db_int("PROXY_ROTATION_INTERVAL", 0)
+        )
+        self.proxy_rotator.SUSPEND_SECONDS = _db_int("PROXY_SUSPEND_DURATION", 300)
+
+    def _on_proxy_rotate(self, proxy_url: str) -> None:
+        """Called by the proxy rotator when the active proxy changes."""
+        try:
+            self.bot.http.proxy = proxy_url
+        except Exception:
+            pass
+
+    def _on_all_proxies_dead(self, rotator) -> None:
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(self.bus.publish("proxies_dead", {
+                "total": len(rotator._proxies),
+            }))
+        except RuntimeError:
+            pass
+        except Exception:
+            logger.debug("Failed to publish proxies_dead event", exc_info=True)
 
     async def _on_ws(self, msg: dict) -> dict | None:
         """
@@ -855,15 +914,37 @@ class ClientListener:
 
         return channel, channel_id, guild
 
-    async def periodic_sync_loop(self):
+    async def _startup_sync(self):
+        """One-time sitemap sync on startup. Events handle changes after this."""
         await self.bot.wait_until_ready()
-        await asyncio.sleep(5)
-        while True:
+
+        startup_delay = self.sitemap._startup_delay
+        logger.info(
+            "[sitemap] Waiting %ds before startup sync", startup_delay
+        )
+        await asyncio.sleep(startup_delay)
+
+        stress_test = os.getenv("SITEMAP_STRESS_TEST", "").lower() in ("1", "true", "yes")
+
+        if stress_test:
+            cycle = 0
+            logger.warning("[sitemap] STRESS TEST enabled — will loop sitemaps continuously")
+            while True:
+                cycle += 1
+                logger.info("[sitemap] Stress test cycle %d", cycle)
+                try:
+                    await self.sitemap.build_and_send_all()
+                except Exception:
+                    logger.exception("[sitemap] Stress test cycle %d failed", cycle)
+                # Wait for the queue to finish before starting next cycle
+                while self.sitemap._queue:
+                    await asyncio.sleep(1)
+                await asyncio.sleep(2)
+        else:
             try:
                 await self.sitemap.build_and_send_all()
             except Exception:
-                logger.exception("Error in periodic sync loop")
-            await asyncio.sleep(self.config.SYNC_INTERVAL_SECONDS)
+                logger.exception("Error in startup sitemap sync")
 
     def schedule_sync(self, guild_id: int | None = None, delay: float = 1.0):
         """
@@ -880,9 +961,35 @@ class ClientListener:
         except Exception:
             logger.exception("[sitemap] failed to schedule sync for %s", guild_id)
 
+    async def on_disconnect(self):
+        """Fired when the gateway WebSocket drops."""
+        if not self.proxy_rotator.enabled or not self._initial_proxy:
+            return
+        self.proxy_rotator.report_failure(self.proxy_rotator._current_proxy or "")
+        if self.proxy_rotator._current_proxy and self.proxy_rotator._is_suspended(
+            self.proxy_rotator._current_proxy, time.monotonic()
+        ):
+            safe = _mask_proxy_url(self.proxy_rotator._current_proxy)
+            logger.warning("[🔀] Proxy %s dropped connection, switching", safe)
+            new_proxy = self.proxy_rotator.rotate_now()
+            if new_proxy:
+                self.bot.http.proxy = new_proxy
+            else:
+                logger.warning("[🔀] No healthy proxies available")
+
+    async def on_resumed(self):
+        """Fired when the gateway successfully reconnects."""
+        if self.proxy_rotator.enabled and self.proxy_rotator._current_proxy:
+            self.proxy_rotator.report_success(self.proxy_rotator._current_proxy)
+
     async def on_ready(self):
         await self.forwarding.start()
         self._reload_mapped_ids()
+
+        if self._proxy_rotation_task is None:
+            self._proxy_rotation_task = asyncio.create_task(
+                self.proxy_rotator.run_rotation_loop()
+            )
 
         asyncio.create_task(self.config.setup_release_watcher(self, should_dm=False))
         self.ui_controller.start()
@@ -896,8 +1003,8 @@ class ClientListener:
         )
         logger.info("[🤖] %s", msg)
 
-        if self._sync_task is None:
-            self._sync_task = asyncio.create_task(self.periodic_sync_loop())
+        if self._sync_task is None or self._sync_task.done():
+            self._sync_task = asyncio.create_task(self._startup_sync())
 
         if self._ws_task is None:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
@@ -2514,19 +2621,15 @@ class ClientListener:
         return f"{t[:6]}...{t[-4:]}"
 
     async def _notify_token_dead(self, reason: str, token: str, kind: str = "primary") -> None:
-        payload = {
-            "type": "token_dead",
-            "data": {
+        try:
+            await self.bus.publish("token_dead", {
                 "reason": reason,
                 "kind": kind,
                 "token_preview": self._mask_token(token),
-            },
-        }
-        try:
-            await self.ws.send(payload)
-            logger.info("[📨] Notified server of dead %s token.", kind)
+            })
+            logger.info("[📨] Notified admin of dead %s token.", kind)
         except Exception as e:
-            logger.warning("[⚠️] Failed to notify server of dead token: %s", e)
+            logger.warning("[⚠️] Failed to notify admin of dead token: %s", e)
 
     def _try_backup_token(self, loop: asyncio.AbstractEventLoop) -> bool:
         """
@@ -2620,14 +2723,61 @@ class ClientListener:
                 else:
                     logger.error("[⛔] No valid backup token available after connection close.")
 
-        except Exception:
-            logger.exception("[⛔] Unexpected error while running client")
+        except Exception as e:
+            if not self._try_next_proxy_on_error(e, token, loop):
+                logger.exception("[⛔] Unexpected error while running client")
+
+    def _is_proxy_error(self, exc: Exception) -> bool:
+        """Check if an exception is a proxy connection failure."""
+        # curl_cffi.requests.exceptions.RequestException inherits OSError
+        if isinstance(exc, (ConnectionError, OSError)):
+            err = str(exc).lower()
+            return "proxy" in err or "curl" in err or "connect" in err or "aborted" in err
+        return False
+
+    def _try_next_proxy_on_error(self, exc: Exception, token: str, loop) -> bool:
+        """If the error is proxy-related, try connecting through other proxies.
+        Returns True if handled (logged), False if caller should handle it."""
+        if not self.proxy_rotator.enabled or not self._initial_proxy:
+            return False
+        if not self._is_proxy_error(exc):
+            return False
+
+        current = self.proxy_rotator._current_proxy or self._initial_proxy
+        safe = _mask_proxy_url(current)
+        logger.warning("[🔀] Proxy %s failed to connect: %s", safe, type(exc).__name__)
+        self.proxy_rotator.report_failure(current)
+
+        for _ in range(self.proxy_rotator.count - 1):
+            new_proxy = self.proxy_rotator.rotate_now()
+            if not new_proxy:
+                break
+            self.bot.http.proxy = new_proxy
+            try:
+                loop.run_until_complete(self.bot.start(token))
+                return True
+            except LoginFailure:
+                logger.error("[⛔] Discord login failed — not a proxy issue")
+                return True
+            except Exception as retry_e:
+                if self._is_proxy_error(retry_e):
+                    safe = _mask_proxy_url(new_proxy)
+                    logger.warning("[🔀] Proxy %s also failed: %s", safe, type(retry_e).__name__)
+                    self.proxy_rotator.report_failure(new_proxy)
+                else:
+                    logger.exception("[⛔] Unexpected error while running client")
+                    return True
+
+        logger.error("[⛔] All proxies failed to connect")
+        return True
 
     def run(self):
         """
         Runs the Copycord client.
         """
         logger.info("[✨] Starting Copycord Client %s", CURRENT_VERSION)
+        if self.proxy_rotator.enabled:
+            self.proxy_rotator.next()
         loop = asyncio.get_event_loop()
 
         try:

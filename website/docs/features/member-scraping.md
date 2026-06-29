@@ -28,10 +28,7 @@ Multiple tokens enable parallel scraping for faster results.
 
 ### 2. Configure proxies (optional)
 
-For large servers or to distribute load, add proxy servers:
-
-- HTTP proxies: `http://user:pass@host:port`
-- SOCKS5 proxies: `socks5://user:pass@host:port`
+For large servers or to distribute load, configure proxies in the **Proxy** card on the [Configuration](/docs/configuration/advanced#proxy-support) page. The scraper shares the same proxy list as the client.
 
 ### 3. Start a scrape
 

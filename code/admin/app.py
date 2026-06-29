@@ -14,6 +14,7 @@ import contextlib
 import mimetypes
 import json
 import os
+import socket
 import sqlite3
 import uuid
 import asyncio
@@ -37,6 +38,7 @@ from admin.logging_setup import (
     REDACT_KEYS,
 )
 from admin.standalone_scraper import StandaloneScraper, ScraperConfig, ScraperResult
+from admin.notifications import notify, send_webhook, EVENTS as NOTIFICATION_EVENTS
 from fastapi import (
     FastAPI,
     Request,
@@ -214,7 +216,6 @@ BOOL_KEYS = [
     "DELETE_MESSAGES",
     "EDIT_MESSAGES",
     "RESEND_EDITED_MESSAGES",
-    "TAG_REPLY_MSG",
     "REPOSITION_CHANNELS",
     "CLONE_VOICE",
     "CLONE_VOICE_PROPERTIES",
@@ -239,10 +240,16 @@ BOOL_KEYS = [
     "CLONE_GUILD_SPLASH",
     "CLONE_GUILD_DISCOVERY_SPLASH",
     "SYNC_GUILD_DESCRIPTION",
+    "DB_CLEANUP_MSG",
+]
+
+MSG_FEATURE_KEYS = [
+    "TAG_REPLY_MSG",
     "ANONYMIZE_USERS",
     "DISABLE_EVERYONE_MENTIONS",
     "DISABLE_ROLE_MENTIONS",
-    "DB_CLEANUP_MSG",
+    "APPEND_TIMESTAMP",
+    "APPEND_AUTHOR",
 ]
 DEFAULTS: Dict[str, Union[bool, str]] = {
     "DELETE_CHANNELS": True,
@@ -282,6 +289,8 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "DISABLE_EVERYONE_MENTIONS": False,
     "DISABLE_ROLE_MENTIONS": False,
     "TAG_REPLY_MSG": False,
+    "APPEND_TIMESTAMP": False,
+    "APPEND_AUTHOR": False,
     "DB_CLEANUP_MSG": True,
     "ON_DEMAND_WEBHOOKS": True,
     "COPYCORD_AUTOSTART": "false",
@@ -393,12 +402,18 @@ class ConnCloseOnShutdownASGI:
 
 
 class BusHub:
+    WATCHDOG_INTERVAL = 30      # how often to check (seconds)
+    WATCHDOG_TIMEOUT = 90       # consider offline after this much silence
+
     def __init__(self):
         self.status = {"server": {}, "client": {}}
         self.subscribers: Set[asyncio.Queue[str]] = set()
         self.ui_sockets: Set[WebSocket] = set()
         self.lock = asyncio.Lock()
         self.recent = deque(maxlen=200)
+        self._last_seen: dict[str, float] = {}
+        self._watchdog_notified: dict[str, bool] = {}
+        self._watchdog_task: Optional[asyncio.Task] = None
 
     def subscribe(self) -> asyncio.Queue[str]:
         q = asyncio.Queue(maxsize=200)
@@ -428,8 +443,17 @@ class BusHub:
         return {"kind": kind, "role": role, "payload": payload or {}}
 
     async def publish(self, kind: str, role: str, payload: dict):
+        if role in ("server", "client"):
+            self._last_seen[role] = time.monotonic()
+            self._watchdog_notified[role] = False
+
         if kind == "status" and role in ("server", "client"):
+            prev = self.status.get(role) or {}
             self.status[role] = payload or {}
+            asyncio.ensure_future(self._check_notifications(kind, role, payload or {}, prev))
+
+        elif kind in ("proxies_dead", "token_dead"):
+            asyncio.ensure_future(self._check_notifications(kind, role, payload or {}, {}))
 
         rec = {"kind": kind, "role": role, "payload": payload or {}}
         self.recent.append(rec)
@@ -491,6 +515,83 @@ class BusHub:
             rec.get("role"),
             len(self.ui_sockets),
         )
+
+    async def _check_notifications(self, kind: str, role: str, payload: dict, prev: dict):
+        try:
+            if kind == "status":
+                was_running = _derive_state(prev) == "running" if prev else False
+                now_running = _derive_state(payload) == "running"
+                if was_running and not now_running:
+                    event = "CLIENT_OFFLINE" if role == "client" else "SERVER_OFFLINE"
+                    meta = NOTIFICATION_EVENTS.get(event, {})
+                    LOGGER.info("[notifications] %s went offline, sending %s notification", role, event)
+                    await notify(
+                        db, event,
+                        meta.get("title", f"{role.title()} Offline"),
+                        meta.get("description", f"The Copycord {role} bot has gone offline."),
+                        meta.get("color", 0xFF6B6B),
+                    )
+            elif kind == "proxies_dead":
+                meta = NOTIFICATION_EVENTS.get("PROXIES_DEAD", {})
+                total = payload.get("total", "?")
+                LOGGER.info("[notifications] All %s proxies dead, sending PROXIES_DEAD notification", total)
+                await notify(
+                    db, "PROXIES_DEAD",
+                    meta.get("title", "All Proxies Dead"),
+                    f"All {total} configured proxies have failed. The client may be exposed or unable to connect.",
+                    meta.get("color", 0xFF9800),
+                )
+            elif kind == "token_dead":
+                meta = NOTIFICATION_EVENTS.get("TOKEN_INVALID", {})
+                reason = payload.get("reason") or payload.get("data", {}).get("reason", "Unknown reason")
+                LOGGER.info("[notifications] Token invalid (%s), sending TOKEN_INVALID notification", reason)
+                await notify(
+                    db, "TOKEN_INVALID",
+                    meta.get("title", "Token Invalid"),
+                    f"A bot token has been invalidated: {reason}",
+                    meta.get("color", 0xFF6B6B),
+                )
+        except Exception:
+            LOGGER.warning("[notifications] Notification check failed", exc_info=True)
+
+    def start_watchdog(self):
+        if self._watchdog_task is None or self._watchdog_task.done():
+            self._watchdog_task = asyncio.ensure_future(self._watchdog_loop())
+
+    async def _watchdog_loop(self):
+        while True:
+            await asyncio.sleep(self.WATCHDOG_INTERVAL)
+            try:
+                now = time.monotonic()
+                for role in ("server", "client"):
+                    last = self._last_seen.get(role)
+                    if last is None:
+                        continue
+                    was_running = _derive_state(self.status.get(role) or {}) == "running"
+                    timed_out = (now - last) > self.WATCHDOG_TIMEOUT
+                    already_notified = self._watchdog_notified.get(role, False)
+
+                    if was_running and timed_out and not already_notified:
+                        event = "CLIENT_OFFLINE" if role == "client" else "SERVER_OFFLINE"
+                        meta = NOTIFICATION_EVENTS.get(event, {})
+                        LOGGER.info(
+                            "[notifications] Watchdog: no heartbeat from %s for %ds, sending %s",
+                            role, int(now - last), event,
+                        )
+                        self.status[role] = {"running": False, "status": "offline"}
+                        self._watchdog_notified[role] = True
+                        await notify(
+                            db, event,
+                            meta.get("title", f"{role.title()} Offline"),
+                            f"The Copycord {role} has not reported in for over {self.WATCHDOG_TIMEOUT}s and is presumed offline.",
+                            meta.get("color", 0xFF6B6B),
+                        )
+                        await self._broadcast_text(json.dumps(
+                            {"kind": "status", "role": role, "payload": self.status[role]},
+                            separators=(",", ":"),
+                        ))
+            except Exception:
+                LOGGER.warning("[notifications] Watchdog loop error", exc_info=True)
 
     async def _broadcast_text(self, text: str):
         dead = []
@@ -702,15 +803,15 @@ async def _check_client_token_valid(raw_token: str) -> bool:
         return False
 
 
-async def _check_server_token_valid(bot_token: str) -> bool:
+async def _check_server_token_valid(bot_token: str) -> tuple[bool, Optional[str]]:
     """
-    Returns True if SERVER_TOKEN (bot token) is valid and actually a bot.
-    We hit /users/@me with Authorization: Bot <token>.
+    Returns (valid, bot_user_id) — checks if SERVER_TOKEN is valid and a bot.
+    The bot_user_id is the same as the application/client ID for invite URLs.
     """
     token = (bot_token or "").strip()
     if not token:
         LOGGER.debug("_check_server_token_valid | no token provided")
-        return False
+        return False, None
 
     url = f"{DISCORD_API_BASE}/users/@me"
     headers = {
@@ -755,14 +856,21 @@ async def _check_server_token_valid(bot_token: str) -> bool:
                         "_check_server_token_valid | token is not a bot user; rejecting for SERVER_TOKEN use"
                     )
 
-                return ok
+                # Store the bot ID for invite URL generation
+                if ok and uid:
+                    try:
+                        db.set_config("BOT_CLIENT_ID", str(uid))
+                    except Exception:
+                        pass
+
+                return ok, uid if ok else None
     except Exception as e:
         LOGGER.warning(
             "_check_server_token_valid | exception=%s bot_token=%s",
             repr(e),
             _redact_token(token),
         )
-        return False
+        return False, None
 
 
 async def _verify_tokens_for_save(values: dict[str, str]) -> list[str]:
@@ -792,12 +900,13 @@ async def _verify_tokens_for_save(values: dict[str, str]) -> list[str]:
         return errs
 
     client_ok = await _check_client_token_valid(raw_client)
-    server_ok = await _check_server_token_valid(raw_server)
+    server_ok, _bot_id = await _check_server_token_valid(raw_server)
 
     LOGGER.debug(
-        "_verify_tokens_for_save | results client_ok=%s server_ok=%s",
+        "_verify_tokens_for_save | results client_ok=%s server_ok=%s bot_id=%s",
         client_ok,
         server_ok,
+        _bot_id,
     )
 
     if not client_ok:
@@ -1887,6 +1996,33 @@ async def _start_log_pruner():
     asyncio.create_task(_log_prune_loop())
 
 
+@app.on_event("startup")
+async def _start_watchdog():
+    hub.start_watchdog()
+
+
+@app.on_event("startup")
+async def _suppress_orphaned_dns_errors():
+    # websockets.connect() to stopped Docker containers leaves orphaned
+    # internal futures whose DNS resolution failed.  Our code already
+    # handles the error in _ws_cmd; this just silences the noisy
+    # "Future exception was never retrieved" stderr warnings.
+    loop = asyncio.get_running_loop()
+    _default_handler = loop.get_exception_handler()
+
+    def _handler(loop, context):
+        exc = context.get("exception")
+        if isinstance(exc, socket.gaierror):
+            LOGGER.debug("Suppressed orphaned DNS future: %s", exc)
+            return
+        if _default_handler:
+            _default_handler(loop, context)
+        else:
+            loop.default_exception_handler(context)
+
+    loop.set_exception_handler(_handler)
+
+
 async def _log_prune_loop():
     """Periodically check log file sizes and truncate to the configured max.
 
@@ -2000,11 +2136,18 @@ async def api_validate_tokens():
     )
     ok = not errs
 
+    bot_client_id = None
+    try:
+        bot_client_id = (db.get_config("BOT_CLIENT_ID", "") or "").strip() or None
+    except Exception:
+        pass
+
     return JSONResponse(
         {
             "ok": ok,
             "has_tokens": True,
             "errors": errs,
+            "bot_client_id": bot_client_id,
         }
     )
 
@@ -3890,24 +4033,34 @@ async def api_scraper_proxies_put(request: Request):
 
 @app.get("/api/server/proxies", response_class=JSONResponse)
 async def api_server_proxies_get():
-    """Return server proxy list and enabled state."""
+    """Return client proxy list, enabled state, and rotation interval."""
     try:
         if _PROXY_FILE.exists():
             text = _PROXY_FILE.read_text(encoding="utf-8").strip()
             lines = [l.strip() for l in text.splitlines() if l.strip()]
         else:
             lines = []
-        enabled = (db.get_config("ENABLE_SERVER_PROXIES", "") or "").strip().lower() in (
+        enabled = (db.get_config("ENABLE_CLIENT_PROXIES", "") or "").strip().lower() in (
             "1", "true", "yes",
         )
-        return JSONResponse({"ok": True, "proxies": lines, "enabled": enabled})
+        interval_raw = (db.get_config("PROXY_ROTATION_INTERVAL", "") or "").strip()
+        try:
+            rotation_interval = int(interval_raw) if interval_raw else 0
+        except (ValueError, TypeError):
+            rotation_interval = 0
+        return JSONResponse({
+            "ok": True,
+            "proxies": lines,
+            "enabled": enabled,
+            "rotation_interval": rotation_interval,
+        })
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
 @app.put("/api/server/proxies", response_class=JSONResponse)
 async def api_server_proxies_put(request: Request):
-    """Save server proxy list (shared file with scraper)."""
+    """Save client proxy list (shared file with scraper)."""
     try:
         payload = await request.json()
     except Exception:
@@ -3927,17 +4080,333 @@ async def api_server_proxies_put(request: Request):
 
 @app.put("/api/server/proxies/toggle", response_class=JSONResponse)
 async def api_server_proxies_toggle(request: Request):
-    """Enable or disable server proxy rotation."""
+    """Enable or disable client proxy rotation."""
     try:
         payload = await request.json()
     except Exception:
         raise HTTPException(400, detail="Invalid JSON")
     enabled = bool(payload.get("enabled", False))
     try:
-        db.set_config("ENABLE_SERVER_PROXIES", "true" if enabled else "false")
+        db.set_config("ENABLE_CLIENT_PROXIES", "true" if enabled else "false")
         return JSONResponse({"ok": True, "enabled": enabled})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/server/proxies/rotation-interval", response_class=JSONResponse)
+async def api_server_proxies_rotation_interval(request: Request):
+    """Set the proxy rotation interval in seconds (0 = per-request)."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    try:
+        interval = max(0, int(payload.get("interval", 0)))
+    except (ValueError, TypeError):
+        raise HTTPException(400, detail="interval must be an integer")
+    try:
+        db.set_config("PROXY_ROTATION_INTERVAL", str(interval))
+        return JSONResponse({"ok": True, "rotation_interval": interval})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+_PROXY_SETTINGS_KEYS = {
+    "PROXY_SUSPEND_DURATION": 300,
+    "PROXY_TEST_BATCH_SIZE": 50,
+    "PROXY_SLOW_THRESHOLD": 3,
+}
+
+
+@app.get("/api/server/proxies/settings", response_class=JSONResponse)
+async def api_proxy_settings_get():
+    """Return proxy settings."""
+    try:
+        settings = {}
+        for key, default in _PROXY_SETTINGS_KEYS.items():
+            raw = (db.get_config(key, "") or "").strip()
+            try:
+                settings[key] = int(raw) if raw else default
+            except (ValueError, TypeError):
+                settings[key] = default
+        return JSONResponse({"ok": True, "settings": settings})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/server/proxies/settings", response_class=JSONResponse)
+async def api_proxy_settings_put(request: Request):
+    """Save proxy settings."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    settings = payload.get("settings", {})
+    if not isinstance(settings, dict):
+        raise HTTPException(400, detail="settings must be an object")
+    try:
+        for key, default in _PROXY_SETTINGS_KEYS.items():
+            if key in settings:
+                val = max(1, int(settings[key]))
+                db.set_config(key, str(val))
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+_proxy_test_task: Optional[asyncio.Task] = None
+
+
+@app.post("/api/server/proxies/test", response_class=JSONResponse)
+async def api_server_proxies_test(request: Request):
+    """Start a background proxy test task. Results streamed via hub broadcast."""
+    global _proxy_test_task
+    import re as _re
+
+    if _proxy_test_task and not _proxy_test_task.done():
+        return JSONResponse({"ok": False, "error": "Test already running"}, status_code=409)
+
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    proxies = payload.get("proxies", [])
+    if not isinstance(proxies, list) or not proxies:
+        raise HTTPException(400, detail="proxies must be a non-empty list")
+
+    _HP_UP = _re.compile(r"^(?P<host>[^:]+):(?P<port>\d+):(?P<user>[^:]+):(?P<pass>.+)$")
+    _UP_HP = _re.compile(r"^(?P<user>[^:@]+):(?P<pass>[^@]+)@(?P<host>[^:]+):(?P<port>\d+)$")
+
+    def _normalise(raw: str):
+        raw = raw.strip()
+        if not raw:
+            return None
+        scheme = "http"
+        if "://" in raw:
+            scheme, _, raw = raw.partition("://")
+        m = _HP_UP.match(raw)
+        if m:
+            return f"{scheme}://{m.group('user')}:{m.group('pass')}@{m.group('host')}:{m.group('port')}"
+        m = _UP_HP.match(raw)
+        if m:
+            return f"{scheme}://{raw}"
+        if ":" in raw:
+            return f"{scheme}://{raw}"
+        return None
+
+    def _is_socks(url: str) -> bool:
+        return url.lower().startswith(("socks4://", "socks5://", "socks4a://", "socks5h://"))
+
+    try:
+        from aiohttp_socks import ProxyConnector
+    except ImportError:
+        ProxyConnector = None
+
+    test_url = "https://discord.com/api/v9/gateway"
+    _batch_raw = (db.get_config("PROXY_TEST_BATCH_SIZE", "") or "").strip()
+    batch_size = int(_batch_raw) if _batch_raw else 50
+    _timeout = aiohttp.ClientTimeout(total=5)
+
+    async def _test_one(raw_proxy: str):
+        url = _normalise(raw_proxy)
+        if not url:
+            return {"proxy": raw_proxy, "ok": False, "error": "Invalid format", "ms": None}
+        import time as _time
+        t0 = _time.monotonic()
+        try:
+            if _is_socks(url):
+                if ProxyConnector is None:
+                    return {"proxy": raw_proxy, "ok": False, "error": "aiohttp_socks not installed", "ms": None}
+                connector = ProxyConnector.from_url(url)
+                async with aiohttp.ClientSession(connector=connector) as sess:
+                    async with sess.get(test_url, timeout=_timeout) as resp:
+                        ms = round((_time.monotonic() - t0) * 1000)
+                        return {"proxy": raw_proxy, "ok": resp.status == 200, "status": resp.status, "ms": ms}
+            else:
+                async with aiohttp.ClientSession() as sess:
+                    async with sess.get(test_url, proxy=url, timeout=_timeout) as resp:
+                        ms = round((_time.monotonic() - t0) * 1000)
+                        return {"proxy": raw_proxy, "ok": resp.status == 200, "status": resp.status, "ms": ms}
+        except Exception as e:
+            ms = round((_time.monotonic() - t0) * 1000)
+            return {"proxy": raw_proxy, "ok": False, "error": type(e).__name__, "ms": ms}
+
+    async def _run_test(proxy_list: list):
+        import time as _time
+        total = len(proxy_list)
+        all_results = []
+        completed = 0
+        t_start = _time.monotonic()
+
+        LOGGER.info("[🔀] Proxy test started: %d proxies (batch=%d, timeout=%ds)", total, batch_size, 5)
+
+        await hub.broadcast({
+            "kind": "proxy_test", "role": "admin",
+            "payload": {"type": "started", "total": total},
+        })
+
+        try:
+            for i in range(0, total, batch_size):
+                batch = proxy_list[i : i + batch_size]
+                batch_num = (i // batch_size) + 1
+                total_batches = (total + batch_size - 1) // batch_size
+                LOGGER.info("[🔀] Proxy test batch %d/%d (%d proxies)", batch_num, total_batches, len(batch))
+
+                batch_results = await asyncio.gather(*[_test_one(p) for p in batch])
+                all_results.extend(batch_results)
+                completed += len(batch_results)
+
+                batch_passed = sum(1 for r in batch_results if r.get("ok"))
+                batch_failed = len(batch_results) - batch_passed
+                LOGGER.info("[🔀] Proxy test batch %d/%d done: %d passed, %d failed", batch_num, total_batches, batch_passed, batch_failed)
+
+                await hub.broadcast({
+                    "kind": "proxy_test", "role": "admin",
+                    "payload": {
+                        "type": "progress",
+                        "current": completed,
+                        "total": total,
+                        "results": list(batch_results),
+                    },
+                })
+
+            elapsed = round(_time.monotonic() - t_start, 1)
+            total_passed = sum(1 for r in all_results if r.get("ok"))
+            total_failed = total - total_passed
+            LOGGER.info("[🔀] Proxy test complete: %d/%d passed, %d failed (%.1fs)", total_passed, total, total_failed, elapsed)
+
+            await hub.broadcast({
+                "kind": "proxy_test", "role": "admin",
+                "payload": {
+                    "type": "complete",
+                    "total": total,
+                    "results": all_results,
+                },
+            })
+        except asyncio.CancelledError:
+            elapsed = round(_time.monotonic() - t_start, 1)
+            LOGGER.info("[🔀] Proxy test stopped after %d/%d proxies (%.1fs)", completed, total, elapsed)
+
+    _proxy_test_task = asyncio.create_task(_run_test(proxies))
+    return JSONResponse({"ok": True, "total": len(proxies)})
+
+
+@app.get("/api/server/proxies/test/status", response_class=JSONResponse)
+async def api_server_proxies_test_status():
+    """Check if a proxy test is currently running."""
+    running = _proxy_test_task is not None and not _proxy_test_task.done()
+    return JSONResponse({"ok": True, "running": running})
+
+
+@app.post("/api/server/proxies/test/stop", response_class=JSONResponse)
+async def api_server_proxies_test_stop():
+    """Stop a running proxy test."""
+    global _proxy_test_task
+    if _proxy_test_task and not _proxy_test_task.done():
+        _proxy_test_task.cancel()
+        LOGGER.info("[🔀] Proxy test stopped by user")
+        await hub.broadcast({
+            "kind": "proxy_test", "role": "admin",
+            "payload": {"type": "stopped"},
+        })
+        return JSONResponse({"ok": True})
+    return JSONResponse({"ok": False, "error": "No test running"})
+
+
+_SYNC_SETTINGS_KEYS = {
+    "SYNC_STARTUP_DELAY": 15,
+    "SYNC_INTER_GUILD_DELAY": 3,
+    "SYNC_RANDOMIZE_ORDER": 1,
+}
+
+
+@app.get("/api/sync/settings", response_class=JSONResponse)
+async def api_sync_settings_get():
+    """Return sync timing settings."""
+    try:
+        settings = {}
+        for key, default in _SYNC_SETTINGS_KEYS.items():
+            raw = (db.get_config(key, "") or "").strip()
+            try:
+                settings[key] = int(raw) if raw else default
+            except (ValueError, TypeError):
+                settings[key] = default
+        return JSONResponse({"ok": True, "settings": settings})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/sync/settings", response_class=JSONResponse)
+async def api_sync_settings_put(request: Request):
+    """Save sync timing settings."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    settings = payload.get("settings", {})
+    if not isinstance(settings, dict):
+        raise HTTPException(400, detail="settings must be an object")
+    try:
+        for key, default in _SYNC_SETTINGS_KEYS.items():
+            if key in settings:
+                val = max(1, int(settings[key]))
+                db.set_config(key, str(val))
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+
+
+@app.get("/api/notifications/settings", response_class=JSONResponse)
+async def api_notifications_settings_get():
+    """Return webhook notification settings."""
+    try:
+        webhook_url = (db.get_config("NOTIFICATION_WEBHOOK_URL", "") or "").strip()
+        events = {}
+        for key, meta in NOTIFICATION_EVENTS.items():
+            raw = (db.get_config(f"NOTIFY_{key}", "") or "").strip().lower()
+            if raw:
+                events[key] = raw not in ("0", "false", "no")
+            else:
+                events[key] = meta.get("default", True)
+        return JSONResponse({"ok": True, "webhook_url": webhook_url, "events": events})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/notifications/settings", response_class=JSONResponse)
+async def api_notifications_settings_put(request: Request):
+    """Save webhook notification settings."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    try:
+        if "webhook_url" in payload:
+            db.set_config("NOTIFICATION_WEBHOOK_URL", (payload["webhook_url"] or "").strip())
+        events = payload.get("events", {})
+        for key in NOTIFICATION_EVENTS:
+            if key in events:
+                db.set_config(f"NOTIFY_{key}", "true" if events[key] else "false")
+        return JSONResponse({"ok": True})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/notifications/test", response_class=JSONResponse)
+async def api_notifications_test():
+    """Send a test notification."""
+    webhook_url = (db.get_config("NOTIFICATION_WEBHOOK_URL", "") or "").strip()
+    if not webhook_url:
+        return JSONResponse({"ok": False, "error": "No webhook URL configured"})
+    ok = await send_webhook(
+        webhook_url,
+        "Test Notification",
+        "If you see this, your Copycord webhook notifications are working!",
+        color=0x8B5CF6,
+    )
+    return JSONResponse({"ok": ok, "error": None if ok else "Failed to send"})
 
 
 @app.post("/api/scraper/start", response_class=JSONResponse)

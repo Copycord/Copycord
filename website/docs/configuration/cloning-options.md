@@ -7,95 +7,89 @@ title: Cloning Options
 
 These settings control what Copycord syncs between the source and clone servers. They can be configured per-mapping through the web dashboard.
 
-## Master controls
+## General
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `ENABLE_CLONING` | `true` | Master switch — disables all cloning when off |
-| `CLONE_MESSAGES` | `true` | Clone messages in real time via webhooks. When disabled, webhook creation is also skipped during sync |
-| `ON_DEMAND_WEBHOOKS` | `true` | When enabled, webhooks are only created when a channel receives its first message instead of during sync. This makes server cloning much faster by skipping upfront webhook creation |
+| Enable Cloning | On | Master switch — disables all cloning when off |
+| Clone Messages | On | Clone messages in real time via webhooks. When disabled, webhook creation is also skipped during sync |
+| On-Demand Webhooks | On | Webhooks are only created when a channel receives its first message instead of during sync. Makes server cloning much faster |
 
-## Message sync
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `EDIT_MESSAGES` | `true` | Edit cloned messages when the source message is edited |
-| `RESEND_EDITED_MESSAGES` | `true` | Resend edited messages as new messages |
-| `DELETE_MESSAGES` | `true` | Delete cloned messages when the source message is deleted |
-| `TAG_REPLY_MSG` | `false` | Add a reference tag showing which message is being replied to |
-
-## Channel sync
+## Messages
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `DELETE_CHANNELS` | `true` | Delete cloned channels when removed from the source |
-| `DELETE_THREADS` | `true` | Delete cloned threads when removed from the source |
-| `REPOSITION_CHANNELS` | `true` | Sync channel order/position from source |
-| `RENAME_CHANNELS` | `true` | Sync channel name changes |
-| `SYNC_CHANNEL_NSFW` | `false` | Sync the NSFW (age-restricted) flag |
-| `SYNC_CHANNEL_TOPIC` | `false` | Sync channel topic/description |
-| `SYNC_CHANNEL_SLOWMODE` | `false` | Sync slowmode (message cooldown) settings |
-| `MIRROR_CHANNEL_PERMISSIONS` | `false` | Mirror channel-level permission overwrites |
+| Edit Messages | On | Edit cloned messages when the source message is edited |
+| Resend Edited Messages | On | Resend edited messages as new messages. Requires Edit Messages to be enabled |
+| Delete Messages | On | Delete cloned messages when the source message is deleted |
 
-## Voice and stage channels
+## Channels
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `CLONE_VOICE` | `true` | Clone voice channels |
-| `CLONE_VOICE_PROPERTIES` | `false` | Sync voice channel bitrate and user limit |
-| `CLONE_STAGE` | `true` | Clone stage channels |
-| `CLONE_STAGE_PROPERTIES` | `false` | Sync stage channel properties |
+| Delete Removed Channels | On | Delete cloned channels when removed from the source |
+| Delete Removed Threads | On | Delete cloned threads when removed from the source |
+| Reposition Channels | On | Sync channel order/position from source |
+| Rename Channels | On | Sync channel name changes |
+| Sync NSFW Flag | Off | Sync the NSFW (age-restricted) flag |
+| Sync Channel Topic | Off | Sync channel topic/description |
+| Sync Slowmode | Off | Sync slowmode (message cooldown) settings |
+| Sync Forum Properties | Off | Sync forum layout, tags, and posting guidelines |
+| Mirror Channel Permissions | Off | Mirror channel-level permission overwrites. Requires Clone Roles to be enabled |
 
-## Role sync
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `CLONE_ROLES` | `true` | Clone roles from the source server |
-| `UPDATE_ROLES` | `true` | Allow updating role properties after initial creation |
-| `DELETE_ROLES` | `true` | Delete cloned roles when removed from the source |
-| `MIRROR_ROLE_PERMISSIONS` | `false` | Mirror role permissions from source |
-| `REARRANGE_ROLES` | `false` | Sync role ordering/position |
-| `CLONE_ROLE_ICONS` | `false` | Clone role icons (requires Server Boost level 2+) |
-
-## Emoji and sticker sync
+## Assets
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `CLONE_EMOJI` | `true` | Clone custom emojis |
-| `CLONE_STICKER` | `true` | Clone custom stickers |
+| Clone Emoji | On | Clone custom emojis |
+| Clone Stickers | On | Clone custom stickers |
+| Clone Voice Channels | On | Clone voice channels |
+| Sync Voice Properties | Off | Sync voice channel bitrate and user limit |
+| Clone Stage Channels | On | Clone stage channels |
+| Sync Stage Properties | Off | Sync stage channel properties |
 
-## Guild-level sync
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `CLONE_GUILD_ICON` | `false` | Sync the server icon |
-| `CLONE_GUILD_BANNER` | `false` | Sync the server banner |
-| `CLONE_GUILD_SPLASH` | `false` | Sync the server invite splash screen |
-| `CLONE_GUILD_DISCOVERY_SPLASH` | `false` | Sync the discovery splash screen |
-| `SYNC_GUILD_DESCRIPTION` | `false` | Sync the server description |
-
-## Forum channels
+## Roles
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `SYNC_FORUM_PROPERTIES` | `false` | Sync forum layout, tags, and posting guidelines |
+| Clone Roles | On | Clone roles from the source server |
+| Update Role Properties | On | Keep role properties (name, color, permissions) in sync after creation. When off, you can freely edit roles in the clone |
+| Delete Removed Roles | On | Delete cloned roles when removed from the source |
+| Mirror Role Permissions | Off | Mirror role permissions from source |
+| Rearrange Roles | Off | Sync role ordering/position |
+| Clone Role Icons | Off | Clone role icons (requires Boost Level 2+) |
 
-## Message customization
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `ANONYMIZE_USERS` | `false` | Replace user names with random identities (e.g., "SwiftFox123") and random avatars |
-| `DISABLE_EVERYONE_MENTIONS` | `false` | Strip @everyone and @here mentions from cloned messages |
-| `DISABLE_ROLE_MENTIONS` | `false` | Strip role mentions from cloned messages |
-
-## Database maintenance
+## Server Identity
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `DB_CLEANUP_MSG` | `true` | Automatically clean up message records when messages are deleted |
+| Clone Server Icon | Off | Clone the server icon |
+| Clone Server Banner | Off | Clone the server banner |
+| Clone Invite Splash | Off | Clone the invite splash image |
+| Clone Discovery Splash | Off | Clone the discovery splash image |
+| Sync Server Description | Off | Sync the server description |
+
+## Message Customization
+
+These options are configured via the **Optional Message Features** popup in the mapping settings.
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| Tag Replies | Off | Prepend a link to the original message when cloning a reply |
+| Anonymize Users | Off | Replace usernames and avatars with random identities |
+| Disable @everyone | Off | Strip @everyone and @here mentions from cloned messages |
+| Disable Role Mentions | Off | Strip role mentions from cloned messages |
+| Append Timestamp | Off | Append the original message timestamp below the cloned message |
+| Append Author | Off | Append the original author's username below the cloned message |
+
+## Database Maintenance
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| Auto-Clean Message DB | On | Automatically clean up message records older than 7 days |
 
 ---
 
 :::tip Recommended starting configuration
-Start with the defaults — they cover the most common use case (full channel and message cloning with roles and emojis). Enable additional sync options as needed. Options like `MIRROR_CHANNEL_PERMISSIONS` and `MIRROR_ROLE_PERMISSIONS` add more API calls and may slow syncing on large servers.
+Start with the defaults — they cover the most common use case (full channel and message cloning with roles and emojis). Enable additional sync options as needed. Options like Mirror Channel Permissions and Mirror Role Permissions add more API calls and may slow syncing on large servers.
 :::

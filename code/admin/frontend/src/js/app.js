@@ -9,53 +9,41 @@
   let FILTER_OBJECTS_KIND = null;
   let FILTER_OBJECTS_CATMAP = null;
   let lastRunning = null;
-  let tooltipEl = null;
   let cModal, cTitle, cBody, cBtnOk, cBtnX, cBtnCa, cBack;
   let confirmResolve = null;
   let confirmReject = null;
   const UPTIME_KEY = (role) => `cpc:uptime:${role}`;
   const ICONS = {
     trash: `
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round"
-          d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
       </svg>
     `,
     settings: `
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round"
-          d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
-        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915"/><circle cx="12" cy="12" r="3"/>
       </svg>
     `,
     filters: `
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round"
-          d="M12 3c2.755 0 5.455.232 8.083.678.533.09.917.556.917 1.096v1.044a2.25 2.25 0 0 1-.659 1.591l-5.432 5.432a2.25 2.25 0 0 0-.659 1.591v2.927a2.25 2.25 0 0 1-1.244 2.013L9.75 21v-6.568a2.25 2.25 0 0 0-.659-1.591L3.659 7.409A2.25 2.25 0 0 1 3 5.818V4.774c0-.54.384-1.006.917-1.096A48.32 48.32 0 0 1 12 3Z" />
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M10 20a1 1 0 0 0 .553.895l2 1A1 1 0 0 0 14 21v-7a2 2 0 0 1 .517-1.341L21.74 4.67A1 1 0 0 0 21 3H3a1 1 0 0 0-.742 1.67l7.225 7.989A2 2 0 0 1 10 14z"/>
       </svg>
     `,
     pause: `
-      <svg viewBox="0 0 24 24" width="20" height="20"
-          fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-        <rect x="7" y="5" width="3.5" height="14" rx="1"></rect>
-        <rect x="13.5" y="5" width="3.5" height="14" rx="1"></rect>
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="14" y="3" width="5" height="18" rx="1"/><rect x="5" y="3" width="5" height="18" rx="1"/>
       </svg>
     `,
     play: `
-      <svg viewBox="0 0 24 24" width="20" height="20"
-          fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-        <path stroke-linecap="round" stroke-linejoin="round"
-              d="M8 5.75v12.5a.75.75 0 0 0 1.137.624l8-6.25a.75.75 0 0 0 0-1.248l-8-6.25A.75.75 0 0 0 8 5.75z" />
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>
       </svg>
     `,
-
     clone: `
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none"
-          stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-      <rect x="9" y="9" width="10" height="10" rx="2"></rect>
-      <rect x="5" y="5" width="10" height="10" rx="2"></rect>
-    </svg>
-  `,
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>
+      </svg>
+    `,
   };
 
   let mapValidated = false;
@@ -214,6 +202,8 @@
     DISABLE_EVERYONE_MENTIONS: false,
     DISABLE_ROLE_MENTIONS: false,
     TAG_REPLY_MSG: false,
+    APPEND_TIMESTAMP: false,
+    APPEND_AUTHOR: false,
     DB_CLEANUP_MSG: true,
     ON_DEMAND_WEBHOOKS: true,
   };
@@ -579,80 +569,6 @@
   let uiSockTimer = null;
   let currentInterval = 4000;
 
-  function ensureTooltipEl() {
-    if (!tooltipEl) {
-      tooltipEl = document.createElement("div");
-      tooltipEl.className = "lock-tooltip";
-      tooltipEl.innerHTML = `
-      <div class="lock-tooltip-text">Stop the bot to edit server mappings</div>
-      <div class="lock-tooltip-arrow"></div>
-    `;
-      document.body.appendChild(tooltipEl);
-    }
-    return tooltipEl;
-  }
-
-  let lastTooltipUpdate = 0;
-  function showTooltip(x, y, force) {
-    const now = Date.now();
-    if (!force && now - lastTooltipUpdate < 50) return;
-    lastTooltipUpdate = now;
-
-    const tip = ensureTooltipEl();
-
-    const offsetY = 16;
-    tip.style.left = x + "px";
-    tip.style.top = y - offsetY + "px";
-    tip.style.opacity = "1";
-  }
-
-  function hideTooltip() {
-    if (tooltipEl) {
-      tooltipEl.style.opacity = "0";
-    }
-  }
-
-  function attachLockOverlay(card) {
-    if (card.querySelector(".guild-card-lock-overlay")) return;
-
-    const cs = window.getComputedStyle(card);
-    if (cs.position === "static") {
-      card.style.position = "relative";
-    }
-
-    const overlay = document.createElement("div");
-    overlay.className = "guild-card-lock-overlay";
-
-    const kill = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-    };
-    overlay.addEventListener("click", kill);
-    overlay.addEventListener("mousedown", kill);
-    overlay.addEventListener("mouseup", kill);
-    overlay.addEventListener("touchstart", kill);
-    overlay.addEventListener("touchend", kill);
-
-    overlay.addEventListener("mouseenter", (e) => {
-      showTooltip(e.clientX, e.clientY, true);
-    });
-
-    overlay.addEventListener("mousemove", (e) => {
-      showTooltip(e.clientX, e.clientY, false);
-    });
-
-    overlay.addEventListener("mouseleave", () => {
-      hideTooltip();
-    });
-
-    card.appendChild(overlay);
-  }
-
-  function detachLockOverlay(card) {
-    const overlay = card.querySelector(".guild-card-lock-overlay");
-    if (overlay) overlay.remove();
-  }
-
   function setGlobalConfigLocked(running) {
     const cfgForm = document.getElementById("cfg-form");
     const saveBtn = document.getElementById("cfg-save-btn");
@@ -721,6 +637,15 @@
         chipsEl.classList.remove("locked-field");
       }
     });
+
+    // Wire auto-start toggle to hidden select
+    const gcAutoToggle = document.getElementById("gc-autostart-toggle");
+    const gcAutoSelect = document.getElementById("COPYCORD_AUTOSTART");
+    if (gcAutoToggle && gcAutoSelect) {
+      gcAutoToggle.addEventListener("change", () => {
+        gcAutoSelect.value = gcAutoToggle.checked ? "true" : "false";
+      });
+    }
   }
 
   function setGuildCardsLocked(running) {
@@ -728,13 +653,12 @@
     cards.forEach((card) => {
       if (running) {
         card.classList.add("locked");
-        attachLockOverlay(card);
+        card.title = "Stop the bots to edit mappings";
       } else {
         card.classList.remove("locked");
-        detachLockOverlay(card);
+        card.title = "";
       }
     });
-    if (!running) hideTooltip();
   }
 
   async function fetchAndRenderStatus() {
@@ -1855,6 +1779,13 @@
       } else {
         highlightTokenInputsFromErrors([]);
       }
+
+      // Enable invite button if bot client ID is available
+      const inviteBtn = document.getElementById("bot-invite-btn");
+      if (inviteBtn && data.bot_client_id) {
+        inviteBtn.href = `https://discord.com/oauth2/authorize?client_id=${data.bot_client_id}&permissions=8&integration_type=0&scope=bot`;
+        inviteBtn.classList.remove("bot-invite-disabled");
+      }
     } catch (err) {
       console.error("Token validation on load failed:", err);
     } finally {
@@ -1943,12 +1874,19 @@
       .value.trim();
 
     const settings = {};
+    // Hidden selects (message features from sub-modal)
     document
       .querySelectorAll("#mapping-form select[id^='map_']")
       .forEach((sel) => {
         const key = sel.id.replace(/^map_/, "");
-        const val = sel.value;
-        settings[key] = String(val).toLowerCase() === "true";
+        settings[key] = String(sel.value).toLowerCase() === "true";
+      });
+    // Toggle checkboxes (main settings)
+    document
+      .querySelectorAll("#mapping-form input[data-map-toggle]")
+      .forEach((cb) => {
+        const key = cb.name;
+        if (key) settings[key] = cb.checked;
       });
 
     return {
@@ -2482,6 +2420,23 @@
         sel.dispatchEvent(new Event("change", { bubbles: true }));
       });
 
+    // Populate toggle checkboxes
+    document
+      .querySelectorAll("#mapping-form input[data-map-toggle]")
+      .forEach((cb) => {
+        const key = cb.name;
+        let rawVal;
+        if (cloneFrom && cloneFrom.settings && key in cloneFrom.settings) {
+          rawVal = cloneFrom.settings[key];
+        } else if (isEdit && mapping?.settings && key in mapping.settings) {
+          rawVal = mapping.settings[key];
+        } else {
+          rawVal = DEFAULT_MAPPING_SETTINGS[key];
+        }
+        if (typeof rawVal === "string") rawVal = rawVal.toLowerCase() === "true";
+        cb.checked = !!rawVal;
+      });
+
     const mappingFormEl = document.getElementById("mapping-form");
     if (mappingFormEl) {
       MAPPING_BASELINE = snapshotForm(mappingFormEl);
@@ -2540,6 +2495,111 @@
   }
 
   window.openMappingModal = openMappingModal;
+
+  // ─── Message Features Modal ──────────────────────────────────────────
+  const msgFeaturesModal = document.getElementById("msg-features-modal");
+  const msgFeaturesOpen  = document.getElementById("msg-features-open");
+  const msgFeaturesClose = document.getElementById("msg-features-close");
+  const msgFeaturesPreview = document.getElementById("msg-features-preview-footer");
+  const msgFeatureToggles = msgFeaturesModal
+    ? msgFeaturesModal.querySelectorAll(".msg-feature-toggle[data-key]")
+    : [];
+
+  function openMsgFeatures() {
+    if (!msgFeaturesModal) return;
+    // Sync toggle state from mapping form hidden values
+    for (const toggle of msgFeatureToggles) {
+      const key = toggle.dataset.key;
+      const formEl = document.getElementById(`map_${key}`);
+      const checked = formEl ? formEl.value === "True" : false;
+      toggle.querySelector("input").checked = checked;
+    }
+    updateMsgFeaturesPreview();
+    msgFeaturesModal.classList.add("show");
+    msgFeaturesModal.setAttribute("aria-hidden", "false");
+  }
+
+  function closeMsgFeatures() {
+    if (!msgFeaturesModal) return;
+    msgFeaturesModal.classList.remove("show");
+    msgFeaturesModal.setAttribute("aria-hidden", "true");
+  }
+
+  function getMsgFeatureState(key) {
+    const toggle = msgFeaturesModal?.querySelector(`.msg-feature-toggle[data-key="${key}"] input`);
+    return toggle?.checked || false;
+  }
+
+  function updateMsgFeaturesPreview() {
+    if (!msgFeaturesPreview) return;
+    const box = msgFeaturesPreview.closest(".msg-features-preview-box");
+    const replyEl = document.getElementById("msg-features-preview-reply");
+    const contentEl = document.getElementById("msg-features-preview-content");
+    const usernameEl = box?.querySelector(".msg-preview-username");
+    const avatarEl = box?.querySelector(".msg-preview-avatar");
+    const isAnon = getMsgFeatureState("ANONYMIZE_USERS");
+    const noEveryone = getMsgFeatureState("DISABLE_EVERYONE_MENTIONS");
+    const noRoles = getMsgFeatureState("DISABLE_ROLE_MENTIONS");
+
+    // Reply
+    if (replyEl) {
+      if (getMsgFeatureState("TAG_REPLY_MSG")) {
+        replyEl.innerHTML = `<span class="msg-reply-icon">↩</span> In reply to: <a class="msg-reply-link">Copycord is the best!</a>`;
+      } else {
+        replyEl.innerHTML = "";
+      }
+    }
+
+    // Anonymize
+    if (usernameEl) usernameEl.textContent = isAnon ? "SwiftFox123" : "Copycord";
+    if (avatarEl) {
+      if (isAnon) {
+        avatarEl.src = "https://picsum.photos/seed/preview42/200";
+        avatarEl.onerror = () => { avatarEl.src = "/static/logo.png"; avatarEl.onerror = null; };
+      } else {
+        avatarEl.src = "/static/logo.png";
+        avatarEl.onerror = null;
+      }
+    }
+
+    // Message content with mention previews
+    if (contentEl) {
+      const everyone = noEveryone
+        ? ` <span class="msg-mention-plain">@everyone</span>`
+        : ` <span class="msg-mention">@everyone</span>`;
+      const role = noRoles
+        ? ` <span class="msg-mention-plain">@Moderator</span>`
+        : ` <span class="msg-mention msg-mention--role">@Moderator</span>`;
+      contentEl.innerHTML = `Hey${everyone} check this out${role}`;
+    }
+
+    // Footer
+    const parts = [];
+    if (getMsgFeatureState("APPEND_TIMESTAMP")) parts.push("Oct 15, 2025 3:42 PM");
+    if (getMsgFeatureState("APPEND_AUTHOR")) {
+      const name = isAnon ? "SwiftFox123" : "Copycord";
+      parts.push(`<strong>${name}</strong>`);
+    }
+    msgFeaturesPreview.innerHTML = parts.length ? parts.join(" · ") : "";
+  }
+
+  // Toggle change handler — sync to hidden form field
+  for (const toggle of msgFeatureToggles) {
+    const input = toggle.querySelector("input");
+    if (!input) continue;
+    input.addEventListener("change", () => {
+      const key = toggle.dataset.key;
+      const formEl = document.getElementById(`map_${key}`);
+      if (formEl) formEl.value = input.checked ? "True" : "False";
+      updateMsgFeaturesPreview();
+    });
+  }
+
+  if (msgFeaturesOpen)  msgFeaturesOpen.addEventListener("click", openMsgFeatures);
+  if (msgFeaturesClose) msgFeaturesClose.addEventListener("click", closeMsgFeatures);
+  if (msgFeaturesModal) {
+    msgFeaturesModal.querySelector(".modal-backdrop")?.addEventListener("click", closeMsgFeatures);
+  }
 
   function setMappingSaveBusy(isBusy) {
     const btn = document.getElementById("mapping-save-btn");
@@ -3588,7 +3648,7 @@
     lastFocusConfirm = document.activeElement;
 
     cTitle.textContent = title || "Confirm";
-    cBody.textContent = body || "Are you sure?";
+    cBody.innerHTML = body || "Are you sure?";
     cBtnOk.textContent = confirmText || "OK";
 
     cBtnOk.classList.remove(
@@ -3710,80 +3770,70 @@
           : "Pause cloning for this mapping";
 
         const statusBadgeHtml = isPaused
-          ? `<span class="status-pill status-pill-paused">Paused</span>`
+          ? `<span class="guild-card-paused-icon" title="Paused"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M17 17H4a1 1 0 0 1-.74-1.673C4.59 13.956 6 12.499 6 8a6 6 0 0 1 .258-1.742"/><path d="m2 2 20 20"/><path d="M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05"/></svg></span>`
           : "";
+
+        const hostName = escapeHtml(m.original_guild_name || `ID: ${m.original_guild_id}`);
 
         return `
       <div class="guild-card ${isPaused ? "is-paused" : "is-active"}"
            data-id="${m.mapping_id}"
            data-status="${statusRaw}">
-        <div class="guild-card-logo">
-          <img src="${iconSrc}" alt="" class="guild-card-logo-img">
-        </div>
 
         <div class="guild-card-inner">
-          <div class="guild-card-main">
-            <div class="guild-card-name">
-              <div class="guild-card-name-title"
-                   title="${escapeHtml(m.mapping_name || "")}">
+          <div class="guild-card-header">
+            <img src="${iconSrc}" alt="" class="guild-card-avatar">
+            <div class="guild-card-info">
+              <div class="guild-card-name-title" title="${escapeHtml(m.mapping_name || "")}">
                 ${escapeHtml(m.mapping_name || "")}
               </div>
+              <div class="guild-card-route">${hostName}</div>
             </div>
-
-            <div class="guild-card-actions">
-              <button class="btn-icon edit-mapping-btn"
-                      data-id="${m.mapping_id}"
-                      aria-label="Edit mapping"
-                      title="Settings">
-                ${ICONS.settings}
-              </button>
-
-              <button class="btn-icon mapping-filters-btn"
-                      data-id="${m.mapping_id}"
-                      aria-label="Filters for this mapping"
-                      title="Filters">
-                ${ICONS.filters}
-              </button>
-
-              <button class="btn-icon mapping-status-btn ${
-                isPaused ? "is-paused" : "is-active"
-              }"
-                      data-id="${m.mapping_id}"
-                      type="button"
-                      aria-pressed="${isPaused ? "true" : "false"}"
-                      aria-label="${statusLabel}"
-                      title="${statusLabel}">
-                ${statusIcon}
-              </button>
-
-              <button class="btn-icon clone-mapping-btn"
-                      data-id="${m.mapping_id}"
-                      aria-label="Clone mapping"
-                      title="Clone mapping">
-                ${ICONS.clone}
-              </button>
-
-              <button
-                class="btn-icon delete-mapping-btn"
-                type="button"
-                data-action="delete"
-                data-id="${m.mapping_id}"
-                aria-label="Delete mapping"
-                title="Delete mapping">
-                ${ICONS.trash}
-              </button>
-            </div>
+            ${statusBadgeHtml}
           </div>
 
-          ${
-            statusBadgeHtml
-              ? `
-            <div class="guild-card-status">
-              ${statusBadgeHtml}
-            </div>
-          `
-              : ""
-          }
+          <div class="guild-card-actions">
+            <button class="btn-icon edit-mapping-btn"
+                    data-id="${m.mapping_id}"
+                    aria-label="Edit mapping"
+                    title="Settings">
+              ${ICONS.settings}
+            </button>
+
+            <button class="btn-icon mapping-filters-btn"
+                    data-id="${m.mapping_id}"
+                    aria-label="Filters for this mapping"
+                    title="Filters">
+              ${ICONS.filters}
+            </button>
+
+            <button class="btn-icon mapping-status-btn ${isPaused ? "is-paused" : "is-active"}"
+                    data-id="${m.mapping_id}"
+                    type="button"
+                    aria-pressed="${isPaused ? "true" : "false"}"
+                    aria-label="${statusLabel}"
+                    title="${statusLabel}">
+              ${statusIcon}
+            </button>
+
+            <button class="btn-icon clone-mapping-btn"
+                    data-id="${m.mapping_id}"
+                    aria-label="Clone mapping"
+                    title="Clone mapping">
+              ${ICONS.clone}
+            </button>
+
+            <span class="guild-card-action-spacer"></span>
+
+            <button class="btn-icon delete-mapping-btn"
+                    type="button"
+                    data-action="delete"
+                    data-id="${m.mapping_id}"
+                    aria-label="Delete mapping"
+                    title="Delete mapping">
+              ${ICONS.trash}
+            </button>
+          </div>
         </div>
       </div>
     `;
@@ -3799,8 +3849,7 @@
         title="Add new mapping"
       >
         <div class="new-card-inner">
-          <div class="new-card-plus">+</div>
-          <div class="new-card-label">Add Mapping</div>
+          <div class="new-card-plus"><svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m11 19-1.106-.552a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0l4.212 2.106a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619V12"/><path d="M15 5.764V12"/><path d="M18 15v6"/><path d="M21 18h-6"/><path d="M9 3.236v15"/></svg></div>
         </div>
       </button>
     `;
@@ -4046,13 +4095,39 @@
 
       fields.forEach((field) => {
         const key = (field.dataset.settingKey || "").toLowerCase();
-        const label = (
-          field.querySelector(".label-text")?.textContent || ""
+        const name = (
+          field.querySelector(".mapping-toggle-name")?.textContent || ""
+        ).toLowerCase();
+        const desc = (
+          field.querySelector(".mapping-toggle-desc")?.textContent || ""
         ).toLowerCase();
 
-        const match = !q || key.includes(q) || label.includes(q);
+        const match = !q || key.includes(q) || name.includes(q) || desc.includes(q);
         field.style.display = match ? "" : "none";
       });
+
+      // Hide sections with no matches, auto-expand when searching
+      let anyMatchTotal = false;
+      document.querySelectorAll("#mapping-form .mapping-settings-section").forEach((section) => {
+        const rows = section.querySelectorAll(".mapping-setting-field");
+        const anyVisible = Array.from(rows).some(r => r.style.display !== "none");
+        section.style.display = anyVisible ? "" : "none";
+        if (anyVisible) anyMatchTotal = true;
+        if (q && anyVisible) section.open = true;
+        if (!q) section.open = false;
+      });
+
+      // Show/hide no results message
+      let noResults = document.getElementById("mapping-no-results");
+      if (!noResults) {
+        noResults = document.createElement("div");
+        noResults.id = "mapping-no-results";
+        noResults.className = "mapping-no-results";
+        noResults.textContent = "No settings match your search";
+        const toolbar = document.querySelector(".mapping-toolbar");
+        if (toolbar) toolbar.after(noResults);
+      }
+      noResults.style.display = (q && !anyMatchTotal) ? "" : "none";
     }
 
     input.addEventListener("input", applyFilter);
@@ -4525,6 +4600,10 @@
         location.host +
         "/ws/out";
       const ws = new WebSocket(url);
+      let wsReady = false;
+
+      // Ignore replayed history — only process live events after a short delay
+      setTimeout(() => { wsReady = true; }, 1500);
 
       ws.onmessage = (ev) => {
         try {
@@ -4532,6 +4611,9 @@
           if (msg.kind === "agent" && msg.type === "status") {
             const prefix = msg.role === "server" ? "server" : "client";
             renderStatusRow(prefix, msg.data || {});
+          }
+          if (msg.kind === "proxy_test" && msg.payload && wsReady) {
+            handleProxyTestEvent(msg.payload);
           }
           if (msg.type === "info")
             showToast(msg.data?.msg || "Info", { type: "success" });
@@ -4762,41 +4844,196 @@
 
     refreshGuildMappings();
 
-    // ─── Server Proxy Rotation ─────────────────────────────────────────────
+    // ─── Client Proxy Rotation ──────────────────────────────────────────────
     const srvProxyCard    = document.getElementById("srv-proxy-card");
     const srvProxyToggle  = document.getElementById("srv-proxy-toggle");
-    const srvProxyTa      = document.getElementById("srv-proxy-textarea");
-    const srvProxyCount   = document.getElementById("srv-proxy-count");
+    const srvProxyChips   = document.getElementById("srv-proxy-chips");
+    const srvProxyInput   = document.getElementById("srv-proxy-chips-input");
     const srvProxyStatus  = document.getElementById("srv-proxy-status");
-    const srvProxySave    = document.getElementById("srv-proxy-save");
     const srvProxyClear   = document.getElementById("srv-proxy-clear");
-    const srvPrependHttp  = document.getElementById("srv-proxy-prepend-http");
-    const srvPrependSocks = document.getElementById("srv-proxy-prepend-socks5");
+    const srvProxyTest    = document.getElementById("srv-proxy-test");
 
-    function srvProxyLines() {
-      if (!srvProxyTa) return [];
-      return srvProxyTa.value.split("\n").map(l => l.trim()).filter(Boolean);
+    const srvRotationToggle   = document.getElementById("srv-proxy-rotation-toggle");
+    const srvRotationControls = document.getElementById("srv-proxy-rotation-controls");
+    const srvIntervalInput    = document.getElementById("srv-proxy-interval");
+    const srvIntervalUnit     = document.getElementById("srv-proxy-interval-unit");
+
+    // ── Proxy chip helpers ──
+
+    function getProxyChipValues() {
+      if (!srvProxyChips) return [];
+      return Array.from(srvProxyChips.querySelectorAll(".srv-proxy-chip-item"))
+        .map(el => el.dataset.proxy)
+        .filter(Boolean);
     }
 
-    function updateSrvProxyCount() {
-      if (!srvProxyCount) return;
-      const n = srvProxyLines().length;
-      srvProxyCount.textContent = n > 0 ? `${n} proxy${n !== 1 ? "ies" : ""}` : "";
+    function createProxyChip(proxy) {
+      const el = document.createElement("span");
+      el.className = "srv-proxy-chip-item";
+      el.dataset.proxy = proxy;
+      el.innerHTML = `<span class="srv-proxy-chip-text">${escapeHtml(proxy)}</span><span class="srv-proxy-chip-x">×</span>`;
+      el.querySelector(".srv-proxy-chip-x").addEventListener("click", () => {
+        el.remove();
+        refreshStatusChip();
+        scheduleProxySave();
+      });
+      return el;
     }
 
-    function updateSrvProxyStatus(enabled, count) {
-      if (!srvProxyStatus) return;
-      if (enabled && count > 0) {
-        srvProxyStatus.textContent = `Enabled · ${count} proxy${count !== 1 ? "ies" : ""}`;
-        srvProxyStatus.className = "srv-proxy-status is-on";
-      } else if (enabled) {
-        srvProxyStatus.textContent = "Enabled · no proxies loaded";
-        srvProxyStatus.className = "srv-proxy-status is-warn";
-      } else {
-        srvProxyStatus.textContent = "Disabled";
-        srvProxyStatus.className = "srv-proxy-status";
+    function escapeHtml(s) {
+      const d = document.createElement("div");
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
+    function addProxies(text) {
+      if (!srvProxyChips || !text) return;
+      const existing = new Set(getProxyChipValues());
+      const lines = text.split(/[\n\r,]+/).map(l => l.trim()).filter(Boolean);
+      let added = false;
+      for (const line of lines) {
+        if (!existing.has(line)) {
+          existing.add(line);
+          srvProxyChips.insertBefore(createProxyChip(line), srvProxyInput);
+          added = true;
+        }
+      }
+      if (added) {
+        refreshStatusChip();
+        scheduleProxySave();
       }
     }
+
+    function setProxyChips(proxies) {
+      if (!srvProxyChips) return;
+      srvProxyChips.querySelectorAll(".srv-proxy-chip-item").forEach(el => el.remove());
+      for (const p of proxies) {
+        srvProxyChips.insertBefore(createProxyChip(p), srvProxyInput);
+      }
+      refreshStatusChip();
+    }
+
+    function pluralProxy(n) {
+      return n === 1 ? "1 proxy" : `${n} proxies`;
+    }
+
+    function refreshStatusChip() {
+      updateSrvProxyChip(srvProxyToggle?.checked, getProxyChipValues().length);
+    }
+
+    function updateSrvProxyChip(enabled, count) {
+      if (!srvProxyStatus) return;
+      if (enabled && count > 0) {
+        srvProxyStatus.textContent = `Enabled · ${pluralProxy(count)}`;
+        srvProxyStatus.className = "srv-proxy-chip is-on";
+      } else if (enabled) {
+        srvProxyStatus.textContent = "Enabled · no proxies";
+        srvProxyStatus.className = "srv-proxy-chip is-warn";
+      } else {
+        srvProxyStatus.textContent = "Disabled";
+        srvProxyStatus.className = "srv-proxy-chip";
+      }
+    }
+
+    function updateRotationControls(intervalSec) {
+      if (!srvRotationControls || !srvRotationToggle) return;
+      const on = intervalSec > 0;
+      srvRotationToggle.checked = on;
+      srvRotationControls.classList.toggle("is-hidden", !on);
+      if (on && srvIntervalInput && srvIntervalUnit) {
+        if (intervalSec >= 3600 && intervalSec % 3600 === 0) {
+          srvIntervalInput.value = intervalSec / 3600;
+          srvIntervalUnit.value = "3600";
+        } else {
+          srvIntervalInput.value = Math.max(1, Math.round(intervalSec / 60));
+          srvIntervalUnit.value = "60";
+        }
+      }
+    }
+
+    function getRotationIntervalSec() {
+      if (!srvRotationToggle || !srvRotationToggle.checked) return 0;
+      if (!srvIntervalInput || !srvIntervalUnit) return 0;
+      const val = Math.max(1, parseInt(srvIntervalInput.value, 10) || 1);
+      const multiplier = parseInt(srvIntervalUnit.value, 10) || 60;
+      return val * multiplier;
+    }
+
+    // ── Input handling ──
+
+    if (srvProxyInput) {
+      srvProxyInput.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          const val = srvProxyInput.value.trim();
+          if (val) {
+            addProxies(val);
+            srvProxyInput.value = "";
+          }
+        }
+        // Backspace on empty input removes last chip
+        if (e.key === "Backspace" && !srvProxyInput.value) {
+          const chips = srvProxyChips.querySelectorAll(".srv-proxy-chip-item");
+          if (chips.length) {
+            chips[chips.length - 1].remove();
+            refreshStatusChip();
+            scheduleProxySave();
+          }
+        }
+      });
+      srvProxyInput.addEventListener("paste", (e) => {
+        e.preventDefault();
+        const text = (e.clipboardData || window.clipboardData).getData("text");
+        if (text) {
+          addProxies(text);
+          srvProxyInput.value = "";
+        }
+      });
+    }
+
+    // Click on container focuses input
+    if (srvProxyChips && srvProxyInput) {
+      srvProxyChips.addEventListener("click", (e) => {
+        if (e.target === srvProxyChips) srvProxyInput.focus();
+      });
+    }
+
+    // ── Auto-save (debounced) ──
+
+    let _proxySaveTimer = null;
+    function scheduleProxySave() {
+      clearTimeout(_proxySaveTimer);
+      _proxySaveTimer = setTimeout(saveProxySettings, 400);
+    }
+
+    async function saveProxySettings() {
+      const lines = getProxyChipValues();
+      const intervalSec = getRotationIntervalSec();
+      try {
+        const [rProxies, rInterval] = await Promise.all([
+          fetch("/api/server/proxies", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ proxies: lines }),
+          }),
+          fetch("/api/server/proxies/rotation-interval", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ interval: intervalSec }),
+          }),
+        ]);
+        const jProxies = await rProxies.json();
+        const jInterval = await rInterval.json();
+        if (!jProxies.ok) showToast(jProxies.error || "Failed to save proxies", { type: "error" });
+        if (!jInterval.ok) showToast(jInterval.error || "Failed to save rotation", { type: "error" });
+        updateSrvProxyChip(srvProxyToggle?.checked, lines.length);
+      } catch (e) {
+        console.error(e);
+        showToast("Failed to save proxy settings", { type: "error" });
+      }
+    }
+
+    // ── API calls ──
 
     async function loadSrvProxies() {
       if (!srvProxyCard) return;
@@ -4804,35 +5041,13 @@
         const r = await fetch("/api/server/proxies");
         const j = await r.json();
         if (j.ok) {
-          if (srvProxyTa) srvProxyTa.value = (j.proxies || []).join("\n");
+          setProxyChips(j.proxies || []);
           if (srvProxyToggle) srvProxyToggle.checked = !!j.enabled;
-          updateSrvProxyCount();
-          updateSrvProxyStatus(!!j.enabled, (j.proxies || []).length);
+          updateSrvProxyChip(!!j.enabled, (j.proxies || []).length);
+          updateRotationControls(j.rotation_interval || 0);
         }
       } catch (e) {
-        console.error("Failed to load server proxies:", e);
-      }
-    }
-
-    async function saveSrvProxies() {
-      const lines = srvProxyLines();
-      try {
-        const r = await fetch("/api/server/proxies", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ proxies: lines }),
-        });
-        const j = await r.json();
-        if (j.ok) {
-          showToast(`Saved ${lines.length} server prox${lines.length !== 1 ? "ies" : "y"}`, { type: "success" });
-          updateSrvProxyCount();
-          updateSrvProxyStatus(srvProxyToggle?.checked, lines.length);
-        } else {
-          showToast(j.error || "Failed to save proxies", { type: "error" });
-        }
-      } catch (e) {
-        console.error(e);
-        showToast("Failed to save proxies", { type: "error" });
+        console.error("Failed to load client proxies:", e);
       }
     }
 
@@ -4845,41 +5060,563 @@
         });
         const j = await r.json();
         if (j.ok) {
-          const count = srvProxyLines().length;
+          const count = getProxyChipValues().length;
           showToast(
             enabled
-              ? `Proxy rotation enabled (${count} prox${count !== 1 ? "ies" : "y"})`
-              : "Proxy rotation disabled",
+              ? `Client proxies enabled (${pluralProxy(count)})`
+              : "Client proxies disabled",
             { type: "success" }
           );
-          updateSrvProxyStatus(enabled, count);
+          updateSrvProxyChip(enabled, count);
         } else {
           showToast(j.error || "Failed to toggle", { type: "error" });
         }
       } catch (e) {
         console.error(e);
-        showToast("Failed to toggle proxy rotation", { type: "error" });
+        showToast("Failed to toggle client proxies", { type: "error" });
       }
     }
 
-    function srvPrependScheme(scheme) {
-      if (!srvProxyTa) return;
-      srvProxyTa.value = srvProxyTa.value.split("\n").map(line => {
-        const l = line.trim();
-        if (!l || l.includes("://")) return line;
-        return `${scheme}${l}`;
-      }).join("\n");
-      updateSrvProxyCount();
+    function toggleRotation(enabled) {
+      if (srvRotationControls) {
+        srvRotationControls.classList.toggle("is-hidden", !enabled);
+      }
+      scheduleProxySave();
     }
 
-    if (srvProxySave)    srvProxySave.addEventListener("click", () => saveSrvProxies());
-    if (srvProxyClear)   srvProxyClear.addEventListener("click", async () => { if (srvProxyTa) srvProxyTa.value = ""; await saveSrvProxies(); });
-    if (srvProxyTa)      srvProxyTa.addEventListener("input", updateSrvProxyCount);
-    if (srvProxyToggle)  srvProxyToggle.addEventListener("change", () => toggleSrvProxies(srvProxyToggle.checked));
-    if (srvPrependHttp)  srvPrependHttp.addEventListener("click", () => srvPrependScheme("http://"));
-    if (srvPrependSocks) srvPrependSocks.addEventListener("click", () => srvPrependScheme("socks5://"));
+    let SLOW_THRESHOLD_MS = 3000;
+    const proxyProgress     = document.getElementById("srv-proxy-progress");
+    const proxyProgressFill = document.getElementById("srv-proxy-progress-fill");
+    const proxyProgressText = document.getElementById("srv-proxy-progress-text");
+
+    function maskProxy(p) {
+      return p.includes("@") ? p.replace(/\/\/[^@]+@/, "//***@") : p;
+    }
+
+    function buildProxyResultRow(r, category) {
+      const masked = escapeHtml(maskProxy(r.proxy));
+      const color = category === "failed" ? "#ff6b6b" : category === "slow" ? "#ff9800" : "#4caf50";
+      const icon = category === "failed" ? "✗" : category === "slow" ? "⚠" : "✓";
+      const detail = r.ok ? `${r.ms}ms` : (r.error || "failed");
+      return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace">`
+        + `<span style="color:${color};flex-shrink:0">${icon}</span>`
+        + `<span style="color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${masked}</span>`
+        + `<span style="color:${color};flex-shrink:0;font-size:11px">${escapeHtml(detail)}</span>`
+        + `</div>`;
+    }
+
+    function showProxyProgress(current, total) {
+      if (!proxyProgress) return;
+      proxyProgress.style.display = "flex";
+      const pct = total > 0 ? Math.round((current / total) * 100) : 0;
+      if (proxyProgressFill) proxyProgressFill.style.width = pct + "%";
+      if (proxyProgressText) proxyProgressText.textContent = `${current} / ${total}`;
+    }
+
+    function hideProxyProgress() {
+      if (proxyProgress) proxyProgress.style.display = "none";
+      if (proxyProgressFill) proxyProgressFill.style.width = "0%";
+    }
+
+    function applyBatchResultsToChips(results) {
+      const chipEls = srvProxyChips.querySelectorAll(".srv-proxy-chip-item");
+      for (const result of results) {
+        const chip = Array.from(chipEls).find(el => el.dataset.proxy === result.proxy);
+        if (!chip) continue;
+        chip.classList.remove("test-loading");
+        const msEl = chip.querySelector(".srv-proxy-chip-ms");
+        if (!result.ok) {
+          chip.classList.add("test-fail");
+          if (msEl) msEl.textContent = result.error || "failed";
+        } else if (result.ms >= SLOW_THRESHOLD_MS) {
+          chip.classList.add("test-slow");
+          if (msEl) msEl.textContent = `${result.ms}ms`;
+        } else {
+          chip.classList.add("test-pass");
+          if (msEl) msEl.textContent = `${result.ms}ms`;
+        }
+      }
+    }
+
+    function showTestResultsModal(allResults) {
+      const good = [], slow = [], failed = [];
+      for (const r of allResults) {
+        if (!r.ok) failed.push(r);
+        else if (r.ms >= SLOW_THRESHOLD_MS) slow.push(r);
+        else good.push(r);
+      }
+
+      const hasIssues = failed.length > 0 || slow.length > 0;
+      if (!hasIssues) {
+        showToast(`All ${good.length} proxies passed`, { type: "success" });
+        return;
+      }
+
+      const stats = `
+        <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
+          <div style="flex:1;min-width:70px;text-align:center;padding:10px 8px;border-radius:10px;background:rgba(76,175,80,0.1)">
+            <div style="font-size:22px;font-weight:700;color:#4caf50">${good.length}</div>
+            <div style="font-size:11px;color:var(--muted)">healthy</div>
+          </div>
+          ${slow.length ? `<div style="flex:1;min-width:70px;text-align:center;padding:10px 8px;border-radius:10px;background:rgba(255,152,0,0.1)">
+            <div style="font-size:22px;font-weight:700;color:#ff9800">${slow.length}</div>
+            <div style="font-size:11px;color:var(--muted)">slow</div>
+          </div>` : ""}
+          ${failed.length ? `<div style="flex:1;min-width:70px;text-align:center;padding:10px 8px;border-radius:10px;background:rgba(255,80,80,0.1)">
+            <div style="font-size:22px;font-weight:700;color:#ff6b6b">${failed.length}</div>
+            <div style="font-size:11px;color:var(--muted)">failed</div>
+          </div>` : ""}
+        </div>`;
+
+      let listHtml = "";
+      if (failed.length) {
+        listHtml += `<div style="font-size:11px;font-weight:600;color:#ff6b6b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:4px">Failed</div>`;
+        listHtml += failed.map(r => buildProxyResultRow(r, "failed")).join("");
+      }
+      if (slow.length) {
+        listHtml += `<div style="font-size:11px;font-weight:600;color:#ff9800;text-transform:uppercase;letter-spacing:0.5px;margin:${failed.length ? "10px" : "0"} 0 4px">Slow (&gt;${SLOW_THRESHOLD_MS / 1000}s)</div>`;
+        listHtml += slow.map(r => buildProxyResultRow(r, "slow")).join("");
+      }
+
+      const resultsBox = `
+        <div class="srv-proxy-results-scroll">
+          ${listHtml}
+        </div>`;
+
+      const checkboxes = `
+        <div style="display:flex;flex-direction:column;gap:8px">
+          ${failed.length ? `<label class="srv-proxy-check" style="cursor:pointer">
+            <input type="checkbox" id="ptr-remove-failed" checked />
+            <span>Remove <strong>${failed.length}</strong> failed proxy${failed.length !== 1 ? "es" : ""}</span>
+          </label>` : ""}
+          ${slow.length ? `<label class="srv-proxy-check" style="cursor:pointer">
+            <input type="checkbox" id="ptr-remove-slow" />
+            <span>Remove <strong>${slow.length}</strong> slow proxy${slow.length !== 1 ? "es" : ""}</span>
+          </label>` : ""}
+        </div>`;
+
+      openConfirm({
+        title: "Proxy Test Results",
+        body: stats + resultsBox + checkboxes,
+        confirmText: "Remove Selected",
+        confirmClass: "btn-ghost-red",
+        showCancel: true,
+        onConfirm: () => {
+          const removeFailed = document.getElementById("ptr-remove-failed")?.checked;
+          const removeSlow = document.getElementById("ptr-remove-slow")?.checked;
+          const toRemove = new Set();
+          if (removeFailed) failed.forEach(r => toRemove.add(r.proxy));
+          if (removeSlow) slow.forEach(r => toRemove.add(r.proxy));
+          if (toRemove.size) {
+            const chipEls = srvProxyChips.querySelectorAll(".srv-proxy-chip-item");
+            chipEls.forEach(el => { if (toRemove.has(el.dataset.proxy)) el.remove(); });
+            refreshStatusChip();
+            saveProxySettings();
+            showToast(`Removed ${toRemove.size} proxy${toRemove.size !== 1 ? "es" : ""}`, { type: "success" });
+          }
+        },
+      });
+    }
+
+    // ── Proxy test streaming state ──
+    let _proxyTestRunning = false;
+    let _proxyTestResults = [];
+
+    function setTestButton(mode) {
+      if (!srvProxyTest) return;
+      if (mode === "running") {
+        _proxyTestRunning = true;
+        srvProxyTest.disabled = false;
+        srvProxyTest.textContent = "Stop";
+        srvProxyTest.classList.add("btn-ghost-red");
+        srvProxyTest.classList.remove("btn-outline");
+      } else {
+        _proxyTestRunning = false;
+        srvProxyTest.disabled = false;
+        srvProxyTest.textContent = "Test All";
+        srvProxyTest.classList.remove("btn-ghost-red");
+        srvProxyTest.classList.add("btn-outline");
+      }
+    }
+
+    function handleProxyTestEvent(payload) {
+      if (payload.type === "started") {
+        _proxyTestResults = [];
+        setTestButton("running");
+        showProxyProgress(0, payload.total);
+        const chipEls = srvProxyChips.querySelectorAll(".srv-proxy-chip-item");
+        chipEls.forEach(el => {
+          el.classList.remove("test-pass", "test-fail", "test-slow");
+          el.classList.add("test-loading");
+          const ms = el.querySelector(".srv-proxy-chip-ms");
+          if (ms) ms.textContent = "testing…";
+          else {
+            const badge = document.createElement("span");
+            badge.className = "srv-proxy-chip-ms";
+            badge.textContent = "testing…";
+            el.insertBefore(badge, el.querySelector(".srv-proxy-chip-x"));
+          }
+        });
+      }
+
+      if (payload.type === "progress") {
+        showProxyProgress(payload.current, payload.total);
+        if (payload.results) {
+          _proxyTestResults.push(...payload.results);
+          applyBatchResultsToChips(payload.results);
+        }
+      }
+
+      if (payload.type === "complete") {
+        setTestButton("idle");
+        hideProxyProgress();
+        const allResults = payload.results || _proxyTestResults;
+        showTestResultsModal(allResults);
+      }
+
+      if (payload.type === "stopped") {
+        setTestButton("idle");
+        hideProxyProgress();
+        // Clear loading state from untested chips
+        srvProxyChips.querySelectorAll(".srv-proxy-chip-item.test-loading").forEach(el => {
+          el.classList.remove("test-loading");
+          const ms = el.querySelector(".srv-proxy-chip-ms");
+          if (ms) ms.remove();
+        });
+        if (_proxyTestResults.length) {
+          showTestResultsModal(_proxyTestResults);
+        } else {
+          showToast("Proxy test stopped", { type: "success" });
+        }
+      }
+    }
+
+    async function testAllProxies() {
+      const proxies = getProxyChipValues();
+      if (!proxies.length) { showToast("No proxies to test", { type: "error" }); return; }
+
+      srvProxyTest.disabled = true;
+      try {
+        const r = await fetch("/api/server/proxies/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ proxies }),
+        });
+        const j = await r.json();
+        if (!j.ok) {
+          showToast(j.error || "Failed to start test", { type: "error" });
+          setTestButton("idle");
+        }
+      } catch (e) {
+        console.error(e);
+        showToast("Failed to start proxy test", { type: "error" });
+        setTestButton("idle");
+      }
+    }
+
+    async function stopProxyTest() {
+      srvProxyTest.disabled = true;
+      try {
+        await fetch("/api/server/proxies/test/stop", { method: "POST" });
+      } catch (e) {
+        console.error(e);
+        setTestButton("idle");
+        hideProxyProgress();
+      }
+    }
+
+    // Check if a test is already running on page load
+    async function checkProxyTestStatus() {
+      try {
+        const r = await fetch("/api/server/proxies/test/status");
+        const j = await r.json();
+        if (j.ok && j.running) {
+          setTestButton("running");
+          showProxyProgress(0, 0);
+          if (proxyProgressText) proxyProgressText.textContent = "resuming…";
+        }
+      } catch {}
+    }
+
+    if (srvProxyTest) {
+      srvProxyTest.addEventListener("click", () => {
+        if (_proxyTestRunning) stopProxyTest();
+        else testAllProxies();
+      });
+    }
+    if (srvProxyClear)      srvProxyClear.addEventListener("click", () => {
+      if (!getProxyChipValues().length) return;
+      openConfirm({
+        title: "Clear all proxies?",
+        body: "This will remove all proxies from the list.",
+        confirmText: "Clear",
+        confirmClass: "btn-ghost-red",
+        showCancel: true,
+        onConfirm: () => { setProxyChips([]); saveProxySettings(); },
+      });
+    });
+    if (srvProxyToggle)     srvProxyToggle.addEventListener("change", () => toggleSrvProxies(srvProxyToggle.checked));
+    if (srvRotationToggle)  srvRotationToggle.addEventListener("change", () => toggleRotation(srvRotationToggle.checked));
+    if (srvIntervalInput) {
+      srvIntervalInput.addEventListener("input", () => {
+        const v = parseInt(srvIntervalInput.value, 10);
+        if (v < 1 && srvIntervalInput.value !== "") srvIntervalInput.value = 1;
+      });
+      srvIntervalInput.addEventListener("change", () => {
+        if (!srvIntervalInput.value || parseInt(srvIntervalInput.value, 10) < 1) srvIntervalInput.value = 1;
+        scheduleProxySave();
+      });
+    }
+    if (srvIntervalUnit)    srvIntervalUnit.addEventListener("change", () => scheduleProxySave());
+
+    // Persist open/closed state
+    if (srvProxyCard) {
+      if (localStorage.getItem("cpc.proxy-card-open") === "1") srvProxyCard.open = true;
+      srvProxyCard.addEventListener("toggle", () => {
+        localStorage.setItem("cpc.proxy-card-open", srvProxyCard.open ? "1" : "0");
+      });
+    }
+
+    // ─── Proxy Settings Modal ──────────────────────────────────────────────
+    const psModal     = document.getElementById("proxy-settings-modal");
+    const psClose     = document.getElementById("proxy-settings-close");
+    const psBtn       = document.getElementById("srv-proxy-settings-btn");
+    const psFields    = {
+      PROXY_SUSPEND_DURATION: document.getElementById("ps-suspend-duration"),
+      PROXY_TEST_BATCH_SIZE:  document.getElementById("ps-test-batch"),
+      PROXY_SLOW_THRESHOLD:   document.getElementById("ps-slow-threshold"),
+    };
+
+    let _psLoaded = false;
+
+    function openProxySettings() {
+      if (!psModal) return;
+      psModal.classList.add("show");
+      psModal.setAttribute("aria-hidden", "false");
+      document.body.classList.add("body-lock-scroll");
+      if (!_psLoaded) loadProxySettings();
+    }
+
+    function closeProxySettings() {
+      if (!psModal) return;
+      psModal.classList.remove("show");
+      psModal.setAttribute("aria-hidden", "true");
+      const anyOther = document.querySelector(
+        "#confirm-modal.show, #log-modal.show, #mapping-modal.show, #filters-modal.show"
+      );
+      if (!anyOther) document.body.classList.remove("body-lock-scroll");
+    }
+
+    async function loadProxySettings() {
+      try {
+        const r = await fetch("/api/server/proxies/settings");
+        const j = await r.json();
+        if (j.ok && j.settings) {
+          for (const [key, el] of Object.entries(psFields)) {
+            if (el && j.settings[key] !== undefined) el.value = j.settings[key];
+          }
+          // Sync slow threshold to test UI
+          if (j.settings.PROXY_SLOW_THRESHOLD) {
+            SLOW_THRESHOLD_MS = j.settings.PROXY_SLOW_THRESHOLD * 1000;
+          }
+          _psLoaded = true;
+        }
+      } catch (e) {
+        console.error("Failed to load proxy settings:", e);
+      }
+    }
+
+    let _psSaveTimer = null;
+    function scheduleProxySettingsSave() {
+      clearTimeout(_psSaveTimer);
+      _psSaveTimer = setTimeout(saveProxySettings_modal, 600);
+    }
+
+    async function saveProxySettings_modal() {
+      const settings = {};
+      for (const [key, el] of Object.entries(psFields)) {
+        if (el) settings[key] = parseInt(el.value, 10) || 1;
+      }
+      // Sync slow threshold immediately
+      if (settings.PROXY_SLOW_THRESHOLD) {
+        SLOW_THRESHOLD_MS = settings.PROXY_SLOW_THRESHOLD * 1000;
+      }
+      try {
+        const r = await fetch("/api/server/proxies/settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ settings }),
+        });
+        const j = await r.json();
+        if (!j.ok) showToast(j.error || "Failed to save settings", { type: "error" });
+      } catch (e) {
+        console.error(e);
+        showToast("Failed to save proxy settings", { type: "error" });
+      }
+    }
+
+    if (psBtn) psBtn.addEventListener("click", openProxySettings);
+    if (psClose) psClose.addEventListener("click", closeProxySettings);
+    if (psModal) {
+      psModal.querySelector(".modal-backdrop")?.addEventListener("click", closeProxySettings);
+    }
+    for (const el of Object.values(psFields)) {
+      if (el) el.addEventListener("change", scheduleProxySettingsSave);
+    }
+
+    const PS_DEFAULTS = {
+      PROXY_SUSPEND_DURATION: 300,
+      PROXY_TEST_BATCH_SIZE: 50,
+      PROXY_SLOW_THRESHOLD: 3,
+    };
+    const psResetBtn = document.getElementById("ps-reset-defaults");
+    if (psResetBtn) {
+      psResetBtn.addEventListener("click", () => {
+        for (const [key, el] of Object.entries(psFields)) {
+          if (el && PS_DEFAULTS[key] !== undefined) el.value = PS_DEFAULTS[key];
+        }
+        SLOW_THRESHOLD_MS = PS_DEFAULTS.PROXY_SLOW_THRESHOLD * 1000;
+        saveProxySettings_modal();
+        showToast("Proxy settings reset to defaults", { type: "success" });
+      });
+    }
 
     loadSrvProxies();
+    checkProxyTestStatus();
+    loadProxySettings();
+
+    // ─── Sync Timing Settings ─────────────────────────────────────────────
+    const syncStartupDelay = document.getElementById("sync-startup-delay");
+    const syncGuildDelay   = document.getElementById("sync-guild-delay");
+    const syncRandomize    = document.getElementById("sync-randomize");
+    const syncCard         = document.getElementById("sync-settings-card");
+
+    async function loadSyncSettings() {
+      try {
+        const r = await fetch("/api/sync/settings");
+        const j = await r.json();
+        if (j.ok && j.settings) {
+          if (syncStartupDelay) syncStartupDelay.value = j.settings.SYNC_STARTUP_DELAY || 15;
+          if (syncGuildDelay) syncGuildDelay.value = j.settings.SYNC_INTER_GUILD_DELAY || 3;
+          if (syncRandomize) syncRandomize.checked = !!(j.settings.SYNC_RANDOMIZE_ORDER ?? 1);
+        }
+      } catch (e) { console.error("Failed to load sync settings:", e); }
+    }
+
+    let _syncSaveTimer = null;
+    function scheduleSyncSave() {
+      clearTimeout(_syncSaveTimer);
+      _syncSaveTimer = setTimeout(async () => {
+        const settings = {};
+        if (syncStartupDelay) settings.SYNC_STARTUP_DELAY = parseInt(syncStartupDelay.value, 10) || 15;
+        if (syncGuildDelay) settings.SYNC_INTER_GUILD_DELAY = parseInt(syncGuildDelay.value, 10) || 3;
+        if (syncRandomize) settings.SYNC_RANDOMIZE_ORDER = syncRandomize.checked ? 1 : 0;
+        try {
+          await fetch("/api/sync/settings", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ settings }),
+          });
+        } catch (e) { console.error(e); }
+      }, 600);
+    }
+
+    if (syncStartupDelay) syncStartupDelay.addEventListener("change", scheduleSyncSave);
+    if (syncGuildDelay) syncGuildDelay.addEventListener("change", scheduleSyncSave);
+    if (syncRandomize) syncRandomize.addEventListener("change", scheduleSyncSave);
+
+    if (syncCard) {
+      if (localStorage.getItem("cpc.sync-card-open") === "1") syncCard.open = true;
+      syncCard.addEventListener("toggle", () => {
+        localStorage.setItem("cpc.sync-card-open", syncCard.open ? "1" : "0");
+      });
+    }
+
+    // Persist open/closed state for Global Config and Cloning Config
+    ["global-config-card", "guild-config-card"].forEach(id => {
+      const card = document.getElementById(id);
+      if (!card) return;
+      const key = `cpc.${id}-open`;
+      const saved = localStorage.getItem(key);
+      if (saved !== null) card.open = saved === "1";
+      card.addEventListener("toggle", () => {
+        localStorage.setItem(key, card.open ? "1" : "0");
+      });
+    });
+
+    // ─── Notification Settings ──────────────────────────────────────────
+    const notifCard       = document.getElementById("notifications-card");
+    const notifWebhookUrl = document.getElementById("notif-webhook-url");
+    const notifTestBtn    = document.getElementById("notif-test-btn");
+    const notifToggles    = document.querySelectorAll(".notif-toggle input[data-event]");
+
+    async function loadNotifSettings() {
+      try {
+        const r = await fetch("/api/notifications/settings");
+        const j = await r.json();
+        if (!j.ok) return;
+        if (notifWebhookUrl) notifWebhookUrl.value = j.webhook_url || "";
+        notifToggles.forEach(cb => {
+          const key = cb.dataset.event;
+          if (key in j.events) cb.checked = j.events[key];
+        });
+      } catch (e) { console.error("Failed to load notification settings:", e); }
+    }
+
+    let _notifSaveTimer = null;
+    function scheduleNotifSave() {
+      clearTimeout(_notifSaveTimer);
+      _notifSaveTimer = setTimeout(async () => {
+        const events = {};
+        notifToggles.forEach(cb => { events[cb.dataset.event] = cb.checked; });
+        try {
+          await fetch("/api/notifications/settings", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              webhook_url: notifWebhookUrl ? notifWebhookUrl.value.trim() : "",
+              events,
+            }),
+          });
+        } catch (e) { console.error(e); }
+      }, 600);
+    }
+
+    if (notifWebhookUrl) notifWebhookUrl.addEventListener("input", scheduleNotifSave);
+    notifToggles.forEach(cb => cb.addEventListener("change", scheduleNotifSave));
+
+    if (notifTestBtn) {
+      notifTestBtn.addEventListener("click", async () => {
+        notifTestBtn.disabled = true;
+        notifTestBtn.textContent = "Sending…";
+        try {
+          const r = await fetch("/api/notifications/test", { method: "POST" });
+          const j = await r.json();
+          if (j.ok) {
+            showToast("Test notification sent!", { type: "success" });
+          } else {
+            showToast(j.error || "Failed to send test notification", { type: "error" });
+          }
+        } catch (e) {
+          showToast("Network error sending test", { type: "error" });
+        } finally {
+          notifTestBtn.disabled = false;
+          notifTestBtn.textContent = "Test";
+        }
+      });
+    }
+
+    if (notifCard) {
+      const nKey = "cpc.notifications-card-open";
+      const nSaved = localStorage.getItem(nKey);
+      if (nSaved !== null) notifCard.open = nSaved === "1";
+      notifCard.addEventListener("toggle", () => {
+        localStorage.setItem(nKey, notifCard.open ? "1" : "0");
+      });
+    }
+
+    loadSyncSettings();
+    loadNotifSettings();
   });
 
   ["server", "client"].forEach((role) => {

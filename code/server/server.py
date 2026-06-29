@@ -42,7 +42,6 @@ from common.common_helpers import resolve_mapping_settings
 from common.websockets import WebsocketManager, AdminBus
 from common.db import DBManager
 from server.rate_limiter import RateLimitManager, ActionType
-from server.proxy_rotator import ProxyRotator, patch_discord_http
 from server.emojis import EmojiManager
 from server.stickers import StickerManager
 from server.roles import RoleManager
@@ -270,9 +269,6 @@ class ServerReceiver:
         )
         self.onjoin = OnJoinService(self.bot, self.db, logger.getChild("OnJoin"))
 
-        self.proxy_rotator = ProxyRotator()
-        self._init_proxy_rotator()
-
         self.MAX_GUILD_CHANNELS = 500
         self.MAX_CATEGORIES = 50
         self.MAX_CHANNELS_PER_CATEGORY = 50
@@ -288,20 +284,6 @@ class ServerReceiver:
 
         self.bot.on_connect = _command_sync
         self.bot.load_extension("server.commands")
-
-    def _init_proxy_rotator(self) -> None:
-        """Load proxy list and check the ENABLE_SERVER_PROXIES db flag.
-
-        Proxies are loaded but kept **disabled** — they are only activated
-        for the duration of a ``sync_structure`` call so that login,
-        slash-command sync, message forwarding, etc. always go direct.
-        """
-        self.proxy_rotator.reload()
-        self._proxy_wanted = (
-            self.db.get_config("ENABLE_SERVER_PROXIES", "") or ""
-        ).strip().lower() in ("1", "true", "yes")
-
-        self.proxy_rotator.set_enabled(False)
 
     def _target_clone_gid_for_origin(self, host_guild_id: int | None) -> int | None:
         return self.guild_resolver.resolve_target_clone(host_guild_id=host_guild_id)
@@ -839,9 +821,6 @@ class ServerReceiver:
         self.session = aiohttp.ClientSession()
         self.webhook_exporter = WebhookDMExporter(self.session, logger)
 
-        self._init_proxy_rotator()
-        patch_discord_http(self.bot, self.proxy_rotator)
-
         mapped = set(self.db.get_all_clone_guild_ids())
         present = (
             {g.id for g in self.bot.guilds} & mapped
@@ -1347,9 +1326,6 @@ class ServerReceiver:
             elif typ == "announce":
                 asyncio.create_task(self.handle_announce(data))
 
-            elif typ == "token_dead":
-                asyncio.create_task(self.handle_token_dead(data))
-
             elif typ == "backfill_started":
                 data = msg.get("data") or {}
                 cid_raw = data.get("channel_id")
@@ -1634,84 +1610,6 @@ class ServerReceiver:
         except Exception as e:
             logger.exception("Unexpected error in handle_announce: %s", e)
 
-    async def handle_token_dead(self, data: dict) -> None:
-        """
-        DM the bot owner(s) when the client reports a dead/invalid Discord token.
-        Recipients: COMMAND_USERS if configured, otherwise all unique guild owners.
-        """
-        if self._shutting_down:
-            return
-
-        try:
-            await self.bot.wait_until_ready()
-
-            reason = str((data or {}).get("reason") or "unknown").strip()
-            kind = str((data or {}).get("kind") or "primary").strip()
-            token_preview = str((data or {}).get("token_preview") or "").strip()
-
-            if kind == "exhausted":
-                title = "⛔ Copycord client is offline: all tokens dead"
-                description = (
-                    "Your primary client token is invalid **and no backup token worked**. "
-                    "The client is offline until you add a working token."
-                )
-            else:
-                title = "⚠️ Copycord client token appears dead"
-                description = (
-                    "The primary client token failed to authenticate. "
-                    "Copycord will attempt backup tokens next."
-                )
-
-            embed = discord.Embed(
-                title=title,
-                description=description,
-                timestamp=datetime.now(timezone.utc),
-            )
-            if token_preview:
-                embed.add_field(name="Token", value=f"`{token_preview}`", inline=True)
-            embed.add_field(name="Kind", value=f"`{kind}`", inline=True)
-            embed.add_field(name="Reason", value=f"```{reason[:1000]}```", inline=False)
-
-            recipient_ids: list[int] = []
-            try:
-                recipient_ids = [int(x) for x in (self.config.COMMAND_USERS or [])]
-            except Exception:
-                recipient_ids = []
-
-            if recipient_ids:
-                sent = 0
-                for uid in recipient_ids:
-                    try:
-                        user = self.bot.get_user(uid) or await self.bot.fetch_user(uid)
-                        await user.send(embed=embed)
-                        sent += 1
-                        logger.info("[🛑] Token-dead DM sent to %s", uid)
-                    except Exception as e:
-                        logger.warning("[⚠️] Failed token-dead DM to %s: %s", uid, e)
-                if sent == 0:
-                    logger.warning("[⚠️] No COMMAND_USERS reachable for token-dead DM.")
-                return
-
-            seen: set[int] = set()
-            for g in list(self.bot.guilds):
-                try:
-                    owner = g.owner or await g.fetch_member(g.owner_id)
-                except Exception as e:
-                    logger.warning("[⚠️] Could not resolve owner for guild %s: %s", g.id, e)
-                    continue
-                owner_id = getattr(owner, "id", None)
-                if not owner_id or owner_id in seen:
-                    continue
-                seen.add(owner_id)
-                try:
-                    await owner.send(embed=embed)
-                    logger.info("[🛑] Token-dead DM sent to guild owner %s (g=%s)", owner_id, g.id)
-                except Exception as e:
-                    logger.warning("[⚠️] Failed token-dead DM to owner %s: %s", owner_id, e)
-
-        except Exception as e:
-            logger.exception("Unexpected error in handle_token_dead: %s", e)
-
     def _load_mappings(self) -> None:
         """
         Refresh in-memory caches from DB. Safe to call anytime.
@@ -1823,14 +1721,6 @@ class ServerReceiver:
         """
         Synchronizes the structure of a clone based on the provided sitemap.
         """
-
-        self._init_proxy_rotator()
-        if self._proxy_wanted and self.proxy_rotator.count:
-            self.proxy_rotator.set_enabled(True)
-            self.ratelimit.set_proxy_bypass(True)
-            self.proxy_rotator.on_all_dead = (
-                lambda _rot: self.ratelimit.set_proxy_bypass(False)
-            )
 
         logger.debug(f"Sync Task #{task_id}: Processing sitemap {sitemap}")
 
@@ -2032,8 +1922,6 @@ class ServerReceiver:
                 return "; ".join(summaries) if summaries else "No changes needed"
 
         finally:
-            self.proxy_rotator.set_enabled(False)
-            self.ratelimit.set_proxy_bypass(False)
             logctx.sync_host_name.reset(_host_token)
             logctx.sync_display_id.reset(_id_token)
 
@@ -3589,8 +3477,12 @@ class ServerReceiver:
                             td["id"] = existing_id
                         eid = tmeta.get("emoji_id")
                         ename = tmeta.get("emoji_name")
-                        if eid or ename:
-                            td["emoji_id"] = eid
+                        if eid:
+                            clone_em = discord.utils.get(ch.guild.emojis, name=ename)
+                            if clone_em:
+                                td["emoji_id"] = clone_em.id
+                                td["emoji_name"] = clone_em.name
+                        elif ename:
                             td["emoji_name"] = ename
                         raw_tag_payloads.append(td)
                     changes["_raw_available_tags"] = raw_tag_payloads
@@ -3782,7 +3674,8 @@ class ServerReceiver:
                 flag_changes: Dict[str, object] = {}
 
                 if flags is not None and hasattr(discord, "ChannelFlags"):
-                    new_flags = discord.ChannelFlags._from_value(flags.value)
+                    flag_val = flags.value if hasattr(flags, "value") else int(flags)
+                    new_flags = discord.ChannelFlags._from_value(flag_val)
                     new_flags.require_tag = bool(desired_req)
                     flag_changes["flags"] = new_flags.value
                 else:
@@ -7708,6 +7601,36 @@ class ServerReceiver:
                                 text = f"{header}\n{text}"
                             else:
                                 text = header
+
+            # ── Append metadata (timestamp / author) ──
+            append_parts = []
+            if mapping_settings.get("APPEND_TIMESTAMP", False):
+                ts = msg.get("timestamp")
+                if ts:
+                    try:
+                        from datetime import datetime as _dt, timezone as _tz
+                        if isinstance(ts, str):
+                            dt = _dt.fromisoformat(ts.replace("Z", "+00:00"))
+                        elif isinstance(ts, (int, float)):
+                            dt = _dt.fromtimestamp(ts, tz=_tz.utc)
+                        else:
+                            dt = None
+                        if dt:
+                            unix_ts = int(dt.timestamp())
+                            append_parts.append(f"<t:{unix_ts}:f>")
+                    except Exception:
+                        pass
+
+            if mapping_settings.get("APPEND_AUTHOR", False):
+                if custom_username:
+                    append_parts.append(f"**{custom_username}**")
+
+            if append_parts:
+                footer = "-# " + " · ".join(append_parts)
+                if text:
+                    text = f"{text}\n{footer}"
+                else:
+                    text = footer
 
             if mapping_settings.get("DISABLE_EVERYONE_MENTIONS", False):
 

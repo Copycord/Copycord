@@ -11,6 +11,8 @@
 from __future__ import annotations
 import asyncio
 import logging
+import random
+from collections import deque
 from typing import Any, List, Dict, Optional, Set
 import discord
 
@@ -26,6 +28,15 @@ class SitemapService:
         self._dirty_guild_ids: Set[int] = set()
         self._dirty_lock = asyncio.Lock()
         self._send_lock = asyncio.Lock()
+
+        # ── Smart queue ──
+        self._queue: deque[int] = deque()    # ordered guild IDs to process
+        self._queue_set: Set[int] = set()    # fast lookup for dedup
+        self._queue_lock = asyncio.Lock()
+        self._queue_task: Optional[asyncio.Task] = None
+        self._startup_delay: int = 15        # seconds before first sync
+        self._inter_guild_delay: int = 3     # seconds between guilds
+        self._randomize_order: bool = True   # shuffle guild order
 
     def _pick_guild(self) -> Optional[discord.Guild]:
         return self.bot.guilds[0] if self.bot.guilds else None
@@ -100,6 +111,186 @@ class SitemapService:
             g = self.bot.get_guild(int(gid))
             if g:
                 yield g
+
+    def enqueue(self, guild_id: int) -> None:
+        """Add a guild to the processing queue with deduplication.
+
+        If the guild is already queued, it keeps its position (the newer
+        data will be fetched when we get to it). If not, it's appended.
+        """
+        gid = int(guild_id)
+        mapped = set(self._mapped_original_ids())
+        if gid not in mapped:
+            self.logger.debug(
+                "[sitemap] Ignoring enqueue for unmapped origin %s", gid
+            )
+            return
+
+        if gid not in self._queue_set:
+            self._queue.append(gid)
+            self._queue_set.add(gid)
+            self.logger.debug("[sitemap] Queued guild %s (queue=%d)", gid, len(self._queue))
+
+        self._ensure_processor()
+
+    def enqueue_all(self) -> None:
+        """Queue all mapped guilds for sitemap processing."""
+        ids = [int(gid) for gid in self._mapped_original_ids() if int(gid) not in self._queue_set]
+        if self._randomize_order and ids:
+            random.shuffle(ids)
+        for gid in ids:
+            self._queue.append(gid)
+            self._queue_set.add(gid)
+        if self._queue:
+            self.logger.info(
+                "[sitemap] Queued %d guilds for sync", len(self._queue)
+            )
+        self._ensure_processor()
+
+    def _ensure_processor(self) -> None:
+        """Start the queue processor if not already running."""
+        if self._queue_task is None or self._queue_task.done():
+            self._queue_task = asyncio.create_task(self._process_queue())
+
+    async def _process_queue(self) -> None:
+        """Process queued guilds sequentially with delays between each."""
+        import time as _time
+        total = len(self._queue)
+        processed = 0
+        failed = 0
+        t_start = _time.monotonic()
+
+        self.logger.info(
+            "[sitemap] Processing %d guild(s) (delay=%ds between each)",
+            total, self._inter_guild_delay,
+        )
+
+        while self._queue:
+            gid = self._queue.popleft()
+            self._queue_set.discard(gid)
+            processed += 1
+
+            g = self.bot.get_guild(gid)
+            if not g:
+                self.logger.warning(
+                    "[sitemap] [%d/%d] Guild %s not found in cache, skipping",
+                    processed, total, gid,
+                )
+                failed += 1
+                continue
+
+            try:
+                clones = self.db.get_clone_guild_ids_for_origin(gid) or [None]
+            except Exception:
+                self.logger.exception(
+                    "[sitemap] [%d/%d] Failed to get clones for %s",
+                    processed, total, g.name,
+                )
+                failed += 1
+                continue
+
+            clone_count = len(clones)
+            self.logger.debug(
+                "[sitemap] [%d/%d] Building sitemap for %s (%d clone(s))",
+                processed, total, g.name, clone_count,
+            )
+
+            for cg in clones:
+                clone_id = int(cg) if cg is not None else None
+                try:
+                    t0 = _time.monotonic()
+                    if clone_id is None:
+                        sm = await self.build_for_guild(g)
+                    else:
+                        sm = await self.build_for_guild_and_clone(g, clone_id)
+
+                    build_ms = round((_time.monotonic() - t0) * 1000)
+
+                    if sm:
+                        await self.ws.send({"type": "sitemap", "data": sm})
+                        label = self._mapping_label(g.id, g.name, clone_id)
+                        ch_count = sum(
+                            len(c.get("channels", [])) for c in sm.get("categories", [])
+                        ) + len(sm.get("standalone_channels", []))
+                        forums = len(sm.get("forums", []))
+                        threads = len(sm.get("threads", []))
+                        roles = len(sm.get("roles", []))
+                        emojis = len(sm.get("emojis", []))
+                        stickers = len(sm.get("stickers", []))
+
+                        parts = [f"{ch_count} ch"]
+                        if forums: parts.append(f"{forums} forums")
+                        if threads: parts.append(f"{threads} threads")
+                        parts.append(f"{roles} roles")
+                        if emojis: parts.append(f"{emojis} emoji")
+                        if stickers: parts.append(f"{stickers} stickers")
+                        parts.append(f"{build_ms}ms")
+
+                        self.logger.info(
+                            "[📩] Sitemap sent for %s (%s)",
+                            label, ", ".join(parts),
+                        )
+                    else:
+                        self.logger.warning(
+                            "[sitemap] [%d/%d] Empty sitemap for %s clone %s",
+                            processed, total, g.name, clone_id,
+                        )
+
+                except discord.RateLimited as e:
+                    wait = e.retry_after + 1.0
+                    self.logger.warning(
+                        "[sitemap] Rate limited building %s, sleeping %.1fs",
+                        g.name, wait,
+                    )
+                    await asyncio.sleep(wait)
+                    if gid not in self._queue_set:
+                        self._queue.appendleft(gid)
+                        self._queue_set.add(gid)
+                        total += 1
+                    break
+
+                except discord.HTTPException as e:
+                    if e.status == 429:
+                        retry_after = 5.0
+                        try:
+                            if isinstance(e.json, dict):
+                                retry_after = float(e.json.get("retry_after", 5.0))
+                        except Exception:
+                            pass
+                        wait = retry_after + 1.0
+                        self.logger.warning(
+                            "[sitemap] HTTP 429 on %s, sleeping %.1fs",
+                            g.name, wait,
+                        )
+                        await asyncio.sleep(wait)
+                        if gid not in self._queue_set:
+                            self._queue.appendleft(gid)
+                            self._queue_set.add(gid)
+                            total += 1
+                        break
+
+                    failed += 1
+                    self.logger.exception(
+                        "[sitemap] HTTP error for %s clone %s: %s",
+                        g.name, clone_id, e,
+                    )
+
+                except Exception as e:
+                    failed += 1
+                    self.logger.exception(
+                        "[sitemap] Failed for %s clone %s: %s",
+                        g.name, clone_id, e,
+                    )
+
+            # Delay between guilds if more in queue
+            if self._queue:
+                await asyncio.sleep(self._inter_guild_delay)
+
+        elapsed = round(_time.monotonic() - t_start, 1)
+        self.logger.info(
+            "[sitemap] Sync complete: %d processed, %d failed (%.1fs)",
+            processed, failed, elapsed,
+        )
 
     def schedule_sync(self, guild_id: int | None, delay: float = 1.0) -> None:
         mapped = set(self._mapped_original_ids())
@@ -304,22 +495,17 @@ class SitemapService:
                     mapping_id,
                 )
 
-    async def build_and_send_all(self, max_concurrency: int = 10) -> None:
-        async with self._send_lock:
+    async def build_and_send_all(self) -> None:
+        self._cancel_pending_debounce()
+        self._dirty_guild_ids.clear()
 
-            self._cancel_pending_debounce()
-            self._dirty_guild_ids.clear()
+        origin_ids = self._mapped_original_ids()
 
-            origin_ids = self._mapped_original_ids()
+        if not origin_ids:
+            self.logger.info("[⚠️] No guild mappings found. Server cloning is disabled.")
+            return
 
-            if not origin_ids:
-                self.logger.info("[⚠️] No guild mappings found. Server cloning is disabled.")
-                return
-
-            await self._build_and_send_selected(
-                origin_ids,
-                max_concurrency=max_concurrency,
-            )
+        self.enqueue_all()
 
     async def build_for_guild(
         self, guild: "discord.Guild", cloned_guild_id: int | None = None
@@ -808,7 +994,6 @@ class SitemapService:
                 entry["overwrites"] = self._serialize_role_overwrites(forum)
             sitemap["forums"].append(entry)
 
-        seen = {t["id"] for t in sitemap["threads"]}
         for row in self.db.get_all_threads():
             try:
                 orig_tid = int(row["original_thread_id"])
@@ -818,6 +1003,14 @@ class SitemapService:
                     else None
                 )
             except (TypeError, ValueError):
+                continue
+
+            # Skip threads that don't belong to this guild
+            try:
+                row_gid = row["original_guild_id"]
+            except (KeyError, IndexError):
+                row_gid = None
+            if row_gid is not None and int(row_gid) != guild.id:
                 continue
 
             thr = guild.get_channel(orig_tid)
@@ -1138,8 +1331,8 @@ class SitemapService:
             if not dirty:
                 dirty = list(self._mapped_original_ids())
 
-            async with self._send_lock:
-                await self._build_and_send_selected(dirty)
+            for gid in dirty:
+                self.enqueue(gid)
 
         finally:
             self._debounce_task = None

@@ -10,23 +10,16 @@
 
 from __future__ import annotations
 
-import itertools
 import logging
 import os
+import random
 import re
 import asyncio
 import time
 from pathlib import Path
 from typing import List, Optional, Dict
 
-import aiohttp
-
-try:
-    from aiohttp_socks import ProxyConnector
-except ImportError:
-    ProxyConnector = None
-
-logger = logging.getLogger("server.proxy_rotator")
+logger = logging.getLogger("client.proxy_rotator")
 
 DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
 _PROXY_FILE = DATA_DIR / "proxies.txt"
@@ -66,7 +59,14 @@ def _normalise_proxy_url(raw: str) -> Optional[str]:
 
 class ProxyRotator:
     """
-    Thread-safe, round-robin proxy rotator with health tracking.
+    Proxy rotator with health tracking and optional timed rotation.
+
+    By default one proxy is selected and used for all requests.  It only
+    switches when the current proxy is suspended due to failures.
+
+    When ``rotation_interval`` is set (> 0 seconds), the proxy
+    automatically rotates to the next healthy one after the interval
+    elapses.
 
     Proxies that fail repeatedly are temporarily suspended and
     automatically re-tested after a cooldown period.
@@ -86,14 +86,18 @@ class ProxyRotator:
 
     def __init__(self) -> None:
         self._proxies: List[str] = []
-        self._cycle = itertools.cycle([])
         self._lock = asyncio.Lock()
         self._enabled: bool = False
-        self._index: int = 0
 
         self._health: Dict[str, Dict] = {}
 
+        # Time-based rotation (0 = per-request round-robin)
+        self._rotation_interval: int = 0
+        self._current_proxy: Optional[str] = None
+        self._current_proxy_since: float = 0.0
+
         self.on_all_dead: Optional[callable] = None
+        self.on_rotate: Optional[callable] = None
 
     @property
     def enabled(self) -> bool:
@@ -113,6 +117,30 @@ class ProxyRotator:
     def proxies(self) -> List[str]:
         return list(self._proxies)
 
+    @property
+    def rotation_interval(self) -> int:
+        """Rotation interval in seconds (0 = per-request)."""
+        return self._rotation_interval
+
+    def set_rotation_interval(self, seconds: int) -> None:
+        """Set the time-based rotation interval in seconds.
+
+        ``0`` disables timed rotation (sticky — one proxy used until it
+        fails).
+        """
+        seconds = max(0, int(seconds))
+        if seconds != self._rotation_interval:
+            self._rotation_interval = seconds
+            # Reset current assignment so the next call picks fresh
+            self._current_proxy = None
+            self._current_proxy_since = 0.0
+            if seconds:
+                logger.debug(
+                    "[🔀] Proxy rotation interval set to %d seconds", seconds
+                )
+            else:
+                logger.debug("[🔀] Timed rotation disabled (sticky mode)")
+
     def set_enabled(self, on: bool) -> None:
         prev = self._enabled
         self._enabled = bool(on)
@@ -121,12 +149,14 @@ class ProxyRotator:
             return
         if on and self._proxies:
             logger.debug(
-                "[🔀] Server proxy rotation ENABLED (%d proxies)", len(self._proxies)
+                "[🔀] Client proxy rotation ENABLED (%d proxies)", len(self._proxies)
             )
         elif on:
-            logger.warning("[⚠️] Server proxy rotation enabled but NO proxies loaded")
+            logger.warning("[⚠️] Client proxy rotation enabled but NO proxies loaded")
         else:
-            logger.debug("[🔀] Server proxy rotation DISABLED")
+            logger.debug("[🔀] Client proxy rotation DISABLED")
+            self._current_proxy = None
+            self._current_proxy_since = 0.0
 
     def reload(self, proxy_lines: Optional[List[str]] = None) -> int:
         """
@@ -143,21 +173,31 @@ class ProxyRotator:
                 normalised.append(url)
 
         self._proxies = normalised
-        self._cycle = itertools.cycle(normalised) if normalised else itertools.cycle([])
-        self._index = 0
 
         self._health = {k: v for k, v in self._health.items() if k in normalised}
 
-        logger.debug("[🔀] Loaded %d server proxies", len(normalised))
+        # Reset time-based assignment when proxy list changes
+        self._current_proxy = None
+        self._current_proxy_since = 0.0
+
+        logger.debug("[🔀] Loaded %d client proxies", len(normalised))
         return len(normalised)
 
     def next(self, *, exclude: Optional[set] = None) -> Optional[str]:
-        """Return the next healthy proxy URL (round-robin), or *None*.
+        """Return the next healthy proxy URL, or *None*.
+
+        Default behaviour (``rotation_interval == 0``): pick one proxy and
+        stick with it indefinitely — only switch when it is suspended.
+
+        When ``rotation_interval > 0``: use one proxy for the configured
+        duration, then advance to the next healthy proxy.
 
         Parameters
         ----------
         exclude:
             Set of proxy URLs to skip (e.g. already tried this request).
+            When provided, a temporary fallback is returned *without*
+            changing the sticky ``_current_proxy`` assignment.
         """
         if not self._proxies:
             return None
@@ -165,19 +205,99 @@ class ProxyRotator:
         exclude = exclude or set()
         now = time.monotonic()
 
-        for _ in range(len(self._proxies)):
-            try:
-                url = next(self._cycle)
-                self._index = (self._index + 1) % len(self._proxies)
-            except StopIteration:
-                return None
+        # Check if the current proxy is still usable
+        if (
+            self._current_proxy
+            and self._current_proxy not in exclude
+            and not self._is_suspended(self._current_proxy, now)
+        ):
+            # With timed rotation, check if the interval has expired
+            if self._rotation_interval > 0:
+                if (now - self._current_proxy_since) < self._rotation_interval:
+                    return self._current_proxy
+                # Interval expired — fall through to assign a new one
+            else:
+                # No rotation — stick with this proxy forever
+                return self._current_proxy
 
-            if url in exclude:
+        # ── Retry / fallback (exclude is non-empty) ──
+        # Return a temporary alternative without changing the sticky proxy.
+        if exclude:
+            return self._next_healthy(exclude, now)
+
+        # ── Genuine rotation or first assignment ──
+        proxy = self._next_healthy(exclude, now)
+        if proxy:
+            old = self._current_proxy
+            self._current_proxy = proxy
+            self._current_proxy_since = now
+            safe = _mask_proxy_url(proxy)
+            if old is None:
+                logger.info("[🔀] Using proxy %s", safe)
+            elif old != proxy:
+                logger.info("[🔀] Switched to proxy %s", safe)
+        return proxy
+
+    def rotate_now(self) -> Optional[str]:
+        """Force an immediate rotation to the next healthy proxy.
+
+        Returns the new proxy URL, or *None* if no healthy proxy is
+        available.  Used by the background rotation timer.
+        """
+        if not self._proxies or not self._enabled:
+            return None
+
+        now = time.monotonic()
+        exclude = {self._current_proxy} if self._current_proxy else set()
+        proxy = self._next_healthy(exclude, now)
+
+        # If all other proxies are dead, stick with the current one
+        if not proxy:
+            proxy = self._current_proxy
+
+        if proxy and proxy != self._current_proxy:
+            self._current_proxy = proxy
+            self._current_proxy_since = now
+            logger.info("[🔀] Switched to proxy %s", _mask_proxy_url(proxy))
+            if self.on_rotate:
+                try:
+                    self.on_rotate(proxy)
+                except Exception:
+                    pass
+        elif proxy and self._current_proxy is None:
+            self._current_proxy = proxy
+            self._current_proxy_since = now
+
+        return proxy
+
+    async def run_rotation_loop(self) -> None:
+        """Background task that handles timed proxy rotation.
+
+        Runs forever; safe to wrap in ``asyncio.create_task``.
+        Health monitoring is handled reactively via ``on_disconnect``
+        / ``on_resumed`` events in the client — no polling needed.
+        """
+        while True:
+            if not self._enabled or self._rotation_interval <= 0:
+                await asyncio.sleep(5)
                 continue
-            if not self._is_suspended(url, now):
-                return url
 
-        return None
+            if self._current_proxy:
+                elapsed = time.monotonic() - self._current_proxy_since
+                if elapsed >= self._rotation_interval:
+                    self.rotate_now()
+
+            await asyncio.sleep(5)
+
+    def _next_healthy(self, exclude: set, now: float) -> Optional[str]:
+        """Pick a random healthy proxy that isn't excluded or suspended."""
+        candidates = [
+            url for url in self._proxies
+            if url not in exclude and not self._is_suspended(url, now)
+        ]
+        if not candidates:
+            return None
+        return random.choice(candidates)
 
     def report_success(self, proxy_url: str) -> None:
         """Mark a proxy as healthy after a successful request."""
@@ -211,11 +331,14 @@ class ProxyRotator:
                 info["failures"],
             )
 
+            # If the suspended proxy was the current time-based proxy, force rotation
+            if self._current_proxy == proxy_url:
+                self._current_proxy = None
+                self._current_proxy_since = 0.0
+
             if self._enabled and self.healthy_count == 0:
-                self._enabled = False
                 logger.warning(
-                    "[🔀] All %d proxies dead — proxy rotation auto-disabled, "
-                    "falling back to direct for remainder of sync",
+                    "[🔀] All %d proxies dead — no healthy proxies available",
                     len(self._proxies),
                 )
                 if self.on_all_dead:
@@ -249,12 +372,6 @@ class ProxyRotator:
             return []
 
 
-def _is_socks(url: str) -> bool:
-    return url.lower().startswith(
-        ("socks4://", "socks5://", "socks4a://", "socks5h://")
-    )
-
-
 def _mask_proxy_url(url: str) -> str:
     """Mask credentials in a proxy URL for safe logging."""
 
@@ -268,131 +385,3 @@ def _mask_proxy_url(url: str) -> str:
     except Exception:
         pass
     return url[:40] + "…" if len(url) > 40 else url
-
-
-_PROXY_ERRORS = (
-    aiohttp.ClientProxyConnectionError,
-    aiohttp.ClientHttpProxyError,
-    aiohttp.ClientConnectorError,
-    aiohttp.ClientOSError,
-    ConnectionRefusedError,
-    ConnectionResetError,
-    OSError,
-)
-
-
-def _make_connector_for_proxy(proxy_url: str) -> Optional[aiohttp.BaseConnector]:
-    """
-    Build a connector suitable for *proxy_url*.
-    - SOCKS proxies require ``aiohttp_socks.ProxyConnector``.
-    - HTTP proxies just use the ``proxy=`` parameter on each request.
-    """
-    if _is_socks(proxy_url):
-        if ProxyConnector is None:
-            logger.error(
-                "[⛔] aiohttp_socks is required for SOCKS proxies but not installed"
-            )
-            return None
-        return ProxyConnector.from_url(proxy_url)
-    return None  # HTTP proxy – use aiohttp's native proxy= kwarg
-
-
-_MAX_PROXY_RETRIES = 3
-
-
-def patch_discord_http(bot, rotator: ProxyRotator) -> None:
-    """
-    Monkey-patch the py-cord ``HTTPClient.request`` so every outgoing call
-    goes through the next proxy in the rotation (when enabled).
-
-    If a proxy connection fails, automatically retries with the next proxy
-    up to ``_MAX_PROXY_RETRIES`` times.  If all proxied attempts fail,
-    falls back to a direct (no-proxy) request.
-
-    Safe to call multiple times – only patches once.
-    """
-    http_client = bot.http
-
-    # Idempotency guard: don't double-patch on reconnects
-    if getattr(http_client, "_proxy_patched", False):
-        logger.debug("[🔀] Discord HTTP client already patched, skipping")
-        return
-
-    original_request = http_client.request
-
-    async def _do_socks_request(proxy_url, route, **kwargs):
-        """Execute a single request through a SOCKS proxy."""
-        connector = ProxyConnector.from_url(proxy_url)
-        old_session = http_client._HTTPClient__session
-        if old_session and not old_session.closed:
-            new_session = aiohttp.ClientSession(
-                connector=connector,
-                headers=old_session._default_headers,
-            )
-            http_client._HTTPClient__session = new_session
-            try:
-                return await original_request(route, **kwargs)
-            finally:
-                http_client._HTTPClient__session = old_session
-                await new_session.close()
-
-        return await original_request(route, **kwargs)
-
-    async def _proxy_request(route, **kwargs):
-        if not rotator.enabled:
-            return await original_request(route, **kwargs)
-
-        tried: set = set()
-        last_exc = None
-        max_attempts = min(_MAX_PROXY_RETRIES, rotator.count)
-
-        for attempt in range(max_attempts):
-            proxy_url = rotator.next(exclude=tried)
-            if not proxy_url:
-
-                break
-
-            tried.add(proxy_url)
-
-            try:
-                if _is_socks(proxy_url):
-                    if ProxyConnector is not None:
-                        result = await _do_socks_request(proxy_url, route, **kwargs)
-                        rotator.report_success(proxy_url)
-                        return result
-                else:
-                    kwargs["proxy"] = proxy_url
-                    result = await original_request(route, **kwargs)
-                    rotator.report_success(proxy_url)
-                    return result
-
-            except _PROXY_ERRORS as exc:
-                last_exc = exc
-                safe = _mask_proxy_url(proxy_url)
-                logger.debug(
-                    "[🔀] Proxy %s failed (attempt %d/%d): %s",
-                    safe,
-                    attempt + 1,
-                    max_attempts,
-                    type(exc).__name__,
-                )
-                rotator.report_failure(proxy_url)
-
-                if not rotator.enabled:
-                    break
-
-                kwargs.pop("proxy", None)
-                continue
-
-        if last_exc is not None and rotator._enabled:
-            logger.debug(
-                "[🔀] %d proxy attempt(s) failed, falling back to direct connection",
-                len(tried),
-            )
-        kwargs.pop("proxy", None)
-
-        return await original_request(route, **kwargs)
-
-    http_client.request = _proxy_request
-    http_client._proxy_patched = True
-    logger.debug("[🔀] Patched discord HTTP client for proxy rotation")
