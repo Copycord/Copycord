@@ -13,6 +13,8 @@ Beyond server cloning, Copycord can forward messages from source servers to exte
 
 Forward messages to any Discord channel via a webhook URL. Messages arrive with their original content, embeds, and author information.
 
+A single rule can forward to **multiple Discord webhook URLs** at once — add as many as you like and the matched message is delivered to every one of them. The rule's username and avatar (if set) are shared across all URLs. Existing single-URL rules keep working unchanged.
+
 ### Telegram
 
 Send messages to a Telegram chat or channel via the Telegram Bot API. Useful for mobile notifications.
@@ -54,3 +56,5 @@ Copycord includes built-in deduplication to prevent sending the same message twi
 ## Performance
 
 Forwarding uses a worker pool model with concurrent workers for each service type. Messages are processed in order with automatic retry on failure.
+
+When a Discord rule targets multiple webhook URLs, those deliveries run **concurrently** (bounded so they stay within Discord's rate limits), so adding more webhooks barely changes how long the rule takes. If one URL fails, only that URL is retried — the ones that already succeeded are not re-sent.
