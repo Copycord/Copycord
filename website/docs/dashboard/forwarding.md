@@ -11,7 +11,7 @@ Copycord can forward messages from source servers to external services in real t
 
 | Service | Type | Description |
 |---------|------|-------------|
-| **Discord Webhook** | Webhook URL | Forward to any Discord channel via webhook |
+| **Discord Webhook** | Webhook URL(s) | Forward to one or more Discord channels via webhook |
 | **Telegram** | Bot API | Send messages to a Telegram chat or channel |
 | **Pushover** | Push notification | Get push notifications on your phone |
 
@@ -21,7 +21,7 @@ Copycord can forward messages from source servers to external services in real t
 2. Click **Create Rule**
 3. Configure the rule:
    - **Service** — Choose the destination (Discord webhook, Telegram, Pushover)
-   - **Webhook/API URL** — The destination endpoint
+   - **Webhook/API URL** — The destination endpoint. For Discord you can add **multiple webhook URLs** — paste each one and press Enter to add it as a chip, and the message is forwarded to all of them
    - **Guild filter** — Which source server to watch (or all)
    - **Channel filter** — Specific channels (or all)
    - **User filter** — Specific users (or all)
@@ -42,6 +42,17 @@ All filters are optional. Leave them empty to forward everything.
 ## Validating webhooks
 
 Before saving a rule, you can click **Validate** to test the webhook URL. This sends a test message to confirm the endpoint is reachable and working.
+
+## Forwarding to multiple Discord webhooks
+
+A single Discord rule can target several webhook URLs. In the rule's **Discord webhook URLs** field, paste each webhook URL and press Enter — each one becomes a chip. When the rule matches a message, it's forwarded to **every** URL in the list.
+
+- The rule's **username** and **avatar** apply to all URLs (one shared identity).
+- You need at least one valid Discord webhook URL — invalid URLs are rejected on save, and duplicates are removed automatically.
+- Deliveries run concurrently, so adding more webhooks doesn't noticeably slow the rule down.
+- A webhook that fails is retried on its own, without re-sending to the URLs that already succeeded.
+
+Rules created with a single webhook URL continue to work and are upgraded to the multi-URL format the next time you save them.
 
 ## Using Copycord as a forwarder only
 
