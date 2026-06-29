@@ -72,7 +72,6 @@ from common.backup_scheduler import BackupConfig, DailySQLiteBackupScheduler
 from common.common_helpers import (
     discord_urls_from_config,
     is_discord_webhook_url,
-    MAX_DISCORD_WEBHOOK_URLS,
 )
 from admin.web_config import router as links_router
 from admin.web_config import startup_links, shutdown_links
@@ -6104,7 +6103,7 @@ async def api_save_forwarding(payload: dict = Body(...)):
                 status_code=400,
             )
         config = dict(config)
-        config["urls"] = raw_urls[:MAX_DISCORD_WEBHOOK_URLS]
+        config["urls"] = raw_urls
         config.pop("url", None)
 
     try:

@@ -118,8 +118,6 @@ DISCORD_WEBHOOK_RE = re.compile(
     r"^https?://(canary\.|ptb\.)?discord(app)?\.com/api/webhooks/\d+/.+", re.I
 )
 
-MAX_DISCORD_WEBHOOK_URLS = 10
-
 
 def is_discord_webhook_url(url: str) -> bool:
     """True if `url` is a Discord webhook URL."""
