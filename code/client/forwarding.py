@@ -16,7 +16,7 @@ import os
 import logging
 import random
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
 import aiohttp
@@ -24,12 +24,17 @@ import discord
 import re
 import html
 from client.message_utils import _resolve_forward, _resolve_forward_via_snapshot
+from common.common_helpers import (
+    discord_urls_from_config,
+    is_discord_webhook_url,
+)
 
 log = logging.getLogger(__name__)
 
-DISCORD_WEBHOOK_RE = re.compile(
-    r"^https?://(canary\.|ptb\.)?discord(app)?\.com/api/webhooks/\d+/.+", re.I
-)
+# How many Discord webhook POSTs to keep in flight at once while a single rule
+# fans a message out to its URLs. Bounds concurrency for latency and rate-limit
+# safety
+DISCORD_WEBHOOK_FANOUT_CONCURRENCY = 8
 
 
 class RetryableForwardingError(Exception):
@@ -111,6 +116,24 @@ def _extract_retry_after_from_headers(
         return None
 
     return None
+
+
+def _extract_ratelimit_remaining(headers) -> int | None:
+    """X-RateLimit-Remaining: requests left in the current bucket (or None)."""
+    try:
+        v = headers.get("X-RateLimit-Remaining") if headers else None
+        return int(v) if v is not None else None
+    except Exception:
+        return None
+
+
+def _extract_ratelimit_reset_after(headers) -> float | None:
+    """X-RateLimit-Reset-After: seconds until the current bucket resets (or None)."""
+    try:
+        v = headers.get("X-RateLimit-Reset-After") if headers else None
+        return float(v) if v is not None else None
+    except Exception:
+        return None
 
 
 def _clip(s: str, limit: int) -> str:
@@ -443,6 +466,7 @@ class ForwardingJob:
     attrs: dict
     attempts: int = 0
     created_monotonic: float = 0.0
+    delivered_urls: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
         if not self.created_monotonic:
@@ -483,6 +507,19 @@ class ForwardingManager:
         self._queue_maxsize = int(os.getenv("FORWARDING_QUEUE_MAXSIZE", "2000"))
         self._max_attempts = int(os.getenv("FORWARDING_QUEUE_MAX_ATTEMPTS", "3"))
         self._retry_max_delay = float(os.getenv("FORWARDING_RETRY_MAX_DELAY", "60"))
+
+        # How many Discord webhook POSTs to keep in flight at once while a single
+        # rule fans a message out to its URLs. Bounds concurrency for latency and
+        # rate-limit safety; NOT a cap on how many URLs a rule may have.
+        self._discord_fanout_concurrency = max(
+            1,
+            int(
+                os.getenv(
+                    "FORWARDING_DISCORD_FANOUT_CONCURRENCY",
+                    str(DISCORD_WEBHOOK_FANOUT_CONCURRENCY),
+                )
+            ),
+        )
 
         self._dedup_ttl = float(os.getenv("FORWARDING_DEDUP_TTL", "60"))
         self._dedup_cache: Dict[tuple, float] = {}
@@ -759,15 +796,21 @@ class ForwardingManager:
             return None
 
         if provider in ("discord",):
-            url = (config.get("url") or "").strip()
-            if not url or not DISCORD_WEBHOOK_RE.match(url):
+            urls = [
+                u
+                for u in discord_urls_from_config(config)
+                if is_discord_webhook_url(u)
+            ]
+            if not urls:
                 self.log.warning(
-                    "[⏩] Non-Discord webhook is not supported; skipping rule | rule_id=%s provider=%s url=%s",
+                    "[⏩] No valid Discord webhook URL; skipping rule | rule_id=%s provider=%s",
                     rule_id,
                     provider_raw,
-                    (url[:80] + "...") if len(url) > 80 else url,
                 )
                 return None
+            config = dict(config)
+            config["urls"] = urls
+            config.pop("url", None)
 
         filters = ForwardingFilters.from_dict(filters_raw)
 
@@ -960,14 +1003,17 @@ class ForwardingManager:
         if p == "pushover":
             return "pushover"
         if p == "discord":
-            url = (rule.config.get("url") or "").strip()
-            if url and DISCORD_WEBHOOK_RE.match(url):
+            urls = [
+                u
+                for u in discord_urls_from_config(rule.config)
+                if is_discord_webhook_url(u)
+            ]
+            if urls:
                 return "discord"
             self.log.warning(
-                "[⏩] Non-Discord webhook is not supported; dropping job | rule_id=%s provider=%s url=%s",
+                "[⏩] Non-Discord webhook is not supported; dropping job | rule_id=%s provider=%s",
                 rule.rule_id,
                 p,
-                (url[:80] + "...") if len(url) > 80 else url,
             )
             return ""
         return ""
@@ -1052,7 +1098,10 @@ class ForwardingManager:
             return
         if provider == "discord":
             await self._send_discord_webhook(
-                rule=job.rule, attrs=job.attrs, session=session,
+                rule=job.rule,
+                attrs=job.attrs,
+                session=session,
+                job=job,
                 attempt=job.attempts,
             )
             return
@@ -1820,21 +1869,19 @@ class ForwardingManager:
         rule: ForwardingRule,
         attrs: dict,
         session: aiohttp.ClientSession,
+        job: "ForwardingJob",
         attempt: int = 0,
     ) -> None:
-        url = (rule.config.get("url") or "").strip()
-        if not url:
-            self.log.debug("[⏩] Discord webhook rule %s missing url", rule.rule_id)
+        urls = [
+            u
+            for u in discord_urls_from_config(rule.config)
+            if is_discord_webhook_url(u)
+        ]
+        if not urls:
+            self.log.debug("[⏩] Discord webhook rule %s has no valid url", rule.rule_id)
             return
 
-        if not DISCORD_WEBHOOK_RE.match(url):
-            self.log.warning(
-                "[⏩] Non-Discord webhook is not supported; skipping forward | rule_id=%s url=%s",
-                rule.rule_id,
-                (url[:80] + "...") if len(url) > 80 else url,
-            )
-            return
-
+        # ---- build payload once (UNCHANGED from previous single-URL logic) ----
         content = (attrs.get("content") or "").strip()
 
         non_image_links: list[str] = []
@@ -1851,7 +1898,6 @@ class ForwardingManager:
         lines: list[str] = []
         if content:
             lines.append(content)
-
         if non_image_links:
             if lines:
                 lines.append("")
@@ -1866,11 +1912,9 @@ class ForwardingManager:
             se = _sanitize_discord_embed_for_webhook(e)
             if se:
                 forwarded_embeds.append(se)
-
         forwarded_embeds = forwarded_embeds[:10]
 
         existing_img_urls = _extract_embed_image_urls(forwarded_embeds)
-
         att_image_urls: list[str] = []
         for a in attrs.get("attachments") or []:
             if not isinstance(a, dict):
@@ -1887,16 +1931,11 @@ class ForwardingManager:
                 {"image": {"url": u}} for u in att_image_urls[:remaining]
             )
 
-        payload = {
-            "allowed_mentions": {"parse": []},
-        }
-
+        payload = {"allowed_mentions": {"parse": []}}
         if text:
             payload["content"] = text
-
         if forwarded_embeds:
             payload["embeds"] = forwarded_embeds
-
         if not payload.get("content") and not payload.get("embeds"):
             payload["content"] = "New message"
 
@@ -1923,6 +1962,7 @@ class ForwardingManager:
                     rule.rule_id,
                 )
 
+        # ---- DB dedup: skip if this rule already fully forwarded this message ----
         msg_id = attrs.get("message_id")
         if msg_id and self.db:
             try:
@@ -1942,41 +1982,88 @@ class ForwardingManager:
             except Exception:
                 self.log.debug("[⏩] DB dedup check failed, proceeding", exc_info=True)
 
-        status, body, retry_after = await _post_with_discord_429_retry(
-            session, url, payload
-        )
+        # ---- fan out to every URL concurrently, tracking per-URL outcome ----
+        # There is no cap on URL count; a bounded semaphore limits how many
+        # POSTs are in flight at once so latency stays flat as the list grows
+        # and we never open one socket per URL or brush the global rate limit.
+        to_send = [u for u in urls if u not in job.delivered_urls]
+        sem = asyncio.Semaphore(self._discord_fanout_concurrency)
 
-        if status == 429:
+        async def _deliver(url: str) -> tuple:
+            async with sem:
+                try:
+                    status, body, retry_after = await _post_with_discord_429_retry(
+                        session, url, payload
+                    )
+                except RetryableForwardingError as e:
+                    return ("pending", url, e.status, e.body or "", None)
+            if status == 429:
+                return ("pending", url, status, body, retry_after)
+            if status in (408, 500, 502, 503, 504):
+                return ("pending", url, status, body, None)
+            if status >= 400:
+                return ("dropped", url, status, body, None)
+            return ("delivered", url, status, body, None)
+
+        results = await asyncio.gather(*(_deliver(u) for u in to_send))
+
+        pending = False
+        pending_retry_after: float | None = None
+        pending_status: int | None = None
+        pending_body: str = ""
+
+        for kind, url, status, body, retry_after in results:
+            if kind == "delivered":
+                job.delivered_urls.add(url)
+            elif kind == "dropped":
+                self.log.warning(
+                    "[⏩] Discord webhook forward failed (dropping url) | rule_id=%s status=%s body=%s",
+                    rule.rule_id,
+                    status,
+                    (body or "")[:300],
+                )
+            else:  # pending
+                pending = True
+                pending_status = status
+                pending_body = body or ""
+                if retry_after:
+                    pending_retry_after = (
+                        max(pending_retry_after or 0.0, retry_after or 0.0) or None
+                    )
+
+        if pending:
             raise RetryableForwardingError(
-                "Discord 429 rate limited",
-                delay=retry_after,
-                status=status,
-                body=body,
+                "Discord webhook(s) pending retry",
+                delay=pending_retry_after,
+                status=pending_status,
+                body=pending_body,
             )
 
-        if status in (408, 500, 502, 503, 504):
-            raise RetryableForwardingError(
-                "Discord transient HTTP error",
-                status=status,
-                body=body,
+        # ---- all URLs delivered or dropped: log once, record exactly one event ----
+        delivered = len(job.delivered_urls)
+        total = len(urls)
+        if delivered:
+            self.log.info(
+                "[⏩] Discord webhook forward OK | rule_id=%s label=%s message_id=%s channel=%s delivered=%s/%s attempt=%s",
+                rule.rule_id,
+                rule.label,
+                attrs.get("message_id"),
+                attrs.get("channel_name"),
+                delivered,
+                total,
+                attempt,
             )
-
-        if status >= 400:
+        else:
             self.log.warning(
-                "[⏩] Discord webhook forward failed | status=%s body=%s",
-                status,
-                (body or "")[:300],
+                "[⏩] Discord webhook forward failed; all %s URL(s) dropped | rule_id=%s label=%s message_id=%s channel=%s attempt=%s",
+                total,
+                rule.rule_id,
+                rule.label,
+                attrs.get("message_id"),
+                attrs.get("channel_name"),
+                attempt,
             )
-            return
 
-        self.log.info(
-            "[⏩] Discord webhook forward OK | rule_id=%s label=%s message_id=%s channel=%s attempt=%s",
-            rule.rule_id,
-            rule.label,
-            attrs.get("message_id"),
-            attrs.get("channel_name"),
-            attempt,
-        )
         try:
             self.db.record_forwarding_event(
                 provider="discord",
@@ -2015,14 +2102,24 @@ async def _post_with_discord_429_retry(
         if 0 < ra <= 10:
             await asyncio.sleep(ra)
             status, body, retry_after, headers = await _once()
-            if status != 429:
-                return status, body, None
 
-        retry_after2 = (
-            _extract_retry_after_from_headers(headers)
-            or _extract_retry_after_from_body(body)
-            or retry_after
-        )
-        return status, body, retry_after2
+        if status == 429:
+            retry_after2 = (
+                _extract_retry_after_from_headers(headers)
+                or _extract_retry_after_from_body(body)
+                or retry_after
+            )
+            return status, body, retry_after2
+
+    # Proactive pacing: if this request drained the bucket, pause briefly so the
+    # next call in this slot doesn't immediately 429. Short resets only — longer
+    # ones fall through to the reactive 429 + requeue path.
+    reset_after = _extract_ratelimit_reset_after(headers)
+    if (
+        _extract_ratelimit_remaining(headers) == 0
+        and reset_after
+        and 0 < reset_after <= 2.0
+    ):
+        await asyncio.sleep(reset_after)
 
     return status, body, None

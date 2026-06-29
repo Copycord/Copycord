@@ -12655,4 +12655,9 @@ tr.log-expanded td {
   }
 }
 
-
+.chip-input-wrap[data-chip-input="discord_webhook_urls"] .chip {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

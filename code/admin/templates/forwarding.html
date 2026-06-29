@@ -255,11 +255,14 @@
 
                             <div id="provider_discord" class="provider-fields" hidden>
                                 <div class="form-group">
-                                    <label class="form-label" for="discord_webhook_url">Discord webhook URL</label>
-                                    <input id="discord_webhook_url" class="input" type="url" autocomplete="off"
-                                        placeholder="https://discord.com/api/webhooks/..." />
+                                    <label class="form-label" for="discord_webhook_urls">Discord webhook URLs</label>
+                                    <input id="discord_webhook_urls" type="hidden" />
+                                    <div class="chip-input-wrap" data-chip-input="discord_webhook_urls">
+                                        <input type="text" class="chip-text-input"
+                                            placeholder="Paste a webhook URL and press Enter..." />
+                                    </div>
                                     <p class="help-text">
-                                        Copycord will forward the matched message to this Discord webhook.
+                                        Copycord forwards the matched message to every webhook URL listed here.
                                     </p>
                                 </div>
                             </div>
