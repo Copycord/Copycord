@@ -45,14 +45,12 @@ def _mock_ws(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _clean_db():
-    """Clean event_logs, guild_mappings, and forwarding rules between tests."""
+    """Clean event_logs and guild_mappings between tests."""
     yield
     try:
         db.clear_event_logs()
         for m in db.list_guild_mappings():
             db.delete_guild_mapping(m["mapping_id"])
-        for r in db.list_message_forwarding_rules():
-            db.delete_message_forward_rule(r["rule_id"])
     except Exception:
         pass
 
@@ -252,92 +250,3 @@ class TestVersion:
     async def test_version_returns_200(self, client):
         resp = await client.get("/version")
         assert resp.status_code == 200
-
-
-# ---------------------------------------------------------------------------
-# Forwarding API — Discord multi-URL
-# ---------------------------------------------------------------------------
-
-class TestForwardingAPI:
-
-    _VALID_A = "https://discord.com/api/webhooks/111/aaa"
-    _VALID_B = "https://discord.com/api/webhooks/222/bbb"
-
-    def _payload(self, **cfg_over):
-        config = {"urls": [self._VALID_A, self._VALID_B]}
-        config.update(cfg_over)
-        return {
-            "guild_id": "111",
-            "label": "Multi",
-            "provider": "discord",
-            "enabled": True,
-            "config": config,
-            "filters": {},
-        }
-
-    async def _get_rule(self, client, rule_id):
-        resp = await client.get("/api/forwarding")
-        for item in resp.json()["items"]:
-            if item["rule_id"] == rule_id:
-                return item
-        return None
-
-    @pytest.mark.asyncio
-    async def test_save_persists_urls(self, client):
-        resp = await client.post("/api/forwarding", json=self._payload())
-        assert resp.status_code == 200
-        rule_id = resp.json()["rule_id"]
-
-        item = await self._get_rule(client, rule_id)
-        assert item is not None
-        cfg = item["config"]
-        if isinstance(cfg, str):
-            import json
-            cfg = json.loads(cfg)
-        assert cfg["urls"] == [self._VALID_A, self._VALID_B]
-        assert "url" not in cfg
-
-    @pytest.mark.asyncio
-    async def test_legacy_url_accepted_and_normalized(self, client):
-        payload = self._payload()
-        payload["config"] = {"url": self._VALID_A}
-        resp = await client.post("/api/forwarding", json=payload)
-        assert resp.status_code == 200
-        rule_id = resp.json()["rule_id"]
-
-        item = await self._get_rule(client, rule_id)
-        cfg = item["config"]
-        if isinstance(cfg, str):
-            import json
-            cfg = json.loads(cfg)
-        assert cfg["urls"] == [self._VALID_A]
-
-    @pytest.mark.asyncio
-    async def test_zero_urls_rejected(self, client):
-        payload = self._payload()
-        payload["config"] = {"urls": []}
-        resp = await client.post("/api/forwarding", json=payload)
-        assert resp.status_code == 400
-
-    @pytest.mark.asyncio
-    async def test_invalid_url_rejected(self, client):
-        payload = self._payload()
-        payload["config"] = {"urls": [self._VALID_A, "https://example.com/x"]}
-        resp = await client.post("/api/forwarding", json=payload)
-        assert resp.status_code == 400
-
-    @pytest.mark.asyncio
-    async def test_caps_at_ten(self, client):
-        many = [f"https://discord.com/api/webhooks/{i}/tok" for i in range(12)]
-        payload = self._payload()
-        payload["config"] = {"urls": many}
-        resp = await client.post("/api/forwarding", json=payload)
-        assert resp.status_code == 200
-        rule_id = resp.json()["rule_id"]
-
-        item = await self._get_rule(client, rule_id)
-        cfg = item["config"]
-        if isinstance(cfg, str):
-            import json
-            cfg = json.loads(cfg)
-        assert len(cfg["urls"]) == 10

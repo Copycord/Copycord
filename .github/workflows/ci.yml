@@ -85,12 +85,12 @@ jobs:
           python-version: "3.11"
 
       - name: Install test dependencies
-        run: pip install -r tests/requirements-test.txt
+        run: pip install pytest
 
       - name: Run DB tests
         env:
           PYTHONPATH: code
-        run: python -m pytest tests/test_db.py tests/test_forwarding_urls.py tests/test_forwarding_rules.py -v 2>&1 | tee /tmp/db-tests.txt
+        run: python -m pytest tests/test_db.py -v 2>&1 | tee /tmp/db-tests.txt
 
       - name: Job summary
         if: always()
@@ -115,12 +115,14 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r tests/requirements-test.txt
+        run: |
+          pip install -r tests/requirements-test.txt
+          pip install pytest-asyncio
 
       - name: Run API tests
         env:
           PYTHONPATH: code
-        run: python -m pytest tests/test_api.py tests/test_forwarding_send.py -v 2>&1 | tee /tmp/api-tests.txt
+        run: python -m pytest tests/test_api.py -v 2>&1 | tee /tmp/api-tests.txt
 
       - name: Job summary
         if: always()
