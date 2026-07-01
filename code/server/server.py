@@ -7305,6 +7305,9 @@ class ServerReceiver:
         target_channel_id: int,
         payload: dict,
         msg: dict,
+        is_backfill: bool = False,
+        source_id: int | None = None,
+        quiet: bool = False,
     ) -> bool:
         """Handle a message via user-token sending when enabled for the mapping.
 
@@ -7313,6 +7316,16 @@ class ServerReceiver:
         message was dropped. Returns False to let the caller fall back to the
         webhook (user-token sending disabled, no mapping resolved, or every token
         failed while webhook fallback is enabled).
+
+        When ``is_backfill`` is set, backfill progress bookkeeping (note_sent /
+        note_checkpoint / progress logging) is handled here so the caller can
+        simply skip its own webhook path. Token sends intentionally bypass the
+        webhook backfill throttle (``_bf_gate``); pacing, if any, comes from the
+        per-mapping USER_TOKEN_MIN_DELAY/MAX_DELAY handled inside the sender.
+
+        ``quiet`` suppresses this method's own success/drop logging for callers
+        (e.g. the thread path) that already emit their own progress line after
+        the send returns.
         """
         try:
             settings = resolve_mapping_settings(
@@ -7351,12 +7364,43 @@ class ServerReceiver:
             )
             delivered = False
 
+        mark_bf = (
+            is_backfill
+            and source_id is not None
+            and not msg.get("__skip_backfill_mark__")
+        )
+
+        def _note_backfill() -> str:
+            """Advance backfill progress for this message; return log suffix."""
+            orig_mid_val = _safe_mid(msg)
+            self.backfill.note_sent(source_id, orig_mid_val)
+            if orig_mid_val is not None:
+                self.backfill.note_checkpoint(
+                    source_id, orig_mid_val, msg.get("timestamp")
+                )
+            d, total = self.backfill.get_progress(source_id)
+            if total is not None:
+                return f" [{max(total - d, 0)} left]"
+            return f" [{d} sent]"
+
         if delivered:
-            logger.info(
-                "[💬] Forwarded (user token) to clone ch=%s from %s",
-                target_channel_id,
-                msg.get("author"),
-            )
+            if mark_bf:
+                suffix = _note_backfill()
+                if not quiet:
+                    logger.info(
+                        "[💬] [backfill] Forwarded (user token) to #%s (clone ch=%s) from %s (%s)%s",
+                        msg.get("channel_name"),
+                        target_channel_id,
+                        msg.get("author"),
+                        msg.get("author_id"),
+                        suffix,
+                    )
+            elif not quiet:
+                logger.info(
+                    "[💬] Forwarded (user token) to clone ch=%s from %s",
+                    target_channel_id,
+                    msg.get("author"),
+                )
             return True
 
         # Every token failed (or none configured). Fall back to the webhook
@@ -7364,11 +7408,18 @@ class ServerReceiver:
         if settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True):
             return False
 
-        logger.info(
-            "[user-send] All tokens failed for clone ch=%s and webhook fallback is off; dropping message from %s",
-            target_channel_id,
-            msg.get("author"),
-        )
+        # User-tokens-only mode: the message is dropped. During backfill still
+        # advance the checkpoint so progress does not stall or re-deliver on
+        # resume.
+        if mark_bf:
+            _note_backfill()
+
+        if not quiet:
+            logger.info(
+                "[user-send] All tokens failed for clone ch=%s and webhook fallback is off; dropping message from %s",
+                target_channel_id,
+                msg.get("author"),
+            )
         return True
 
     def _build_webhook_payload(
@@ -8510,6 +8561,27 @@ class ServerReceiver:
                     ctx_mapping_row=chosen,
                 )
 
+                # User-token sending: when enabled for this mapping, post the
+                # (backfilled) message as a real user via the Discord REST API
+                # instead of the webhook. Token sends deliberately skip the
+                # backfill throttle (_bf_gate) below — this is the "no sleeps for
+                # token forwarding" path. Falls through to the webhook only when
+                # a token could not deliver and webhook fallback is enabled.
+                if clone_for_gate and _settings_for_forced.get(
+                    "USE_USER_TOKENS", False
+                ):
+                    if await self._try_user_token_send(
+                        original_guild_id=chosen.get("original_guild_id")
+                        or host_guild_id,
+                        cloned_guild_id=chosen.get("cloned_guild_id"),
+                        target_channel_id=int(clone_for_gate),
+                        payload=payload_for_forced,
+                        msg=msg,
+                        is_backfill=is_backfill,
+                        source_id=source_id,
+                    ):
+                        return
+
                 rl_key = f"channel:{clone_for_gate or source_id}"
                 if sem:
                     async with sem:
@@ -8847,6 +8919,21 @@ class ServerReceiver:
                             continue
 
                     if is_backfill and clone_cid:
+                        # User-token sending during backfill (on-demand webhook
+                        # path). When enabled, deliver as a real user via REST
+                        # instead of the webhook, skipping the _bf_gate throttle.
+                        if _settings.get("USE_USER_TOKENS", False):
+                            if await self._try_user_token_send(
+                                original_guild_id=orig_gid,
+                                cloned_guild_id=clone_gid,
+                                target_channel_id=int(clone_cid),
+                                payload=payload_for_mapping,
+                                msg=msg,
+                                is_backfill=True,
+                                source_id=source_id,
+                            ):
+                                continue
+
                         await self.backfill.ensure_temps_ready(int(clone_cid))
                         (
                             primary_url,
@@ -9729,13 +9816,12 @@ class ServerReceiver:
                         thread_id = None
 
                     # User-token sending: post into the existing thread as a real
-                    # user account when enabled for this mapping. Falls through to
-                    # the webhook below if no token can deliver.
-                    if (
-                        not is_backfill
-                        and thread_id
-                        and _settings.get("USE_USER_TOKENS", False)
-                    ):
+                    # user account when enabled for this mapping (live or backfill).
+                    # During backfill this returns before the _bf_gate throttle
+                    # below, so token thread forwarding runs without sleeps; the
+                    # caller emits the backfill progress line after we return.
+                    # Falls through to the webhook below if no token can deliver.
+                    if thread_id and _settings.get("USE_USER_TOKENS", False):
                         if await self._try_user_token_send(
                             original_guild_id=data.get("guild_id"),
                             cloned_guild_id=clone_gid,
@@ -9747,6 +9833,7 @@ class ServerReceiver:
                                 "embeds": p.get("embeds"),
                             },
                             msg=data,
+                            quiet=is_backfill,
                         ):
                             return None
 

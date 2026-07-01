@@ -9,18 +9,6 @@
 
 """
 User-token ("self-bot") message sender.
-
-When a guild mapping has ``USE_USER_TOKENS`` enabled and one or more user
-tokens attached, cloned messages are posted into the clone guild by a randomly
-chosen user account via the raw Discord REST API instead of a channel webhook.
-
-Limitations (by design — see the guild-mappings feature notes):
-  * User accounts cannot post rich embeds → embeds are flattened into text.
-  * User accounts cannot set a per-message username/avatar → the message appears
-    as whichever account posted it.
-  * Attachments are re-downloaded and re-uploaded as real files (multipart).
-  * The account must be a member of the clone guild with permission to post in
-    the target channel, otherwise that token is skipped.
 """
 
 from __future__ import annotations
@@ -132,16 +120,10 @@ class UserTokenSender:
         if hi > 0:
             await asyncio.sleep(random.uniform(lo, min(hi, 30.0)))
 
-        rl_key = f"channel:{target_channel_id}"
-
         for tok in order:
             token_value = (tok.get("token_value") or "").strip()
             if not token_value:
                 continue
-            try:
-                await self._ratelimit.acquire(self._action, key=rl_key)
-            except Exception:
-                pass
             try:
                 ok = await self._send_with_token(
                     token_value, chan, text, atts_to_upload, typing=typing
@@ -267,12 +249,6 @@ class UserTokenSender:
                                 channel_id,
                             )
                             return False
-                        try:
-                            self._ratelimit.penalize(
-                                self._action, retry_after, key=f"channel:{channel_id}"
-                            )
-                        except Exception:
-                            pass
                         await asyncio.sleep(min(retry_after, 30.0))
                         continue
 
@@ -453,13 +429,6 @@ class UserTokenSender:
 
     def _build_headers(self, token: str) -> dict:
         """Realistic Discord desktop-client headers, unique & stable per token.
-
-        Each account presents a *distinct* but *consistent* device fingerprint:
-        the super-properties and User-Agent are derived deterministically from
-        the token, so one account always looks like the same machine across
-        requests (and process restarts), while different accounts never share a
-        fingerprint. That mirrors how real clients behave — a fleet of accounts
-        all sending an identical fingerprint is itself a detection signal.
         """
         fp = self._fingerprints.get(token)
         if fp is None:
