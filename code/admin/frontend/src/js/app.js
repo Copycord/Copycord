@@ -2604,6 +2604,11 @@
       searchInput.hidden = true;
     }
 
+    const settingsMenu = document.getElementById("user-token-settings-menu");
+    const settingsBtn = document.getElementById("user-token-settings-open");
+    if (settingsMenu) settingsMenu.hidden = true;
+    if (settingsBtn) settingsBtn.setAttribute("aria-expanded", "false");
+
     if (!mappingId) {
       if (saveFirst) saveFirst.hidden = false;
       if (editor) editor.hidden = true;
@@ -2618,10 +2623,10 @@
 
   async function loadUserTokens() {
     const list = document.getElementById("userTokensList");
-    const countEl = document.getElementById("user-tokens-count");
+    const headerEl = document.getElementById("user-tokens-list-header");
     const searchEl = document.getElementById("user_tokens_search");
     if (!list || !USER_TOKENS_MAPPING_ID) return;
-    if (countEl) countEl.hidden = true;
+    if (headerEl) headerEl.hidden = true;
     if (searchEl) searchEl.hidden = true;
     list.innerHTML = `<div class="mapping-toggle-desc">Loading…</div>`;
     try {
@@ -2671,17 +2676,18 @@
 
   function renderUserTokens(tokens) {
     const list = document.getElementById("userTokensList");
+    const headerEl = document.getElementById("user-tokens-list-header");
     const countEl = document.getElementById("user-tokens-count");
     const searchEl = document.getElementById("user_tokens_search");
     if (!list) return;
     if (!tokens.length) {
-      if (countEl) countEl.hidden = true;
+      if (headerEl) headerEl.hidden = true;
       if (searchEl) searchEl.hidden = true;
       list.innerHTML = `<div class="mapping-toggle-desc">No user tokens yet. Add one above.</div>`;
       return;
     }
+    if (headerEl) headerEl.hidden = false;
     if (countEl) {
-      countEl.hidden = false;
       countEl.textContent = `${tokens.length} token${
         tokens.length === 1 ? "" : "s"
       }`;
@@ -2918,6 +2924,208 @@
   document
     .querySelector("#user-token-bulk-modal .modal-backdrop")
     ?.addEventListener("click", closeBulkTokenModal);
+
+  // ── Token settings menu (verify / delete all) ──
+  function closeUserTokenMenu() {
+    const menu = document.getElementById("user-token-settings-menu");
+    const btn = document.getElementById("user-token-settings-open");
+    if (menu) menu.hidden = true;
+    if (btn) btn.setAttribute("aria-expanded", "false");
+  }
+
+  function toggleUserTokenMenu(e) {
+    e?.stopPropagation();
+    const menu = document.getElementById("user-token-settings-menu");
+    const btn = document.getElementById("user-token-settings-open");
+    if (!menu) return;
+    const willOpen = menu.hidden;
+    menu.hidden = !willOpen;
+    if (btn) btn.setAttribute("aria-expanded", willOpen ? "true" : "false");
+  }
+
+  document
+    .getElementById("user-token-settings-open")
+    ?.addEventListener("click", toggleUserTokenMenu);
+
+  // Close the menu on any outside click or Escape.
+  document.addEventListener("click", (e) => {
+    const wrap = document.querySelector(".user-token-settings");
+    if (wrap && !wrap.contains(e.target)) closeUserTokenMenu();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeUserTokenMenu();
+  });
+
+  async function deleteUserTokens(body) {
+    try {
+      const res = await fetch(
+        `/api/guild-mappings/${encodeURIComponent(
+          USER_TOKENS_MAPPING_ID
+        )}/user-tokens/delete`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      );
+      const j = await res.json();
+      await loadUserTokens();
+      if (!j.ok) {
+        window.showToast?.(j.error || "Failed to delete tokens.", {
+          type: "error",
+        });
+        return null;
+      }
+      return j.deleted;
+    } catch (e) {
+      window.showToast?.("Network error while deleting tokens.", {
+        type: "error",
+      });
+      return null;
+    }
+  }
+
+  function buildVerifyResultsHtml(j) {
+    const esc = window.escapeHtml || ((s) => String(s == null ? "" : s));
+    // Non-working first so failures are immediately visible.
+    const ordered = (j.results || [])
+      .slice()
+      .sort((a, b) => Number(a.ok) - Number(b.ok));
+    const rows = ordered
+      .map((r) => {
+        const label = r.username
+          ? `${esc(r.masked)} · ${esc(r.username)}`
+          : esc(r.masked);
+        const cls = r.ok ? "added" : "invalid";
+        const txt = r.ok ? "Working" : "Not working";
+        return `<div class="user-token-bulk-row"><span class="btok">${label}</span><span class="bstatus ${cls}">${txt}</span></div>`;
+      })
+      .join("");
+    const summary =
+      `<div class="user-token-verify-summary">` +
+      `<span class="uv-ok">${j.working} working</span>` +
+      `<span class="uv-sep">·</span>` +
+      `<span class="uv-bad">${j.broken} not working</span>` +
+      `</div>`;
+    return `${summary}<div class="user-token-bulk-results user-token-verify-list">${rows}</div>`;
+  }
+
+  async function verifyUserTokens() {
+    closeUserTokenMenu();
+    if (!USER_TOKENS_MAPPING_ID) return;
+    const esc = window.escapeHtml || ((s) => String(s == null ? "" : s));
+    const cModalEl = document.getElementById("confirm-modal");
+    const stillOpen = () => !!cModalEl && cModalEl.classList.contains("show");
+
+    // Open the modal immediately with a loading state — the verification
+    // request happens while the popup is already on screen.
+    openConfirm({
+      title: "Token verification",
+      body:
+        `<div class="user-token-verify-loading">` +
+        `<span class="uv-spinner" aria-hidden="true"></span>` +
+        `<span>Verifying tokens…</span></div>`,
+      confirmText: "Cancel",
+      confirmClass: "btn-ghost",
+      showCancel: false,
+    });
+
+    let j;
+    try {
+      const res = await fetch(
+        `/api/guild-mappings/${encodeURIComponent(
+          USER_TOKENS_MAPPING_ID
+        )}/user-tokens/verify`,
+        { method: "POST" }
+      );
+      j = await res.json();
+    } catch (e) {
+      if (stillOpen()) {
+        openConfirm({
+          title: "Token verification",
+          body: "Network error while verifying tokens.",
+          confirmText: "Close",
+          confirmClass: "btn-ghost",
+          showCancel: false,
+        });
+      }
+      return;
+    }
+
+    // The user closed the popup while we were waiting — don't reopen it.
+    if (!stillOpen()) return;
+
+    if (!j.ok || !j.total) {
+      openConfirm({
+        title: "Token verification",
+        body: j.ok
+          ? "There are no tokens to verify."
+          : esc(j.error || "Failed to verify tokens."),
+        confirmText: "Close",
+        confirmClass: "btn-ghost",
+        showCancel: false,
+      });
+      return;
+    }
+
+    const body = buildVerifyResultsHtml(j);
+    if (!j.broken) {
+      openConfirm({
+        title: "Token verification",
+        body,
+        confirmText: "Done",
+        confirmClass: "btn-primary",
+        showCancel: false,
+      });
+      return;
+    }
+
+    const brokenIds = (j.results || []).filter((r) => !r.ok).map((r) => r.id);
+    openConfirm({
+      title: "Token verification",
+      body,
+      confirmText: `Delete ${j.broken} non-working`,
+      confirmClass: "btn-ghost-red",
+      showCancel: true,
+      onConfirm: async () => {
+        const deleted = await deleteUserTokens({ ids: brokenIds });
+        if (deleted != null) {
+          window.showToast?.(
+            `Removed ${deleted} non-working token${deleted === 1 ? "" : "s"}.`,
+            { type: "success" }
+          );
+        }
+      },
+    });
+  }
+
+  async function deleteAllUserTokens() {
+    closeUserTokenMenu();
+    if (!USER_TOKENS_MAPPING_ID) return;
+    openConfirm({
+      title: "Delete all tokens?",
+      body: "This removes <strong>all</strong> user tokens from this mapping. This cannot be undone.",
+      confirmText: "Delete all",
+      confirmClass: "btn-ghost-red",
+      showCancel: true,
+      onConfirm: async () => {
+        const deleted = await deleteUserTokens({ scope: "all" });
+        if (deleted != null) {
+          window.showToast?.(
+            `Deleted ${deleted} token${deleted === 1 ? "" : "s"}.`,
+            { type: "success" }
+          );
+        }
+      },
+    });
+  }
+
+  document
+    .getElementById("user-token-verify")
+    ?.addEventListener("click", verifyUserTokens);
+  document
+    .getElementById("user-token-delete-all")
+    ?.addEventListener("click", deleteAllUserTokens);
 
   document
     .querySelector(".token-user-btn[data-target='user_token_value']")

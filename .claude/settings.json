@@ -35,7 +35,22 @@
       "Bash(grep -n \"^\\\\.dd \\\\|^\\\\.dd{\\\\|^\\\\.dd,\\\\|^\\\\.dd-toggle\\\\|^\\\\.dd-menu\\\\|\\\\.dd {\" main.css)",
       "Bash(python -m py_compile code/admin/app.py)",
       "Bash(python -m pytest tests/test_api.py::TestMappingUserTokensAPI -q)",
-      "Bash(python -m py_compile code/server/token_sender.py code/server/server.py code/common/config.py)"
+      "Bash(python -m py_compile code/server/token_sender.py code/server/server.py code/common/config.py)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('code/server/server.py', encoding='utf-8'\\).read\\(\\)\\); print\\('server.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('code/server/token_sender.py', encoding='utf-8'\\).read\\(\\)\\); print\\('token_sender.py OK'\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('code/admin/app.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('code/common/db.py', encoding='utf-8'\\).read\\(\\)\\); print\\('app.py + db.py OK'\\)\")",
+      "Bash(cat vite.config.js)",
+      "Bash(node -e \"console.log\\(JSON.stringify\\(require\\('./package.json'\\).scripts,null,2\\)\\)\")",
+      "Bash(git check-ignore *)",
+      "Bash(cp dist/assets/main.js dist/assets/main.css ../static/assets/)",
+      "Read(//c/Users/Mac/Desktop/Git Repos/static/**)",
+      "Bash(python -m pytest tests/test_api.py tests/test_db.py -q)",
+      "Bash(cd \"c:\\\\Users\\\\Mac\\\\Desktop\\\\Git Repos\\\\copycord\\\\code\\\\admin\\\\frontend\" && npm run build 2>&1 | tail -6 && cp dist/assets/main.js dist/assets/main.css ../static/assets/ && echo \"--- copied ---\" && ls -la ../static/assets/)",
+      "Bash(python -c \"import ast; [ast.parse\\(open\\(f, encoding='utf-8'\\).read\\(\\)\\) for f in ['code/common/selfbot_headers.py','code/server/token_sender.py','code/admin/app.py']]; print\\('syntax OK'\\)\")",
+      "Bash(python -m pytest tests/test_token_sender.py tests/test_api.py -q)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Mac\\Desktop\\Git Repos\\static"
     ]
   }
 }

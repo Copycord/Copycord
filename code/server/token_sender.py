@@ -14,13 +14,13 @@ User-token ("self-bot") message sender.
 from __future__ import annotations
 
 import asyncio
-import base64
-import hashlib
 import json
 import random
 from typing import Callable, Optional
 
 import aiohttp
+
+from common.selfbot_headers import make_fingerprint
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
 
@@ -442,86 +442,7 @@ class UserTokenSender:
 
     @staticmethod
     def _make_fingerprint(token: str) -> dict:
-        # Deterministic per-token RNG → a stable, unique fingerprint per account.
-        seed = int(hashlib.sha256(token.encode("utf-8")).hexdigest()[:16], 16)
-        rng = random.Random(seed)
-
-        chrome_major = rng.choice([128, 130, 132, 134, 136, 139])
-        chrome_version = (
-            f"{chrome_major}.0.{rng.randint(6000, 7300)}.{rng.randint(30, 220)}"
-        )
-        client_version = rng.choice(
-            ["1.0.9179", "1.0.9163", "1.0.9156", "1.0.9154"]
-        )
-        electron_version = rng.choice(
-            ["32.2.5", "31.3.1", "28.2.10", "22.3.26"]
-        )
-        os_version = rng.choice(
-            ["10.0.19045", "10.0.22621", "10.0.22631", "10.0.26100"]
-        )
-        build_number = rng.randint(330000, 366000)
-        native_build = rng.randint(60000, 64000)
-        locale = rng.choice(
-            ["en-US", "en-GB", "de", "fr", "es-ES", "nl", "pt-BR"]
-        )
-        tz = rng.choice(
-            [
-                "America/New_York",
-                "America/Chicago",
-                "America/Los_Angeles",
-                "Europe/London",
-                "Europe/Berlin",
-                "Europe/Amsterdam",
-                "Asia/Tokyo",
-            ]
-        )
-
-        user_agent = (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            f"discord/{client_version} Chrome/{chrome_version} "
-            f"Electron/{electron_version} Safari/537.36"
-        )
-
-        # Shape matches discord.py-self's super-properties for the desktop app.
-        super_props = {
-            "os": "Windows",
-            "browser": "Discord Client",
-            "release_channel": "stable",
-            "client_version": client_version,
-            "os_version": os_version,
-            "os_arch": "x64",
-            "app_arch": "x64",
-            "system_locale": locale,
-            "browser_user_agent": user_agent,
-            "browser_version": chrome_version,
-            "client_build_number": build_number,
-            "native_build_number": native_build,
-            "client_event_source": None,
-            "device": "",
-            "referrer": "",
-            "referring_domain": "",
-            "referrer_current": "",
-            "referring_domain_current": "",
-        }
-        super_props_b64 = base64.b64encode(
-            json.dumps(super_props, separators=(",", ":")).encode()
-        ).decode()
-
-        headers = {
-            "User-Agent": user_agent,
-            "X-Discord-Locale": locale,
-            "X-Discord-Timezone": tz,
-            "Accept": "*/*",
-            "Accept-Language": f"{locale},en;q=0.9",
-            "Origin": "https://discord.com",
-            "Referer": "https://discord.com/channels/@me",
-            "Sec-CH-UA": (
-                f'"Chromium";v="{chrome_major}", '
-                f'"Not(A:Brand";v="24", '
-                f'"Google Chrome";v="{chrome_major}"'
-            ),
-            "Sec-CH-UA-Mobile": "?0",
-            "Sec-CH-UA-Platform": '"Windows"',
-        }
-        return {"headers": headers, "super_props_b64": super_props_b64}
+        # Delegates to the shared builder so token *validation* (admin process)
+        # and message *sending* (server process) present an identical device
+        # fingerprint for the same account. See common.selfbot_headers.
+        return make_fingerprint(token)

@@ -425,6 +425,107 @@ class TestMappingUserTokensAPI:
         statuses = sorted(r["status"] for r in body["results"])
         assert statuses == ["added", "invalid"]
 
+    async def _add_tokens(self, client, monkeypatch, mid, tokens):
+        import admin.app as app_mod
+
+        monkeypatch.setattr(
+            app_mod, "_selfbot_in_guild", AsyncMock(return_value=True)
+        )
+        monkeypatch.setattr(
+            app_mod, "_selfbot_identity", AsyncMock(return_value=None)
+        )
+        ids = []
+        for t in tokens:
+            resp = await client.post(
+                f"/api/guild-mappings/{mid}/user-tokens", json={"token": t}
+            )
+            ids.append(resp.json()["token"]["id"])
+        return ids
+
+    @pytest.mark.asyncio
+    async def test_verify_reports_working_and_broken(self, client, monkeypatch):
+        import admin.app as app_mod
+
+        mid = self._make_mapping()
+        await self._add_tokens(
+            client, monkeypatch, mid, ["goodtoken1", "badtoken22"]
+        )
+
+        # Re-check: only the first token is still a member.
+        async def fake_in_guild(token, gid):
+            return token == "goodtoken1"
+
+        monkeypatch.setattr(app_mod, "_selfbot_in_guild", fake_in_guild)
+
+        resp = await client.post(f"/api/guild-mappings/{mid}/user-tokens/verify")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["total"] == 2
+        assert body["working"] == 1
+        assert body["broken"] == 1
+        # Full token never leaks; each result carries an id + ok flag.
+        assert "goodtoken1" not in str(body)
+        by_ok = {r["ok"] for r in body["results"]}
+        assert by_ok == {True, False}
+        assert all(r.get("id") for r in body["results"])
+
+    @pytest.mark.asyncio
+    async def test_verify_unknown_mapping(self, client):
+        resp = await client.post("/api/guild-mappings/nope/user-tokens/verify")
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_delete_by_ids(self, client, monkeypatch):
+        mid = self._make_mapping()
+        ids = await self._add_tokens(
+            client, monkeypatch, mid, ["tokaaaaaaaa", "tokbbbbbbbb", "tokcccccccc"]
+        )
+
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens/delete",
+            json={"ids": ids[:2]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] == 2
+
+        resp = await client.get(f"/api/guild-mappings/{mid}/user-tokens")
+        remaining = resp.json()["tokens"]
+        assert len(remaining) == 1
+        assert remaining[0]["id"] == ids[2]
+
+    @pytest.mark.asyncio
+    async def test_delete_scope_all(self, client, monkeypatch):
+        mid = self._make_mapping()
+        await self._add_tokens(
+            client, monkeypatch, mid, ["tokaaaaaaaa", "tokbbbbbbbb"]
+        )
+
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens/delete",
+            json={"scope": "all"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] == 2
+
+        resp = await client.get(f"/api/guild-mappings/{mid}/user-tokens")
+        assert resp.json()["tokens"] == []
+
+    @pytest.mark.asyncio
+    async def test_delete_requires_scope_or_ids(self, client):
+        mid = self._make_mapping()
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens/delete", json={}
+        )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_delete_unknown_mapping(self, client):
+        resp = await client.post(
+            "/api/guild-mappings/nope/user-tokens/delete", json={"scope": "all"}
+        )
+        assert resp.status_code == 404
+
 
 # ---------------------------------------------------------------------------
 # Version endpoint

@@ -73,6 +73,7 @@ from common.common_helpers import (
     discord_urls_from_config,
     is_discord_webhook_url,
 )
+from common.selfbot_headers import build_headers as _selfbot_headers
 from admin.web_config import router as links_router
 from admin.web_config import startup_links, shutdown_links
 from contextlib import suppress
@@ -946,9 +947,10 @@ async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
         return False
 
     base_url = f"{DISCORD_API_BASE}/users/@me/guilds"
-    headers = {
-        "Authorization": client_token,
-    }
+    # Bare (Authorization-only) requests are rejected by Discord with HTTP 401
+    # even for valid member accounts, so present the same realistic browser
+    # headers the sender uses. See common.selfbot_headers.
+    headers = _selfbot_headers(client_token)
     wanted = str(guild_id)
 
     try:
@@ -1031,7 +1033,9 @@ async def _selfbot_identity(token: str) -> dict | None:
         return None
 
     url = f"{DISCORD_API_BASE}/users/@me"
-    headers = {"Authorization": token}
+    # Same realistic headers as the sender — a bare request 401s. See
+    # common.selfbot_headers.
+    headers = _selfbot_headers(token)
     try:
         async with aiohttp.ClientSession() as sess:
             async with sess.get(url, headers=headers, timeout=10) as resp:
@@ -5939,6 +5943,93 @@ async def api_bulk_add_mapping_tokens(mapping_id: str, payload: dict = Body(...)
             "results": results,
         }
     )
+
+
+@app.post(
+    "/api/guild-mappings/{mapping_id}/user-tokens/verify",
+    response_class=JSONResponse,
+)
+async def api_verify_mapping_tokens(mapping_id: str):
+    """Re-check every attached token: is it still valid AND a member of the
+    clone guild? Returns per-token results (with ids) so the UI can offer to
+    prune the non-working ones."""
+    m = db.get_mapping_by_id(mapping_id)
+    if not m:
+        return JSONResponse(
+            {"ok": False, "error": "Mapping not found."}, status_code=404
+        )
+
+    try:
+        clone_gid = int(m.get("cloned_guild_id") or 0)
+    except Exception:
+        clone_gid = 0
+
+    rows = db.list_mapping_tokens(mapping_id)
+
+    results = []
+    working = 0
+    broken = 0
+    # Check sequentially to avoid hammering Discord's rate limits.
+    for r in rows:
+        token_value = r.get("token_value") or ""
+        ok = bool(await _selfbot_in_guild(token_value, clone_gid))
+        if ok:
+            working += 1
+        else:
+            broken += 1
+        results.append(
+            {
+                "id": r.get("token_id"),
+                "masked": _mask_token(token_value),
+                "username": r.get("username") or "",
+                "ok": ok,
+            }
+        )
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "total": len(rows),
+            "working": working,
+            "broken": broken,
+            "results": results,
+        }
+    )
+
+
+@app.post(
+    "/api/guild-mappings/{mapping_id}/user-tokens/delete",
+    response_class=JSONResponse,
+)
+async def api_bulk_delete_mapping_tokens(mapping_id: str, payload: dict = Body(...)):
+    """Bulk-remove tokens. Pass ``{"scope": "all"}`` to remove every token, or
+    ``{"ids": [...]}`` to remove a specific set (e.g. non-working ones)."""
+    m = db.get_mapping_by_id(mapping_id)
+    if not m:
+        return JSONResponse(
+            {"ok": False, "error": "Mapping not found."}, status_code=404
+        )
+
+    scope = str(payload.get("scope") or "").strip().lower()
+    if scope == "all":
+        deleted = db.delete_all_mapping_tokens(mapping_id)
+        return JSONResponse({"ok": True, "deleted": deleted})
+
+    ids = payload.get("ids")
+    if not isinstance(ids, list) or not ids:
+        return JSONResponse(
+            {"ok": False, "error": "Provide scope='all' or a non-empty ids list."},
+            status_code=400,
+        )
+
+    deleted = 0
+    for tid in ids:
+        row = db.get_mapping_token(tid)
+        if row and str(row.get("mapping_id")) == str(mapping_id):
+            if db.delete_mapping_token(tid):
+                deleted += 1
+
+    return JSONResponse({"ok": True, "deleted": deleted})
 
 
 @app.patch(

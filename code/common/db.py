@@ -5373,6 +5373,15 @@ class DBManager:
             self.conn.commit()
             return cur.rowcount > 0
 
+    def delete_all_mapping_tokens(self, mapping_id: str) -> int:
+        """Detach every user token from a mapping. Returns the number removed."""
+        with self.lock:
+            cur = self.conn.execute(
+                "DELETE FROM mapping_user_tokens WHERE mapping_id = ?", (mapping_id,)
+            )
+            self.conn.commit()
+            return cur.rowcount
+
     def increment_mapping_token_usage(self, token_id: str) -> None:
         """Increment usage counter and update last_used timestamp for a token."""
         with self.lock:

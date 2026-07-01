@@ -634,6 +634,16 @@ class TestMappingUserTokens:
         assert db.delete_mapping_token(tid) is True
         assert db.list_mapping_tokens("ut-map") == []
 
+    def test_delete_all(self, db):
+        self._mapping(db)
+        db.add_mapping_token("ut-map", "tokA")
+        db.add_mapping_token("ut-map", "tokB")
+        db.add_mapping_token("ut-map", "tokC")
+        assert db.delete_all_mapping_tokens("ut-map") == 3
+        assert db.list_mapping_tokens("ut-map") == []
+        # A second call removes nothing.
+        assert db.delete_all_mapping_tokens("ut-map") == 0
+
     def test_usage_increment(self, db):
         self._mapping(db)
         tid = db.add_mapping_token("ut-map", "tokA")

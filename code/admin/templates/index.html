@@ -1098,7 +1098,44 @@
                   </div>
                   <input type="text" id="user_tokens_search" class="mapping-search-input user-tokens-search"
                     placeholder="Search tokens…" autocomplete="off" hidden />
-                  <div class="user-tokens-count" id="user-tokens-count" hidden></div>
+                  <div class="user-tokens-list-header" id="user-tokens-list-header" hidden>
+                    <div class="user-tokens-count" id="user-tokens-count"></div>
+                    <div class="user-token-settings">
+                      <button type="button" id="user-token-settings-open" class="user-token-settings-btn"
+                        title="Token options" aria-haspopup="true" aria-expanded="false" aria-label="Token options">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none"
+                          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                          viewBox="0 0 24 24">
+                          <circle cx="12" cy="12" r="3" />
+                          <path
+                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                        </svg>
+                      </button>
+                      <div class="user-token-settings-menu" id="user-token-settings-menu" role="menu" hidden>
+                        <button type="button" class="user-token-menu-item" id="user-token-verify" role="menuitem">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            viewBox="0 0 24 24">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                            <polyline points="22 4 12 14.01 9 11.01" />
+                          </svg>
+                          <span>Verify tokens</span>
+                        </button>
+                        <button type="button" class="user-token-menu-item is-danger" id="user-token-delete-all"
+                          role="menuitem">
+                          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            viewBox="0 0 24 24">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            <line x1="10" y1="11" x2="10" y2="17" />
+                            <line x1="14" y1="11" x2="14" y2="17" />
+                          </svg>
+                          <span>Delete all tokens</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                   <div id="userTokensList" class="user-tokens-list"></div>
                 </div>
               </div>
