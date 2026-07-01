@@ -568,6 +568,80 @@ class TestThreadMappings:
 
 
 # ---------------------------------------------------------------------------
+# Mapping user tokens (self-bot senders)
+# ---------------------------------------------------------------------------
+
+class TestMappingUserTokens:
+
+    def _mapping(self, db, mapping_id="ut-map", ogid=1, cgid=2):
+        return db.upsert_guild_mapping(
+            mapping_id=mapping_id,
+            mapping_name="UT",
+            original_guild_id=ogid,
+            original_guild_name="",
+            original_guild_icon_url=None,
+            cloned_guild_id=cgid,
+            cloned_guild_name="",
+        )
+
+    def test_add_and_list(self, db):
+        self._mapping(db)
+        tid = db.add_mapping_token(
+            "ut-map", "tokenA", label="acct1", username="user1", user_id="10"
+        )
+        assert tid
+        rows = db.list_mapping_tokens("ut-map")
+        assert len(rows) == 1
+        assert rows[0]["token_value"] == "tokenA"
+        assert rows[0]["label"] == "acct1"
+        assert rows[0]["username"] == "user1"
+        assert rows[0]["enabled"] == 1
+
+    def test_enabled_tokens_only(self, db):
+        self._mapping(db)
+        db.add_mapping_token("ut-map", "tokA")
+        t2 = db.add_mapping_token("ut-map", "tokB")
+        db.set_mapping_token_enabled(t2, False)
+        enabled = db.get_enabled_mapping_tokens("ut-map")
+        assert {e["token_value"] for e in enabled} == {"tokA"}
+
+    def test_unique_per_mapping(self, db):
+        self._mapping(db)
+        db.add_mapping_token("ut-map", "dup")
+        with pytest.raises(sqlite3.IntegrityError):
+            db.add_mapping_token("ut-map", "dup")
+
+    def test_same_token_different_mappings(self, db):
+        self._mapping(db)
+        self._mapping(db, mapping_id="ut-map2", ogid=3, cgid=4)
+        db.add_mapping_token("ut-map", "shared")
+        # Same token string is allowed under a different mapping.
+        db.add_mapping_token("ut-map2", "shared")
+        assert len(db.list_mapping_tokens("ut-map")) == 1
+        assert len(db.list_mapping_tokens("ut-map2")) == 1
+
+    def test_toggle_enabled(self, db):
+        self._mapping(db)
+        tid = db.add_mapping_token("ut-map", "tokA")
+        db.set_mapping_token_enabled(tid, False)
+        assert db.get_mapping_token(tid)["enabled"] == 0
+        db.set_mapping_token_enabled(tid, True)
+        assert db.get_mapping_token(tid)["enabled"] == 1
+
+    def test_delete(self, db):
+        self._mapping(db)
+        tid = db.add_mapping_token("ut-map", "tokA")
+        assert db.delete_mapping_token(tid) is True
+        assert db.list_mapping_tokens("ut-map") == []
+
+    def test_usage_increment(self, db):
+        self._mapping(db)
+        tid = db.add_mapping_token("ut-map", "tokA")
+        db.increment_mapping_token_usage(tid)
+        assert db.get_mapping_token(tid)["use_count"] == 1
+
+
+# ---------------------------------------------------------------------------
 # Cascade: deleting a guild mapping cleans child tables
 # ---------------------------------------------------------------------------
 
@@ -588,6 +662,7 @@ class TestGuildMappingCascade:
         db.upsert_channel_mapping(100, "gen", 200, None, 10, 20, 0, original_guild_id=1, cloned_guild_id=2)
         db.upsert_role_mapping(500, "Admin", 600, "Admin-Clone", original_guild_id=1, cloned_guild_id=2)
         db.upsert_emoji_mapping(700, "pepe", 800, "pepe", original_guild_id=1, cloned_guild_id=2)
+        db.add_mapping_token(mid, "tokA", label="acct")
         db.add_event_log(event_type="x", details="y", guild_id=1)
 
         db.delete_guild_mapping(mid)
@@ -596,5 +671,6 @@ class TestGuildMappingCascade:
         assert len(db.get_all_channel_mappings()) == 0
         assert len(db.get_all_role_mappings()) == 0
         assert len(db.get_all_emoji_mappings()) == 0
+        assert db.list_mapping_tokens(mid) == []
         # Event logs are NOT cascade-deleted (they're audit records)
         assert db.count_event_logs() == 1

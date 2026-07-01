@@ -14,6 +14,7 @@ from typing import Tuple, Dict, Optional
 
 class ActionType(Enum):
     WEBHOOK_MESSAGE = "webhook_message"
+    USER_MESSAGE = "user_message"
     WEBHOOK_CREATE = "webhook_create"
     WEBHOOK_DELETE = "webhook_delete"
     CREATE_CHANNEL = "create_channel"
@@ -85,6 +86,7 @@ class RateLimitManager:
     def __init__(self, config: Dict[ActionType, Tuple[int, float]] = None):
         cfg = config or {
             ActionType.WEBHOOK_MESSAGE: (5, 2.5),
+            ActionType.USER_MESSAGE: (5, 5.0),
             ActionType.CREATE_CHANNEL: (2, 15.0),
             ActionType.WEBHOOK_CREATE: (1, 30.0),
             ActionType.WEBHOOK_DELETE: (1, 10.0),

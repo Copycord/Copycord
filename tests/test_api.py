@@ -241,6 +241,144 @@ class TestGuildMappingsAPI:
 
 
 # ---------------------------------------------------------------------------
+# Mapping user tokens API
+# ---------------------------------------------------------------------------
+
+class TestMappingUserTokensAPI:
+
+    def _make_mapping(self):
+        return db.upsert_guild_mapping(
+            mapping_id=None,
+            mapping_name="UT API",
+            original_guild_id=111,
+            original_guild_name="",
+            original_guild_icon_url=None,
+            cloned_guild_id=222,
+            cloned_guild_name="",
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_empty(self, client):
+        mid = self._make_mapping()
+        resp = await client.get(f"/api/guild-mappings/{mid}/user-tokens")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["tokens"] == []
+
+    @pytest.mark.asyncio
+    async def test_list_unknown_mapping(self, client):
+        resp = await client.get("/api/guild-mappings/nope/user-tokens")
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_add_validates_and_masks(self, client, monkeypatch):
+        import admin.app as app_mod
+
+        monkeypatch.setattr(
+            app_mod, "_selfbot_in_guild", AsyncMock(return_value=True)
+        )
+        monkeypatch.setattr(
+            app_mod,
+            "_selfbot_identity",
+            AsyncMock(return_value={"id": "999", "username": "tester"}),
+        )
+        mid = self._make_mapping()
+
+        secret = "supersecrettoken1234"
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens",
+            json={"token": secret, "label": "acct"},
+        )
+        assert resp.status_code == 200
+        tok = resp.json()["token"]
+        assert tok["username"] == "tester"
+        assert tok["enabled"] is True
+        # Full token is never returned to the client.
+        assert secret not in str(resp.json())
+        assert tok["token_masked"].startswith("supers")
+
+        # Listing also returns it masked.
+        resp = await client.get(f"/api/guild-mappings/{mid}/user-tokens")
+        toks = resp.json()["tokens"]
+        assert len(toks) == 1
+        assert secret not in str(toks)
+
+    @pytest.mark.asyncio
+    async def test_add_rejects_account_not_in_clone(self, client, monkeypatch):
+        import admin.app as app_mod
+
+        monkeypatch.setattr(
+            app_mod, "_selfbot_in_guild", AsyncMock(return_value=False)
+        )
+        mid = self._make_mapping()
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens", json={"token": "bad"}
+        )
+        assert resp.status_code == 400
+        assert resp.json()["ok"] is False
+        # Nothing was stored.
+        resp = await client.get(f"/api/guild-mappings/{mid}/user-tokens")
+        assert resp.json()["tokens"] == []
+
+    @pytest.mark.asyncio
+    async def test_add_missing_token(self, client):
+        mid = self._make_mapping()
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens", json={}
+        )
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_add_unknown_mapping(self, client):
+        resp = await client.post(
+            "/api/guild-mappings/nope/user-tokens", json={"token": "x"}
+        )
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_toggle_and_delete(self, client, monkeypatch):
+        import admin.app as app_mod
+
+        monkeypatch.setattr(
+            app_mod, "_selfbot_in_guild", AsyncMock(return_value=True)
+        )
+        monkeypatch.setattr(
+            app_mod, "_selfbot_identity", AsyncMock(return_value=None)
+        )
+        mid = self._make_mapping()
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens",
+            json={"token": "tok12345678"},
+        )
+        token_id = resp.json()["token"]["id"]
+
+        resp = await client.patch(
+            f"/api/guild-mappings/{mid}/user-tokens/{token_id}",
+            json={"enabled": False},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["token"]["enabled"] is False
+
+        resp = await client.delete(
+            f"/api/guild-mappings/{mid}/user-tokens/{token_id}"
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+
+        resp = await client.get(f"/api/guild-mappings/{mid}/user-tokens")
+        assert resp.json()["tokens"] == []
+
+    @pytest.mark.asyncio
+    async def test_patch_unknown_token(self, client):
+        mid = self._make_mapping()
+        resp = await client.patch(
+            f"/api/guild-mappings/{mid}/user-tokens/nope", json={"enabled": True}
+        )
+        assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # Version endpoint
 # ---------------------------------------------------------------------------
 

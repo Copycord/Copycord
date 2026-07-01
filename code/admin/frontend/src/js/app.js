@@ -206,6 +206,7 @@
     APPEND_AUTHOR: false,
     DB_CLEANUP_MSG: true,
     ON_DEMAND_WEBHOOKS: true,
+    USE_USER_TOKENS: false,
   };
 
   let lastFocusLog = null;
@@ -2437,6 +2438,11 @@
         cb.checked = !!rawVal;
       });
 
+    // Per-mapping user tokens can only be managed once the mapping exists.
+    setupUserTokensSection(
+      isEdit && mapping?.mapping_id ? mapping.mapping_id : null
+    );
+
     const mappingFormEl = document.getElementById("mapping-form");
     if (mappingFormEl) {
       MAPPING_BASELINE = snapshotForm(mappingFormEl);
@@ -2495,6 +2501,190 @@
   }
 
   window.openMappingModal = openMappingModal;
+
+  // ─── User Message Sending (per-mapping user tokens) ──────────────────
+  let USER_TOKENS_MAPPING_ID = null;
+
+  function setUserTokenStatus(msg) {
+    const el = document.getElementById("user-token-status");
+    if (el) el.textContent = msg || "";
+  }
+
+  function setupUserTokensSection(mappingId) {
+    USER_TOKENS_MAPPING_ID = mappingId || null;
+    const saveFirst = document.getElementById("user-tokens-save-first");
+    const editor = document.getElementById("user-tokens-editor");
+    const valInput = document.getElementById("user_token_value");
+    const labelInput = document.getElementById("user_token_label");
+    const list = document.getElementById("userTokensList");
+
+    setUserTokenStatus("");
+    if (valInput) {
+      valInput.value = "";
+      valInput.type = "password";
+    }
+    if (labelInput) labelInput.value = "";
+
+    if (!mappingId) {
+      if (saveFirst) saveFirst.hidden = false;
+      if (editor) editor.hidden = true;
+      if (list) list.innerHTML = "";
+      return;
+    }
+
+    if (saveFirst) saveFirst.hidden = true;
+    if (editor) editor.hidden = false;
+    loadUserTokens();
+  }
+
+  async function loadUserTokens() {
+    const list = document.getElementById("userTokensList");
+    if (!list || !USER_TOKENS_MAPPING_ID) return;
+    list.innerHTML = `<div class="mapping-toggle-desc">Loading…</div>`;
+    try {
+      const res = await fetch(
+        `/api/guild-mappings/${encodeURIComponent(
+          USER_TOKENS_MAPPING_ID
+        )}/user-tokens`
+      );
+      const j = await res.json();
+      if (!j.ok) {
+        list.innerHTML = `<div class="mapping-toggle-desc">Failed to load tokens.</div>`;
+        return;
+      }
+      renderUserTokens(j.tokens || []);
+    } catch (e) {
+      list.innerHTML = `<div class="mapping-toggle-desc">Failed to load tokens.</div>`;
+    }
+  }
+
+  function renderUserTokens(tokens) {
+    const list = document.getElementById("userTokensList");
+    if (!list) return;
+    if (!tokens.length) {
+      list.innerHTML = `<div class="mapping-toggle-desc">No user tokens yet. Add one above.</div>`;
+      return;
+    }
+    list.innerHTML = "";
+    for (const t of tokens) {
+      const name = t.label || t.username || t.user_id || "User token";
+      const row = document.createElement("div");
+      row.className = "user-token-row";
+      row.innerHTML = `
+        <div class="user-token-meta">
+          <span class="user-token-name"></span>
+          <span class="mapping-toggle-desc user-token-sub"></span>
+        </div>
+        <div class="user-token-actions">
+          <label class="toggle mapping-toggle-switch">
+            <input type="checkbox" class="user-token-enabled" ${
+              t.enabled ? "checked" : ""
+            } />
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          </label>
+          <button type="button" class="btn btn-ghost user-token-remove">Remove</button>
+        </div>`;
+      row.querySelector(".user-token-name").textContent = name;
+      const sub = t.token_masked + (t.username ? ` · ${t.username}` : "");
+      row.querySelector(".user-token-sub").textContent = sub;
+      const enabledInput = row.querySelector(".user-token-enabled");
+      enabledInput.addEventListener("change", () =>
+        toggleUserToken(t.id, enabledInput.checked)
+      );
+      row
+        .querySelector(".user-token-remove")
+        .addEventListener("click", () => removeUserToken(t.id, name));
+      list.appendChild(row);
+    }
+  }
+
+  async function addUserToken() {
+    if (!USER_TOKENS_MAPPING_ID) return;
+    const valInput = document.getElementById("user_token_value");
+    const labelInput = document.getElementById("user_token_label");
+    const btn = document.getElementById("user-token-add");
+    const token = (valInput?.value || "").trim();
+    if (!token) {
+      setUserTokenStatus("Enter a token.");
+      return;
+    }
+    if (btn) btn.disabled = true;
+    setUserTokenStatus("Validating…");
+    try {
+      const res = await fetch(
+        `/api/guild-mappings/${encodeURIComponent(
+          USER_TOKENS_MAPPING_ID
+        )}/user-tokens`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            token,
+            label: (labelInput?.value || "").trim(),
+          }),
+        }
+      );
+      const j = await res.json();
+      if (!j.ok) {
+        setUserTokenStatus(j.error || "Failed to add token.");
+        return;
+      }
+      if (valInput) valInput.value = "";
+      if (labelInput) labelInput.value = "";
+      setUserTokenStatus("Token added.");
+      await loadUserTokens();
+    } catch (e) {
+      setUserTokenStatus("Network error.");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function toggleUserToken(id, enabled) {
+    if (!USER_TOKENS_MAPPING_ID) return;
+    try {
+      await fetch(
+        `/api/guild-mappings/${encodeURIComponent(
+          USER_TOKENS_MAPPING_ID
+        )}/user-tokens/${encodeURIComponent(id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled }),
+        }
+      );
+    } catch (e) {
+      /* ignore — UI reflects intent; reload on next open */
+    }
+  }
+
+  async function removeUserToken(id, name) {
+    if (!USER_TOKENS_MAPPING_ID) return;
+    if (!window.confirm(`Remove ${name}?`)) return;
+    try {
+      await fetch(
+        `/api/guild-mappings/${encodeURIComponent(
+          USER_TOKENS_MAPPING_ID
+        )}/user-tokens/${encodeURIComponent(id)}`,
+        { method: "DELETE" }
+      );
+      await loadUserTokens();
+    } catch (e) {
+      setUserTokenStatus("Failed to remove token.");
+    }
+  }
+
+  document
+    .getElementById("user-token-add")
+    ?.addEventListener("click", addUserToken);
+
+  document
+    .querySelector(".token-user-btn[data-target='user_token_value']")
+    ?.addEventListener("click", () => {
+      const input = document.getElementById("user_token_value");
+      if (!input) return;
+      input.type = input.type === "password" ? "text" : "password";
+    });
 
   // ─── Message Features Modal ──────────────────────────────────────────
   const msgFeaturesModal = document.getElementById("msg-features-modal");

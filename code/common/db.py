@@ -1062,6 +1062,54 @@ class DBManager:
             ],
         )
 
+        self._ensure_table(
+            name="mapping_user_tokens",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    token_id        TEXT PRIMARY KEY,
+                    mapping_id      TEXT NOT NULL,
+                    token_value     TEXT NOT NULL,
+                    label           TEXT,
+                    username        TEXT,
+                    user_id         TEXT,
+                    enabled         INTEGER NOT NULL DEFAULT 1,
+                    added_at        INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+                    last_used       INTEGER,
+                    use_count       INTEGER DEFAULT 0,
+                    UNIQUE(mapping_id, token_value),
+                    FOREIGN KEY (mapping_id) REFERENCES guild_mappings(mapping_id) ON DELETE CASCADE
+                );
+            """,
+            required_columns={
+                "token_id",
+                "mapping_id",
+                "token_value",
+                "label",
+                "username",
+                "user_id",
+                "enabled",
+                "added_at",
+                "last_used",
+                "use_count",
+            },
+            copy_map={
+                "token_id": "token_id",
+                "mapping_id": "mapping_id",
+                "token_value": "token_value",
+                "label": "label",
+                "username": "username",
+                "user_id": "user_id",
+                "enabled": "enabled",
+                "added_at": "added_at",
+                "last_used": "last_used",
+                "use_count": "use_count",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_mapping_user_tokens_mapping ON mapping_user_tokens(mapping_id);",
+                "CREATE INDEX IF NOT EXISTS idx_mapping_user_tokens_enabled ON mapping_user_tokens(enabled);",
+            ],
+        )
+
     def _table_exists(self, name: str) -> bool:
         row = self.conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -2877,6 +2925,14 @@ class DBManager:
                 except sqlite3.OperationalError:
 
                     pass
+
+            try:
+                self.conn.execute(
+                    "DELETE FROM mapping_user_tokens WHERE mapping_id = ?",
+                    (mapping_id,),
+                )
+            except sqlite3.OperationalError:
+                pass
 
             self.conn.execute(
                 "DELETE FROM guild_mappings WHERE mapping_id = ?",
@@ -5221,6 +5277,108 @@ class DBManager:
             self.conn.execute(
                 """
                 UPDATE scraper_tokens 
+                SET use_count = use_count + 1,
+                    last_used = ?
+                WHERE token_id = ?
+                """,
+                (int(time.time()), token_id),
+            )
+            self.conn.commit()
+
+    # ── mapping_user_tokens CRUD ─────────────────────────────────────
+
+    def add_mapping_token(
+        self,
+        mapping_id: str,
+        token_value: str,
+        *,
+        label: str | None = None,
+        username: str | None = None,
+        user_id: str | None = None,
+    ) -> str:
+        """Attach a user (self-bot) token to a mapping and return its token_id."""
+        token_id = str(uuid.uuid4())
+        with self.lock:
+            self.conn.execute(
+                """
+                INSERT INTO mapping_user_tokens
+                    (token_id, mapping_id, token_value, label, username, user_id)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (token_id, mapping_id, token_value, label, username, user_id),
+            )
+            self.conn.commit()
+        return token_id
+
+    def list_mapping_tokens(self, mapping_id: str) -> list[dict]:
+        """Return all user tokens attached to a mapping (includes token_value)."""
+        with self.lock:
+            cur = self.conn.execute(
+                """
+                SELECT token_id, mapping_id, token_value, label, username, user_id,
+                       enabled, added_at, last_used, use_count
+                FROM mapping_user_tokens
+                WHERE mapping_id = ?
+                ORDER BY added_at ASC, token_id ASC
+                """,
+                (mapping_id,),
+            )
+            return [dict(row) for row in cur.fetchall()]
+
+    def get_mapping_token(self, token_id: str) -> dict | None:
+        """Get a single mapping user token by ID."""
+        with self.lock:
+            cur = self.conn.execute(
+                """
+                SELECT token_id, mapping_id, token_value, label, username, user_id,
+                       enabled, added_at, last_used, use_count
+                FROM mapping_user_tokens
+                WHERE token_id = ?
+                """,
+                (token_id,),
+            )
+            row = cur.fetchone()
+            return dict(row) if row else None
+
+    def get_enabled_mapping_tokens(self, mapping_id: str) -> list[dict]:
+        """Return {token_id, token_value, username} for each enabled token of a mapping."""
+        with self.lock:
+            cur = self.conn.execute(
+                """
+                SELECT token_id, token_value, username
+                FROM mapping_user_tokens
+                WHERE mapping_id = ? AND enabled = 1
+                ORDER BY added_at ASC, token_id ASC
+                """,
+                (mapping_id,),
+            )
+            return [dict(row) for row in cur.fetchall() if row["token_value"]]
+
+    def set_mapping_token_enabled(self, token_id: str, enabled: bool) -> bool:
+        """Enable or disable a single mapping user token."""
+        with self.lock:
+            cur = self.conn.execute(
+                "UPDATE mapping_user_tokens SET enabled = ? WHERE token_id = ?",
+                (1 if enabled else 0, token_id),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def delete_mapping_token(self, token_id: str) -> bool:
+        """Detach a user token from a mapping."""
+        with self.lock:
+            cur = self.conn.execute(
+                "DELETE FROM mapping_user_tokens WHERE token_id = ?", (token_id,)
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def increment_mapping_token_usage(self, token_id: str) -> None:
+        """Increment usage counter and update last_used timestamp for a token."""
+        with self.lock:
+            self.conn.execute(
+                """
+                UPDATE mapping_user_tokens
                 SET use_count = use_count + 1,
                     last_used = ?
                 WHERE token_id = ?

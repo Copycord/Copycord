@@ -234,6 +234,7 @@ BOOL_KEYS = [
     "CLONE_STICKER",
     "MIRROR_ROLE_PERMISSIONS",
     "MIRROR_CHANNEL_PERMISSIONS",
+    "USE_USER_TOKENS",
     "CLONE_GUILD_ICON",
     "CLONE_GUILD_BANNER",
     "CLONE_GUILD_SPLASH",
@@ -292,6 +293,7 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "APPEND_AUTHOR": False,
     "DB_CLEANUP_MSG": True,
     "ON_DEMAND_WEBHOOKS": True,
+    "USE_USER_TOKENS": False,
     "COPYCORD_AUTOSTART": "false",
     "LOG_MAX_SIZE_MB": "10",
 }
@@ -1012,6 +1014,39 @@ async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
             guild_id,
         )
         return False
+
+
+async def _selfbot_identity(token: str) -> dict | None:
+    """Return {"id", "username"} for a user token, or None if invalid.
+
+    Used to label a mapping's user tokens in the dashboard.
+    """
+    if not token:
+        return None
+
+    url = f"{DISCORD_API_BASE}/users/@me"
+    headers = {"Authorization": token}
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(url, headers=headers, timeout=10) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                uid = str(data.get("id", "") or "")
+                if not uid:
+                    return None
+                username = data.get("username") or ""
+                discriminator = str(data.get("discriminator") or "0")
+                if discriminator and discriminator not in ("0", "0000"):
+                    username = f"{username}#{discriminator}"
+                return {"id": uid, "username": username}
+    except Exception as e:
+        LOGGER.debug(
+            "_selfbot_identity | exception=%s token=%s",
+            repr(e),
+            _redact_token(token),
+        )
+        return None
 
 
 async def _bot_in_guild(server_token: str, guild_id: int) -> bool:
@@ -5731,6 +5766,132 @@ async def api_update_mapping(mapping_id: str, payload: dict = Body(...)):
 @app.delete("/api/guild-mappings/{mapping_id}", response_class=JSONResponse)
 async def api_delete_mapping(mapping_id: str):
     db.delete_guild_mapping(mapping_id)
+    return JSONResponse({"ok": True})
+
+
+def _mask_token(tok: str) -> str:
+    """Mask a user token for display — never return the full value to the UI."""
+    tok = str(tok or "")
+    if not tok:
+        return ""
+    if len(tok) <= 10:
+        return tok[:2] + "…"
+    return f"{tok[:6]}…{tok[-4:]}"
+
+
+def _serialize_mapping_token(row: dict) -> dict:
+    return {
+        "id": row.get("token_id"),
+        "label": row.get("label") or "",
+        "username": row.get("username") or "",
+        "user_id": row.get("user_id") or "",
+        "enabled": bool(row.get("enabled")),
+        "token_masked": _mask_token(row.get("token_value") or ""),
+        "use_count": row.get("use_count") or 0,
+        "last_used": row.get("last_used"),
+    }
+
+
+@app.get(
+    "/api/guild-mappings/{mapping_id}/user-tokens", response_class=JSONResponse
+)
+async def api_list_mapping_tokens(mapping_id: str):
+    m = db.get_mapping_by_id(mapping_id)
+    if not m:
+        return JSONResponse(
+            {"ok": False, "error": "Mapping not found."}, status_code=404
+        )
+    rows = db.list_mapping_tokens(mapping_id)
+    return JSONResponse(
+        {"ok": True, "tokens": [_serialize_mapping_token(r) for r in rows]}
+    )
+
+
+@app.post(
+    "/api/guild-mappings/{mapping_id}/user-tokens", response_class=JSONResponse
+)
+async def api_add_mapping_token(mapping_id: str, payload: dict = Body(...)):
+    m = db.get_mapping_by_id(mapping_id)
+    if not m:
+        return JSONResponse(
+            {"ok": False, "error": "Mapping not found."}, status_code=404
+        )
+
+    token = (payload.get("token") or "").strip()
+    label = (payload.get("label") or "").strip() or None
+    if not token:
+        return JSONResponse(
+            {"ok": False, "error": "Missing token."}, status_code=400
+        )
+
+    try:
+        clone_gid = int(m.get("cloned_guild_id") or 0)
+    except Exception:
+        clone_gid = 0
+
+    # Validate on add: token must be valid AND the account must be a member of
+    # the clone guild, otherwise it could never deliver a message.
+    in_clone = await _selfbot_in_guild(token, clone_gid)
+    if not in_clone:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "That token is invalid or the account is not a member of the clone server. Join the clone server with this account first.",
+            },
+            status_code=400,
+        )
+
+    ident = await _selfbot_identity(token)
+    username = (ident or {}).get("username") or None
+    user_id = (ident or {}).get("id") or None
+
+    try:
+        token_id = db.add_mapping_token(
+            mapping_id, token, label=label, username=username, user_id=user_id
+        )
+    except sqlite3.IntegrityError:
+        return JSONResponse(
+            {"ok": False, "error": "That token is already attached to this mapping."},
+            status_code=400,
+        )
+
+    row = db.get_mapping_token(token_id)
+    return JSONResponse(
+        {"ok": True, "token": _serialize_mapping_token(row)}, status_code=200
+    )
+
+
+@app.patch(
+    "/api/guild-mappings/{mapping_id}/user-tokens/{token_id}",
+    response_class=JSONResponse,
+)
+async def api_update_mapping_token(
+    mapping_id: str, token_id: str, payload: dict = Body(...)
+):
+    row = db.get_mapping_token(token_id)
+    if not row or str(row.get("mapping_id")) != str(mapping_id):
+        return JSONResponse(
+            {"ok": False, "error": "Token not found."}, status_code=404
+        )
+
+    if "enabled" in payload:
+        db.set_mapping_token_enabled(token_id, bool(payload.get("enabled")))
+
+    updated = db.get_mapping_token(token_id)
+    return JSONResponse({"ok": True, "token": _serialize_mapping_token(updated)})
+
+
+@app.delete(
+    "/api/guild-mappings/{mapping_id}/user-tokens/{token_id}",
+    response_class=JSONResponse,
+)
+async def api_delete_mapping_token(mapping_id: str, token_id: str):
+    row = db.get_mapping_token(token_id)
+    if not row or str(row.get("mapping_id")) != str(mapping_id):
+        return JSONResponse(
+            {"ok": False, "error": "Token not found."}, status_code=404
+        )
+    db.delete_mapping_token(token_id)
     return JSONResponse({"ok": True})
 
 

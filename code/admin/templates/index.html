@@ -974,6 +974,51 @@
           </details>
           {% endfor %}
 
+          <details class="mapping-section mapping-settings-section" id="user-tokens-section">
+            <summary class="mapping-section-header">
+              <span class="mapping-section-chev" aria-hidden="true">&#9662;</span>
+              <span>User Message Sending</span>
+            </summary>
+            <div class="mapping-section-body">
+              <div class="mapping-toggle-row mapping-setting-field" data-setting-key="use_user_tokens">
+                <div class="mapping-toggle-info">
+                  <span class="mapping-toggle-name">Send messages as users</span>
+                  <span class="mapping-toggle-desc">Post cloned messages from real user accounts (self-bot tokens) instead of webhooks. A random enabled token is chosen per message, and it falls back to the webhook if every token fails. Accounts must be members of the clone server. Using self-bots is against Discord's ToS and can get accounts banned.</span>
+                </div>
+                <label class="toggle mapping-toggle-switch">
+                  <input type="checkbox" id="map_USE_USER_TOKENS" name="USE_USER_TOKENS" data-map-toggle />
+                  <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                </label>
+              </div>
+
+              <div class="user-tokens-manager" id="user-tokens-manager">
+                <div class="mapping-toggle-desc" id="user-tokens-save-first" hidden>
+                  Save this mapping first, then reopen it to add user tokens.
+                </div>
+                <div id="user-tokens-editor" hidden>
+                  <div class="field field-token" style="margin-top:10px;">
+                    <label for="user_token_value">
+                      <span class="label-text">Add user token</span>
+                    </label>
+                    <div class="token-wrap">
+                      <input type="password" id="user_token_value" autocomplete="off" spellcheck="false"
+                        class="token-input" placeholder="Paste a user (self-bot) token" />
+                      <button type="button" class="reveal-btn token-user-btn" data-target="user_token_value"
+                        aria-pressed="false" aria-label="Show token">👁</button>
+                    </div>
+                    <input type="text" id="user_token_label" maxlength="80" class="token-note-input"
+                      placeholder="Label (optional)" style="margin-top:6px;" />
+                    <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
+                      <button type="button" id="user-token-add" class="btn btn-ghost">Add token</button>
+                      <span class="mapping-toggle-desc" id="user-token-status" aria-live="polite"></span>
+                    </div>
+                  </div>
+                  <div id="userTokensList" class="user-tokens-scroll" style="margin-top:10px;"></div>
+                </div>
+              </div>
+            </div>
+          </details>
+
           <div class="mapping-form-footer">
             <button class="btn btn-ghost" type="button" id="mapping-cancel-btn" hidden>
               Cancel

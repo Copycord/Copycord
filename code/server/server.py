@@ -42,6 +42,7 @@ from common.common_helpers import resolve_mapping_settings
 from common.websockets import WebsocketManager, AdminBus
 from common.db import DBManager
 from server.rate_limiter import RateLimitManager, ActionType
+from server.token_sender import UserTokenSender
 from server.emojis import EmojiManager
 from server.stickers import StickerManager
 from server.roles import RoleManager
@@ -228,6 +229,13 @@ class ServerReceiver:
             role="server", logger=logger, admin_ws_url=self.config.ADMIN_WS_URL
         )
         self.ratelimit = RateLimitManager()
+        self.user_token_sender = UserTokenSender(
+            db=self.db,
+            ratelimit=self.ratelimit,
+            action_type=ActionType.USER_MESSAGE,
+            session_provider=self._ensure_aiohttp_session,
+            logger=logger,
+        )
         self.backfill = BackfillManager(self, ratelimit=self.ratelimit)
         self.backfills = BackfillTracker(
             bus=self.bus,
@@ -7262,6 +7270,79 @@ class ServerReceiver:
             )
             return []
 
+    def _ensure_aiohttp_session(self) -> aiohttp.ClientSession:
+        """Return a live shared aiohttp session, recreating it if closed.
+
+        Used by the webhook send path and the user-token sender so both share
+        one connection pool.
+        """
+        if self.session is None or self.session.closed:
+            self.session = aiohttp.ClientSession()
+        return self.session
+
+    def _mapping_id_for(
+        self, original_guild_id, cloned_guild_id
+    ) -> str | None:
+        """Resolve the guild-mapping UUID for an (original, clone) guild pair."""
+        try:
+            row = self.db.get_mapping_by_original_and_clone(
+                int(original_guild_id or 0), int(cloned_guild_id or 0)
+            )
+        except Exception:
+            row = None
+        if not row:
+            return None
+        try:
+            return row["mapping_id"]
+        except Exception:
+            return None
+
+    async def _try_user_token_send(
+        self,
+        *,
+        original_guild_id,
+        cloned_guild_id,
+        target_channel_id: int,
+        payload: dict,
+        msg: dict,
+    ) -> bool:
+        """Post a message as a user token if the mapping has it enabled.
+
+        Returns True when a token delivered the message; False when user-token
+        sending is off, no tokens exist, or every token failed (caller should
+        then fall back to the webhook path).
+        """
+        try:
+            settings = resolve_mapping_settings(
+                self.db,
+                self.config,
+                original_guild_id=int(original_guild_id) if original_guild_id else None,
+                cloned_guild_id=int(cloned_guild_id) if cloned_guild_id else None,
+            )
+        except Exception:
+            settings = {}
+
+        if not settings.get("USE_USER_TOKENS", False):
+            return False
+
+        mapping_id = self._mapping_id_for(original_guild_id, cloned_guild_id)
+        if not mapping_id:
+            return False
+
+        try:
+            return await self.user_token_sender.send(
+                mapping_id=mapping_id,
+                target_channel_id=int(target_channel_id),
+                content=(payload or {}).get("content"),
+                embeds=(payload or {}).get("embeds"),
+                attachments=msg.get("attachments"),
+            )
+        except Exception:
+            logger.exception(
+                "[user-send] send failed for channel %s", target_channel_id
+            )
+            return False
+
     def _build_webhook_payload(
         self,
         msg: Dict,
@@ -8791,6 +8872,28 @@ class ServerReceiver:
                                 )
                         continue
 
+                    # User-token sending: when enabled for this mapping, post the
+                    # message as a random real user account via the Discord REST
+                    # API instead of the webhook. Falls through to the webhook
+                    # below if there are no usable tokens or every token fails.
+                    if not is_backfill and clone_cid:
+                        if await self._try_user_token_send(
+                            original_guild_id=orig_gid,
+                            cloned_guild_id=clone_gid,
+                            target_channel_id=int(clone_cid),
+                            payload=payload_for_mapping,
+                            msg=msg,
+                        ):
+                            logger.info(
+                                "[💬]%s Forwarded (user token) to #%s (clone ch=%s) from %s (%s)",
+                                tag,
+                                msg.get("channel_name"),
+                                clone_cid,
+                                msg.get("author"),
+                                msg.get("author_id"),
+                            )
+                            continue
+
                     primary_customized = await _primary_name_changed_for_mapping(
                         mapping
                     )
@@ -9604,6 +9707,36 @@ class ServerReceiver:
                             thread_id = thread_obj
                     except Exception:
                         thread_id = None
+
+                    # User-token sending: post into the existing thread as a real
+                    # user account when enabled for this mapping. Falls through to
+                    # the webhook below if no token can deliver.
+                    if (
+                        not is_backfill
+                        and thread_id
+                        and _settings.get("USE_USER_TOKENS", False)
+                    ):
+                        if await self._try_user_token_send(
+                            original_guild_id=data.get("guild_id"),
+                            cloned_guild_id=clone_gid,
+                            target_channel_id=int(thread_id),
+                            payload={
+                                "content": (
+                                    p.get("content") if include_text else None
+                                ),
+                                "embeds": p.get("embeds"),
+                            },
+                            msg=data,
+                        ):
+                            logger.info(
+                                "[💬]%s Forwarded (user token) to thread_id=%s (parent #%s) from %s",
+                                tag,
+                                thread_id,
+                                data.get("thread_parent_name")
+                                or data.get("channel_name"),
+                                data.get("author"),
+                            )
+                            return None
 
                     kw = {
                         "content": (p.get("content") if include_text else None),

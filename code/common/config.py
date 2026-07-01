@@ -130,6 +130,7 @@ class Config:
             "APPEND_AUTHOR": False,
             "DB_CLEANUP_MSG": True,
             "ON_DEMAND_WEBHOOKS": True,
+            "USE_USER_TOKENS": False,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):
