@@ -182,7 +182,7 @@ async def test_links_only_skips_upload(monkeypatch):
 
     captured = {}
 
-    async def fake_send(self, token, channel_id, text, attachments, *, typing=False):
+    async def fake_send(self, token, channel_id, text, attachments, *, typing=False, sticker_ids=None):
         captured["attachments"] = attachments
         return True
 
@@ -230,7 +230,7 @@ async def test_forced_token_id_is_tried_first(monkeypatch):
 
     used = {}
 
-    async def fake_send(self, token, channel_id, text, attachments, *, typing=False):
+    async def fake_send(self, token, channel_id, text, attachments, *, typing=False, sticker_ids=None):
         used["token"] = token
         return True
 
@@ -275,7 +275,7 @@ async def test_uploaded_attachment_url_stripped_from_text(monkeypatch):
 
     captured = {}
 
-    def fake_multipart(self, content, files):
+    def fake_multipart(self, content, files, sticker_ids=None):
         captured["content"] = content
         return "FORM"
 
@@ -303,6 +303,54 @@ async def test_uploaded_attachment_url_stripped_from_text(monkeypatch):
     # The link is gone; only the message text remains (the file carries it).
     assert url not in captured["content"]
     assert captured["content"].strip() == "lol"
+
+
+@pytest.mark.asyncio
+async def test_sticker_only_message_sends_sticker_ids():
+    class _DB:
+        def get_enabled_mapping_tokens(self, mapping_id):
+            return [{"token_id": "a", "token_value": "ta"}]
+
+        def increment_mapping_token_usage(self, tid):
+            return None
+
+    captured = {}
+
+    class _Resp:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class _Session:
+        def post(self, url, json=None, data=None, headers=None, timeout=None):
+            captured["json"] = json
+            return _Resp()
+
+    s = UserTokenSender(
+        db=_DB(),
+        ratelimit=_FakeRateLimit(),
+        action_type="user_message",
+        session_provider=lambda: _Session(),
+        logger=types.SimpleNamespace(
+            debug=lambda *a, **k: None,
+            warning=lambda *a, **k: None,
+            exception=lambda *a, **k: None,
+        ),
+    )
+
+    # A sticker-only message (no text/attachments) still sends via token.
+    ok = await s.send(
+        mapping_id="m",
+        target_channel_id=1,
+        content=None,
+        sticker_ids=[123456789],
+    )
+    assert ok is True
+    assert captured["json"]["sticker_ids"] == ["123456789"]
 
 
 @pytest.mark.asyncio
@@ -360,7 +408,7 @@ async def test_no_consecutive_repeat_same_channel(monkeypatch):
     used = []
 
     async def fake_send_with_token(
-        self, token, channel_id, text, attachments, *, typing=False
+        self, token, channel_id, text, attachments, *, typing=False, sticker_ids=None
     ):
         # Record which token actually sent (order[0] always succeeds here).
         used.append(token)
@@ -421,3 +469,319 @@ async def test_send_returns_false_without_tokens():
         attachments=None,
     )
     assert ok is False
+
+
+class _JsonResp:
+    """Minimal aiohttp-style response returning a fixed status + JSON body."""
+
+    def __init__(self, status, body=None):
+        self.status = status
+        self._body = body or {}
+        self.headers = {}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def json(self):
+        return self._body
+
+    async def text(self):
+        return json.dumps(self._body)
+
+
+def _forum_sender(db, session):
+    return UserTokenSender(
+        db=db,
+        ratelimit=_FakeRateLimit(),
+        action_type="user_message",
+        session_provider=lambda: session,
+        logger=types.SimpleNamespace(
+            debug=lambda *a, **k: None,
+            warning=lambda *a, **k: None,
+            exception=lambda *a, **k: None,
+        ),
+    )
+
+
+class TestCreateForumThread:
+
+    @pytest.mark.asyncio
+    async def test_creates_thread_and_returns_id(self):
+        class _DB:
+            def get_enabled_mapping_tokens(self, mapping_id):
+                return [{"token_id": "a", "token_value": "ta"}]
+
+            def increment_mapping_token_usage(self, tid):
+                return None
+
+        captured = {}
+
+        class _Session:
+            def post(self, url, json=None, data=None, headers=None, timeout=None):
+                captured["url"] = url
+                captured["json"] = json
+                return _JsonResp(201, {"id": "998877"})
+
+        s = _forum_sender(_DB(), _Session())
+        new_id = await s.create_forum_thread(
+            mapping_id="m",
+            forum_channel_id=42,
+            thread_name="My Thread",
+            content="first post",
+            applied_tag_ids=[111, 222],
+        )
+        assert new_id == 998877
+        assert captured["url"].endswith("/channels/42/threads")
+        assert captured["json"]["name"] == "My Thread"
+        assert captured["json"]["message"]["content"] == "first post"
+        assert captured["json"]["applied_tags"] == ["111", "222"]
+
+    @pytest.mark.asyncio
+    async def test_forced_token_is_tried_first(self):
+        class _DB:
+            def get_enabled_mapping_tokens(self, mapping_id):
+                return [
+                    {"token_id": "a", "token_value": "ta"},
+                    {"token_id": "b", "token_value": "tb"},
+                    {"token_id": "c", "token_value": "tc"},
+                ]
+
+            def increment_mapping_token_usage(self, tid):
+                return None
+
+        used = {}
+
+        class _Session:
+            def post(self, url, json=None, data=None, headers=None, timeout=None):
+                # The Authorization header reveals which account is posting.
+                used["auth"] = headers.get("Authorization")
+                return _JsonResp(201, {"id": "5"})
+
+        s = _forum_sender(_DB(), _Session())
+        new_id = await s.create_forum_thread(
+            mapping_id="m",
+            forum_channel_id=1,
+            thread_name="t",
+            content="hi",
+            strategy="round_robin",
+            forced_token_id="c",
+        )
+        assert new_id == 5
+        assert used["auth"] == "tc"
+
+    @pytest.mark.asyncio
+    async def test_empty_starter_returns_none(self):
+        class _DB:
+            def get_enabled_mapping_tokens(self, mapping_id):
+                return [{"token_id": "a", "token_value": "ta"}]
+
+        posted = {"called": False}
+
+        class _Session:
+            def post(self, *a, **k):
+                posted["called"] = True
+                return _JsonResp(201, {"id": "1"})
+
+        s = _forum_sender(_DB(), _Session())
+        # No text, no attachments, no stickers → webhook must create the thread.
+        new_id = await s.create_forum_thread(
+            mapping_id="m",
+            forum_channel_id=1,
+            thread_name="t",
+            content=None,
+        )
+        assert new_id is None
+        assert posted["called"] is False
+
+    @pytest.mark.asyncio
+    async def test_all_tokens_rejected_returns_none(self):
+        class _DB:
+            def get_enabled_mapping_tokens(self, mapping_id):
+                return [
+                    {"token_id": "a", "token_value": "ta"},
+                    {"token_id": "b", "token_value": "tb"},
+                ]
+
+            def increment_mapping_token_usage(self, tid):
+                return None
+
+        attempts = {"n": 0}
+
+        class _Session:
+            def post(self, url, json=None, data=None, headers=None, timeout=None):
+                attempts["n"] += 1
+                return _JsonResp(403, {"message": "Missing Access"})
+
+        s = _forum_sender(_DB(), _Session())
+        new_id = await s.create_forum_thread(
+            mapping_id="m",
+            forum_channel_id=1,
+            thread_name="t",
+            content="hi",
+        )
+        assert new_id is None
+        # Every token was tried before giving up.
+        assert attempts["n"] == 2
+
+    @pytest.mark.asyncio
+    async def test_sticker_only_forum_thread_includes_sticker_ids(self):
+        class _DB:
+            def get_enabled_mapping_tokens(self, mapping_id):
+                return [{"token_id": "a", "token_value": "ta"}]
+
+            def increment_mapping_token_usage(self, tid):
+                return None
+
+        captured = {}
+
+        class _Session:
+            def post(self, url, json=None, data=None, headers=None, timeout=None):
+                captured["json"] = json
+                return _JsonResp(201, {"id": "77"})
+
+        s = _forum_sender(_DB(), _Session())
+        new_id = await s.create_forum_thread(
+            mapping_id="m",
+            forum_channel_id=1,
+            thread_name="t",
+            content=None,
+            sticker_ids=[13579],
+        )
+        assert new_id == 77
+        assert captured["json"]["message"]["sticker_ids"] == ["13579"]
+
+
+class TestCreateTextThread:
+
+    @pytest.mark.asyncio
+    async def test_linked_thread_posts_to_message_threads_endpoint(self):
+        class _DB:
+            def get_enabled_mapping_tokens(self, mapping_id):
+                return [{"token_id": "a", "token_value": "ta"}]
+
+            def increment_mapping_token_usage(self, tid):
+                return None
+
+        captured = {}
+
+        class _Session:
+            def post(self, url, json=None, data=None, headers=None, timeout=None):
+                captured["url"] = url
+                captured["json"] = json
+                return _JsonResp(201, {"id": "444"})
+
+        s = _forum_sender(_DB(), _Session())
+        new_id = await s.create_text_thread(
+            mapping_id="m",
+            parent_channel_id=42,
+            thread_name="chat",
+            starter_message_id=999,
+        )
+        assert new_id == 444
+        # Created FROM the message → id equals the message id in Discord.
+        assert captured["url"].endswith("/channels/42/messages/999/threads")
+        assert captured["json"]["name"] == "chat"
+        # A message-linked thread must not force a standalone thread type.
+        assert "type" not in captured["json"]
+
+    @pytest.mark.asyncio
+    async def test_standalone_thread_uses_channel_threads_endpoint(self):
+        class _DB:
+            def get_enabled_mapping_tokens(self, mapping_id):
+                return [{"token_id": "a", "token_value": "ta"}]
+
+            def increment_mapping_token_usage(self, tid):
+                return None
+
+        captured = {}
+
+        class _Session:
+            def post(self, url, json=None, data=None, headers=None, timeout=None):
+                captured["url"] = url
+                captured["json"] = json
+                return _JsonResp(201, {"id": "555"})
+
+        s = _forum_sender(_DB(), _Session())
+        new_id = await s.create_text_thread(
+            mapping_id="m",
+            parent_channel_id=42,
+            thread_name="chat",
+        )
+        assert new_id == 555
+        assert captured["url"].endswith("/channels/42/threads")
+        assert captured["json"]["type"] == 11
+
+    @pytest.mark.asyncio
+    async def test_forced_token_is_tried_first(self):
+        class _DB:
+            def get_enabled_mapping_tokens(self, mapping_id):
+                return [
+                    {"token_id": "a", "token_value": "ta"},
+                    {"token_id": "b", "token_value": "tb"},
+                ]
+
+            def increment_mapping_token_usage(self, tid):
+                return None
+
+        used = {}
+
+        class _Session:
+            def post(self, url, json=None, data=None, headers=None, timeout=None):
+                used["auth"] = headers.get("Authorization")
+                return _JsonResp(201, {"id": "9"})
+
+        s = _forum_sender(_DB(), _Session())
+        new_id = await s.create_text_thread(
+            mapping_id="m",
+            parent_channel_id=1,
+            thread_name="t",
+            strategy="round_robin",
+            forced_token_id="b",
+        )
+        assert new_id == 9
+        assert used["auth"] == "tb"
+
+    @pytest.mark.asyncio
+    async def test_all_tokens_rejected_returns_none(self):
+        class _DB:
+            def get_enabled_mapping_tokens(self, mapping_id):
+                return [
+                    {"token_id": "a", "token_value": "ta"},
+                    {"token_id": "b", "token_value": "tb"},
+                ]
+
+            def increment_mapping_token_usage(self, tid):
+                return None
+
+        attempts = {"n": 0}
+
+        class _Session:
+            def post(self, url, json=None, data=None, headers=None, timeout=None):
+                attempts["n"] += 1
+                return _JsonResp(403, {"message": "Missing Access"})
+
+        s = _forum_sender(_DB(), _Session())
+        new_id = await s.create_text_thread(
+            mapping_id="m",
+            parent_channel_id=1,
+            thread_name="t",
+        )
+        assert new_id is None
+        assert attempts["n"] == 2
+
+    @pytest.mark.asyncio
+    async def test_no_tokens_returns_none(self):
+        class _DB:
+            def get_enabled_mapping_tokens(self, mapping_id):
+                return []
+
+        s = _forum_sender(_DB(), object())
+        new_id = await s.create_text_thread(
+            mapping_id="m",
+            parent_channel_id=1,
+            thread_name="t",
+        )
+        assert new_id is None

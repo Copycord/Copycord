@@ -1263,7 +1263,9 @@ class ClientListener:
             ChannelType.private_thread,
         )
 
-        stickers_payload = self.msg.stickers_payload(getattr(src_msg, "stickers", []))
+        stickers_payload = self.msg.stickers_payload(
+            getattr(src_msg, "stickers", []), getattr(src_msg, "guild", None)
+        )
 
         role_mentions = self.msg._build_role_mentions_payload(src_msg)
 
@@ -1462,7 +1464,9 @@ class ClientListener:
             ChannelType.public_thread,
             ChannelType.private_thread,
         )
-        stickers_payload = self.msg.stickers_payload(getattr(after, "stickers", []))
+        stickers_payload = self.msg.stickers_payload(
+            getattr(after, "stickers", []), getattr(after, "guild", None)
+        )
 
         payload = {
             "type": "thread_message_edit" if is_thread else "message_edit",

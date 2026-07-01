@@ -1616,7 +1616,7 @@ class BackfillEngine:
                 merged_content, real_msg, mention_map
             )
             stickers_payload = self.msg.stickers_payload(
-                getattr(real_msg, "stickers", [])
+                getattr(real_msg, "stickers", []), getattr(real_msg, "guild", None)
             )
 
             is_thread = getattr(wrapper_channel, "type", None) in (

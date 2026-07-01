@@ -7513,6 +7513,284 @@ class ServerReceiver:
             )
         return True
 
+    async def _try_user_token_forum_thread(
+        self,
+        *,
+        original_guild_id,
+        cloned_guild_id,
+        forum_channel_id: int,
+        thread_name: str,
+        payload: dict,
+        applied_tag_ids: list | None,
+        msg: dict,
+    ) -> int | None:
+        """Create a forum thread's starter post as a user token when enabled.
+
+        A forum thread and its first (starter) message are created atomically,
+        so the normal into-thread token path can't reach the starter — this
+        creates the whole thread as the assigned account. Returns the new clone
+        thread id on success, or None so the caller creates the thread via the
+        webhook (feature off, bot/embed-authored, no tokens, or every token
+        failed). Never raises — the thread must still get created.
+        """
+        try:
+            settings = resolve_mapping_settings(
+                self.db,
+                self.config,
+                original_guild_id=int(original_guild_id) if original_guild_id else None,
+                cloned_guild_id=int(cloned_guild_id) if cloned_guild_id else None,
+            )
+        except Exception:
+            settings = {}
+
+        if not settings.get("USE_USER_TOKENS", False):
+            return None
+
+        # Bot/webhook-authored or rich-embed starters can't be reproduced by a
+        # real account — let the webhook create the thread so the author
+        # identity and embed are preserved.
+        if host_message_needs_webhook(msg):
+            return None
+
+        mapping_id = self._mapping_id_for(original_guild_id, cloned_guild_id)
+        if not mapping_id:
+            return None
+
+        forced_token_id = await self._prepare_token_identity(
+            mapping_id=mapping_id,
+            cloned_guild_id=cloned_guild_id,
+            settings=settings,
+            msg=msg,
+        )
+
+        try:
+            new_id = await self.user_token_sender.create_forum_thread(
+                mapping_id=mapping_id,
+                forum_channel_id=int(forum_channel_id),
+                thread_name=thread_name,
+                content=(payload or {}).get("content"),
+                embeds=(payload or {}).get("embeds"),
+                attachments=msg.get("attachments"),
+                applied_tag_ids=[t for t in (applied_tag_ids or []) if t],
+                author_id=msg.get("author_id"),
+                strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
+                min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
+                max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
+                links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
+                forced_token_id=forced_token_id,
+            )
+        except Exception:
+            logger.exception(
+                "[user-send] forum thread create failed for channel %s",
+                forum_channel_id,
+            )
+            return None
+
+        return int(new_id) if new_id else None
+
+    async def _try_user_token_text_thread(
+        self,
+        *,
+        original_guild_id,
+        cloned_guild_id,
+        parent_channel_id: int,
+        thread_name: str,
+        starter_message_id: int | None,
+        msg: dict,
+    ) -> int | None:
+        """Create a text-channel thread as a user token when enabled.
+
+        The bot normally creates text threads; when token forwarding is on we
+        create the thread as the assigned account so the "started a thread"
+        system message and thread ownership reflect the real author instead of
+        the bot. The thread's first message is still forwarded separately.
+
+        Returns the new clone thread id on success, or None so the caller
+        creates the thread via the bot (feature off, bot/embed-authored, no
+        tokens, or every token failed). Never raises.
+        """
+        try:
+            settings = resolve_mapping_settings(
+                self.db,
+                self.config,
+                original_guild_id=int(original_guild_id) if original_guild_id else None,
+                cloned_guild_id=int(cloned_guild_id) if cloned_guild_id else None,
+            )
+        except Exception:
+            settings = {}
+
+        if not settings.get("USE_USER_TOKENS", False):
+            return None
+
+        # Bot/webhook-authored or rich-embed starters can't be reproduced by a
+        # real account — let the bot create the thread.
+        if host_message_needs_webhook(msg):
+            return None
+
+        mapping_id = self._mapping_id_for(original_guild_id, cloned_guild_id)
+        if not mapping_id:
+            return None
+
+        forced_token_id = await self._prepare_token_identity(
+            mapping_id=mapping_id,
+            cloned_guild_id=cloned_guild_id,
+            settings=settings,
+            msg=msg,
+        )
+
+        try:
+            new_id = await self.user_token_sender.create_text_thread(
+                mapping_id=mapping_id,
+                parent_channel_id=int(parent_channel_id),
+                thread_name=thread_name,
+                starter_message_id=int(starter_message_id)
+                if starter_message_id
+                else None,
+                author_id=msg.get("author_id"),
+                strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
+                min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
+                max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
+                forced_token_id=forced_token_id,
+            )
+        except Exception:
+            logger.exception(
+                "[user-send] text thread create failed for channel %s",
+                parent_channel_id,
+            )
+            return None
+
+        return int(new_id) if new_id else None
+
+    async def _try_user_token_stickers(self, *, ch, stickers, mapping, msg) -> bool:
+        """Send a sticker message via a user token when enabled for the mapping.
+
+        Custom guild stickers are sent by their *cloned* id (the token account is
+        a clone-guild member); standard Discord-library stickers are sent by their
+        original global id, which only works if the account has Nitro. Anything
+        the account can't use fails the send and falls back to the bot.
+
+        Returns True when a token delivered the message (caller should stop), or
+        False to let the bot/webhook handle it (feature off, bot-authored, or
+        every token failed with fallback on).
+        """
+        if not stickers or host_message_needs_webhook(msg):
+            return False
+
+        try:
+            clone_gid = int(getattr(getattr(ch, "guild", None), "id", 0) or 0)
+            target_channel_id = int(getattr(ch, "id", 0) or 0)
+        except Exception:
+            return False
+        if not clone_gid or not target_channel_id:
+            return False
+
+        orig_gid = mapping.get("original_guild_id")
+        try:
+            settings = resolve_mapping_settings(
+                self.db,
+                self.config,
+                original_guild_id=int(orig_gid) if orig_gid else None,
+                cloned_guild_id=clone_gid,
+            )
+        except Exception:
+            settings = {}
+        if not settings.get("USE_USER_TOKENS", False):
+            return False
+
+        # Map each source sticker to a sendable id: the *cloned* sticker id when
+        # we cloned it (custom guild stickers), otherwise the *original* id —
+        # which works for standard Discord-library stickers when the account has
+        # Nitro. Ids the account can't use just make the send fail and we fall
+        # back to the bot.
+        try:
+            rows = self.db.get_all_sticker_mappings()
+        except Exception:
+            rows = []
+        clone_map: dict[int, int] = {}
+        for r in rows:
+            try:
+                r = dict(r)
+                if int(r.get("cloned_guild_id") or 0) == clone_gid:
+                    clone_map[int(r["original_sticker_id"])] = int(
+                        r["cloned_sticker_id"]
+                    )
+            except Exception:
+                continue
+
+        sticker_ids: list[int] = []
+        for s in (stickers or [])[:3]:
+            try:
+                oid = int(s.get("id") or 0)
+            except Exception:
+                continue
+            if not oid:
+                continue
+            clone_id = clone_map.get(oid)
+            if clone_id:
+                # Custom guild sticker we cloned → the member can send it.
+                sid = clone_id
+            elif s.get("is_guild_sticker"):
+                # Custom sticker we did NOT clone (e.g. clone guild sticker limit
+                # hit). The token account isn't in the source guild, so it can
+                # never send this — skip it and let the bot handle the fallback.
+                continue
+            else:
+                # Standard Discord-library sticker → global id (needs Nitro).
+                sid = oid
+            if sid not in sticker_ids:
+                sticker_ids.append(sid)
+        if not sticker_ids:
+            return False
+
+        mapping_id = self._mapping_id_for(orig_gid, clone_gid)
+        if not mapping_id:
+            return False
+
+        forced_token_id = await self._prepare_token_identity(
+            mapping_id=mapping_id,
+            cloned_guild_id=clone_gid,
+            settings=settings,
+            msg=msg,
+        )
+
+        try:
+            delivered = await self.user_token_sender.send(
+                mapping_id=mapping_id,
+                target_channel_id=target_channel_id,
+                content=(msg.get("content") or "").strip() or None,
+                sticker_ids=sticker_ids,
+                author_id=msg.get("author_id"),
+                strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
+                typing=bool(settings.get("USER_TOKEN_TYPING", False)),
+                min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
+                max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
+                links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
+                forced_token_id=forced_token_id,
+            )
+        except Exception:
+            logger.exception(
+                "[user-send] sticker send failed for channel %s", target_channel_id
+            )
+            delivered = False
+
+        if delivered:
+            logger.info(
+                "[💬] Forwarded (user token, sticker) to clone ch=%s from %s",
+                target_channel_id,
+                msg.get("author"),
+            )
+            return True
+
+        if settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True):
+            return False
+
+        logger.info(
+            "[user-send] All tokens failed for sticker in clone ch=%s and webhook fallback is off; dropping from %s",
+            target_channel_id,
+            msg.get("author"),
+        )
+        return True
+
     def _build_webhook_payload(
         self,
         msg: Dict,
@@ -8286,6 +8564,18 @@ class ServerReceiver:
 
             current_url = url_to_use
             while True:
+                # Never send a truly empty webhook payload — Discord rejects it
+                # with 400 "Cannot send an empty message" (e.g. a sticker that
+                # couldn't be cloned and left nothing else to send).
+                if not (payload.get("content") or "").strip() and not (
+                    payload.get("embeds") or []
+                ):
+                    logger.debug(
+                        "[send] Skipping empty webhook payload for #%s",
+                        msg.get("channel_name"),
+                    )
+                    return
+
                 await self.ratelimit.acquire(ActionType.WEBHOOK_MESSAGE, key=rl_key)
                 released = False
                 try:
@@ -10380,33 +10670,101 @@ class ServerReceiver:
                                         break
 
                                 mode = "unknown"
+                                new_thread = None
 
-                                async def _actually_create_thread() -> discord.Thread:
-                                    nonlocal mode
+                                # When token forwarding is enabled, create the
+                                # thread as the assigned user account so the
+                                # "started a thread" system message and thread
+                                # ownership reflect the real author. Falls back
+                                # to the bot below on any failure.
+                                token_thread_id = (
+                                    await self._try_user_token_text_thread(
+                                        original_guild_id=host_guild_id,
+                                        cloned_guild_id=guild.id,
+                                        parent_channel_id=int(cloned_id),
+                                        thread_name=data["thread_name"],
+                                        starter_message_id=(
+                                            int(getattr(starter_msg, "id", 0))
+                                            if starter_msg is not None
+                                            else None
+                                        ),
+                                        msg=data,
+                                    )
+                                )
+                                if token_thread_id:
+                                    new_thread = guild.get_channel(
+                                        int(token_thread_id)
+                                    )
+                                    if not isinstance(new_thread, discord.Thread):
+                                        for _ in range(8):
+                                            try:
+                                                new_thread = (
+                                                    await self.bot.fetch_channel(
+                                                        int(token_thread_id)
+                                                    )
+                                                )
+                                            except Exception:
+                                                new_thread = None
+                                            if isinstance(
+                                                new_thread, discord.Thread
+                                            ):
+                                                break
+                                            new_thread = None
+                                            await asyncio.sleep(0.2)
+                                    if not isinstance(new_thread, discord.Thread):
+                                        # Thread exists but we couldn't resolve
+                                        # it — do NOT let the bot create a
+                                        # duplicate. Retry on a later message.
+                                        logger.warning(
+                                            "[🧵]%s Created text thread '%s' via user token but couldn't resolve the Thread object yet; will retry later.",
+                                            tag,
+                                            data["thread_name"],
+                                        )
+                                        if is_backfill and hasattr(
+                                            self, "backfill"
+                                        ):
+                                            self.backfill.note_checkpoint(
+                                                parent_id,
+                                                int(data["message_id"]),
+                                                data.get("timestamp"),
+                                            )
+                                        return None
+                                    mode = (
+                                        "token-linked-starter-msg"
+                                        if starter_msg is not None
+                                        else "token-channel"
+                                    )
 
-                                    if starter_msg is not None:
-                                        mode = "linked-starter-msg"
-                                        return await starter_msg.create_thread(
+                                if new_thread is None:
+
+                                    async def _actually_create_thread() -> discord.Thread:
+                                        nonlocal mode
+
+                                        if starter_msg is not None:
+                                            mode = "linked-starter-msg"
+                                            return await starter_msg.create_thread(
+                                                name=data["thread_name"],
+                                                auto_archive_duration=60,
+                                            )
+
+                                        mode = "channel-fallback"
+                                        return await cloned_parent.create_thread(
                                             name=data["thread_name"],
+                                            type=ChannelType.public_thread,
                                             auto_archive_duration=60,
                                         )
 
-                                    mode = "channel-fallback"
-                                    return await cloned_parent.create_thread(
-                                        name=data["thread_name"],
-                                        type=ChannelType.public_thread,
-                                        auto_archive_duration=60,
-                                    )
-
-                                if sem:
-                                    async with sem:
+                                    if sem:
+                                        async with sem:
+                                            if is_backfill:
+                                                await self._bf_gate(int(cloned_id))
+                                            new_thread = (
+                                                await _actually_create_thread()
+                                            )
+                                    else:
                                         if is_backfill:
                                             await self._bf_gate(int(cloned_id))
                                         new_thread = await _actually_create_thread()
-                                else:
-                                    if is_backfill:
-                                        await self._bf_gate(int(cloned_id))
-                                    new_thread = await _actually_create_thread()
 
                                 if is_backfill and hasattr(self, "backfill"):
                                     self.backfill.add_expected_total(parent_id, 1)
@@ -10645,52 +11003,114 @@ class ServerReceiver:
                                                 "[🏷️] Could not auto-sync forum tags: %s", e
                                             )
 
-                                wh_kwargs = dict(
-                                    content=(tmp.get("content") or None),
-                                    embeds=tmp.get("embeds"),
-                                    username=final_uname,
-                                    avatar_url=final_av,
-                                    thread_name=data["thread_name"],
-                                    wait=True,
+                                # Forum starter posts are created atomically
+                                # with the thread, so the normal into-thread
+                                # token path can't reach them. When token
+                                # forwarding is enabled, create the whole thread
+                                # as the assigned account; fall back to the
+                                # webhook below on any failure.
+                                t = None
+                                via_token = False
+                                token_thread_id = (
+                                    await self._try_user_token_forum_thread(
+                                        original_guild_id=host_guild_id,
+                                        cloned_guild_id=guild.id,
+                                        forum_channel_id=int(cloned_id),
+                                        thread_name=data["thread_name"],
+                                        payload=tmp,
+                                        applied_tag_ids=[
+                                            getattr(ct, "id", None)
+                                            for ct in clone_applied_tags
+                                        ],
+                                        msg=data,
+                                    )
                                 )
+                                if token_thread_id:
+                                    via_token = True
+                                    t = guild.get_channel(int(token_thread_id))
+                                    if not isinstance(t, discord.Thread):
+                                        for _ in range(8):
+                                            try:
+                                                t = await self.bot.fetch_channel(
+                                                    int(token_thread_id)
+                                                )
+                                            except Exception:
+                                                t = None
+                                            if isinstance(t, discord.Thread):
+                                                break
+                                            t = None
+                                            await asyncio.sleep(0.2)
+                                    if not isinstance(t, discord.Thread):
+                                        # The thread exists but we couldn't
+                                        # resolve it — do NOT create a webhook
+                                        # thread (that would duplicate). Retry on
+                                        # a later message, like the webhook
+                                        # resolve-fail path below.
+                                        logger.warning(
+                                            "[🧵]%s Created forum thread '%s' via user token but couldn't resolve the Thread object yet; will retry later.",
+                                            tag,
+                                            data["thread_name"],
+                                        )
+                                        if is_backfill and hasattr(
+                                            self, "backfill"
+                                        ):
+                                            self.backfill.note_checkpoint(
+                                                parent_id,
+                                                int(data["message_id"]),
+                                                data.get("timestamp"),
+                                            )
+                                        return None
 
-                                if sem:
-                                    async with sem:
+                                if t is None:
+                                    wh_kwargs = dict(
+                                        content=(tmp.get("content") or None),
+                                        embeds=tmp.get("embeds"),
+                                        username=final_uname,
+                                        avatar_url=final_av,
+                                        thread_name=data["thread_name"],
+                                        wait=True,
+                                    )
+
+                                    if sem:
+                                        async with sem:
+                                            if is_backfill:
+                                                await self._bf_gate(int(cloned_id))
+                                            sent_msg = await thread_webhook.send(
+                                                **wh_kwargs
+                                            )
+                                    else:
                                         if is_backfill:
                                             await self._bf_gate(int(cloned_id))
                                         sent_msg = await thread_webhook.send(
                                             **wh_kwargs
                                         )
-                                else:
-                                    if is_backfill:
-                                        await self._bf_gate(int(cloned_id))
-                                    sent_msg = await thread_webhook.send(
-                                        **wh_kwargs
-                                    )
 
-                                t = await _try_resolve_thread_from_message(
-                                    sent_msg, tries=6, delay=0.2
-                                )
-                                if not t:
-                                    logger.warning(
-                                        "[🧵]%s Created forum thread '%s' but couldn't resolve thread object yet; will retry later.",
-                                        tag,
-                                        data["thread_name"],
+                                    t = await _try_resolve_thread_from_message(
+                                        sent_msg, tries=6, delay=0.2
                                     )
-                                    if is_backfill and hasattr(self, "backfill"):
-                                        self.backfill.note_checkpoint(
-                                            parent_id,
-                                            int(data["message_id"]),
-                                            data.get("timestamp"),
+                                    if not t:
+                                        logger.warning(
+                                            "[🧵]%s Created forum thread '%s' but couldn't resolve thread object yet; will retry later.",
+                                            tag,
+                                            data["thread_name"],
                                         )
-                                    return None
+                                        if is_backfill and hasattr(
+                                            self, "backfill"
+                                        ):
+                                            self.backfill.note_checkpoint(
+                                                parent_id,
+                                                int(data["message_id"]),
+                                                data.get("timestamp"),
+                                            )
+                                        return None
 
                                 logger.info(
-                                    "[🧵]%s Created forum thread '%s' → cloned_thread_id=%s in #%s",
+                                    "[🧵]%s Created forum thread '%s' → cloned_thread_id=%s in #%s%s",
                                     tag,
                                     data["thread_name"],
                                     t.id,
                                     getattr(cloned_parent, "name", cloned_id),
+                                    " (user token)" if via_token else "",
                                 )
                                 try:
                                     await t.edit(auto_archive_duration=60)
@@ -10771,6 +11191,8 @@ class ServerReceiver:
                                 created = True
                             else:
                                 clone_thread = await _create_text_thread()
+                                if not clone_thread:
+                                    continue
                                 new_id = clone_thread.id
 
                                 payload_for_thread = (
