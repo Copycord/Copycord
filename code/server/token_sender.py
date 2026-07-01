@@ -62,6 +62,8 @@ class UserTokenSender:
         self._log = logger
         # One stable device fingerprint per token (keyed by token string).
         self._fingerprints: dict = {}
+        # Last token id used per channel, to avoid back-to-back repeats.
+        self._last_token_by_channel: dict = {}
 
     # ── public API ───────────────────────────────────────────────────────────
 
@@ -105,10 +107,25 @@ class UserTokenSender:
         if not text and not atts:
             return False
 
-        # Random pick per message: shuffle a copy and try in that order so a
-        # failure simply rotates to the next account.
+        # Random pick per message, but avoid using the same account twice in a
+        # row in the same channel. Otherwise a burst of messages can all land on
+        # one token, and Discord groups consecutive same-author messages under a
+        # single header — defeating the point of spreading sends across
+        # accounts. With a single token there is nothing to spread (no-op).
         order = list(tokens)
         random.shuffle(order)
+
+        chan = int(target_channel_id)
+        last_tid = self._last_token_by_channel.get(chan)
+        if (
+            last_tid is not None
+            and len(order) > 1
+            and order[0].get("token_id") == last_tid
+        ):
+            for i in range(1, len(order)):
+                if order[i].get("token_id") != last_tid:
+                    order[0], order[i] = order[i], order[0]
+                    break
 
         rl_key = f"channel:{target_channel_id}"
 
@@ -131,12 +148,13 @@ class UserTokenSender:
                 ok = False
 
             if ok:
-                try:
-                    tid = tok.get("token_id")
-                    if tid:
+                tid = tok.get("token_id")
+                if tid:
+                    self._last_token_by_channel[chan] = tid
+                    try:
                         self._db.increment_mapping_token_usage(tid)
-                except Exception:
-                    pass
+                    except Exception:
+                        pass
                 self._log.debug(
                     "[user-send] Sent message into channel %s as %s",
                     target_channel_id,

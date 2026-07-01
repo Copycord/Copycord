@@ -983,7 +983,7 @@
               <div class="mapping-toggle-row mapping-setting-field" data-setting-key="use_user_tokens">
                 <div class="mapping-toggle-info">
                   <span class="mapping-toggle-name">Send messages as users</span>
-                  <span class="mapping-toggle-desc">Post cloned messages from real user accounts (self-bot tokens) instead of webhooks. A random enabled token is chosen per message, and it falls back to the webhook if every token fails. Accounts must be members of the clone server. Using self-bots is against Discord's ToS and can get accounts banned.</span>
+                  <span class="mapping-toggle-desc">Post cloned messages from real user accounts (self-bot tokens) instead of webhooks. A random enabled token is chosen per message, and it falls back to the webhook if every token fails. Accounts must be members of the clone server.</span>
                 </div>
                 <label class="toggle mapping-toggle-switch">
                   <input type="checkbox" id="map_USE_USER_TOKENS" name="USE_USER_TOKENS" data-map-toggle />
@@ -992,28 +992,43 @@
               </div>
 
               <div class="user-tokens-manager" id="user-tokens-manager">
-                <div class="mapping-toggle-desc" id="user-tokens-save-first" hidden>
+                <div class="user-tokens-hint" id="user-tokens-save-first" hidden>
                   Save this mapping first, then reopen it to add user tokens.
                 </div>
                 <div id="user-tokens-editor" hidden>
-                  <div class="field field-token" style="margin-top:10px;">
-                    <label for="user_token_value">
-                      <span class="label-text">Add user token</span>
-                    </label>
-                    <div class="token-wrap">
-                      <input type="password" id="user_token_value" autocomplete="off" spellcheck="false"
-                        class="token-input" placeholder="Paste a user (self-bot) token" />
-                      <button type="button" class="reveal-btn token-user-btn" data-target="user_token_value"
-                        aria-pressed="false" aria-label="Show token">👁</button>
+                  <div class="user-token-add">
+                    <div class="user-token-add-label">Add user token</div>
+                    <div class="field field-token user-token-input-wrap">
+                      <div class="token-wrap">
+                        <input type="password" id="user_token_value" autocomplete="off" spellcheck="false"
+                          class="token-input" placeholder="Paste a user (self-bot) token" />
+                        <button type="button" class="reveal-btn token-user-btn" data-target="user_token_value"
+                          aria-pressed="false" title="Show">
+                          <svg class="icon-eye" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            viewBox="0 0 24 24">
+                            <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" />
+                            <circle cx="12" cy="12" r="3" />
+                          </svg>
+                          <svg class="icon-eye-off" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none"
+                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+                            viewBox="0 0 24 24" style="display:none">
+                            <path
+                              d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.4 18.4 0 0 1 5.06-5.94M9.9 9.9A3 3 0 0 0 9 12a3 3 0 0 0 3 3 3 3 0 0 0 2.1-.9M1 1l22 22" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
-                    <input type="text" id="user_token_label" maxlength="80" class="token-note-input"
-                      placeholder="Label (optional)" style="margin-top:6px;" />
-                    <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">
-                      <button type="button" id="user-token-add" class="btn btn-ghost">Add token</button>
-                      <span class="mapping-toggle-desc" id="user-token-status" aria-live="polite"></span>
+                    <input type="text" id="user_token_label" maxlength="80" class="user-token-label"
+                      placeholder="Label (optional)" />
+                    <div class="user-token-add-row">
+                      <button type="button" id="user-token-add" class="btn btn-primary user-token-add-btn">Add
+                        token</button>
+                      <span class="user-token-status" id="user-token-status" aria-live="polite"></span>
                     </div>
                   </div>
-                  <div id="userTokensList" class="user-tokens-scroll" style="margin-top:10px;"></div>
+                  <div class="user-tokens-count" id="user-tokens-count" hidden></div>
+                  <div id="userTokensList" class="user-tokens-list"></div>
                 </div>
               </div>
             </div>

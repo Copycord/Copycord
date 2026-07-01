@@ -2505,9 +2505,25 @@
   // ─── User Message Sending (per-mapping user tokens) ──────────────────
   let USER_TOKENS_MAPPING_ID = null;
 
-  function setUserTokenStatus(msg) {
+  function setUserTokenStatus(msg, type) {
     const el = document.getElementById("user-token-status");
-    if (el) el.textContent = msg || "";
+    if (!el) return;
+    el.textContent = msg || "";
+    el.classList.remove("is-error", "is-ok");
+    if (type === "error") el.classList.add("is-error");
+    else if (type === "ok") el.classList.add("is-ok");
+  }
+
+  function resetUserTokenReveal() {
+    const btn = document.querySelector(
+      ".token-user-btn[data-target='user_token_value']"
+    );
+    if (!btn) return;
+    btn.setAttribute("aria-pressed", "false");
+    const eye = btn.querySelector(".icon-eye");
+    const eyeOff = btn.querySelector(".icon-eye-off");
+    if (eye) eye.style.display = "";
+    if (eyeOff) eyeOff.style.display = "none";
   }
 
   function setupUserTokensSection(mappingId) {
@@ -2524,6 +2540,7 @@
       valInput.type = "password";
     }
     if (labelInput) labelInput.value = "";
+    resetUserTokenReveal();
 
     if (!mappingId) {
       if (saveFirst) saveFirst.hidden = false;
@@ -2539,7 +2556,9 @@
 
   async function loadUserTokens() {
     const list = document.getElementById("userTokensList");
+    const countEl = document.getElementById("user-tokens-count");
     if (!list || !USER_TOKENS_MAPPING_ID) return;
+    if (countEl) countEl.hidden = true;
     list.innerHTML = `<div class="mapping-toggle-desc">Loading…</div>`;
     try {
       const res = await fetch(
@@ -2560,10 +2579,18 @@
 
   function renderUserTokens(tokens) {
     const list = document.getElementById("userTokensList");
+    const countEl = document.getElementById("user-tokens-count");
     if (!list) return;
     if (!tokens.length) {
+      if (countEl) countEl.hidden = true;
       list.innerHTML = `<div class="mapping-toggle-desc">No user tokens yet. Add one above.</div>`;
       return;
+    }
+    if (countEl) {
+      countEl.hidden = false;
+      countEl.textContent = `${tokens.length} token${
+        tokens.length === 1 ? "" : "s"
+      }`;
     }
     list.innerHTML = "";
     for (const t of tokens) {
@@ -2605,7 +2632,7 @@
     const btn = document.getElementById("user-token-add");
     const token = (valInput?.value || "").trim();
     if (!token) {
-      setUserTokenStatus("Enter a token.");
+      setUserTokenStatus("Enter a token.", "error");
       return;
     }
     if (btn) btn.disabled = true;
@@ -2626,15 +2653,19 @@
       );
       const j = await res.json();
       if (!j.ok) {
-        setUserTokenStatus(j.error || "Failed to add token.");
+        setUserTokenStatus(j.error || "Failed to add token.", "error");
         return;
       }
-      if (valInput) valInput.value = "";
+      if (valInput) {
+        valInput.value = "";
+        valInput.type = "password";
+      }
       if (labelInput) labelInput.value = "";
-      setUserTokenStatus("Token added.");
+      resetUserTokenReveal();
+      setUserTokenStatus("Token added.", "ok");
       await loadUserTokens();
     } catch (e) {
-      setUserTokenStatus("Network error.");
+      setUserTokenStatus("Network error.", "error");
     } finally {
       if (btn) btn.disabled = false;
     }
@@ -2670,7 +2701,7 @@
       );
       await loadUserTokens();
     } catch (e) {
-      setUserTokenStatus("Failed to remove token.");
+      setUserTokenStatus("Failed to remove token.", "error");
     }
   }
 
@@ -2680,10 +2711,17 @@
 
   document
     .querySelector(".token-user-btn[data-target='user_token_value']")
-    ?.addEventListener("click", () => {
+    ?.addEventListener("click", (e) => {
+      const btn = e.currentTarget;
       const input = document.getElementById("user_token_value");
       if (!input) return;
-      input.type = input.type === "password" ? "text" : "password";
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.setAttribute("aria-pressed", show ? "true" : "false");
+      const eye = btn.querySelector(".icon-eye");
+      const eyeOff = btn.querySelector(".icon-eye-off");
+      if (eye) eye.style.display = show ? "none" : "";
+      if (eyeOff) eyeOff.style.display = show ? "" : "none";
     });
 
   // ─── Message Features Modal ──────────────────────────────────────────

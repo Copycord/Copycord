@@ -11057,6 +11057,147 @@ body.page-forwarding .fwd-no-match-sub {
 .mapping-settings-section {
   padding-bottom: 6px;
 }
+
+/* ── User Message Sending (per-mapping user tokens) ── */
+.user-tokens-manager {
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+}
+.user-tokens-hint {
+  font-size: 12px;
+  color: var(--muted);
+  opacity: 0.85;
+  padding: 4px 2px;
+}
+.user-token-add-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+.user-token-input-wrap {
+  margin: 0;
+}
+.user-token-label {
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: #140b26;
+  color: var(--text);
+  outline: 0;
+  box-sizing: border-box;
+  transition: border 0.2s ease;
+}
+.user-token-label:focus {
+  border-color: var(--accent);
+}
+.user-token-add-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.user-token-add-btn {
+  flex: 0 0 auto;
+  min-width: 108px;
+  white-space: nowrap;
+}
+.user-token-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+  opacity: 0.85;
+}
+.user-token-status.is-error {
+  color: #f4a3a3;
+  opacity: 1;
+}
+.user-token-status.is-ok {
+  color: #86efac;
+  opacity: 1;
+}
+.user-tokens-count {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin: 12px 2px 6px;
+}
+.user-tokens-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+  /* Cap the height so a large number of tokens scrolls instead of
+     stretching the mapping modal. ~4 rows tall before scrolling. */
+  max-height: 216px;
+  overflow-y: auto;
+  padding-right: 4px;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+.user-tokens-list::-webkit-scrollbar {
+  width: 10px;
+}
+.user-tokens-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+.user-tokens-list::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--primary), var(--primary-700));
+  border: 2px solid transparent;
+  border-radius: 12px;
+  background-clip: padding-box;
+}
+.user-token-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.06));
+}
+.user-token-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.user-token-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.user-token-sub {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.7;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.user-token-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+.user-token-remove {
+  min-height: 30px;
+  padding: 4px 12px;
+  font-size: 12px;
+}
 .mapping-form-footer {
   display: flex;
   justify-content: flex-end;
