@@ -980,15 +980,85 @@
               <span>User Message Sending</span>
             </summary>
             <div class="mapping-section-body">
+              <div class="user-token-disclaimer">
+                <strong>Warning:</strong> This feature uses user tokens, which violate Discord's Terms of
+                Service. Discord may rate limit your accounts or permanently ban them at any
+                time. Only use accounts you are willing to lose.
+              </div>
               <div class="mapping-toggle-row mapping-setting-field" data-setting-key="use_user_tokens">
                 <div class="mapping-toggle-info">
                   <span class="mapping-toggle-name">Send messages as users</span>
-                  <span class="mapping-toggle-desc">Post cloned messages from real user accounts (self-bot tokens) instead of webhooks. A random enabled token is chosen per message, and it falls back to the webhook if every token fails. Accounts must be members of the clone server.</span>
+                  <span class="mapping-toggle-desc">Send cloned messages from real user accounts instead of webhooks. Accounts must be in the clone server.</span>
                 </div>
                 <label class="toggle mapping-toggle-switch">
                   <input type="checkbox" id="map_USE_USER_TOKENS" name="USE_USER_TOKENS" data-map-toggle />
                   <span class="toggle-track"><span class="toggle-thumb"></span></span>
                 </label>
+              </div>
+
+              <div class="user-token-options" id="user-token-options">
+                <div class="mapping-toggle-row">
+                  <div class="mapping-toggle-info">
+                    <span class="mapping-toggle-name">Account selection</span>
+                    <span class="mapping-toggle-desc" id="ut_strategy_desc"></span>
+                  </div>
+                  <select id="ut_strategy" class="user-token-select">
+                    <option value="random">Random</option>
+                    <option value="round_robin">Round-robin</option>
+                    <option value="sticky_author">Sticky</option>
+                  </select>
+                </div>
+
+                <div class="mapping-toggle-row" data-setting-key="user_token_fallback_webhook">
+                  <div class="mapping-toggle-info">
+                    <span class="mapping-toggle-name">Fall back to webhook</span>
+                    <span class="mapping-toggle-desc">If every token fails, send via the normal webhook instead of dropping the
+                      message.</span>
+                  </div>
+                  <label class="toggle mapping-toggle-switch">
+                    <input type="checkbox" id="map_USER_TOKEN_FALLBACK_WEBHOOK" name="USER_TOKEN_FALLBACK_WEBHOOK"
+                      data-map-toggle />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+
+                <div class="mapping-toggle-row" data-setting-key="user_token_typing">
+                  <div class="mapping-toggle-info">
+                    <span class="mapping-toggle-name">Show typing indicator</span>
+                    <span class="mapping-toggle-desc">Briefly show “typing…” before each message so it looks more
+                      human.</span>
+                  </div>
+                  <label class="toggle mapping-toggle-switch">
+                    <input type="checkbox" id="map_USER_TOKEN_TYPING" name="USER_TOKEN_TYPING" data-map-toggle />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+
+                <div class="mapping-toggle-row" data-setting-key="user_token_links_only">
+                  <div class="mapping-toggle-info">
+                    <span class="mapping-toggle-name">Attachments as links</span>
+                    <span class="mapping-toggle-desc">Post source attachment links instead of re-uploading the
+                      files.</span>
+                  </div>
+                  <label class="toggle mapping-toggle-switch">
+                    <input type="checkbox" id="map_USER_TOKEN_LINKS_ONLY" name="USER_TOKEN_LINKS_ONLY" data-map-toggle />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                </div>
+
+                <div class="mapping-toggle-row">
+                  <div class="mapping-toggle-info">
+                    <span class="mapping-toggle-name">Send delay</span>
+                    <span class="mapping-toggle-desc">Random pause before each message, in seconds.</span>
+                  </div>
+                  <div class="user-token-delay">
+                    <input type="number" id="ut_min_delay" class="user-token-num" min="0" max="30" step="0.5"
+                      placeholder="min" />
+                    <span class="user-token-delay-sep">to</span>
+                    <input type="number" id="ut_max_delay" class="user-token-num" min="0" max="30" step="0.5"
+                      placeholder="max" />
+                  </div>
+                </div>
               </div>
 
               <div class="user-tokens-manager" id="user-tokens-manager">
@@ -1019,14 +1089,14 @@
                         </button>
                       </div>
                     </div>
-                    <input type="text" id="user_token_label" maxlength="80" class="user-token-label"
-                      placeholder="Label (optional)" />
                     <div class="user-token-add-row">
                       <button type="button" id="user-token-add" class="btn btn-primary user-token-add-btn">Add
                         token</button>
                       <span class="user-token-status" id="user-token-status" aria-live="polite"></span>
                     </div>
                   </div>
+                  <input type="text" id="user_tokens_search" class="mapping-search-input user-tokens-search"
+                    placeholder="Search tokens…" autocomplete="off" hidden />
                   <div class="user-tokens-count" id="user-tokens-count" hidden></div>
                   <div id="userTokensList" class="user-tokens-list"></div>
                 </div>

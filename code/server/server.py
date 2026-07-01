@@ -7306,11 +7306,13 @@ class ServerReceiver:
         payload: dict,
         msg: dict,
     ) -> bool:
-        """Post a message as a user token if the mapping has it enabled.
+        """Handle a message via user-token sending when enabled for the mapping.
 
-        Returns True when a token delivered the message; False when user-token
-        sending is off, no tokens exist, or every token failed (caller should
-        then fall back to the webhook path).
+        Returns True when the caller should NOT perform the webhook send — either
+        a token delivered the message, or user-tokens-only mode is on and the
+        message was dropped. Returns False to let the caller fall back to the
+        webhook (user-token sending disabled, no mapping resolved, or every token
+        failed while webhook fallback is enabled).
         """
         try:
             settings = resolve_mapping_settings(
@@ -7330,18 +7332,44 @@ class ServerReceiver:
             return False
 
         try:
-            return await self.user_token_sender.send(
+            delivered = await self.user_token_sender.send(
                 mapping_id=mapping_id,
                 target_channel_id=int(target_channel_id),
                 content=(payload or {}).get("content"),
                 embeds=(payload or {}).get("embeds"),
                 attachments=msg.get("attachments"),
+                author_id=msg.get("author_id"),
+                strategy=str(settings.get("USER_TOKEN_STRATEGY") or "random"),
+                typing=bool(settings.get("USER_TOKEN_TYPING", False)),
+                min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
+                max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
+                links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
             )
         except Exception:
             logger.exception(
                 "[user-send] send failed for channel %s", target_channel_id
             )
+            delivered = False
+
+        if delivered:
+            logger.info(
+                "[💬] Forwarded (user token) to clone ch=%s from %s",
+                target_channel_id,
+                msg.get("author"),
+            )
+            return True
+
+        # Every token failed (or none configured). Fall back to the webhook
+        # unless the mapping is set to user-tokens only.
+        if settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True):
             return False
+
+        logger.info(
+            "[user-send] All tokens failed for clone ch=%s and webhook fallback is off; dropping message from %s",
+            target_channel_id,
+            msg.get("author"),
+        )
+        return True
 
     def _build_webhook_payload(
         self,
@@ -8884,14 +8912,6 @@ class ServerReceiver:
                             payload=payload_for_mapping,
                             msg=msg,
                         ):
-                            logger.info(
-                                "[💬]%s Forwarded (user token) to #%s (clone ch=%s) from %s (%s)",
-                                tag,
-                                msg.get("channel_name"),
-                                clone_cid,
-                                msg.get("author"),
-                                msg.get("author_id"),
-                            )
                             continue
 
                     primary_customized = await _primary_name_changed_for_mapping(
@@ -9728,14 +9748,6 @@ class ServerReceiver:
                             },
                             msg=data,
                         ):
-                            logger.info(
-                                "[💬]%s Forwarded (user token) to thread_id=%s (parent #%s) from %s",
-                                tag,
-                                thread_id,
-                                data.get("thread_parent_name")
-                                or data.get("channel_name"),
-                                data.get("author"),
-                            )
                             return None
 
                     kw = {

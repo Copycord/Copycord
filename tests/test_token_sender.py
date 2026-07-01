@@ -111,6 +111,82 @@ class _FakeRateLimit:
         return None
 
 
+class TestSelectionStrategies:
+
+    def test_round_robin_rotates_evenly(self):
+        s = _make_sender()
+        toks = [{"token_id": "a"}, {"token_id": "b"}, {"token_id": "c"}]
+        firsts = [
+            s._order_tokens(toks, 1, "round_robin", None)[0]["token_id"]
+            for _ in range(6)
+        ]
+        assert firsts == ["a", "b", "c", "a", "b", "c"]
+
+    def test_round_robin_independent_per_channel(self):
+        s = _make_sender()
+        toks = [{"token_id": "a"}, {"token_id": "b"}]
+        # Channel 1 advances without affecting channel 2's rotation.
+        s._order_tokens(toks, 1, "round_robin", None)
+        assert s._order_tokens(toks, 2, "round_robin", None)[0]["token_id"] == "a"
+
+    def test_sticky_author_is_consistent(self):
+        s = _make_sender()
+        toks = [{"token_id": "a"}, {"token_id": "b"}, {"token_id": "c"}]
+        f1 = s._order_tokens(toks, 1, "sticky_author", "user123")[0]["token_id"]
+        f2 = s._order_tokens(toks, 1, "sticky_author", "user123")[0]["token_id"]
+        assert f1 == f2
+
+    def test_sticky_author_spreads_across_authors(self):
+        s = _make_sender()
+        toks = [{"token_id": "a"}, {"token_id": "b"}, {"token_id": "c"}]
+        firsts = {
+            s._order_tokens(toks, 1, "sticky_author", f"u{i}")[0]["token_id"]
+            for i in range(30)
+        }
+        assert len(firsts) > 1
+
+
+@pytest.mark.asyncio
+async def test_links_only_skips_upload(monkeypatch):
+    class _DB:
+        def get_enabled_mapping_tokens(self, mapping_id):
+            return [{"token_id": "a", "token_value": "ta"}]
+
+        def increment_mapping_token_usage(self, tid):
+            return None
+
+    captured = {}
+
+    async def fake_send(self, token, channel_id, text, attachments, *, typing=False):
+        captured["attachments"] = attachments
+        return True
+
+    monkeypatch.setattr(UserTokenSender, "_send_with_token", fake_send)
+
+    s = UserTokenSender(
+        db=_DB(),
+        ratelimit=_FakeRateLimit(),
+        action_type="user_message",
+        session_provider=lambda: None,
+        logger=types.SimpleNamespace(
+            debug=lambda *a, **k: None,
+            warning=lambda *a, **k: None,
+            exception=lambda *a, **k: None,
+        ),
+    )
+
+    ok = await s.send(
+        mapping_id="m",
+        target_channel_id=1,
+        content="hi",
+        attachments=[{"url": "http://x/a.png", "filename": "a.png"}],
+        links_only=True,
+    )
+    assert ok is True
+    # Links-only means nothing is handed to the uploader.
+    assert captured["attachments"] == []
+
+
 @pytest.mark.asyncio
 async def test_no_consecutive_repeat_same_channel(monkeypatch):
     """With multiple tokens, the same account should not be picked twice in a
@@ -129,7 +205,9 @@ async def test_no_consecutive_repeat_same_channel(monkeypatch):
 
     used = []
 
-    async def fake_send_with_token(self, token, channel_id, text, attachments):
+    async def fake_send_with_token(
+        self, token, channel_id, text, attachments, *, typing=False
+    ):
         # Record which token actually sent (order[0] always succeeds here).
         used.append(token)
         return True

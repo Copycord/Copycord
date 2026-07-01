@@ -131,6 +131,12 @@ class Config:
             "DB_CLEANUP_MSG": True,
             "ON_DEMAND_WEBHOOKS": True,
             "USE_USER_TOKENS": False,
+            "USER_TOKEN_STRATEGY": "random",
+            "USER_TOKEN_FALLBACK_WEBHOOK": True,
+            "USER_TOKEN_TYPING": False,
+            "USER_TOKEN_MIN_DELAY": 0,
+            "USER_TOKEN_MAX_DELAY": 0,
+            "USER_TOKEN_LINKS_ONLY": False,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):

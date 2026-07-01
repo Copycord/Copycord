@@ -207,6 +207,12 @@
     DB_CLEANUP_MSG: true,
     ON_DEMAND_WEBHOOKS: true,
     USE_USER_TOKENS: false,
+    USER_TOKEN_STRATEGY: "random",
+    USER_TOKEN_FALLBACK_WEBHOOK: true,
+    USER_TOKEN_TYPING: false,
+    USER_TOKEN_MIN_DELAY: 0,
+    USER_TOKEN_MAX_DELAY: 0,
+    USER_TOKEN_LINKS_ONLY: false,
   };
 
   let lastFocusLog = null;
@@ -1890,6 +1896,17 @@
         if (key) settings[key] = cb.checked;
       });
 
+    // String / numeric user-token options (not map_-prefixed, so the generic
+    // loops above skip them).
+    const stratEl = document.getElementById("ut_strategy");
+    if (stratEl) settings.USER_TOKEN_STRATEGY = stratEl.value;
+    const minDelayEl = document.getElementById("ut_min_delay");
+    if (minDelayEl)
+      settings.USER_TOKEN_MIN_DELAY = parseFloat(minDelayEl.value) || 0;
+    const maxDelayEl = document.getElementById("ut_max_delay");
+    if (maxDelayEl)
+      settings.USER_TOKEN_MAX_DELAY = parseFloat(maxDelayEl.value) || 0;
+
     return {
       mapping_id: id,
       mapping_name,
@@ -2438,6 +2455,28 @@
         cb.checked = !!rawVal;
       });
 
+    // Populate string / numeric user-token options.
+    {
+      const pickSetting = (key) => {
+        if (cloneFrom && cloneFrom.settings && key in cloneFrom.settings)
+          return cloneFrom.settings[key];
+        if (isEdit && mapping?.settings && key in mapping.settings)
+          return mapping.settings[key];
+        return DEFAULT_MAPPING_SETTINGS[key];
+      };
+      const stratEl = document.getElementById("ut_strategy");
+      if (stratEl) {
+        stratEl.value = pickSetting("USER_TOKEN_STRATEGY") || "random";
+        // Sync the custom .dd dropdown label (it listens for `change`).
+        stratEl.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      updateStrategyDesc();
+      const minDelayEl = document.getElementById("ut_min_delay");
+      if (minDelayEl) minDelayEl.value = pickSetting("USER_TOKEN_MIN_DELAY") ?? 0;
+      const maxDelayEl = document.getElementById("ut_max_delay");
+      if (maxDelayEl) maxDelayEl.value = pickSetting("USER_TOKEN_MAX_DELAY") ?? 0;
+    }
+
     // Per-mapping user tokens can only be managed once the mapping exists.
     setupUserTokensSection(
       isEdit && mapping?.mapping_id ? mapping.mapping_id : null
@@ -2505,6 +2544,21 @@
   // ─── User Message Sending (per-mapping user tokens) ──────────────────
   let USER_TOKENS_MAPPING_ID = null;
 
+  const UT_STRATEGY_DESCS = {
+    random:
+      "Picks a random account per message, avoiding the same account twice in a row.",
+    round_robin: "Rotates through accounts evenly — each one sends in turn.",
+    sticky_author:
+      "Each source user always sends from the same account, keeping identities consistent.",
+  };
+
+  function updateStrategyDesc() {
+    const sel = document.getElementById("ut_strategy");
+    const desc = document.getElementById("ut_strategy_desc");
+    if (!sel || !desc) return;
+    desc.textContent = UT_STRATEGY_DESCS[sel.value] || "";
+  }
+
   function setUserTokenStatus(msg, type) {
     const el = document.getElementById("user-token-status");
     if (!el) return;
@@ -2531,7 +2585,6 @@
     const saveFirst = document.getElementById("user-tokens-save-first");
     const editor = document.getElementById("user-tokens-editor");
     const valInput = document.getElementById("user_token_value");
-    const labelInput = document.getElementById("user_token_label");
     const list = document.getElementById("userTokensList");
 
     setUserTokenStatus("");
@@ -2539,8 +2592,13 @@
       valInput.value = "";
       valInput.type = "password";
     }
-    if (labelInput) labelInput.value = "";
     resetUserTokenReveal();
+
+    const searchInput = document.getElementById("user_tokens_search");
+    if (searchInput) {
+      searchInput.value = "";
+      searchInput.hidden = true;
+    }
 
     if (!mappingId) {
       if (saveFirst) saveFirst.hidden = false;
@@ -2557,8 +2615,10 @@
   async function loadUserTokens() {
     const list = document.getElementById("userTokensList");
     const countEl = document.getElementById("user-tokens-count");
+    const searchEl = document.getElementById("user_tokens_search");
     if (!list || !USER_TOKENS_MAPPING_ID) return;
     if (countEl) countEl.hidden = true;
+    if (searchEl) searchEl.hidden = true;
     list.innerHTML = `<div class="mapping-toggle-desc">Loading…</div>`;
     try {
       const res = await fetch(
@@ -2577,12 +2637,42 @@
     }
   }
 
+  function filterUserTokens() {
+    const search = document.getElementById("user_tokens_search");
+    const list = document.getElementById("userTokensList");
+    if (!list) return;
+    const q = (search?.value || "").trim().toLowerCase();
+    const rows = list.querySelectorAll(".user-token-row");
+    let anyVisible = false;
+    rows.forEach((row) => {
+      const match = !q || row.textContent.toLowerCase().includes(q);
+      row.style.display = match ? "" : "none";
+      if (match) anyVisible = true;
+    });
+
+    let empty = document.getElementById("user-tokens-no-match");
+    if (!empty) {
+      empty = document.createElement("div");
+      empty.id = "user-tokens-no-match";
+      empty.className = "mapping-toggle-desc";
+      empty.textContent = "No tokens match your search.";
+    }
+    if (q && !anyVisible) {
+      if (empty.parentNode !== list) list.appendChild(empty);
+      empty.style.display = "";
+    } else {
+      empty.style.display = "none";
+    }
+  }
+
   function renderUserTokens(tokens) {
     const list = document.getElementById("userTokensList");
     const countEl = document.getElementById("user-tokens-count");
+    const searchEl = document.getElementById("user_tokens_search");
     if (!list) return;
     if (!tokens.length) {
       if (countEl) countEl.hidden = true;
+      if (searchEl) searchEl.hidden = true;
       list.innerHTML = `<div class="mapping-toggle-desc">No user tokens yet. Add one above.</div>`;
       return;
     }
@@ -2592,9 +2682,10 @@
         tokens.length === 1 ? "" : "s"
       }`;
     }
+    if (searchEl) searchEl.hidden = false;
     list.innerHTML = "";
     for (const t of tokens) {
-      const name = t.label || t.username || t.user_id || "User token";
+      const name = t.username || t.user_id || "User token";
       const row = document.createElement("div");
       row.className = "user-token-row";
       row.innerHTML = `
@@ -2609,7 +2700,7 @@
             } />
             <span class="toggle-track"><span class="toggle-thumb"></span></span>
           </label>
-          <button type="button" class="btn btn-ghost user-token-remove">Remove</button>
+          <button type="button" class="btn btn-ghost-red user-token-remove">Remove</button>
         </div>`;
       row.querySelector(".user-token-name").textContent = name;
       const sub = t.token_masked + (t.username ? ` · ${t.username}` : "");
@@ -2623,12 +2714,13 @@
         .addEventListener("click", () => removeUserToken(t.id, name));
       list.appendChild(row);
     }
+    // Re-apply any active search filter after rebuilding the list.
+    filterUserTokens();
   }
 
   async function addUserToken() {
     if (!USER_TOKENS_MAPPING_ID) return;
     const valInput = document.getElementById("user_token_value");
-    const labelInput = document.getElementById("user_token_label");
     const btn = document.getElementById("user-token-add");
     const token = (valInput?.value || "").trim();
     if (!token) {
@@ -2645,10 +2737,7 @@
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            token,
-            label: (labelInput?.value || "").trim(),
-          }),
+          body: JSON.stringify({ token }),
         }
       );
       const j = await res.json();
@@ -2660,7 +2749,6 @@
         valInput.value = "";
         valInput.type = "password";
       }
-      if (labelInput) labelInput.value = "";
       resetUserTokenReveal();
       setUserTokenStatus("Token added.", "ok");
       await loadUserTokens();
@@ -2708,6 +2796,14 @@
   document
     .getElementById("user-token-add")
     ?.addEventListener("click", addUserToken);
+
+  document
+    .getElementById("ut_strategy")
+    ?.addEventListener("change", updateStrategyDesc);
+
+  document
+    .getElementById("user_tokens_search")
+    ?.addEventListener("input", filterUserTokens);
 
   document
     .querySelector(".token-user-btn[data-target='user_token_value']")

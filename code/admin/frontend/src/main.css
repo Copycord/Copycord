@@ -11059,6 +11059,19 @@ body.page-forwarding .fwd-no-match-sub {
 }
 
 /* ── User Message Sending (per-mapping user tokens) ── */
+.user-token-disclaimer {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.user-token-disclaimer strong {
+  color: #f4a3a3;
+}
 .user-tokens-manager {
   margin-top: 8px;
   padding: 12px;
@@ -11078,23 +11091,56 @@ body.page-forwarding .fwd-no-match-sub {
   color: var(--text);
   margin-bottom: 6px;
 }
-.user-token-input-wrap {
-  margin: 0;
+.user-token-options {
+  margin-top: 6px;
 }
-.user-token-label {
-  width: 100%;
-  margin-top: 8px;
-  padding: 12px;
-  border-radius: 12px;
+.user-token-select {
+  flex: 0 0 auto;
+  min-width: 210px;
+  padding: 8px 10px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: #140b26;
   color: var(--text);
   outline: 0;
-  box-sizing: border-box;
-  transition: border 0.2s ease;
+  font-size: 13px;
 }
-.user-token-label:focus {
+.user-token-select:focus {
   border-color: var(--accent);
+}
+/* The native <select> is auto-converted into a custom .dd widget whose toggle
+   is width:100%; give it an explicit width so it doesn't collapse in the
+   space-between option row. */
+#user-token-options .dd {
+  flex: 0 0 auto;
+  width: 200px;
+  max-width: 55%;
+}
+.user-token-delay {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.user-token-num {
+  width: 72px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #140b26;
+  color: var(--text);
+  outline: 0;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.user-token-num:focus {
+  border-color: var(--accent);
+}
+.user-token-delay-sep {
+  font-size: 12px;
+  color: var(--muted);
+}
+.user-token-input-wrap {
+  margin: 0;
 }
 .user-token-add-row {
   display: flex;
@@ -11122,6 +11168,9 @@ body.page-forwarding .fwd-no-match-sub {
 .user-token-status.is-ok {
   color: #86efac;
   opacity: 1;
+}
+.user-tokens-search {
+  margin-top: 12px;
 }
 .user-tokens-count {
   font-size: 11px;

@@ -64,6 +64,8 @@ class UserTokenSender:
         self._fingerprints: dict = {}
         # Last token id used per channel, to avoid back-to-back repeats.
         self._last_token_by_channel: dict = {}
+        # Rotating index per channel for round-robin selection.
+        self._rr_index_by_channel: dict = {}
 
     # ── public API ───────────────────────────────────────────────────────────
 
@@ -75,6 +77,12 @@ class UserTokenSender:
         content: Optional[str],
         embeds: Optional[list] = None,
         attachments: Optional[list] = None,
+        author_id=None,
+        strategy: str = "random",
+        typing: bool = False,
+        min_delay: float = 0.0,
+        max_delay: float = 0.0,
+        links_only: bool = False,
     ) -> bool:
         """
         Attempt to post a message into ``target_channel_id`` (a channel or thread
@@ -107,25 +115,20 @@ class UserTokenSender:
         if not text and not atts:
             return False
 
-        # Random pick per message, but avoid using the same account twice in a
-        # row in the same channel. Otherwise a burst of messages can all land on
-        # one token, and Discord groups consecutive same-author messages under a
-        # single header — defeating the point of spreading sends across
-        # accounts. With a single token there is nothing to spread (no-op).
-        order = list(tokens)
-        random.shuffle(order)
-
         chan = int(target_channel_id)
-        last_tid = self._last_token_by_channel.get(chan)
-        if (
-            last_tid is not None
-            and len(order) > 1
-            and order[0].get("token_id") == last_tid
-        ):
-            for i in range(1, len(order)):
-                if order[i].get("token_id") != last_tid:
-                    order[0], order[i] = order[i], order[0]
-                    break
+
+        # Links-only mode: don't re-upload files; the source URLs are already in
+        # the message text, so just skip the multipart upload.
+        atts_to_upload = [] if links_only else atts
+
+        # Pick the order of accounts to try, per the selected strategy.
+        order = self._order_tokens(tokens, chan, strategy, author_id)
+
+        # Optional spacing so bursts look less automated / ease rate limits.
+        lo = max(0.0, float(min_delay or 0.0))
+        hi = max(lo, float(max_delay or 0.0))
+        if hi > 0:
+            await asyncio.sleep(random.uniform(lo, min(hi, 30.0)))
 
         rl_key = f"channel:{target_channel_id}"
 
@@ -139,7 +142,7 @@ class UserTokenSender:
                 pass
             try:
                 ok = await self._send_with_token(
-                    token_value, int(target_channel_id), text, atts
+                    token_value, chan, text, atts_to_upload, typing=typing
                 )
             except Exception:
                 self._log.exception(
@@ -169,10 +172,51 @@ class UserTokenSender:
         )
         return False
 
+    # ── account selection ─────────────────────────────────────────────────────
+
+    def _order_tokens(self, tokens: list, chan: int, strategy: str, author_id):
+        """Return the tokens in the order to try, per the selected strategy."""
+        toks = list(tokens)
+        if len(toks) <= 1:
+            return toks
+
+        if strategy == "round_robin":
+            # Even rotation: advance one step each call for this channel.
+            ordered = sorted(toks, key=lambda t: str(t.get("token_id")))
+            idx = self._rr_index_by_channel.get(chan, 0) % len(ordered)
+            self._rr_index_by_channel[chan] = (idx + 1) % len(ordered)
+            return ordered[idx:] + ordered[:idx]
+
+        if strategy == "sticky_author" and author_id:
+            # Same source author always maps to the same account.
+            ordered = sorted(toks, key=lambda t: str(t.get("token_id")))
+            h = int(
+                hashlib.sha256(str(author_id).encode("utf-8")).hexdigest()[:8], 16
+            )
+            idx = h % len(ordered)
+            return ordered[idx:] + ordered[:idx]
+
+        # Default "random": shuffle, but avoid repeating the last account used in
+        # this channel so bursts don't group under one author.
+        random.shuffle(toks)
+        last = self._last_token_by_channel.get(chan)
+        if last is not None and toks[0].get("token_id") == last:
+            for i in range(1, len(toks)):
+                if toks[i].get("token_id") != last:
+                    toks[0], toks[i] = toks[i], toks[0]
+                    break
+        return toks
+
     # ── send implementation ──────────────────────────────────────────────────
 
     async def _send_with_token(
-        self, token: str, channel_id: int, text: str, attachments: list
+        self,
+        token: str,
+        channel_id: int,
+        text: str,
+        attachments: list,
+        *,
+        typing: bool = False,
     ) -> bool:
         session = self._session_provider()
         files, kept_urls = await self._prepare_files(session, attachments)
@@ -194,6 +238,9 @@ class UserTokenSender:
 
         url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
         headers = self._build_headers(token)
+
+        if typing:
+            await self._send_typing(session, channel_id, headers)
 
         attempts = 0
         while True:
@@ -250,6 +297,19 @@ class UserTokenSender:
             except aiohttp.ClientError as e:
                 self._log.warning("[user-send] Network error posting to channel %s: %s", channel_id, e)
                 return False
+
+    async def _send_typing(self, session, channel_id: int, headers: dict):
+        """Fire a typing indicator, then pause briefly to simulate typing.
+
+        Best-effort — any failure is ignored and the message is still sent.
+        """
+        try:
+            typing_url = f"{DISCORD_API_BASE}/channels/{channel_id}/typing"
+            async with session.post(typing_url, headers=headers, timeout=10):
+                pass
+            await asyncio.sleep(random.uniform(1.0, 2.5))
+        except Exception:
+            pass
 
     async def _prepare_files(self, session: aiohttp.ClientSession, attachments: list):
         """Download attachments and return (files, kept_urls).
