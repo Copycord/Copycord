@@ -811,6 +811,31 @@ class ServerReceiver:
         except Exception:
             logger.exception("Failed to summarize guild_mappings on startup")
 
+    async def _status_heartbeat_loop(self):
+        """Periodically re-publish status so the admin watchdog keeps us online.
+
+        The admin marks a component offline after ~90s of bus silence. Incidental
+        log/event traffic normally refreshes that, but an otherwise-idle bot would
+        be shown offline while running fine. Gated on readiness so a genuine
+        disconnect or shutdown isn't masked by a stale "running" heartbeat.
+        """
+        while not self._shutting_down:
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                return
+            if self._shutting_down:
+                return
+            try:
+                if self.bot.is_ready() and not self.bot.is_closed():
+                    await self.bus.status(
+                        running=True,
+                        status=f"Logged in as {self.bot.user.name}",
+                        discord={"ready": True},
+                    )
+            except Exception:
+                logger.debug("[status] heartbeat publish failed", exc_info=True)
+
     async def on_ready(self):
         """
         Event handler that is called when the bot is ready.
@@ -862,6 +887,12 @@ class ServerReceiver:
         msg = f"Logged in as {self.bot.user.name}"
 
         await self.bus.status(running=True, status=msg, discord={"ready": True})
+
+        # Keep re-publishing status so the admin's watchdog keeps us marked
+        # online during quiet periods (it presumes offline after ~90s of bus
+        # silence). Started once; survives gateway reconnects.
+        if getattr(self, "_status_hb_task", None) is None or self._status_hb_task.done():
+            self._status_hb_task = asyncio.create_task(self._status_heartbeat_loop())
 
         logger.info("[🤖] %s", msg)
 
@@ -12804,6 +12835,9 @@ class ServerReceiver:
             return
         self._shutting_down = True
         logger.info("Shutting down server...")
+        hb = getattr(self, "_status_hb_task", None)
+        if hb is not None:
+            hb.cancel()
         if getattr(self, "_send_tasks", None):
 
             for t in list(self._send_tasks):

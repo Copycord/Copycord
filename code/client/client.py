@@ -982,6 +982,32 @@ class ClientListener:
         if self.proxy_rotator.enabled and self.proxy_rotator._current_proxy:
             self.proxy_rotator.report_success(self.proxy_rotator._current_proxy)
 
+    async def _status_heartbeat_loop(self):
+        """Periodically re-publish status so the admin watchdog keeps us online.
+
+        The admin marks a component offline after ~90s of bus silence. Incidental
+        log/event traffic normally refreshes that, but an otherwise-idle bot would
+        be shown offline while running fine. Gated on readiness so a genuine
+        disconnect or shutdown isn't masked by a stale "running" heartbeat.
+        """
+        while True:
+            try:
+                await asyncio.sleep(30)
+            except asyncio.CancelledError:
+                return
+            try:
+                if self.bot.is_ready() and not self.bot.is_closed():
+                    who = getattr(
+                        getattr(self.bot, "user", None), "display_name", "(unknown)"
+                    )
+                    await self.bus.status(
+                        running=True,
+                        status=f"Logged in as {who}",
+                        discord={"ready": True},
+                    )
+            except Exception:
+                logger.debug("[status] heartbeat publish failed", exc_info=True)
+
     async def on_ready(self):
         await self.forwarding.start()
         self._reload_mapped_ids()
@@ -1001,6 +1027,16 @@ class ClientListener:
             status=msg,
             discord={"ready": True},
         )
+
+        # Keep re-publishing status so the admin's watchdog keeps us marked
+        # online during quiet periods (it presumes offline after ~90s of bus
+        # silence). Started once; survives gateway reconnects.
+        if (
+            getattr(self, "_status_hb_task", None) is None
+            or self._status_hb_task.done()
+        ):
+            self._status_hb_task = asyncio.create_task(self._status_heartbeat_loop())
+
         logger.info("[🤖] %s", msg)
 
         if self._sync_task is None or self._sync_task.done():
@@ -2596,6 +2632,9 @@ class ClientListener:
         Asynchronously shuts down the client.
         """
         logger.info("Shutting down client…")
+        hb = getattr(self, "_status_hb_task", None)
+        if hb is not None:
+            hb.cancel()
         self.ws.begin_shutdown()
         self.bus.begin_shutdown()
         with contextlib.suppress(Exception):

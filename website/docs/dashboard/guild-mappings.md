@@ -59,18 +59,35 @@ To use it:
 2. Add one or more **user tokens**. Each token is validated when you add it — the account must be a member of the **clone** server, or it is rejected.
 3. Enable the **Send messages as users** toggle.
 
-When enabled, each new channel message (and each message posted into an existing thread) is sent by a **randomly chosen enabled token** via the Discord API. If a token is invalid, missing permissions, rate-limited, or removed from the clone server, Copycord rotates to another token; if **every** token fails it falls back to the normal webhook send, so no message is lost. Tokens are shown masked and can be individually enabled, disabled, or removed.
+When enabled, each cloned message is sent by one of the enabled tokens via the Discord API. If a token is invalid, missing permissions, rate-limited, or removed from the clone server, Copycord rotates to another token; if **Fall back to webhook** is on and **every** token fails, it falls back to the normal webhook send so no message is lost. Tokens are shown masked and can be individually enabled, disabled, or removed. The **⚙ gear** menu can verify every token at once (and offer to delete the ones that fail) or clear all tokens.
 
 :::warning
 Using self-bot accounts to send messages is against Discord's Terms of Service and can get those accounts banned. Each account must be in the clone server with permission to post in the target channels.
 :::
 
+#### Options
+
+- **Account selection** — how a token is chosen for each message:
+  - **Rotate evenly** — spread messages across all enabled tokens (round-robin).
+  - **Sticky per author** — pin each source author to one token, so that author's messages always come from the same account.
+- **Mirror author nickname** *(Sticky per author only)* — rename the assigned account in the clone server to the host author's display name, so it looks like that member.
+- **Mirror author roles** *(Sticky per author only)* — give the assigned account the cloned roles that match the host author's roles.
+- **Identity hold** *(Sticky per author only)* — how many minutes an account keeps an author before rotating to a free one. On rotation the previous account's mirrored nickname and roles are reset. `0` never rotates.
+- **Fall back to webhook** — if every token fails, send via the normal webhook instead of dropping the message.
+- **Show typing indicator** — briefly show "typing…" before each message so it looks more human.
+- **Attachments as links** — post the source attachment links instead of re-downloading and re-uploading the files.
+- **Send delay** — a random pause (min–max seconds) between messages to the same channel, so they don't arrive in a burst.
+
 Some behavior differs from webhook sending:
 
-- **Identity** — the message appears as whichever account sent it; per-message usernames/avatars are not possible.
-- **Embeds** — user accounts cannot post rich embeds, so embeds are flattened into text and links.
-- **Attachments** — files are re-downloaded from the source and re-uploaded by the sending account.
-- **Scope** — only new channel messages and thread posts are sent this way. Forum-thread creation, message edits, deletes, and backfill still use webhooks. (A webhook cannot edit a user-sent message, so edits to those messages are not applied.)
+- **Identity** — the message appears as whichever account sent it; per-message usernames/avatars are not possible. Use **Sticky per author** with nickname/role mirroring to make an account resemble the original author.
+- **Bots, webhooks & rich embeds** — messages authored by bots or webhooks, and any message containing a rich embed, are always sent by the normal webhook (a user account cannot reproduce them), so their author identity and embed are preserved.
+- **Embeds** — user accounts cannot post rich embeds, so plain embeds are flattened into text and links.
+- **Attachments** — files are re-downloaded from the source and re-uploaded by the sending account, unless **Attachments as links** is on.
+- **Stickers** — cloned custom stickers are sent by the token; standard Discord stickers require the account to have Nitro; a custom sticker that isn't cloned into the clone server falls back to the bot posting its image.
+- **Threads** — token accounts create both **text threads** and **forum-thread starter posts** (and post the messages inside them), so the thread creator and the "started a thread" system message reflect the sending account. If a token can't create the thread, the bot (text) or webhook (forum) creates it instead.
+- **Backfill** — historical backfill also forwards through tokens when enabled, with no artificial delay between token sends.
+- **Edits & deletes** — a webhook cannot edit or delete a user-sent message, so edits and deletes to token-sent messages are not applied.
 
 ### Delete a mapping
 
