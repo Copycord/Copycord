@@ -11094,6 +11094,14 @@ body.page-forwarding .fwd-no-match-sub {
 .user-token-options {
   margin-top: 6px;
 }
+.user-token-sticky-options {
+  margin: 2px 0 2px 10px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+}
+.user-token-sticky-options[hidden] {
+  display: none;
+}
 .user-token-select {
   flex: 0 0 auto;
   min-width: 210px;

@@ -1110,6 +1110,48 @@ class DBManager:
             ],
         )
 
+        # Sticky-author identity assignments: which token account currently
+        # "is" a given host author, when it was assigned (drives the TTL), and
+        # which nickname / clone roles the bot applied (so they can be reset on
+        # rotation or cleanup).
+        self._ensure_table(
+            name="mapping_token_identities",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    mapping_id       TEXT NOT NULL,
+                    author_id        TEXT NOT NULL,
+                    token_id         TEXT NOT NULL,
+                    cloned_guild_id  INTEGER NOT NULL,
+                    applied_nick     TEXT,
+                    applied_role_ids TEXT,
+                    assigned_at      INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
+                    PRIMARY KEY (mapping_id, author_id),
+                    FOREIGN KEY (mapping_id) REFERENCES guild_mappings(mapping_id) ON DELETE CASCADE
+                );
+            """,
+            required_columns={
+                "mapping_id",
+                "author_id",
+                "token_id",
+                "cloned_guild_id",
+                "applied_nick",
+                "applied_role_ids",
+                "assigned_at",
+            },
+            copy_map={
+                "mapping_id": "mapping_id",
+                "author_id": "author_id",
+                "token_id": "token_id",
+                "cloned_guild_id": "cloned_guild_id",
+                "applied_nick": "applied_nick",
+                "applied_role_ids": "applied_role_ids",
+                "assigned_at": "assigned_at",
+            },
+            post_sql=[
+                "CREATE INDEX IF NOT EXISTS idx_mapping_token_identities_mapping ON mapping_token_identities(mapping_id);",
+            ],
+        )
+
     def _table_exists(self, name: str) -> bool:
         row = self.conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -2929,6 +2971,14 @@ class DBManager:
             try:
                 self.conn.execute(
                     "DELETE FROM mapping_user_tokens WHERE mapping_id = ?",
+                    (mapping_id,),
+                )
+            except sqlite3.OperationalError:
+                pass
+
+            try:
+                self.conn.execute(
+                    "DELETE FROM mapping_token_identities WHERE mapping_id = ?",
                     (mapping_id,),
                 )
             except sqlite3.OperationalError:
@@ -5341,11 +5391,15 @@ class DBManager:
             return dict(row) if row else None
 
     def get_enabled_mapping_tokens(self, mapping_id: str) -> list[dict]:
-        """Return {token_id, token_value, username} for each enabled token of a mapping."""
+        """Return {token_id, token_value, username, user_id} for each enabled token.
+
+        ``user_id`` is required by the identity manager to resolve the token
+        account's member object in the clone guild.
+        """
         with self.lock:
             cur = self.conn.execute(
                 """
-                SELECT token_id, token_value, username
+                SELECT token_id, token_value, username, user_id
                 FROM mapping_user_tokens
                 WHERE mapping_id = ? AND enabled = 1
                 ORDER BY added_at ASC, token_id ASC
@@ -5395,6 +5449,96 @@ class DBManager:
                 (int(time.time()), token_id),
             )
             self.conn.commit()
+
+    # ── mapping_token_identities CRUD ────────────────────────────────
+
+    def upsert_token_identity(
+        self,
+        *,
+        mapping_id: str,
+        author_id: str,
+        token_id: str,
+        cloned_guild_id: int,
+        applied_nick: str | None,
+        applied_role_ids: list[int] | None,
+        assigned_at: int,
+    ) -> None:
+        """Insert/replace the identity assignment for a (mapping, author)."""
+        role_json = json.dumps(sorted(int(r) for r in (applied_role_ids or [])))
+        with self.lock:
+            self.conn.execute(
+                """
+                INSERT INTO mapping_token_identities
+                    (mapping_id, author_id, token_id, cloned_guild_id,
+                     applied_nick, applied_role_ids, assigned_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(mapping_id, author_id) DO UPDATE SET
+                    token_id = excluded.token_id,
+                    cloned_guild_id = excluded.cloned_guild_id,
+                    applied_nick = excluded.applied_nick,
+                    applied_role_ids = excluded.applied_role_ids,
+                    assigned_at = excluded.assigned_at
+                """,
+                (
+                    str(mapping_id),
+                    str(author_id),
+                    str(token_id),
+                    int(cloned_guild_id),
+                    applied_nick,
+                    role_json,
+                    int(assigned_at),
+                ),
+            )
+            self.conn.commit()
+
+    @staticmethod
+    def _row_to_identity(row) -> dict:
+        d = dict(row)
+        try:
+            d["applied_role_ids"] = [
+                int(x) for x in json.loads(d.get("applied_role_ids") or "[]")
+            ]
+        except Exception:
+            d["applied_role_ids"] = []
+        return d
+
+    def get_token_identity(self, mapping_id: str, author_id: str) -> dict | None:
+        """Return the identity assignment for a (mapping, author), or None."""
+        with self.lock:
+            row = self.conn.execute(
+                "SELECT * FROM mapping_token_identities WHERE mapping_id = ? AND author_id = ?",
+                (str(mapping_id), str(author_id)),
+            ).fetchone()
+            return self._row_to_identity(row) if row else None
+
+    def list_token_identities(self, mapping_id: str) -> list[dict]:
+        """Return all identity assignments for a mapping."""
+        with self.lock:
+            rows = self.conn.execute(
+                "SELECT * FROM mapping_token_identities WHERE mapping_id = ?",
+                (str(mapping_id),),
+            ).fetchall()
+            return [self._row_to_identity(r) for r in rows]
+
+    def delete_token_identity(self, mapping_id: str, author_id: str) -> bool:
+        """Remove a single identity assignment."""
+        with self.lock:
+            cur = self.conn.execute(
+                "DELETE FROM mapping_token_identities WHERE mapping_id = ? AND author_id = ?",
+                (str(mapping_id), str(author_id)),
+            )
+            self.conn.commit()
+            return cur.rowcount > 0
+
+    def clear_token_identities(self, mapping_id: str) -> int:
+        """Remove all identity assignments for a mapping. Returns count removed."""
+        with self.lock:
+            cur = self.conn.execute(
+                "DELETE FROM mapping_token_identities WHERE mapping_id = ?",
+                (str(mapping_id),),
+            )
+            self.conn.commit()
+            return cur.rowcount
 
     # ── event_logs CRUD ──────────────────────────────────────────────
 

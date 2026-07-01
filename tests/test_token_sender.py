@@ -213,6 +213,135 @@ async def test_links_only_skips_upload(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_forced_token_id_is_tried_first(monkeypatch):
+    """When the identity manager pre-selects a token, that account posts —
+    regardless of the strategy ordering."""
+
+    class _DB:
+        def get_enabled_mapping_tokens(self, mapping_id):
+            return [
+                {"token_id": "a", "token_value": "ta"},
+                {"token_id": "b", "token_value": "tb"},
+                {"token_id": "c", "token_value": "tc"},
+            ]
+
+        def increment_mapping_token_usage(self, tid):
+            return None
+
+    used = {}
+
+    async def fake_send(self, token, channel_id, text, attachments, *, typing=False):
+        used["token"] = token
+        return True
+
+    monkeypatch.setattr(UserTokenSender, "_send_with_token", fake_send)
+
+    s = UserTokenSender(
+        db=_DB(),
+        ratelimit=_FakeRateLimit(),
+        action_type="user_message",
+        session_provider=lambda: None,
+        logger=types.SimpleNamespace(
+            debug=lambda *a, **k: None,
+            warning=lambda *a, **k: None,
+            exception=lambda *a, **k: None,
+        ),
+    )
+
+    ok = await s.send(
+        mapping_id="m",
+        target_channel_id=1,
+        content="hi",
+        strategy="round_robin",
+        forced_token_id="c",
+    )
+    assert ok is True
+    assert used["token"] == "tc"
+
+
+@pytest.mark.asyncio
+async def test_uploaded_attachment_url_stripped_from_text(monkeypatch):
+    """Regression: when an attachment is re-uploaded as a file (links_only off),
+    its URL must be removed from the text so it isn't shown as a link *and* a
+    file."""
+    s = _make_sender()
+    url = "http://cdn.example/att.png?ex=abc"
+
+    async def fake_prepare(self, session, attachments):
+        # Report the attachment as successfully uploaded.
+        return [("att.png", b"data", "image/png")], {url}
+
+    monkeypatch.setattr(UserTokenSender, "_prepare_files", fake_prepare)
+
+    captured = {}
+
+    def fake_multipart(self, content, files):
+        captured["content"] = content
+        return "FORM"
+
+    monkeypatch.setattr(UserTokenSender, "_build_multipart", fake_multipart)
+
+    class _Resp:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class _Session:
+        def post(self, *a, **k):
+            return _Resp()
+
+    s._session_provider = lambda: _Session()
+
+    ok = await s._send_with_token(
+        "tok", 1, f"lol\n{url}", [{"url": url, "filename": "att.png"}]
+    )
+    assert ok is True
+    # The link is gone; only the message text remains (the file carries it).
+    assert url not in captured["content"]
+    assert captured["content"].strip() == "lol"
+
+
+@pytest.mark.asyncio
+async def test_pace_immediate_when_no_delay():
+    import time as _t
+
+    s = _make_sender()
+    t0 = _t.monotonic()
+    for _ in range(5):
+        await s._pace_channel(100, 0, 0)
+    assert _t.monotonic() - t0 < 0.05
+
+
+@pytest.mark.asyncio
+async def test_pace_spaces_consecutive_messages():
+    import time as _t
+
+    s = _make_sender()
+    # First message to a channel is immediate; the next must wait ~the delay
+    # instead of firing in the same burst.
+    await s._pace_channel(100, 0.05, 0.05)
+    t0 = _t.monotonic()
+    await s._pace_channel(100, 0.05, 0.05)
+    assert _t.monotonic() - t0 >= 0.04
+
+
+@pytest.mark.asyncio
+async def test_pace_is_independent_per_channel():
+    import time as _t
+
+    s = _make_sender()
+    await s._pace_channel(100, 0.05, 0.05)
+    # A different channel is not throttled by channel 100's timer.
+    t0 = _t.monotonic()
+    await s._pace_channel(200, 0.05, 0.05)
+    assert _t.monotonic() - t0 < 0.03
+
+
+@pytest.mark.asyncio
 async def test_no_consecutive_repeat_same_channel(monkeypatch):
     """With multiple tokens, the same account should not be picked twice in a
     row for one channel."""

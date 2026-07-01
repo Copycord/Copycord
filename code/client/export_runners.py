@@ -35,7 +35,11 @@ from typing import (
 )
 from discord import ChannelType, ForumChannel, MessageType, Object as DiscordObject
 from discord.errors import HTTPException, Forbidden
-from client.message_utils import _resolve_forward, _resolve_forward_via_snapshot
+from client.message_utils import (
+    _resolve_forward,
+    _resolve_forward_via_snapshot,
+    MessageUtils,
+)
 
 
 DictLike: TypeAlias = Dict[str, Any]
@@ -1632,6 +1636,12 @@ class BackfillEngine:
                     "channel_type": wrapper_channel_type,
                     "author": author_name,
                     "author_id": getattr(real_msg.author, "id", None),
+                    "author_display_name": getattr(
+                        real_msg.author, "display_name", None
+                    ),
+                    "author_role_ids": MessageUtils.author_role_ids(real_msg),
+                    "is_bot": bool(getattr(real_msg.author, "bot", False)),
+                    "webhook_id": getattr(real_msg, "webhook_id", None),
                     "avatar_url": (
                         str(real_msg.author.display_avatar.url)
                         if getattr(real_msg.author, "display_avatar", None)

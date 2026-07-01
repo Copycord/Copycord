@@ -255,6 +255,45 @@ class MessageUtils:
             out.append({"id": int(rid), "name": str(name)})
         return out
 
+    @staticmethod
+    def author_role_ids(src_msg: discord.Message) -> list[int]:
+        """The host author's own role ids (excluding @everyone).
+
+        Used by the server's sticky-author identity feature to mirror the
+        author's roles onto the token account. Falls back to looking the author
+        up as a guild member when the message author is a bare ``User`` (e.g.
+        historical/backfilled messages).
+        """
+        author = getattr(src_msg, "author", None)
+        if author is None:
+            return []
+
+        def _collect(obj) -> list[int]:
+            ids: list[int] = []
+            for r in getattr(obj, "roles", None) or []:
+                try:
+                    if getattr(r, "is_default", None) and r.is_default():
+                        continue
+                    ids.append(int(r.id))
+                except Exception:
+                    continue
+            return ids
+
+        ids = _collect(author)
+        if ids:
+            return ids
+
+        guild = getattr(src_msg, "guild", None)
+        aid = getattr(author, "id", None)
+        if guild is not None and aid is not None:
+            try:
+                member = guild.get_member(int(aid))
+            except Exception:
+                member = None
+            if member is not None:
+                return _collect(member)
+        return []
+
 
 class Snapshot:
     """All snapshot-related helpers, shims, and the REST fallback."""

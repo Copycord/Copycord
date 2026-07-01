@@ -43,6 +43,7 @@ from common.websockets import WebsocketManager, AdminBus
 from common.db import DBManager
 from server.rate_limiter import RateLimitManager, ActionType
 from server.token_sender import UserTokenSender
+from server.token_identity import TokenIdentityManager
 from server.emojis import EmojiManager
 from server.stickers import StickerManager
 from server.roles import RoleManager
@@ -56,6 +57,7 @@ from server.helpers import (
     _calc_text_len_with_urls,
     _safe_mid,
     _anonymize_user,
+    host_message_needs_webhook,
 )
 from server.permission_sync import ChannelPermissionSync
 from server.guild_resolver import GuildResolver
@@ -236,6 +238,15 @@ class ServerReceiver:
             session_provider=self._ensure_aiohttp_session,
             logger=logger,
         )
+        self.token_identity = TokenIdentityManager(
+            bot=self.bot,
+            db=self.db,
+            logger=logger,
+        )
+        # Mappings whose sticky-identity leftovers have already been cleaned up
+        # after the feature was turned off (bounds the cleanup DB read to once
+        # per mapping until identity is re-enabled).
+        self._identity_cleaned: set[str] = set()
         self.backfill = BackfillManager(self, ratelimit=self.ratelimit)
         self.backfills = BackfillTracker(
             bus=self.bus,
@@ -7297,6 +7308,68 @@ class ServerReceiver:
         except Exception:
             return None
 
+    async def _cleanup_token_identity(self, mapping_id) -> None:
+        """Reset leftover sticky identities once after the feature is disabled."""
+        key = str(mapping_id)
+        if key in self._identity_cleaned:
+            return
+        self._identity_cleaned.add(key)
+        try:
+            if self.db.list_token_identities(key):
+                await self.token_identity.reset_mapping(key)
+        except Exception:
+            logger.debug("[identity] cleanup failed for mapping %s", key, exc_info=True)
+
+    async def _prepare_token_identity(
+        self, *, mapping_id, cloned_guild_id, settings: dict, msg: dict
+    ) -> str | None:
+        """Run sticky-author identity prep and return the token id to force.
+
+        Returns None (no forced token) when identity mirroring is off, the
+        strategy isn't sticky_author, there are no tokens, or anything fails.
+        Never raises — the message must still send.
+        """
+        strategy = str(settings.get("USER_TOKEN_STRATEGY") or "round_robin")
+        identity_on = strategy == "sticky_author" and (
+            bool(settings.get("USER_TOKEN_STICKY_NICKNAME"))
+            or bool(settings.get("USER_TOKEN_STICKY_ROLES"))
+        )
+
+        if not identity_on:
+            # Feature was turned off — reset any leftover nicknames/roles once.
+            await self._cleanup_token_identity(mapping_id)
+            return None
+
+        self._identity_cleaned.discard(str(mapping_id))
+
+        if not cloned_guild_id:
+            return None
+
+        try:
+            tokens = self.db.get_enabled_mapping_tokens(str(mapping_id)) or []
+        except Exception:
+            tokens = []
+        if not tokens:
+            return None
+
+        try:
+            return await self.token_identity.prepare(
+                mapping_id=mapping_id,
+                cloned_guild_id=int(cloned_guild_id),
+                author_id=msg.get("author_id"),
+                author_display_name=msg.get("author_display_name")
+                or msg.get("author"),
+                author_role_ids=msg.get("author_role_ids") or [],
+                settings=settings,
+                tokens=tokens,
+            )
+        except Exception:
+            logger.debug(
+                "[identity] prepare failed; sending without identity prep",
+                exc_info=True,
+            )
+            return None
+
     async def _try_user_token_send(
         self,
         *,
@@ -7340,9 +7413,26 @@ class ServerReceiver:
         if not settings.get("USE_USER_TOKENS", False):
             return False
 
+        # Bot/webhook-authored messages and rich embeds can't be reproduced by a
+        # real user account, so let the normal webhook send them (it preserves
+        # the author identity and the embed).
+        if host_message_needs_webhook(msg):
+            return False
+
         mapping_id = self._mapping_id_for(original_guild_id, cloned_guild_id)
         if not mapping_id:
             return False
+
+        # Sticky-author identity: when enabled, let the identity manager pick /
+        # rotate the token for this author and mirror the author's nickname/roles
+        # onto that account BEFORE it sends, so the account that posts is the one
+        # we just made look like the author.
+        forced_token_id = await self._prepare_token_identity(
+            mapping_id=mapping_id,
+            cloned_guild_id=cloned_guild_id,
+            settings=settings,
+            msg=msg,
+        )
 
         try:
             delivered = await self.user_token_sender.send(
@@ -7357,6 +7447,7 @@ class ServerReceiver:
                 min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
                 max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
                 links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
+                forced_token_id=forced_token_id,
             )
         except Exception:
             logger.exception(

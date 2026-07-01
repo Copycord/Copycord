@@ -1381,7 +1381,31 @@ def _safe_mid(msg: dict) -> int | None:
         return mid if mid > 0 else None
     except Exception:
         return None
-    
+
+
+def host_message_needs_webhook(msg: dict) -> bool:
+    """True when a message should be sent via webhook rather than a user token.
+
+    A real user account can't faithfully reproduce these, so routing them to a
+    token would look wrong:
+      * bot- or webhook-authored messages (the identity/embeds would be lost);
+      * messages carrying a *rich* embed (only bots/webhooks can post those; a
+        user token would flatten it to plain text).
+
+    Auto-generated link previews (embed type link/image/video/gifv/article) are
+    NOT rich embeds — the URL lives in the message text and the clone regenerates
+    the preview — so those still go via token.
+    """
+    if not isinstance(msg, dict):
+        return False
+    if msg.get("is_bot") or msg.get("webhook_id"):
+        return True
+    for e in msg.get("embeds") or []:
+        if isinstance(e, dict) and e.get("type") == "rich":
+            return True
+    return False
+
+
 # =============================================================================
 # User Anonymization
 # =============================================================================

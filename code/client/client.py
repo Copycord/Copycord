@@ -1275,6 +1275,12 @@ class ClientListener:
             "channel_type": target_chan.type.value,
             "author": author,
             "author_id": getattr(getattr(src_msg, "author", None), "id", None),
+            "author_display_name": getattr(
+                getattr(src_msg, "author", None), "display_name", None
+            ),
+            "author_role_ids": self.msg.author_role_ids(src_msg),
+            "is_bot": bool(getattr(getattr(src_msg, "author", None), "bot", False)),
+            "webhook_id": getattr(src_msg, "webhook_id", None),
             "avatar_url": (
                 str(src_msg.author.display_avatar.url)
                 if getattr(getattr(src_msg, "author", None), "display_avatar", None)

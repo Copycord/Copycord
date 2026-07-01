@@ -1008,6 +1008,47 @@
                   </select>
                 </div>
 
+                <div class="user-token-sticky-options" id="user-token-sticky-options" hidden>
+                  <div class="mapping-toggle-row" data-setting-key="user_token_sticky_nickname">
+                    <div class="mapping-toggle-info">
+                      <span class="mapping-toggle-name">Mirror author nickname</span>
+                      <span class="mapping-toggle-desc">Rename the assigned account in the clone server to the host
+                        author's display name.</span>
+                    </div>
+                    <label class="toggle mapping-toggle-switch">
+                      <input type="checkbox" id="map_USER_TOKEN_STICKY_NICKNAME" name="USER_TOKEN_STICKY_NICKNAME"
+                        data-map-toggle />
+                      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                    </label>
+                  </div>
+
+                  <div class="mapping-toggle-row" data-setting-key="user_token_sticky_roles">
+                    <div class="mapping-toggle-info">
+                      <span class="mapping-toggle-name">Mirror author roles</span>
+                      <span class="mapping-toggle-desc">Give the assigned account the cloned roles that match the host
+                        author's roles.</span>
+                    </div>
+                    <label class="toggle mapping-toggle-switch">
+                      <input type="checkbox" id="map_USER_TOKEN_STICKY_ROLES" name="USER_TOKEN_STICKY_ROLES"
+                        data-map-toggle />
+                      <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                    </label>
+                  </div>
+
+                  <div class="mapping-toggle-row">
+                    <div class="mapping-toggle-info">
+                      <span class="mapping-toggle-name">Identity hold</span>
+                      <span class="mapping-toggle-desc">How long (minutes) an account keeps an author before rotating to
+                        a free one. 0 = never rotate.</span>
+                    </div>
+                    <div class="user-token-delay">
+                      <input type="number" id="ut_identity_ttl" class="user-token-num" min="0" max="1440" step="5"
+                        placeholder="60" />
+                      <span class="user-token-delay-sep">min</span>
+                    </div>
+                  </div>
+                </div>
+
                 <div class="mapping-toggle-row" data-setting-key="user_token_fallback_webhook">
                   <div class="mapping-toggle-info">
                     <span class="mapping-toggle-name">Fall back to webhook</span>

@@ -54,6 +54,11 @@ class UserTokenSender:
         self._rr_index_by_channel: dict = {}
         # Sticky mode: (mapping_id, author_id) -> token_id assignment.
         self._sticky_author_token: dict = {}
+        # Send-delay pacing: serialize per channel so the configured delay
+        # SPACES messages instead of each message jittering independently
+        # (which would fire concurrent messages in a burst).
+        self._pace_locks: dict = {}
+        self._pace_last_by_channel: dict = {}
 
     # ── public API ───────────────────────────────────────────────────────────
 
@@ -71,10 +76,16 @@ class UserTokenSender:
         min_delay: float = 0.0,
         max_delay: float = 0.0,
         links_only: bool = False,
+        forced_token_id: Optional[str] = None,
     ) -> bool:
         """
         Attempt to post a message into ``target_channel_id`` (a channel or thread
         id in the clone guild) as one of the mapping's user tokens.
+
+        When ``forced_token_id`` is given (the identity manager already decided
+        which account should send), that token is tried first, bypassing the
+        strategy ordering — this keeps the account that received the mirrored
+        nickname/roles the same account that posts the message.
 
         Returns True on success, False if there are no usable tokens or every
         token failed — in which case the caller should fall back to the webhook.
@@ -109,16 +120,25 @@ class UserTokenSender:
         # the message text, so just skip the multipart upload.
         atts_to_upload = [] if links_only else atts
 
-        # Pick the order of accounts to try, per the selected strategy.
-        order = self._order_tokens(
-            tokens, chan, strategy, author_id, mapping_id
-        )
+        # Pick the order of accounts to try. When the identity manager already
+        # chose a token, try it first (then the rest as fallback); otherwise use
+        # the configured strategy ordering.
+        if forced_token_id is not None:
+            forced = [
+                t for t in tokens if str(t.get("token_id")) == str(forced_token_id)
+            ]
+            rest = [
+                t for t in tokens if str(t.get("token_id")) != str(forced_token_id)
+            ]
+            order = forced + rest
+        else:
+            order = self._order_tokens(
+                tokens, chan, strategy, author_id, mapping_id
+            )
 
-        # Optional spacing so bursts look less automated / ease rate limits.
-        lo = max(0.0, float(min_delay or 0.0))
-        hi = max(lo, float(max_delay or 0.0))
-        if hi > 0:
-            await asyncio.sleep(random.uniform(lo, min(hi, 30.0)))
+        # Optional spacing so messages don't arrive in a burst. Serialized per
+        # channel so each message waits a random gap after the previous one.
+        await self._pace_channel(chan, min_delay, max_delay)
 
         for tok in order:
             token_value = (tok.get("token_value") or "").strip()
@@ -192,6 +212,34 @@ class UserTokenSender:
 
     # ── send implementation ──────────────────────────────────────────────────
 
+    async def _pace_channel(self, chan: int, min_delay, max_delay) -> None:
+        """Space sends to a channel by a random gap.
+
+        Unlike a bare per-message sleep (which lets concurrent messages fire at
+        once), this serializes on a per-channel lock and waits until at least a
+        random ``[min, max]`` seconds after the previous send — so bursts are
+        spread out. When messages arrive slower than the gap, there is no wait.
+        """
+        lo = max(0.0, float(min_delay or 0.0))
+        hi = max(lo, float(max_delay or 0.0))
+        if hi <= 0:
+            return
+
+        lock = self._pace_locks.get(chan)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._pace_locks[chan] = lock
+
+        async with lock:
+            loop = asyncio.get_event_loop()
+            now = loop.time()
+            gap = random.uniform(lo, min(hi, 30.0))
+            last = self._pace_last_by_channel.get(chan, 0.0)
+            wait = (last + gap) - now
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._pace_last_by_channel[chan] = loop.time()
+
     async def _send_with_token(
         self,
         token: str,
@@ -202,15 +250,15 @@ class UserTokenSender:
         typing: bool = False,
     ) -> bool:
         session = self._session_provider()
-        files, kept_urls = await self._prepare_files(session, attachments)
+        files, uploaded_urls = await self._prepare_files(session, attachments)
 
-        # Any attachment that was uploaded as a file gets its URL stripped from
-        # the text to avoid showing the link twice. Attachments we could not
-        # download keep their URL in the text as a fallback.
+        # Any attachment we uploaded as a real file gets its URL stripped from
+        # the text so the link isn't shown alongside the upload. Attachments we
+        # could not download keep their URL in the text as a fallback link.
         body_text = text
         for a in attachments:
             url = a.get("url")
-            if url and url not in kept_urls and url in body_text:
+            if url and url in uploaded_urls and url in body_text:
                 body_text = body_text.replace(url, "").strip()
 
         if len(body_text) > MAX_CONTENT_LEN:
@@ -289,14 +337,15 @@ class UserTokenSender:
             pass
 
     async def _prepare_files(self, session: aiohttp.ClientSession, attachments: list):
-        """Download attachments and return (files, kept_urls).
+        """Download attachments and return (files, uploaded_urls).
 
         ``files`` is a list of (filename, bytes, content_type) tuples that will
-        be uploaded as multipart. ``kept_urls`` is the set of source URLs that
-        were successfully downloaded (so the caller can strip them from text).
+        be uploaded as multipart. ``uploaded_urls`` is the set of source URLs we
+        downloaded successfully (so the caller can strip them from the text — the
+        file replaces the link).
         """
         files: list = []
-        kept_urls: set = set()
+        uploaded_urls: set = set()
 
         for a in attachments:
             url = a.get("url")
@@ -327,9 +376,9 @@ class UserTokenSender:
 
             filename = a.get("filename") or self._basename(url) or "file.bin"
             files.append((filename, data, ctype))
-            kept_urls.add(url)
+            uploaded_urls.add(url)
 
-        return files, kept_urls
+        return files, uploaded_urls
 
     def _build_multipart(self, content: str, files: list) -> aiohttp.FormData:
         form = aiohttp.FormData()

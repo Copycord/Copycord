@@ -650,6 +650,89 @@ class TestMappingUserTokens:
         db.increment_mapping_token_usage(tid)
         assert db.get_mapping_token(tid)["use_count"] == 1
 
+    def test_enabled_tokens_include_user_id(self, db):
+        # The identity manager needs user_id to resolve the token's member.
+        self._mapping(db)
+        db.add_mapping_token("ut-map", "tokA", username="acc", user_id="4242")
+        enabled = db.get_enabled_mapping_tokens("ut-map")
+        assert len(enabled) == 1
+        assert enabled[0]["user_id"] == "4242"
+        assert enabled[0]["username"] == "acc"
+
+
+class TestMappingTokenIdentities:
+
+    def _mapping(self, db, mapping_id="id-map", ogid=1, cgid=2):
+        return db.upsert_guild_mapping(
+            mapping_id=mapping_id,
+            mapping_name="ID",
+            original_guild_id=ogid,
+            original_guild_name="",
+            original_guild_icon_url=None,
+            cloned_guild_id=cgid,
+            cloned_guild_name="",
+        )
+
+    def test_upsert_and_get(self, db):
+        self._mapping(db)
+        db.upsert_token_identity(
+            mapping_id="id-map",
+            author_id="111",
+            token_id="tok1",
+            cloned_guild_id=2,
+            applied_nick="Alice",
+            applied_role_ids=[30, 20, 10],
+            assigned_at=1000,
+        )
+        row = db.get_token_identity("id-map", "111")
+        assert row["token_id"] == "tok1"
+        assert row["applied_nick"] == "Alice"
+        # Role ids round-trip as a sorted int list.
+        assert row["applied_role_ids"] == [10, 20, 30]
+        assert row["assigned_at"] == 1000
+
+    def test_upsert_replaces(self, db):
+        self._mapping(db)
+        db.upsert_token_identity(
+            mapping_id="id-map", author_id="111", token_id="tok1",
+            cloned_guild_id=2, applied_nick="A", applied_role_ids=[1],
+            assigned_at=1000,
+        )
+        db.upsert_token_identity(
+            mapping_id="id-map", author_id="111", token_id="tok2",
+            cloned_guild_id=2, applied_nick="B", applied_role_ids=[],
+            assigned_at=2000,
+        )
+        assert len(db.list_token_identities("id-map")) == 1
+        row = db.get_token_identity("id-map", "111")
+        assert row["token_id"] == "tok2"
+        assert row["applied_role_ids"] == []
+        assert row["assigned_at"] == 2000
+
+    def test_list_and_delete(self, db):
+        self._mapping(db)
+        for aid in ("a", "b", "c"):
+            db.upsert_token_identity(
+                mapping_id="id-map", author_id=aid, token_id="t",
+                cloned_guild_id=2, applied_nick=None, applied_role_ids=[],
+                assigned_at=1,
+            )
+        assert len(db.list_token_identities("id-map")) == 3
+        assert db.delete_token_identity("id-map", "b") is True
+        assert len(db.list_token_identities("id-map")) == 2
+        assert db.clear_token_identities("id-map") == 2
+        assert db.list_token_identities("id-map") == []
+
+    def test_cascade_on_mapping_delete(self, db):
+        mid = self._mapping(db, mapping_id="id-cascade")
+        db.upsert_token_identity(
+            mapping_id=mid, author_id="1", token_id="t",
+            cloned_guild_id=2, applied_nick="x", applied_role_ids=[1],
+            assigned_at=1,
+        )
+        db.delete_guild_mapping(mid)
+        assert db.list_token_identities(mid) == []
+
 
 # ---------------------------------------------------------------------------
 # Cascade: deleting a guild mapping cleans child tables
