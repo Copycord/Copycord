@@ -11148,6 +11148,100 @@ body.page-forwarding .fwd-no-match-sub {
   gap: 10px;
   margin-top: 10px;
 }
+.user-token-bulk-btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.user-token-bulk-content {
+  max-width: 620px;
+  width: 94vw;
+}
+.user-token-bulk-body {
+  padding: 12px 16px 16px;
+}
+.user-token-bulk-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #140b26;
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  outline: 0;
+  resize: none;
+  height: 132px;
+  overflow: auto;
+  white-space: pre;
+}
+.user-token-bulk-textarea:focus {
+  border-color: var(--accent);
+}
+.user-token-bulk-textarea::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.user-token-bulk-textarea::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background-clip: padding-box;
+}
+.user-token-bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+.user-token-bulk-results {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--accent) transparent;
+}
+.user-token-bulk-results::-webkit-scrollbar {
+  width: 10px;
+}
+.user-token-bulk-results::-webkit-scrollbar-track {
+  background: transparent;
+}
+.user-token-bulk-results::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, var(--primary), var(--primary-700));
+  border: 2px solid transparent;
+  border-radius: 12px;
+  background-clip: padding-box;
+}
+.user-token-bulk-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 4px 2px;
+}
+.user-token-bulk-row .btok {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+}
+.user-token-bulk-row .bstatus {
+  margin-left: auto;
+  font-weight: 600;
+}
+.user-token-bulk-row .bstatus.added {
+  color: #86efac;
+}
+.user-token-bulk-row .bstatus.duplicate {
+  color: var(--muted);
+}
+.user-token-bulk-row .bstatus.invalid,
+.user-token-bulk-row .bstatus.error {
+  color: #f4a3a3;
+}
 .user-token-add-btn {
   flex: 0 0 auto;
   min-width: 108px;

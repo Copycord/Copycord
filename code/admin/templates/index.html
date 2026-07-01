@@ -977,7 +977,7 @@
           <details class="mapping-section mapping-settings-section" id="user-tokens-section">
             <summary class="mapping-section-header">
               <span class="mapping-section-chev" aria-hidden="true">&#9662;</span>
-              <span>User Message Sending</span>
+              <span>Token Message Forwarding</span>
             </summary>
             <div class="mapping-section-body">
               <div class="user-token-disclaimer">
@@ -1003,9 +1003,8 @@
                     <span class="mapping-toggle-desc" id="ut_strategy_desc"></span>
                   </div>
                   <select id="ut_strategy" class="user-token-select">
-                    <option value="random">Random</option>
-                    <option value="round_robin">Round-robin</option>
-                    <option value="sticky_author">Sticky</option>
+                    <option value="round_robin">Rotate evenly</option>
+                    <option value="sticky_author">Sticky per author</option>
                   </select>
                 </div>
 
@@ -1092,6 +1091,8 @@
                     <div class="user-token-add-row">
                       <button type="button" id="user-token-add" class="btn btn-primary user-token-add-btn">Add
                         token</button>
+                      <button type="button" id="user-token-bulk-open"
+                        class="btn btn-ghost user-token-bulk-btn">Bulk add</button>
                       <span class="user-token-status" id="user-token-status" aria-live="polite"></span>
                     </div>
                   </div>
@@ -1626,6 +1627,28 @@
       </div>
     </div>
 
+
+    <div id="user-token-bulk-modal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content user-token-bulk-content" role="dialog" aria-modal="true"
+        aria-labelledby="user-token-bulk-title">
+        <div class="modal-header">
+          <div class="modal-title-wrap">
+            <div class="modal-title-main" id="user-token-bulk-title">Bulk add user tokens</div>
+          </div>
+          <button type="button" id="user-token-bulk-close" class="icon-btn verify-close" aria-label="Close">&#10005;</button>
+        </div>
+        <div class="user-token-bulk-body">
+          <textarea id="user_token_bulk_input" class="user-token-bulk-textarea" rows="6" spellcheck="false"
+            autocomplete="off" wrap="off" placeholder="Paste tokens here, one per line…"></textarea>
+          <div class="user-token-bulk-actions">
+            <button type="button" id="user-token-bulk-submit" class="btn btn-primary">Verify &amp; add</button>
+            <span class="user-token-status" id="user-token-bulk-status" aria-live="polite"></span>
+          </div>
+          <div id="user-token-bulk-results" class="user-token-bulk-results"></div>
+        </div>
+      </div>
+    </div>
 
     <div id="toast-root" class="toast-root" aria-live="polite" aria-atomic="true"></div>
 

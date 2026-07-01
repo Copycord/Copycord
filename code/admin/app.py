@@ -5867,6 +5867,80 @@ async def api_add_mapping_token(mapping_id: str, payload: dict = Body(...)):
     )
 
 
+@app.post(
+    "/api/guild-mappings/{mapping_id}/user-tokens/bulk",
+    response_class=JSONResponse,
+)
+async def api_bulk_add_mapping_tokens(mapping_id: str, payload: dict = Body(...)):
+    m = db.get_mapping_by_id(mapping_id)
+    if not m:
+        return JSONResponse(
+            {"ok": False, "error": "Mapping not found."}, status_code=404
+        )
+
+    raw = payload.get("tokens")
+    if isinstance(raw, str):
+        candidates = raw.splitlines()
+    elif isinstance(raw, list):
+        candidates = [str(t) for t in raw]
+    else:
+        candidates = []
+
+    # Trim, drop blanks, and de-duplicate the pasted input (preserve order).
+    seen_input: set[str] = set()
+    tokens: list[str] = []
+    for c in candidates:
+        t = c.strip()
+        if t and t not in seen_input:
+            seen_input.add(t)
+            tokens.append(t)
+
+    try:
+        clone_gid = int(m.get("cloned_guild_id") or 0)
+    except Exception:
+        clone_gid = 0
+
+    existing = {r["token_value"] for r in db.list_mapping_tokens(mapping_id)}
+
+    results = []
+    added = 0
+    # Validate sequentially to avoid hammering Discord's rate limits.
+    for t in tokens:
+        masked = _mask_token(t)
+        if t in existing:
+            results.append({"masked": masked, "status": "duplicate"})
+            continue
+
+        in_clone = await _selfbot_in_guild(t, clone_gid)
+        if not in_clone:
+            results.append({"masked": masked, "status": "invalid"})
+            continue
+
+        ident = await _selfbot_identity(t)
+        username = (ident or {}).get("username") or None
+        user_id = (ident or {}).get("id") or None
+        try:
+            db.add_mapping_token(mapping_id, t, username=username, user_id=user_id)
+            existing.add(t)
+            added += 1
+            results.append(
+                {"masked": masked, "status": "added", "username": username}
+            )
+        except sqlite3.IntegrityError:
+            results.append({"masked": masked, "status": "duplicate"})
+        except Exception:
+            results.append({"masked": masked, "status": "error"})
+
+    return JSONResponse(
+        {
+            "ok": True,
+            "added": added,
+            "total": len(tokens),
+            "results": results,
+        }
+    )
+
+
 @app.patch(
     "/api/guild-mappings/{mapping_id}/user-tokens/{token_id}",
     response_class=JSONResponse,

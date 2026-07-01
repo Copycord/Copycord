@@ -207,7 +207,7 @@
     DB_CLEANUP_MSG: true,
     ON_DEMAND_WEBHOOKS: true,
     USE_USER_TOKENS: false,
-    USER_TOKEN_STRATEGY: "random",
+    USER_TOKEN_STRATEGY: "round_robin",
     USER_TOKEN_FALLBACK_WEBHOOK: true,
     USER_TOKEN_TYPING: false,
     USER_TOKEN_MIN_DELAY: 0,
@@ -2466,7 +2466,7 @@
       };
       const stratEl = document.getElementById("ut_strategy");
       if (stratEl) {
-        stratEl.value = pickSetting("USER_TOKEN_STRATEGY") || "random";
+        stratEl.value = normalizeStrategy(pickSetting("USER_TOKEN_STRATEGY"));
         // Sync the custom .dd dropdown label (it listens for `change`).
         stratEl.dispatchEvent(new Event("change", { bubbles: true }));
       }
@@ -2545,12 +2545,16 @@
   let USER_TOKENS_MAPPING_ID = null;
 
   const UT_STRATEGY_DESCS = {
-    random:
-      "Picks a random account per message, avoiding the same account twice in a row.",
-    round_robin: "Rotates through accounts evenly — each one sends in turn.",
+    round_robin:
+      "Cycles through your accounts in turn so each sends an equal share.",
     sticky_author:
       "Each source user always sends from the same account, keeping identities consistent.",
   };
+
+  function normalizeStrategy(v) {
+    // "random" was removed — treat any legacy/unknown value as rotate.
+    return v === "sticky_author" ? "sticky_author" : "round_robin";
+  }
 
   function updateStrategyDesc() {
     const sel = document.getElementById("ut_strategy");
@@ -2804,6 +2808,116 @@
   document
     .getElementById("user_tokens_search")
     ?.addEventListener("input", filterUserTokens);
+
+  // ── Bulk add tokens ──
+  function setBulkTokenStatus(msg, type) {
+    const el = document.getElementById("user-token-bulk-status");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.classList.remove("is-error", "is-ok");
+    if (type === "error") el.classList.add("is-error");
+    else if (type === "ok") el.classList.add("is-ok");
+  }
+
+  function openBulkTokenModal() {
+    if (!USER_TOKENS_MAPPING_ID) return;
+    const modal = document.getElementById("user-token-bulk-modal");
+    const input = document.getElementById("user_token_bulk_input");
+    const results = document.getElementById("user-token-bulk-results");
+    if (input) input.value = "";
+    if (results) results.innerHTML = "";
+    setBulkTokenStatus("");
+    if (!modal) return;
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+    if (input) input.focus();
+  }
+
+  function closeBulkTokenModal() {
+    const modal = document.getElementById("user-token-bulk-modal");
+    if (!modal) return;
+    modal.classList.remove("show");
+    modal.setAttribute("aria-hidden", "true");
+  }
+
+  function renderBulkTokenResults(results) {
+    const box = document.getElementById("user-token-bulk-results");
+    if (!box) return;
+    box.innerHTML = "";
+    const labels = {
+      added: "Added",
+      duplicate: "Already added",
+      invalid: "Invalid / not in server",
+      error: "Error",
+    };
+    for (const r of results || []) {
+      const row = document.createElement("div");
+      row.className = "user-token-bulk-row";
+      const tok = document.createElement("span");
+      tok.className = "btok";
+      tok.textContent = r.masked + (r.username ? ` · ${r.username}` : "");
+      const st = document.createElement("span");
+      st.className = `bstatus ${r.status}`;
+      st.textContent = labels[r.status] || r.status;
+      row.appendChild(tok);
+      row.appendChild(st);
+      box.appendChild(row);
+    }
+  }
+
+  async function submitBulkTokens() {
+    if (!USER_TOKENS_MAPPING_ID) return;
+    const input = document.getElementById("user_token_bulk_input");
+    const btn = document.getElementById("user-token-bulk-submit");
+    const text = (input?.value || "").trim();
+    if (!text) {
+      setBulkTokenStatus("Paste at least one token.", "error");
+      return;
+    }
+    if (btn) btn.disabled = true;
+    setBulkTokenStatus("Validating… this can take a moment.");
+    try {
+      const res = await fetch(
+        `/api/guild-mappings/${encodeURIComponent(
+          USER_TOKENS_MAPPING_ID
+        )}/user-tokens/bulk`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tokens: text }),
+        }
+      );
+      const j = await res.json();
+      if (!j.ok) {
+        setBulkTokenStatus(j.error || "Failed to add tokens.", "error");
+        return;
+      }
+      renderBulkTokenResults(j.results);
+      const skipped = (j.total || 0) - (j.added || 0);
+      setBulkTokenStatus(
+        `Added ${j.added} of ${j.total}${skipped ? `, ${skipped} skipped` : ""}.`,
+        j.added ? "ok" : "error"
+      );
+      await loadUserTokens();
+    } catch (e) {
+      setBulkTokenStatus("Network error.", "error");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  document
+    .getElementById("user-token-bulk-open")
+    ?.addEventListener("click", openBulkTokenModal);
+  document
+    .getElementById("user-token-bulk-close")
+    ?.addEventListener("click", closeBulkTokenModal);
+  document
+    .getElementById("user-token-bulk-submit")
+    ?.addEventListener("click", submitBulkTokens);
+  document
+    .querySelector("#user-token-bulk-modal .modal-backdrop")
+    ?.addEventListener("click", closeBulkTokenModal);
 
   document
     .querySelector(".token-user-btn[data-target='user_token_value']")

@@ -145,6 +145,31 @@ class TestSelectionStrategies:
         }
         assert len(firsts) > 1
 
+    def test_sticky_author_distinct_authors_get_distinct_tokens(self):
+        # Regression: different authors must not all land on the same account
+        # when there are enough tokens to go around.
+        s = _make_sender()
+        toks = [{"token_id": "a"}, {"token_id": "b"}, {"token_id": "c"}]
+        picks = [
+            s._order_tokens(toks, 1, "sticky_author", a)[0]["token_id"]
+            for a in ("userA", "userB", "userC")
+        ]
+        assert len(set(picks)) == 3
+        # And each author keeps its assignment on repeat.
+        assert s._order_tokens(toks, 1, "sticky_author", "userA")[0][
+            "token_id"
+        ] == picks[0]
+
+    def test_sticky_author_scoped_per_mapping(self):
+        s = _make_sender()
+        toks_x = [{"token_id": "x1"}, {"token_id": "x2"}]
+        toks_y = [{"token_id": "y1"}, {"token_id": "y2"}]
+        # Same author in two mappings resolves within each mapping's own tokens.
+        px = s._order_tokens(toks_x, 1, "sticky_author", "u", "mapX")[0]["token_id"]
+        py = s._order_tokens(toks_y, 1, "sticky_author", "u", "mapY")[0]["token_id"]
+        assert px in ("x1", "x2")
+        assert py in ("y1", "y2")
+
 
 @pytest.mark.asyncio
 async def test_links_only_skips_upload(monkeypatch):

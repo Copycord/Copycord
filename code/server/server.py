@@ -7339,7 +7339,7 @@ class ServerReceiver:
                 embeds=(payload or {}).get("embeds"),
                 attachments=msg.get("attachments"),
                 author_id=msg.get("author_id"),
-                strategy=str(settings.get("USER_TOKEN_STRATEGY") or "random"),
+                strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
                 typing=bool(settings.get("USER_TOKEN_TYPING", False)),
                 min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
                 max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),

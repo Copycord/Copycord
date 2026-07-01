@@ -377,6 +377,54 @@ class TestMappingUserTokensAPI:
         )
         assert resp.status_code == 404
 
+    @pytest.mark.asyncio
+    async def test_bulk_add_dedupes_and_adds(self, client, monkeypatch):
+        import admin.app as app_mod
+
+        monkeypatch.setattr(
+            app_mod, "_selfbot_in_guild", AsyncMock(return_value=True)
+        )
+        monkeypatch.setattr(
+            app_mod,
+            "_selfbot_identity",
+            AsyncMock(return_value={"id": "1", "username": "u"}),
+        )
+        mid = self._make_mapping()
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens/bulk",
+            json={"tokens": "tokaaaaaaaa\ntokbbbbbbbb\n  \ntokaaaaaaaa"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["ok"] is True
+        # Blank + duplicate line collapse to two unique tokens.
+        assert body["total"] == 2
+        assert body["added"] == 2
+
+        resp = await client.get(f"/api/guild-mappings/{mid}/user-tokens")
+        assert len(resp.json()["tokens"]) == 2
+
+    @pytest.mark.asyncio
+    async def test_bulk_add_marks_invalid(self, client, monkeypatch):
+        import admin.app as app_mod
+
+        async def fake_in_guild(token, gid):
+            return token == "goodtoken1"
+
+        monkeypatch.setattr(app_mod, "_selfbot_in_guild", fake_in_guild)
+        monkeypatch.setattr(
+            app_mod, "_selfbot_identity", AsyncMock(return_value=None)
+        )
+        mid = self._make_mapping()
+        resp = await client.post(
+            f"/api/guild-mappings/{mid}/user-tokens/bulk",
+            json={"tokens": "goodtoken1\nbadtoken2"},
+        )
+        body = resp.json()
+        assert body["added"] == 1
+        statuses = sorted(r["status"] for r in body["results"])
+        assert statuses == ["added", "invalid"]
+
 
 # ---------------------------------------------------------------------------
 # Version endpoint

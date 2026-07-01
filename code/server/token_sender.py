@@ -62,10 +62,10 @@ class UserTokenSender:
         self._log = logger
         # One stable device fingerprint per token (keyed by token string).
         self._fingerprints: dict = {}
-        # Last token id used per channel, to avoid back-to-back repeats.
-        self._last_token_by_channel: dict = {}
         # Rotating index per channel for round-robin selection.
         self._rr_index_by_channel: dict = {}
+        # Sticky mode: (mapping_id, author_id) -> token_id assignment.
+        self._sticky_author_token: dict = {}
 
     # ── public API ───────────────────────────────────────────────────────────
 
@@ -78,7 +78,7 @@ class UserTokenSender:
         embeds: Optional[list] = None,
         attachments: Optional[list] = None,
         author_id=None,
-        strategy: str = "random",
+        strategy: str = "round_robin",
         typing: bool = False,
         min_delay: float = 0.0,
         max_delay: float = 0.0,
@@ -122,7 +122,9 @@ class UserTokenSender:
         atts_to_upload = [] if links_only else atts
 
         # Pick the order of accounts to try, per the selected strategy.
-        order = self._order_tokens(tokens, chan, strategy, author_id)
+        order = self._order_tokens(
+            tokens, chan, strategy, author_id, mapping_id
+        )
 
         # Optional spacing so bursts look less automated / ease rate limits.
         lo = max(0.0, float(min_delay or 0.0))
@@ -153,7 +155,6 @@ class UserTokenSender:
             if ok:
                 tid = tok.get("token_id")
                 if tid:
-                    self._last_token_by_channel[chan] = tid
                     try:
                         self._db.increment_mapping_token_usage(tid)
                     except Exception:
@@ -174,38 +175,38 @@ class UserTokenSender:
 
     # ── account selection ─────────────────────────────────────────────────────
 
-    def _order_tokens(self, tokens: list, chan: int, strategy: str, author_id):
+    def _order_tokens(
+        self, tokens: list, chan: int, strategy: str, author_id, mapping_id=None
+    ):
         """Return the tokens in the order to try, per the selected strategy."""
         toks = list(tokens)
         if len(toks) <= 1:
             return toks
 
-        if strategy == "round_robin":
-            # Even rotation: advance one step each call for this channel.
-            ordered = sorted(toks, key=lambda t: str(t.get("token_id")))
-            idx = self._rr_index_by_channel.get(chan, 0) % len(ordered)
-            self._rr_index_by_channel[chan] = (idx + 1) % len(ordered)
-            return ordered[idx:] + ordered[:idx]
-
         if strategy == "sticky_author" and author_id:
-            # Same source author always maps to the same account.
+            # Each source author is assigned one account and always uses it.
+            # New authors are handed the least-used account so distinct authors
+            # spread across distinct accounts until the accounts run out.
             ordered = sorted(toks, key=lambda t: str(t.get("token_id")))
-            h = int(
-                hashlib.sha256(str(author_id).encode("utf-8")).hexdigest()[:8], 16
-            )
-            idx = h % len(ordered)
+            ids = [str(t.get("token_id")) for t in ordered]
+            key = (str(mapping_id), str(author_id))
+            assigned = self._sticky_author_token.get(key)
+            if assigned not in ids:
+                counts = {tid: 0 for tid in ids}
+                for (mid, _aid), tid in self._sticky_author_token.items():
+                    if mid == str(mapping_id) and tid in counts:
+                        counts[tid] += 1
+                assigned = min(ids, key=lambda tid: counts[tid])
+                self._sticky_author_token[key] = assigned
+            idx = ids.index(assigned)
             return ordered[idx:] + ordered[:idx]
 
-        # Default "random": shuffle, but avoid repeating the last account used in
-        # this channel so bursts don't group under one author.
-        random.shuffle(toks)
-        last = self._last_token_by_channel.get(chan)
-        if last is not None and toks[0].get("token_id") == last:
-            for i in range(1, len(toks)):
-                if toks[i].get("token_id") != last:
-                    toks[0], toks[i] = toks[i], toks[0]
-                    break
-        return toks
+        # Default / "round_robin" (and any legacy value): even rotation per
+        # channel so every account sends an equal share.
+        ordered = sorted(toks, key=lambda t: str(t.get("token_id")))
+        idx = self._rr_index_by_channel.get(chan, 0) % len(ordered)
+        self._rr_index_by_channel[chan] = (idx + 1) % len(ordered)
+        return ordered[idx:] + ordered[:idx]
 
     # ── send implementation ──────────────────────────────────────────────────
 
