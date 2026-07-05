@@ -390,8 +390,20 @@ class TokenIdentityManager:
         return applied_nick, applied_role_ids
 
     async def _reset_identity(
-        self, guild, member, *, applied_nick, applied_role_ids
+        self, guild, member, *, applied_nick=None, applied_role_ids=None
     ) -> None:
+        """Return a token account to a clean slate when its identity changes.
+
+        Called when an author rotates to a different token (the previous token
+        must be cleared) or when the feature is disabled. When we mirrored a
+        nickname onto the account we clear it; when we mirrored roles onto it we
+        strip **every** role the bot is able to remove — not just the ones we
+        recorded — so nothing lingers on the previous identity even if the exact
+        applied-role list was lost or another author had used the account. Roles
+        are only touched when we had actually applied roles, so a nickname-only
+        mapping never strips roles the account legitimately holds.
+        """
+        # Clear the mirrored nickname (only when we set one).
         if applied_nick is not None and member.nick:
             try:
                 await member.edit(nick=None, reason="Copycord sticky identity reset")
@@ -408,11 +420,16 @@ class TokenIdentityManager:
                     exc_info=True,
                 )
 
-        to_remove = []
-        for rid in applied_role_ids or []:
-            r = guild.get_role(int(rid))
-            if r is not None and r in member.roles:
-                to_remove.append(r)
+        # If we had mirrored roles onto this identity, strip every removable role
+        # (managed roles, @everyone, and roles above the bot can't be removed and
+        # are skipped) so no mirrored role lingers on the previous token.
+        if not applied_role_ids:
+            return
+        to_remove = [
+            r
+            for r in getattr(member, "roles", [])
+            if self._role_assignable(guild, r)
+        ]
         if to_remove:
             try:
                 await member.remove_roles(

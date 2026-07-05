@@ -288,3 +288,44 @@ class TestPrepareIdempotency:
         await mgr.prepare(**kw)
         assert member.added == added_after_first
         assert member.removed == []
+
+
+class TestResetIdentity:
+
+    @pytest.mark.asyncio
+    async def test_reset_strips_all_removable_roles_and_clears_nick(self):
+        # The previous token must come back clean when the identity changes:
+        # every removable role is stripped (even ones we never recorded), the
+        # managed role stays (can't be removed), and the nickname is cleared.
+        mirrored = _Role(20, position=5)
+        untracked = _Role(21, position=6)
+        managed = _Role(22, position=7, managed=True)
+        member = _Member(500, nick="Alice", roles=[mirrored, untracked, managed])
+        guild = _Guild(2, {500: member}, {20: mirrored, 21: untracked, 22: managed})
+        mgr = TokenIdentityManager(bot=_Bot(guild), db=_DB(), logger=_silent())
+
+        await mgr._reset_identity(
+            guild, member, applied_nick="Alice", applied_role_ids=[20]
+        )
+
+        remaining = [r.id for r in member.roles]
+        assert 20 not in remaining
+        assert 21 not in remaining
+        assert 22 in remaining
+        assert member.nick is None
+
+    @pytest.mark.asyncio
+    async def test_reset_leaves_roles_when_none_were_mirrored(self):
+        # Nickname-only identity (no roles applied) must not touch the account's
+        # roles, only clear the nickname.
+        base = _Role(30, position=3)
+        member = _Member(500, nick="Bob", roles=[base])
+        guild = _Guild(2, {500: member}, {30: base})
+        mgr = TokenIdentityManager(bot=_Bot(guild), db=_DB(), logger=_silent())
+
+        await mgr._reset_identity(
+            guild, member, applied_nick="Bob", applied_role_ids=[]
+        )
+
+        assert [r.id for r in member.roles] == [30]
+        assert member.nick is None
