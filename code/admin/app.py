@@ -305,7 +305,6 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "USER_TOKEN_LINKS_ONLY": False,
     "USER_TOKEN_STICKY_NICKNAME": False,
     "USER_TOKEN_STICKY_ROLES": False,
-    "USER_TOKEN_IDENTITY_TTL_MIN": 60,
     "COPYCORD_AUTOSTART": "false",
     "LOG_MAX_SIZE_MB": "10",
 }

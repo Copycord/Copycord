@@ -215,7 +215,6 @@
     USER_TOKEN_LINKS_ONLY: false,
     USER_TOKEN_STICKY_NICKNAME: false,
     USER_TOKEN_STICKY_ROLES: false,
-    USER_TOKEN_IDENTITY_TTL_MIN: 60,
   };
 
   let lastFocusLog = null;
@@ -1909,12 +1908,6 @@
     const maxDelayEl = document.getElementById("ut_max_delay");
     if (maxDelayEl)
       settings.USER_TOKEN_MAX_DELAY = parseFloat(maxDelayEl.value) || 0;
-    const ttlEl = document.getElementById("ut_identity_ttl");
-    if (ttlEl) {
-      const ttl = parseInt(ttlEl.value, 10);
-      settings.USER_TOKEN_IDENTITY_TTL_MIN = Number.isFinite(ttl) ? ttl : 60;
-    }
-
     return {
       mapping_id: id,
       mapping_name,
@@ -2483,8 +2476,6 @@
       if (minDelayEl) minDelayEl.value = pickSetting("USER_TOKEN_MIN_DELAY") ?? 0;
       const maxDelayEl = document.getElementById("ut_max_delay");
       if (maxDelayEl) maxDelayEl.value = pickSetting("USER_TOKEN_MAX_DELAY") ?? 0;
-      const ttlEl = document.getElementById("ut_identity_ttl");
-      if (ttlEl) ttlEl.value = pickSetting("USER_TOKEN_IDENTITY_TTL_MIN") ?? 60;
     }
 
     // Per-mapping user tokens can only be managed once the mapping exists.

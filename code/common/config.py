@@ -139,7 +139,6 @@ class Config:
             "USER_TOKEN_LINKS_ONLY": False,
             "USER_TOKEN_STICKY_NICKNAME": False,
             "USER_TOKEN_STICKY_ROLES": False,
-            "USER_TOKEN_IDENTITY_TTL_MIN": 60,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):

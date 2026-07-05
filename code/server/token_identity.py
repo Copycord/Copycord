@@ -13,9 +13,11 @@ Sticky-author identity manager.
 Under the ``sticky_author`` user-token strategy this makes the token account
 that posts a cloned message *look like* the host author: the server bot sets the
 account's nickname to the host author's display name and grants it the cloned
-roles that correspond to the author's host roles. Each author holds a token for
-``USER_TOKEN_IDENTITY_TTL_MIN`` minutes; after that they rotate to a currently
-unused token and the previous account's nickname/roles are reset.
+roles that correspond to the author's host roles. Each author is assigned one
+token permanently and only swaps to an unused token if its token goes bad
+(disabled or failing to send); on a swap the previous account's nickname/roles
+are reset. When no unused token is free the caller falls back to a webhook or
+skips the message per ``USER_TOKEN_FALLBACK_WEBHOOK``.
 
 Only the py-cord bot (``self.bot``) can edit members, so this manager owns token
 *selection* as well — it hands the chosen ``token_id`` back to the caller, which
@@ -43,6 +45,21 @@ class TokenIdentityManager:
         # One lock per mapping so concurrent authors don't race token selection
         # or clobber each other's nickname edits.
         self._locks: dict[str, asyncio.Lock] = {}
+        # Tokens that failed to deliver this run, per mapping. Excluded from
+        # selection so an author swaps off a bad token (and no one else is
+        # assigned it). In-memory only — cleared on restart, where every token
+        # is retried fresh.
+        self._bad_tokens: dict[str, set[str]] = {}
+
+    def mark_token_bad(self, mapping_id, token_id) -> None:
+        """Record that a token failed to send so selection swaps away from it.
+
+        Applies for the rest of this process run; a restart clears it and the
+        token is tried again.
+        """
+        if not mapping_id or not token_id:
+            return
+        self._bad_tokens.setdefault(str(mapping_id), set()).add(str(token_id))
 
     # ── selection (pure, unit-testable) ──────────────────────────────────────
 
@@ -51,58 +68,49 @@ class TokenIdentityManager:
         identities: list[dict],
         author_id: str,
         enabled_token_ids: list[str],
-        ttl_seconds: int,
-        now: int,
     ) -> tuple[str | None, str | None]:
         """Decide which token this author should use.
 
-        Returns ``(chosen_token_id, reset_prev_token_id)`` where the second is the
-        author's previous token to reset when a real swap occurs (else None).
-        Pure function of the persisted state so it can be tested without a bot.
+        Assignment is **permanent**: an author keeps its token until that token
+        goes bad (drops out of ``enabled_token_ids`` — disabled or marked bad).
+        Only then does it swap to an unused token. A token is never shared, so
+        when every enabled token is already assigned to another author there is
+        nothing to hand out.
+
+        Returns ``(chosen_token_id, reset_prev_token_id)``:
+          - ``chosen`` is None when no token is free — the caller decides whether
+            to send via webhook or skip the message.
+          - ``reset_prev`` is the author's previous token to clear when a swap
+            actually happens (else None).
+        Pure function of the persisted state so it can be unit-tested.
         """
         enabled = [str(t) for t in enabled_token_ids]
+        author_id = str(author_id)
         if not enabled:
             return None, None
-        author_id = str(author_id)
-
-        def _live(ident: dict) -> bool:
-            # ttl<=0 means "hold indefinitely" (never rotate on time).
-            if ttl_seconds <= 0:
-                return True
-            return (now - int(ident.get("assigned_at") or 0)) < ttl_seconds
 
         cur = next(
             (i for i in identities if str(i.get("author_id")) == author_id), None
         )
         prev = str(cur["token_id"]) if cur else None
 
-        # 1) Author still holds a live, still-enabled token → keep it.
-        if cur and str(cur["token_id"]) in enabled and _live(cur):
-            return str(cur["token_id"]), None
+        # Keep the current assignment while its token is still good.
+        if prev and prev in enabled:
+            return prev, None
 
-        # 2) Tokens currently held by OTHER authors within their TTL.
-        counts = {t: 0 for t in enabled}
-        active: set[str] = set()
-        for i in identities:
-            if str(i.get("author_id")) == author_id:
-                continue
-            tid = str(i.get("token_id"))
-            if tid in counts and _live(i):
-                counts[tid] += 1
-                active.add(tid)
+        # New author, or the assigned token went bad → take an unused token.
+        # Tokens held by OTHER authors are off-limits (one token per identity).
+        taken = {
+            str(i.get("token_id"))
+            for i in identities
+            if str(i.get("author_id")) != author_id
+        }
+        free = [t for t in enabled if t not in taken]
+        if not free:
+            # Every enabled token is already assigned to someone else.
+            return None, None
 
-        # 3) Prefer a token not held by another active author (and not the one we
-        #    are rotating away from).
-        free = [t for t in enabled if t not in active and t != prev]
-        if free:
-            chosen = min(free, key=lambda t: (counts[t], enabled.index(t)))
-        elif prev and prev in enabled:
-            # None free → remain on the current token (no reset).
-            chosen = prev
-        else:
-            # All busy and no current assignment → share the least-used token.
-            chosen = min(enabled, key=lambda t: (counts[t], enabled.index(t)))
-
+        chosen = free[0]
         reset_prev = prev if (prev and prev != chosen) else None
         return chosen, reset_prev
 
@@ -118,35 +126,61 @@ class TokenIdentityManager:
         author_role_ids,
         settings: dict,
         tokens: list[dict],
-    ) -> str | None:
-        """Select/rotate the token for this author and apply its identity.
+    ) -> tuple[str | None, str | None]:
+        """Assign (or keep) this author's token and apply its identity.
 
-        Returns the chosen ``token_id`` (to force the sender to use it), or None
-        if no token could be chosen. Never raises — identity failures are logged
-        and the send proceeds regardless.
+        Assignment is permanent — an author keeps its token until that token
+        goes bad, then swaps to an unused one. Returns ``(token_id, action)``:
+          - ``(token_id, None)`` → post from this token (identity applied).
+          - ``(None, "webhook")`` / ``(None, "skip")`` → no token could be
+            assigned (every enabled token is taken by another identity, or all
+            are bad); the caller sends via webhook or drops the message per the
+            ``USER_TOKEN_FALLBACK_WEBHOOK`` toggle.
+        Never raises — identity failures are logged and a token is still chosen.
         """
+        exhausted = (
+            "webhook" if settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True) else "skip"
+        )
         if not author_id:
-            return None
+            return None, exhausted
 
         mapping_id = str(mapping_id)
         author_id = str(author_id)
         do_nick = bool(settings.get("USER_TOKEN_STICKY_NICKNAME"))
         do_roles = bool(settings.get("USER_TOKEN_STICKY_ROLES"))
-        try:
-            ttl_seconds = max(0, int(settings.get("USER_TOKEN_IDENTITY_TTL_MIN") or 0)) * 60
-        except Exception:
-            ttl_seconds = 0
 
-        token_by_id = {str(t.get("token_id")): t for t in tokens if t.get("token_id")}
+        # Enabled tokens minus any we've seen fail this run, so a bad token is
+        # swapped away from and never reassigned.
+        bad = self._bad_tokens.get(mapping_id) or set()
+        token_by_id = {
+            str(t.get("token_id")): t
+            for t in tokens
+            if t.get("token_id") and str(t.get("token_id")) not in bad
+        }
         enabled_token_ids = list(token_by_id.keys())
         if not enabled_token_ids:
-            return None
+            return None, exhausted
 
         async with self._lock_for(mapping_id):
             now = int(time.time())
 
             # This author's current assignment (indexed PK lookup, O(1)).
             cur = self._db.get_token_identity(mapping_id, author_id)
+
+            if cur is not None and str(cur.get("token_id")) in token_by_id:
+                # Keep the current assignment — its token is still good.
+                chosen = str(cur["token_id"])
+                reset_prev = None
+                keep = True
+            else:
+                # New author, or the assigned token went bad → pick a free token.
+                identities = self._db.list_token_identities(mapping_id)
+                chosen, reset_prev = self._select_token(
+                    identities, author_id, enabled_token_ids
+                )
+                if not chosen:
+                    return None, exhausted
+                keep = False
 
             try:
                 guild = (
@@ -171,46 +205,25 @@ class TokenIdentityManager:
             )
             desired_role_ids = sorted({r.id for r in desired_roles})
 
-            live_keep = (
-                cur is not None
-                and str(cur.get("token_id")) in token_by_id
-                and (
-                    ttl_seconds <= 0
-                    or (now - int(cur.get("assigned_at") or 0)) < ttl_seconds
-                )
-            )
-
-            if live_keep:
-                chosen = str(cur["token_id"])
-                keep = True
-                reset_prev = None
-                # Fast path: the account already carries the identity we want →
-                # no member resolution, no edits, no write.
+            # Fast path: keeping the same token and the identity is already in
+            # sync → no member resolution, no edits, no write.
+            if keep:
                 nick_ok = (not do_nick) or (cur.get("applied_nick") == desired_nick)
                 roles_ok = (not do_roles) or (
                     list(cur.get("applied_role_ids") or []) == desired_role_ids
                 )
                 if nick_ok and roles_ok:
-                    return chosen
-            else:
-                # Only the (rarer) rotation path needs the full assignment set.
-                identities = self._db.list_token_identities(mapping_id)
-                chosen, reset_prev = self._select_token(
-                    identities, author_id, enabled_token_ids, ttl_seconds, now
-                )
-                if not chosen:
-                    return None
-                keep = cur is not None and str(cur.get("token_id")) == chosen
+                    return chosen, None
 
             # Without the clone guild cached we can't touch members; still force
             # the chosen token for the send, but don't churn the DB.
             if guild is None:
-                return chosen
+                return chosen, None
 
             applied_nick = cur.get("applied_nick") if keep else None
             applied_role_ids = list(cur.get("applied_role_ids") or []) if keep else []
 
-            # Reset the account we're rotating away from.
+            # Reset the account we're swapping away from (bad/old token).
             if reset_prev and cur is not None:
                 try:
                     prev_row = self._db.get_mapping_token(reset_prev)
@@ -254,7 +267,9 @@ class TokenIdentityManager:
                         exc_info=True,
                     )
 
-            assigned_at = int(cur["assigned_at"]) if keep else now
+            assigned_at = (
+                int(cur["assigned_at"]) if keep and cur.get("assigned_at") else now
+            )
             try:
                 self._db.upsert_token_identity(
                     mapping_id=mapping_id,
@@ -268,7 +283,7 @@ class TokenIdentityManager:
             except Exception:
                 self._log.debug("[identity] failed to persist assignment", exc_info=True)
 
-            return chosen
+            return chosen, None
 
     async def reset_mapping(self, mapping_id) -> None:
         """Clear every applied nickname/role for a mapping and drop its state.

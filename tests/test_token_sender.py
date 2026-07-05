@@ -260,6 +260,53 @@ async def test_forced_token_id_is_tried_first(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_sticky_exclusive_never_falls_back_to_other_tokens(monkeypatch):
+    """A sticky identity must never post from a different account: when the
+    forced token fails and sticky_exclusive is set, no other token is tried."""
+
+    class _DB:
+        def get_enabled_mapping_tokens(self, mapping_id):
+            return [
+                {"token_id": "a", "token_value": "ta"},
+                {"token_id": "b", "token_value": "tb"},
+            ]
+
+        def increment_mapping_token_usage(self, tid):
+            return None
+
+    tried = []
+
+    async def fake_send(self, token, channel_id, text, attachments, *, typing=False, sticker_ids=None):
+        tried.append(token)
+        return False
+
+    monkeypatch.setattr(UserTokenSender, "_send_with_token", fake_send)
+
+    s = UserTokenSender(
+        db=_DB(),
+        ratelimit=_FakeRateLimit(),
+        action_type="user_message",
+        session_provider=lambda: None,
+        logger=types.SimpleNamespace(
+            debug=lambda *a, **k: None,
+            warning=lambda *a, **k: None,
+            exception=lambda *a, **k: None,
+        ),
+    )
+
+    ok = await s.send(
+        mapping_id="m",
+        target_channel_id=1,
+        content="hi",
+        forced_token_id="a",
+        sticky_exclusive=True,
+    )
+    assert ok is False
+    # Only the forced account was attempted — never the other token.
+    assert tried == ["ta"]
+
+
+@pytest.mark.asyncio
 async def test_uploaded_attachment_url_stripped_from_text(monkeypatch):
     """Regression: when an attachment is re-uploaded as a file (links_only off),
     its URL must be removed from the text so it isn't shown as a link *and* a
@@ -365,28 +412,131 @@ async def test_pace_immediate_when_no_delay():
 
 
 @pytest.mark.asyncio
-async def test_pace_spaces_consecutive_messages():
+async def test_pace_waits_the_delay_every_message():
     import time as _t
 
     s = _make_sender()
-    # First message to a channel is immediate; the next must wait ~the delay
-    # instead of firing in the same burst.
-    await s._pace_channel(100, 0.05, 0.05)
+    # Every message waits its own delay before being sent.
     t0 = _t.monotonic()
     await s._pace_channel(100, 0.05, 0.05)
     assert _t.monotonic() - t0 >= 0.04
 
 
 @pytest.mark.asyncio
-async def test_pace_is_independent_per_channel():
+async def test_chan_lock_serializes_same_channel():
+    import asyncio as _a
     import time as _t
 
     s = _make_sender()
-    await s._pace_channel(100, 0.05, 0.05)
-    # A different channel is not throttled by channel 100's timer.
+
+    async def hold():
+        async with s._chan_lock(100):
+            await _a.sleep(0.05)
+
     t0 = _t.monotonic()
-    await s._pace_channel(200, 0.05, 0.05)
-    assert _t.monotonic() - t0 < 0.03
+    # Two holders of the same channel lock take turns (~0.10s), never bursting.
+    await _a.gather(hold(), hold())
+    assert _t.monotonic() - t0 >= 0.09
+
+
+@pytest.mark.asyncio
+async def test_pace_independent_channels_run_concurrently():
+    import asyncio as _a
+    import time as _t
+
+    s = _make_sender()
+    t0 = _t.monotonic()
+    # Different channels delay at the same time, not one-after-another.
+    await _a.gather(
+        s._pace_channel(100, 0.05, 0.05),
+        s._pace_channel(200, 0.05, 0.05),
+    )
+    assert _t.monotonic() - t0 < 0.09
+
+
+@pytest.mark.asyncio
+async def test_pace_shows_typing_for_the_delay():
+    import time as _t
+
+    posts = []
+
+    class _Resp:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class _Session:
+        def post(self, url, headers=None, timeout=None):
+            posts.append(url)
+            return _Resp()
+
+    s = _make_sender()
+    s._session_provider = lambda: _Session()
+    t0 = _t.monotonic()
+    # Typing enabled → the indicator fires and the message waits the delay.
+    await s._pace_channel(100, 0.05, 0.05, typing=True, token="tok")
+    assert _t.monotonic() - t0 >= 0.04
+    assert any("/typing" in u for u in posts)
+
+
+@pytest.mark.asyncio
+async def test_send_serializes_typing_then_send_per_channel():
+    """Regression: with typing + delay, queued messages to one channel take
+    strict turns — typing → send → typing → send. A message's typing must never
+    fire before the previous message is sent (which would clear the indicator)."""
+    import asyncio as _a
+
+    events = []
+
+    class _DB:
+        def get_enabled_mapping_tokens(self, mapping_id):
+            return [{"token_id": "a", "token_value": "ta"}]
+
+        def increment_mapping_token_usage(self, tid):
+            return None
+
+    class _Resp:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class _Session:
+        def post(self, url, json=None, data=None, headers=None, timeout=None):
+            events.append("type" if url.endswith("/typing") else "send")
+            return _Resp()
+
+    s = UserTokenSender(
+        db=_DB(),
+        ratelimit=_FakeRateLimit(),
+        action_type="user_message",
+        session_provider=lambda: _Session(),
+        logger=types.SimpleNamespace(
+            debug=lambda *a, **k: None,
+            warning=lambda *a, **k: None,
+            exception=lambda *a, **k: None,
+        ),
+    )
+
+    async def one():
+        await s.send(
+            mapping_id="m",
+            target_channel_id=1,
+            content="hi",
+            typing=True,
+            min_delay=0.02,
+            max_delay=0.02,
+            forced_token_id="a",
+            sticky_exclusive=True,
+        )
+
+    await _a.gather(one(), one())
+    assert events == ["type", "send", "type", "send"]
 
 
 @pytest.mark.asyncio

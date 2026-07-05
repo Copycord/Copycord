@@ -26,62 +26,57 @@ select = TokenIdentityManager._select_token
 
 class TestSelectToken:
 
-    def test_new_author_gets_least_used_free_token(self):
-        chosen, reset = select([], "X", ["a", "b", "c"], 3600, 100)
+    def test_new_author_gets_first_free_token(self):
+        chosen, reset = select([], "X", ["a", "b", "c"])
         assert chosen == "a"
         assert reset is None
 
     def test_distinct_authors_get_distinct_tokens(self):
         identities = []
         picks = []
-        now = 1000
         for author in ("X", "Y", "Z"):
-            chosen, _ = select(identities, author, ["a", "b", "c"], 3600, now)
+            chosen, _ = select(identities, author, ["a", "b", "c"])
             picks.append(chosen)
-            identities.append(_ident(author, chosen, now))
+            identities.append(_ident(author, chosen, 0))
         assert sorted(picks) == ["a", "b", "c"]
 
-    def test_author_keeps_live_token(self):
+    def test_author_keeps_assigned_token(self):
+        # Assignment is permanent — the token stays while it's still enabled.
         identities = [_ident("X", "b", 900)]
-        chosen, reset = select(identities, "X", ["a", "b", "c"], 3600, 1000)
+        chosen, reset = select(identities, "X", ["a", "b", "c"])
         assert chosen == "b"
         assert reset is None
 
-    def test_expired_hold_rotates_to_free_token(self):
-        # X's hold on "a" expired; Y actively holds "b" → X moves to "c".
-        identities = [_ident("X", "a", 0), _ident("Y", "b", 9000)]
-        chosen, reset = select(identities, "X", ["a", "b", "c"], 3600, 10000)
+    def test_bad_token_swaps_to_free_token(self):
+        # X's token "a" is no longer enabled (went bad); Y holds "b" → X → "c".
+        identities = [_ident("X", "a", 0), _ident("Y", "b", 0)]
+        chosen, reset = select(identities, "X", ["b", "c"])
         assert chosen == "c"
         assert reset == "a"
 
-    def test_no_free_token_keeps_current(self):
-        # Only one token and the hold expired → stay put, no reset.
-        identities = [_ident("X", "a", 0)]
-        chosen, reset = select(identities, "X", ["a"], 3600, 10000)
-        assert chosen == "a"
+    def test_no_free_token_returns_none(self):
+        # X's token is bad and the only other token is taken by Y → exhausted.
+        identities = [_ident("X", "a", 0), _ident("Y", "b", 0)]
+        chosen, reset = select(identities, "X", ["b"])
+        assert chosen is None
         assert reset is None
 
-    def test_all_busy_no_current_shares_least_used(self):
-        identities = [_ident("Y", "a", 9000), _ident("Z", "b", 9000)]
-        chosen, reset = select(identities, "X", ["a", "b"], 3600, 10000)
-        assert chosen in ("a", "b")
-        assert reset is None
-
-    def test_ttl_zero_never_expires(self):
-        identities = [_ident("X", "a", 0)]
-        chosen, reset = select(identities, "X", ["a", "b"], 0, 10_000_000)
-        assert chosen == "a"
+    def test_new_author_all_taken_returns_none(self):
+        # Every enabled token is already assigned to another identity.
+        identities = [_ident("Y", "a", 0), _ident("Z", "b", 0)]
+        chosen, reset = select(identities, "X", ["a", "b"])
+        assert chosen is None
         assert reset is None
 
     def test_disabled_token_forces_reassignment(self):
-        # X was on "a" but "a" is no longer enabled → rotate + reset "a".
-        identities = [_ident("X", "a", 9000)]
-        chosen, reset = select(identities, "X", ["b", "c"], 3600, 10000)
+        # X was on "a" but "a" is no longer enabled → swap + reset "a".
+        identities = [_ident("X", "a", 0)]
+        chosen, reset = select(identities, "X", ["b", "c"])
         assert chosen == "b"
         assert reset == "a"
 
     def test_no_tokens_returns_none(self):
-        chosen, reset = select([], "X", [], 3600, 100)
+        chosen, reset = select([], "X", [])
         assert chosen is None
         assert reset is None
 
@@ -172,7 +167,8 @@ class _DB:
         return [v for k, v in self.identities.items() if k[0] == str(mapping_id)]
 
     def get_mapping_token(self, token_id):
-        return None
+        uid = getattr(self, "token_users", {}).get(str(token_id))
+        return {"user_id": uid} if uid else None
 
     def get_role_mapping_for_clone(self, host_id, clone_gid):
         crid = self.role_map.get(int(host_id))
@@ -214,7 +210,7 @@ class TestPrepareIdempotency:
         settings = {
             "USER_TOKEN_STICKY_NICKNAME": True,
             "USER_TOKEN_STICKY_ROLES": False,
-            "USER_TOKEN_IDENTITY_TTL_MIN": 60,
+            "USER_TOKEN_STRATEGY": "sticky_author",
         }
         kw = dict(
             mapping_id="m", cloned_guild_id=2, author_id="777",
@@ -222,12 +218,12 @@ class TestPrepareIdempotency:
             settings=settings, tokens=tokens,
         )
 
-        assert await mgr.prepare(**kw) == "a"
+        assert await mgr.prepare(**kw) == ("a", None)
         assert member.nick == "Alice"
         assert db.upserts == 1
 
         # Already in sync → no second edit, no second write.
-        assert await mgr.prepare(**kw) == "a"
+        assert await mgr.prepare(**kw) == ("a", None)
         assert len(member.edits) == 1
         assert db.upserts == 1
 
@@ -248,7 +244,7 @@ class TestPrepareIdempotency:
         settings = {
             "USER_TOKEN_STICKY_NICKNAME": True,
             "USER_TOKEN_STICKY_ROLES": False,
-            "USER_TOKEN_IDENTITY_TTL_MIN": 60,
+            "USER_TOKEN_STRATEGY": "sticky_author",
         }
         kw = dict(
             mapping_id="m", cloned_guild_id=2, author_id="777",
@@ -273,7 +269,7 @@ class TestPrepareIdempotency:
         settings = {
             "USER_TOKEN_STICKY_NICKNAME": False,
             "USER_TOKEN_STICKY_ROLES": True,
-            "USER_TOKEN_IDENTITY_TTL_MIN": 0,
+            "USER_TOKEN_STRATEGY": "sticky_author",
         }
         kw = dict(
             mapping_id="m", cloned_guild_id=2, author_id="777",
@@ -288,6 +284,78 @@ class TestPrepareIdempotency:
         await mgr.prepare(**kw)
         assert member.added == added_after_first
         assert member.removed == []
+
+
+class TestPrepareSwapAndExhaust:
+
+    def _kw(self, tokens, fallback_webhook=True):
+        return dict(
+            mapping_id="m", cloned_guild_id=2, author_id="777",
+            author_display_name="Alice", author_role_ids=[],
+            settings={
+                "USER_TOKEN_STRATEGY": "sticky_author",
+                "USER_TOKEN_STICKY_NICKNAME": True,
+                "USER_TOKEN_FALLBACK_WEBHOOK": fallback_webhook,
+            },
+            tokens=tokens,
+        )
+
+    @pytest.mark.asyncio
+    async def test_new_identity_no_free_token_webhook(self):
+        # The only token is already held by another author → exhausted → webhook.
+        db = _DB()
+        db.identities[("m", "999")] = {
+            "author_id": "999", "token_id": "a", "cloned_guild_id": 2,
+            "applied_nick": "Bob", "applied_role_ids": [], "assigned_at": 0,
+        }
+        mgr = TokenIdentityManager(
+            bot=_Bot(_Guild(2, {500: _Member(500)}, {})), db=db, logger=_silent()
+        )
+        token_id, action = await mgr.prepare(
+            **self._kw([{"token_id": "a", "user_id": "500"}])
+        )
+        assert token_id is None
+        assert action == "webhook"
+
+    @pytest.mark.asyncio
+    async def test_new_identity_no_free_token_skip(self):
+        db = _DB()
+        db.identities[("m", "999")] = {
+            "author_id": "999", "token_id": "a", "cloned_guild_id": 2,
+            "applied_nick": "Bob", "applied_role_ids": [], "assigned_at": 0,
+        }
+        mgr = TokenIdentityManager(
+            bot=_Bot(_Guild(2, {500: _Member(500)}, {})), db=db, logger=_silent()
+        )
+        token_id, action = await mgr.prepare(
+            **self._kw([{"token_id": "a", "user_id": "500"}], fallback_webhook=False)
+        )
+        assert token_id is None
+        assert action == "skip"
+
+    @pytest.mark.asyncio
+    async def test_mark_token_bad_swaps_and_resets_previous(self):
+        m_a = _Member(500)
+        m_b = _Member(600)
+        db = _DB()
+        db.token_users = {"a": "500", "b": "600"}
+        guild = _Guild(2, {500: m_a, 600: m_b}, {})
+        mgr = TokenIdentityManager(bot=_Bot(guild), db=db, logger=_silent())
+        tokens = [
+            {"token_id": "a", "user_id": "500"},
+            {"token_id": "b", "user_id": "600"},
+        ]
+        kw = self._kw(tokens)
+
+        # Permanent assignment: first send picks "a" and mirrors the nickname.
+        assert await mgr.prepare(**kw) == ("a", None)
+        assert m_a.nick == "Alice"
+
+        # Token "a" goes bad → next send swaps to "b" and clears "a".
+        mgr.mark_token_bad("m", "a")
+        assert await mgr.prepare(**kw) == ("b", None)
+        assert m_b.nick == "Alice"
+        assert m_a.nick is None
 
 
 class TestResetIdentity:

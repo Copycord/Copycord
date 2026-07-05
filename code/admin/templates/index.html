@@ -1034,25 +1034,13 @@
                     </label>
                   </div>
 
-                  <div class="mapping-toggle-row">
-                    <div class="mapping-toggle-info">
-                      <span class="mapping-toggle-name">Identity hold</span>
-                      <span class="mapping-toggle-desc">How long (minutes) an account keeps an author before rotating to
-                        a free one. 0 = never rotate.</span>
-                    </div>
-                    <div class="user-token-delay">
-                      <input type="number" id="ut_identity_ttl" class="user-token-num" min="0" max="1440" step="5"
-                        placeholder="60" />
-                      <span class="user-token-delay-sep">min</span>
-                    </div>
-                  </div>
                 </div>
 
                 <div class="mapping-toggle-row" data-setting-key="user_token_fallback_webhook">
                   <div class="mapping-toggle-info">
                     <span class="mapping-toggle-name">Fall back to webhook</span>
-                    <span class="mapping-toggle-desc">If every token fails, send via the normal webhook instead of dropping the
-                      message.</span>
+                    <span class="mapping-toggle-desc">If no token can send the message, use the normal webhook instead of
+                      dropping it.</span>
                   </div>
                   <label class="toggle mapping-toggle-switch">
                     <input type="checkbox" id="map_USER_TOKEN_FALLBACK_WEBHOOK" name="USER_TOKEN_FALLBACK_WEBHOOK"

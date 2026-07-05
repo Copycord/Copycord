@@ -7351,37 +7351,51 @@ class ServerReceiver:
         except Exception:
             logger.debug("[identity] cleanup failed for mapping %s", key, exc_info=True)
 
-    async def _prepare_token_identity(
-        self, *, mapping_id, cloned_guild_id, settings: dict, msg: dict
-    ) -> str | None:
-        """Run sticky-author identity prep and return the token id to force.
-
-        Returns None (no forced token) when identity mirroring is off, the
-        strategy isn't sticky_author, there are no tokens, or anything fails.
-        Never raises — the message must still send.
-        """
-        strategy = str(settings.get("USER_TOKEN_STRATEGY") or "round_robin")
-        identity_on = strategy == "sticky_author" and (
+    @staticmethod
+    def _identity_active(settings: dict) -> bool:
+        """True when the sticky-author identity manager should own token choice."""
+        return str(settings.get("USER_TOKEN_STRATEGY") or "") == "sticky_author" and (
             bool(settings.get("USER_TOKEN_STICKY_NICKNAME"))
             or bool(settings.get("USER_TOKEN_STICKY_ROLES"))
         )
 
-        if not identity_on:
+    @staticmethod
+    def _identity_exhausted_action(settings: dict) -> str:
+        """Webhook-or-skip when a token can't deliver, from the shared toggle."""
+        return (
+            "webhook" if settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True) else "skip"
+        )
+
+    async def _prepare_token_identity(
+        self, *, mapping_id, cloned_guild_id, settings: dict, msg: dict
+    ) -> tuple[str | None, str | None]:
+        """Run sticky-author identity prep. Returns ``(forced_token_id, action)``.
+
+        - ``(token_id, None)`` → post from this exact account (identity applied).
+        - ``(None, "webhook")`` / ``(None, "skip")`` → identity is active but out
+          of free tokens; the caller sends via webhook or drops the message per
+          ``USER_TOKEN_FALLBACK_WEBHOOK``.
+        - ``(None, None)`` → identity mirroring off; caller uses the normal
+          strategy ordering.
+        Never raises — the message must still send.
+        """
+        if not self._identity_active(settings):
             # Feature was turned off — reset any leftover nicknames/roles once.
             await self._cleanup_token_identity(mapping_id)
-            return None
+            return None, None
 
         self._identity_cleaned.discard(str(mapping_id))
 
         if not cloned_guild_id:
-            return None
+            return None, None
 
         try:
             tokens = self.db.get_enabled_mapping_tokens(str(mapping_id)) or []
         except Exception:
             tokens = []
         if not tokens:
-            return None
+            # No usable tokens at all → exhausted per the setting.
+            return None, self._identity_exhausted_action(settings)
 
         try:
             return await self.token_identity.prepare(
@@ -7399,7 +7413,7 @@ class ServerReceiver:
                 "[identity] prepare failed; sending without identity prep",
                 exc_info=True,
             )
-            return None
+            return None, None
 
     async def _try_user_token_send(
         self,
@@ -7454,37 +7468,64 @@ class ServerReceiver:
         if not mapping_id:
             return False
 
-        # Sticky-author identity: when enabled, let the identity manager pick /
-        # rotate the token for this author and mirror the author's nickname/roles
-        # onto that account BEFORE it sends, so the account that posts is the one
-        # we just made look like the author.
-        forced_token_id = await self._prepare_token_identity(
-            mapping_id=mapping_id,
-            cloned_guild_id=cloned_guild_id,
-            settings=settings,
-            msg=msg,
-        )
+        identity_active = self._identity_active(settings)
 
-        try:
-            delivered = await self.user_token_sender.send(
-                mapping_id=mapping_id,
-                target_channel_id=int(target_channel_id),
-                content=(payload or {}).get("content"),
-                embeds=(payload or {}).get("embeds"),
-                attachments=msg.get("attachments"),
-                author_id=msg.get("author_id"),
-                strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
-                typing=bool(settings.get("USER_TOKEN_TYPING", False)),
-                min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
-                max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
-                links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
-                forced_token_id=forced_token_id,
-            )
-        except Exception:
-            logger.exception(
-                "[user-send] send failed for channel %s", target_channel_id
-            )
-            delivered = False
+        async def _do_send(forced, exclusive) -> bool:
+            try:
+                return await self.user_token_sender.send(
+                    mapping_id=mapping_id,
+                    target_channel_id=int(target_channel_id),
+                    content=(payload or {}).get("content"),
+                    embeds=(payload or {}).get("embeds"),
+                    attachments=msg.get("attachments"),
+                    author_id=msg.get("author_id"),
+                    strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
+                    typing=bool(settings.get("USER_TOKEN_TYPING", False)),
+                    min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
+                    max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
+                    links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
+                    forced_token_id=forced,
+                    sticky_exclusive=exclusive,
+                )
+            except Exception:
+                logger.exception(
+                    "[user-send] send failed for channel %s", target_channel_id
+                )
+                return False
+
+        delivered = False
+
+        if identity_active:
+            # The identity manager owns token choice. If the assigned account
+            # fails to deliver, mark that token bad and let the next prepare()
+            # swap this author to a free token; repeat until a send succeeds or
+            # the mapping runs out of tokens.
+            try:
+                n_tokens = len(
+                    self.db.get_enabled_mapping_tokens(str(mapping_id)) or []
+                )
+            except Exception:
+                n_tokens = 1
+            for _ in range(max(1, n_tokens) + 1):
+                token_id, _action = await self._prepare_token_identity(
+                    mapping_id=mapping_id,
+                    cloned_guild_id=cloned_guild_id,
+                    settings=settings,
+                    msg=msg,
+                )
+                if not token_id:
+                    break
+                delivered = await _do_send(token_id, True)
+                if delivered:
+                    break
+                # This account couldn't deliver → drop it and swap next pass.
+                self.token_identity.mark_token_bad(mapping_id, token_id)
+        else:
+            # Round-robin / non-identity: reset any leftover sticky identity once
+            # (in case the feature was just disabled), then a single send with
+            # the sender's own cross-token fallback.
+            await self._cleanup_token_identity(mapping_id)
+            delivered = await _do_send(None, False)
 
         mark_bf = (
             is_backfill
@@ -7525,23 +7566,32 @@ class ServerReceiver:
                 )
             return True
 
-        # Every token failed (or none configured). Fall back to the webhook
-        # unless the mapping is set to user-tokens only.
-        if settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True):
-            return False
+        # Not delivered — a token couldn't carry it (every token failed, or an
+        # identity had no free token). Fall back to the webhook or drop it, per
+        # the shared USER_TOKEN_FALLBACK_WEBHOOK toggle.
+        skip = not settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True)
 
-        # User-tokens-only mode: the message is dropped. During backfill still
-        # advance the checkpoint so progress does not stall or re-deliver on
-        # resume.
+        if not skip:
+            return False  # fall back to the webhook
+
+        # Drop the message. During backfill still advance the checkpoint so
+        # progress does not stall or re-deliver on resume.
         if mark_bf:
             _note_backfill()
 
         if not quiet:
-            logger.info(
-                "[user-send] All tokens failed for clone ch=%s and webhook fallback is off; dropping message from %s",
-                target_channel_id,
-                msg.get("author"),
-            )
+            if identity_active:
+                logger.info(
+                    "[user-send] No free token for this identity and 'skip' is set; dropping message from %s (clone ch=%s)",
+                    msg.get("author"),
+                    target_channel_id,
+                )
+            else:
+                logger.info(
+                    "[user-send] All tokens failed for clone ch=%s and webhook fallback is off; dropping message from %s",
+                    target_channel_id,
+                    msg.get("author"),
+                )
         return True
 
     async def _try_user_token_forum_thread(
@@ -7587,12 +7637,18 @@ class ServerReceiver:
         if not mapping_id:
             return None
 
-        forced_token_id = await self._prepare_token_identity(
+        forced_token_id, _action = await self._prepare_token_identity(
             mapping_id=mapping_id,
             cloned_guild_id=cloned_guild_id,
             settings=settings,
             msg=msg,
         )
+
+        # With sticky identity active but no free token, don't create the thread
+        # as a random account — let the webhook create it.
+        identity_active = self._identity_active(settings)
+        if identity_active and not forced_token_id:
+            return None
 
         try:
             new_id = await self.user_token_sender.create_forum_thread(
@@ -7609,6 +7665,7 @@ class ServerReceiver:
                 max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
                 links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
                 forced_token_id=forced_token_id,
+                sticky_exclusive=identity_active,
             )
         except Exception:
             logger.exception(
@@ -7662,12 +7719,18 @@ class ServerReceiver:
         if not mapping_id:
             return None
 
-        forced_token_id = await self._prepare_token_identity(
+        forced_token_id, _action = await self._prepare_token_identity(
             mapping_id=mapping_id,
             cloned_guild_id=cloned_guild_id,
             settings=settings,
             msg=msg,
         )
+
+        # With sticky identity active but no free token, don't create the thread
+        # as a random account — let the bot create it.
+        identity_active = self._identity_active(settings)
+        if identity_active and not forced_token_id:
+            return None
 
         try:
             new_id = await self.user_token_sender.create_text_thread(
@@ -7682,6 +7745,7 @@ class ServerReceiver:
                 min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
                 max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
                 forced_token_id=forced_token_id,
+                sticky_exclusive=identity_active,
             )
         except Exception:
             logger.exception(
@@ -7777,12 +7841,17 @@ class ServerReceiver:
         if not mapping_id:
             return False
 
-        forced_token_id = await self._prepare_token_identity(
+        forced_token_id, action = await self._prepare_token_identity(
             mapping_id=mapping_id,
             cloned_guild_id=clone_gid,
             settings=settings,
             msg=msg,
         )
+        identity_active = self._identity_active(settings)
+
+        # Sticky identity active but no free token → webhook or skip per setting.
+        if identity_active and not forced_token_id:
+            return (action or "webhook") == "skip"
 
         try:
             delivered = await self.user_token_sender.send(
@@ -7797,6 +7866,7 @@ class ServerReceiver:
                 max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
                 links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
                 forced_token_id=forced_token_id,
+                sticky_exclusive=identity_active,
             )
         except Exception:
             logger.exception(
@@ -7811,6 +7881,13 @@ class ServerReceiver:
                 msg.get("author"),
             )
             return True
+
+        # For a sticky identity, drop the failed account so the author swaps on
+        # the next message, and honour the exhausted setting for this one.
+        if identity_active:
+            if forced_token_id:
+                self.token_identity.mark_token_bad(mapping_id, forced_token_id)
+            return self._identity_exhausted_action(settings) == "skip"
 
         if settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True):
             return False

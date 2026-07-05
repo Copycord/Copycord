@@ -69,14 +69,13 @@ Using self-bot accounts to send messages is against Discord's Terms of Service a
 
 - **Account selection** — how a token is chosen for each message:
   - **Rotate evenly** — spread messages across all enabled tokens (round-robin).
-  - **Sticky per author** — pin each source author to one token, so that author's messages always come from the same account.
+  - **Sticky per author** — pin each source author to one token permanently, so that author's messages always come from the same account. The token is only swapped if it goes bad (disabled or failing to send), in which case the author moves to an unused token and the old account's mirrored nickname/roles are cleared. If no token is free, the message follows **Fall back to webhook**.
 - **Mirror author nickname** *(Sticky per author only)* — rename the assigned account in the clone server to the host author's display name, so it looks like that member.
 - **Mirror author roles** *(Sticky per author only)* — give the assigned account the cloned roles that match the host author's roles.
-- **Identity hold** *(Sticky per author only)* — how many minutes an account keeps an author before rotating to a free one. On rotation the previous account's mirrored nickname and roles are reset. `0` never rotates.
-- **Fall back to webhook** — if every token fails, send via the normal webhook instead of dropping the message.
-- **Show typing indicator** — briefly show "typing…" before each message so it looks more human.
+- **Fall back to webhook** — if no token can send a message (every token failed, or *Sticky per author* has no free token left for a new identity), send via the normal webhook instead of dropping it.
+- **Show typing indicator** — while a message waits out its **Send delay**, show the "typing…" indicator the whole time, so a 5–10s delay looks like 5–10s of typing before the message appears. With no send delay set it's just a brief blip.
 - **Attachments as links** — post the source attachment links instead of re-downloading and re-uploading the files.
-- **Send delay** — a random pause (min–max seconds) between messages to the same channel, so they don't arrive in a burst.
+- **Send delay** — wait a random min–max seconds before each message is sent (its "composition time"). Messages to the same channel take turns, so they still never arrive in a burst.
 
 Some behavior differs from webhook sending:
 

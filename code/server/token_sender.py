@@ -54,11 +54,10 @@ class UserTokenSender:
         self._rr_index_by_channel: dict = {}
         # Sticky mode: (mapping_id, author_id) -> token_id assignment.
         self._sticky_author_token: dict = {}
-        # Send-delay pacing: serialize per channel so the configured delay
-        # SPACES messages instead of each message jittering independently
-        # (which would fire concurrent messages in a burst).
+        # Send-delay pacing: one lock per channel so each message waits its full
+        # delay (showing the typing indicator, if enabled) before being sent,
+        # and queued messages take turns instead of firing in a burst.
         self._pace_locks: dict = {}
-        self._pace_last_by_channel: dict = {}
 
     # ── public API ───────────────────────────────────────────────────────────
 
@@ -78,6 +77,7 @@ class UserTokenSender:
         max_delay: float = 0.0,
         links_only: bool = False,
         forced_token_id: Optional[str] = None,
+        sticky_exclusive: bool = False,
     ) -> bool:
         """
         Attempt to post a message into ``target_channel_id`` (a channel or thread
@@ -87,6 +87,11 @@ class UserTokenSender:
         which account should send), that token is tried first, bypassing the
         strategy ordering — this keeps the account that received the mirrored
         nickname/roles the same account that posts the message.
+
+        When ``sticky_exclusive`` is also set, ONLY the forced token is tried —
+        never another account — so a sticky identity is never impersonated by the
+        wrong token. If it fails the caller decides whether to swap the author's
+        assignment, fall back to a webhook, or skip.
 
         Returns True on success, False if there are no usable tokens or every
         token failed — in which case the caller should fall back to the webhook.
@@ -129,63 +134,88 @@ class UserTokenSender:
             forced = [
                 t for t in tokens if str(t.get("token_id")) == str(forced_token_id)
             ]
-            rest = [
-                t for t in tokens if str(t.get("token_id")) != str(forced_token_id)
-            ]
-            order = forced + rest
+            if sticky_exclusive:
+                # Only the forced account may post — never fall back to another,
+                # which would break the mirrored identity.
+                order = forced
+            else:
+                rest = [
+                    t for t in tokens if str(t.get("token_id")) != str(forced_token_id)
+                ]
+                order = forced + rest
         else:
             order = self._order_tokens(
                 tokens, chan, strategy, author_id, mapping_id
             )
 
-        # Optional spacing so messages don't arrive in a burst. Serialized per
-        # channel so each message waits a random gap after the previous one.
-        await self._pace_channel(chan, min_delay, max_delay)
-
-        first_attempt = True
-        for tok in order:
-            token_value = (tok.get("token_value") or "").strip()
-            if not token_value:
-                continue
-            # Only the first account fires the typing indicator — otherwise a
-            # failing send would make every token "type" in a burst.
-            fire_typing = typing and first_attempt
-            first_attempt = False
-            try:
-                ok = await self._send_with_token(
-                    token_value,
-                    chan,
-                    text,
-                    atts_to_upload,
-                    typing=fire_typing,
-                    sticker_ids=stkr_ids,
-                )
-            except Exception:
-                self._log.exception(
-                    "[user-send] Unexpected error sending to channel %s", target_channel_id
-                )
-                ok = False
-
-            if ok:
-                tid = tok.get("token_id")
-                if tid:
-                    try:
-                        self._db.increment_mapping_token_usage(tid)
-                    except Exception:
-                        pass
-                self._log.debug(
-                    "[user-send] Sent message into channel %s as %s",
-                    target_channel_id,
-                    tok.get("username") or tok.get("token_id"),
-                )
-                return True
-
-        self._log.debug(
-            "[user-send] All %d token(s) failed for channel %s; falling back to webhook",
-            len(order),
-            target_channel_id,
+        # The typing indicator uses the first candidate account — the one about
+        # to post.
+        type_token = next(
+            (
+                tv
+                for tv in ((t.get("token_value") or "").strip() for t in order)
+                if tv
+            ),
+            None,
         )
-        return False
+
+        async def _deliver() -> bool:
+            # Wait this message's send-delay first (showing typing for the whole
+            # time when enabled), then post it.
+            await self._pace_channel(
+                chan, min_delay, max_delay, typing=typing, token=type_token
+            )
+            for tok in order:
+                token_value = (tok.get("token_value") or "").strip()
+                if not token_value:
+                    continue
+                try:
+                    ok = await self._send_with_token(
+                        token_value,
+                        chan,
+                        text,
+                        atts_to_upload,
+                        sticker_ids=stkr_ids,
+                    )
+                except Exception:
+                    self._log.exception(
+                        "[user-send] Unexpected error sending to channel %s",
+                        target_channel_id,
+                    )
+                    ok = False
+
+                if ok:
+                    tid = tok.get("token_id")
+                    if tid:
+                        try:
+                            self._db.increment_mapping_token_usage(tid)
+                        except Exception:
+                            pass
+                    self._log.debug(
+                        "[user-send] Sent message into channel %s as %s",
+                        target_channel_id,
+                        tok.get("username") or tok.get("token_id"),
+                    )
+                    return True
+
+            self._log.debug(
+                "[user-send] All %d token(s) failed for channel %s; falling back to webhook",
+                len(order),
+                target_channel_id,
+            )
+            return False
+
+        # When there's a delay or a typing indicator to show, hold the per-channel
+        # lock across BOTH the delay and the send so queued messages take strict
+        # turns: type → send → next types → send. If the lock were released after
+        # the delay (before the send), the next message would start typing and
+        # then get its indicator cleared by this message's send — so it would
+        # appear to send with no typing. With no delay/typing there's nothing to
+        # serialize, so send concurrently.
+        if (typing and type_token) or float(max_delay or 0.0) > 0:
+            async with self._chan_lock(chan):
+                return await _deliver()
+        return await _deliver()
 
     async def create_forum_thread(
         self,
@@ -205,6 +235,7 @@ class UserTokenSender:
         max_delay: float = 0.0,
         links_only: bool = False,
         forced_token_id: Optional[str] = None,
+        sticky_exclusive: bool = False,
     ) -> Optional[int]:
         """
         Create a forum thread whose starter message is authored by one of the
@@ -252,10 +283,13 @@ class UserTokenSender:
             forced = [
                 t for t in tokens if str(t.get("token_id")) == str(forced_token_id)
             ]
-            rest = [
-                t for t in tokens if str(t.get("token_id")) != str(forced_token_id)
-            ]
-            order = forced + rest
+            if sticky_exclusive:
+                order = forced
+            else:
+                rest = [
+                    t for t in tokens if str(t.get("token_id")) != str(forced_token_id)
+                ]
+                order = forced + rest
         else:
             order = self._order_tokens(
                 tokens, forum_id, strategy, author_id, mapping_id
@@ -322,6 +356,7 @@ class UserTokenSender:
         min_delay: float = 0.0,
         max_delay: float = 0.0,
         forced_token_id: Optional[str] = None,
+        sticky_exclusive: bool = False,
     ) -> Optional[int]:
         """
         Create a text-channel thread as one of the mapping's user tokens.
@@ -354,10 +389,13 @@ class UserTokenSender:
             forced = [
                 t for t in tokens if str(t.get("token_id")) == str(forced_token_id)
             ]
-            rest = [
-                t for t in tokens if str(t.get("token_id")) != str(forced_token_id)
-            ]
-            order = forced + rest
+            if sticky_exclusive:
+                order = forced
+            else:
+                rest = [
+                    t for t in tokens if str(t.get("token_id")) != str(forced_token_id)
+                ]
+                order = forced + rest
         else:
             order = self._order_tokens(
                 tokens, parent_id, strategy, author_id, mapping_id
@@ -444,33 +482,71 @@ class UserTokenSender:
 
     # ── send implementation ──────────────────────────────────────────────────
 
-    async def _pace_channel(self, chan: int, min_delay, max_delay) -> None:
-        """Space sends to a channel by a random gap.
-
-        Unlike a bare per-message sleep (which lets concurrent messages fire at
-        once), this serializes on a per-channel lock and waits until at least a
-        random ``[min, max]`` seconds after the previous send — so bursts are
-        spread out. When messages arrive slower than the gap, there is no wait.
-        """
-        lo = max(0.0, float(min_delay or 0.0))
-        hi = max(lo, float(max_delay or 0.0))
-        if hi <= 0:
-            return
-
+    def _chan_lock(self, chan: int) -> asyncio.Lock:
+        """Per-channel lock. The caller holds it across the delay AND the send so
+        queued messages take strict turns (type → send → next type → send)."""
         lock = self._pace_locks.get(chan)
         if lock is None:
             lock = asyncio.Lock()
             self._pace_locks[chan] = lock
+        return lock
 
-        async with lock:
-            loop = asyncio.get_event_loop()
-            now = loop.time()
-            gap = random.uniform(lo, min(hi, 30.0))
-            last = self._pace_last_by_channel.get(chan, 0.0)
-            wait = (last + gap) - now
-            if wait > 0:
-                await asyncio.sleep(wait)
-            self._pace_last_by_channel[chan] = loop.time()
+    async def _pace_channel(
+        self,
+        chan: int,
+        min_delay,
+        max_delay,
+        *,
+        typing: bool = False,
+        token: Optional[str] = None,
+    ) -> None:
+        """Wait a message's send-delay before it goes out.
+
+        The delay is a random ``[min, max]`` seconds and represents human
+        composition time. When ``typing`` is set (and a ``token`` is given) the
+        typing indicator is shown for the whole delay; otherwise we just wait.
+        With no delay this only shows a brief typing blip (if enabled) or is a
+        no-op. This does NOT lock — the caller holds ``_chan_lock`` across this
+        and the send so a queued message can't start typing before the current
+        one is actually posted (which would clear its indicator).
+        """
+        lo = max(0.0, float(min_delay or 0.0))
+        hi = max(lo, float(max_delay or 0.0))
+        do_type = bool(typing and token)
+        if hi <= 0 and not do_type:
+            return
+
+        delay = random.uniform(lo, min(hi, 30.0)) if hi > 0 else 0.0
+        if do_type:
+            await self._type_for(chan, token, delay)
+        elif delay > 0:
+            await asyncio.sleep(delay)
+
+    async def _type_for(self, chan: int, token: str, duration: float) -> None:
+        """Show the typing indicator in ``chan`` for ``duration`` seconds.
+
+        Discord clears the indicator ~10s after each trigger, so re-fire every
+        ~8s for longer delays. Best-effort — a failed ping never blocks the send.
+        """
+        session = self._session_provider()
+        headers = self._build_headers(token)
+        url = f"{DISCORD_API_BASE}/channels/{chan}/typing"
+
+        async def _fire():
+            try:
+                async with session.post(url, headers=headers, timeout=10):
+                    pass
+            except Exception:
+                pass
+
+        await _fire()
+        remaining = max(0.0, float(duration))
+        while remaining > 0:
+            step = min(remaining, 8.0)
+            await asyncio.sleep(step)
+            remaining -= step
+            if remaining > 0:
+                await _fire()
 
     async def _send_with_token(
         self,
@@ -479,7 +555,6 @@ class UserTokenSender:
         text: str,
         attachments: list,
         *,
-        typing: bool = False,
         sticker_ids: Optional[list] = None,
     ) -> bool:
         session = self._session_provider()
@@ -503,9 +578,6 @@ class UserTokenSender:
 
         url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
         headers = self._build_headers(token)
-
-        if typing:
-            await self._send_typing(session, channel_id, headers)
 
         attempts = 0
         while True:
@@ -771,19 +843,6 @@ class UserTokenSender:
                     e,
                 )
                 return None
-
-    async def _send_typing(self, session, channel_id: int, headers: dict):
-        """Fire a typing indicator, then pause briefly to simulate typing.
-
-        Best-effort — any failure is ignored and the message is still sent.
-        """
-        try:
-            typing_url = f"{DISCORD_API_BASE}/channels/{channel_id}/typing"
-            async with session.post(typing_url, headers=headers, timeout=10):
-                pass
-            await asyncio.sleep(random.uniform(1.0, 2.5))
-        except Exception:
-            pass
 
     async def _prepare_files(self, session: aiohttp.ClientSession, attachments: list):
         """Download attachments and return (files, uploaded_urls).
