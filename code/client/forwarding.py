@@ -1204,13 +1204,20 @@ class ForwardingManager:
 
             visible_idx = 0
             for e in embed_dicts:
+                title_raw = (e.get("title") or "").strip()
                 desc_raw = (e.get("description") or "").strip()
-                if not desc_raw:
+                if not title_raw and not desc_raw:
                     continue
 
                 visible_idx += 1
                 lines.append(esc(f"Embed {visible_idx}:"))
-                lines.append(esc(desc_raw))
+                if title_raw:
+                    title_line = esc(title_raw)
+                    if as_html:
+                        title_line = f"<b>{title_line}</b>"
+                    lines.append(title_line)
+                if desc_raw:
+                    lines.append(esc(desc_raw))
                 lines.append("")
 
             while lines and not lines[-1].strip():
@@ -1644,8 +1651,12 @@ class ForwardingManager:
                 _maybe_add(thumb.get("url"))
 
         raw_content = (attrs.get("content") or "").strip()
-        has_embed_desc = any(
-            isinstance(e, dict) and (e.get("description") or "").strip()
+        has_embed_text = any(
+            isinstance(e, dict)
+            and (
+                (e.get("description") or "").strip()
+                or (e.get("title") or "").strip()
+            )
             for e in (embeds or [])
         )
         has_non_image_att = any(
@@ -1655,7 +1666,7 @@ class ForwardingManager:
             for a in (attachments or [])
         )
 
-        if image_urls and not (raw_content or has_embed_desc or has_non_image_att):
+        if image_urls and not (raw_content or has_embed_text or has_non_image_att):
             lines = []
 
         async def _tg_call(
