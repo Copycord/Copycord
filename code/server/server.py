@@ -1896,6 +1896,7 @@ class ServerReceiver:
                             update_roles=settings.get("UPDATE_ROLES", True),
                             rearrange_roles=settings.get("REARRANGE_ROLES", False),
                             clone_role_icons=settings.get("CLONE_ROLE_ICONS", False),
+                            clone_role_styles=settings.get("CLONE_ROLE_STYLES", False),
                         )
                         if roles_handle:
                             bg_tasks.append(roles_handle)
@@ -2006,6 +2007,7 @@ class ServerReceiver:
         - CLONE_GUILD_SPLASH
         - CLONE_GUILD_DISCOVERY_SPLASH
         - SYNC_GUILD_DESCRIPTION
+        - CLONE_SERVER_TAG (currently bot-blocked by Discord; see _sync_server_tag)
         """
         parts: List[str] = []
 
@@ -2348,6 +2350,18 @@ class ServerReceiver:
                 changes["description"] = want_desc
                 changed_fields.append("description")
 
+        if settings.get("CLONE_SERVER_TAG", False):
+            try:
+                tag_part = await self._sync_server_tag(guild, gmeta.get("profile"))
+                if tag_part:
+                    parts.append(tag_part)
+            except Exception as e:
+                logger.warning(
+                    "[⚠️] Failed syncing server tag for clone guild %s: %s",
+                    guild.id,
+                    e,
+                )
+
         if not changes:
             return parts
 
@@ -2391,6 +2405,94 @@ class ServerReceiver:
                 )
 
         return parts
+
+    async def _sync_server_tag(
+        self, guild: discord.Guild, want_profile: object
+    ) -> str | None:
+        """
+        Mirror the host's server tag (guild profile tag + badge) onto this clone.
+
+        NOTE: Discord currently rejects this endpoint for bot tokens with
+        `20001: Bots cannot use this endpoint`, so this cannot succeed today —
+        the CLONE_SERVER_TAG toggle is disabled in the admin UI. The code is
+        kept intact so the feature works immediately if/when Discord allows
+        bots to set server tags.
+
+        py-cord has no guild-profile API, so read/patch via raw HTTP. A None
+        want_profile means the client couldn't read the host's profile — do
+        nothing rather than clearing the clone's tag on missing data.
+        """
+        if not isinstance(want_profile, dict):
+            return None
+
+        from discord.http import Route
+
+        payload = {
+            "tag": want_profile.get("tag") or None,
+            "badge": want_profile.get("badge") or 0,
+            "badge_color_primary": want_profile.get("badge_color_primary"),
+            "badge_color_secondary": want_profile.get("badge_color_secondary"),
+        }
+        marker = json.dumps(payload, sort_keys=True)
+
+        try:
+            stored = self.db.get_applied_asset_hash(guild.id, "server_tag")
+        except Exception:
+            stored = ""
+        if stored == marker:
+            return None
+
+        # Prefer a live read when Discord allows it, so an already-matching
+        # tag isn't re-patched.
+        try:
+            data = await self.bot.http.request(
+                Route("GET", "/guilds/{guild_id}/profile", guild_id=guild.id)
+            )
+            if isinstance(data, dict):
+                current = {
+                    "tag": data.get("tag") or None,
+                    "badge": data.get("badge") or 0,
+                    "badge_color_primary": data.get("badge_color_primary"),
+                    "badge_color_secondary": data.get("badge_color_secondary"),
+                }
+                if current == payload:
+                    with contextlib.suppress(Exception):
+                        self.db.set_applied_asset_hash(guild.id, "server_tag", marker)
+                    return None
+        except Exception:
+            pass
+
+        try:
+            await self.bot.http.request(
+                Route("PATCH", "/guilds/{guild_id}/profile", guild_id=guild.id),
+                json=payload,
+            )
+        except Exception as e:
+            logger.warning(
+                "[⚠️] Failed to set server tag %r for clone guild %s — Discord "
+                "does not allow bots to set server tags yet: %s",
+                payload.get("tag"),
+                guild.id,
+                e,
+            )
+            return None
+
+        with contextlib.suppress(Exception):
+            self.db.set_applied_asset_hash(guild.id, "server_tag", marker)
+
+        desc = (
+            f"Set server tag '{payload['tag']}'"
+            if payload.get("tag")
+            else "Cleared server tag"
+        )
+        logger.info("[🏷️] %s for clone guild %s", desc, guild.id)
+        await self._emit_event_log(
+            "guild_metadata",
+            desc,
+            guild_id=guild.id,
+            guild_name=guild.name,
+        )
+        return desc
 
     async def _sync_community(self, guild: discord.Guild, sitemap: Dict) -> List[str]:
         """

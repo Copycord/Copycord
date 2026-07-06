@@ -274,10 +274,12 @@
     "CLONE_GUILD_BANNER": "Clone the server banner from the host to the clone.",
     "CLONE_GUILD_SPLASH": "Clone the invite splash image from the host to the clone.",
     "CLONE_GUILD_DISCOVERY_SPLASH": "Clone the discovery splash image from the host to the clone.",
+    "CLONE_SERVER_TAG": "Clone the server tag from the host to the clone. Requires the clone server to have access to Server Tags.",
     "SYNC_GUILD_DESCRIPTION": "Sync the server description from the host to the clone.",
     "SYNC_FORUM_PROPERTIES": "When enabled, forum properties (topic, tags, etc.) will be synchronized from the host to the clone.",
     "REARRANGE_ROLES": "When enabled, roles will be rearranged in the clone to match the host server's role hierarchy.",
     "CLONE_ROLE_ICONS": "When enabled, role icons (custom images and unicode emoji) will be cloned from the host to the clone. Requires the clone server to have Boost Level 2+.",
+    "CLONE_ROLE_STYLES": "When enabled, role color styles will be cloned from the host to the clone. Requires the clone server to have Boost Level 2+.",
     "ANONYMIZE_USERS": "When enabled, user identities will be anonymized with random names and avatar images.",
     "DISABLE_EVERYONE_MENTIONS": "When enabled, @everyone and @here mentions will be disabled in mirrored messages.",
     "DISABLE_ROLE_MENTIONS": "When enabled, role mentions will be disabled in mirrored messages to stop role pings.",
@@ -926,6 +928,7 @@
             "UPDATE_ROLES": "Update Role Properties",
             "REARRANGE_ROLES": "Rearrange Roles",
             "CLONE_ROLE_ICONS": "Clone Role Icons",
+            "CLONE_ROLE_STYLES": "Clone Role Styles",
             "MIRROR_ROLE_PERMISSIONS": "Mirror Role Permissions",
             "CLONE_EMOJI": "Clone Emoji",
             "CLONE_STICKER": "Clone Stickers",
@@ -937,6 +940,7 @@
             "CLONE_GUILD_BANNER": "Clone Server Banner",
             "CLONE_GUILD_SPLASH": "Clone Invite Splash",
             "CLONE_GUILD_DISCOVERY_SPLASH": "Clone Discovery Splash",
+            "CLONE_SERVER_TAG": "Clone Server Tag",
             "SYNC_GUILD_DESCRIPTION": "Sync Server Description",
           } %}
 
@@ -944,9 +948,13 @@
             "General": ["ENABLE_CLONING", "CLONE_MESSAGES", "ON_DEMAND_WEBHOOKS", "DB_CLEANUP_MSG"],
             "Channels": ["DELETE_CHANNELS", "DELETE_THREADS", "REPOSITION_CHANNELS", "RENAME_CHANNELS", "SYNC_CHANNEL_NSFW", "SYNC_CHANNEL_TOPIC", "SYNC_CHANNEL_SLOWMODE", "SYNC_FORUM_PROPERTIES", "MIRROR_CHANNEL_PERMISSIONS"],
             "Messages": ["DELETE_MESSAGES", "EDIT_MESSAGES", "RESEND_EDITED_MESSAGES"],
-            "Roles": ["CLONE_ROLES", "DELETE_ROLES", "UPDATE_ROLES", "REARRANGE_ROLES", "CLONE_ROLE_ICONS", "MIRROR_ROLE_PERMISSIONS"],
+            "Roles": ["CLONE_ROLES", "DELETE_ROLES", "UPDATE_ROLES", "REARRANGE_ROLES", "CLONE_ROLE_ICONS", "CLONE_ROLE_STYLES", "MIRROR_ROLE_PERMISSIONS"],
             "Assets": ["CLONE_EMOJI", "CLONE_STICKER", "CLONE_VOICE", "CLONE_VOICE_PROPERTIES", "CLONE_STAGE", "CLONE_STAGE_PROPERTIES"],
-            "Server Identity": ["CLONE_GUILD_ICON", "CLONE_GUILD_BANNER", "CLONE_GUILD_SPLASH", "CLONE_GUILD_DISCOVERY_SPLASH", "SYNC_GUILD_DESCRIPTION"],
+            "Server Identity": ["CLONE_GUILD_ICON", "CLONE_GUILD_BANNER", "CLONE_GUILD_SPLASH", "CLONE_GUILD_DISCOVERY_SPLASH", "CLONE_SERVER_TAG", "SYNC_GUILD_DESCRIPTION"],
+          } %}
+
+          {% set DISABLED_SETTINGS = {
+            "CLONE_SERVER_TAG": "Discord doesn't allow bots to set server tags yet, so this can't be applied.",
           } %}
 
           {% for section_name, keys in sections.items() %}
@@ -957,15 +965,20 @@
             </summary>
             <div class="mapping-section-body">
               {% for k in keys %}
-              <div class="mapping-toggle-row mapping-setting-field" data-setting-key="{{ k | lower }}">
+              {% set disabled_reason = DISABLED_SETTINGS.get(k) %}
+              <div class="mapping-toggle-row mapping-setting-field{% if disabled_reason %} is-disabled{% endif %}"
+                   data-setting-key="{{ k | lower }}">
                 <div class="mapping-toggle-info">
                   <span class="mapping-toggle-name">{{ FRIENDLY_NAMES.get(k, k) }}</span>
                   {% if FIELD_TIPS.get(k) %}
                   <span class="mapping-toggle-desc">{{ FIELD_TIPS[k] }}</span>
                   {% endif %}
+                  {% if disabled_reason %}
+                  <span class="mapping-toggle-desc mapping-toggle-disabled-note">{{ disabled_reason }}</span>
+                  {% endif %}
                 </div>
                 <label class="toggle mapping-toggle-switch">
-                  <input type="checkbox" id="map_{{ k }}" name="{{ k }}" data-map-toggle />
+                  <input type="checkbox" id="map_{{ k }}" name="{{ k }}" data-map-toggle {% if disabled_reason %}disabled{% endif %} />
                   <span class="toggle-track"><span class="toggle-thumb"></span></span>
                 </label>
               </div>

@@ -537,6 +537,7 @@ class SitemapService:
                     "widget_channel_id": None,
                     "premium_tier": None,
                     "premium_subscription_count": None,
+                    "profile": None,
                     "max_members": None,
                     "max_presences": None,
                     "max_video_channel_users": None,
@@ -738,6 +739,49 @@ class SitemapService:
         except Exception:
             widget_channel_id = None
 
+        # The installed discord.py-self doesn't parse the newer role "colors"
+        # object (gradient/holographic styles), so pull the raw role payloads.
+        raw_role_colors: Dict[int, Dict[str, object]] = {}
+        try:
+            raw_roles = await guild._state.http.get_roles(guild.id)
+            for rr in raw_roles or []:
+                cols = rr.get("colors")
+                if isinstance(cols, dict):
+                    raw_role_colors[int(rr["id"])] = {
+                        "primary_color": cols.get("primary_color"),
+                        "secondary_color": cols.get("secondary_color"),
+                        "tertiary_color": cols.get("tertiary_color"),
+                    }
+        except Exception:
+            self.logger.debug(
+                "[sitemap] Could not fetch raw role colors for guild %s",
+                guild.id,
+                exc_info=True,
+            )
+
+        # Guild profile (server tag + badge). No library support; raw GET.
+        # None means "unknown" (endpoint failed) — the server only acts on a dict.
+        guild_profile: Optional[Dict[str, object]] = None
+        try:
+            from discord.http import Route
+
+            pdata = await guild._state.http.request(
+                Route("GET", "/guilds/{guild_id}/profile", guild_id=guild.id)
+            )
+            if isinstance(pdata, dict):
+                guild_profile = {
+                    "tag": pdata.get("tag") or None,
+                    "badge": pdata.get("badge"),
+                    "badge_color_primary": pdata.get("badge_color_primary"),
+                    "badge_color_secondary": pdata.get("badge_color_secondary"),
+                }
+        except Exception:
+            self.logger.debug(
+                "[sitemap] Could not fetch guild profile for %s",
+                guild.id,
+                exc_info=True,
+            )
+
         sitemap: Dict = {
             "guild": {
                 "id": guild.id,
@@ -772,6 +816,7 @@ class SitemapService:
                 "premium_subscription_count": getattr(
                     guild, "premium_subscription_count", None
                 ),
+                "profile": guild_profile,
                 "max_members": getattr(guild, "max_members", None),
                 "max_presences": getattr(guild, "max_presences", None),
                 "max_video_channel_users": getattr(
@@ -798,6 +843,7 @@ class SitemapService:
                         "color": (
                             r.color.value if hasattr(r.color, "value") else int(r.color)
                         ),
+                        "colors": raw_role_colors.get(r.id),
                         "hoist": r.hoist,
                         "mentionable": r.mentionable,
                         "managed": r.managed,
@@ -1092,6 +1138,7 @@ class SitemapService:
                     "widget_channel_id": None,
                     "premium_tier": None,
                     "premium_subscription_count": None,
+                    "profile": None,
                     "max_members": None,
                     "max_presences": None,
                     "max_video_channel_users": None,
