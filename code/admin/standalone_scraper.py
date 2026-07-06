@@ -8,13 +8,6 @@
 # =============================================================================
 
 
-"""
-Standalone Member Scraper
-
-Multi-token gateway-based member scraper with QueryPlanner for complete
-member discovery.  Falls back to REST API when gateway is unavailable.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -541,22 +534,13 @@ class SharedPlanner:
 
 
 def _build_headers(token: str) -> dict[str, str]:
-    """Realistic Discord desktop-client headers for a user token.
-
-    Delegates to the shared builder so the scraper, the message sender, and token
-    validation all present the same current fingerprint. See
-    ``common.selfbot_headers``.
-    """
+    """Realistic Discord desktop-client headers for a user token."""
     return build_headers(token)
 
 
 class StandaloneScraper:
     """
     Independent member scraper using multiple tokens via Discord gateway.
-
-    Each token opens a websocket, identifies, then sends op-8 member-list
-    requests driven by the shared QueryPlanner.  Falls back to REST when
-    the gateway is unavailable.
     """
 
     DISCORD_API = "https://discord.com/api/v10"
@@ -578,15 +562,6 @@ class StandaloneScraper:
     def _normalize_proxy(raw: str) -> str:
         """
         Accept multiple common proxy formats and return a proper URL.
-
-        Supported inputs:
-          - http://user:pass@host:port        (proper URL — returned as-is)
-          - socks5://user:pass@host:port      (proper URL — returned as-is)
-          - http://host:port:user:pass        (scheme + provider format)
-          - socks5://host:port:user:pass      (scheme + provider format)
-          - host:port                         (no auth)
-          - host:port:user:pass               (common provider format)
-          - user:pass@host:port               (missing scheme)
         """
         raw = raw.strip()
         if not raw:
@@ -854,11 +829,6 @@ class StandaloneScraper:
         """
         Single gateway session: identify -> pump op-8 queries -> collect
         GUILD_MEMBERS_CHUNK responses.
-
-        Stays alive until:
-          - stop_event is set (target reached / cancelled)
-          - planner is fully exhausted AND no in-flight queries AND
-            no growth for several seconds (final sweep timeout)
         """
 
         if (member_count_hint or 0) >= 500_000:
@@ -993,11 +963,7 @@ class StandaloneScraper:
                                 threshold=refill_threshold, step=refill_step
                             )
 
-                            # prefixes are fine — they'll return < 100 members.
-
                             skip_single = (member_count_hint or 0) > 1000
-
-                            # Keep pulling batches until we've filled all
 
                             max_local_rounds = 200
                             local_rounds = 0
@@ -1264,8 +1230,6 @@ class StandaloneScraper:
                 if q:
                     await planner.requeue(q)
 
-            # Don't give up immediately — other sessions may still be producing work.
-            # Only exit if stop event is set, or we've truly exhausted everything.
             if self._stop_event.is_set():
                 return
             if not await planner.has_work():
