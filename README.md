@@ -39,6 +39,11 @@ Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multi
 > </details>
 >
 > <details>
+> <summary><b>Send Messages as Real Users</b></summary>
+> Optionally deliver cloned messages through real user accounts instead of webhooks, so posts appear to come from genuine members—pin each source author to their own account and mirror their nickname and roles so it looks just like them.
+> </details>
+>
+> <details>
 > <summary><b>Dynamic Structure Sync</b></summary>
 > Copycord constantly watches for changes in the source server (new channels, renames, role updates) and applies them to your clone automatically.
 > </details>

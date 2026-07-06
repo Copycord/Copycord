@@ -724,6 +724,27 @@ class StickerManager:
         if msg.get("__stickers_embeds_added__"):
             return False
 
+        # User-token sticker sending: when enabled for the mapping, post custom
+        # cloned stickers as a real user via the token instead of the bot. Only
+        # on the initial call (not the internal embed-fallback re-entry).
+        if (
+            stickers
+            and mapping
+            and ch
+            and not prefer_embeds
+            and not suppress_text
+        ):
+            try:
+                if await receiver._try_user_token_stickers(
+                    ch=ch, stickers=stickers, mapping=mapping, msg=msg
+                ):
+                    return True
+            except Exception:
+                logger.debug(
+                    "[user-send] sticker token attempt errored; using bot",
+                    exc_info=True,
+                )
+
         def _is_custom_sticker_dict(s: dict) -> bool:
             try:
                 if int(s.get("type", 0)) == 2:
@@ -879,8 +900,8 @@ class StickerManager:
             msg["__stickers_embeds_added__"] = True
             msg["__stickers_embeds_custom__"] = all_custom
             msg["__stickers_embeds_count__"] = len(pairs)
-            logger.info(
-                "[💬] Sticker-embed fallback message sent from %s in #%s",
+            logger.debug(
+                "[💬] Prepared sticker-embed fallback for %s in #%s (sending via webhook)",
                 msg.get("author", "Unknown"),
                 msg.get("channel_name", "Unknown"),
             )

@@ -206,6 +206,15 @@
     APPEND_AUTHOR: false,
     DB_CLEANUP_MSG: true,
     ON_DEMAND_WEBHOOKS: true,
+    USE_USER_TOKENS: false,
+    USER_TOKEN_STRATEGY: "round_robin",
+    USER_TOKEN_FALLBACK_WEBHOOK: true,
+    USER_TOKEN_TYPING: false,
+    USER_TOKEN_MIN_DELAY: 0,
+    USER_TOKEN_MAX_DELAY: 0,
+    USER_TOKEN_LINKS_ONLY: false,
+    USER_TOKEN_STICKY_NICKNAME: false,
+    USER_TOKEN_STICKY_ROLES: false,
   };
 
   let lastFocusLog = null;
@@ -1889,6 +1898,16 @@
         if (key) settings[key] = cb.checked;
       });
 
+    // String / numeric user-token options (not map_-prefixed, so the generic
+    // loops above skip them).
+    const stratEl = document.getElementById("ut_strategy");
+    if (stratEl) settings.USER_TOKEN_STRATEGY = stratEl.value;
+    const minDelayEl = document.getElementById("ut_min_delay");
+    if (minDelayEl)
+      settings.USER_TOKEN_MIN_DELAY = parseFloat(minDelayEl.value) || 0;
+    const maxDelayEl = document.getElementById("ut_max_delay");
+    if (maxDelayEl)
+      settings.USER_TOKEN_MAX_DELAY = parseFloat(maxDelayEl.value) || 0;
     return {
       mapping_id: id,
       mapping_name,
@@ -2437,6 +2456,33 @@
         cb.checked = !!rawVal;
       });
 
+    // Populate string / numeric user-token options.
+    {
+      const pickSetting = (key) => {
+        if (cloneFrom && cloneFrom.settings && key in cloneFrom.settings)
+          return cloneFrom.settings[key];
+        if (isEdit && mapping?.settings && key in mapping.settings)
+          return mapping.settings[key];
+        return DEFAULT_MAPPING_SETTINGS[key];
+      };
+      const stratEl = document.getElementById("ut_strategy");
+      if (stratEl) {
+        stratEl.value = normalizeStrategy(pickSetting("USER_TOKEN_STRATEGY"));
+        // Sync the custom .dd dropdown label (it listens for `change`).
+        stratEl.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      updateStrategyDesc();
+      const minDelayEl = document.getElementById("ut_min_delay");
+      if (minDelayEl) minDelayEl.value = pickSetting("USER_TOKEN_MIN_DELAY") ?? 0;
+      const maxDelayEl = document.getElementById("ut_max_delay");
+      if (maxDelayEl) maxDelayEl.value = pickSetting("USER_TOKEN_MAX_DELAY") ?? 0;
+    }
+
+    // Per-mapping user tokens can only be managed once the mapping exists.
+    setupUserTokensSection(
+      isEdit && mapping?.mapping_id ? mapping.mapping_id : null
+    );
+
     const mappingFormEl = document.getElementById("mapping-form");
     if (mappingFormEl) {
       MAPPING_BASELINE = snapshotForm(mappingFormEl);
@@ -2495,6 +2541,609 @@
   }
 
   window.openMappingModal = openMappingModal;
+
+  // ─── User Message Sending (per-mapping user tokens) ──────────────────
+  let USER_TOKENS_MAPPING_ID = null;
+
+  const UT_STRATEGY_DESCS = {
+    round_robin:
+      "Cycles through your accounts in turn so each sends an equal share.",
+    sticky_author:
+      "Each source user always sends from the same account, keeping identities consistent.",
+  };
+
+  function normalizeStrategy(v) {
+    // "random" was removed — treat any legacy/unknown value as rotate.
+    return v === "sticky_author" ? "sticky_author" : "round_robin";
+  }
+
+  function updateStrategyDesc() {
+    const sel = document.getElementById("ut_strategy");
+    const desc = document.getElementById("ut_strategy_desc");
+    if (sel && desc) desc.textContent = UT_STRATEGY_DESCS[sel.value] || "";
+    // Identity mirroring options only apply to the sticky_author strategy.
+    const sticky = document.getElementById("user-token-sticky-options");
+    if (sticky) sticky.hidden = !sel || sel.value !== "sticky_author";
+  }
+
+  function setUserTokenStatus(msg, type) {
+    const el = document.getElementById("user-token-status");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.classList.remove("is-error", "is-ok");
+    if (type === "error") el.classList.add("is-error");
+    else if (type === "ok") el.classList.add("is-ok");
+  }
+
+  function resetUserTokenReveal() {
+    const btn = document.querySelector(
+      ".token-user-btn[data-target='user_token_value']"
+    );
+    if (!btn) return;
+    btn.setAttribute("aria-pressed", "false");
+    const eye = btn.querySelector(".icon-eye");
+    const eyeOff = btn.querySelector(".icon-eye-off");
+    if (eye) eye.style.display = "";
+    if (eyeOff) eyeOff.style.display = "none";
+  }
+
+  function setupUserTokensSection(mappingId) {
+    USER_TOKENS_MAPPING_ID = mappingId || null;
+    const saveFirst = document.getElementById("user-tokens-save-first");
+    const editor = document.getElementById("user-tokens-editor");
+    const valInput = document.getElementById("user_token_value");
+    const list = document.getElementById("userTokensList");
+
+    setUserTokenStatus("");
+    if (valInput) {
+      valInput.value = "";
+      valInput.type = "password";
+    }
+    resetUserTokenReveal();
+
+    const searchInput = document.getElementById("user_tokens_search");
+    if (searchInput) {
+      searchInput.value = "";
+      searchInput.hidden = true;
+    }
+
+    const settingsMenu = document.getElementById("user-token-settings-menu");
+    const settingsBtn = document.getElementById("user-token-settings-open");
+    if (settingsMenu) settingsMenu.hidden = true;
+    if (settingsBtn) settingsBtn.setAttribute("aria-expanded", "false");
+
+    if (!mappingId) {
+      if (saveFirst) saveFirst.hidden = false;
+      if (editor) editor.hidden = true;
+      if (list) list.innerHTML = "";
+      return;
+    }
+
+    if (saveFirst) saveFirst.hidden = true;
+    if (editor) editor.hidden = false;
+    loadUserTokens();
+  }
+
+  async function loadUserTokens() {
+    const list = document.getElementById("userTokensList");
+    const headerEl = document.getElementById("user-tokens-list-header");
+    const searchEl = document.getElementById("user_tokens_search");
+    if (!list || !USER_TOKENS_MAPPING_ID) return;
+    if (headerEl) headerEl.hidden = true;
+    if (searchEl) searchEl.hidden = true;
+    list.innerHTML = `<div class="mapping-toggle-desc">Loading…</div>`;
+    try {
+      const res = await fetch(
+        `/api/guild-mappings/${encodeURIComponent(
+          USER_TOKENS_MAPPING_ID
+        )}/user-tokens`
+      );
+      const j = await res.json();
+      if (!j.ok) {
+        list.innerHTML = `<div class="mapping-toggle-desc">Failed to load tokens.</div>`;
+        return;
+      }
+      renderUserTokens(j.tokens || []);
+    } catch (e) {
+      list.innerHTML = `<div class="mapping-toggle-desc">Failed to load tokens.</div>`;
+    }
+  }
+
+  function filterUserTokens() {
+    const search = document.getElementById("user_tokens_search");
+    const list = document.getElementById("userTokensList");
+    if (!list) return;
+    const q = (search?.value || "").trim().toLowerCase();
+    const rows = list.querySelectorAll(".user-token-row");
+    let anyVisible = false;
+    rows.forEach((row) => {
+      const match = !q || row.textContent.toLowerCase().includes(q);
+      row.style.display = match ? "" : "none";
+      if (match) anyVisible = true;
+    });
+
+    let empty = document.getElementById("user-tokens-no-match");
+    if (!empty) {
+      empty = document.createElement("div");
+      empty.id = "user-tokens-no-match";
+      empty.className = "mapping-toggle-desc";
+      empty.textContent = "No tokens match your search.";
+    }
+    if (q && !anyVisible) {
+      if (empty.parentNode !== list) list.appendChild(empty);
+      empty.style.display = "";
+    } else {
+      empty.style.display = "none";
+    }
+  }
+
+  function renderUserTokens(tokens) {
+    const list = document.getElementById("userTokensList");
+    const headerEl = document.getElementById("user-tokens-list-header");
+    const countEl = document.getElementById("user-tokens-count");
+    const searchEl = document.getElementById("user_tokens_search");
+    if (!list) return;
+    if (!tokens.length) {
+      if (headerEl) headerEl.hidden = true;
+      if (searchEl) searchEl.hidden = true;
+      list.innerHTML = `<div class="mapping-toggle-desc">No user tokens yet. Add one above.</div>`;
+      return;
+    }
+    if (headerEl) headerEl.hidden = false;
+    if (countEl) {
+      countEl.textContent = `${tokens.length} token${
+        tokens.length === 1 ? "" : "s"
+      }`;
+    }
+    if (searchEl) searchEl.hidden = false;
+    list.innerHTML = "";
+    for (const t of tokens) {
+      const name = t.username || t.user_id || "User token";
+      const row = document.createElement("div");
+      row.className = "user-token-row";
+      row.innerHTML = `
+        <div class="user-token-meta">
+          <span class="user-token-name"></span>
+          <span class="mapping-toggle-desc user-token-sub"></span>
+        </div>
+        <div class="user-token-actions">
+          <label class="toggle mapping-toggle-switch">
+            <input type="checkbox" class="user-token-enabled" ${
+              t.enabled ? "checked" : ""
+            } />
+            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+          </label>
+          <button type="button" class="btn btn-ghost-red user-token-remove">Remove</button>
+        </div>`;
+      row.querySelector(".user-token-name").textContent = name;
+      const sub = t.token_masked + (t.username ? ` · ${t.username}` : "");
+      row.querySelector(".user-token-sub").textContent = sub;
+      const enabledInput = row.querySelector(".user-token-enabled");
+      enabledInput.addEventListener("change", () =>
+        toggleUserToken(t.id, enabledInput.checked)
+      );
+      row
+        .querySelector(".user-token-remove")
+        .addEventListener("click", () => removeUserToken(t.id, name));
+      list.appendChild(row);
+    }
+    // Re-apply any active search filter after rebuilding the list.
+    filterUserTokens();
+  }
+
+  async function addUserToken() {
+    if (!USER_TOKENS_MAPPING_ID) return;
+    const valInput = document.getElementById("user_token_value");
+    const btn = document.getElementById("user-token-add");
+    const token = (valInput?.value || "").trim();
+    if (!token) {
+      setUserTokenStatus("Enter a token.", "error");
+      return;
+    }
+    if (btn) btn.disabled = true;
+    setUserTokenStatus("Validating…");
+    try {
+      const res = await fetch(
+        `/api/guild-mappings/${encodeURIComponent(
+          USER_TOKENS_MAPPING_ID
+        )}/user-tokens`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token }),
+        }
+      );
+      const j = await res.json();
+      if (!j.ok) {
+        setUserTokenStatus(j.error || "Failed to add token.", "error");
+        return;
+      }
+      if (valInput) {
+        valInput.value = "";
+        valInput.type = "password";
+      }
+      resetUserTokenReveal();
+      setUserTokenStatus("Token added.", "ok");
+      await loadUserTokens();
+    } catch (e) {
+      setUserTokenStatus("Network error.", "error");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  async function toggleUserToken(id, enabled) {
+    if (!USER_TOKENS_MAPPING_ID) return;
+    try {
+      await fetch(
+        `/api/guild-mappings/${encodeURIComponent(
+          USER_TOKENS_MAPPING_ID
+        )}/user-tokens/${encodeURIComponent(id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled }),
+        }
+      );
+    } catch (e) {
+      /* ignore — UI reflects intent; reload on next open */
+    }
+  }
+
+  async function removeUserToken(id, name) {
+    if (!USER_TOKENS_MAPPING_ID) return;
+    if (!window.confirm(`Remove ${name}?`)) return;
+    try {
+      await fetch(
+        `/api/guild-mappings/${encodeURIComponent(
+          USER_TOKENS_MAPPING_ID
+        )}/user-tokens/${encodeURIComponent(id)}`,
+        { method: "DELETE" }
+      );
+      await loadUserTokens();
+    } catch (e) {
+      setUserTokenStatus("Failed to remove token.", "error");
+    }
+  }
+
+  document
+    .getElementById("user-token-add")
+    ?.addEventListener("click", addUserToken);
+
+  document
+    .getElementById("ut_strategy")
+    ?.addEventListener("change", updateStrategyDesc);
+
+  document
+    .getElementById("user_tokens_search")
+    ?.addEventListener("input", filterUserTokens);
+
+  // ── Bulk add tokens ──
+  function setBulkTokenStatus(msg, type) {
+    const el = document.getElementById("user-token-bulk-status");
+    if (!el) return;
+    el.textContent = msg || "";
+    el.classList.remove("is-error", "is-ok");
+    if (type === "error") el.classList.add("is-error");
+    else if (type === "ok") el.classList.add("is-ok");
+  }
+
+  function openBulkTokenModal() {
+    if (!USER_TOKENS_MAPPING_ID) return;
+    const modal = document.getElementById("user-token-bulk-modal");
+    const input = document.getElementById("user_token_bulk_input");
+    const results = document.getElementById("user-token-bulk-results");
+    if (input) input.value = "";
+    if (results) results.innerHTML = "";
+    setBulkTokenStatus("");
+    if (!modal) return;
+    modal.classList.add("show");
+    modal.setAttribute("aria-hidden", "false");
+    if (input) input.focus();
+  }
+
+  function closeBulkTokenModal() {
+    const modal = document.getElementById("user-token-bulk-modal");
+    if (!modal) return;
+    modal.classList.remove("show");
+    modal.setAttribute("aria-hidden", "true");
+  }
+
+  function renderBulkTokenResults(results) {
+    const box = document.getElementById("user-token-bulk-results");
+    if (!box) return;
+    box.innerHTML = "";
+    const labels = {
+      added: "Added",
+      duplicate: "Already added",
+      invalid: "Invalid / not in server",
+      error: "Error",
+    };
+    for (const r of results || []) {
+      const row = document.createElement("div");
+      row.className = "user-token-bulk-row";
+      const tok = document.createElement("span");
+      tok.className = "btok";
+      tok.textContent = r.masked + (r.username ? ` · ${r.username}` : "");
+      const st = document.createElement("span");
+      st.className = `bstatus ${r.status}`;
+      st.textContent = labels[r.status] || r.status;
+      row.appendChild(tok);
+      row.appendChild(st);
+      box.appendChild(row);
+    }
+  }
+
+  async function submitBulkTokens() {
+    if (!USER_TOKENS_MAPPING_ID) return;
+    const input = document.getElementById("user_token_bulk_input");
+    const btn = document.getElementById("user-token-bulk-submit");
+    const text = (input?.value || "").trim();
+    if (!text) {
+      setBulkTokenStatus("Paste at least one token.", "error");
+      return;
+    }
+    if (btn) btn.disabled = true;
+    setBulkTokenStatus("Validating… this can take a moment.");
+    try {
+      const res = await fetch(
+        `/api/guild-mappings/${encodeURIComponent(
+          USER_TOKENS_MAPPING_ID
+        )}/user-tokens/bulk`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tokens: text }),
+        }
+      );
+      const j = await res.json();
+      if (!j.ok) {
+        setBulkTokenStatus(j.error || "Failed to add tokens.", "error");
+        return;
+      }
+      renderBulkTokenResults(j.results);
+      const skipped = (j.total || 0) - (j.added || 0);
+      setBulkTokenStatus(
+        `Added ${j.added} of ${j.total}${skipped ? `, ${skipped} skipped` : ""}.`,
+        j.added ? "ok" : "error"
+      );
+      await loadUserTokens();
+    } catch (e) {
+      setBulkTokenStatus("Network error.", "error");
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  document
+    .getElementById("user-token-bulk-open")
+    ?.addEventListener("click", openBulkTokenModal);
+  document
+    .getElementById("user-token-bulk-close")
+    ?.addEventListener("click", closeBulkTokenModal);
+  document
+    .getElementById("user-token-bulk-submit")
+    ?.addEventListener("click", submitBulkTokens);
+  document
+    .querySelector("#user-token-bulk-modal .modal-backdrop")
+    ?.addEventListener("click", closeBulkTokenModal);
+
+  // ── Token settings menu (verify / delete all) ──
+  function closeUserTokenMenu() {
+    const menu = document.getElementById("user-token-settings-menu");
+    const btn = document.getElementById("user-token-settings-open");
+    if (menu) menu.hidden = true;
+    if (btn) btn.setAttribute("aria-expanded", "false");
+  }
+
+  function toggleUserTokenMenu(e) {
+    e?.stopPropagation();
+    const menu = document.getElementById("user-token-settings-menu");
+    const btn = document.getElementById("user-token-settings-open");
+    if (!menu) return;
+    const willOpen = menu.hidden;
+    menu.hidden = !willOpen;
+    if (btn) btn.setAttribute("aria-expanded", willOpen ? "true" : "false");
+  }
+
+  document
+    .getElementById("user-token-settings-open")
+    ?.addEventListener("click", toggleUserTokenMenu);
+
+  // Close the menu on any outside click or Escape.
+  document.addEventListener("click", (e) => {
+    const wrap = document.querySelector(".user-token-settings");
+    if (wrap && !wrap.contains(e.target)) closeUserTokenMenu();
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeUserTokenMenu();
+  });
+
+  async function deleteUserTokens(body) {
+    try {
+      const res = await fetch(
+        `/api/guild-mappings/${encodeURIComponent(
+          USER_TOKENS_MAPPING_ID
+        )}/user-tokens/delete`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }
+      );
+      const j = await res.json();
+      await loadUserTokens();
+      if (!j.ok) {
+        window.showToast?.(j.error || "Failed to delete tokens.", {
+          type: "error",
+        });
+        return null;
+      }
+      return j.deleted;
+    } catch (e) {
+      window.showToast?.("Network error while deleting tokens.", {
+        type: "error",
+      });
+      return null;
+    }
+  }
+
+  function buildVerifyResultsHtml(j) {
+    const esc = window.escapeHtml || ((s) => String(s == null ? "" : s));
+    // Non-working first so failures are immediately visible.
+    const ordered = (j.results || [])
+      .slice()
+      .sort((a, b) => Number(a.ok) - Number(b.ok));
+    const rows = ordered
+      .map((r) => {
+        const label = r.username
+          ? `${esc(r.masked)} · ${esc(r.username)}`
+          : esc(r.masked);
+        const cls = r.ok ? "added" : "invalid";
+        const txt = r.ok ? "Working" : "Not working";
+        return `<div class="user-token-bulk-row"><span class="btok">${label}</span><span class="bstatus ${cls}">${txt}</span></div>`;
+      })
+      .join("");
+    const summary =
+      `<div class="user-token-verify-summary">` +
+      `<span class="uv-ok">${j.working} working</span>` +
+      `<span class="uv-sep">·</span>` +
+      `<span class="uv-bad">${j.broken} not working</span>` +
+      `</div>`;
+    return `${summary}<div class="user-token-bulk-results user-token-verify-list">${rows}</div>`;
+  }
+
+  async function verifyUserTokens() {
+    closeUserTokenMenu();
+    if (!USER_TOKENS_MAPPING_ID) return;
+    const esc = window.escapeHtml || ((s) => String(s == null ? "" : s));
+    const cModalEl = document.getElementById("confirm-modal");
+    const stillOpen = () => !!cModalEl && cModalEl.classList.contains("show");
+
+    // Open the modal immediately with a loading state — the verification
+    // request happens while the popup is already on screen.
+    openConfirm({
+      title: "Token verification",
+      body:
+        `<div class="user-token-verify-loading">` +
+        `<span class="uv-spinner" aria-hidden="true"></span>` +
+        `<span>Verifying tokens…</span></div>`,
+      confirmText: "Cancel",
+      confirmClass: "btn-ghost",
+      showCancel: false,
+    });
+
+    let j;
+    try {
+      const res = await fetch(
+        `/api/guild-mappings/${encodeURIComponent(
+          USER_TOKENS_MAPPING_ID
+        )}/user-tokens/verify`,
+        { method: "POST" }
+      );
+      j = await res.json();
+    } catch (e) {
+      if (stillOpen()) {
+        openConfirm({
+          title: "Token verification",
+          body: "Network error while verifying tokens.",
+          confirmText: "Close",
+          confirmClass: "btn-ghost",
+          showCancel: false,
+        });
+      }
+      return;
+    }
+
+    // The user closed the popup while we were waiting — don't reopen it.
+    if (!stillOpen()) return;
+
+    if (!j.ok || !j.total) {
+      openConfirm({
+        title: "Token verification",
+        body: j.ok
+          ? "There are no tokens to verify."
+          : esc(j.error || "Failed to verify tokens."),
+        confirmText: "Close",
+        confirmClass: "btn-ghost",
+        showCancel: false,
+      });
+      return;
+    }
+
+    const body = buildVerifyResultsHtml(j);
+    if (!j.broken) {
+      openConfirm({
+        title: "Token verification",
+        body,
+        confirmText: "Done",
+        confirmClass: "btn-primary",
+        showCancel: false,
+      });
+      return;
+    }
+
+    const brokenIds = (j.results || []).filter((r) => !r.ok).map((r) => r.id);
+    openConfirm({
+      title: "Token verification",
+      body,
+      confirmText: `Delete ${j.broken} non-working`,
+      confirmClass: "btn-ghost-red",
+      showCancel: true,
+      onConfirm: async () => {
+        const deleted = await deleteUserTokens({ ids: brokenIds });
+        if (deleted != null) {
+          window.showToast?.(
+            `Removed ${deleted} non-working token${deleted === 1 ? "" : "s"}.`,
+            { type: "success" }
+          );
+        }
+      },
+    });
+  }
+
+  async function deleteAllUserTokens() {
+    closeUserTokenMenu();
+    if (!USER_TOKENS_MAPPING_ID) return;
+    openConfirm({
+      title: "Delete all tokens?",
+      body: "This removes <strong>all</strong> user tokens from this mapping. This cannot be undone.",
+      confirmText: "Delete all",
+      confirmClass: "btn-ghost-red",
+      showCancel: true,
+      onConfirm: async () => {
+        const deleted = await deleteUserTokens({ scope: "all" });
+        if (deleted != null) {
+          window.showToast?.(
+            `Deleted ${deleted} token${deleted === 1 ? "" : "s"}.`,
+            { type: "success" }
+          );
+        }
+      },
+    });
+  }
+
+  document
+    .getElementById("user-token-verify")
+    ?.addEventListener("click", verifyUserTokens);
+  document
+    .getElementById("user-token-delete-all")
+    ?.addEventListener("click", deleteAllUserTokens);
+
+  document
+    .querySelector(".token-user-btn[data-target='user_token_value']")
+    ?.addEventListener("click", (e) => {
+      const btn = e.currentTarget;
+      const input = document.getElementById("user_token_value");
+      if (!input) return;
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.setAttribute("aria-pressed", show ? "true" : "false");
+      const eye = btn.querySelector(".icon-eye");
+      const eyeOff = btn.querySelector(".icon-eye-off");
+      if (eye) eye.style.display = show ? "none" : "";
+      if (eyeOff) eyeOff.style.display = show ? "" : "none";
+    });
 
   // ─── Message Features Modal ──────────────────────────────────────────
   const msgFeaturesModal = document.getElementById("msg-features-modal");

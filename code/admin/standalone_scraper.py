@@ -8,13 +8,6 @@
 # =============================================================================
 
 
-"""
-Standalone Member Scraper
-
-Multi-token gateway-based member scraper with QueryPlanner for complete
-member discovery.  Falls back to REST API when gateway is unavailable.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -31,6 +24,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import IntEnum
 from typing import Any, Callable, Dict, List, Optional
+
+from common.selfbot_headers import build_headers
 
 try:
     from aiohttp_socks import ProxyConnector
@@ -539,59 +534,13 @@ class SharedPlanner:
 
 
 def _build_headers(token: str) -> dict[str, str]:
-    """Build realistic Discord client headers with randomised fingerprint."""
-    client_versions = ["1.0.9163", "1.0.9156", "1.0.9154"]
-    chrome_versions = ["108.0.5359.215", "139.0.7258.155"]
-    electron_versions = ["22.3.26", "22.3.18"]
-    win_builds = ["10.0.22621", "10.0.22631"]
-    locales = ["en-US", "en-GB", "de", "fr", "es-ES"]
-    timezones = ["America/New_York", "America/Chicago", "Europe/Berlin", "Asia/Tokyo"]
-
-    cv = random.choice(client_versions)
-    chv = random.choice(chrome_versions)
-    ev = random.choice(electron_versions)
-    osv = random.choice(win_builds)
-    loc = random.choice(locales)
-    tz = random.choice(timezones)
-
-    super_props = {
-        "os": "Windows",
-        "browser": "Discord Client",
-        "release_channel": "stable",
-        "client_version": cv,
-        "os_version": osv,
-        "os_arch": "x64",
-        "system_locale": loc,
-    }
-    sp_b64 = base64.b64encode(
-        json.dumps(super_props, separators=(",", ":")).encode()
-    ).decode()
-
-    return {
-        "Authorization": token,
-        "User-Agent": (
-            f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            f"AppleWebKit/537.36 (KHTML, like Gecko) "
-            f"discord/{cv} Chrome/{chv} Electron/{ev} Safari/537.36"
-        ),
-        "X-Super-Properties": sp_b64,
-        "X-Discord-Locale": loc,
-        "X-Discord-Timezone": tz,
-        "Accept": "*/*",
-        "Accept-Language": f"{loc},en;q=0.9",
-        "DNT": "1",
-        "Origin": "https://discord.com",
-        "Referer": "https://discord.com/channels/@me",
-    }
+    """Realistic Discord desktop-client headers for a user token."""
+    return build_headers(token)
 
 
 class StandaloneScraper:
     """
     Independent member scraper using multiple tokens via Discord gateway.
-
-    Each token opens a websocket, identifies, then sends op-8 member-list
-    requests driven by the shared QueryPlanner.  Falls back to REST when
-    the gateway is unavailable.
     """
 
     DISCORD_API = "https://discord.com/api/v10"
@@ -613,15 +562,6 @@ class StandaloneScraper:
     def _normalize_proxy(raw: str) -> str:
         """
         Accept multiple common proxy formats and return a proper URL.
-
-        Supported inputs:
-          - http://user:pass@host:port        (proper URL — returned as-is)
-          - socks5://user:pass@host:port      (proper URL — returned as-is)
-          - http://host:port:user:pass        (scheme + provider format)
-          - socks5://host:port:user:pass      (scheme + provider format)
-          - host:port                         (no auth)
-          - host:port:user:pass               (common provider format)
-          - user:pass@host:port               (missing scheme)
         """
         raw = raw.strip()
         if not raw:
@@ -722,7 +662,7 @@ class StandaloneScraper:
         try:
             async with session.get(
                 f"{self.DISCORD_API}/users/@me",
-                headers={"Authorization": token},
+                headers=_build_headers(token),
                 timeout=aiohttp.ClientTimeout(total=5),
                 **self._proxy_kwarg(proxy),
             ) as resp:
@@ -747,7 +687,7 @@ class StandaloneScraper:
                 url = f"{self.DISCORD_API}/users/@me/guilds?limit=200&after={after}"
                 async with session.get(
                     url,
-                    headers={"Authorization": token},
+                    headers=_build_headers(token),
                     timeout=aiohttp.ClientTimeout(total=8),
                     **self._proxy_kwarg(proxy),
                 ) as resp:
@@ -786,7 +726,7 @@ class StandaloneScraper:
         try:
             async with session.get(
                 f"{self.DISCORD_API}/guilds/{guild_id}?with_counts=true",
-                headers={"Authorization": token},
+                headers=_build_headers(token),
                 timeout=aiohttp.ClientTimeout(total=8),
                 **self._proxy_kwarg(proxy),
             ) as resp:
@@ -889,11 +829,6 @@ class StandaloneScraper:
         """
         Single gateway session: identify -> pump op-8 queries -> collect
         GUILD_MEMBERS_CHUNK responses.
-
-        Stays alive until:
-          - stop_event is set (target reached / cancelled)
-          - planner is fully exhausted AND no in-flight queries AND
-            no growth for several seconds (final sweep timeout)
         """
 
         if (member_count_hint or 0) >= 500_000:
@@ -1028,11 +963,7 @@ class StandaloneScraper:
                                 threshold=refill_threshold, step=refill_step
                             )
 
-                            # prefixes are fine — they'll return < 100 members.
-
                             skip_single = (member_count_hint or 0) > 1000
-
-                            # Keep pulling batches until we've filled all
 
                             max_local_rounds = 200
                             local_rounds = 0
@@ -1299,8 +1230,6 @@ class StandaloneScraper:
                 if q:
                     await planner.requeue(q)
 
-            # Don't give up immediately — other sessions may still be producing work.
-            # Only exit if stop event is set, or we've truly exhausted everything.
             if self._stop_event.is_set():
                 return
             if not await planner.has_work():
@@ -1341,7 +1270,7 @@ class StandaloneScraper:
                     proxy = self._next_proxy()
                     async with session.get(
                         f"{self.DISCORD_API}/guilds/{self.config.guild_id}/members",
-                        headers={"Authorization": token},
+                        headers=_build_headers(token),
                         params=params,
                         timeout=aiohttp.ClientTimeout(total=10),
                         **self._proxy_kwarg(proxy),

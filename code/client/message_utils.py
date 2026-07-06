@@ -16,6 +16,8 @@ import discord
 import aiohttp
 from discord import Member
 
+from common.selfbot_headers import build_headers
+
 
 class MessageUtils:
     """
@@ -158,7 +160,7 @@ class MessageUtils:
 
         return e
 
-    def stickers_payload(self, stickers) -> list[dict]:
+    def stickers_payload(self, stickers, guild=None) -> list[dict]:
         def _enum_int(val, default=0):
             v = getattr(val, "value", val)
             try:
@@ -173,14 +175,31 @@ class MessageUtils:
                 u = getattr(asset, "url", None) if asset else None
             return str(u) if u else ""
 
+        # Ids of the source guild's own custom stickers. Lets the server tell a
+        # custom guild sticker (cloneable / token-sendable only when cloned) from
+        # a standard Discord-library sticker (global id, token-sendable w/ Nitro).
+        guild_sticker_ids: set[int] = set()
+        if guild is not None:
+            try:
+                guild_sticker_ids = {
+                    int(gs.id) for gs in (getattr(guild, "stickers", []) or [])
+                }
+            except Exception:
+                guild_sticker_ids = set()
+
         out = []
         for s in stickers or []:
+            try:
+                sid = int(getattr(s, "id", 0) or 0)
+            except Exception:
+                sid = 0
             out.append(
                 {
                     "id": s.id,
                     "name": s.name,
                     "format_type": _enum_int(getattr(s, "format", None), 0),
                     "url": _sticker_url(s),
+                    "is_guild_sticker": sid in guild_sticker_ids,
                 }
             )
         return out
@@ -240,7 +259,9 @@ class MessageUtils:
             ]
 
         if message.stickers:
-            data["stickers"] = self.stickers_payload(message.stickers)
+            data["stickers"] = self.stickers_payload(
+                message.stickers, getattr(message, "guild", None)
+            )
 
         return data
 
@@ -254,6 +275,45 @@ class MessageUtils:
                 continue
             out.append({"id": int(rid), "name": str(name)})
         return out
+
+    @staticmethod
+    def author_role_ids(src_msg: discord.Message) -> list[int]:
+        """The host author's own role ids (excluding @everyone).
+
+        Used by the server's sticky-author identity feature to mirror the
+        author's roles onto the token account. Falls back to looking the author
+        up as a guild member when the message author is a bare ``User`` (e.g.
+        historical/backfilled messages).
+        """
+        author = getattr(src_msg, "author", None)
+        if author is None:
+            return []
+
+        def _collect(obj) -> list[int]:
+            ids: list[int] = []
+            for r in getattr(obj, "roles", None) or []:
+                try:
+                    if getattr(r, "is_default", None) and r.is_default():
+                        continue
+                    ids.append(int(r.id))
+                except Exception:
+                    continue
+            return ids
+
+        ids = _collect(author)
+        if ids:
+            return ids
+
+        guild = getattr(src_msg, "guild", None)
+        aid = getattr(author, "id", None)
+        if guild is not None and aid is not None:
+            try:
+                member = guild.get_member(int(aid))
+            except Exception:
+                member = None
+            if member is not None:
+                return _collect(member)
+        return []
 
 
 class Snapshot:
@@ -408,7 +468,7 @@ class Snapshot:
                     return None
 
                 url = f"https://discord.com/api/v9/channels/{chan_id}/messages?limit={int(limit)}"
-                headers = {"Authorization": token}
+                headers = build_headers(token)
 
                 async with aiohttp.ClientSession() as sess:
                     async with sess.get(url, headers=headers) as resp:

@@ -568,6 +568,173 @@ class TestThreadMappings:
 
 
 # ---------------------------------------------------------------------------
+# Mapping user tokens (self-bot senders)
+# ---------------------------------------------------------------------------
+
+class TestMappingUserTokens:
+
+    def _mapping(self, db, mapping_id="ut-map", ogid=1, cgid=2):
+        return db.upsert_guild_mapping(
+            mapping_id=mapping_id,
+            mapping_name="UT",
+            original_guild_id=ogid,
+            original_guild_name="",
+            original_guild_icon_url=None,
+            cloned_guild_id=cgid,
+            cloned_guild_name="",
+        )
+
+    def test_add_and_list(self, db):
+        self._mapping(db)
+        tid = db.add_mapping_token(
+            "ut-map", "tokenA", label="acct1", username="user1", user_id="10"
+        )
+        assert tid
+        rows = db.list_mapping_tokens("ut-map")
+        assert len(rows) == 1
+        assert rows[0]["token_value"] == "tokenA"
+        assert rows[0]["label"] == "acct1"
+        assert rows[0]["username"] == "user1"
+        assert rows[0]["enabled"] == 1
+
+    def test_enabled_tokens_only(self, db):
+        self._mapping(db)
+        db.add_mapping_token("ut-map", "tokA")
+        t2 = db.add_mapping_token("ut-map", "tokB")
+        db.set_mapping_token_enabled(t2, False)
+        enabled = db.get_enabled_mapping_tokens("ut-map")
+        assert {e["token_value"] for e in enabled} == {"tokA"}
+
+    def test_unique_per_mapping(self, db):
+        self._mapping(db)
+        db.add_mapping_token("ut-map", "dup")
+        with pytest.raises(sqlite3.IntegrityError):
+            db.add_mapping_token("ut-map", "dup")
+
+    def test_same_token_different_mappings(self, db):
+        self._mapping(db)
+        self._mapping(db, mapping_id="ut-map2", ogid=3, cgid=4)
+        db.add_mapping_token("ut-map", "shared")
+        # Same token string is allowed under a different mapping.
+        db.add_mapping_token("ut-map2", "shared")
+        assert len(db.list_mapping_tokens("ut-map")) == 1
+        assert len(db.list_mapping_tokens("ut-map2")) == 1
+
+    def test_toggle_enabled(self, db):
+        self._mapping(db)
+        tid = db.add_mapping_token("ut-map", "tokA")
+        db.set_mapping_token_enabled(tid, False)
+        assert db.get_mapping_token(tid)["enabled"] == 0
+        db.set_mapping_token_enabled(tid, True)
+        assert db.get_mapping_token(tid)["enabled"] == 1
+
+    def test_delete(self, db):
+        self._mapping(db)
+        tid = db.add_mapping_token("ut-map", "tokA")
+        assert db.delete_mapping_token(tid) is True
+        assert db.list_mapping_tokens("ut-map") == []
+
+    def test_delete_all(self, db):
+        self._mapping(db)
+        db.add_mapping_token("ut-map", "tokA")
+        db.add_mapping_token("ut-map", "tokB")
+        db.add_mapping_token("ut-map", "tokC")
+        assert db.delete_all_mapping_tokens("ut-map") == 3
+        assert db.list_mapping_tokens("ut-map") == []
+        # A second call removes nothing.
+        assert db.delete_all_mapping_tokens("ut-map") == 0
+
+    def test_usage_increment(self, db):
+        self._mapping(db)
+        tid = db.add_mapping_token("ut-map", "tokA")
+        db.increment_mapping_token_usage(tid)
+        assert db.get_mapping_token(tid)["use_count"] == 1
+
+    def test_enabled_tokens_include_user_id(self, db):
+        # The identity manager needs user_id to resolve the token's member.
+        self._mapping(db)
+        db.add_mapping_token("ut-map", "tokA", username="acc", user_id="4242")
+        enabled = db.get_enabled_mapping_tokens("ut-map")
+        assert len(enabled) == 1
+        assert enabled[0]["user_id"] == "4242"
+        assert enabled[0]["username"] == "acc"
+
+
+class TestMappingTokenIdentities:
+
+    def _mapping(self, db, mapping_id="id-map", ogid=1, cgid=2):
+        return db.upsert_guild_mapping(
+            mapping_id=mapping_id,
+            mapping_name="ID",
+            original_guild_id=ogid,
+            original_guild_name="",
+            original_guild_icon_url=None,
+            cloned_guild_id=cgid,
+            cloned_guild_name="",
+        )
+
+    def test_upsert_and_get(self, db):
+        self._mapping(db)
+        db.upsert_token_identity(
+            mapping_id="id-map",
+            author_id="111",
+            token_id="tok1",
+            cloned_guild_id=2,
+            applied_nick="Alice",
+            applied_role_ids=[30, 20, 10],
+            assigned_at=1000,
+        )
+        row = db.get_token_identity("id-map", "111")
+        assert row["token_id"] == "tok1"
+        assert row["applied_nick"] == "Alice"
+        # Role ids round-trip as a sorted int list.
+        assert row["applied_role_ids"] == [10, 20, 30]
+        assert row["assigned_at"] == 1000
+
+    def test_upsert_replaces(self, db):
+        self._mapping(db)
+        db.upsert_token_identity(
+            mapping_id="id-map", author_id="111", token_id="tok1",
+            cloned_guild_id=2, applied_nick="A", applied_role_ids=[1],
+            assigned_at=1000,
+        )
+        db.upsert_token_identity(
+            mapping_id="id-map", author_id="111", token_id="tok2",
+            cloned_guild_id=2, applied_nick="B", applied_role_ids=[],
+            assigned_at=2000,
+        )
+        assert len(db.list_token_identities("id-map")) == 1
+        row = db.get_token_identity("id-map", "111")
+        assert row["token_id"] == "tok2"
+        assert row["applied_role_ids"] == []
+        assert row["assigned_at"] == 2000
+
+    def test_list_and_delete(self, db):
+        self._mapping(db)
+        for aid in ("a", "b", "c"):
+            db.upsert_token_identity(
+                mapping_id="id-map", author_id=aid, token_id="t",
+                cloned_guild_id=2, applied_nick=None, applied_role_ids=[],
+                assigned_at=1,
+            )
+        assert len(db.list_token_identities("id-map")) == 3
+        assert db.delete_token_identity("id-map", "b") is True
+        assert len(db.list_token_identities("id-map")) == 2
+        assert db.clear_token_identities("id-map") == 2
+        assert db.list_token_identities("id-map") == []
+
+    def test_cascade_on_mapping_delete(self, db):
+        mid = self._mapping(db, mapping_id="id-cascade")
+        db.upsert_token_identity(
+            mapping_id=mid, author_id="1", token_id="t",
+            cloned_guild_id=2, applied_nick="x", applied_role_ids=[1],
+            assigned_at=1,
+        )
+        db.delete_guild_mapping(mid)
+        assert db.list_token_identities(mid) == []
+
+
+# ---------------------------------------------------------------------------
 # Cascade: deleting a guild mapping cleans child tables
 # ---------------------------------------------------------------------------
 
@@ -588,6 +755,7 @@ class TestGuildMappingCascade:
         db.upsert_channel_mapping(100, "gen", 200, None, 10, 20, 0, original_guild_id=1, cloned_guild_id=2)
         db.upsert_role_mapping(500, "Admin", 600, "Admin-Clone", original_guild_id=1, cloned_guild_id=2)
         db.upsert_emoji_mapping(700, "pepe", 800, "pepe", original_guild_id=1, cloned_guild_id=2)
+        db.add_mapping_token(mid, "tokA", label="acct")
         db.add_event_log(event_type="x", details="y", guild_id=1)
 
         db.delete_guild_mapping(mid)
@@ -596,5 +764,6 @@ class TestGuildMappingCascade:
         assert len(db.get_all_channel_mappings()) == 0
         assert len(db.get_all_role_mappings()) == 0
         assert len(db.get_all_emoji_mappings()) == 0
+        assert db.list_mapping_tokens(mid) == []
         # Event logs are NOT cascade-deleted (they're audit records)
         assert db.count_event_logs() == 1

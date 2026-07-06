@@ -130,6 +130,15 @@ class Config:
             "APPEND_AUTHOR": False,
             "DB_CLEANUP_MSG": True,
             "ON_DEMAND_WEBHOOKS": True,
+            "USE_USER_TOKENS": False,
+            "USER_TOKEN_STRATEGY": "round_robin",
+            "USER_TOKEN_FALLBACK_WEBHOOK": True,
+            "USER_TOKEN_TYPING": False,
+            "USER_TOKEN_MIN_DELAY": 0,
+            "USER_TOKEN_MAX_DELAY": 0,
+            "USER_TOKEN_LINKS_ONLY": False,
+            "USER_TOKEN_STICKY_NICKNAME": False,
+            "USER_TOKEN_STICKY_ROLES": False,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):

@@ -102,10 +102,13 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
   # -----------------------------------------------------------------------
-  # 3. API endpoint tests
+  # 3. Unit tests — API, user-token sending/identity, fingerprint, routing.
+  #    Runs the whole tests/ tree except the dependency-light DB tests (which
+  #    the test-db job covers). Using the directory (not a file list) means new
+  #    test files are picked up automatically.
   # -----------------------------------------------------------------------
-  test-api:
-    name: API endpoint tests
+  test-suite:
+    name: Unit tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -119,18 +122,18 @@ jobs:
           pip install -r tests/requirements-test.txt
           pip install pytest-asyncio
 
-      - name: Run API tests
+      - name: Run unit tests
         env:
           PYTHONPATH: code
-        run: python -m pytest tests/test_api.py -v 2>&1 | tee /tmp/api-tests.txt
+        run: python -m pytest tests/ --ignore=tests/test_db.py -v 2>&1 | tee /tmp/tests.txt
 
       - name: Job summary
         if: always()
         run: |
-          echo "## API Endpoint Tests" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Unit Tests" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          tail -20 /tmp/api-tests.txt >> "$GITHUB_STEP_SUMMARY"
+          tail -25 /tmp/tests.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
   # -----------------------------------------------------------------------

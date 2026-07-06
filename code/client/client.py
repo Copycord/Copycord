@@ -32,7 +32,6 @@ from client.message_utils import (
     _resolve_forward_via_snapshot,
 )
 from common.websockets import WebsocketManager, AdminBus
-from client.scraper import MemberScraper
 from client.helpers import ClientUiController, dump_message_debug
 from client.export_runners import (
     BackfillEngine,
@@ -101,12 +100,6 @@ class ClientListener:
         self._ws_task: Optional[asyncio.Task] = None
         self._proxy_rotation_task: Optional[asyncio.Task] = None
         self._m_user = re.compile(r"<@!?(\d+)>")
-        self.scraper = getattr(self, "scraper", None)
-        self._scrape_lock = getattr(self, "_scrape_lock", asyncio.Lock())
-        self._last_cancel_at: float | None = None
-        self._cancelling: bool = False
-        self._scrape_task = None
-        self._scrape_gid = None
         self.do_precount = True
         self._dm_export_lock = asyncio.Lock()
         self._dm_export_task: asyncio.Task | None = None
@@ -462,263 +455,6 @@ class ClientListener:
                 logger.info("[🌐] Received sitemap request for %s", target_gid or "ALL")
 
             return {"ok": True}
-
-        elif typ == "scrape_members":
-            data = data or {}
-
-            inc_username = bool(data.get("include_username", False))
-            inc_avatar_url = bool(data.get("include_avatar_url", False))
-            inc_bio = bool(data.get("include_bio", False))
-            inc_roles = bool(data.get("include_roles", False))
-            gid = str(data.get("guild_id") or "")
-            self._scrape_gid = gid
-
-            def clamp(v, lo, hi):
-                return max(lo, min(hi, v))
-
-            try:
-                ns = int(data.get("num_sessions", 2))
-            except Exception:
-                ns = 2
-            ns = clamp(ns, 1, 5)
-
-            mpps = data.get("max_parallel_per_session")
-            if mpps is None:
-                mpps = clamp(8 // ns, 1, 5)
-            else:
-                try:
-                    mpps = clamp(int(mpps), 1, 5)
-                except Exception:
-                    mpps = 1
-
-            def _err_msg(e: BaseException) -> str:
-                msg = str(e).strip()
-                return msg or type(e).__name__
-
-            try:
-                if self.scraper is None:
-                    self.scraper = MemberScraper(self.bot, self.config, logger=logger)
-
-                async with self._scrape_lock:
-                    if self._scrape_task and not self._scrape_task.done():
-
-                        return {"ok": False, "error": "scrape-already-running"}
-
-                    try:
-                        await self.bus.publish(
-                            kind="client",
-                            payload={
-                                "type": "scrape_started",
-                                "data": {
-                                    "guild_id": gid,
-                                    "options": {
-                                        "include_username": inc_username,
-                                        "include_avatar_url": inc_avatar_url,
-                                        "include_bio": inc_bio,
-                                        "num_sessions": ns,
-                                        "max_parallel_per_session": mpps,
-                                        "include_roles": inc_roles,
-                                    },
-                                },
-                            },
-                        )
-                    except Exception:
-                        pass
-
-                try:
-                    target_gid = int(gid) if gid else None
-                except Exception:
-                    target_gid = None
-
-                self._scrape_task = asyncio.create_task(
-                    self.scraper.scrape(
-                        guild_id=target_gid,
-                        include_username=inc_username,
-                        include_avatar_url=inc_avatar_url,
-                        include_bio=inc_bio,
-                        include_roles=inc_roles,
-                        num_sessions=ns,
-                        max_parallel_per_session=mpps,
-                    ),
-                    name="scrape",
-                )
-
-                async def _finish_scrape():
-                    try:
-                        result = await self._scrape_task
-                        count = len((result or {}).get("members", []))
-                        logger.debug("[scrape] TASK_DONE count=%d", count)
-
-                        import os, json, datetime as _dt
-
-                        data_root = os.getenv("DATA_DIR", "/data")
-                        scrapes_dir = os.path.join(data_root, "scrapes")
-                        os.makedirs(scrapes_dir, exist_ok=True)
-
-                        rgid = str((result or {}).get("guild_id") or gid or "unknown")
-                        gname = (result or {}).get("guild_name", "guild")
-                        slug = "".join(
-                            ch if ch.isalnum() else "_" for ch in gname
-                        ).strip("_")
-                        while "__" in slug:
-                            slug = slug.replace("__", "_")
-
-                        ts = _dt.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-                        outfile = os.path.join(scrapes_dir, f"{slug}_{rgid}_{ts}.json")
-
-                        with open(outfile, "w", encoding="utf-8") as f:
-                            json.dump(result or {}, f, ensure_ascii=False, indent=2)
-
-                        try:
-                            await self.bus.publish(
-                                kind="client",
-                                payload={
-                                    "type": "scrape_done",
-                                    "data": {
-                                        "guild_id": rgid,
-                                        "count": count,
-                                        "path": outfile,
-                                        "filename": os.path.basename(outfile),
-                                    },
-                                },
-                            )
-                        except Exception:
-                            pass
-
-                    except asyncio.CancelledError:
-
-                        import os, json, datetime as _dt
-
-                        snap = await self.scraper.snapshot_members()
-                        try:
-                            rgid = str(self._scrape_gid or gid or "unknown")
-                            try:
-                                g = self.bot.get_guild(int(rgid))
-                            except Exception:
-                                g = None
-                            gname = g.name if g else "guild"
-
-                            scrapes_dir = "/data/scrapes"
-                            os.makedirs(scrapes_dir, exist_ok=True)
-
-                            slug = "".join(
-                                ch if ch.isalnum() else "_" for ch in gname
-                            ).strip("_")
-                            while "__" in slug:
-                                slug = slug.replace("__", "_")
-
-                            ts = _dt.datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-                            outfile = os.path.join(
-                                scrapes_dir, f"{slug}_{rgid}_{ts}.json"
-                            )
-
-                            with open(outfile, "w", encoding="utf-8") as f:
-                                json.dump(
-                                    {
-                                        "members": snap,
-                                        "count": len(snap),
-                                        "guild_id": rgid,
-                                        "guild_name": gname,
-                                    },
-                                    f,
-                                    ensure_ascii=False,
-                                    indent=2,
-                                )
-
-                            await self.bus.publish(
-                                kind="client",
-                                payload={
-                                    "type": "scrape_done",
-                                    "data": {
-                                        "guild_id": rgid,
-                                        "count": len(snap),
-                                        "path": outfile,
-                                        "filename": os.path.basename(outfile),
-                                        "partial": True,
-                                    },
-                                },
-                            )
-                        except Exception:
-
-                            try:
-                                await self.bus.publish(
-                                    kind="client",
-                                    payload={
-                                        "type": "scrape_cancelled",
-                                        "data": {"guild_id": self._scrape_gid or gid},
-                                    },
-                                )
-                            except Exception:
-                                pass
-
-                    except BaseException as e:
-                        logger.exception("[⛔] OP8 scrape failed: %r", e)
-                        try:
-                            await self.bus.publish(
-                                kind="client",
-                                payload={
-                                    "type": "scrape_failed",
-                                    "data": {"guild_id": gid, "error": _err_msg(e)},
-                                },
-                            )
-                        except Exception:
-                            pass
-                    finally:
-                        self._scrape_task = None
-                        self._scrape_gid = None
-
-                asyncio.create_task(_finish_scrape())
-
-                return {"ok": True, "accepted": True, "guild_id": gid}
-
-            except BaseException as e:
-                logger.exception("[⛔] OP8 scrape failed (outer): %r", e)
-                try:
-                    await self.bus.publish(
-                        kind="client",
-                        payload={
-                            "type": "scrape_failed",
-                            "data": {"guild_id": gid, "error": _err_msg(e)},
-                        },
-                    )
-                except Exception:
-                    pass
-                return {"ok": False, "error": _err_msg(e)}
-
-        elif typ == "scrape_status":
-
-            running = bool(self._scrape_task and not self._scrape_task.done())
-            return {"ok": True, "running": running, "guild_id": self._scrape_gid}
-
-        elif typ == "scrape_cancel":
-            req_gid = str((data or {}).get("guild_id") or "")
-            is_running = bool(self._scrape_task and not self._scrape_task.done())
-            if not is_running:
-                return {"ok": False, "error": "no-scrape-running"}
-
-            try:
-                if self.scraper:
-                    self.scraper.request_cancel()
-
-                try:
-                    self._scrape_task.cancel()
-                except Exception:
-                    pass
-
-                try:
-                    await self.bus.publish(
-                        kind="client",
-                        payload={
-                            "type": "scrape_cancelled",
-                            "data": {"guild_id": self._scrape_gid or req_gid},
-                        },
-                    )
-                except Exception:
-                    pass
-                return {"ok": True, "cancelling": True}
-            except Exception as e:
-                logger.exception("[scrape_cancel] failed: %r", e)
-                return {"ok": False, "error": str(e)}
 
         elif typ == "export_dm_history":
             uid = int(data["user_id"])
@@ -1299,7 +1035,9 @@ class ClientListener:
             ChannelType.private_thread,
         )
 
-        stickers_payload = self.msg.stickers_payload(getattr(src_msg, "stickers", []))
+        stickers_payload = self.msg.stickers_payload(
+            getattr(src_msg, "stickers", []), getattr(src_msg, "guild", None)
+        )
 
         role_mentions = self.msg._build_role_mentions_payload(src_msg)
 
@@ -1311,6 +1049,12 @@ class ClientListener:
             "channel_type": target_chan.type.value,
             "author": author,
             "author_id": getattr(getattr(src_msg, "author", None), "id", None),
+            "author_display_name": getattr(
+                getattr(src_msg, "author", None), "display_name", None
+            ),
+            "author_role_ids": self.msg.author_role_ids(src_msg),
+            "is_bot": bool(getattr(getattr(src_msg, "author", None), "bot", False)),
+            "webhook_id": getattr(src_msg, "webhook_id", None),
             "avatar_url": (
                 str(src_msg.author.display_avatar.url)
                 if getattr(getattr(src_msg, "author", None), "display_avatar", None)
@@ -1492,7 +1236,9 @@ class ClientListener:
             ChannelType.public_thread,
             ChannelType.private_thread,
         )
-        stickers_payload = self.msg.stickers_payload(getattr(after, "stickers", []))
+        stickers_payload = self.msg.stickers_payload(
+            getattr(after, "stickers", []), getattr(after, "guild", None)
+        )
 
         payload = {
             "type": "thread_message_edit" if is_thread else "message_edit",
@@ -2633,17 +2379,6 @@ class ClientListener:
             await asyncio.wait_for(
                 self.bus.status(running=False, status="Stopped"), 0.4
             )
-        try:
-            t = getattr(self, "_scrape_task", None)
-            if getattr(self, "scraper", None):
-                self.scraper.request_cancel()
-            if t and not t.done():
-                t.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await asyncio.wait_for(t, timeout=5.0)
-        except Exception as e:
-            logger.debug("Shutdown error: %r", e)
-            
         with contextlib.suppress(Exception):
             await self.forwarding.close(drain=False)
 
