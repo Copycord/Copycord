@@ -302,9 +302,9 @@ class RoleManager:
                 if icon_url:
                     icon_bytes = await self._fetch_icon_bytes(icon_url)
                     if icon_bytes:
-                        kwargs["display_icon"] = icon_bytes
+                        kwargs["icon"] = icon_bytes
                 elif unicode_emoji:
-                    kwargs["display_icon"] = unicode_emoji
+                    kwargs["unicode_emoji"] = unicode_emoji
 
             cloned = await guild.create_role(**kwargs)
             await asyncio.sleep(self._ROLE_OP_DELAY)
@@ -332,8 +332,9 @@ class RoleManager:
             return cloned, 1, can_create, create_suppressed_logged
 
         except Exception as e:
-            if "display_icon" in str(e):
-                kwargs.pop("display_icon", None)
+            if "icon" in kwargs or "unicode_emoji" in kwargs:
+                kwargs.pop("icon", None)
+                kwargs.pop("unicode_emoji", None)
                 try:
                     cloned = await guild.create_role(**kwargs)
                     await asyncio.sleep(self._ROLE_OP_DELAY)
@@ -345,9 +346,10 @@ class RoleManager:
                     clone_by_id[cloned.id] = cloned
                     self._log(
                         "warning",
-                        "[⚠️] Created role '%s' without icon — clone server doesn't support role icons. "
-                        "Boost to Level 2+ or set CLONE_ROLE_ICONS to false.",
+                        "[⚠️] Created role '%s' without icon — Discord rejected the icon (%s). "
+                        "If the clone server isn't Boost Level 2+, boost it or set CLONE_ROLE_ICONS to false.",
                         want_name,
+                        e,
                     )
                     can_create = len(guild.roles) < self.MAX_ROLES
                     return cloned, 1, can_create, create_suppressed_logged
@@ -594,9 +596,9 @@ class RoleManager:
                         if want_icon_url:
                             icon_bytes = await self._fetch_icon_bytes(want_icon_url)
                             if icon_bytes:
-                                kwargs["display_icon"] = icon_bytes
+                                kwargs["icon"] = icon_bytes
                         elif want_unicode_emoji:
-                            kwargs["display_icon"] = want_unicode_emoji
+                            kwargs["unicode_emoji"] = want_unicode_emoji
 
                     new_role = await guild.create_role(**kwargs)
                     await asyncio.sleep(self._ROLE_OP_DELAY)
@@ -629,8 +631,9 @@ class RoleManager:
                     continue
 
                 except Exception as e:
-                    if "display_icon" in str(e):
-                        kwargs.pop("display_icon", None)
+                    if "icon" in kwargs or "unicode_emoji" in kwargs:
+                        kwargs.pop("icon", None)
+                        kwargs.pop("unicode_emoji", None)
                         try:
                             new_role = await guild.create_role(**kwargs)
                             await asyncio.sleep(self._ROLE_OP_DELAY)
@@ -642,9 +645,10 @@ class RoleManager:
                             clone_by_id[new_role.id] = new_role
                             self._log(
                                 "warning",
-                                "[⚠️] Created role '%s' without icon — clone server doesn't support role icons. "
-                                "Boost to Level 2+ or set CLONE_ROLE_ICONS to false.",
+                                "[⚠️] Created role '%s' without icon — Discord rejected the icon (%s). "
+                                "If the clone server isn't Boost Level 2+, boost it or set CLONE_ROLE_ICONS to false.",
                                 want_name,
+                                e,
                             )
                             can_create = len(guild.roles) < self.MAX_ROLES
                             continue
@@ -755,11 +759,12 @@ class RoleManager:
                             if want_icon_url:
                                 icon_bytes = await self._fetch_icon_bytes(want_icon_url)
                                 if icon_bytes:
-                                    kwargs["display_icon"] = icon_bytes
+                                    kwargs["icon"] = icon_bytes
                             elif want_unicode_emoji:
-                                kwargs["display_icon"] = want_unicode_emoji
+                                kwargs["unicode_emoji"] = want_unicode_emoji
                             elif not want_icon_url and not want_unicode_emoji:
-                                kwargs["display_icon"] = None
+                                kwargs["icon"] = None
+                                kwargs["unicode_emoji"] = None
 
                         await cloned_role.edit(**kwargs)
                         await asyncio.sleep(self._ROLE_OP_DELAY)
@@ -787,18 +792,19 @@ class RoleManager:
                         )
 
                     except Exception as e:
-                        msg = str(e)
-                        if "display_icon" in msg:
-                            kwargs.pop("display_icon", None)
+                        if "icon" in kwargs or "unicode_emoji" in kwargs:
+                            kwargs.pop("icon", None)
+                            kwargs.pop("unicode_emoji", None)
                             try:
                                 await cloned_role.edit(**kwargs)
                                 await asyncio.sleep(self._ROLE_OP_DELAY)
                                 updated += 1
                                 self._log(
                                     "warning",
-                                    "[⚠️] Role '%s' updated without icon — clone server doesn't support role icons. "
-                                    "Boost to Level 2+ or set CLONE_ROLE_ICONS to false.",
+                                    "[⚠️] Role '%s' updated without icon — Discord rejected the icon (%s). "
+                                    "If the clone server isn't Boost Level 2+, boost it or set CLONE_ROLE_ICONS to false.",
                                     getattr(cloned_role, "name", "?"),
+                                    e,
                                 )
                             except Exception as e2:
                                 self._log(

@@ -572,6 +572,31 @@ class DBManager:
         self.conn.commit()
 
         self._ensure_table(
+            name="guild_asset_state",
+            create_sql_template="""
+                CREATE TABLE {table} (
+                    cloned_guild_id  INTEGER NOT NULL,
+                    kind             TEXT    NOT NULL,
+                    applied_hash     TEXT    NOT NULL DEFAULT '',
+                    last_updated     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (cloned_guild_id, kind)
+                );
+            """,
+            required_columns={
+                "cloned_guild_id",
+                "kind",
+                "applied_hash",
+                "last_updated",
+            },
+            copy_map={
+                "cloned_guild_id": "cloned_guild_id",
+                "kind": "kind",
+                "applied_hash": "applied_hash",
+                "last_updated": "COALESCE(last_updated, CURRENT_TIMESTAMP)",
+            },
+        )
+
+        self._ensure_table(
             name="role_blocks",
             create_sql_template="""
                 CREATE TABLE {table} (
@@ -1275,6 +1300,30 @@ class DBManager:
             r["key"]: r["value"]
             for r in self.conn.execute("SELECT key, value FROM app_config")
         }
+
+    def get_applied_asset_hash(self, cloned_guild_id: int, kind: str) -> str:
+        """
+        Last host asset hash applied to a clone guild's icon/banner/splash/
+        discovery_splash. Empty string when never applied (or cleared).
+        """
+        row = self.conn.execute(
+            "SELECT applied_hash FROM guild_asset_state "
+            "WHERE cloned_guild_id=? AND kind=?",
+            (int(cloned_guild_id), kind),
+        ).fetchone()
+        return row["applied_hash"] if row else ""
+
+    def set_applied_asset_hash(
+        self, cloned_guild_id: int, kind: str, applied_hash: str
+    ) -> None:
+        with self.lock, self.conn:
+            self.conn.execute(
+                "INSERT INTO guild_asset_state(cloned_guild_id, kind, applied_hash, last_updated) "
+                "VALUES(?,?,?,CURRENT_TIMESTAMP) "
+                "ON CONFLICT(cloned_guild_id, kind) DO UPDATE SET "
+                "applied_hash=excluded.applied_hash, last_updated=excluded.last_updated",
+                (int(cloned_guild_id), kind, applied_hash or ""),
+            )
 
     def get_version(self) -> str:
         """

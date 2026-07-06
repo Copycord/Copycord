@@ -115,7 +115,7 @@ async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> di
             ),
         }
         set_build_info(parsed)
-        logger.info(
+        logger.debug(
             "Discord build fingerprint updated: build=%s version=%s",
             parsed["client_build_number"],
             parsed["client_version"],
