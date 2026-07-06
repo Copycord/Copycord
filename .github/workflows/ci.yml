@@ -13,6 +13,12 @@ concurrency:
 permissions:
   contents: read
 
+# Explicit bash so run steps get pipefail — otherwise `cmd | tee` swallows
+# cmd's exit code and failing tests/lint leave the job green.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   # -----------------------------------------------------------------------
   # 1. Lint — ruff on Python, syntax check via py_compile
@@ -31,17 +37,12 @@ jobs:
         run: pip install ruff
 
       - name: Ruff lint
-        id: ruff
-        run: |
-          ruff check code/ 2>&1 | tee /tmp/ruff.txt
-          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+        run: ruff check code/ 2>&1 | tee /tmp/ruff.txt
 
       - name: Python syntax check (py_compile)
-        id: pycompile
         run: |
           find code/ -name '*.py' -print0 \
             | xargs -0 python -m py_compile 2>&1 | tee /tmp/pycompile.txt
-          echo "exit_code=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
 
       - name: Job summary
         if: always()
@@ -49,7 +50,7 @@ jobs:
           echo "## Lint & Syntax Check" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          ruff_out=$(cat /tmp/ruff.txt)
+          ruff_out=$(cat /tmp/ruff.txt 2>/dev/null || true)
           if [ -z "$ruff_out" ]; then
             echo "**Ruff:** All checks passed" >> "$GITHUB_STEP_SUMMARY"
           else
@@ -61,7 +62,7 @@ jobs:
 
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
-          pyc_out=$(cat /tmp/pycompile.txt)
+          pyc_out=$(cat /tmp/pycompile.txt 2>/dev/null || true)
           if [ -z "$pyc_out" ]; then
             echo "**py_compile:** All files compile OK" >> "$GITHUB_STEP_SUMMARY"
           else
