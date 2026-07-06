@@ -6,96 +6,176 @@
 #  version 3.0. A copy of the license is available at:
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
-
-"""
-Shared realistic Discord desktop-client headers for user ("self-bot") tokens.
-
-Both the admin process (token *validation*) and the server process (message
-*sending*) must present the SAME browser-like headers when talking to Discord's
-REST API with a user token. Discord rejects bare requests — an ``Authorization``
-header with a python/aiohttp User-Agent and no client fingerprint — with HTTP
-401 even for a valid member account. So every user-token request must carry a
-realistic User-Agent plus an ``X-Super-Properties`` fingerprint.
-
-Fingerprints are derived deterministically from the token, so one account always
-looks like the same machine across requests and processes, while different
-accounts never share a fingerprint (a fleet of accounts sending an identical
-fingerprint is itself a detection signal).
-"""
-
 from __future__ import annotations
 
 import base64
 import hashlib
 import json
+import logging
 import random
 
-# token -> {"headers": {...}, "super_props_b64": "..."}
+import aiohttp
+
+logger = logging.getLogger(__name__)
+
+
+BUILD_INFO_URL = "https://api.macslodge.com/discord/build"
+
+
+DEFAULT_BUILD: dict = {
+    "release_channel": "stable",
+    "client_version": "1.0.9243",
+    "browser_user_agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) discord/1.0.9243 Chrome/138.0.7204.251 "
+        "Electron/37.6.0 Safari/537.36"
+    ),
+    "browser_version": "37.6.0",
+    "client_build_number": 573410,
+    "native_build_number": 84934,
+}
+
+
+_BUILD: dict = dict(DEFAULT_BUILD)
+
+
 _FINGERPRINT_CACHE: dict[str, dict] = {}
 
 
-def make_fingerprint(token: str) -> dict:
-    """Build a stable, unique device fingerprint for a token.
+_WINDOWS_BUILDS = [
+    ("10.0.19045", "19045"),
+    ("10.0.22621", "22621"),
+    ("10.0.22631", "22631"),
+    ("10.0.26100", "26100"),
+    ("10.0.20348", "20348"),
+]
 
-    Returns ``{"headers": {...}, "super_props_b64": "..."}``. The result is
-    deterministic per token (seeded by its SHA-256), so the same account always
-    presents the same fingerprint.
-    """
-    # Deterministic per-token RNG → a stable, unique fingerprint per account.
+_LOCALES = ["en-US", "en-GB", "de", "fr", "es-ES", "nl", "pt-BR"]
+_TIMEZONES = [
+    "America/New_York",
+    "America/Chicago",
+    "America/Los_Angeles",
+    "Europe/London",
+    "Europe/Berlin",
+    "Europe/Amsterdam",
+    "Asia/Tokyo",
+]
+
+
+def get_build_info() -> dict:
+    """Return a copy of the current shared build fingerprint."""
+    return dict(_BUILD)
+
+
+def set_build_info(build: dict) -> None:
+    """Replace the shared build fingerprint and invalidate cached per-token
+    fingerprints so they rebuild against the new build."""
+    global _BUILD
+    merged = dict(DEFAULT_BUILD)
+    merged.update({k: v for k, v in (build or {}).items() if v is not None})
+    _BUILD = merged
+    _FINGERPRINT_CACHE.clear()
+
+
+async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> dict:
+    """Fetch the current Discord *stable* build fingerprint."""
+    owns = session is None
+    sess = session or aiohttp.ClientSession()
+    try:
+        async with sess.get(
+            BUILD_INFO_URL, timeout=aiohttp.ClientTimeout(total=10)
+        ) as resp:
+            if resp.status != 200:
+                logger.debug("build-info fetch: HTTP %s", resp.status)
+                return get_build_info()
+            data = await resp.json()
+
+        dec = (((data or {}).get("clients") or {}).get("Discord") or {}).get(
+            "decoded"
+        ) or {}
+        build_number = int(dec.get("client_build_number") or 0)
+        ua = str(dec.get("browser_user_agent") or "")
+
+        # so a bad/spoofed response can't degrade the fingerprint below fallback.
+        if build_number < 400000 or "discord/" not in ua:
+            logger.debug("build-info fetch: implausible payload; keeping current build")
+            return get_build_info()
+
+        parsed = {
+            "release_channel": dec.get("release_channel")
+            or DEFAULT_BUILD["release_channel"],
+            "client_version": dec.get("client_version")
+            or DEFAULT_BUILD["client_version"],
+            "browser_user_agent": ua,
+            "browser_version": dec.get("browser_version")
+            or DEFAULT_BUILD["browser_version"],
+            "client_build_number": build_number,
+            "native_build_number": int(
+                dec.get("native_build_number") or DEFAULT_BUILD["native_build_number"]
+            ),
+        }
+        set_build_info(parsed)
+        logger.info(
+            "Discord build fingerprint updated: build=%s version=%s",
+            parsed["client_build_number"],
+            parsed["client_version"],
+        )
+        return parsed
+    except Exception as e:
+        logger.debug("build-info fetch failed: %r", e)
+        return get_build_info()
+    finally:
+        if owns:
+            try:
+                await sess.close()
+            except Exception:
+                pass
+
+
+def _stable_uuid(rng: random.Random) -> str:
+    """A deterministic UUIDv4-format string from a seeded RNG (so a token's
+    launch ids are stable per account but unique across accounts)."""
+    b = bytearray(rng.getrandbits(8) for _ in range(16))
+    b[6] = (b[6] & 0x0F) | 0x40
+    b[8] = (b[8] & 0x3F) | 0x80
+    h = b.hex()
+    return f"{h[0:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:32]}"
+
+
+def make_fingerprint(token: str) -> dict:
+    """Build a stable, unique device fingerprint for a token."""
     seed = int(hashlib.sha256(token.encode("utf-8")).hexdigest()[:16], 16)
     rng = random.Random(seed)
 
-    chrome_major = rng.choice([128, 130, 132, 134, 136, 139])
-    chrome_version = (
-        f"{chrome_major}.0.{rng.randint(6000, 7300)}.{rng.randint(30, 220)}"
-    )
-    client_version = rng.choice(["1.0.9179", "1.0.9163", "1.0.9156", "1.0.9154"])
-    electron_version = rng.choice(["32.2.5", "31.3.1", "28.2.10", "22.3.26"])
-    os_version = rng.choice(
-        ["10.0.19045", "10.0.22621", "10.0.22631", "10.0.26100"]
-    )
-    build_number = rng.randint(330000, 366000)
-    native_build = rng.randint(60000, 64000)
-    locale = rng.choice(["en-US", "en-GB", "de", "fr", "es-ES", "nl", "pt-BR"])
-    tz = rng.choice(
-        [
-            "America/New_York",
-            "America/Chicago",
-            "America/Los_Angeles",
-            "Europe/London",
-            "Europe/Berlin",
-            "Europe/Amsterdam",
-            "Asia/Tokyo",
-        ]
-    )
+    build = get_build_info()
+    os_version, os_sdk_version = rng.choice(_WINDOWS_BUILDS)
+    locale = rng.choice(_LOCALES)
+    tz = rng.choice(_TIMEZONES)
+    app_state = rng.choice(["focused", "unfocused"])
+    launch_id = _stable_uuid(rng)
+    launch_signature = _stable_uuid(rng)
 
-    user_agent = (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        f"discord/{client_version} Chrome/{chrome_version} "
-        f"Electron/{electron_version} Safari/537.36"
-    )
+    user_agent = build["browser_user_agent"]
 
-    # Shape matches discord.py-self's super-properties for the desktop app.
     super_props = {
         "os": "Windows",
         "browser": "Discord Client",
-        "release_channel": "stable",
-        "client_version": client_version,
+        "release_channel": build["release_channel"],
+        "client_version": build["client_version"],
         "os_version": os_version,
         "os_arch": "x64",
         "app_arch": "x64",
         "system_locale": locale,
+        "has_client_mods": False,
+        "client_launch_id": launch_id,
         "browser_user_agent": user_agent,
-        "browser_version": chrome_version,
-        "client_build_number": build_number,
-        "native_build_number": native_build,
+        "browser_version": build["browser_version"],
+        "os_sdk_version": os_sdk_version,
+        "client_build_number": build["client_build_number"],
+        "native_build_number": build["native_build_number"],
         "client_event_source": None,
-        "device": "",
-        "referrer": "",
-        "referring_domain": "",
-        "referrer_current": "",
-        "referring_domain_current": "",
+        "launch_signature": launch_signature,
+        "client_app_state": app_state,
     }
     super_props_b64 = base64.b64encode(
         json.dumps(super_props, separators=(",", ":")).encode()
@@ -105,27 +185,15 @@ def make_fingerprint(token: str) -> dict:
         "User-Agent": user_agent,
         "X-Discord-Locale": locale,
         "X-Discord-Timezone": tz,
+        "X-Debug-Options": "bugReporterEnabled",
         "Accept": "*/*",
         "Accept-Language": f"{locale},en;q=0.9",
-        "Origin": "https://discord.com",
-        "Referer": "https://discord.com/channels/@me",
-        "Sec-CH-UA": (
-            f'"Chromium";v="{chrome_major}", '
-            f'"Not(A:Brand";v="24", '
-            f'"Google Chrome";v="{chrome_major}"'
-        ),
-        "Sec-CH-UA-Mobile": "?0",
-        "Sec-CH-UA-Platform": '"Windows"',
     }
     return {"headers": headers, "super_props_b64": super_props_b64}
 
 
 def build_headers(token: str) -> dict:
-    """Full header dict for a user-token REST request.
-
-    Includes the realistic browser headers, the ``Authorization`` token, and the
-    ``X-Super-Properties`` fingerprint. Fingerprints are cached per token.
-    """
+    """Full header dict for a user-token REST request."""
     fp = _FINGERPRINT_CACHE.get(token)
     if fp is None:
         fp = make_fingerprint(token)
@@ -135,3 +203,10 @@ def build_headers(token: str) -> dict:
         "Authorization": token,
         "X-Super-Properties": fp["super_props_b64"],
     }
+
+
+def context_properties(location: str = "chat_input") -> str:
+    """Base64 ``X-Context-Properties`` value the real client sends with actions."""
+    return base64.b64encode(
+        json.dumps({"location": location}, separators=(",", ":")).encode()
+    ).decode()

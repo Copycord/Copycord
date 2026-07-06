@@ -32,6 +32,8 @@ from datetime import datetime
 from enum import IntEnum
 from typing import Any, Callable, Dict, List, Optional
 
+from common.selfbot_headers import build_headers
+
 try:
     from aiohttp_socks import ProxyConnector
 
@@ -539,50 +541,13 @@ class SharedPlanner:
 
 
 def _build_headers(token: str) -> dict[str, str]:
-    """Build realistic Discord client headers with randomised fingerprint."""
-    client_versions = ["1.0.9163", "1.0.9156", "1.0.9154"]
-    chrome_versions = ["108.0.5359.215", "139.0.7258.155"]
-    electron_versions = ["22.3.26", "22.3.18"]
-    win_builds = ["10.0.22621", "10.0.22631"]
-    locales = ["en-US", "en-GB", "de", "fr", "es-ES"]
-    timezones = ["America/New_York", "America/Chicago", "Europe/Berlin", "Asia/Tokyo"]
+    """Realistic Discord desktop-client headers for a user token.
 
-    cv = random.choice(client_versions)
-    chv = random.choice(chrome_versions)
-    ev = random.choice(electron_versions)
-    osv = random.choice(win_builds)
-    loc = random.choice(locales)
-    tz = random.choice(timezones)
-
-    super_props = {
-        "os": "Windows",
-        "browser": "Discord Client",
-        "release_channel": "stable",
-        "client_version": cv,
-        "os_version": osv,
-        "os_arch": "x64",
-        "system_locale": loc,
-    }
-    sp_b64 = base64.b64encode(
-        json.dumps(super_props, separators=(",", ":")).encode()
-    ).decode()
-
-    return {
-        "Authorization": token,
-        "User-Agent": (
-            f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            f"AppleWebKit/537.36 (KHTML, like Gecko) "
-            f"discord/{cv} Chrome/{chv} Electron/{ev} Safari/537.36"
-        ),
-        "X-Super-Properties": sp_b64,
-        "X-Discord-Locale": loc,
-        "X-Discord-Timezone": tz,
-        "Accept": "*/*",
-        "Accept-Language": f"{loc},en;q=0.9",
-        "DNT": "1",
-        "Origin": "https://discord.com",
-        "Referer": "https://discord.com/channels/@me",
-    }
+    Delegates to the shared builder so the scraper, the message sender, and token
+    validation all present the same current fingerprint. See
+    ``common.selfbot_headers``.
+    """
+    return build_headers(token)
 
 
 class StandaloneScraper:
@@ -722,7 +687,7 @@ class StandaloneScraper:
         try:
             async with session.get(
                 f"{self.DISCORD_API}/users/@me",
-                headers={"Authorization": token},
+                headers=_build_headers(token),
                 timeout=aiohttp.ClientTimeout(total=5),
                 **self._proxy_kwarg(proxy),
             ) as resp:
@@ -747,7 +712,7 @@ class StandaloneScraper:
                 url = f"{self.DISCORD_API}/users/@me/guilds?limit=200&after={after}"
                 async with session.get(
                     url,
-                    headers={"Authorization": token},
+                    headers=_build_headers(token),
                     timeout=aiohttp.ClientTimeout(total=8),
                     **self._proxy_kwarg(proxy),
                 ) as resp:
@@ -786,7 +751,7 @@ class StandaloneScraper:
         try:
             async with session.get(
                 f"{self.DISCORD_API}/guilds/{guild_id}?with_counts=true",
-                headers={"Authorization": token},
+                headers=_build_headers(token),
                 timeout=aiohttp.ClientTimeout(total=8),
                 **self._proxy_kwarg(proxy),
             ) as resp:
@@ -1341,7 +1306,7 @@ class StandaloneScraper:
                     proxy = self._next_proxy()
                     async with session.get(
                         f"{self.DISCORD_API}/guilds/{self.config.guild_id}/members",
-                        headers={"Authorization": token},
+                        headers=_build_headers(token),
                         params=params,
                         timeout=aiohttp.ClientTimeout(total=10),
                         **self._proxy_kwarg(proxy),

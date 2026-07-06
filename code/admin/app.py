@@ -73,7 +73,10 @@ from common.common_helpers import (
     discord_urls_from_config,
     is_discord_webhook_url,
 )
-from common.selfbot_headers import build_headers as _selfbot_headers
+from common.selfbot_headers import (
+    build_headers as _selfbot_headers,
+    refresh_build_info as _refresh_build_info,
+)
 from admin.web_config import router as links_router
 from admin.web_config import startup_links, shutdown_links
 from contextlib import suppress
@@ -414,8 +417,8 @@ class ConnCloseOnShutdownASGI:
 
 
 class BusHub:
-    WATCHDOG_INTERVAL = 30      # how often to check (seconds)
-    WATCHDOG_TIMEOUT = 90       # consider offline after this much silence
+    WATCHDOG_INTERVAL = 30
+    WATCHDOG_TIMEOUT = 90
 
     def __init__(self):
         self.status = {"server": {}, "client": {}}
@@ -462,10 +465,14 @@ class BusHub:
         if kind == "status" and role in ("server", "client"):
             prev = self.status.get(role) or {}
             self.status[role] = payload or {}
-            asyncio.ensure_future(self._check_notifications(kind, role, payload or {}, prev))
+            asyncio.ensure_future(
+                self._check_notifications(kind, role, payload or {}, prev)
+            )
 
         elif kind in ("proxies_dead", "token_dead"):
-            asyncio.ensure_future(self._check_notifications(kind, role, payload or {}, {}))
+            asyncio.ensure_future(
+                self._check_notifications(kind, role, payload or {}, {})
+            )
 
         rec = {"kind": kind, "role": role, "payload": payload or {}}
         self.recent.append(rec)
@@ -528,7 +535,9 @@ class BusHub:
             len(self.ui_sockets),
         )
 
-    async def _check_notifications(self, kind: str, role: str, payload: dict, prev: dict):
+    async def _check_notifications(
+        self, kind: str, role: str, payload: dict, prev: dict
+    ):
         try:
             if kind == "status":
                 was_running = _derive_state(prev) == "running" if prev else False
@@ -536,29 +545,46 @@ class BusHub:
                 if was_running and not now_running:
                     event = "CLIENT_OFFLINE" if role == "client" else "SERVER_OFFLINE"
                     meta = NOTIFICATION_EVENTS.get(event, {})
-                    LOGGER.info("[notifications] %s went offline, sending %s notification", role, event)
+                    LOGGER.info(
+                        "[notifications] %s went offline, sending %s notification",
+                        role,
+                        event,
+                    )
                     await notify(
-                        db, event,
+                        db,
+                        event,
                         meta.get("title", f"{role.title()} Offline"),
-                        meta.get("description", f"The Copycord {role} bot has gone offline."),
+                        meta.get(
+                            "description", f"The Copycord {role} bot has gone offline."
+                        ),
                         meta.get("color", 0xFF6B6B),
                     )
             elif kind == "proxies_dead":
                 meta = NOTIFICATION_EVENTS.get("PROXIES_DEAD", {})
                 total = payload.get("total", "?")
-                LOGGER.info("[notifications] All %s proxies dead, sending PROXIES_DEAD notification", total)
+                LOGGER.info(
+                    "[notifications] All %s proxies dead, sending PROXIES_DEAD notification",
+                    total,
+                )
                 await notify(
-                    db, "PROXIES_DEAD",
+                    db,
+                    "PROXIES_DEAD",
                     meta.get("title", "All Proxies Dead"),
                     f"All {total} configured proxies have failed. The client may be exposed or unable to connect.",
                     meta.get("color", 0xFF9800),
                 )
             elif kind == "token_dead":
                 meta = NOTIFICATION_EVENTS.get("TOKEN_INVALID", {})
-                reason = payload.get("reason") or payload.get("data", {}).get("reason", "Unknown reason")
-                LOGGER.info("[notifications] Token invalid (%s), sending TOKEN_INVALID notification", reason)
+                reason = payload.get("reason") or payload.get("data", {}).get(
+                    "reason", "Unknown reason"
+                )
+                LOGGER.info(
+                    "[notifications] Token invalid (%s), sending TOKEN_INVALID notification",
+                    reason,
+                )
                 await notify(
-                    db, "TOKEN_INVALID",
+                    db,
+                    "TOKEN_INVALID",
                     meta.get("title", "Token Invalid"),
                     f"A bot token has been invalidated: {reason}",
                     meta.get("color", 0xFF6B6B),
@@ -579,29 +605,42 @@ class BusHub:
                     last = self._last_seen.get(role)
                     if last is None:
                         continue
-                    was_running = _derive_state(self.status.get(role) or {}) == "running"
+                    was_running = (
+                        _derive_state(self.status.get(role) or {}) == "running"
+                    )
                     timed_out = (now - last) > self.WATCHDOG_TIMEOUT
                     already_notified = self._watchdog_notified.get(role, False)
 
                     if was_running and timed_out and not already_notified:
-                        event = "CLIENT_OFFLINE" if role == "client" else "SERVER_OFFLINE"
+                        event = (
+                            "CLIENT_OFFLINE" if role == "client" else "SERVER_OFFLINE"
+                        )
                         meta = NOTIFICATION_EVENTS.get(event, {})
                         LOGGER.info(
                             "[notifications] Watchdog: no heartbeat from %s for %ds, sending %s",
-                            role, int(now - last), event,
+                            role,
+                            int(now - last),
+                            event,
                         )
                         self.status[role] = {"running": False, "status": "offline"}
                         self._watchdog_notified[role] = True
                         await notify(
-                            db, event,
+                            db,
+                            event,
                             meta.get("title", f"{role.title()} Offline"),
                             f"The Copycord {role} has not reported in for over {self.WATCHDOG_TIMEOUT}s and is presumed offline.",
                             meta.get("color", 0xFF6B6B),
                         )
-                        await self._broadcast_text(json.dumps(
-                            {"kind": "status", "role": role, "payload": self.status[role]},
-                            separators=(",", ":"),
-                        ))
+                        await self._broadcast_text(
+                            json.dumps(
+                                {
+                                    "kind": "status",
+                                    "role": role,
+                                    "payload": self.status[role],
+                                },
+                                separators=(",", ":"),
+                            )
+                        )
             except Exception:
                 LOGGER.warning("[notifications] Watchdog loop error", exc_info=True)
 
@@ -637,8 +676,8 @@ scraper_state = {
     "result": None,
     "guild_id": None,
     "started_at": None,
-    "queue": [],          # list of dicts: {id, guild_id, include_username, include_avatar_url, include_bio, include_roles, proxies, status, added_at}
-    "queue_task": None,   # the asyncio.Task running the queue processor
+    "queue": [],
+    "queue_task": None,
     "queue_running": False,
 }
 scraper_lock = asyncio.Lock()
@@ -762,10 +801,9 @@ async def _check_client_token_valid(raw_token: str) -> bool:
         return False
 
     url = f"{DISCORD_API_BASE}/users/@me"
-    headers = {
-        "Authorization": token,
-        "User-Agent": "Copycord-ConfigCheck/1.0",
-    }
+    # Present the same realistic desktop fingerprint the sender uses — a bare
+    # User-Agent can 401 even a valid user token. See common.selfbot_headers.
+    headers = _selfbot_headers(token)
 
     try:
         async with aiohttp.ClientSession() as sess:
@@ -868,7 +906,6 @@ async def _check_server_token_valid(bot_token: str) -> tuple[bool, Optional[str]
                         "_check_server_token_valid | token is not a bot user; rejecting for SERVER_TOKEN use"
                     )
 
-                # Store the bot ID for invite URL generation
                 if ok and uid:
                     try:
                         db.set_config("BOT_CLIENT_ID", str(uid))
@@ -951,9 +988,7 @@ async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
         return False
 
     base_url = f"{DISCORD_API_BASE}/users/@me/guilds"
-    # Bare (Authorization-only) requests are rejected by Discord with HTTP 401
-    # even for valid member accounts, so present the same realistic browser
-    # headers the sender uses. See common.selfbot_headers.
+
     headers = _selfbot_headers(client_token)
     wanted = str(guild_id)
 
@@ -1037,8 +1072,7 @@ async def _selfbot_identity(token: str) -> dict | None:
         return None
 
     url = f"{DISCORD_API_BASE}/users/@me"
-    # Same realistic headers as the sender — a bare request 401s. See
-    # common.selfbot_headers.
+
     headers = _selfbot_headers(token)
     try:
         async with aiohttp.ClientSession() as sess:
@@ -1614,7 +1648,11 @@ async def index(request: Request):
 
     both_running = bool(s_server.get("running")) and bool(s_client.get("running"))
 
-    text_keys = [k for k in ALLOWED_ENV if k not in ("LOG_LEVEL", "COPYCORD_AUTOSTART", "LOG_MAX_SIZE_MB")]
+    text_keys = [
+        k
+        for k in ALLOWED_ENV
+        if k not in ("LOG_LEVEL", "COPYCORD_AUTOSTART", "LOG_MAX_SIZE_MB")
+    ]
 
     bool_keys = BOOL_KEYS
     guild_mappings = db.list_guild_mappings()
@@ -1996,7 +2034,9 @@ async def _autostart_if_ready():
             {"CLIENT_TOKEN": client_token, "SERVER_TOKEN": server_token}
         )
         if token_errs:
-            LOGGER.info("Auto-start skipped: invalid tokens (%s)", "; ".join(token_errs))
+            LOGGER.info(
+                "Auto-start skipped: invalid tokens (%s)", "; ".join(token_errs)
+            )
             return
 
         srv_ok, srv_reason, _ = await _check_controller("Server", SERVER_CTRL_URL)
@@ -2007,7 +2047,9 @@ async def _autostart_if_ready():
                 reasons.append(f"Server: {srv_reason}")
             if not cli_ok:
                 reasons.append(f"Client: {cli_reason}")
-            LOGGER.info("Auto-start skipped: controllers not reachable (%s)", "; ".join(reasons))
+            LOGGER.info(
+                "Auto-start skipped: controllers not reachable (%s)", "; ".join(reasons)
+            )
             return
 
         srv = await _ws_cmd(SERVER_CTRL_URL, {"cmd": "start"})
@@ -2020,11 +2062,13 @@ async def _autostart_if_ready():
         )
 
         for role in ("server", "client"):
-            await hub.broadcast({
-                "type": "status",
-                "source": role,
-                "data": {"running": True},
-            })
+            await hub.broadcast(
+                {
+                    "type": "status",
+                    "source": role,
+                    "data": {"running": True},
+                }
+            )
     except Exception:
         LOGGER.exception("Auto-start failed")
 
@@ -2051,10 +2095,7 @@ async def _start_watchdog():
 
 @app.on_event("startup")
 async def _suppress_orphaned_dns_errors():
-    # websockets.connect() to stopped Docker containers leaves orphaned
-    # internal futures whose DNS resolution failed.  Our code already
-    # handles the error in _ws_cmd; this just silences the noisy
-    # "Future exception was never retrieved" stderr warnings.
+
     loop = asyncio.get_running_loop()
     _default_handler = loop.get_exception_handler()
 
@@ -2096,18 +2137,15 @@ async def _log_prune_loop():
                     if size <= max_bytes:
                         continue
 
-                    # Only read the tail we want to keep
                     with open(p, "rb") as f:
                         f.seek(size - max_bytes)
                         tail = f.read()
 
-                    # Decode and cut at the first newline to avoid a partial line
                     text = tail.decode("utf-8", errors="ignore")
                     nl = text.find("\n")
                     if nl != -1:
-                        text = text[nl + 1:]
+                        text = text[nl + 1 :]
 
-                    # Write back atomically via temp file
                     tmp = p.with_suffix(".tmp")
                     tmp.write_text(text, encoding="utf-8")
                     tmp.replace(p)
@@ -2155,6 +2193,17 @@ async def _cleanup_stale_mapping_pairs_on_boot():
             )
     except Exception:
         LOGGER.exception("Startup cleanup: failed while removing stale mapping state.")
+
+
+@app.on_event("startup")
+async def _refresh_discord_build_on_boot():
+    """Refresh the shared user-token fingerprint to the current Discord build so
+    token *validation* uses the same up-to-date fingerprint as the sender.
+    Best-effort — falls back to the baked build number if unreachable."""
+    try:
+        await _refresh_build_info()
+    except Exception:
+        LOGGER.debug("Startup: Discord build refresh failed", exc_info=True)
 
 
 @app.on_event("shutdown")
@@ -2416,8 +2465,6 @@ async def system_page(request: Request):
     )
 
 
-# ── Event Logs ───────────────────────────────────────────────────────
-
 @app.get("/event-logs")
 async def event_logs_page(request: Request):
     return templates.TemplateResponse(
@@ -2514,23 +2561,25 @@ async def api_add_event_log(body: dict = Body(...)):
         category_name=body.get("category_name"),
         extra=body.get("extra"),
     )
-    # Broadcast the new log to all connected UI clients
-    await hub.broadcast({
-        "kind": "event_log",
-        "role": "server",
-        "payload": {
-            "log_id": log_id,
-            "event_type": event_type,
-            "details": details,
-            "guild_id": body.get("guild_id"),
-            "guild_name": body.get("guild_name"),
-            "channel_id": body.get("channel_id"),
-            "channel_name": body.get("channel_name"),
-            "category_id": body.get("category_id"),
-            "category_name": body.get("category_name"),
-            "extra": body.get("extra"),
-        },
-    })
+
+    await hub.broadcast(
+        {
+            "kind": "event_log",
+            "role": "server",
+            "payload": {
+                "log_id": log_id,
+                "event_type": event_type,
+                "details": details,
+                "guild_id": body.get("guild_id"),
+                "guild_name": body.get("guild_name"),
+                "channel_id": body.get("channel_id"),
+                "channel_name": body.get("channel_name"),
+                "category_id": body.get("category_id"),
+                "category_name": body.get("category_name"),
+                "extra": body.get("extra"),
+            },
+        }
+    )
     return {"ok": True, "log_id": log_id}
 
 
@@ -2944,9 +2993,7 @@ async def api_mapping_channels(mapping_id: str):
         raise HTTPException(status_code=400, detail="client-token-missing")
 
     url = f"{DISCORD_API_BASE}/guilds/{orig_id}/channels"
-    headers = {
-        "Authorization": f"{client_token}",
-    }
+    headers = _selfbot_headers(client_token)
 
     try:
         async with aiohttp.ClientSession() as sess:
@@ -3055,9 +3102,7 @@ async def api_mapping_roles(mapping_id: str):
         raise HTTPException(status_code=400, detail="client-token-missing")
 
     url = f"{DISCORD_API_BASE}/guilds/{orig_id}/roles"
-    headers = {
-        "Authorization": f"{client_token}",
-    }
+    headers = _selfbot_headers(client_token)
 
     try:
         async with aiohttp.ClientSession() as sess:
@@ -3630,7 +3675,9 @@ async def api_backfill_start(payload: dict = Body(...)):
 
     if payload.get("ignore_cloned"):
         try:
-            exclude = db.get_cloned_original_ids_for_channel(channel_id, cloned_guild_id)
+            exclude = db.get_cloned_original_ids_for_channel(
+                channel_id, cloned_guild_id
+            )
             if exclude:
                 data["exclude_ids"] = [str(mid) for mid in exclude]
         except Exception:
@@ -3898,7 +3945,7 @@ async def api_scraper_tokens_add(
             async with aiohttp.ClientSession() as sess:
                 async with sess.get(
                     f"{DISCORD_API_BASE}/users/@me",
-                    headers={"Authorization": token_value},
+                    headers=_selfbot_headers(token_value),
                     timeout=5,
                 ) as resp:
                     if resp.status == 200:
@@ -3947,7 +3994,7 @@ async def api_scraper_tokens_validate(token_id: str):
             async with aiohttp.ClientSession() as sess:
                 async with sess.get(
                     f"{DISCORD_API_BASE}/users/@me",
-                    headers={"Authorization": token["token_value"]},
+                    headers=_selfbot_headers(token["token_value"]),
                     timeout=5,
                 ) as resp:
                     if resp.status == 200:
@@ -4077,8 +4124,6 @@ async def api_scraper_proxies_put(request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-
-
 @app.get("/api/server/proxies", response_class=JSONResponse)
 async def api_server_proxies_get():
     """Return client proxy list, enabled state, and rotation interval."""
@@ -4088,20 +4133,26 @@ async def api_server_proxies_get():
             lines = [l.strip() for l in text.splitlines() if l.strip()]
         else:
             lines = []
-        enabled = (db.get_config("ENABLE_CLIENT_PROXIES", "") or "").strip().lower() in (
-            "1", "true", "yes",
+        enabled = (
+            db.get_config("ENABLE_CLIENT_PROXIES", "") or ""
+        ).strip().lower() in (
+            "1",
+            "true",
+            "yes",
         )
         interval_raw = (db.get_config("PROXY_ROTATION_INTERVAL", "") or "").strip()
         try:
             rotation_interval = int(interval_raw) if interval_raw else 0
         except (ValueError, TypeError):
             rotation_interval = 0
-        return JSONResponse({
-            "ok": True,
-            "proxies": lines,
-            "enabled": enabled,
-            "rotation_interval": rotation_interval,
-        })
+        return JSONResponse(
+            {
+                "ok": True,
+                "proxies": lines,
+                "enabled": enabled,
+                "rotation_interval": rotation_interval,
+            }
+        )
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
@@ -4212,7 +4263,9 @@ async def api_server_proxies_test(request: Request):
     import re as _re
 
     if _proxy_test_task and not _proxy_test_task.done():
-        return JSONResponse({"ok": False, "error": "Test already running"}, status_code=409)
+        return JSONResponse(
+            {"ok": False, "error": "Test already running"}, status_code=409
+        )
 
     try:
         payload = await request.json()
@@ -4222,8 +4275,12 @@ async def api_server_proxies_test(request: Request):
     if not isinstance(proxies, list) or not proxies:
         raise HTTPException(400, detail="proxies must be a non-empty list")
 
-    _HP_UP = _re.compile(r"^(?P<host>[^:]+):(?P<port>\d+):(?P<user>[^:]+):(?P<pass>.+)$")
-    _UP_HP = _re.compile(r"^(?P<user>[^:@]+):(?P<pass>[^@]+)@(?P<host>[^:]+):(?P<port>\d+)$")
+    _HP_UP = _re.compile(
+        r"^(?P<host>[^:]+):(?P<port>\d+):(?P<user>[^:]+):(?P<pass>.+)$"
+    )
+    _UP_HP = _re.compile(
+        r"^(?P<user>[^:@]+):(?P<pass>[^@]+)@(?P<host>[^:]+):(?P<port>\d+)$"
+    )
 
     def _normalise(raw: str):
         raw = raw.strip()
@@ -4243,7 +4300,9 @@ async def api_server_proxies_test(request: Request):
         return None
 
     def _is_socks(url: str) -> bool:
-        return url.lower().startswith(("socks4://", "socks5://", "socks4a://", "socks5h://"))
+        return url.lower().startswith(
+            ("socks4://", "socks5://", "socks4a://", "socks5h://")
+        )
 
     try:
         from aiohttp_socks import ProxyConnector
@@ -4258,47 +4317,87 @@ async def api_server_proxies_test(request: Request):
     async def _test_one(raw_proxy: str):
         url = _normalise(raw_proxy)
         if not url:
-            return {"proxy": raw_proxy, "ok": False, "error": "Invalid format", "ms": None}
+            return {
+                "proxy": raw_proxy,
+                "ok": False,
+                "error": "Invalid format",
+                "ms": None,
+            }
         import time as _time
+
         t0 = _time.monotonic()
         try:
             if _is_socks(url):
                 if ProxyConnector is None:
-                    return {"proxy": raw_proxy, "ok": False, "error": "aiohttp_socks not installed", "ms": None}
+                    return {
+                        "proxy": raw_proxy,
+                        "ok": False,
+                        "error": "aiohttp_socks not installed",
+                        "ms": None,
+                    }
                 connector = ProxyConnector.from_url(url)
                 async with aiohttp.ClientSession(connector=connector) as sess:
                     async with sess.get(test_url, timeout=_timeout) as resp:
                         ms = round((_time.monotonic() - t0) * 1000)
-                        return {"proxy": raw_proxy, "ok": resp.status == 200, "status": resp.status, "ms": ms}
+                        return {
+                            "proxy": raw_proxy,
+                            "ok": resp.status == 200,
+                            "status": resp.status,
+                            "ms": ms,
+                        }
             else:
                 async with aiohttp.ClientSession() as sess:
                     async with sess.get(test_url, proxy=url, timeout=_timeout) as resp:
                         ms = round((_time.monotonic() - t0) * 1000)
-                        return {"proxy": raw_proxy, "ok": resp.status == 200, "status": resp.status, "ms": ms}
+                        return {
+                            "proxy": raw_proxy,
+                            "ok": resp.status == 200,
+                            "status": resp.status,
+                            "ms": ms,
+                        }
         except Exception as e:
             ms = round((_time.monotonic() - t0) * 1000)
-            return {"proxy": raw_proxy, "ok": False, "error": type(e).__name__, "ms": ms}
+            return {
+                "proxy": raw_proxy,
+                "ok": False,
+                "error": type(e).__name__,
+                "ms": ms,
+            }
 
     async def _run_test(proxy_list: list):
         import time as _time
+
         total = len(proxy_list)
         all_results = []
         completed = 0
         t_start = _time.monotonic()
 
-        LOGGER.info("[🔀] Proxy test started: %d proxies (batch=%d, timeout=%ds)", total, batch_size, 5)
+        LOGGER.info(
+            "[🔀] Proxy test started: %d proxies (batch=%d, timeout=%ds)",
+            total,
+            batch_size,
+            5,
+        )
 
-        await hub.broadcast({
-            "kind": "proxy_test", "role": "admin",
-            "payload": {"type": "started", "total": total},
-        })
+        await hub.broadcast(
+            {
+                "kind": "proxy_test",
+                "role": "admin",
+                "payload": {"type": "started", "total": total},
+            }
+        )
 
         try:
             for i in range(0, total, batch_size):
                 batch = proxy_list[i : i + batch_size]
                 batch_num = (i // batch_size) + 1
                 total_batches = (total + batch_size - 1) // batch_size
-                LOGGER.info("[🔀] Proxy test batch %d/%d (%d proxies)", batch_num, total_batches, len(batch))
+                LOGGER.info(
+                    "[🔀] Proxy test batch %d/%d (%d proxies)",
+                    batch_num,
+                    total_batches,
+                    len(batch),
+                )
 
                 batch_results = await asyncio.gather(*[_test_one(p) for p in batch])
                 all_results.extend(batch_results)
@@ -4306,34 +4405,57 @@ async def api_server_proxies_test(request: Request):
 
                 batch_passed = sum(1 for r in batch_results if r.get("ok"))
                 batch_failed = len(batch_results) - batch_passed
-                LOGGER.info("[🔀] Proxy test batch %d/%d done: %d passed, %d failed", batch_num, total_batches, batch_passed, batch_failed)
+                LOGGER.info(
+                    "[🔀] Proxy test batch %d/%d done: %d passed, %d failed",
+                    batch_num,
+                    total_batches,
+                    batch_passed,
+                    batch_failed,
+                )
 
-                await hub.broadcast({
-                    "kind": "proxy_test", "role": "admin",
-                    "payload": {
-                        "type": "progress",
-                        "current": completed,
-                        "total": total,
-                        "results": list(batch_results),
-                    },
-                })
+                await hub.broadcast(
+                    {
+                        "kind": "proxy_test",
+                        "role": "admin",
+                        "payload": {
+                            "type": "progress",
+                            "current": completed,
+                            "total": total,
+                            "results": list(batch_results),
+                        },
+                    }
+                )
 
             elapsed = round(_time.monotonic() - t_start, 1)
             total_passed = sum(1 for r in all_results if r.get("ok"))
             total_failed = total - total_passed
-            LOGGER.info("[🔀] Proxy test complete: %d/%d passed, %d failed (%.1fs)", total_passed, total, total_failed, elapsed)
+            LOGGER.info(
+                "[🔀] Proxy test complete: %d/%d passed, %d failed (%.1fs)",
+                total_passed,
+                total,
+                total_failed,
+                elapsed,
+            )
 
-            await hub.broadcast({
-                "kind": "proxy_test", "role": "admin",
-                "payload": {
-                    "type": "complete",
-                    "total": total,
-                    "results": all_results,
-                },
-            })
+            await hub.broadcast(
+                {
+                    "kind": "proxy_test",
+                    "role": "admin",
+                    "payload": {
+                        "type": "complete",
+                        "total": total,
+                        "results": all_results,
+                    },
+                }
+            )
         except asyncio.CancelledError:
             elapsed = round(_time.monotonic() - t_start, 1)
-            LOGGER.info("[🔀] Proxy test stopped after %d/%d proxies (%.1fs)", completed, total, elapsed)
+            LOGGER.info(
+                "[🔀] Proxy test stopped after %d/%d proxies (%.1fs)",
+                completed,
+                total,
+                elapsed,
+            )
 
     _proxy_test_task = asyncio.create_task(_run_test(proxies))
     return JSONResponse({"ok": True, "total": len(proxies)})
@@ -4353,10 +4475,13 @@ async def api_server_proxies_test_stop():
     if _proxy_test_task and not _proxy_test_task.done():
         _proxy_test_task.cancel()
         LOGGER.info("[🔀] Proxy test stopped by user")
-        await hub.broadcast({
-            "kind": "proxy_test", "role": "admin",
-            "payload": {"type": "stopped"},
-        })
+        await hub.broadcast(
+            {
+                "kind": "proxy_test",
+                "role": "admin",
+                "payload": {"type": "stopped"},
+            }
+        )
         return JSONResponse({"ok": True})
     return JSONResponse({"ok": False, "error": "No test running"})
 
@@ -4404,8 +4529,6 @@ async def api_sync_settings_put(request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
-
-
 @app.get("/api/notifications/settings", response_class=JSONResponse)
 async def api_notifications_settings_get():
     """Return webhook notification settings."""
@@ -4432,7 +4555,9 @@ async def api_notifications_settings_put(request: Request):
         raise HTTPException(400, detail="Invalid JSON")
     try:
         if "webhook_url" in payload:
-            db.set_config("NOTIFICATION_WEBHOOK_URL", (payload["webhook_url"] or "").strip())
+            db.set_config(
+                "NOTIFICATION_WEBHOOK_URL", (payload["webhook_url"] or "").strip()
+            )
         events = payload.get("events", {})
         for key in NOTIFICATION_EVENTS:
             if key in events:
@@ -4503,7 +4628,6 @@ async def api_scraper_start(request: Request):
             status_code=400,
         )
 
-    # Build a queue item and add it
     item = {
         "id": _next_queue_id(),
         "guild_id": guild_id,
@@ -4519,7 +4643,6 @@ async def api_scraper_start(request: Request):
     async with scraper_lock:
         scraper_state["queue"].append(item)
 
-    # Ensure the queue processor is running
     await _ensure_queue_processor()
 
     await _broadcast_queue_update()
@@ -4527,7 +4650,9 @@ async def api_scraper_start(request: Request):
     return JSONResponse(
         {
             "ok": True,
-            "message": "Scraper queued" if scraper_state["running"] else "Scraper started",
+            "message": (
+                "Scraper queued" if scraper_state["running"] else "Scraper started"
+            ),
             "tokens_used": len(accessible_tokens),
             "proxies_used": len(proxy_list),
             "guild_id": guild_id,
@@ -4614,7 +4739,10 @@ async def api_scraper_queue_remove(queue_id: int):
             if item["id"] == queue_id:
                 if item["status"] == "running":
                     return JSONResponse(
-                        {"ok": False, "error": "Cannot remove a running scrape. Use cancel instead."},
+                        {
+                            "ok": False,
+                            "error": "Cannot remove a running scrape. Use cancel instead.",
+                        },
                         status_code=409,
                     )
                 scraper_state["queue"].pop(i)
@@ -4697,7 +4825,7 @@ async def _queue_processor():
 
     try:
         while True:
-            # Find the next pending item
+
             next_item = None
             async with scraper_lock:
                 for item in scraper_state["queue"]:
@@ -4706,7 +4834,7 @@ async def _queue_processor():
                         break
 
             if next_item is None:
-                # No more pending items — stop the processor
+
                 break
 
             await _run_single_scrape(next_item)
@@ -4846,7 +4974,6 @@ async def _run_single_scrape(queue_item: dict):
 
     scraper = StandaloneScraper(config)
 
-    # Mark as running
     async with scraper_lock:
         queue_item["status"] = "running"
         scraper_state["running"] = True
@@ -4963,7 +5090,7 @@ async def _run_single_scrape(queue_item: dict):
                 },
             }
         )
-        # Re-raise so the queue processor knows it was cancelled
+
         raise
     except Exception as e:
         LOGGER.exception("Scraper task failed for guild %s: %s", guild_id, e)
@@ -4989,7 +5116,7 @@ async def _run_single_scrape(queue_item: dict):
             }
         )
     finally:
-        # Remove completed/error/cancelled item from queue
+
         async with scraper_lock:
             scraper_state["queue"] = [
                 it for it in scraper_state["queue"] if it["id"] != queue_item["id"]
@@ -5041,17 +5168,15 @@ async def api_scraper_cancel():
 async def api_scraper_cancel_all():
     """Cancel the current scrape AND clear the entire pending queue."""
     async with scraper_lock:
-        # Clear all pending items
+
         scraper_state["queue"] = [
             item for item in scraper_state["queue"] if item["status"] == "running"
         ]
 
-        # Stop the current scraper
         scraper = scraper_state.get("scraper")
         if scraper:
             scraper.stop()
 
-        # Cancel the queue processor task
         qt = scraper_state.get("queue_task")
         if qt and not qt.done():
             qt.cancel()
@@ -5806,9 +5931,7 @@ def _serialize_mapping_token(row: dict) -> dict:
     }
 
 
-@app.get(
-    "/api/guild-mappings/{mapping_id}/user-tokens", response_class=JSONResponse
-)
+@app.get("/api/guild-mappings/{mapping_id}/user-tokens", response_class=JSONResponse)
 async def api_list_mapping_tokens(mapping_id: str):
     m = db.get_mapping_by_id(mapping_id)
     if not m:
@@ -5821,9 +5944,7 @@ async def api_list_mapping_tokens(mapping_id: str):
     )
 
 
-@app.post(
-    "/api/guild-mappings/{mapping_id}/user-tokens", response_class=JSONResponse
-)
+@app.post("/api/guild-mappings/{mapping_id}/user-tokens", response_class=JSONResponse)
 async def api_add_mapping_token(mapping_id: str, payload: dict = Body(...)):
     m = db.get_mapping_by_id(mapping_id)
     if not m:
@@ -5834,17 +5955,13 @@ async def api_add_mapping_token(mapping_id: str, payload: dict = Body(...)):
     token = (payload.get("token") or "").strip()
     label = (payload.get("label") or "").strip() or None
     if not token:
-        return JSONResponse(
-            {"ok": False, "error": "Missing token."}, status_code=400
-        )
+        return JSONResponse({"ok": False, "error": "Missing token."}, status_code=400)
 
     try:
         clone_gid = int(m.get("cloned_guild_id") or 0)
     except Exception:
         clone_gid = 0
 
-    # Validate on add: token must be valid AND the account must be a member of
-    # the clone guild, otherwise it could never deliver a message.
     in_clone = await _selfbot_in_guild(token, clone_gid)
     if not in_clone:
         return JSONResponse(
@@ -5894,7 +6011,6 @@ async def api_bulk_add_mapping_tokens(mapping_id: str, payload: dict = Body(...)
     else:
         candidates = []
 
-    # Trim, drop blanks, and de-duplicate the pasted input (preserve order).
     seen_input: set[str] = set()
     tokens: list[str] = []
     for c in candidates:
@@ -5931,9 +6047,7 @@ async def api_bulk_add_mapping_tokens(mapping_id: str, payload: dict = Body(...)
             db.add_mapping_token(mapping_id, t, username=username, user_id=user_id)
             existing.add(t)
             added += 1
-            results.append(
-                {"masked": masked, "status": "added", "username": username}
-            )
+            results.append({"masked": masked, "status": "added", "username": username})
         except sqlite3.IntegrityError:
             results.append({"masked": masked, "status": "duplicate"})
         except Exception:
@@ -6045,9 +6159,7 @@ async def api_update_mapping_token(
 ):
     row = db.get_mapping_token(token_id)
     if not row or str(row.get("mapping_id")) != str(mapping_id):
-        return JSONResponse(
-            {"ok": False, "error": "Token not found."}, status_code=404
-        )
+        return JSONResponse({"ok": False, "error": "Token not found."}, status_code=404)
 
     if "enabled" in payload:
         db.set_mapping_token_enabled(token_id, bool(payload.get("enabled")))
@@ -6063,9 +6175,7 @@ async def api_update_mapping_token(
 async def api_delete_mapping_token(mapping_id: str, token_id: str):
     row = db.get_mapping_token(token_id)
     if not row or str(row.get("mapping_id")) != str(mapping_id):
-        return JSONResponse(
-            {"ok": False, "error": "Token not found."}, status_code=404
-        )
+        return JSONResponse({"ok": False, "error": "Token not found."}, status_code=404)
     db.delete_mapping_token(token_id)
     return JSONResponse({"ok": True})
 
@@ -6085,9 +6195,7 @@ async def api_client_guilds():
         raise HTTPException(status_code=400, detail="client-token-missing")
 
     url = f"{DISCORD_API_BASE}/users/@me/guilds"
-    headers = {
-        "Authorization": client_token,
-    }
+    headers = _selfbot_headers(client_token)
 
     try:
         async with aiohttp.ClientSession() as sess:

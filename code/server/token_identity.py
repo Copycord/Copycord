@@ -7,23 +7,6 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-"""
-Sticky-author identity manager.
-
-Under the ``sticky_author`` user-token strategy this makes the token account
-that posts a cloned message *look like* the host author: the server bot sets the
-account's nickname to the host author's display name and grants it the cloned
-roles that correspond to the author's host roles. Each author is assigned one
-token permanently and only swaps to an unused token if its token goes bad
-(disabled or failing to send); on a swap the previous account's nickname/roles
-are reset. When no unused token is free the caller falls back to a webhook or
-skips the message per ``USER_TOKEN_FALLBACK_WEBHOOK``.
-
-Only the py-cord bot (``self.bot``) can edit members, so this manager owns token
-*selection* as well — it hands the chosen ``token_id`` back to the caller, which
-forces ``UserTokenSender.send(forced_token_id=...)`` to post from that exact
-account. Selection state is persisted in ``mapping_token_identities``.
-"""
 
 from __future__ import annotations
 
@@ -45,20 +28,11 @@ class TokenIdentityManager:
         # One lock per mapping so concurrent authors don't race token selection
         # or clobber each other's nickname edits.
         self._locks: dict[str, asyncio.Lock] = {}
-        # Tokens Discord confirmed dead (revoked → HTTP 401) this session. They
-        # are never handed to an identity again until the process restarts or the
-        # user removes them in the UI. ONLY a genuine 401 lands a token here — a
-        # rate-limit or transient error must never bench a good account.
+
         self._bad_tokens: set[str] = set()
 
-    # ── bad-token bench (session-scoped) ─────────────────────────────────────
-
     def mark_token_bad(self, token_id) -> None:
-        """Bench a token for the rest of this session — Discord revoked it.
-
-        Called only when a send returns a 401 for the forced account, so the
-        next assignment skips it instead of re-trying a token that can't work.
-        """
+        """Bench a token for the rest of this session — Discord revoked it."""
         if token_id is None:
             return
         tid = str(token_id)
@@ -76,29 +50,13 @@ class TokenIdentityManager:
         """Forget all benched tokens (e.g. after the user re-verifies them)."""
         self._bad_tokens.clear()
 
-    # ── selection (pure, unit-testable) ──────────────────────────────────────
-
     @staticmethod
     def _select_token(
         identities: list[dict],
         author_id: str,
         enabled_token_ids: list[str],
     ) -> tuple[str | None, str | None]:
-        """Decide which token this author should use.
-
-        Assignment is **permanent**: an author keeps its token until that token
-        goes bad (drops out of ``enabled_token_ids`` — disabled or marked bad).
-        Only then does it swap to an unused token. A token is never shared, so
-        when every enabled token is already assigned to another author there is
-        nothing to hand out.
-
-        Returns ``(chosen_token_id, reset_prev_token_id)``:
-          - ``chosen`` is None when no token is free — the caller decides whether
-            to send via webhook or skip the message.
-          - ``reset_prev`` is the author's previous token to clear when a swap
-            actually happens (else None).
-        Pure function of the persisted state so it can be unit-tested.
-        """
+        """Decide which token this author should use."""
         enabled = [str(t) for t in enabled_token_ids]
         author_id = str(author_id)
         if not enabled:
@@ -109,12 +67,9 @@ class TokenIdentityManager:
         )
         prev = str(cur["token_id"]) if cur else None
 
-        # Keep the current assignment while its token is still good.
         if prev and prev in enabled:
             return prev, None
 
-        # New author, or the assigned token went bad → take an unused token.
-        # Tokens held by OTHER authors are off-limits (one token per identity).
         taken = {
             str(i.get("token_id"))
             for i in identities
@@ -122,14 +77,12 @@ class TokenIdentityManager:
         }
         free = [t for t in enabled if t not in taken]
         if not free:
-            # Every enabled token is already assigned to someone else.
+
             return None, None
 
         chosen = free[0]
         reset_prev = prev if (prev and prev != chosen) else None
         return chosen, reset_prev
-
-    # ── public API ───────────────────────────────────────────────────────────
 
     async def prepare(
         self,
@@ -143,23 +96,7 @@ class TokenIdentityManager:
         tokens: list[dict],
         exclude: set | None = None,
     ) -> tuple[str | None, str | None]:
-        """Assign (or keep) this author's token and apply its identity.
-
-        Assignment is permanent — an author keeps its token until that token
-        goes bad, then swaps to an unused one. Returns ``(token_id, action)``:
-          - ``(token_id, None)`` → post from this token (identity applied).
-          - ``(None, "webhook")`` / ``(None, "skip")`` → no token could be
-            assigned (every enabled token is taken by another identity, or all
-            were excluded); the caller sends via webhook or drops the message per
-            the ``USER_TOKEN_FALLBACK_WEBHOOK`` toggle.
-
-        ``exclude`` is the set of token ids the caller has already tried and
-        failed *for this message*, so a re-prepare swaps to a different account.
-        It is per-message only — a token that fails once is NOT benched for
-        future messages (a transient failure shouldn't take an account out of
-        rotation); the DB assignment moves on a real swap, so a genuinely dead
-        token is only tried once per author. Never raises.
-        """
+        """Assign (or keep) this author's token and apply its identity."""
         exhausted = (
             "webhook" if settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True) else "skip"
         )
@@ -171,10 +108,6 @@ class TokenIdentityManager:
         do_nick = bool(settings.get("USER_TOKEN_STICKY_NICKNAME"))
         do_roles = bool(settings.get("USER_TOKEN_STICKY_ROLES"))
 
-        # Enabled tokens minus the ones already tried for THIS message and the
-        # ones benched for the whole session (Discord revoked them). ``exclude``
-        # is per-message and cycles a swap; ``_bad_tokens`` is permanent for the
-        # session so a revoked account is never reassigned to a new identity.
         skip = {str(t) for t in (exclude or ())} | self._bad_tokens
         token_by_id = {
             str(t.get("token_id")): t
@@ -192,12 +125,12 @@ class TokenIdentityManager:
             cur = self._db.get_token_identity(mapping_id, author_id)
 
             if cur is not None and str(cur.get("token_id")) in token_by_id:
-                # Keep the current assignment — its token is still good.
+
                 chosen = str(cur["token_id"])
                 reset_prev = None
                 keep = True
             else:
-                # New author, or the assigned token went bad → pick a free token.
+
                 identities = self._db.list_token_identities(mapping_id)
                 chosen, reset_prev = self._select_token(
                     identities, author_id, enabled_token_ids
@@ -215,8 +148,6 @@ class TokenIdentityManager:
             except Exception:
                 guild = None
 
-            # Desired identity — computed cheaply from cache + DB (no member,
-            # no API). Recomputed each call so role-mapping changes are picked up.
             desired_nick = (
                 str(author_display_name)[:MAX_NICK_LEN]
                 if (do_nick and author_display_name)
@@ -229,8 +160,6 @@ class TokenIdentityManager:
             )
             desired_role_ids = sorted({r.id for r in desired_roles})
 
-            # Fast path: keeping the same token and the identity is already in
-            # sync → no member resolution, no edits, no write.
             if keep:
                 nick_ok = (not do_nick) or (cur.get("applied_nick") == desired_nick)
                 roles_ok = (not do_roles) or (
@@ -268,7 +197,6 @@ class TokenIdentityManager:
                         exc_info=True,
                     )
 
-            # Apply identity to the chosen account.
             chosen_tok = token_by_id.get(chosen) or {}
             member = await self._resolve_member(guild, chosen_tok.get("user_id"))
             if member is not None:
@@ -305,7 +233,9 @@ class TokenIdentityManager:
                     assigned_at=assigned_at,
                 )
             except Exception:
-                self._log.debug("[identity] failed to persist assignment", exc_info=True)
+                self._log.debug(
+                    "[identity] failed to persist assignment", exc_info=True
+                )
 
             return chosen, None
 
@@ -347,8 +277,6 @@ class TokenIdentityManager:
             except Exception:
                 pass
 
-    # ── identity application (bot side) ──────────────────────────────────────
-
     async def _apply_identity(
         self,
         guild,
@@ -381,8 +309,7 @@ class TokenIdentityManager:
                         getattr(member, "id", "?"),
                         exc_info=True,
                     )
-            # Record the intent even if the edit was blocked, so a permission /
-            # hierarchy failure is not re-attempted on every subsequent message.
+
             applied_nick = desired_nick
 
         if do_roles:
@@ -390,11 +317,17 @@ class TokenIdentityManager:
             have_ids = {r.id for r in getattr(member, "roles", [])}
 
             to_add = [r for r in desired_roles if r.id not in have_ids]
-            to_remove_ids = set(int(x) for x in (prev_applied_role_ids or [])) - desired_ids
+            to_remove_ids = (
+                set(int(x) for x in (prev_applied_role_ids or [])) - desired_ids
+            )
             to_remove = []
             for rid in to_remove_ids:
                 r = guild.get_role(int(rid))
-                if r is not None and r in member.roles and self._role_assignable(guild, r):
+                if (
+                    r is not None
+                    and r in member.roles
+                    and self._role_assignable(guild, r)
+                ):
                     to_remove.append(r)
 
             if to_add:
@@ -442,7 +375,7 @@ class TokenIdentityManager:
         are only touched when we had actually applied roles, so a nickname-only
         mapping never strips roles the account legitimately holds.
         """
-        # Clear the mirrored nickname (only when we set one).
+
         if applied_nick is not None and member.nick:
             try:
                 await member.edit(nick=None, reason="Copycord sticky identity reset")
@@ -459,15 +392,12 @@ class TokenIdentityManager:
                     exc_info=True,
                 )
 
-        # If we had mirrored roles onto this identity, strip every removable role
         # (managed roles, @everyone, and roles above the bot can't be removed and
-        # are skipped) so no mirrored role lingers on the previous token.
+
         if not applied_role_ids:
             return
         to_remove = [
-            r
-            for r in getattr(member, "roles", [])
-            if self._role_assignable(guild, r)
+            r for r in getattr(member, "roles", []) if self._role_assignable(guild, r)
         ]
         if to_remove:
             try:
@@ -486,8 +416,6 @@ class TokenIdentityManager:
                     getattr(member, "id", "?"),
                     exc_info=True,
                 )
-
-    # ── helpers ──────────────────────────────────────────────────────────────
 
     def _lock_for(self, mapping_id: str) -> asyncio.Lock:
         lock = self._locks.get(mapping_id)

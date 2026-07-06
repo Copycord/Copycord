@@ -16,6 +16,8 @@ import discord
 import aiohttp
 from discord import Member
 
+from common.selfbot_headers import build_headers
+
 
 class MessageUtils:
     """
@@ -466,7 +468,7 @@ class Snapshot:
                     return None
 
                 url = f"https://discord.com/api/v9/channels/{chan_id}/messages?limit={int(limit)}"
-                headers = {"Authorization": token}
+                headers = build_headers(token)
 
                 async with aiohttp.ClientSession() as sess:
                     async with sess.get(url, headers=headers) as resp:
