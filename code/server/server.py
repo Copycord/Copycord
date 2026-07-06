@@ -36,6 +36,7 @@ import time
 from datetime import datetime, timezone
 from asyncio import Queue
 from pathlib import Path
+from types import SimpleNamespace
 from dotenv import load_dotenv
 from common.config import Config, CURRENT_VERSION
 from common.common_helpers import resolve_mapping_settings
@@ -872,8 +873,7 @@ class ServerReceiver:
 
         asyncio.create_task(self.config.setup_release_watcher(self))
         self.session = aiohttp.ClientSession()
-        # Refresh the shared user-token fingerprint to the current Discord build
-        # (best-effort; falls back to the baked build number if unreachable).
+
         asyncio.create_task(refresh_build_info(self.session))
         self.webhook_exporter = WebhookDMExporter(self.session, logger)
 
@@ -899,8 +899,6 @@ class ServerReceiver:
         msg = f"Logged in as {self.bot.user.name}"
 
         await self.bus.status(running=True, status=msg, discord={"ready": True})
-
-        # Keep re-publishing status so the admin's watchdog keeps us marked
 
         if (
             getattr(self, "_status_hb_task", None) is None
@@ -2088,7 +2086,7 @@ class ServerReceiver:
             if required not in clone_features:
                 logger.info(
                     "[✨] Skipping %s sync for clone guild %s: clone is missing the "
-                    "%s feature (boost level too low?)",
+                    "%s feature",
                     kind,
                     guild.id,
                     required,
@@ -2096,6 +2094,21 @@ class ServerReceiver:
                 parts.append(f"Skipped {kind} (clone lacks {required})")
                 return False
             return True
+
+        def _already_applied(kind: str, host_hash: str | None) -> bool:
+            """
+            Discord re-hashes uploaded images, so the clone's asset hash never
+            matches the host's. Remember which host hash we last applied and
+            skip the re-upload while it hasn't changed.
+            """
+            if not host_hash:
+                return False
+            try:
+                return self.db.get_applied_asset_hash(guild.id, kind) == host_hash
+            except Exception:
+                return False
+
+        applied_hashes: Dict[str, str] = {}
 
         cfg_clone_icon = settings.get("CLONE_GUILD_ICON", False)
         cfg_clone_banner = settings.get("CLONE_GUILD_BANNER", False)
@@ -2122,6 +2135,7 @@ class ServerReceiver:
                     if clone_icon is not None:
                         changes["icon"] = None
                         changed_fields.append("icon (cleared)")
+                        applied_hashes["icon"] = ""
                 else:
 
                     host_hash = None
@@ -2130,10 +2144,8 @@ class ServerReceiver:
                     elif icon_url is not None:
                         host_hash = _normalized_hash_from_url(icon_url)
 
-                    if (
-                        host_hash is not None
-                        and clone_hash is not None
-                        and host_hash == clone_hash
+                    if clone_hash is not None and (
+                        host_hash == clone_hash or _already_applied("icon", host_hash)
                     ):
                         pass
                     else:
@@ -2158,6 +2170,7 @@ class ServerReceiver:
                         if icon_bytes is not None:
                             changes["icon"] = icon_bytes
                             changed_fields.append("icon")
+                            applied_hashes["icon"] = host_hash or ""
             except Exception:
                 logger.warning(
                     "[⚠️] Failed syncing guild icon for clone %s",
@@ -2176,6 +2189,7 @@ class ServerReceiver:
                     if clone_banner is not None:
                         changes["banner"] = None
                         changed_fields.append("banner (cleared)")
+                        applied_hashes["banner"] = ""
                 else:
                     host_hash = None
                     if host_banner is not None:
@@ -2186,10 +2200,8 @@ class ServerReceiver:
                     animated = bool(host_hash and host_hash.startswith("a_"))
                     if not _can_clone_premium_asset("banner", animated=animated):
                         pass
-                    elif (
-                        host_hash is not None
-                        and clone_hash is not None
-                        and host_hash == clone_hash
+                    elif clone_hash is not None and (
+                        host_hash == clone_hash or _already_applied("banner", host_hash)
                     ):
                         pass
                     else:
@@ -2214,6 +2226,7 @@ class ServerReceiver:
                         if banner_bytes is not None:
                             changes["banner"] = banner_bytes
                             changed_fields.append("banner")
+                            applied_hashes["banner"] = host_hash or ""
             except Exception as e:
                 logger.warning(
                     "[⚠️] Failed syncing guild banner for clone %s: %s", guild.id, e
@@ -2230,6 +2243,7 @@ class ServerReceiver:
                     if clone_splash is not None:
                         changes["splash"] = None
                         changed_fields.append("splash (cleared)")
+                        applied_hashes["splash"] = ""
                 else:
                     host_hash = None
                     if host_splash is not None:
@@ -2239,10 +2253,8 @@ class ServerReceiver:
 
                     if not _can_clone_premium_asset("splash"):
                         pass
-                    elif (
-                        host_hash is not None
-                        and clone_hash is not None
-                        and host_hash == clone_hash
+                    elif clone_hash is not None and (
+                        host_hash == clone_hash or _already_applied("splash", host_hash)
                     ):
                         pass
                     else:
@@ -2267,6 +2279,7 @@ class ServerReceiver:
                         if splash_bytes is not None:
                             changes["splash"] = splash_bytes
                             changed_fields.append("splash")
+                            applied_hashes["splash"] = host_hash or ""
             except Exception as e:
                 logger.warning(
                     "[⚠️] Failed syncing guild splash for clone %s: %s", guild.id, e
@@ -2285,6 +2298,7 @@ class ServerReceiver:
                     if clone_ds is not None:
                         changes["discovery_splash"] = None
                         changed_fields.append("discovery_splash (cleared)")
+                        applied_hashes["discovery_splash"] = ""
                 else:
                     host_hash = None
                     if host_ds is not None:
@@ -2294,10 +2308,9 @@ class ServerReceiver:
 
                     if not _can_clone_premium_asset("discovery_splash"):
                         pass
-                    elif (
-                        host_hash is not None
-                        and clone_hash is not None
-                        and host_hash == clone_hash
+                    elif clone_hash is not None and (
+                        host_hash == clone_hash
+                        or _already_applied("discovery_splash", host_hash)
                     ):
                         pass
                     else:
@@ -2322,6 +2335,7 @@ class ServerReceiver:
                         if ds_bytes is not None:
                             changes["discovery_splash"] = ds_bytes
                             changed_fields.append("discovery_splash")
+                            applied_hashes["discovery_splash"] = host_hash or ""
             except Exception as e:
                 logger.warning(
                     "[⚠️] Failed syncing guild discovery_splash for clone %s: %s",
@@ -2339,6 +2353,11 @@ class ServerReceiver:
 
         try:
             await guild.edit(**changes)
+            for kind, applied in applied_hashes.items():
+                try:
+                    self.db.set_applied_asset_hash(guild.id, kind, applied)
+                except Exception:
+                    pass
             logger.info(
                 "[🏛️] Updated guild metadata for '%s' (%d): %s",
                 guild.name,
@@ -3118,6 +3137,13 @@ class ServerReceiver:
                 return name
             return None
 
+        def _fmt_log_val(val: Any, max_len: int = 80) -> str:
+            """Flatten a change value to one line and cap its length for logs."""
+            s = " ".join(str(val).split())
+            if len(s) > max_len:
+                s = s[: max_len - 3] + "..."
+            return s
+
         def _norm_tag_emoji_value(val: Any) -> str:
             """Normalize ForumTag.emoji to a simple comparable string."""
             if isinstance(val, (discord.Emoji, discord.PartialEmoji)):
@@ -3530,39 +3556,13 @@ class ServerReceiver:
                         if not name:
                             continue
 
-                        moderated = bool(tmeta.get("moderated", False))
-
-                        emoji_name = tmeta.get("emoji_name") or ""
-
-                        try:
-                            if emoji_name:
-                                new_tag_obj = discord.ForumTag(
-                                    name=name,
-                                    emoji=emoji_name,
-                                    moderated=moderated,
-                                )
-                            else:
-
-                                new_tag_obj = discord.ForumTag.__new__(discord.ForumTag)
-                                new_tag_obj._state = None
-                                new_tag_obj._channel_id = None
-                                new_tag_obj.name = name
-                                new_tag_obj.id = 0
-                                new_tag_obj.moderated = moderated
-                                new_tag_obj.emoji = None
-
-                                def _safe_to_dict(tag=new_tag_obj):
-                                    d = {"name": tag.name, "moderated": tag.moderated}
-                                    if tag.id:
-                                        d["id"] = tag.id
-                                    return d
-
-                                new_tag_obj.to_dict = _safe_to_dict
-                        except Exception:
-                            new_tag_obj = None
-
-                        if new_tag_obj is not None:
-                            desired_tags.append(new_tag_obj)
+                        desired_tags.append(
+                            SimpleNamespace(
+                                name=name,
+                                moderated=bool(tmeta.get("moderated", False)),
+                                emoji=tmeta.get("emoji_name") or None,
+                            )
+                        )
 
                     tags_changed = True
                 else:
@@ -3574,45 +3574,17 @@ class ServerReceiver:
                     and desired_req
                     and not _has_unmoderated_tag(desired_tags)
                 ):
-                    try:
-                        existing_names = {
-                            (getattr(t, "name", "") or "").strip().lower()
-                            for t in desired_tags
-                        }
-                        if "general" not in existing_names:
-                            fallback_tag = discord.ForumTag.__new__(discord.ForumTag)
-                            fallback_tag._state = None
-                            fallback_tag._channel_id = None
-                            fallback_tag.name = "General"
-                            fallback_tag.id = 0
-                            fallback_tag.moderated = False
-                            fallback_tag.emoji = None
-
-                            def _safe_to_dict_fb(tag=fallback_tag):
-                                d = {
-                                    "name": tag.name,
-                                    "moderated": tag.moderated,
-                                    "emoji_id": None,
-                                    "emoji_name": None,
-                                }
-                                if tag.id:
-                                    d["id"] = tag.id
-                                return d
-
-                            fallback_tag.to_dict = _safe_to_dict_fb
-                            desired_tags.append(fallback_tag)
-                            tags_changed = True
-                    except Exception as tag_err:
-                        logger.warning(
-                            "[meta] Failed to create fallback ForumTag on #%d (%s): %s",
-                            ch.id,
-                            ch.name,
-                            tag_err,
+                    existing_names = {
+                        (getattr(t, "name", "") or "").strip().lower()
+                        for t in desired_tags
+                    }
+                    if "general" not in existing_names:
+                        desired_tags.append(
+                            SimpleNamespace(name="General", moderated=False, emoji=None)
                         )
+                        tags_changed = True
 
                 if tags_changed:
-
-                    # metadata — py-cord's ForumTag breaks for tags
 
                     clone_tag_id_by_name = {}
                     for ct in clone_tags:
@@ -3644,6 +3616,18 @@ class ServerReceiver:
                         elif ename:
                             td["emoji_name"] = ename
                         raw_tag_payloads.append(td)
+
+                    if (
+                        desired_req
+                        and not any(not p["moderated"] for p in raw_tag_payloads)
+                        and len(raw_tag_payloads) < 20
+                    ):
+                        td = {"name": "General", "moderated": False}
+                        existing_id = clone_tag_id_by_name.get("general")
+                        if existing_id:
+                            td["id"] = existing_id
+                        raw_tag_payloads.append(td)
+
                     changes["_raw_available_tags"] = raw_tag_payloads
 
                     final_tags = desired_tags[:20]
@@ -3656,7 +3640,32 @@ class ServerReceiver:
                     current_norm = _norm_forum_emoji(
                         getattr(ch, "default_reaction_emoji", None)
                     )
-                    if current_norm != desired_norm:
+
+                    d_eid, d_name, _ = desired_norm
+                    skip_reaction = False
+                    if d_eid:
+                        clone_em = (
+                            discord.utils.get(ch.guild.emojis, name=d_name)
+                            if d_name
+                            else None
+                        )
+                        if clone_em:
+                            desired_norm = (
+                                int(clone_em.id),
+                                clone_em.name,
+                                bool(clone_em.animated),
+                            )
+                        else:
+                            logger.debug(
+                                "[meta] Clone guild has no emoji named %r for the "
+                                "default reaction on forum #%d (%s); skipping",
+                                d_name,
+                                ch.id,
+                                ch.name,
+                            )
+                            skip_reaction = True
+
+                    if not skip_reaction and current_norm != desired_norm:
                         payload = _build_forum_emoji(desired_norm)
                         if payload is not None:
                             changes["default_reaction_emoji"] = payload
@@ -3738,7 +3747,10 @@ class ServerReceiver:
                     log_items.append(("default_forum_layout", raw_forum_layout))
                 if tag_log_parts:
                     log_items.append(("tags", "; ".join(tag_log_parts)))
-                log_str = ", ".join(f"{k}={v}" for k, v in log_items) or "(no changes)"
+                log_str = (
+                    ", ".join(f"{k}={_fmt_log_val(v)}" for k, v in log_items)
+                    or "(no changes)"
+                )
 
                 if is_voice_ch and voice_changed_here:
                     logger.info(
@@ -3836,18 +3848,7 @@ class ServerReceiver:
 
         for ch, desired_req in require_tag_ops:
             try:
-                flags = getattr(ch, "flags", None)
-                flag_changes: Dict[str, object] = {}
-
-                if flags is not None and hasattr(discord, "ChannelFlags"):
-                    flag_val = flags.value if hasattr(flags, "value") else int(flags)
-                    new_flags = discord.ChannelFlags._from_value(flag_val)
-                    new_flags.require_tag = bool(desired_req)
-                    flag_changes["flags"] = new_flags.value
-                else:
-                    flag_changes["require_tag"] = bool(desired_req)
-
-                await ch.edit(**flag_changes)
+                await ch.edit(require_tag=bool(desired_req))
                 logger.info(
                     "[🧵] Set require_tag=%s for forum '%s' #%d",
                     desired_req,
@@ -7714,13 +7715,9 @@ class ServerReceiver:
                 tried.add(str(token_id))
                 continue
             if status == SEND_UNDELIVERABLE:
-                # The account can't post in this channel (missing perms / not in
-                # guild / channel gone) but the token is fine. Don't swap — a
-                # different account likely can't post here either and would post
 
                 return self._identity_exhausted_action(settings)
             if status in (SEND_RATE_LIMITED, SEND_TRANSIENT):
-                # Not the token's fault (the sender already slept/retried). Hold
 
                 return "drop"
 
@@ -7740,24 +7737,7 @@ class ServerReceiver:
         source_id: int | None = None,
         quiet: bool = False,
     ) -> bool:
-        """Handle a message via user-token sending when enabled for the mapping.
-
-        Returns True when the caller should NOT perform the webhook send — either
-        a token delivered the message, or user-tokens-only mode is on and the
-        message was dropped. Returns False to let the caller fall back to the
-        webhook (user-token sending disabled, no mapping resolved, or every token
-        failed while webhook fallback is enabled).
-
-        When ``is_backfill`` is set, backfill progress bookkeeping (note_sent /
-        note_checkpoint / progress logging) is handled here so the caller can
-        simply skip its own webhook path. Token sends intentionally bypass the
-        webhook backfill throttle (``_bf_gate``); pacing, if any, comes from the
-        per-mapping USER_TOKEN_MIN_DELAY/MAX_DELAY handled inside the sender.
-
-        ``quiet`` suppresses this method's own success/drop logging for callers
-        (e.g. the thread path) that already emit their own progress line after
-        the send returns.
-        """
+        """Handle a message via user-token sending when enabled for the mapping."""
         try:
             settings = resolve_mapping_settings(
                 self.db,
@@ -7770,8 +7750,6 @@ class ServerReceiver:
 
         if not settings.get("USE_USER_TOKENS", False):
             return False
-
-        # Bot/webhook-authored messages and rich embeds can't be reproduced by a
 
         if host_message_needs_webhook(msg):
             return False
@@ -7807,8 +7785,6 @@ class ServerReceiver:
 
         if identity_active:
 
-            # account only when the current one is dead or can't post here; a
-
             disp = await self._run_sticky_identity(
                 mapping_id=mapping_id,
                 cloned_guild_id=cloned_guild_id,
@@ -7818,7 +7794,6 @@ class ServerReceiver:
             )
         else:
 
-            # the sender's own cross-token fallback.
             await self._cleanup_token_identity(mapping_id)
             disp = self._disposition_for(await _do_send(None, False), settings)
 
@@ -7923,8 +7898,6 @@ class ServerReceiver:
         if not settings.get("USE_USER_TOKENS", False):
             return None
 
-        # Bot/webhook-authored or rich-embed starters can't be reproduced by a
-
         if host_message_needs_webhook(msg):
             return None
 
@@ -7938,8 +7911,6 @@ class ServerReceiver:
             settings=settings,
             msg=msg,
         )
-
-        # With sticky identity active but no free token, don't create the thread
 
         identity_active = self._identity_active(settings)
         if identity_active and not forced_token_id:
@@ -8005,8 +7976,6 @@ class ServerReceiver:
         if not settings.get("USE_USER_TOKENS", False):
             return None
 
-        # Bot/webhook-authored or rich-embed starters can't be reproduced by a
-
         if host_message_needs_webhook(msg):
             return None
 
@@ -8020,8 +7989,6 @@ class ServerReceiver:
             settings=settings,
             msg=msg,
         )
-
-        # With sticky identity active but no free token, don't create the thread
 
         identity_active = self._identity_active(settings)
         if identity_active and not forced_token_id:
@@ -8087,8 +8054,6 @@ class ServerReceiver:
         if not settings.get("USE_USER_TOKENS", False):
             return False
 
-        # Nitro. Ids the account can't use just make the send fail and we fall
-
         try:
             rows = self.db.get_all_sticker_mappings()
         except Exception:
@@ -8117,8 +8082,6 @@ class ServerReceiver:
 
                 sid = clone_id
             elif s.get("is_guild_sticker"):
-
-                # hit). The token account isn't in the source guild, so it can
 
                 continue
             else:
@@ -8964,7 +8927,6 @@ class ServerReceiver:
             current_url = url_to_use
             while True:
 
-                # couldn't be cloned and left nothing else to send).
                 if not (payload.get("content") or "").strip() and not (
                     payload.get("embeds") or []
                 ):
@@ -9339,9 +9301,6 @@ class ServerReceiver:
                     ctx_guild_id=ctx_gid,
                     ctx_mapping_row=chosen,
                 )
-
-                # backfill throttle (_bf_gate) below — this is the "no sleeps for
-                # token forwarding" path. Falls through to the webhook only when
 
                 if clone_for_gate and _settings_for_forced.get(
                     "USE_USER_TOKENS", False
@@ -11081,7 +11040,6 @@ class ServerReceiver:
                                             new_thread = None
                                             await asyncio.sleep(0.2)
                                     if not isinstance(new_thread, discord.Thread):
-                                        # Thread exists but we couldn't resolve
 
                                         logger.warning(
                                             "[🧵]%s Created text thread '%s' via user token but couldn't resolve the Thread object yet; will retry later.",
@@ -11285,8 +11243,6 @@ class ServerReceiver:
                                         if ct:
                                             clone_applied_tags.append(ct)
 
-                                    # none matching, sync the forum's tag
-
                                     if not clone_applied_tags:
                                         try:
                                             from discord.http import Route as _Route
@@ -11413,8 +11369,6 @@ class ServerReceiver:
                                                 e,
                                             )
 
-                                # token path can't reach them. When token
-
                                 t = None
                                 via_token = False
                                 token_thread_id = (
@@ -11447,7 +11401,6 @@ class ServerReceiver:
                                             t = None
                                             await asyncio.sleep(0.2)
                                     if not isinstance(t, discord.Thread):
-                                        # The thread exists but we couldn't
 
                                         logger.warning(
                                             "[🧵]%s Created forum thread '%s' via user token but couldn't resolve the Thread object yet; will retry later.",
