@@ -59,7 +59,7 @@ To use it:
 2. Add one or more **user tokens**. Each token is validated when you add it — the account must be a member of the **clone** server, or it is rejected.
 3. Enable the **Send messages as users** toggle.
 
-When enabled, each cloned message is sent by one of the enabled tokens via the Discord API. If a token is invalid, missing permissions, rate-limited, or removed from the clone server, Copycord rotates to another token; if **Fall back to webhook** is on and **every** token fails, it falls back to the normal webhook send so no message is lost. Tokens are shown masked and can be individually enabled, disabled, or removed. The **⚙ gear** menu can verify every token at once (and offer to delete the ones that fail) or clear all tokens.
+When enabled, each cloned message is sent by one of the enabled tokens via the Discord API. If an account can't deliver a message, Copycord uses another enabled token where possible; if none can and **Fall back to webhook** is on, it uses the normal webhook so no message is lost. Tokens are shown masked and can be individually enabled, disabled, or removed. The **⚙ gear** menu can verify every token at once (and offer to delete the ones that fail) or clear all tokens.
 
 :::warning
 Using self-bot accounts to send messages is against Discord's Terms of Service and can get those accounts banned. Each account must be in the clone server with permission to post in the target channels.
@@ -69,10 +69,10 @@ Using self-bot accounts to send messages is against Discord's Terms of Service a
 
 - **Account selection** — how a token is chosen for each message:
   - **Rotate evenly** — spread messages across all enabled tokens (round-robin).
-  - **Sticky per author** — pin each source author to one token permanently, so that author's messages always come from the same account. The token is only swapped if it goes bad (disabled or failing to send), in which case the author moves to an unused token and the old account's mirrored nickname/roles are cleared. If no token is free, the message follows **Fall back to webhook**.
+  - **Sticky per author** — pin each source author to one token permanently, so that author's messages always come from the same account. The account is only swapped if its token goes bad (disabled, or revoked/removed from the clone server), in which case the author moves to an unused token and the old account's mirrored nickname/roles are cleared. If no unused token is free, the message follows **Fall back to webhook**.
 - **Mirror author nickname** *(Sticky per author only)* — rename the assigned account in the clone server to the host author's display name, so it looks like that member.
 - **Mirror author roles** *(Sticky per author only)* — give the assigned account the cloned roles that match the host author's roles.
-- **Fall back to webhook** — if no token can send a message (every token failed, or *Sticky per author* has no free token left for a new identity), send via the normal webhook instead of dropping it.
+- **Fall back to webhook** — if no token can deliver a message (every token failed, or *Sticky per author* has no free token left for a new identity), send via the normal webhook instead of dropping it. With this off, the message is skipped.
 - **Show typing indicator** — while a message waits out its **Send delay**, show the "typing…" indicator the whole time, so a 5–10s delay looks like 5–10s of typing before the message appears. With no send delay set it's just a brief blip.
 - **Attachments as links** — post the source attachment links instead of re-downloading and re-uploading the files.
 - **Send delay** — wait a random min–max seconds before each message is sent (its "composition time"). Messages to the same channel take turns, so they still never arrive in a burst.
