@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+import time
 from typing import Callable, Optional
 
 import aiohttp
@@ -29,8 +30,23 @@ DISCORD_API_BASE = "https://discord.com/api/v10"
 MAX_CONTENT_LEN = 2000
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
-# How many times we retry the *same* token after a 429 before moving on.
-MAX_429_RETRIES = 2
+# A 429 sleeps the account for its retry_after and retries — we respect the rate
+# limit rather than moving on. Network/timeout/5xx errors are retried too (never
+# webhooked). These bound how many times before giving up on one message.
+MAX_429_RETRIES = 5
+MAX_NET_RETRIES = 3
+
+# Outcome of a single-account send, reported up so the sticky-identity loop can
+# tell a genuinely dead account (bench it + swap) apart from a transient blip
+# (keep the account, don't webhook) apart from "no token could deliver" (the one
+# case that falls back to a webhook).
+SEND_OK = "ok"                        # delivered
+SEND_DEAD = "dead"                    # HTTP 401 — token revoked/invalid; bench it
+SEND_UNDELIVERABLE = "undeliverable"  # 403/404/other 4xx — can't post here; try another
+SEND_RATE_LIMITED = "rate_limited"    # 429 still after retries; don't swap, don't webhook
+SEND_TRANSIENT = "transient"          # network/timeout/5xx after retries; don't swap/webhook
+SEND_UNSUPPORTED = "unsupported"      # nothing a user account can carry → let the webhook do it
+SEND_NO_TOKENS = "no_tokens"          # no usable tokens / bad target → webhook
 
 
 class UserTokenSender:
@@ -58,6 +74,12 @@ class UserTokenSender:
         # delay (showing the typing indicator, if enabled) before being sent,
         # and queued messages take turns instead of firing in a burst.
         self._pace_locks: dict = {}
+        # Per-account rate-limit gating: one lock per token so an account's
+        # messages take strict turns, plus a cooldown timestamp set from a 429's
+        # retry_after. When one message from an account is rate limited the rest
+        # wait out the cooldown instead of piling on more 429s (keyed by token).
+        self._token_locks: dict = {}
+        self._token_cooldown: dict = {}
 
     # ── public API ───────────────────────────────────────────────────────────
 
@@ -78,7 +100,7 @@ class UserTokenSender:
         links_only: bool = False,
         forced_token_id: Optional[str] = None,
         sticky_exclusive: bool = False,
-    ) -> bool:
+    ) -> str:
         """
         Attempt to post a message into ``target_channel_id`` (a channel or thread
         id in the clone guild) as one of the mapping's user tokens.
@@ -93,20 +115,23 @@ class UserTokenSender:
         wrong token. If it fails the caller decides whether to swap the author's
         assignment, fall back to a webhook, or skip.
 
-        Returns True on success, False if there are no usable tokens or every
-        token failed — in which case the caller should fall back to the webhook.
+        Returns a ``SEND_*`` status: ``SEND_OK`` on success, otherwise the reason
+        the (last) account couldn't deliver — ``SEND_DEAD`` (token revoked),
+        ``SEND_UNDELIVERABLE`` (can't post here), ``SEND_RATE_LIMITED``,
+        ``SEND_TRANSIENT`` (network), ``SEND_UNSUPPORTED`` (nothing carryable), or
+        ``SEND_NO_TOKENS``. The caller decides swap/webhook/drop from that.
         """
         if not mapping_id or not target_channel_id:
-            return False
+            return SEND_NO_TOKENS
 
         try:
             tokens = self._db.get_enabled_mapping_tokens(str(mapping_id)) or []
         except Exception:
             self._log.exception("[user-send] Failed to load tokens for mapping %s", mapping_id)
-            return False
+            return SEND_NO_TOKENS
 
         if not tokens:
-            return False
+            return SEND_NO_TOKENS
 
         text = self._compose_text(content, embeds)
         atts = [
@@ -119,7 +144,7 @@ class UserTokenSender:
         # Nothing a user account can carry (e.g. custom-embed-only message) →
         # let the webhook path handle it.
         if not text and not atts and not stkr_ids:
-            return False
+            return SEND_UNSUPPORTED
 
         chan = int(target_channel_id)
 
@@ -159,18 +184,19 @@ class UserTokenSender:
             None,
         )
 
-        async def _deliver() -> bool:
+        async def _deliver() -> str:
             # Wait this message's send-delay first (showing typing for the whole
             # time when enabled), then post it.
             await self._pace_channel(
                 chan, min_delay, max_delay, typing=typing, token=type_token
             )
+            last = SEND_NO_TOKENS
             for tok in order:
                 token_value = (tok.get("token_value") or "").strip()
                 if not token_value:
                     continue
                 try:
-                    ok = await self._send_with_token(
+                    status = await self._send_with_token(
                         token_value,
                         chan,
                         text,
@@ -182,9 +208,9 @@ class UserTokenSender:
                         "[user-send] Unexpected error sending to channel %s",
                         target_channel_id,
                     )
-                    ok = False
+                    status = SEND_TRANSIENT
 
-                if ok:
+                if status == SEND_OK:
                     tid = tok.get("token_id")
                     if tid:
                         try:
@@ -196,14 +222,15 @@ class UserTokenSender:
                         target_channel_id,
                         tok.get("username") or tok.get("token_id"),
                     )
-                    return True
+                    return SEND_OK
+                last = status
 
             self._log.debug(
-                "[user-send] All %d token(s) failed for channel %s; falling back to webhook",
-                len(order),
+                "[user-send] token(s) could not deliver to channel %s (%s)",
                 target_channel_id,
+                last,
             )
-            return False
+            return last
 
         # When there's a delay or a typing indicator to show, hold the per-channel
         # lock across BOTH the delay and the send so queued messages take strict
@@ -491,6 +518,141 @@ class UserTokenSender:
             self._pace_locks[chan] = lock
         return lock
 
+    def _token_lock(self, key: str) -> asyncio.Lock:
+        """Per-account lock held across a request so one account's messages take
+        strict turns — a rate-limited account holds back its own queued messages
+        instead of firing them all and collecting more 429s."""
+        lock = self._token_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._token_locks[key] = lock
+        return lock
+
+    async def _await_cooldown(self, key: str) -> None:
+        """Block until this account's rate-limit cooldown (if any) elapses."""
+        delay = self._token_cooldown.get(key, 0.0) - time.monotonic()
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+    async def _request_with_token(
+        self,
+        token: str,
+        url: str,
+        *,
+        json_body: Optional[dict] = None,
+        form_factory: Optional[Callable[[], aiohttp.FormData]] = None,
+        timeout: int = 30,
+        ctx: str = "",
+    ) -> tuple[str, Optional[dict]]:
+        """POST as one account with per-account rate-limit gating and retries.
+
+        Serializes on the account (``_token_lock``) so its queued messages wait
+        their turn, sleeps a 429's ``retry_after`` (parking the account for that
+        long so other messages wait too) and retries, and retries network /
+        timeout / 5xx errors. Returns ``(status, data)`` where ``status`` is a
+        ``SEND_*`` constant and ``data`` is the parsed JSON on success (or None).
+        ``form_factory`` must rebuild the multipart body each attempt (an aiohttp
+        ``FormData`` is single-use).
+        """
+        session = self._session_provider()
+        r429 = 0
+        rnet = 0
+        async with self._token_lock(token):
+            while True:
+                await self._await_cooldown(token)
+                try:
+                    headers = self._build_headers(token)
+                    if form_factory is not None:
+                        resp_cm = session.post(
+                            url, data=form_factory(), headers=headers, timeout=timeout
+                        )
+                    else:
+                        resp_cm = session.post(
+                            url, json=json_body, headers=headers, timeout=timeout
+                        )
+
+                    async with resp_cm as resp:
+                        status = resp.status
+                        if status in (200, 201):
+                            try:
+                                data = await resp.json()
+                            except Exception:
+                                data = None
+                            return SEND_OK, data
+
+                        if status == 429:
+                            retry_after = await self._retry_after(resp)
+                            wait = min(max(0.0, retry_after), 60.0)
+                            # Park the whole account so queued messages wait too.
+                            self._token_cooldown[token] = time.monotonic() + wait
+                            r429 += 1
+                            if r429 > MAX_429_RETRIES:
+                                self._log.warning(
+                                    "[user-send] Still rate limited %s after %d retries",
+                                    ctx,
+                                    MAX_429_RETRIES,
+                                )
+                                return SEND_RATE_LIMITED, None
+                            await asyncio.sleep(wait)
+                            continue
+
+                        if status == 401:
+                            # Token revoked/invalid → this account is dead.
+                            self._log.debug(
+                                "[user-send] token revoked (HTTP 401) %s", ctx
+                            )
+                            return SEND_DEAD, None
+
+                        if status in (403, 404):
+                            # Not in guild / missing perms / channel gone — this
+                            # account can't deliver here, but it isn't dead.
+                            self._log.debug(
+                                "[user-send] token can't deliver (HTTP %s) %s",
+                                status,
+                                ctx,
+                            )
+                            return SEND_UNDELIVERABLE, None
+
+                        if 500 <= status < 600:
+                            rnet += 1
+                            if rnet > MAX_NET_RETRIES:
+                                self._log.warning(
+                                    "[user-send] Discord HTTP %s %s; giving up after %d retries",
+                                    status,
+                                    ctx,
+                                    MAX_NET_RETRIES,
+                                )
+                                return SEND_TRANSIENT, None
+                            await asyncio.sleep(min(2.0 * rnet, 10.0))
+                            continue
+
+                        body = await self._safe_text(resp)
+                        self._log.warning(
+                            "[user-send] Discord returned HTTP %s %s: %s",
+                            status,
+                            ctx,
+                            body[:300],
+                        )
+                        return SEND_UNDELIVERABLE, None
+                except asyncio.TimeoutError:
+                    rnet += 1
+                    self._log.warning(
+                        "[user-send] Timeout %s (attempt %d)", ctx, rnet
+                    )
+                    if rnet > MAX_NET_RETRIES:
+                        return SEND_TRANSIENT, None
+                    await asyncio.sleep(min(2.0 * rnet, 10.0))
+                    continue
+                except aiohttp.ClientError as e:
+                    rnet += 1
+                    self._log.warning(
+                        "[user-send] Network error %s (attempt %d): %s", ctx, rnet, e
+                    )
+                    if rnet > MAX_NET_RETRIES:
+                        return SEND_TRANSIENT, None
+                    await asyncio.sleep(min(2.0 * rnet, 10.0))
+                    continue
+
     async def _pace_channel(
         self,
         chan: int,
@@ -556,7 +718,8 @@ class UserTokenSender:
         attachments: list,
         *,
         sticker_ids: Optional[list] = None,
-    ) -> bool:
+    ) -> str:
+        """Post a message as one account. Returns a ``SEND_*`` status."""
         session = self._session_provider()
         files, uploaded_urls = await self._prepare_files(session, attachments)
         stkr_ids = [str(s) for s in (sticker_ids or []) if s]
@@ -574,62 +737,29 @@ class UserTokenSender:
             body_text = body_text[: MAX_CONTENT_LEN - 1] + "…"
 
         if not body_text and not files and not stkr_ids:
-            return False
+            return SEND_UNSUPPORTED
 
         url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
-        headers = self._build_headers(token)
+        ctx = f"posting to channel {channel_id}"
 
-        attempts = 0
-        while True:
-            try:
-                if files:
-                    form = self._build_multipart(body_text, files, stkr_ids)
-                    resp_cm = session.post(url, data=form, headers=headers, timeout=60)
-                else:
-                    payload = {"content": body_text}
-                    if stkr_ids:
-                        payload["sticker_ids"] = stkr_ids
-                    resp_cm = session.post(url, json=payload, headers=headers, timeout=30)
-
-                async with resp_cm as resp:
-                    status = resp.status
-                    if status in (200, 201):
-                        return True
-
-                    if status == 429:
-                        retry_after = await self._retry_after(resp)
-                        attempts += 1
-                        if attempts > MAX_429_RETRIES:
-                            self._log.warning(
-                                "[user-send] Rate limited on channel %s; giving up on this token",
-                                channel_id,
-                            )
-                            return False
-                        await asyncio.sleep(min(retry_after, 30.0))
-                        continue
-
-                    if status in (401, 403, 404):
-                        # invalid/expired token, not in guild, missing perms, or
-                        # channel gone → this token cannot deliver; try the next.
-                        self._log.debug(
-                            "[user-send] token rejected (HTTP %s) for channel %s", status, channel_id
-                        )
-                        return False
-
-                    body = await self._safe_text(resp)
-                    self._log.warning(
-                        "[user-send] Discord returned HTTP %s for channel %s: %s",
-                        status,
-                        channel_id,
-                        body[:300],
-                    )
-                    return False
-            except asyncio.TimeoutError:
-                self._log.warning("[user-send] Timeout posting to channel %s", channel_id)
-                return False
-            except aiohttp.ClientError as e:
-                self._log.warning("[user-send] Network error posting to channel %s: %s", channel_id, e)
-                return False
+        if files:
+            status, _ = await self._request_with_token(
+                token,
+                url,
+                form_factory=lambda: self._build_multipart(
+                    body_text, files, stkr_ids
+                ),
+                timeout=60,
+                ctx=ctx,
+            )
+        else:
+            payload = {"content": body_text}
+            if stkr_ids:
+                payload["sticker_ids"] = stkr_ids
+            status, _ = await self._request_with_token(
+                token, url, json_body=payload, timeout=30, ctx=ctx
+            )
+        return status
 
     async def _create_thread_with_token(
         self,
@@ -677,76 +807,31 @@ class UserTokenSender:
             thread_body["applied_tags"] = [str(t) for t in applied_tag_ids]
 
         url = f"{DISCORD_API_BASE}/channels/{forum_channel_id}/threads"
-        headers = self._build_headers(token)
+        ctx = f"creating forum thread in {forum_channel_id}"
 
-        attempts = 0
-        while True:
+        if files:
+            status, data = await self._request_with_token(
+                token,
+                url,
+                form_factory=lambda: self._build_forum_multipart(thread_body, files),
+                timeout=60,
+                ctx=ctx,
+            )
+        else:
+            status, data = await self._request_with_token(
+                token, url, json_body=thread_body, timeout=30, ctx=ctx
+            )
+
+        if status == SEND_OK:
             try:
-                if files:
-                    form = self._build_forum_multipart(thread_body, files)
-                    resp_cm = session.post(url, data=form, headers=headers, timeout=60)
-                else:
-                    resp_cm = session.post(
-                        url, json=thread_body, headers=headers, timeout=30
-                    )
-
-                async with resp_cm as resp:
-                    status = resp.status
-                    if status in (200, 201):
-                        try:
-                            data = await resp.json()
-                            return int(data.get("id"))
-                        except Exception:
-                            self._log.warning(
-                                "[user-send] Forum thread created in %s but response "
-                                "had no usable id",
-                                forum_channel_id,
-                            )
-                            return None
-
-                    if status == 429:
-                        retry_after = await self._retry_after(resp)
-                        attempts += 1
-                        if attempts > MAX_429_RETRIES:
-                            self._log.warning(
-                                "[user-send] Rate limited creating forum thread in %s; "
-                                "giving up on this token",
-                                forum_channel_id,
-                            )
-                            return None
-                        await asyncio.sleep(min(retry_after, 30.0))
-                        continue
-
-                    if status in (401, 403, 404):
-                        self._log.debug(
-                            "[user-send] token rejected (HTTP %s) creating forum "
-                            "thread in %s",
-                            status,
-                            forum_channel_id,
-                        )
-                        return None
-
-                    body = await self._safe_text(resp)
-                    self._log.warning(
-                        "[user-send] Discord returned HTTP %s creating forum thread "
-                        "in %s: %s",
-                        status,
-                        forum_channel_id,
-                        body[:300],
-                    )
-                    return None
-            except asyncio.TimeoutError:
+                return int((data or {}).get("id"))
+            except Exception:
                 self._log.warning(
-                    "[user-send] Timeout creating forum thread in %s", forum_channel_id
-                )
-                return None
-            except aiohttp.ClientError as e:
-                self._log.warning(
-                    "[user-send] Network error creating forum thread in %s: %s",
+                    "[user-send] Forum thread created in %s but response had no "
+                    "usable id",
                     forum_channel_id,
-                    e,
                 )
-                return None
+        return None
 
     async def _create_text_thread_with_token(
         self,
@@ -764,8 +849,6 @@ class UserTokenSender:
         (type 11) is created. Returns the new thread id, or None so the caller
         can try the next token.
         """
-        session = self._session_provider()
-
         body: dict = {
             "name": (thread_name or "thread")[:100],
             "auto_archive_duration": int(auto_archive_duration or 60),
@@ -779,70 +862,24 @@ class UserTokenSender:
             url = f"{DISCORD_API_BASE}/channels/{parent_channel_id}/threads"
             body["type"] = 11  # public thread
 
-        headers = self._build_headers(token)
+        status, data = await self._request_with_token(
+            token,
+            url,
+            json_body=body,
+            timeout=30,
+            ctx=f"creating text thread in {parent_channel_id}",
+        )
 
-        attempts = 0
-        while True:
+        if status == SEND_OK:
             try:
-                async with session.post(
-                    url, json=body, headers=headers, timeout=30
-                ) as resp:
-                    status = resp.status
-                    if status in (200, 201):
-                        try:
-                            data = await resp.json()
-                            return int(data.get("id"))
-                        except Exception:
-                            self._log.warning(
-                                "[user-send] Text thread created in %s but response "
-                                "had no usable id",
-                                parent_channel_id,
-                            )
-                            return None
-
-                    if status == 429:
-                        retry_after = await self._retry_after(resp)
-                        attempts += 1
-                        if attempts > MAX_429_RETRIES:
-                            self._log.warning(
-                                "[user-send] Rate limited creating text thread in %s; "
-                                "giving up on this token",
-                                parent_channel_id,
-                            )
-                            return None
-                        await asyncio.sleep(min(retry_after, 30.0))
-                        continue
-
-                    if status in (401, 403, 404):
-                        self._log.debug(
-                            "[user-send] token rejected (HTTP %s) creating text "
-                            "thread in %s",
-                            status,
-                            parent_channel_id,
-                        )
-                        return None
-
-                    body_txt = await self._safe_text(resp)
-                    self._log.warning(
-                        "[user-send] Discord returned HTTP %s creating text thread "
-                        "in %s: %s",
-                        status,
-                        parent_channel_id,
-                        body_txt[:300],
-                    )
-                    return None
-            except asyncio.TimeoutError:
+                return int((data or {}).get("id"))
+            except Exception:
                 self._log.warning(
-                    "[user-send] Timeout creating text thread in %s", parent_channel_id
-                )
-                return None
-            except aiohttp.ClientError as e:
-                self._log.warning(
-                    "[user-send] Network error creating text thread in %s: %s",
+                    "[user-send] Text thread created in %s but response had no "
+                    "usable id",
                     parent_channel_id,
-                    e,
                 )
-                return None
+        return None
 
     async def _prepare_files(self, session: aiohttp.ClientSession, attachments: list):
         """Download attachments and return (files, uploaded_urls).

@@ -8,9 +8,18 @@ import base64
 import json
 import types
 
+import aiohttp
 import pytest
 
-from server.token_sender import UserTokenSender
+from server.token_sender import (
+    UserTokenSender,
+    SEND_OK,
+    SEND_DEAD,
+    SEND_UNDELIVERABLE,
+    SEND_RATE_LIMITED,
+    SEND_TRANSIENT,
+    SEND_NO_TOKENS,
+)
 
 
 def _make_sender():
@@ -182,9 +191,9 @@ async def test_links_only_skips_upload(monkeypatch):
 
     captured = {}
 
-    async def fake_send(self, token, channel_id, text, attachments, *, typing=False, sticker_ids=None):
+    async def fake_send(self, token, channel_id, text, attachments, *, sticker_ids=None):
         captured["attachments"] = attachments
-        return True
+        return SEND_OK
 
     monkeypatch.setattr(UserTokenSender, "_send_with_token", fake_send)
 
@@ -207,7 +216,7 @@ async def test_links_only_skips_upload(monkeypatch):
         attachments=[{"url": "http://x/a.png", "filename": "a.png"}],
         links_only=True,
     )
-    assert ok is True
+    assert ok == SEND_OK
     # Links-only means nothing is handed to the uploader.
     assert captured["attachments"] == []
 
@@ -230,9 +239,9 @@ async def test_forced_token_id_is_tried_first(monkeypatch):
 
     used = {}
 
-    async def fake_send(self, token, channel_id, text, attachments, *, typing=False, sticker_ids=None):
+    async def fake_send(self, token, channel_id, text, attachments, *, sticker_ids=None):
         used["token"] = token
-        return True
+        return SEND_OK
 
     monkeypatch.setattr(UserTokenSender, "_send_with_token", fake_send)
 
@@ -255,7 +264,7 @@ async def test_forced_token_id_is_tried_first(monkeypatch):
         strategy="round_robin",
         forced_token_id="c",
     )
-    assert ok is True
+    assert ok == SEND_OK
     assert used["token"] == "tc"
 
 
@@ -276,9 +285,9 @@ async def test_sticky_exclusive_never_falls_back_to_other_tokens(monkeypatch):
 
     tried = []
 
-    async def fake_send(self, token, channel_id, text, attachments, *, typing=False, sticker_ids=None):
+    async def fake_send(self, token, channel_id, text, attachments, *, sticker_ids=None):
         tried.append(token)
-        return False
+        return SEND_DEAD
 
     monkeypatch.setattr(UserTokenSender, "_send_with_token", fake_send)
 
@@ -301,7 +310,8 @@ async def test_sticky_exclusive_never_falls_back_to_other_tokens(monkeypatch):
         forced_token_id="a",
         sticky_exclusive=True,
     )
-    assert ok is False
+    # The forced account failed and no other may be tried → its failure status.
+    assert ok == SEND_DEAD
     # Only the forced account was attempted — never the other token.
     assert tried == ["ta"]
 
@@ -346,7 +356,7 @@ async def test_uploaded_attachment_url_stripped_from_text(monkeypatch):
     ok = await s._send_with_token(
         "tok", 1, f"lol\n{url}", [{"url": url, "filename": "att.png"}]
     )
-    assert ok is True
+    assert ok == SEND_OK
     # The link is gone; only the message text remains (the file carries it).
     assert url not in captured["content"]
     assert captured["content"].strip() == "lol"
@@ -396,7 +406,7 @@ async def test_sticker_only_message_sends_sticker_ids():
         content=None,
         sticker_ids=[123456789],
     )
-    assert ok is True
+    assert ok == SEND_OK
     assert captured["json"]["sticker_ids"] == ["123456789"]
 
 
@@ -558,11 +568,11 @@ async def test_no_consecutive_repeat_same_channel(monkeypatch):
     used = []
 
     async def fake_send_with_token(
-        self, token, channel_id, text, attachments, *, typing=False, sticker_ids=None
+        self, token, channel_id, text, attachments, *, sticker_ids=None
     ):
         # Record which token actually sent (order[0] always succeeds here).
         used.append(token)
-        return True
+        return SEND_OK
 
     monkeypatch.setattr(
         UserTokenSender, "_send_with_token", fake_send_with_token
@@ -588,7 +598,7 @@ async def test_no_consecutive_repeat_same_channel(monkeypatch):
             embeds=None,
             attachments=None,
         )
-        assert ok is True
+        assert ok == SEND_OK
 
     # No two consecutive sends into the same channel used the same token.
     assert all(used[i] != used[i + 1] for i in range(len(used) - 1))
@@ -618,7 +628,7 @@ async def test_send_returns_false_without_tokens():
         embeds=None,
         attachments=None,
     )
-    assert ok is False
+    assert ok == SEND_NO_TOKENS
 
 
 class _JsonResp:
@@ -935,3 +945,133 @@ class TestCreateTextThread:
             thread_name="t",
         )
         assert new_id is None
+
+
+async def _instant_sleep(*a, **k):
+    """No-op replacement for asyncio.sleep so retry/backoff tests don't wait."""
+    return None
+
+
+class _ScriptedSession:
+    """Yields a scripted sequence of responses; ``("raise", exc)`` raises."""
+
+    def __init__(self, script):
+        self._script = list(script)
+        self.calls = 0
+
+    def post(self, url, json=None, data=None, headers=None, timeout=None):
+        self.calls += 1
+        item = self._script.pop(0) if self._script else ("resp", 200, {})
+        if item[0] == "raise":
+            raise item[1]
+        return _JsonResp(item[1], item[2])
+
+
+class TestSendStatusTaxonomy:
+    """A single-account send reports *why* it couldn't deliver so the sticky
+    loop can tell a dead account from a transient blip from a rate limit."""
+
+    @pytest.mark.asyncio
+    async def test_401_is_dead(self):
+        s = _make_sender()
+        s._session_provider = lambda: _ScriptedSession([("resp", 401, {})])
+        # Revoked/invalid token → dead → caller benches it.
+        assert await s._send_with_token("t", 1, "hi", []) == SEND_DEAD
+
+    @pytest.mark.asyncio
+    async def test_403_is_undeliverable(self):
+        s = _make_sender()
+        s._session_provider = lambda: _ScriptedSession(
+            [("resp", 403, {"message": "Missing Access"})]
+        )
+        # Can't post here, but the token itself isn't dead → try another account.
+        assert await s._send_with_token("t", 1, "hi", []) == SEND_UNDELIVERABLE
+
+    @pytest.mark.asyncio
+    async def test_429_then_success_retries_and_parks_account(self, monkeypatch):
+        import asyncio
+
+        monkeypatch.setattr(asyncio, "sleep", _instant_sleep)
+        session = _ScriptedSession(
+            [("resp", 429, {"retry_after": 5}), ("resp", 200, {})]
+        )
+        s = _make_sender()
+        s._session_provider = lambda: session
+        # A 429 sleeps its retry_after then retries the SAME account (no swap).
+        assert await s._send_with_token("t", 1, "hi", []) == SEND_OK
+        assert session.calls == 2
+        # The account was parked so its other queued messages wait too.
+        assert "t" in s._token_cooldown
+
+    @pytest.mark.asyncio
+    async def test_persistent_429_is_rate_limited_not_webhooked(self, monkeypatch):
+        import asyncio
+
+        monkeypatch.setattr(asyncio, "sleep", _instant_sleep)
+        session = _ScriptedSession([("resp", 429, {"retry_after": 0.001})] * 20)
+        s = _make_sender()
+        s._session_provider = lambda: session
+        # Still limited after the retries → a distinct status the caller must NOT
+        # webhook (it's not the token's fault).
+        assert await s._send_with_token("t", 1, "hi", []) == SEND_RATE_LIMITED
+
+    @pytest.mark.asyncio
+    async def test_network_error_is_retried_then_transient(self, monkeypatch):
+        import asyncio
+
+        monkeypatch.setattr(asyncio, "sleep", _instant_sleep)
+        session = _ScriptedSession(
+            [("raise", aiohttp.ClientError("boom"))] * 20
+        )
+        s = _make_sender()
+        s._session_provider = lambda: session
+        # Network errors are retried (never webhooked); after the cap → transient.
+        assert await s._send_with_token("t", 1, "hi", []) == SEND_TRANSIENT
+        assert session.calls > 1
+
+    @pytest.mark.asyncio
+    async def test_cooldown_blocks_until_elapsed(self):
+        import time as _t
+
+        s = _make_sender()
+        # A parked account makes the next message wait out the cooldown.
+        s._token_cooldown["t"] = _t.monotonic() + 0.05
+        t0 = _t.monotonic()
+        await s._await_cooldown("t")
+        assert _t.monotonic() - t0 >= 0.04
+
+    @pytest.mark.asyncio
+    async def test_same_account_requests_serialize(self):
+        import asyncio as _a
+
+        # Regression: one account's messages never overlap — a rate limit on one
+        # holds the others back instead of firing them all at once.
+        active = {"n": 0, "max": 0}
+
+        class _Resp:
+            status = 200
+
+            async def __aenter__(self):
+                active["n"] += 1
+                active["max"] = max(active["max"], active["n"])
+                await _a.sleep(0.02)
+                return self
+
+            async def __aexit__(self, *a):
+                active["n"] -= 1
+                return False
+
+            async def json(self):
+                return {}
+
+        class _Session:
+            def post(self, *a, **k):
+                return _Resp()
+
+        s = _make_sender()
+        s._session_provider = lambda: _Session()
+        await _a.gather(
+            s._send_with_token("t", 1, "hi", []),
+            s._send_with_token("t", 1, "hi", []),
+        )
+        assert active["max"] == 1

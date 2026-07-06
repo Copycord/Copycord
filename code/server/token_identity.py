@@ -45,21 +45,36 @@ class TokenIdentityManager:
         # One lock per mapping so concurrent authors don't race token selection
         # or clobber each other's nickname edits.
         self._locks: dict[str, asyncio.Lock] = {}
-        # Tokens that failed to deliver this run, per mapping. Excluded from
-        # selection so an author swaps off a bad token (and no one else is
-        # assigned it). In-memory only — cleared on restart, where every token
-        # is retried fresh.
-        self._bad_tokens: dict[str, set[str]] = {}
+        # Tokens Discord confirmed dead (revoked → HTTP 401) this session. They
+        # are never handed to an identity again until the process restarts or the
+        # user removes them in the UI. ONLY a genuine 401 lands a token here — a
+        # rate-limit or transient error must never bench a good account.
+        self._bad_tokens: set[str] = set()
 
-    def mark_token_bad(self, mapping_id, token_id) -> None:
-        """Record that a token failed to send so selection swaps away from it.
+    # ── bad-token bench (session-scoped) ─────────────────────────────────────
 
-        Applies for the rest of this process run; a restart clears it and the
-        token is tried again.
+    def mark_token_bad(self, token_id) -> None:
+        """Bench a token for the rest of this session — Discord revoked it.
+
+        Called only when a send returns a 401 for the forced account, so the
+        next assignment skips it instead of re-trying a token that can't work.
         """
-        if not mapping_id or not token_id:
+        if token_id is None:
             return
-        self._bad_tokens.setdefault(str(mapping_id), set()).add(str(token_id))
+        tid = str(token_id)
+        if tid not in self._bad_tokens:
+            self._bad_tokens.add(tid)
+            self._log.info(
+                "[identity] token %s benched for this session (Discord revoked it)",
+                tid,
+            )
+
+    def is_token_bad(self, token_id) -> bool:
+        return str(token_id) in self._bad_tokens
+
+    def clear_bad_tokens(self) -> None:
+        """Forget all benched tokens (e.g. after the user re-verifies them)."""
+        self._bad_tokens.clear()
 
     # ── selection (pure, unit-testable) ──────────────────────────────────────
 
@@ -126,6 +141,7 @@ class TokenIdentityManager:
         author_role_ids,
         settings: dict,
         tokens: list[dict],
+        exclude: set | None = None,
     ) -> tuple[str | None, str | None]:
         """Assign (or keep) this author's token and apply its identity.
 
@@ -134,9 +150,15 @@ class TokenIdentityManager:
           - ``(token_id, None)`` → post from this token (identity applied).
           - ``(None, "webhook")`` / ``(None, "skip")`` → no token could be
             assigned (every enabled token is taken by another identity, or all
-            are bad); the caller sends via webhook or drops the message per the
-            ``USER_TOKEN_FALLBACK_WEBHOOK`` toggle.
-        Never raises — identity failures are logged and a token is still chosen.
+            were excluded); the caller sends via webhook or drops the message per
+            the ``USER_TOKEN_FALLBACK_WEBHOOK`` toggle.
+
+        ``exclude`` is the set of token ids the caller has already tried and
+        failed *for this message*, so a re-prepare swaps to a different account.
+        It is per-message only — a token that fails once is NOT benched for
+        future messages (a transient failure shouldn't take an account out of
+        rotation); the DB assignment moves on a real swap, so a genuinely dead
+        token is only tried once per author. Never raises.
         """
         exhausted = (
             "webhook" if settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True) else "skip"
@@ -149,13 +171,15 @@ class TokenIdentityManager:
         do_nick = bool(settings.get("USER_TOKEN_STICKY_NICKNAME"))
         do_roles = bool(settings.get("USER_TOKEN_STICKY_ROLES"))
 
-        # Enabled tokens minus any we've seen fail this run, so a bad token is
-        # swapped away from and never reassigned.
-        bad = self._bad_tokens.get(mapping_id) or set()
+        # Enabled tokens minus the ones already tried for THIS message and the
+        # ones benched for the whole session (Discord revoked them). ``exclude``
+        # is per-message and cycles a swap; ``_bad_tokens`` is permanent for the
+        # session so a revoked account is never reassigned to a new identity.
+        skip = {str(t) for t in (exclude or ())} | self._bad_tokens
         token_by_id = {
             str(t.get("token_id")): t
             for t in tokens
-            if t.get("token_id") and str(t.get("token_id")) not in bad
+            if t.get("token_id") and str(t.get("token_id")) not in skip
         }
         enabled_token_ids = list(token_by_id.keys())
         if not enabled_token_ids:

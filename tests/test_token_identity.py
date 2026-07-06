@@ -334,7 +334,7 @@ class TestPrepareSwapAndExhaust:
         assert action == "skip"
 
     @pytest.mark.asyncio
-    async def test_mark_token_bad_swaps_and_resets_previous(self):
+    async def test_failed_token_excluded_swaps_and_resets_previous(self):
         m_a = _Member(500)
         m_b = _Member(600)
         db = _DB()
@@ -351,11 +351,106 @@ class TestPrepareSwapAndExhaust:
         assert await mgr.prepare(**kw) == ("a", None)
         assert m_a.nick == "Alice"
 
-        # Token "a" goes bad → next send swaps to "b" and clears "a".
-        mgr.mark_token_bad("m", "a")
+        # "a" failed to send this message → exclude it → swap to "b", clear "a".
+        assert await mgr.prepare(**kw, exclude={"a"}) == ("b", None)
+        assert m_b.nick == "Alice"
+        assert m_a.nick is None
+
+    @pytest.mark.asyncio
+    async def test_failure_does_not_bench_token_for_future_messages(self):
+        # Regression: a token that fails once (excluded for one message) must
+        # still be available for the next message — no persistent benching.
+        m_a = _Member(500)
+        db = _DB()
+        db.token_users = {"a": "500"}
+        guild = _Guild(2, {500: m_a}, {})
+        mgr = TokenIdentityManager(bot=_Bot(guild), db=db, logger=_silent())
+        tokens = [{"token_id": "a", "user_id": "500"}]
+
+        # This message excludes "a" (it just failed) and there's no other token
+        # → exhausted → webhook.
+        assert await mgr.prepare(**self._kw(tokens), exclude={"a"}) == (None, "webhook")
+
+        # Next message (no exclusion) can still use "a".
+        assert await mgr.prepare(**self._kw(tokens)) == ("a", None)
+
+
+class TestBadTokens:
+    """A token confirmed dead (Discord revoked it → 401) is benched for the rest
+    of the session and never handed to an identity again."""
+
+    def _kw(self, tokens, author="777", fallback_webhook=True):
+        return dict(
+            mapping_id="m", cloned_guild_id=2, author_id=author,
+            author_display_name="Alice", author_role_ids=[],
+            settings={
+                "USER_TOKEN_STRATEGY": "sticky_author",
+                "USER_TOKEN_STICKY_NICKNAME": True,
+                "USER_TOKEN_FALLBACK_WEBHOOK": fallback_webhook,
+            },
+            tokens=tokens,
+        )
+
+    @pytest.mark.asyncio
+    async def test_benched_token_is_not_assigned_to_new_author(self):
+        db = _DB()
+        db.token_users = {"a": "500", "b": "600"}
+        guild = _Guild(2, {500: _Member(500), 600: _Member(600)}, {})
+        mgr = TokenIdentityManager(bot=_Bot(guild), db=db, logger=_silent())
+        mgr.mark_token_bad("a")
+
+        tokens = [
+            {"token_id": "a", "user_id": "500"},
+            {"token_id": "b", "user_id": "600"},
+        ]
+        token_id, _ = await mgr.prepare(**self._kw(tokens))
+        # "a" is benched → the new identity lands on "b".
+        assert token_id == "b"
+
+    @pytest.mark.asyncio
+    async def test_benching_current_token_swaps_and_resets_it(self):
+        m_a = _Member(500)
+        m_b = _Member(600)
+        db = _DB()
+        db.token_users = {"a": "500", "b": "600"}
+        guild = _Guild(2, {500: m_a, 600: m_b}, {})
+        mgr = TokenIdentityManager(bot=_Bot(guild), db=db, logger=_silent())
+        tokens = [
+            {"token_id": "a", "user_id": "500"},
+            {"token_id": "b", "user_id": "600"},
+        ]
+        kw = self._kw(tokens)
+
+        # Assigned "a" first.
+        assert await mgr.prepare(**kw) == ("a", None)
+        assert m_a.nick == "Alice"
+
+        # Discord revoked "a" mid-session → bench it → next message swaps to "b"
+        # and clears "a" (its nickname is reset).
+        mgr.mark_token_bad("a")
         assert await mgr.prepare(**kw) == ("b", None)
         assert m_b.nick == "Alice"
         assert m_a.nick is None
+
+    @pytest.mark.asyncio
+    async def test_all_tokens_benched_exhausts_to_webhook(self):
+        db = _DB()
+        db.token_users = {"a": "500"}
+        guild = _Guild(2, {500: _Member(500)}, {})
+        mgr = TokenIdentityManager(bot=_Bot(guild), db=db, logger=_silent())
+        mgr.mark_token_bad("a")
+        # The only token is dead → no free token to switch to → webhook.
+        assert await mgr.prepare(**self._kw([{"token_id": "a", "user_id": "500"}])) == (
+            None,
+            "webhook",
+        )
+
+    def test_clear_bad_tokens_reenables(self):
+        mgr = TokenIdentityManager(bot=None, db=_DB(), logger=_silent())
+        mgr.mark_token_bad("a")
+        assert mgr.is_token_bad("a")
+        mgr.clear_bad_tokens()
+        assert not mgr.is_token_bad("a")
 
 
 class TestResetIdentity:

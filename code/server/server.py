@@ -42,7 +42,14 @@ from common.common_helpers import resolve_mapping_settings
 from common.websockets import WebsocketManager, AdminBus
 from common.db import DBManager
 from server.rate_limiter import RateLimitManager, ActionType
-from server.token_sender import UserTokenSender
+from server.token_sender import (
+    UserTokenSender,
+    SEND_OK,
+    SEND_DEAD,
+    SEND_UNDELIVERABLE,
+    SEND_RATE_LIMITED,
+    SEND_TRANSIENT,
+)
 from server.token_identity import TokenIdentityManager
 from server.emojis import EmojiManager
 from server.stickers import StickerManager
@@ -7367,7 +7374,7 @@ class ServerReceiver:
         )
 
     async def _prepare_token_identity(
-        self, *, mapping_id, cloned_guild_id, settings: dict, msg: dict
+        self, *, mapping_id, cloned_guild_id, settings: dict, msg: dict, exclude=None
     ) -> tuple[str | None, str | None]:
         """Run sticky-author identity prep. Returns ``(forced_token_id, action)``.
 
@@ -7377,7 +7384,10 @@ class ServerReceiver:
           ``USER_TOKEN_FALLBACK_WEBHOOK``.
         - ``(None, None)`` → identity mirroring off; caller uses the normal
           strategy ordering.
-        Never raises — the message must still send.
+
+        ``exclude`` is the set of token ids already tried and failed for THIS
+        message, so a re-prepare swaps to a different account. Never raises — the
+        message must still send.
         """
         if not self._identity_active(settings):
             # Feature was turned off — reset any leftover nicknames/roles once.
@@ -7407,6 +7417,7 @@ class ServerReceiver:
                 author_role_ids=msg.get("author_role_ids") or [],
                 settings=settings,
                 tokens=tokens,
+                exclude=exclude,
             )
         except Exception:
             logger.debug(
@@ -7414,6 +7425,73 @@ class ServerReceiver:
                 exc_info=True,
             )
             return None, None
+
+    def _disposition_for(self, status: str, settings: dict) -> str:
+        """Map a raw ``SEND_*`` status to a disposition for the non-identity
+        (round-robin) path: ``"ok"``, ``"drop"`` (rate-limited/transient — never
+        webhook), or webhook/skip when no token could deliver."""
+        if status == SEND_OK:
+            return "ok"
+        if status in (SEND_RATE_LIMITED, SEND_TRANSIENT):
+            return "drop"
+        return self._identity_exhausted_action(settings)
+
+    async def _run_sticky_identity(
+        self, *, mapping_id, cloned_guild_id, settings: dict, msg: dict, attempt
+    ) -> str:
+        """Drive the sticky-identity swap loop for one message.
+
+        ``attempt(token_id)`` forces that account (sticky-exclusive) and returns
+        a ``SEND_*`` status. The author swaps to another account when the current
+        one is dead (Discord revoked it → bench it) or can't post here, retrying
+        until one delivers or there is no free token to switch to. A rate-limit
+        or transient error is NOT the account's fault, so it never swaps or
+        webhooks — the sender already slept/retried and we drop the message.
+
+        Returns a disposition: ``"ok"``, ``"webhook"``, ``"skip"``, or ``"drop"``.
+        The only path to ``"webhook"`` is having no free token left to try.
+        """
+        try:
+            n_tokens = len(self.db.get_enabled_mapping_tokens(str(mapping_id)) or [])
+        except Exception:
+            n_tokens = 1
+
+        tried: set[str] = set()
+        for _ in range(max(1, n_tokens) + 1):
+            token_id, action = await self._prepare_token_identity(
+                mapping_id=mapping_id,
+                cloned_guild_id=cloned_guild_id,
+                settings=settings,
+                msg=msg,
+                exclude=tried,
+            )
+            if not token_id:
+                # No free token to switch to → the one case we webhook (or skip).
+                return action or self._identity_exhausted_action(settings)
+
+            status = await attempt(token_id)
+            if status == SEND_OK:
+                return "ok"
+            if status == SEND_DEAD:
+                # Discord revoked this token → bench it for the session, swap.
+                self.token_identity.mark_token_bad(token_id)
+                tried.add(str(token_id))
+                continue
+            if status == SEND_UNDELIVERABLE:
+                # This account can't post here (perms / not in guild / channel
+                # gone) but isn't dead → try another account, don't bench it.
+                tried.add(str(token_id))
+                continue
+            if status in (SEND_RATE_LIMITED, SEND_TRANSIENT):
+                # Not the token's fault (the sender already slept/retried). Hold
+                # the message — don't swap the identity away, don't webhook.
+                return "drop"
+            # Nothing a user account can carry (SEND_UNSUPPORTED) or no usable
+            # token at all → let the webhook try instead of dropping it.
+            return self._identity_exhausted_action(settings)
+
+        # Ran out of swap attempts without delivering → treat as no free token.
+        return self._identity_exhausted_action(settings)
 
     async def _try_user_token_send(
         self,
@@ -7470,7 +7548,7 @@ class ServerReceiver:
 
         identity_active = self._identity_active(settings)
 
-        async def _do_send(forced, exclusive) -> bool:
+        async def _do_send(forced, exclusive) -> str:
             try:
                 return await self.user_token_sender.send(
                     mapping_id=mapping_id,
@@ -7491,41 +7569,27 @@ class ServerReceiver:
                 logger.exception(
                     "[user-send] send failed for channel %s", target_channel_id
                 )
-                return False
-
-        delivered = False
+                return SEND_TRANSIENT
 
         if identity_active:
-            # The identity manager owns token choice. If the assigned account
-            # fails to deliver, mark that token bad and let the next prepare()
-            # swap this author to a free token; repeat until a send succeeds or
-            # the mapping runs out of tokens.
-            try:
-                n_tokens = len(
-                    self.db.get_enabled_mapping_tokens(str(mapping_id)) or []
-                )
-            except Exception:
-                n_tokens = 1
-            for _ in range(max(1, n_tokens) + 1):
-                token_id, _action = await self._prepare_token_identity(
-                    mapping_id=mapping_id,
-                    cloned_guild_id=cloned_guild_id,
-                    settings=settings,
-                    msg=msg,
-                )
-                if not token_id:
-                    break
-                delivered = await _do_send(token_id, True)
-                if delivered:
-                    break
-                # This account couldn't deliver → drop it and swap next pass.
-                self.token_identity.mark_token_bad(mapping_id, token_id)
+            # The identity manager owns token choice: swap the author to another
+            # account only when the current one is dead or can't post here; a
+            # rate-limit/transient error holds the message instead of webhooking.
+            disp = await self._run_sticky_identity(
+                mapping_id=mapping_id,
+                cloned_guild_id=cloned_guild_id,
+                settings=settings,
+                msg=msg,
+                attempt=lambda tid: _do_send(tid, True),
+            )
         else:
             # Round-robin / non-identity: reset any leftover sticky identity once
             # (in case the feature was just disabled), then a single send with
             # the sender's own cross-token fallback.
             await self._cleanup_token_identity(mapping_id)
-            delivered = await _do_send(None, False)
+            disp = self._disposition_for(await _do_send(None, False), settings)
+
+        delivered = disp == "ok"
 
         mark_bf = (
             is_backfill
@@ -7566,21 +7630,26 @@ class ServerReceiver:
                 )
             return True
 
-        # Not delivered — a token couldn't carry it (every token failed, or an
-        # identity had no free token). Fall back to the webhook or drop it, per
-        # the shared USER_TOKEN_FALLBACK_WEBHOOK toggle.
-        skip = not settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True)
-
-        if not skip:
+        # Not delivered. The disposition decides what happens next:
+        #   "webhook" → no token could deliver → fall back to the webhook.
+        #   "skip"    → same, but webhook fallback is off → drop it.
+        #   "drop"    → rate-limited/transient → hold the message, never webhook.
+        if disp == "webhook":
             return False  # fall back to the webhook
 
-        # Drop the message. During backfill still advance the checkpoint so
-        # progress does not stall or re-deliver on resume.
+        # Dropped here. During backfill still advance the checkpoint so progress
+        # does not stall or re-deliver on resume.
         if mark_bf:
             _note_backfill()
 
         if not quiet:
-            if identity_active:
+            if disp == "drop":
+                logger.info(
+                    "[user-send] Could not deliver to clone ch=%s from %s (rate limited / network); dropping",
+                    target_channel_id,
+                    msg.get("author"),
+                )
+            elif identity_active:
                 logger.info(
                     "[user-send] No free token for this identity and 'skip' is set; dropping message from %s (clone ch=%s)",
                     msg.get("author"),
@@ -7841,40 +7910,46 @@ class ServerReceiver:
         if not mapping_id:
             return False
 
-        forced_token_id, action = await self._prepare_token_identity(
-            mapping_id=mapping_id,
-            cloned_guild_id=clone_gid,
-            settings=settings,
-            msg=msg,
-        )
         identity_active = self._identity_active(settings)
 
-        # Sticky identity active but no free token → webhook or skip per setting.
-        if identity_active and not forced_token_id:
-            return (action or "webhook") == "skip"
+        async def _sticker_send(forced, exclusive) -> str:
+            try:
+                return await self.user_token_sender.send(
+                    mapping_id=mapping_id,
+                    target_channel_id=target_channel_id,
+                    content=(msg.get("content") or "").strip() or None,
+                    sticker_ids=sticker_ids,
+                    author_id=msg.get("author_id"),
+                    strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
+                    typing=bool(settings.get("USER_TOKEN_TYPING", False)),
+                    min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
+                    max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
+                    links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
+                    forced_token_id=forced,
+                    sticky_exclusive=exclusive,
+                )
+            except Exception:
+                logger.exception(
+                    "[user-send] sticker send failed for channel %s",
+                    target_channel_id,
+                )
+                return SEND_TRANSIENT
 
-        try:
-            delivered = await self.user_token_sender.send(
+        if identity_active:
+            # Same swap-until-one-works loop as a normal message send: swap on a
+            # dead/undeliverable account, hold on rate-limit/transient.
+            disp = await self._run_sticky_identity(
                 mapping_id=mapping_id,
-                target_channel_id=target_channel_id,
-                content=(msg.get("content") or "").strip() or None,
-                sticker_ids=sticker_ids,
-                author_id=msg.get("author_id"),
-                strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
-                typing=bool(settings.get("USER_TOKEN_TYPING", False)),
-                min_delay=float(settings.get("USER_TOKEN_MIN_DELAY", 0) or 0),
-                max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
-                links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
-                forced_token_id=forced_token_id,
-                sticky_exclusive=identity_active,
+                cloned_guild_id=clone_gid,
+                settings=settings,
+                msg=msg,
+                attempt=lambda tid: _sticker_send(tid, True),
             )
-        except Exception:
-            logger.exception(
-                "[user-send] sticker send failed for channel %s", target_channel_id
-            )
-            delivered = False
+        else:
+            await self._cleanup_token_identity(mapping_id)
+            disp = self._disposition_for(await _sticker_send(None, False), settings)
 
-        if delivered:
+        if disp == "ok":
             logger.info(
                 "[💬] Forwarded (user token, sticker) to clone ch=%s from %s",
                 target_channel_id,
@@ -7882,20 +7957,14 @@ class ServerReceiver:
             )
             return True
 
-        # For a sticky identity, drop the failed account so the author swaps on
-        # the next message, and honour the exhausted setting for this one.
-        if identity_active:
-            if forced_token_id:
-                self.token_identity.mark_token_bad(mapping_id, forced_token_id)
-            return self._identity_exhausted_action(settings) == "skip"
-
-        if settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True):
+        # No token could deliver → webhook; otherwise (skip/drop) drop it here.
+        if disp == "webhook":
             return False
-
         logger.info(
-            "[user-send] All tokens failed for sticker in clone ch=%s and webhook fallback is off; dropping from %s",
+            "[user-send] Could not send the sticker in clone ch=%s from %s (%s); dropping",
             target_channel_id,
             msg.get("author"),
+            "rate limited / network" if disp == "drop" else "webhook fallback off",
         )
         return True
 
