@@ -312,7 +312,33 @@ DEFAULTS: Dict[str, Union[bool, str]] = {
     "LOG_MAX_SIZE_MB": "10",
 }
 
-app = FastAPI(title=APP_TITLE)
+# Startup/shutdown hooks run in registration order via the lifespan handler
+# (FastAPI removed @app.on_event; a custom lifespan ignores on_event handlers,
+# so all hooks must register through these decorators).
+_startup_hooks = []
+_shutdown_hooks = []
+
+
+def _on_startup(fn):
+    _startup_hooks.append(fn)
+    return fn
+
+
+def _on_shutdown(fn):
+    _shutdown_hooks.append(fn)
+    return fn
+
+
+@contextlib.asynccontextmanager
+async def _lifespan(_: FastAPI):
+    for hook in _startup_hooks:
+        await hook()
+    yield
+    for hook in _shutdown_hooks:
+        await hook()
+
+
+app = FastAPI(title=APP_TITLE, lifespan=_lifespan)
 mimetypes.add_type("application/javascript", ".js")
 mimetypes.add_type("text/css", ".css")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
@@ -1858,7 +1884,7 @@ async def stop_all():
     return RedirectResponse("/", status_code=303)
 
 
-@app.on_event("shutdown")
+@_on_shutdown
 async def on_shutdown():
     LOGGER.info("Shutdown initiated")
     shutdown_event.set()
@@ -1945,12 +1971,12 @@ async def logs(which: str, tail: int = 20000):
     return PlainTextResponse("No logs yet.", status_code=404)
 
 
-@app.on_event("startup")
+@_on_startup
 async def _startup_links():
     await startup_links(app, templates_env=templates.env, set_jinja_global=True)
 
 
-@app.on_event("startup")
+@_on_startup
 async def _migrate_legacy_single_mapping():
     """
     Runs once on startup and (if needed) upgrades a legacy single-guild install
@@ -1982,12 +2008,12 @@ async def _migrate_legacy_single_mapping():
         )
 
 
-@app.on_event("shutdown")
+@_on_shutdown
 async def _shutdown():
     await shutdown_links(app)
 
 
-@app.on_event("startup")
+@_on_startup
 async def _apply_db_log_level_and_banner():
     try:
         env = _read_env()
@@ -2004,12 +2030,12 @@ async def _apply_db_log_level_and_banner():
     )
 
 
-@app.on_event("startup")
+@_on_startup
 async def _start_bg_tasks():
     asyncio.create_task(_lock_listener())
 
 
-@app.on_event("startup")
+@_on_startup
 async def _maybe_autostart():
     asyncio.create_task(_autostart_if_ready())
 
@@ -2073,27 +2099,27 @@ async def _autostart_if_ready():
         LOGGER.exception("Auto-start failed")
 
 
-@app.on_event("startup")
+@_on_startup
 async def _start_release_watcher():
     asyncio.create_task(_release_watch_loop())
 
 
-@app.on_event("startup")
+@_on_startup
 async def _start_backup_scheduler():
     backup_scheduler.start()
 
 
-@app.on_event("startup")
+@_on_startup
 async def _start_log_pruner():
     asyncio.create_task(_log_prune_loop())
 
 
-@app.on_event("startup")
+@_on_startup
 async def _start_watchdog():
     hub.start_watchdog()
 
 
-@app.on_event("startup")
+@_on_startup
 async def _suppress_orphaned_dns_errors():
 
     loop = asyncio.get_running_loop()
@@ -2163,7 +2189,7 @@ async def _log_prune_loop():
             LOGGER.debug("Log prune loop error", exc_info=True)
 
 
-@app.on_event("startup")
+@_on_startup
 async def _cleanup_stale_mapping_pairs_on_boot():
     """
     On admin API startup, purge any per-(host, clone) state that no longer
@@ -2195,7 +2221,7 @@ async def _cleanup_stale_mapping_pairs_on_boot():
         LOGGER.exception("Startup cleanup: failed while removing stale mapping state.")
 
 
-@app.on_event("startup")
+@_on_startup
 async def _refresh_discord_build_on_boot():
     """Refresh the shared user-token fingerprint to the current Discord build so
     token *validation* uses the same up-to-date fingerprint as the sender.
@@ -2206,7 +2232,7 @@ async def _refresh_discord_build_on_boot():
         LOGGER.debug("Startup: Discord build refresh failed", exc_info=True)
 
 
-@app.on_event("shutdown")
+@_on_shutdown
 async def _stop_backup_scheduler():
     await backup_scheduler.stop()
 
