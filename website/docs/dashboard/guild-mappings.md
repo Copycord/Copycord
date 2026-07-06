@@ -32,9 +32,9 @@ Each mapping has its own set of [cloning options](/docs/configuration/cloning-op
 - **General** — master cloning toggle, message cloning, webhooks
 - **Channels** — channel deletion, renaming, repositioning, permissions
 - **Messages** — message editing, deletion, resending
-- **Roles** — role cloning, deletion, permissions, icons
+- **Roles** — role cloning, deletion, permissions, icons, color styles
 - **Assets** — emoji, stickers, voice/stage channels
-- **Server Identity** — server icon, banner, splash, description
+- **Server Identity** — server icon, banner, splash, tag, description
 
 ### Message features
 

@@ -537,7 +537,6 @@ class SitemapService:
                     "widget_channel_id": None,
                     "premium_tier": None,
                     "premium_subscription_count": None,
-                    "profile": None,
                     "max_members": None,
                     "max_presences": None,
                     "max_video_channel_users": None,
@@ -759,29 +758,6 @@ class SitemapService:
                 exc_info=True,
             )
 
-        # Guild profile (server tag + badge). No library support; raw GET.
-        # None means "unknown" (endpoint failed) — the server only acts on a dict.
-        guild_profile: Optional[Dict[str, object]] = None
-        try:
-            from discord.http import Route
-
-            pdata = await guild._state.http.request(
-                Route("GET", "/guilds/{guild_id}/profile", guild_id=guild.id)
-            )
-            if isinstance(pdata, dict):
-                guild_profile = {
-                    "tag": pdata.get("tag") or None,
-                    "badge": pdata.get("badge"),
-                    "badge_color_primary": pdata.get("badge_color_primary"),
-                    "badge_color_secondary": pdata.get("badge_color_secondary"),
-                }
-        except Exception:
-            self.logger.debug(
-                "[sitemap] Could not fetch guild profile for %s",
-                guild.id,
-                exc_info=True,
-            )
-
         sitemap: Dict = {
             "guild": {
                 "id": guild.id,
@@ -816,7 +792,6 @@ class SitemapService:
                 "premium_subscription_count": getattr(
                     guild, "premium_subscription_count", None
                 ),
-                "profile": guild_profile,
                 "max_members": getattr(guild, "max_members", None),
                 "max_presences": getattr(guild, "max_presences", None),
                 "max_video_channel_users": getattr(
@@ -1138,7 +1113,6 @@ class SitemapService:
                     "widget_channel_id": None,
                     "premium_tier": None,
                     "premium_subscription_count": None,
-                    "profile": None,
                     "max_members": None,
                     "max_presences": None,
                     "max_video_channel_users": None,

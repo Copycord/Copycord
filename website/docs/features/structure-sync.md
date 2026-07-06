@@ -43,6 +43,7 @@ Copycord continuously watches source servers for structural changes and mirrors 
 | Hoist toggled | Clone hoist updated | Update Role Properties |
 | Position changed | Clone position updated | Rearrange Roles |
 | Icon changed | Clone icon updated | Clone Role Icons |
+| Style changed | Clone role color style updated (solid, gradient, holographic) | Clone Role Styles |
 
 ### Emojis and Stickers
 
