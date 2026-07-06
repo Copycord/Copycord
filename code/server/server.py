@@ -2066,26 +2066,34 @@ class ServerReceiver:
                     return None
             return _normalized_hash_from_url(u)
 
-        origin_premium_tier = int(gmeta.get("premium_tier") or 0)
-        clone_premium_tier = int(getattr(guild, "premium_tier", 0) or 0)
+        clone_features = set(getattr(guild, "features", None) or [])
 
-        def _can_clone_premium_asset(kind: str) -> bool:
+        _ASSET_REQUIRED_FEATURE = {
+            "banner": "BANNER",
+            "splash": "INVITE_SPLASH",
+            "discovery_splash": "DISCOVERABLE",
+        }
+
+        def _can_clone_premium_asset(kind: str, *, animated: bool = False) -> bool:
             """
-            Skip banner/splash/discovery_splash if host boost tier > clone boost tier.
-            We still allow clearing if host has None.
+            Skip banner/splash/discovery_splash if the clone guild lacks the
+            Discord feature required to set that asset (e.g. BANNER unlocks at
+            Boost Level 2). We still allow clearing if host has None.
             """
-            if origin_premium_tier > clone_premium_tier:
+            required = (
+                "ANIMATED_BANNER"
+                if (kind == "banner" and animated)
+                else _ASSET_REQUIRED_FEATURE[kind]
+            )
+            if required not in clone_features:
                 logger.info(
-                    "[✨] Skipping %s sync for clone guild %s: host premium_tier=%s > "
-                    "clone premium_tier=%s",
+                    "[✨] Skipping %s sync for clone guild %s: clone is missing the "
+                    "%s feature (boost level too low?)",
                     kind,
                     guild.id,
-                    origin_premium_tier,
-                    clone_premium_tier,
+                    required,
                 )
-                parts.append(
-                    f"Skipped {kind} (host boost tier {origin_premium_tier} > clone tier {clone_premium_tier})"
-                )
+                parts.append(f"Skipped {kind} (clone lacks {required})")
                 return False
             return True
 
@@ -2158,22 +2166,52 @@ class ServerReceiver:
                 )
 
         if cfg_clone_banner:
+            banner_url = gmeta.get("banner") or None
             host_banner = getattr(host_guild, "banner", None) if host_guild else None
             clone_banner = getattr(guild, "banner", None)
-            host_hash = _asset_hash(host_banner)
             clone_hash = _asset_hash(clone_banner)
 
             try:
-                if host_banner is None:
+                if banner_url is None and host_banner is None:
                     if clone_banner is not None:
                         changes["banner"] = None
                         changed_fields.append("banner (cleared)")
                 else:
-                    if not _can_clone_premium_asset("banner"):
+                    host_hash = None
+                    if host_banner is not None:
+                        host_hash = _asset_hash(host_banner)
+                    elif banner_url is not None:
+                        host_hash = _normalized_hash_from_url(banner_url)
+
+                    animated = bool(host_hash and host_hash.startswith("a_"))
+                    if not _can_clone_premium_asset("banner", animated=animated):
+                        pass
+                    elif (
+                        host_hash is not None
+                        and clone_hash is not None
+                        and host_hash == clone_hash
+                    ):
                         pass
                     else:
-                        if host_hash is None or host_hash != clone_hash:
+                        banner_bytes = None
+
+                        if host_banner is not None:
                             banner_bytes = await host_banner.read()
+
+                        if banner_bytes is None and banner_url is not None:
+                            if (
+                                getattr(self, "session", None) is None
+                                or self.session.closed
+                            ):
+                                import aiohttp
+
+                                self.session = aiohttp.ClientSession()
+
+                            async with self.session.get(banner_url) as resp:
+                                resp.raise_for_status()
+                                banner_bytes = await resp.read()
+
+                        if banner_bytes is not None:
                             changes["banner"] = banner_bytes
                             changed_fields.append("banner")
             except Exception as e:
@@ -2182,22 +2220,51 @@ class ServerReceiver:
                 )
 
         if cfg_clone_splash:
+            splash_url = gmeta.get("splash") or None
             host_splash = getattr(host_guild, "splash", None) if host_guild else None
             clone_splash = getattr(guild, "splash", None)
-            host_hash = _asset_hash(host_splash)
             clone_hash = _asset_hash(clone_splash)
 
             try:
-                if host_splash is None:
+                if splash_url is None and host_splash is None:
                     if clone_splash is not None:
                         changes["splash"] = None
                         changed_fields.append("splash (cleared)")
                 else:
+                    host_hash = None
+                    if host_splash is not None:
+                        host_hash = _asset_hash(host_splash)
+                    elif splash_url is not None:
+                        host_hash = _normalized_hash_from_url(splash_url)
+
                     if not _can_clone_premium_asset("splash"):
                         pass
+                    elif (
+                        host_hash is not None
+                        and clone_hash is not None
+                        and host_hash == clone_hash
+                    ):
+                        pass
                     else:
-                        if host_hash is None or host_hash != clone_hash:
+                        splash_bytes = None
+
+                        if host_splash is not None:
                             splash_bytes = await host_splash.read()
+
+                        if splash_bytes is None and splash_url is not None:
+                            if (
+                                getattr(self, "session", None) is None
+                                or self.session.closed
+                            ):
+                                import aiohttp
+
+                                self.session = aiohttp.ClientSession()
+
+                            async with self.session.get(splash_url) as resp:
+                                resp.raise_for_status()
+                                splash_bytes = await resp.read()
+
+                        if splash_bytes is not None:
                             changes["splash"] = splash_bytes
                             changed_fields.append("splash")
             except Exception as e:
@@ -2206,24 +2273,53 @@ class ServerReceiver:
                 )
 
         if cfg_clone_discovery_splash:
+            ds_url = gmeta.get("discovery_splash") or None
             host_ds = (
                 getattr(host_guild, "discovery_splash", None) if host_guild else None
             )
             clone_ds = getattr(guild, "discovery_splash", None)
-            host_hash = _asset_hash(host_ds)
             clone_hash = _asset_hash(clone_ds)
 
             try:
-                if host_ds is None:
+                if ds_url is None and host_ds is None:
                     if clone_ds is not None:
                         changes["discovery_splash"] = None
                         changed_fields.append("discovery_splash (cleared)")
                 else:
+                    host_hash = None
+                    if host_ds is not None:
+                        host_hash = _asset_hash(host_ds)
+                    elif ds_url is not None:
+                        host_hash = _normalized_hash_from_url(ds_url)
+
                     if not _can_clone_premium_asset("discovery_splash"):
                         pass
+                    elif (
+                        host_hash is not None
+                        and clone_hash is not None
+                        and host_hash == clone_hash
+                    ):
+                        pass
                     else:
-                        if host_hash is None or host_hash != clone_hash:
+                        ds_bytes = None
+
+                        if host_ds is not None:
                             ds_bytes = await host_ds.read()
+
+                        if ds_bytes is None and ds_url is not None:
+                            if (
+                                getattr(self, "session", None) is None
+                                or self.session.closed
+                            ):
+                                import aiohttp
+
+                                self.session = aiohttp.ClientSession()
+
+                            async with self.session.get(ds_url) as resp:
+                                resp.raise_for_status()
+                                ds_bytes = await resp.read()
+
+                        if ds_bytes is not None:
                             changes["discovery_splash"] = ds_bytes
                             changed_fields.append("discovery_splash")
             except Exception as e:
