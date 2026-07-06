@@ -7442,14 +7442,16 @@ class ServerReceiver:
         """Drive the sticky-identity swap loop for one message.
 
         ``attempt(token_id)`` forces that account (sticky-exclusive) and returns
-        a ``SEND_*`` status. The author swaps to another account when the current
-        one is dead (Discord revoked it → bench it) or can't post here, retrying
-        until one delivers or there is no free token to switch to. A rate-limit
-        or transient error is NOT the account's fault, so it never swaps or
-        webhooks — the sender already slept/retried and we drop the message.
+        a ``SEND_*`` status. The author swaps to another account ONLY when the
+        current one is dead (Discord revoked it → bench it), retrying until one
+        delivers or there is no free token left. A permission / can't-post-here
+        error (403/404) does NOT swap — another account likely can't post there
+        either and swapping would post as the wrong account — so it webhooks or
+        skips. A rate-limit or transient error is not the account's fault either,
+        so it drops the message (the sender already slept/retried) without a
+        swap or webhook.
 
         Returns a disposition: ``"ok"``, ``"webhook"``, ``"skip"``, or ``"drop"``.
-        The only path to ``"webhook"`` is having no free token left to try.
         """
         try:
             n_tokens = len(self.db.get_enabled_mapping_tokens(str(mapping_id)) or [])
@@ -7478,10 +7480,11 @@ class ServerReceiver:
                 tried.add(str(token_id))
                 continue
             if status == SEND_UNDELIVERABLE:
-                # This account can't post here (perms / not in guild / channel
-                # gone) but isn't dead → try another account, don't bench it.
-                tried.add(str(token_id))
-                continue
+                # The account can't post in this channel (missing perms / not in
+                # guild / channel gone) but the token is fine. Don't swap — a
+                # different account likely can't post here either and would post
+                # as the wrong identity — send via the webhook (or skip).
+                return self._identity_exhausted_action(settings)
             if status in (SEND_RATE_LIMITED, SEND_TRANSIENT):
                 # Not the token's fault (the sender already slept/retried). Hold
                 # the message — don't swap the identity away, don't webhook.
@@ -7651,7 +7654,7 @@ class ServerReceiver:
                 )
             elif identity_active:
                 logger.info(
-                    "[user-send] No free token for this identity and 'skip' is set; dropping message from %s (clone ch=%s)",
+                    "[user-send] No token could deliver this identity's message and 'skip' is set; dropping from %s (clone ch=%s)",
                     msg.get("author"),
                     target_channel_id,
                 )
