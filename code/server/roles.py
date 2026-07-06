@@ -103,6 +103,7 @@ class RoleManager:
         update_roles: bool | None = None,
         rearrange_roles: bool | None = None,
         clone_role_icons: bool | None = None,
+        clone_role_styles: bool | None = None,
     ) -> None:
         clone_gid = int(target_clone_guild_id or self.clone_guild_id)
 
@@ -151,6 +152,9 @@ class RoleManager:
         eff_clone_role_icons = (
             False if clone_role_icons is None else bool(clone_role_icons)
         )
+        eff_clone_role_styles = (
+            False if clone_role_styles is None else bool(clone_role_styles)
+        )
 
         logger.debug(
             "[🧩] Scheduling role sync task host=%s → clone=%s (delete_roles=%s mirror_perms=%s rearrange=%s)",
@@ -172,6 +176,7 @@ class RoleManager:
                 update_roles=eff_update_roles,
                 rearrange_roles=eff_rearrange_roles,
                 clone_role_icons=eff_clone_role_icons,
+                clone_role_styles=eff_clone_role_styles,
             )
         )
 
@@ -190,6 +195,7 @@ class RoleManager:
         update_roles: bool,
         rearrange_roles: bool,
         clone_role_icons: bool = False,
+        clone_role_styles: bool = False,
     ) -> None:
         lock = self._get_lock_for_clone(clone_id)
         async with lock:
@@ -206,6 +212,7 @@ class RoleManager:
                     update_roles=update_roles,
                     rearrange_roles=rearrange_roles,
                     clone_role_icons=clone_role_icons,
+                    clone_role_styles=clone_role_styles,
                 )
 
                 parts = []
@@ -253,6 +260,31 @@ class RoleManager:
                 else:
                     self._tasks.pop(clone_id, None)
 
+    @staticmethod
+    def _build_role_colours(colors: Optional[Dict]) -> Optional[discord.RoleColours]:
+        """
+        Build a py-cord RoleColours from the sitemap's raw colors dict
+        (primary/secondary/tertiary ints). Returns None when unusable.
+        """
+        if not isinstance(colors, dict):
+            return None
+        try:
+            primary = discord.Colour(int(colors.get("primary_color") or 0))
+        except Exception:
+            return None
+
+        def _opt(v):
+            try:
+                return discord.Colour(int(v)) if v is not None else None
+            except Exception:
+                return None
+
+        return discord.RoleColours(
+            primary,
+            _opt(colors.get("secondary_color")),
+            _opt(colors.get("tertiary_color")),
+        )
+
     async def _recreate_missing_role(
         self,
         *,
@@ -272,6 +304,8 @@ class RoleManager:
         clone_role_icons: bool = False,
         icon_url: str | None = None,
         unicode_emoji: str | None = None,
+        clone_role_styles: bool = False,
+        role_colors: Dict | None = None,
     ) -> Tuple[Optional[discord.Role], int, bool, bool]:
         """
         (unchanged logic, still per-clone safe)
@@ -305,6 +339,13 @@ class RoleManager:
                         kwargs["icon"] = icon_bytes
                 elif unicode_emoji:
                     kwargs["unicode_emoji"] = unicode_emoji
+
+            if clone_role_styles:
+                colours_obj = self._build_role_colours(role_colors)
+                if colours_obj is not None:
+                    # py-cord lets colour= override colours=, so pass only one
+                    kwargs.pop("colour", None)
+                    kwargs["colours"] = colours_obj
 
             cloned = await guild.create_role(**kwargs)
             await asyncio.sleep(self._ROLE_OP_DELAY)
@@ -376,6 +417,7 @@ class RoleManager:
         update_roles: bool,
         rearrange_roles: bool,
         clone_role_icons: bool = False,
+        clone_role_styles: bool = False,
     ) -> Tuple[int, int, int]:
         """
         Mirror roles (name/color/hoist/mentionable + permissions if enabled)
@@ -404,6 +446,26 @@ class RoleManager:
             for r in incoming
             if not r.get("managed") and not r.get("everyone")
         }
+
+        styles_supported = "ENHANCED_ROLE_COLORS" in set(
+            getattr(guild, "features", []) or []
+        )
+        if clone_role_styles and not styles_supported:
+            has_styled = any(
+                isinstance(r.get("colors"), dict)
+                and (
+                    r["colors"].get("secondary_color")
+                    or r["colors"].get("tertiary_color")
+                )
+                for r in incoming_filtered.values()
+            )
+            if has_styled:
+                self._log(
+                    "info",
+                    "[🧩] Clone server doesn't support enhanced role colors — "
+                    "gradient/holographic styles will be applied as solid colors. "
+                    "Boost to Level 2+ or set CLONE_ROLE_STYLES to false.",
+                )
 
         clone_by_id = {r.id: r for r in guild.roles}
         blocked = {int(x) for x in self.db.get_blocked_role_ids(clone_id)}
@@ -545,6 +607,7 @@ class RoleManager:
             want_mention = bool(info.get("mentionable", False))
             want_icon_url = info.get("icon_url")
             want_unicode_emoji = info.get("unicode_emoji")
+            want_colors = info.get("colors") if clone_role_styles else None
 
             if mapping and not cloned_role:
                 cloned_role, add, can_create, create_suppressed_logged = (
@@ -565,6 +628,8 @@ class RoleManager:
                         clone_role_icons=clone_role_icons,
                         icon_url=want_icon_url,
                         unicode_emoji=want_unicode_emoji,
+                        clone_role_styles=clone_role_styles,
+                        role_colors=want_colors,
                     )
                 )
                 created += add
@@ -599,6 +664,13 @@ class RoleManager:
                                 kwargs["icon"] = icon_bytes
                         elif want_unicode_emoji:
                             kwargs["unicode_emoji"] = want_unicode_emoji
+
+                    if clone_role_styles:
+                        colours_obj = self._build_role_colours(want_colors)
+                        if colours_obj is not None:
+                            # py-cord lets colour= override colours=, so pass only one
+                            kwargs.pop("colour", None)
+                            kwargs["colours"] = colours_obj
 
                     new_role = await guild.create_role(**kwargs)
                     await asyncio.sleep(self._ROLE_OP_DELAY)
@@ -716,6 +788,32 @@ class RoleManager:
                 if old_color != new_color:
                     changes.append(f"color: #{old_color:06X} -> #{new_color:06X}")
 
+                # Gradient/holographic styles: only diff secondary/tertiary when
+                # the clone supports them — Discord strips them otherwise and a
+                # comparison would re-trigger an edit on every sync.
+                if (
+                    clone_role_styles
+                    and styles_supported
+                    and isinstance(want_colors, dict)
+                ):
+                    cur_cols = getattr(cloned_role, "colours", None)
+                    cur_s = getattr(getattr(cur_cols, "secondary", None), "value", None)
+                    cur_t = getattr(getattr(cur_cols, "tertiary", None), "value", None)
+
+                    def _opt_int(v):
+                        try:
+                            return int(v) if v is not None else None
+                        except Exception:
+                            return None
+
+                    want_s = _opt_int(want_colors.get("secondary_color"))
+                    want_t = _opt_int(want_colors.get("tertiary_color"))
+                    if (cur_s, cur_t) != (want_s, want_t):
+                        changes.append(
+                            f"style: secondary {cur_s} -> {want_s}, "
+                            f"tertiary {cur_t} -> {want_t}"
+                        )
+
                 if cloned_role.hoist != want_hoist:
                     changes.append(f"hoist: {cloned_role.hoist} -> {want_hoist}")
 
@@ -765,6 +863,13 @@ class RoleManager:
                             elif not want_icon_url and not want_unicode_emoji:
                                 kwargs["icon"] = None
                                 kwargs["unicode_emoji"] = None
+
+                        if clone_role_styles:
+                            colours_obj = self._build_role_colours(want_colors)
+                            if colours_obj is not None:
+                                # py-cord lets colour= override colours=, so pass only one
+                                kwargs.pop("colour", None)
+                                kwargs["colours"] = colours_obj
 
                         await cloned_role.edit(**kwargs)
                         await asyncio.sleep(self._ROLE_OP_DELAY)

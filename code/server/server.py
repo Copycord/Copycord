@@ -1896,6 +1896,7 @@ class ServerReceiver:
                             update_roles=settings.get("UPDATE_ROLES", True),
                             rearrange_roles=settings.get("REARRANGE_ROLES", False),
                             clone_role_icons=settings.get("CLONE_ROLE_ICONS", False),
+                            clone_role_styles=settings.get("CLONE_ROLE_STYLES", False),
                         )
                         if roles_handle:
                             bg_tasks.append(roles_handle)

@@ -11054,6 +11054,15 @@ body.page-forwarding .fwd-no-match-sub {
   flex-shrink: 0;
   margin: 0;
 }
+.mapping-toggle-row.is-disabled .mapping-toggle-switch {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.mapping-toggle-disabled-note {
+  color: var(--warn, #e0a44b) !important;
+  opacity: 0.9 !important;
+  font-style: italic;
+}
 .mapping-settings-section {
   padding-bottom: 6px;
 }

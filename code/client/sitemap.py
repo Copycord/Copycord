@@ -738,6 +738,26 @@ class SitemapService:
         except Exception:
             widget_channel_id = None
 
+        # The installed discord.py-self doesn't parse the newer role "colors"
+        # object (gradient/holographic styles), so pull the raw role payloads.
+        raw_role_colors: Dict[int, Dict[str, object]] = {}
+        try:
+            raw_roles = await guild._state.http.get_roles(guild.id)
+            for rr in raw_roles or []:
+                cols = rr.get("colors")
+                if isinstance(cols, dict):
+                    raw_role_colors[int(rr["id"])] = {
+                        "primary_color": cols.get("primary_color"),
+                        "secondary_color": cols.get("secondary_color"),
+                        "tertiary_color": cols.get("tertiary_color"),
+                    }
+        except Exception:
+            self.logger.debug(
+                "[sitemap] Could not fetch raw role colors for guild %s",
+                guild.id,
+                exc_info=True,
+            )
+
         sitemap: Dict = {
             "guild": {
                 "id": guild.id,
@@ -798,6 +818,7 @@ class SitemapService:
                         "color": (
                             r.color.value if hasattr(r.color, "value") else int(r.color)
                         ),
+                        "colors": raw_role_colors.get(r.id),
                         "hoist": r.hoist,
                         "mentionable": r.mentionable,
                         "managed": r.managed,

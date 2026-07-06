@@ -58,6 +58,7 @@ These settings control what Copycord syncs between the source and clone servers.
 | Mirror Role Permissions | Off | Mirror role permissions from source |
 | Rearrange Roles | Off | Sync role ordering/position |
 | Clone Role Icons | Off | Clone role icons (requires Boost Level 2+) |
+| Clone Role Styles | Off | Clone role color styles (solid, gradient, holographic). Gradient/holographic styles require the clone server to have Boost Level 2+; otherwise the solid primary color is applied |
 
 ## Server Identity
 
@@ -67,6 +68,7 @@ These settings control what Copycord syncs between the source and clone servers.
 | Clone Server Banner | Off | Clone the server banner |
 | Clone Invite Splash | Off | Clone the invite splash image |
 | Clone Discovery Splash | Off | Clone the discovery splash image |
+| Clone Server Tag | Off | Clone the server tag and badge. **Disabled** — Discord does not allow bots to set server tags yet; the toggle is inactive until they do |
 | Sync Server Description | Off | Sync the server description |
 
 ## Message Customization
