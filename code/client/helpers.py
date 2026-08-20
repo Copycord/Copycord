@@ -114,14 +114,13 @@ class ClientUiController:
             kind = (ev.get("kind") or ev.get("topic") or "").lower()
             role = (ev.get("role") or ev.get("source") or "").lower()
 
-            self.log.debug("Bus event RX | kind=%r role=%r", kind, role)
-            self.log.debug("Bus event payload = %s", _safe_preview(ev))
-
+            # Nothing is logged before this filter on purpose: every role
+            # publishes a status heartbeat every ~30s, so logging each event
+            # (plus a full payload dump) on arrival buried the handful that
+            # are actual commands. Log only what we're going to act on.
             if kind != "client":
-                self.log.debug("Ignoring non-client event.")
                 return
             if role and role != "ui":
-                self.log.debug("Ignoring client event from non-UI role=%r", role)
                 return
 
             p = ev.get("payload") or ev.get("data") or {}
@@ -129,9 +128,10 @@ class ClientUiController:
             req_id = ev.get("req_id") or self._new_req_id()
 
             self.log.debug(
-                "Client command received | action=%r req_id=%s",
+                "Bus command | action=%r req_id=%s payload=%s",
                 action or "(none)",
                 req_id,
+                _safe_preview(ev),
             )
 
             if not action:

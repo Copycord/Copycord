@@ -6,12 +6,6 @@
 #  version 3.0. A copy of the license is available at:
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
-
-
-"""
-User-token ("self-bot") message sender.
-"""
-
 from __future__ import annotations
 
 import asyncio
@@ -21,8 +15,16 @@ import time
 from typing import Callable, Optional
 
 import aiohttp
+from curl_cffi import CurlMime
+from curl_cffi.requests.exceptions import RequestException as CurlRequestException
 
-from common.selfbot_headers import build_headers, context_properties
+from common.proxy_pool import get_pool as get_proxy_pool
+from common.selfbot_headers import (
+    build_headers,
+    close_tls_session,
+    context_properties,
+    get_tls_session,
+)
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
 
@@ -67,6 +69,17 @@ class UserTokenSender:
         self._pace_locks: dict = {}
         self._token_locks: dict = {}
         self._token_cooldown: dict = {}
+        # Last-activity timestamps backing reap_idle_state() — every dict
+        # above is keyed by token/channel/author and grows for the life of
+        # the process otherwise, which matters at large token counts or
+        # high-churn source servers (many distinct authors).
+        self._token_last_seen: dict = {}
+        self._channel_last_seen: dict = {}
+        self._author_last_seen: dict = {}
+        # Token values Discord answered 401 for. Also disabled in the DB, so
+        # this is mostly a same-tick guard (the DB write can fail, and the
+        # remaining tokens in an in-flight order list are already loaded).
+        self._dead_tokens: set = set()
 
     async def send(
         self,
@@ -85,17 +98,26 @@ class UserTokenSender:
         links_only: bool = False,
         forced_token_id: Optional[str] = None,
         sticky_exclusive: bool = False,
+        use_proxy: bool = False,
+        sent_as: Optional[list] = None,
     ) -> str:
         """
         Attempt to post a message into ``target_channel_id`` (a channel or thread
         id in the clone guild) as one of the mapping's user tokens.
 
+        ``sent_as``: optional list the account label that delivered the
+        message is appended to. An out-param rather than a richer return
+        value because the ``SEND_*`` string is compared directly at every
+        call site; this lets the caller fold "which account sent it" into
+        its own log line instead of us emitting a near-duplicate one here.
         """
         if not mapping_id or not target_channel_id:
             return SEND_NO_TOKENS
 
         try:
-            tokens = self._db.get_enabled_mapping_tokens(str(mapping_id)) or []
+            tokens = self._filter_dead(
+                self._db.get_enabled_mapping_tokens(str(mapping_id)) or []
+            )
         except Exception:
             self._log.exception(
                 "[user-send] Failed to load tokens for mapping %s", mapping_id
@@ -138,7 +160,12 @@ class UserTokenSender:
 
         async def _deliver() -> str:
             await self._pace_channel(
-                chan, min_delay, max_delay, typing=typing, token=type_token
+                chan,
+                min_delay,
+                max_delay,
+                typing=typing,
+                token=type_token,
+                use_proxy=use_proxy,
             )
             last = SEND_NO_TOKENS
             for tok in order:
@@ -152,6 +179,7 @@ class UserTokenSender:
                         text,
                         atts_to_upload,
                         sticker_ids=stkr_ids,
+                        use_proxy=use_proxy,
                     )
                 except Exception:
                     self._log.exception(
@@ -167,12 +195,14 @@ class UserTokenSender:
                             self._db.increment_mapping_token_usage(tid)
                         except Exception:
                             pass
-                    self._log.debug(
-                        "[user-send] Sent message into channel %s as %s",
-                        target_channel_id,
-                        tok.get("username") or tok.get("token_id"),
-                    )
+                    if sent_as is not None:
+                        sent_as.append(tok.get("username") or tok.get("token_id"))
                     return SEND_OK
+                if status == SEND_DEAD:
+                    # Discord revoked it. Bench + disable, or every future
+                    # message pays another lease/session/prime round trip
+                    # just to collect the same 401.
+                    self._mark_token_dead(tok)
                 last = status
 
             self._log.debug(
@@ -206,6 +236,7 @@ class UserTokenSender:
         links_only: bool = False,
         forced_token_id: Optional[str] = None,
         sticky_exclusive: bool = False,
+        use_proxy: bool = False,
     ) -> Optional[int]:
         """
         Create a forum thread whose starter message is authored by one of the
@@ -215,7 +246,9 @@ class UserTokenSender:
             return None
 
         try:
-            tokens = self._db.get_enabled_mapping_tokens(str(mapping_id)) or []
+            tokens = self._filter_dead(
+                self._db.get_enabled_mapping_tokens(str(mapping_id)) or []
+            )
         except Exception:
             self._log.exception(
                 "[user-send] Failed to load tokens for mapping %s", mapping_id
@@ -269,6 +302,7 @@ class UserTokenSender:
                     sticker_ids=stkr_ids,
                     applied_tag_ids=tag_ids,
                     auto_archive_duration=auto_archive_duration,
+                    use_proxy=use_proxy,
                 )
             except Exception:
                 self._log.exception(
@@ -314,6 +348,7 @@ class UserTokenSender:
         max_delay: float = 0.0,
         forced_token_id: Optional[str] = None,
         sticky_exclusive: bool = False,
+        use_proxy: bool = False,
     ) -> Optional[int]:
         """
         Create a text-channel thread as one of the mapping's user tokens.
@@ -322,7 +357,9 @@ class UserTokenSender:
             return None
 
         try:
-            tokens = self._db.get_enabled_mapping_tokens(str(mapping_id)) or []
+            tokens = self._filter_dead(
+                self._db.get_enabled_mapping_tokens(str(mapping_id)) or []
+            )
         except Exception:
             self._log.exception(
                 "[user-send] Failed to load tokens for mapping %s", mapping_id
@@ -362,6 +399,7 @@ class UserTokenSender:
                     thread_name,
                     starter_message_id=starter_message_id,
                     auto_archive_duration=auto_archive_duration,
+                    use_proxy=use_proxy,
                 )
             except Exception:
                 self._log.exception(
@@ -393,6 +431,42 @@ class UserTokenSender:
         )
         return None
 
+    def _filter_dead(self, tokens: list) -> list:
+        """Drop tokens already known revoked this run.
+
+        ``get_enabled_mapping_tokens`` normally excludes them anyway once
+        ``_mark_token_dead`` has flipped ``enabled`` in the DB; this covers
+        the window before that write lands (or if it failed).
+        """
+        if not self._dead_tokens:
+            return tokens
+        return [
+            t
+            for t in tokens
+            if (t.get("token_value") or "").strip() not in self._dead_tokens
+        ]
+
+    def _mark_token_dead(self, tok: dict) -> None:
+        """Bench a 401'd token for this run and disable it in the DB so it
+        stops being loaded at all and shows as disabled in the admin UI."""
+        token_value = (tok.get("token_value") or "").strip()
+        if token_value:
+            self._dead_tokens.add(token_value)
+        token_id = tok.get("token_id")
+        if not token_id:
+            return
+        try:
+            self._db.set_mapping_token_enabled(token_id, False)
+        except Exception:
+            self._log.exception(
+                "[user-send] Failed to disable revoked token %s", token_id
+            )
+            return
+        self._log.warning(
+            "[user-send] Token %s returned 401 (revoked); disabled it",
+            tok.get("username") or token_id,
+        )
+
     def _order_tokens(
         self, tokens: list, chan: int, strategy: str, author_id, mapping_id=None
     ):
@@ -406,6 +480,7 @@ class UserTokenSender:
             ordered = sorted(toks, key=lambda t: str(t.get("token_id")))
             ids = [str(t.get("token_id")) for t in ordered]
             key = (str(mapping_id), str(author_id))
+            self._author_last_seen[key] = time.monotonic()
             assigned = self._sticky_author_token.get(key)
             if assigned not in ids:
                 counts = {tid: 0 for tid in ids}
@@ -418,13 +493,14 @@ class UserTokenSender:
             return ordered[idx:] + ordered[:idx]
 
         ordered = sorted(toks, key=lambda t: str(t.get("token_id")))
+        self._channel_last_seen[chan] = time.monotonic()
         idx = self._rr_index_by_channel.get(chan, 0) % len(ordered)
         self._rr_index_by_channel[chan] = (idx + 1) % len(ordered)
         return ordered[idx:] + ordered[:idx]
 
     def _chan_lock(self, chan: int) -> asyncio.Lock:
-        """Per-channel lock. The caller holds it across the delay AND the send so
-        queued messages take strict turns (type → send → next type → send)."""
+        """Per-channel lock."""
+        self._channel_last_seen[chan] = time.monotonic()
         lock = self._pace_locks.get(chan)
         if lock is None:
             lock = asyncio.Lock()
@@ -435,6 +511,7 @@ class UserTokenSender:
         """Per-account lock held across a request so one account's messages take
         strict turns — a rate-limited account holds back its own queued messages
         instead of firing them all and collecting more 429s."""
+        self._token_last_seen[key] = time.monotonic()
         lock = self._token_locks.get(key)
         if lock is None:
             lock = asyncio.Lock()
@@ -447,111 +524,209 @@ class UserTokenSender:
         if delay > 0:
             await asyncio.sleep(delay)
 
+    async def reap_idle_state(self, idle_ttl: float = 3600) -> dict:
+        """Drop lock/cooldown/rotation bookkeeping for tokens, channels, and
+        sticky-author assignments untouched for ``idle_ttl`` seconds.
+
+        Every dict this class keeps (token locks/cooldowns, per-channel
+        pace locks/round-robin cursors, sticky-author assignments) is keyed
+        by something that grows without bound over the process lifetime —
+        tokens added over time, channels ever paced, or distinct authors
+        ever seen — with nothing to shrink it. That's fine at small scale;
+        at thousands of tokens or a high-churn source server it isn't.
+
+        Nothing is lost permanently: a token/channel/author that becomes
+        active again after being reaped just gets fresh state, identical in
+        effect to its first-ever use (a round-robin cursor resets to 0, a
+        sticky author gets freshly reassigned to the least-used token).
+        Returns a dict of how many entries were reaped per category.
+
+        Safe by construction, not by locking: ``_token_lock``/``_chan_lock``
+        synchronously stamp last-seen to "now" *before* returning the lock
+        object, with no ``await`` in between — so any key genuinely in
+        concurrent use can never show up as stale here. The ``.locked()``
+        checks below are therefore a non-blocking belt-and-suspenders guard,
+        not something this ever needs to wait on; blocking on a held lock
+        (an earlier version of this did) risks stalling the whole periodic
+        sweep on one busy token.
+        """
+        tokens = self._reap_idle_token_state(idle_ttl)
+        channels = self._reap_idle_channel_state(idle_ttl)
+        authors = self._reap_idle_author_state(idle_ttl)
+        if tokens or channels or authors:
+            self._log.debug(
+                "[user-send] Reaped idle bookkeeping: %d token(s), %d channel(s), "
+                "%d author(s)",
+                tokens,
+                channels,
+                authors,
+            )
+        return {"tokens": tokens, "channels": channels, "authors": authors}
+
+    def _reap_idle_token_state(self, idle_ttl: float) -> int:
+        now = time.monotonic()
+        reaped = 0
+        for token in [
+            k for k, t in list(self._token_last_seen.items()) if now - t >= idle_ttl
+        ]:
+            lock = self._token_locks.get(token)
+            if lock is not None and lock.locked():
+                continue
+            self._token_locks.pop(token, None)
+            self._token_cooldown.pop(token, None)
+            self._token_last_seen.pop(token, None)
+            reaped += 1
+        return reaped
+
+    def _reap_idle_channel_state(self, idle_ttl: float) -> int:
+        now = time.monotonic()
+        reaped = 0
+        for chan in [
+            k for k, t in list(self._channel_last_seen.items()) if now - t >= idle_ttl
+        ]:
+            lock = self._pace_locks.get(chan)
+            if lock is not None and lock.locked():
+                continue
+            self._pace_locks.pop(chan, None)
+            self._rr_index_by_channel.pop(chan, None)
+            self._channel_last_seen.pop(chan, None)
+            reaped += 1
+        return reaped
+
+    def _reap_idle_author_state(self, idle_ttl: float) -> int:
+        # No lock objects involved for author assignments (plain dict
+        # entries, read/written without locking already), so no acquire
+        # dance is needed here.
+        now = time.monotonic()
+        stale = [
+            k for k, t in list(self._author_last_seen.items()) if now - t >= idle_ttl
+        ]
+        for key in stale:
+            self._sticky_author_token.pop(key, None)
+            self._author_last_seen.pop(key, None)
+        return len(stale)
+
     async def _request_with_token(
         self,
         token: str,
         url: str,
         *,
         json_body: Optional[dict] = None,
-        form_factory: Optional[Callable[[], aiohttp.FormData]] = None,
+        mime_factory: Optional[Callable[[], "CurlMime"]] = None,
         timeout: int = 30,
         ctx: str = "",
         extra_headers: Optional[dict] = None,
+        use_proxy: bool = False,
     ) -> tuple[str, Optional[dict]]:
         """POST as one account with per-account rate-limit gating and retries."""
-        session = self._session_provider()
         r429 = 0
         rnet = 0
         async with self._token_lock(token):
             while True:
                 await self._await_cooldown(token)
+                # Read the lease unconditionally, not gated on use_proxy: if
+                # this token's session was primed through a proxy (by any
+                # mapping), its cookies belong to that IP and every request
+                # must keep following it. Re-read each attempt because a
+                # prior iteration's report_failure() may have swapped it.
+                proxy = get_proxy_pool().current(token)
                 try:
+                    session = await get_tls_session(token, use_proxy=use_proxy)
                     headers = self._build_headers(token)
                     if extra_headers:
                         headers = {**headers, **extra_headers}
-                    if form_factory is not None:
-                        resp_cm = session.post(
-                            url, data=form_factory(), headers=headers, timeout=timeout
+
+                    if mime_factory is not None:
+                        resp = await session.post(
+                            url,
+                            multipart=mime_factory(),
+                            headers=headers,
+                            timeout=timeout,
+                            proxy=proxy,
                         )
                     else:
-                        resp_cm = session.post(
-                            url, json=json_body, headers=headers, timeout=timeout
+                        resp = await session.post(
+                            url,
+                            json=json_body,
+                            headers=headers,
+                            timeout=timeout,
+                            proxy=proxy,
                         )
 
-                    async with resp_cm as resp:
-                        status = resp.status
-                        if status in (200, 201):
-                            try:
-                                data = await resp.json()
-                            except Exception:
-                                data = None
-                            return SEND_OK, data
+                    status = resp.status_code
+                    if status in (200, 201):
+                        if proxy:
+                            get_proxy_pool().report_success(proxy)
+                        try:
+                            data = resp.json()
+                        except Exception:
+                            data = None
+                        return SEND_OK, data
 
-                        if status == 429:
-                            retry_after = await self._retry_after(resp)
-                            wait = min(max(0.0, retry_after), 60.0)
+                    if status == 429:
+                        retry_after = self._retry_after(resp)
+                        wait = min(max(0.0, retry_after), 60.0)
 
-                            self._token_cooldown[token] = time.monotonic() + wait
-                            r429 += 1
-                            if r429 > MAX_429_RETRIES:
-                                self._log.warning(
-                                    "[user-send] Still rate limited %s after %d retries",
-                                    ctx,
-                                    MAX_429_RETRIES,
-                                )
-                                return SEND_RATE_LIMITED, None
-                            await asyncio.sleep(wait)
-                            continue
-
-                        if status == 401:
-
-                            self._log.debug(
-                                "[user-send] token revoked (HTTP 401) %s", ctx
-                            )
-                            return SEND_DEAD, None
-
-                        if status in (403, 404):
-
-                            self._log.debug(
-                                "[user-send] token can't deliver (HTTP %s) %s",
-                                status,
+                        self._token_cooldown[token] = time.monotonic() + wait
+                        r429 += 1
+                        if r429 > MAX_429_RETRIES:
+                            self._log.warning(
+                                "[user-send] Still rate limited %s after %d retries",
                                 ctx,
+                                MAX_429_RETRIES,
                             )
-                            return SEND_UNDELIVERABLE, None
+                            return SEND_RATE_LIMITED, None
+                        await asyncio.sleep(wait)
+                        continue
 
-                        if 500 <= status < 600:
-                            rnet += 1
-                            if rnet > MAX_NET_RETRIES:
-                                self._log.warning(
-                                    "[user-send] Discord HTTP %s %s; giving up after %d retries",
-                                    status,
-                                    ctx,
-                                    MAX_NET_RETRIES,
-                                )
-                                return SEND_TRANSIENT, None
-                            await asyncio.sleep(min(2.0 * rnet, 10.0))
-                            continue
+                    if status == 401:
 
-                        body = await self._safe_text(resp)
-                        self._log.warning(
-                            "[user-send] Discord returned HTTP %s %s: %s",
+                        self._log.debug("[user-send] token revoked (HTTP 401) %s", ctx)
+                        await close_tls_session(token, reason="revoked-401")
+                        return SEND_DEAD, None
+
+                    if status in (403, 404):
+
+                        self._log.debug(
+                            "[user-send] token can't deliver (HTTP %s) %s",
                             status,
                             ctx,
-                            body[:300],
                         )
                         return SEND_UNDELIVERABLE, None
-                except asyncio.TimeoutError:
-                    rnet += 1
-                    self._log.warning("[user-send] Timeout %s (attempt %d)", ctx, rnet)
-                    if rnet > MAX_NET_RETRIES:
-                        return SEND_TRANSIENT, None
-                    await asyncio.sleep(min(2.0 * rnet, 10.0))
-                    continue
-                except aiohttp.ClientError as e:
+
+                    if 500 <= status < 600:
+                        rnet += 1
+                        if rnet > MAX_NET_RETRIES:
+                            self._log.warning(
+                                "[user-send] Discord HTTP %s %s; giving up after %d retries",
+                                status,
+                                ctx,
+                                MAX_NET_RETRIES,
+                            )
+                            return SEND_TRANSIENT, None
+                        await asyncio.sleep(min(2.0 * rnet, 10.0))
+                        continue
+
+                    body = self._safe_text(resp)
+                    self._log.warning(
+                        "[user-send] Discord returned HTTP %s %s: %s",
+                        status,
+                        ctx,
+                        body[:300],
+                    )
+                    return SEND_UNDELIVERABLE, None
+                except CurlRequestException as e:
                     rnet += 1
                     self._log.warning(
                         "[user-send] Network error %s (attempt %d): %s", ctx, rnet, e
                     )
+                    if proxy:
+                        # A connection-level failure (not an HTTP error status
+                        # from Discord) is the signal that this specific
+                        # proxy — not the account — is the problem. Swap it;
+                        # the next loop iteration picks up whatever
+                        # report_failure() reassigned.
+                        await get_proxy_pool().report_failure(token)
                     if rnet > MAX_NET_RETRIES:
                         return SEND_TRANSIENT, None
                     await asyncio.sleep(min(2.0 * rnet, 10.0))
@@ -565,6 +740,7 @@ class UserTokenSender:
         *,
         typing: bool = False,
         token: Optional[str] = None,
+        use_proxy: bool = False,
     ) -> None:
         """Wait a message's send-delay before it goes out."""
         lo = max(0.0, float(min_delay or 0.0))
@@ -575,20 +751,23 @@ class UserTokenSender:
 
         delay = random.uniform(lo, min(hi, 30.0)) if hi > 0 else 0.0
         if do_type:
-            await self._type_for(chan, token, delay)
+            await self._type_for(chan, token, delay, use_proxy=use_proxy)
         elif delay > 0:
             await asyncio.sleep(delay)
 
-    async def _type_for(self, chan: int, token: str, duration: float) -> None:
+    async def _type_for(
+        self, chan: int, token: str, duration: float, *, use_proxy: bool = False
+    ) -> None:
         """Show the typing indicator in ``chan`` for ``duration`` seconds."""
-        session = self._session_provider()
         headers = self._build_headers(token)
         url = f"{DISCORD_API_BASE}/channels/{chan}/typing"
 
         async def _fire():
+            self._token_last_seen[token] = time.monotonic()
             try:
-                async with session.post(url, headers=headers, timeout=10):
-                    pass
+                session = await get_tls_session(token, use_proxy=use_proxy)
+                proxy = get_proxy_pool().current(token)
+                await session.post(url, headers=headers, timeout=10, proxy=proxy)
             except Exception:
                 pass
 
@@ -609,6 +788,7 @@ class UserTokenSender:
         attachments: list,
         *,
         sticker_ids: Optional[list] = None,
+        use_proxy: bool = False,
     ) -> str:
         """Post a message as one account. Returns a ``SEND_*`` status."""
         session = self._session_provider()
@@ -635,17 +815,24 @@ class UserTokenSender:
             status, _ = await self._request_with_token(
                 token,
                 url,
-                form_factory=lambda: self._build_multipart(body_text, files, stkr_ids),
+                mime_factory=lambda: self._build_multipart(body_text, files, stkr_ids),
                 timeout=60,
                 ctx=ctx,
                 extra_headers=extra,
+                use_proxy=use_proxy,
             )
         else:
             payload = {"content": body_text}
             if stkr_ids:
                 payload["sticker_ids"] = stkr_ids
             status, _ = await self._request_with_token(
-                token, url, json_body=payload, timeout=30, ctx=ctx, extra_headers=extra
+                token,
+                url,
+                json_body=payload,
+                timeout=30,
+                ctx=ctx,
+                extra_headers=extra,
+                use_proxy=use_proxy,
             )
         return status
 
@@ -660,6 +847,7 @@ class UserTokenSender:
         sticker_ids: Optional[list] = None,
         applied_tag_ids: Optional[list] = None,
         auto_archive_duration: int = 60,
+        use_proxy: bool = False,
     ) -> Optional[int]:
         """POST a forum thread + starter message as one account."""
         session = self._session_provider()
@@ -697,13 +885,19 @@ class UserTokenSender:
             status, data = await self._request_with_token(
                 token,
                 url,
-                form_factory=lambda: self._build_forum_multipart(thread_body, files),
+                mime_factory=lambda: self._build_forum_multipart(thread_body, files),
                 timeout=60,
                 ctx=ctx,
+                use_proxy=use_proxy,
             )
         else:
             status, data = await self._request_with_token(
-                token, url, json_body=thread_body, timeout=30, ctx=ctx
+                token,
+                url,
+                json_body=thread_body,
+                timeout=30,
+                ctx=ctx,
+                use_proxy=use_proxy,
             )
 
         if status == SEND_OK:
@@ -725,6 +919,7 @@ class UserTokenSender:
         *,
         starter_message_id: Optional[int] = None,
         auto_archive_duration: int = 60,
+        use_proxy: bool = False,
     ) -> Optional[int]:
         """Create a text-channel thread as one account."""
         body: dict = {
@@ -746,6 +941,7 @@ class UserTokenSender:
             json_body=body,
             timeout=30,
             ctx=f"creating text thread in {parent_channel_id}",
+            use_proxy=use_proxy,
         )
 
         if status == SEND_OK:
@@ -801,8 +997,7 @@ class UserTokenSender:
 
     def _build_multipart(
         self, content: str, files: list, sticker_ids: Optional[list] = None
-    ) -> aiohttp.FormData:
-        form = aiohttp.FormData()
+    ) -> "CurlMime":
         payload = {
             "content": content or "",
             "attachments": [
@@ -811,30 +1006,33 @@ class UserTokenSender:
         }
         if sticker_ids:
             payload["sticker_ids"] = [str(s) for s in sticker_ids]
-        form.add_field(
-            "payload_json", json.dumps(payload), content_type="application/json"
+        mime = CurlMime()
+        mime.addpart(
+            "payload_json",
+            content_type="application/json",
+            data=json.dumps(payload).encode(),
         )
         for i, (fn, data, ct) in enumerate(files):
-            form.add_field(f"files[{i}]", data, filename=fn, content_type=ct)
-        return form
+            mime.addpart(f"files[{i}]", content_type=ct, filename=fn, data=data)
+        return mime
 
-    def _build_forum_multipart(
-        self, thread_body: dict, files: list
-    ) -> aiohttp.FormData:
+    def _build_forum_multipart(self, thread_body: dict, files: list) -> "CurlMime":
         """Multipart body for creating a forum thread with file attachments."""
-        form = aiohttp.FormData()
         body = dict(thread_body)
         message = dict(body.get("message") or {})
         message["attachments"] = [
             {"id": i, "filename": fn} for i, (fn, _data, _ct) in enumerate(files)
         ]
         body["message"] = message
-        form.add_field(
-            "payload_json", json.dumps(body), content_type="application/json"
+        mime = CurlMime()
+        mime.addpart(
+            "payload_json",
+            content_type="application/json",
+            data=json.dumps(body).encode(),
         )
         for i, (fn, data, ct) in enumerate(files):
-            form.add_field(f"files[{i}]", data, filename=fn, content_type=ct)
-        return form
+            mime.addpart(f"files[{i}]", content_type=ct, filename=fn, data=data)
+        return mime
 
     def _compose_text(self, content: Optional[str], embeds: Optional[list]) -> str:
         text = (content or "").strip()
@@ -895,9 +1093,9 @@ class UserTokenSender:
             return ""
 
     @staticmethod
-    async def _retry_after(resp) -> float:
+    def _retry_after(resp) -> float:
         try:
-            data = await resp.json()
+            data = resp.json()
             return float(data.get("retry_after", 1.0))
         except Exception:
             hdr = resp.headers.get("Retry-After")
@@ -907,9 +1105,9 @@ class UserTokenSender:
                 return 1.0
 
     @staticmethod
-    async def _safe_text(resp) -> str:
+    def _safe_text(resp) -> str:
         try:
-            return await resp.text()
+            return resp.text
         except Exception:
             return ""
 

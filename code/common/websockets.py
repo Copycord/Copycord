@@ -121,21 +121,21 @@ class WebsocketManager:
         - logs unexpected exceptions, but never blocks shutdown
         """
         peer = getattr(ws, "remote_address", None)
-        self.logger.debug("[ws≺] connection open path=%s peer=%s", path, peer)
+        # Deliberately no open/close logging: senders dial a fresh connection
+        # per message and hang up immediately, so "connection open", "peer
+        # closed (OK)" and "connection closed" fire once PER MESSAGE and say
+        # nothing the per-request line below doesn't already say. Abnormal
+        # closes still log (see ConnectionClosedError).
         try:
             while True:
                 try:
-                    t0 = time.monotonic()
                     raw = await ws.recv()
-                    dt = (time.monotonic() - t0) * 1000
-                    self.logger.debug(
-                        "[ws←] recv bytes=%d ms=%.1f", _bytes_len(raw), dt
-                    )
                 except ConnectionClosedOK:
-                    self.logger.debug("[ws] peer closed (OK)")
                     break
                 except ConnectionClosedError as e:
-                    self.logger.info("[ws] peer closed with error: %s", e)
+                    self.logger.info(
+                        "[ws] peer %s closed with error: %s", peer, e
+                    )
                     break
 
                 try:
@@ -151,8 +151,8 @@ class WebsocketManager:
                 rid = req.get("rid") or str(uuid.uuid4())
                 req["rid"] = rid
                 ptype = _ptype(req)
-                self.logger.debug("[ws] handle type=%s rid=%s", ptype, rid)
 
+                dt = 0.0
                 try:
                     t1 = time.monotonic()
                     response = await handler(req)
@@ -161,13 +161,6 @@ class WebsocketManager:
                     if isinstance(response, dict):
                         response.setdefault("rid", rid)
                     dt = (time.monotonic() - t1) * 1000
-                    self.logger.debug(
-                        "[ws] handler done type=%s rid=%s ms=%.1f ok=%s",
-                        ptype,
-                        rid,
-                        dt,
-                        isinstance(response, dict) and response.get("ok"),
-                    )
                 except Exception:
                     self.logger.exception(
                         "Error in WS handler type=%s rid=%s", ptype, rid
@@ -176,18 +169,21 @@ class WebsocketManager:
 
                 payload = _json(response)
                 ok = await self._safe_send(ws, payload)
+                # One line per request rather than five (recv/handle/done/
+                # reply/sent) — same information, a fifth of the volume.
                 self.logger.debug(
-                    "[ws→] reply type=%s rid=%s ok=%s bytes=%d",
+                    "[ws] type=%s rid=%s in=%dB out=%dB %.1fms ok=%s",
                     ptype,
                     rid,
-                    ok,
+                    _bytes_len(raw),
                     _bytes_len(payload),
+                    dt,
+                    ok,
                 )
                 if not ok:
                     break
         finally:
             await self._close_quietly(ws)
-            self.logger.debug("[ws≻] connection closed path=%s peer=%s", path, peer)
 
     async def _safe_send(self, ws, payload: str) -> bool:
         if ws.closed:
@@ -195,7 +191,6 @@ class WebsocketManager:
             return False
         try:
             await ws.send(payload)
-            self.logger.debug("[ws→] sent bytes=%d", _bytes_len(payload))
             return True
         except (ConnectionClosedOK, ConnectionClosedError) as e:
             self.logger.debug("[ws→] peer closed during send: %s", e)
@@ -285,16 +280,19 @@ class WebsocketManager:
 
         for attempt in range(1, max_attempts + 1):
             try:
-                self.logger.debug(
-                    "WS send attempt %d/%d → %s type=%s rid=%s",
-                    attempt,
-                    max_attempts,
-                    self.send_url,
-                    ptype,
-                    rid,
-                )
+                # Only announce retries. The first attempt is the boring case
+                # and fires on every outbound message; a failure that leads to
+                # attempt 2 already logs a warning of its own below.
+                if attempt > 1:
+                    self.logger.debug(
+                        "WS send retry %d/%d → %s type=%s rid=%s",
+                        attempt,
+                        max_attempts,
+                        self.send_url,
+                        ptype,
+                        rid,
+                    )
 
-                t0 = time.monotonic()
                 if connect_timeout is not None:
                     ws = await asyncio.wait_for(
                         websockets.connect(
@@ -306,28 +304,16 @@ class WebsocketManager:
                     ws = await websockets.connect(
                         self.send_url, max_size=None, ping_interval=None
                     )
-                tconn = (time.monotonic() - t0) * 1000
-                self.logger.debug("WS send connected ms=%.1f rid=%s", tconn, rid)
 
                 try:
                     raw = _json(payload)
 
-                    t1 = time.monotonic()
                     if send_timeout is not None:
                         await asyncio.wait_for(ws.send(raw), send_timeout)
                     else:
                         await ws.send(raw)
-                    tsend = (time.monotonic() - t1) * 1000
-                    self.logger.debug(
-                        "WS send payload bytes=%d ms=%.1f type=%s rid=%s",
-                        _bytes_len(raw),
-                        tsend,
-                        ptype,
-                        rid,
-                    )
                 finally:
                     await self._close_quietly(ws)
-                    self.logger.debug("WS send closed rid=%s", rid)
 
                 return
 
@@ -406,7 +392,6 @@ class WebsocketManager:
 
         for attempt in range(1, max_attempts + 1):
             try:
-                t0 = time.monotonic()
                 if connect_timeout is not None:
                     ws = await asyncio.wait_for(
                         websockets.connect(
@@ -418,30 +403,25 @@ class WebsocketManager:
                     ws = await websockets.connect(
                         self.send_url, max_size=None, ping_interval=None
                     )
-                tconn = (time.monotonic() - t0) * 1000
-                self.logger.debug("WS request connected ms=%.1f rid=%s", tconn, rid)
 
                 try:
                     raw_out = _json(payload)
                     await ws.send(raw_out)
-                    self.logger.debug(
-                        "WS request sent bytes=%d rid=%s type=%s",
-                        _bytes_len(raw_out),
-                        rid,
-                        ptype,
-                    )
 
                     t1 = time.monotonic()
                     if timeout is not None:
                         raw_in = await asyncio.wait_for(ws.recv(), timeout)
                     else:
                         raw_in = await ws.recv()
-                    trecv = (time.monotonic() - t1) * 1000
+                    # One line per round trip rather than four
+                    # (connected/sent/recv/closed).
                     self.logger.debug(
-                        "WS request recv bytes=%d ms=%.1f rid=%s",
-                        _bytes_len(raw_in),
-                        trecv,
+                        "[ws] request type=%s rid=%s out=%dB in=%dB %.1fms",
+                        ptype,
                         rid,
+                        _bytes_len(raw_out),
+                        _bytes_len(raw_in),
+                        (time.monotonic() - t1) * 1000,
                     )
 
                     data = json.loads(raw_in)
@@ -456,7 +436,6 @@ class WebsocketManager:
                     return data
                 finally:
                     await self._close_quietly(ws)
-                    self.logger.debug("WS request closed rid=%s", rid)
 
             except asyncio.CancelledError:
                 self.logger.info(

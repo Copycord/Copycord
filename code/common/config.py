@@ -141,6 +141,11 @@ class Config:
             "USER_TOKEN_LINKS_ONLY": False,
             "USER_TOKEN_STICKY_NICKNAME": False,
             "USER_TOKEN_STICKY_ROLES": False,
+            # Off by default on purpose: proxies.txt is shared with the client
+            # (ENABLE_CLIENT_PROXIES), so anyone already using proxies for
+            # their client must opt in explicitly before token sends start
+            # routing through them too.
+            "USER_TOKEN_USE_PROXIES": False,
         }
 
     async def setup_release_watcher(self, receiver, should_dm: bool = True):
