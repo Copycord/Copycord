@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import random
+import re
 
 import aiohttp
 
@@ -20,6 +21,10 @@ logger = logging.getLogger(__name__)
 
 
 BUILD_INFO_URL = "https://api.macslodge.com/discord/build"
+_DISCORD_APP_URL = "https://discord.com/app"
+_DISCORD_ASSET_URL = "https://discord.com/assets/{asset}"
+_ASSET_RE = re.compile(r'(?:src|href)="/assets/([^"]+\.js)"')
+_BUILD_NUMBER_MARKERS = ('buildNumber:"', 'build_number:"')
 
 
 DEFAULT_BUILD: dict = {
@@ -77,28 +82,85 @@ def set_build_info(build: dict) -> None:
     _FINGERPRINT_CACHE.clear()
 
 
+async def _scrape_build_number_from_web(
+    sess: aiohttp.ClientSession,
+) -> int | None:
+    """Fallback: read the live build number straight from Discord's own web
+    assets. Guards against ever sending a stale build number (a known
+    lock/flag trigger) just because the primary build API is down or lagging
+    behind Discord's own deploys."""
+    try:
+        async with sess.get(
+            _DISCORD_APP_URL, timeout=aiohttp.ClientTimeout(total=8)
+        ) as resp:
+            page = await resp.text()
+        assets = _ASSET_RE.findall(page)
+        # the entry chunk carrying buildNumber is typically near the end.
+        for asset in reversed(assets):
+            try:
+                async with sess.get(
+                    _DISCORD_ASSET_URL.format(asset=asset),
+                    timeout=aiohttp.ClientTimeout(total=8),
+                ) as resp:
+                    js = await resp.text()
+            except Exception:
+                continue
+            for marker in _BUILD_NUMBER_MARKERS:
+                if marker in js:
+                    try:
+                        return int(js.split(marker, 1)[1].split('"', 1)[0])
+                    except (IndexError, ValueError):
+                        continue
+    except Exception as e:
+        logger.debug("build-number web scrape failed: %r", e)
+    return None
+
+
 async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> dict:
-    """Fetch the current Discord *stable* build fingerprint."""
+    """Fetch the current Discord *stable* build fingerprint.
+
+    Primary source is the pre-decoded build API; if it's unreachable or
+    returns an implausible payload, falls back to scraping the build number
+    directly out of Discord's own web assets so the fingerprint never goes
+    stale just because the primary API is down.
+    """
     owns = session is None
     sess = session or aiohttp.ClientSession()
     try:
-        async with sess.get(
-            BUILD_INFO_URL, timeout=aiohttp.ClientTimeout(total=10)
-        ) as resp:
-            if resp.status != 200:
-                logger.debug("build-info fetch: HTTP %s", resp.status)
-                return get_build_info()
-            data = await resp.json()
+        dec: dict = {}
+        try:
+            async with sess.get(
+                BUILD_INFO_URL, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    dec = (((data or {}).get("clients") or {}).get("Discord") or {}).get(
+                        "decoded"
+                    ) or {}
+                else:
+                    logger.debug("build-info fetch: HTTP %s", resp.status)
+        except Exception as e:
+            logger.debug("build-info fetch failed: %r", e)
 
-        dec = (((data or {}).get("clients") or {}).get("Discord") or {}).get(
-            "decoded"
-        ) or {}
         build_number = int(dec.get("client_build_number") or 0)
         ua = str(dec.get("browser_user_agent") or "")
 
-        # so a bad/spoofed response can't degrade the fingerprint below fallback.
+        # so a bad/spoofed/unreachable response can't degrade the fingerprint
+        # below fallback.
         if build_number < 400000 or "discord/" not in ua:
-            logger.debug("build-info fetch: implausible payload; keeping current build")
+            logger.debug(
+                "build-info fetch: implausible or missing payload; scraping web assets"
+            )
+            scraped = await _scrape_build_number_from_web(sess)
+            if scraped is not None and scraped >= 400000:
+                parsed = dict(DEFAULT_BUILD)
+                parsed["client_build_number"] = scraped
+                set_build_info(parsed)
+                logger.debug(
+                    "Discord build fingerprint updated via web scrape: build=%s",
+                    scraped,
+                )
+                return parsed
             return get_build_info()
 
         parsed = {
