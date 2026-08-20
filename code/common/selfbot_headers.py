@@ -6,18 +6,37 @@
 #  version 3.0. A copy of the license is available at:
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
+
+
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import json
 import logging
 import random
 import re
+import time
 
 import aiohttp
 
+from common.proxy_pool import get_pool as _get_proxy_pool
+
+try:
+    from curl_cffi.requests import AsyncSession as _CurlAsyncSession
+except ImportError:
+    _CurlAsyncSession = None
+
 logger = logging.getLogger(__name__)
+
+
+def _token_log_id(token: str) -> str:
+    """A short, stable, non-reversible identifier for a token, safe to put
+    in logs — never the token itself or a prefix of it (Discord tokens are
+    partially structured/guessable, so even a truncated raw prefix is a
+    partial credential leak)."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:10]
 
 
 BUILD_INFO_URL = "https://api.macslodge.com/discord/build"
@@ -25,6 +44,12 @@ _DISCORD_APP_URL = "https://discord.com/app"
 _DISCORD_ASSET_URL = "https://discord.com/assets/{asset}"
 _ASSET_RE = re.compile(r'(?:src|href)="/assets/([^"]+\.js)"')
 _BUILD_NUMBER_MARKERS = ('buildNumber:"', 'build_number:"')
+
+
+TLS_IMPERSONATE = "chrome146"
+
+
+TLS_SESSION_IDLE_TTL = 3600
 
 
 DEFAULT_BUILD: dict = {
@@ -86,16 +111,14 @@ async def _scrape_build_number_from_web(
     sess: aiohttp.ClientSession,
 ) -> int | None:
     """Fallback: read the live build number straight from Discord's own web
-    assets. Guards against ever sending a stale build number (a known
-    lock/flag trigger) just because the primary build API is down or lagging
-    behind Discord's own deploys."""
+    assets."""
     try:
         async with sess.get(
             _DISCORD_APP_URL, timeout=aiohttp.ClientTimeout(total=8)
         ) as resp:
             page = await resp.text()
         assets = _ASSET_RE.findall(page)
-        # the entry chunk carrying buildNumber is typically near the end.
+
         for asset in reversed(assets):
             try:
                 async with sess.get(
@@ -117,13 +140,7 @@ async def _scrape_build_number_from_web(
 
 
 async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> dict:
-    """Fetch the current Discord *stable* build fingerprint.
-
-    Primary source is the pre-decoded build API; if it's unreachable or
-    returns an implausible payload, falls back to scraping the build number
-    directly out of Discord's own web assets so the fingerprint never goes
-    stale just because the primary API is down.
-    """
+    """Fetch the current Discord *stable* build fingerprint."""
     owns = session is None
     sess = session or aiohttp.ClientSession()
     try:
@@ -134,9 +151,9 @@ async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> di
             ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
-                    dec = (((data or {}).get("clients") or {}).get("Discord") or {}).get(
-                        "decoded"
-                    ) or {}
+                    dec = (
+                        ((data or {}).get("clients") or {}).get("Discord") or {}
+                    ).get("decoded") or {}
                 else:
                     logger.debug("build-info fetch: HTTP %s", resp.status)
         except Exception as e:
@@ -145,8 +162,6 @@ async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> di
         build_number = int(dec.get("client_build_number") or 0)
         ua = str(dec.get("browser_user_agent") or "")
 
-        # so a bad/spoofed/unreachable response can't degrade the fingerprint
-        # below fallback.
         if build_number < 400000 or "discord/" not in ua:
             logger.debug(
                 "build-info fetch: implausible or missing payload; scraping web assets"
@@ -195,8 +210,7 @@ async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> di
 
 
 def _stable_uuid(rng: random.Random) -> str:
-    """A deterministic UUIDv4-format string from a seeded RNG (so a token's
-    launch ids are stable per account but unique across accounts)."""
+    """A deterministic UUIDv4-format string from a seeded RNG."""
     b = bytearray(rng.getrandbits(8) for _ in range(16))
     b[6] = (b[6] & 0x0F) | 0x40
     b[8] = (b[8] & 0x3F) | 0x80
@@ -216,6 +230,7 @@ def make_fingerprint(token: str) -> dict:
     app_state = rng.choice(["focused", "unfocused"])
     launch_id = _stable_uuid(rng)
     launch_signature = _stable_uuid(rng)
+    heartbeat_session_id = _stable_uuid(rng)
 
     user_agent = build["browser_user_agent"]
 
@@ -237,6 +252,7 @@ def make_fingerprint(token: str) -> dict:
         "native_build_number": build["native_build_number"],
         "client_event_source": None,
         "launch_signature": launch_signature,
+        "client_heartbeat_session_id": heartbeat_session_id,
         "client_app_state": app_state,
     }
     super_props_b64 = base64.b64encode(
@@ -268,7 +284,161 @@ def build_headers(token: str) -> dict:
 
 
 def context_properties(location: str = "chat_input") -> str:
-    """Base64 ``X-Context-Properties`` value the real client sends with actions."""
+    """Base64 ``X-Context-Properties`` value the client sends with actions."""
     return base64.b64encode(
         json.dumps({"location": location}, separators=(",", ":")).encode()
     ).decode()
+
+
+_TLS_SESSIONS: dict = {}
+_TLS_PRIMED: set[str] = set()
+_TLS_SESSION_LOCKS: dict[str, asyncio.Lock] = {}
+_TLS_LAST_USED: dict[str, float] = {}
+
+
+def _tls_session_lock(token: str) -> asyncio.Lock:
+    lock = _TLS_SESSION_LOCKS.get(token)
+    if lock is None:
+        lock = asyncio.Lock()
+        _TLS_SESSION_LOCKS[token] = lock
+    return lock
+
+
+async def get_tls_session(token: str, *, use_proxy: bool = False):
+    """Return a curl_cffi ``AsyncSession`` dedicated to this token.
+
+    When ``use_proxy`` is set (per-mapping ``USER_TOKEN_USE_PROXIES``) and
+    the pool has entries, first creation also leases this token a proxy and
+    primes the session's cookies *through* that proxy — priming from a
+    different network path than real requests will use would hand the token
+    cookies tied to the wrong source IP. The session itself never has a
+    proxy baked in; callers pass the token's current lease
+    (``proxy_pool.get_pool().current(token)``) per request instead, so a
+    proxy failure mid-life can swap the lease without tearing down the
+    cookie jar/TLS state.
+
+    The proxy decision is made ONCE, at session creation. A token reachable
+    from two mappings with different ``USER_TOKEN_USE_PROXIES`` values
+    resolves first-session-wins, deliberately: sessions and leases are keyed
+    by token value, and switching a live session between proxied and direct
+    would use cookies issued to one IP from another — a sharper anomaly than
+    either choice made consistently.
+    """
+    if _CurlAsyncSession is None:
+        raise RuntimeError("curl_cffi is not installed")
+
+    async with _tls_session_lock(token):
+        sess = _TLS_SESSIONS.get(token)
+        is_new = sess is None
+        if sess is None:
+            try:
+                sess = _CurlAsyncSession(impersonate=TLS_IMPERSONATE)
+            except Exception as e:
+                logger.error(
+                    "Failed to create curl_cffi session with impersonate=%r "
+                    "(check the installed curl_cffi version supports this "
+                    "target): %r",
+                    TLS_IMPERSONATE,
+                    e,
+                )
+                raise
+            _TLS_SESSIONS[token] = sess
+
+        proxy = None
+        if token not in _TLS_PRIMED:
+            pool = _get_proxy_pool()
+            if use_proxy and pool.enabled:
+                proxy = await pool.lease(token)
+            await _prime_tls_session(sess, token, proxy=proxy)
+            _TLS_PRIMED.add(token)
+
+        _TLS_LAST_USED[token] = time.monotonic()
+
+        if is_new:
+            logger.debug(
+                "TLS session created: token=%s impersonate=%s proxy=%s live_sessions=%d",
+                _token_log_id(token),
+                TLS_IMPERSONATE,
+                _mask_proxy_for_log(proxy) if proxy else "none",
+                len(_TLS_SESSIONS),
+            )
+
+        return sess
+
+
+def _mask_proxy_for_log(proxy: str) -> str:
+    if "@" in proxy:
+        scheme_rest = proxy.split("://", 1)
+        if len(scheme_rest) == 2:
+            creds_host = scheme_rest[1].split("@", 1)
+            if len(creds_host) == 2:
+                return f"{scheme_rest[0]}://***@{creds_host[1]}"
+    return proxy
+
+
+async def _prime_tls_session(sess, token: str, proxy: str | None = None) -> None:
+    """Warm the session's cookie jar, through ``proxy`` if this token has
+    one leased, so cookies are tied to the same source IP real requests will
+    use."""
+    try:
+        await sess.get("https://discord.com", timeout=12, proxy=proxy)
+    except Exception as e:
+        logger.debug("TLS session cookie priming failed for token: %r", e)
+
+
+async def close_tls_session(token: str, reason: str = "unspecified") -> None:
+    """Drop a token's cached curl_cffi session (e.g. on token removal/revoke)
+    and release its proxy lease, if any, back to the pool.
+
+    ``reason`` is purely for the log line — pass something like
+    "revoked-401", "idle-timeout", or "shutdown" so the log tells you *why*
+    a given session went away, not just that it did.
+    """
+    async with _tls_session_lock(token):
+        sess = _TLS_SESSIONS.pop(token, None)
+        _TLS_PRIMED.discard(token)
+        _TLS_LAST_USED.pop(token, None)
+        if sess is not None:
+            try:
+                await sess.close()
+            except Exception:
+                pass
+    _TLS_SESSION_LOCKS.pop(token, None)
+
+    await _get_proxy_pool().release(token)
+
+    if sess is not None:
+        logger.debug(
+            "TLS session closed: token=%s reason=%s live_sessions=%d",
+            _token_log_id(token),
+            reason,
+            len(_TLS_SESSIONS),
+        )
+
+
+async def close_all_tls_sessions() -> None:
+    """Drop every cached curl_cffi session (e.g. on shutdown)."""
+    tokens = list(_TLS_SESSIONS.keys())
+    for token in tokens:
+        await close_tls_session(token, reason="shutdown")
+
+
+async def reap_idle_tls_sessions(idle_ttl: float = TLS_SESSION_IDLE_TTL) -> int:
+    """Close every cached session that hasn't been used in ``idle_ttl``
+    seconds.
+    """
+    now = time.monotonic()
+    stale = [
+        token
+        for token, last in list(_TLS_LAST_USED.items())
+        if (now - last) >= idle_ttl
+    ]
+    for token in stale:
+        await close_tls_session(token, reason="idle-timeout")
+    if stale:
+        logger.info(
+            "TLS idle reap: closed %d session(s), %d still live",
+            len(stale),
+            len(_TLS_SESSIONS),
+        )
+    return len(stale)

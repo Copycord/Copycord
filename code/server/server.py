@@ -40,7 +40,13 @@ from types import SimpleNamespace
 from dotenv import load_dotenv
 from common.config import Config, CURRENT_VERSION
 from common.common_helpers import resolve_mapping_settings
-from common.selfbot_headers import refresh_build_info
+from common.selfbot_headers import (
+    refresh_build_info,
+    close_all_tls_sessions,
+    reap_idle_tls_sessions,
+    TLS_SESSION_IDLE_TTL,
+)
+from common.proxy_pool import get_pool as get_proxy_pool
 from common.websockets import WebsocketManager, AdminBus
 from common.db import DBManager
 from server.rate_limiter import RateLimitManager, ActionType
@@ -97,8 +103,16 @@ ch.setLevel(LEVEL)
 root.addHandler(ch)
 
 
-for name in ("websockets.server", "websockets.protocol"):
-    logging.getLogger(name).setLevel(logging.WARNING)
+# Parent logger, so websockets.client is covered too — these processes dial
+# OUT to the admin bus, and the client child logs the whole handshake plus
+# every frame at DEBUG ("< Sec-WebSocket-Accept", "> TEXT ...", "= connection
+# is OPEN"), which buries our own output on a debug run.
+logging.getLogger("websockets").setLevel(logging.WARNING)
+# asyncio emits "Using selector: EpollSelector" and tzlocal dumps its
+# /etc/localtime probing, both at DEBUG on every boot. WARNING keeps the
+# parts worth seeing (asyncio's slow-callback warnings, real errors).
+for lib in ("asyncio", "tzlocal"):
+    logging.getLogger(lib).setLevel(logging.WARNING)
 for lib in (
     "discord",
     "discord.client",
@@ -912,10 +926,20 @@ class ServerReceiver:
 
         asyncio.create_task(self.backfill.cleanup_non_primary_webhooks())
 
+        _pool = get_proxy_pool()
+        _pool.reload()
+        try:
+            _suspend = (self.db.get_config("PROXY_SUSPEND_DURATION", "") or "").strip()
+            if _suspend:
+                _pool.SUSPEND_SECONDS = max(1, int(_suspend))
+        except (ValueError, TypeError):
+            pass
+
         if not self._processor_started:
             self._ws_task = asyncio.create_task(self.ws.start_server(self._on_ws))
             self._processor_started = True
             self._prune_old_messages_loop()
+            self._reap_idle_tls_sessions_loop()
 
     async def on_member_join(self, member: discord.Member):
         g = getattr(member, "guild", None)
@@ -7761,6 +7785,11 @@ class ServerReceiver:
 
         identity_active = self._identity_active(settings)
 
+        # Filled in by the sender with the account that actually delivered,
+        # so the "Forwarded" line below can name both the source author and
+        # the sending account on one line.
+        sent_as: list = []
+
         async def _do_send(forced, exclusive) -> str:
             try:
                 return await self.user_token_sender.send(
@@ -7777,6 +7806,8 @@ class ServerReceiver:
                     links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
                     forced_token_id=forced,
                     sticky_exclusive=exclusive,
+                    use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+                    sent_as=sent_as,
                 )
             except Exception:
                 logger.exception(
@@ -7820,22 +7851,25 @@ class ServerReceiver:
             return f" [{d} sent]"
 
         if delivered:
+            as_who = sent_as[-1] if sent_as else "?"
             if mark_bf:
                 suffix = _note_backfill()
                 if not quiet:
                     logger.info(
-                        "[💬] [backfill] Forwarded (user token) to #%s (clone ch=%s) from %s (%s)%s",
+                        "[💬] [backfill] Forwarded (user token) to #%s (clone ch=%s) from %s (%s) as %s%s",
                         msg.get("channel_name"),
                         target_channel_id,
                         msg.get("author"),
                         msg.get("author_id"),
+                        as_who,
                         suffix,
                     )
             elif not quiet:
                 logger.info(
-                    "[💬] Forwarded (user token) to clone ch=%s from %s",
+                    "[💬] Forwarded (user token) to clone ch=%s from %s as %s",
                     target_channel_id,
                     msg.get("author"),
+                    as_who,
                 )
             return True
 
@@ -7933,6 +7967,7 @@ class ServerReceiver:
                 links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
                 forced_token_id=forced_token_id,
                 sticky_exclusive=identity_active,
+                use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
             )
         except Exception:
             logger.exception(
@@ -8009,6 +8044,7 @@ class ServerReceiver:
                 max_delay=float(settings.get("USER_TOKEN_MAX_DELAY", 0) or 0),
                 forced_token_id=forced_token_id,
                 sticky_exclusive=identity_active,
+                use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
             )
         except Exception:
             logger.exception(
@@ -8099,6 +8135,8 @@ class ServerReceiver:
 
         identity_active = self._identity_active(settings)
 
+        sent_as: list = []
+
         async def _sticker_send(forced, exclusive) -> str:
             try:
                 return await self.user_token_sender.send(
@@ -8114,6 +8152,8 @@ class ServerReceiver:
                     links_only=bool(settings.get("USER_TOKEN_LINKS_ONLY", False)),
                     forced_token_id=forced,
                     sticky_exclusive=exclusive,
+                    use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+                    sent_as=sent_as,
                 )
             except Exception:
                 logger.exception(
@@ -8137,9 +8177,10 @@ class ServerReceiver:
 
         if disp == "ok":
             logger.info(
-                "[💬] Forwarded (user token, sticker) to clone ch=%s from %s",
+                "[💬] Forwarded (user token, sticker) to clone ch=%s from %s as %s",
                 target_channel_id,
                 msg.get("author"),
+                sent_as[-1] if sent_as else "?",
             )
             return True
 
@@ -12413,6 +12454,42 @@ class ServerReceiver:
         self._prune_task = asyncio.create_task(_runner(), name="prune-old-messages")
         return self._prune_task
 
+    def _reap_idle_tls_sessions_loop(self) -> asyncio.Task:
+        """Periodically close user-token curl_cffi sessions — and their
+        associated lock/cooldown/rotation bookkeeping in the token sender —
+        that have sat idle longer than ``TLS_SESSION_IDLE_TTL``.
+
+        Pure resource hygiene for deployments running large token pools — an
+        idle session's cookies/fingerprint identity aren't lost, the session
+        just transparently rebuilds (and re-primes) the next time that token
+        is actually used, and reaped token/channel/author bookkeeping just
+        starts fresh on next use too.
+        """
+        if getattr(self, "_tls_reap_task", None) and not self._tls_reap_task.done():
+            return self._tls_reap_task
+
+        async def _runner():
+            try:
+                while True:
+                    await asyncio.sleep(min(TLS_SESSION_IDLE_TTL, 15 * 60))
+                    try:
+                        await reap_idle_tls_sessions()
+                    except Exception:
+                        logger.exception("[🧹] reap_idle_tls_sessions failed")
+                    try:
+                        await self.user_token_sender.reap_idle_state(
+                            TLS_SESSION_IDLE_TTL
+                        )
+                    except Exception:
+                        logger.exception("[🧹] user_token_sender.reap_idle_state failed")
+            except asyncio.CancelledError:
+                raise
+
+        self._tls_reap_task = asyncio.create_task(
+            _runner(), name="reap-idle-tls-sessions"
+        )
+        return self._tls_reap_task
+
     async def _delete_with_row(
         self, row, orig_mid: int, channel_name: str | None = None
     ) -> bool:
@@ -13221,6 +13298,9 @@ class ServerReceiver:
         await _cancel_and_wait(getattr(self, "_sitemap_task", None), "sitemap")
         await _cancel_and_wait(getattr(self, "_ws_task", None), "ws")
         await _cancel_and_wait(getattr(self, "_prune_task", None), "prune-old-messages")
+        await _cancel_and_wait(
+            getattr(self, "_tls_reap_task", None), "reap-idle-tls-sessions"
+        )
 
         setattr(self, "_suppress_backfill_dm", True)
         try:
@@ -13235,6 +13315,11 @@ class ServerReceiver:
                 await self.session.close()
         except Exception:
             logger.debug("[shutdown] aiohttp session close failed", exc_info=True)
+
+        try:
+            await close_all_tls_sessions()
+        except Exception:
+            logger.debug("[shutdown] TLS session close failed", exc_info=True)
 
         try:
             if hasattr(self, "bot") and self.bot and not self.bot.is_closed():

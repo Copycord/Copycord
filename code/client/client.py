@@ -66,8 +66,16 @@ ch.setLevel(LEVEL)
 root.addHandler(ch)
 
 
-for name in ("websockets.server", "websockets.protocol"):
-    logging.getLogger(name).setLevel(logging.WARNING)
+# Parent logger, so websockets.client is covered too — these processes dial
+# OUT to the admin bus, and the client child logs the whole handshake plus
+# every frame at DEBUG ("< Sec-WebSocket-Accept", "> TEXT ...", "= connection
+# is OPEN"), which buries our own output on a debug run.
+logging.getLogger("websockets").setLevel(logging.WARNING)
+# asyncio emits "Using selector: EpollSelector" and tzlocal dumps its
+# /etc/localtime probing, both at DEBUG on every boot. WARNING keeps the
+# parts worth seeing (asyncio's slow-callback warnings, real errors).
+for lib in ("asyncio", "tzlocal"):
+    logging.getLogger(lib).setLevel(logging.WARNING)
 for lib in (
     "discord",
     "discord.client",
