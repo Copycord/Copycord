@@ -7983,6 +7983,7 @@ class ServerReceiver:
                     sent_as=sent_as,
                     sent_ids=sent_ids,
                     reply_to=reply_to,
+                    guild_id=cloned_guild_id,
                 )
             except Exception:
                 logger.exception(
@@ -8346,6 +8347,7 @@ class ServerReceiver:
                     sent_as=sent_as,
                     sent_ids=sent_ids,
                     reply_to=reply_to,
+                    guild_id=clone_gid,
                 )
             except Exception:
                 logger.exception(
@@ -10115,6 +10117,7 @@ class ServerReceiver:
                 content=content,
                 embeds=embeds,
                 use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+                guild_id=clone_gid,
             )
 
             if status == SEND_OK:
@@ -12854,6 +12857,7 @@ class ServerReceiver:
             message_id=cloned_mid,
             token_id=token_id,
             use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+            guild_id=clone_gid,
         )
 
         with self._clone_log_label(clone_gid):

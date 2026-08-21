@@ -50,12 +50,72 @@ class TestFingerprintShape:
         # os_sdk_version is the build part of os_version (they must stay in sync).
         assert props["os_version"].endswith(props["os_sdk_version"])
 
-    def test_no_contradictory_browser_headers(self):
-        # Desktop identity → we must NOT send browser-only client-hint headers.
-        h = sh.build_headers("token-abc")
-        for banned in ("Sec-CH-UA", "Sec-CH-UA-Platform", "Origin", "Referer"):
-            assert banned not in h
+    def test_sends_the_client_hints_the_real_client_sends(self):
+        # This previously asserted the opposite, on the assumption that a
+        # desktop client sends no client hints. A capture of the real desktop
+        # client (2026-08-21) shows it sends all of these, so leaving them out
+        # was itself the tell.
+        h = sh.build_headers("token-abc", referer="https://discord.com/channels/1/2")
+        assert h["Sec-CH-UA-Platform"] == '"Windows"'
+        assert h["Sec-CH-UA-Mobile"] == "?0"
+        assert h["Origin"] == "https://discord.com"
+        assert h["Referer"] == "https://discord.com/channels/1/2"
         assert h["X-Debug-Options"] == "bugReporterEnabled"
+
+        # Electron's brand list has no "Google Chrome" entry, and its Chromium
+        # major must match the user agent's.
+        chrome_major = h["User-Agent"].split("Chrome/")[1].split(".")[0]
+        assert h["Sec-CH-UA"] == f'"Not/A)Brand";v="99", "Chromium";v="{chrome_major}"'
+        assert "Google Chrome" not in h["Sec-CH-UA"]
+
+    def test_every_header_value_is_a_string(self):
+        # build_headers() is shared with aiohttp callers (the scraper,
+        # message_utils, admin token validation). A None value is a curl_cffi
+        # instruction to delete a header; aiohttp dies on it with
+        # "Cannot serialize non-str key None", which surfaced as every token
+        # being reported invalid. Keep the deletions out of here.
+        h = sh.build_headers("token-abc", referer="https://discord.com/channels/1/2")
+        assert all(isinstance(v, str) for v in h.values()), {
+            k: v for k, v in h.items() if not isinstance(v, str)
+        }
+
+    def test_api_call_not_a_page_load(self):
+        # curl_cffi's impersonation profile defaults these to a top-level
+        # navigation, which contradicts a POST carrying an Authorization
+        # header. We pin them, and remove the navigation-only extras (None
+        # deletes a header in curl_cffi; an empty string leaves it in place).
+        h = sh.build_headers("token-abc")
+        assert h["Sec-Fetch-Site"] == "same-origin"
+        assert h["Sec-Fetch-Mode"] == "cors"
+        assert h["Sec-Fetch-Dest"] == "empty"
+
+        # The deletions are curl_cffi-only and live apart from build_headers,
+        # which aiohttp callers share and which must stay all-string.
+        for banned in ("sec-fetch-user", "upgrade-insecure-requests", "priority"):
+            assert sh.SUPPRESSED_PROFILE_HEADERS[banned] is None
+            assert banned not in h
+
+    def test_build_fingerprint_is_internally_consistent(self):
+        # A build number belongs to exactly one client and Electron version.
+        # Shipping a fresh number with stale version strings describes a client
+        # that never existed, which is worse than simply being behind.
+        b = sh.DEFAULT_BUILD
+        assert b["client_version"] in b["browser_user_agent"]
+        assert b["browser_version"] in b["browser_user_agent"]
+
+    def test_locale_and_timezone_are_a_plausible_pair(self):
+        # Drawn together, not independently: a French client on an
+        # America/New_York clock is a combination almost nobody has.
+        for i in range(200):
+            h = sh.build_headers(f"tok-{i}")
+            assert (h["X-Discord-Locale"], h["X-Discord-Timezone"]) in sh._LOCALE_TIMEZONES
+            # The desktop client sends the bare locale, not a weighted list.
+            assert h["Accept-Language"] == h["X-Discord-Locale"]
+
+    def test_no_datacenter_windows_build(self):
+        # 10.0.20348 is Windows Server 2022; a desktop app running on a
+        # datacenter SKU is a tell by itself.
+        assert all(b[0] != "10.0.20348" for b in sh._WINDOWS_BUILDS)
 
     def test_unique_per_account_but_shared_build(self):
         _, a = _props("account-1")

@@ -52,17 +52,21 @@ TLS_IMPERSONATE = "chrome146"
 TLS_SESSION_IDLE_TTL = 3600
 
 
+# These five move together. A build number belongs to exactly one client
+# version, Electron version and user agent, so mixing a fresh number with
+# stale version strings describes a client that never shipped. Taken from a
+# real desktop capture, 2026-08-21.
 DEFAULT_BUILD: dict = {
     "release_channel": "stable",
-    "client_version": "1.0.9243",
+    "client_version": "1.0.9254",
     "browser_user_agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) discord/1.0.9243 Chrome/138.0.7204.251 "
-        "Electron/37.6.0 Safari/537.36"
+        "(KHTML, like Gecko) discord/1.0.9254 Chrome/148.0.7778.280 "
+        "Electron/42.7.1 Safari/537.36"
     ),
-    "browser_version": "37.6.0",
-    "client_build_number": 573410,
-    "native_build_number": 84934,
+    "browser_version": "42.7.1",
+    "client_build_number": 595897,
+    "native_build_number": 88466,
 }
 
 
@@ -72,23 +76,28 @@ _BUILD: dict = dict(DEFAULT_BUILD)
 _FINGERPRINT_CACHE: dict[str, dict] = {}
 
 
+# No 10.0.20348: that is Windows Server 2022, and a datacenter SKU running the
+# Discord desktop app is a tell on its own.
 _WINDOWS_BUILDS = [
     ("10.0.19045", "19045"),
     ("10.0.22621", "22621"),
     ("10.0.22631", "22631"),
     ("10.0.26100", "26100"),
-    ("10.0.20348", "20348"),
+    ("10.0.26200", "26200"),
 ]
 
-_LOCALES = ["en-US", "en-GB", "de", "fr", "es-ES", "nl", "pt-BR"]
-_TIMEZONES = [
-    "America/New_York",
-    "America/Chicago",
-    "America/Los_Angeles",
-    "Europe/London",
-    "Europe/Berlin",
-    "Europe/Amsterdam",
-    "Asia/Tokyo",
+# Paired, not drawn independently: a French client reporting an America/New_York
+# clock is a combination almost no real user has.
+_LOCALE_TIMEZONES = [
+    ("en-US", "America/New_York"),
+    ("en-US", "America/Chicago"),
+    ("en-US", "America/Los_Angeles"),
+    ("en-GB", "Europe/London"),
+    ("de", "Europe/Berlin"),
+    ("fr", "Europe/Paris"),
+    ("es-ES", "Europe/Madrid"),
+    ("nl", "Europe/Amsterdam"),
+    ("pt-BR", "America/Sao_Paulo"),
 ]
 
 
@@ -168,21 +177,45 @@ async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> di
             )
             scraped = await _scrape_build_number_from_web(sess)
             if scraped is not None and scraped >= 400000:
-                parsed = dict(DEFAULT_BUILD)
-                parsed["client_build_number"] = scraped
-                set_build_info(parsed)
-                logger.debug(
-                    "Discord build fingerprint updated via web scrape: build=%s",
-                    scraped,
-                )
-                return parsed
+                if scraped == DEFAULT_BUILD["client_build_number"]:
+                    logger.debug(
+                        "Discord build fingerprint confirmed current: build=%s",
+                        scraped,
+                    )
+                else:
+                    # Deliberately NOT applied. The scrape yields a build
+                    # number and nothing else, and a build number belongs to
+                    # exactly one client/Electron/Chrome version. Grafting a
+                    # fresh number onto the built-in version strings describes
+                    # a client that never shipped, which is easier to spot
+                    # than simply being a few builds behind.
+                    logger.warning(
+                        "Discord build %s is newer than the built-in fingerprint "
+                        "(%s / %s). Keeping the built-in set intact: the scrape "
+                        "cannot supply the matching client and Electron versions. "
+                        "Update DEFAULT_BUILD from a real client capture.",
+                        scraped,
+                        DEFAULT_BUILD["client_build_number"],
+                        DEFAULT_BUILD["client_version"],
+                    )
+            return get_build_info()
+
+        fetched_version = str(dec.get("client_version") or "")
+
+        # A set whose own version string is absent from its own user agent is
+        # not self-consistent, so it cannot be worn as one identity.
+        if fetched_version and fetched_version not in ua:
+            logger.warning(
+                "Build feed is internally inconsistent (client %s not present "
+                "in its own user agent). Keeping the built-in set.",
+                fetched_version,
+            )
             return get_build_info()
 
         parsed = {
             "release_channel": dec.get("release_channel")
             or DEFAULT_BUILD["release_channel"],
-            "client_version": dec.get("client_version")
-            or DEFAULT_BUILD["client_version"],
+            "client_version": fetched_version or DEFAULT_BUILD["client_version"],
             "browser_user_agent": ua,
             "browser_version": dec.get("browser_version")
             or DEFAULT_BUILD["browser_version"],
@@ -225,8 +258,7 @@ def make_fingerprint(token: str) -> dict:
 
     build = get_build_info()
     os_version, os_sdk_version = rng.choice(_WINDOWS_BUILDS)
-    locale = rng.choice(_LOCALES)
-    tz = rng.choice(_TIMEZONES)
+    locale, tz = rng.choice(_LOCALE_TIMEZONES)
     app_state = rng.choice(["focused", "unfocused"])
     launch_id = _stable_uuid(rng)
     launch_signature = _stable_uuid(rng)
@@ -265,22 +297,82 @@ def make_fingerprint(token: str) -> dict:
         "X-Discord-Timezone": tz,
         "X-Debug-Options": "bugReporterEnabled",
         "Accept": "*/*",
-        "Accept-Language": f"{locale},en;q=0.9",
+        # The desktop client sends the bare locale, not a weighted list.
+        "Accept-Language": locale,
+        "X-Installation-Id": _installation_id(rng),
+        # Electron's brand list, derived from the same UA above so the two can
+        # never disagree. Chrome's own list carries a "Google Chrome" brand;
+        # Electron's does not, which is what curl_cffi's profile gets wrong.
+        "Sec-CH-UA": _sec_ch_ua(user_agent),
+        "Sec-CH-UA-Mobile": "?0",
+        "Sec-CH-UA-Platform": '"Windows"',
+        # An API call from the app, not a page load. curl_cffi's impersonation
+        # profile defaults these to a top-level navigation, which contradicts
+        # a POST carrying an Authorization header.
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Dest": "empty",
+        "Origin": "https://discord.com",
     }
     return {"headers": headers, "super_props_b64": super_props_b64}
 
 
-def build_headers(token: str) -> dict:
-    """Full header dict for a user-token REST request."""
+def _installation_id(rng: random.Random) -> str:
+    """A stable per-install id shaped like the client's: <snowflake>.<27 chars>."""
+    snowflake = rng.randrange(10**18, 10**19)
+    alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+    suffix = "".join(rng.choice(alphabet) for _ in range(27))
+    return f"{snowflake}.{suffix}"
+
+
+def _sec_ch_ua(user_agent: str) -> str:
+    """Electron's Sec-CH-UA brand list for the Chrome major in ``user_agent``."""
+    m = re.search(r"Chrome/(\d+)", user_agent or "")
+    major = m.group(1) if m else "148"
+    return f'"Not/A)Brand";v="99", "Chromium";v="{major}"'
+
+
+# curl_cffi's impersonation profile adds these; the real client sends none of
+# them. A None value removes a header rather than blanking it (an empty string
+# leaves it in place).
+#
+# NOT part of build_headers(): only curl_cffi understands a None value, and
+# aiohttp -- which the scraper and message_utils use -- raises on one. Merge it
+# in at the curl_cffi call site instead.
+SUPPRESSED_PROFILE_HEADERS = {
+    "sec-fetch-user": None,
+    "upgrade-insecure-requests": None,
+    "priority": None,
+}
+
+
+def build_headers(token: str, *, referer: str | None = None) -> dict:
+    """Full header dict for a user-token REST request.
+
+    ``referer`` should be the clone channel the message is going to; the real
+    client always sends the channel it is looking at.
+
+    Every value is a string, so this is safe for aiohttp. Callers going out
+    through curl_cffi should also merge SUPPRESSED_PROFILE_HEADERS.
+    """
     fp = _FINGERPRINT_CACHE.get(token)
     if fp is None:
         fp = make_fingerprint(token)
         _FINGERPRINT_CACHE[token] = fp
-    return {
+    headers = {
         **fp["headers"],
         "Authorization": token,
         "X-Super-Properties": fp["super_props_b64"],
     }
+    if referer:
+        headers["Referer"] = referer
+    return headers
+
+
+def channel_referer(channel_id, guild_id=None) -> str:
+    """The URL the client would be sitting on to send into this channel."""
+    scope = str(guild_id) if guild_id else "@me"
+    return f"https://discord.com/channels/{scope}/{channel_id}"
 
 
 def context_properties(location: str = "chat_input") -> str:
@@ -442,3 +534,92 @@ async def reap_idle_tls_sessions(idle_ttl: float = TLS_SESSION_IDLE_TTL) -> int:
             len(_TLS_SESSIONS),
         )
     return len(stale)
+
+
+def session_state(token: str) -> dict:
+    """Live TLS-session state for one token, for debug output.
+
+    A closed session is not an error: sessions are created on first send and
+    reaped after ``TLS_SESSION_IDLE_TTL``, so a token that has not posted
+    recently simply has none.
+    """
+    now = time.monotonic()
+    last = _TLS_LAST_USED.get(token)
+    return {
+        "session_open": token in _TLS_SESSIONS,
+        "cookies_primed": token in _TLS_PRIMED,
+        "idle_seconds": round(now - last, 1) if last is not None else None,
+        "impersonate": TLS_IMPERSONATE,
+    }
+
+
+def live_session_count() -> int:
+    """How many per-token TLS sessions are currently open."""
+    return len(_TLS_SESSIONS)
+
+
+# Headers a real Discord desktop client sends on a message POST, from a
+# capture taken 2026-08-21. Values that vary per install/session are given as
+# None, meaning "must be present, value not compared".
+REAL_CLIENT_HEADERS = {
+    "sec-ch-ua-platform": '"Windows"',
+    "sec-ch-ua": '"Not/A)Brand";v="99", "Chromium";v="148"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-fetch-site": "same-origin",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-dest": "empty",
+    "origin": "https://discord.com",
+    "referer": None,
+    "x-installation-id": None,
+    "x-debug-options": "bugReporterEnabled",
+    "x-discord-locale": None,
+    "x-discord-timezone": None,
+    "x-super-properties": None,
+    "x-context-properties": None,
+    "authorization": None,
+    "user-agent": None,
+    "accept": "*/*",
+    "accept-language": None,
+    "accept-encoding": "gzip, deflate, br, zstd",
+    "content-type": "application/json",
+}
+
+# The real client sends none of these. They are navigation artifacts that give
+# away a browser impersonation profile being used for an API call.
+REAL_CLIENT_ABSENT = (
+    "sec-fetch-user",
+    "upgrade-insecure-requests",
+    "priority",
+)
+
+# Set by the transport or the request itself, not part of the persona.
+_WIRE_IGNORE = ("host", "content-length", "cookie", "x-forwarded-proto", "x-amzn-trace-id")
+
+
+def diff_against_real_client(wire_headers: dict) -> dict:
+    """Compare headers actually sent against the real-client reference."""
+    got = {k.lower(): v for k, v in (wire_headers or {}).items()}
+
+    missing, mismatched = [], {}
+    for name, expected in REAL_CLIENT_HEADERS.items():
+        if name not in got:
+            missing.append(name)
+        elif expected is not None and got[name] != expected:
+            mismatched[name] = {"expected": expected, "got": got[name]}
+
+    extra = [n for n in REAL_CLIENT_ABSENT if n in got]
+    unexpected = sorted(
+        n
+        for n in got
+        if n not in REAL_CLIENT_HEADERS
+        and n not in REAL_CLIENT_ABSENT
+        and n not in _WIRE_IGNORE
+    )
+
+    return {
+        "matches_real_client": not (missing or mismatched or extra),
+        "missing": missing,
+        "mismatched": mismatched,
+        "present_but_real_client_omits": extra,
+        "not_in_reference": unexpected,
+    }

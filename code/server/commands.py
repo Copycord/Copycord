@@ -21,13 +21,25 @@ from datetime import datetime, timezone
 import time
 import logging
 import re
+import base64
 import json
 import io
 import zipfile
 import sqlite3
 from typing import Optional
 from common.config import Config
+from common.common_helpers import resolve_mapping_settings
 from common.db import DBManager
+from common.proxy_pool import _proxy_label, get_pool as get_proxy_pool
+from common.selfbot_headers import (
+    SUPPRESSED_PROFILE_HEADERS,
+    _token_log_id,
+    build_headers,
+    channel_referer,
+    context_properties,
+    diff_against_real_client,
+    get_tls_session,
+)
 from server.rate_limiter import RateLimitManager, ActionType
 from server.helpers import PurgeAssetHelper
 
@@ -362,6 +374,195 @@ class CloneCommands(commands.Cog):
         embed.add_field(name="Uptime", value=uptime_str, inline=True)
 
         await ctx.respond(embed=embed, ephemeral=True)
+
+    @guild_scoped_slash_command(
+        name="token_debug",
+        description="Dump the proxy, egress IP and real on-the-wire headers for each user token.",
+    )
+    async def token_debug(
+        self,
+        ctx: discord.ApplicationContext,
+        limit: int = Option(
+            description="Maximum tokens to include (default 25)",
+            required=False,
+            default=25,
+        ),
+    ):
+        """Dump what each user token looks like on the wire.
+
+        Deliberately shows the fingerprint, not the credential: the
+        Authorization header is the account itself, and this file lands in a
+        Discord channel.
+        """
+        guild = ctx.guild
+        if not guild:
+            return await ctx.respond(
+                "This command must be run inside a server.", ephemeral=True
+            )
+
+        await ctx.defer(ephemeral=True)
+
+        mapping = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping:
+            return await ctx.followup.send(
+                "This server isn't a clone mapping.", ephemeral=True
+            )
+        mapping = dict(mapping)
+        mapping_id = mapping.get("mapping_id")
+
+        try:
+            tokens = self.db.get_enabled_mapping_tokens(str(mapping_id)) or []
+        except Exception:
+            logger.exception("[token-debug] failed to load tokens")
+            tokens = []
+
+        if not tokens:
+            return await ctx.followup.send(
+                "No enabled user tokens on this mapping.", ephemeral=True
+            )
+
+        try:
+            limit = max(1, min(int(limit), 100))
+        except (TypeError, ValueError):
+            limit = 25
+        shown, omitted = tokens[:limit], max(0, len(tokens) - limit)
+
+        settings = resolve_mapping_settings(
+            self.db,
+            config,
+            original_guild_id=mapping.get("original_guild_id"),
+            cloned_guild_id=guild.id,
+        )
+        use_proxy = bool(settings.get("USER_TOKEN_USE_PROXIES", False))
+
+        pool = get_proxy_pool()
+        entries = []
+        for row in shown:
+            row = dict(row)
+            token = (row.get("token_value") or "").strip()
+            if not token:
+                continue
+
+            headers = build_headers(token)
+            fingerprint = None
+            sp = headers.get("X-Super-Properties")
+            if sp:
+                try:
+                    fingerprint = json.loads(base64.b64decode(sp))
+                except Exception:
+                    fingerprint = None
+
+            entry = {
+                "username": row.get("username"),
+                "token_id": row.get("token_id"),
+                # Correlates a row with the logs without carrying the credential.
+                "token_ref": _token_log_id(token),
+            }
+
+            wire = await self._token_wire_probe(
+                token,
+                use_proxy=use_proxy,
+                channel_id=ctx.channel_id,
+                guild_id=guild.id,
+            )
+            if wire.get("ok"):
+                entry["egress_ip"] = wire.get("egress_ip")
+                entry["headers"] = wire.get("headers_on_wire")
+                entry["diff_vs_real_client"] = wire.get("diff_vs_real_client")
+            else:
+                # Fall back to the configured dict so the dump still says
+                # something when the probe cannot reach the echo service.
+                entry["probe_error"] = wire.get("error")
+                entry["headers_configured"] = {
+                    k: ("[redacted]" if k.lower() == "authorization" else v)
+                    for k, v in headers.items()
+                    if v is not None
+                }
+
+            entry["fingerprint"] = fingerprint
+
+            # Read after the probe: the probe is what opens the session and
+            # takes the lease, so reading first reports neither.
+            proxy = pool.current(token)
+            entry["proxy"] = _proxy_label(proxy) if proxy else None
+
+            entries.append(entry)
+
+        report = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "mapping": mapping.get("mapping_name"),
+            "proxies_enabled": use_proxy,
+            "tokens": entries,
+        }
+        if omitted:
+            report["tokens_omitted"] = omitted
+
+        buf = io.BytesIO(json.dumps(report, indent=2, default=str).encode())
+        buf.seek(0)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+        await ctx.followup.send(
+            file=discord.File(buf, filename=f"copycord_token_debug_{ts}.json"),
+            ephemeral=True,
+        )
+
+    async def _token_wire_probe(
+        self, token: str, *, use_proxy: bool, channel_id, guild_id
+    ) -> dict:
+        """What actually leaves the machine for this token.
+
+        build_headers() is only our half of the request — curl_cffi's
+        impersonation profile adds and overrides headers on top of it, so the
+        configured dict does not tell you what Discord receives. This sends a
+        real request through the token's own session and proxy lease and
+        reports the headers as observed, plus the egress IP.
+
+        The Authorization value is swapped for a placeholder: this goes to a
+        third-party echo service, and the header is the account itself.
+        """
+        try:
+            session = await get_tls_session(token, use_proxy=use_proxy)
+            proxy = get_proxy_pool().current(token)
+
+            # Build the headers exactly as a real send does, or the probe
+            # reports differences that only exist in the probe: the referer
+            # and the profile-header deletions are both added on this path.
+            headers = {
+                **build_headers(
+                    token, referer=channel_referer(channel_id, guild_id)
+                ),
+                **SUPPRESSED_PROFILE_HEADERS,
+            }
+            headers["Authorization"] = "PROBE." + "x" * max(0, len(token) - 6)
+            headers["X-Context-Properties"] = context_properties("chat_input")
+
+            resp = await session.post(
+                "https://httpbin.org/anything",
+                json={"content": "probe"},
+                headers=headers,
+                timeout=20,
+                proxy=proxy,
+            )
+            if resp.status_code != 200:
+                return {"ok": False, "error": f"HTTP {resp.status_code}"}
+
+            body = resp.json() or {}
+            wire = {k.lower(): v for k, v in (body.get("headers") or {}).items()}
+
+            # Diff first, then drop the value: the header's presence is part
+            # of the comparison, its contents are not ours to write down.
+            diff = diff_against_real_client(wire)
+            if "authorization" in wire:
+                wire["authorization"] = "[redacted]"
+
+            return {
+                "ok": True,
+                "egress_ip": body.get("origin"),
+                "headers_on_wire": wire,
+                "diff_vs_real_client": diff,
+            }
+        except Exception as e:
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
     @guild_scoped_slash_command(
         name="ping_client",

@@ -211,7 +211,7 @@ async def test_links_only_skips_upload(monkeypatch):
 
     async def fake_send(
         self, token, channel_id, text, attachments, *,
-        sticker_ids=None, use_proxy=False, reply_to=None,
+        sticker_ids=None, use_proxy=False, reply_to=None, guild_id=None,
     ):
         captured["attachments"] = attachments
         return SEND_OK, 111
@@ -262,7 +262,7 @@ async def test_forced_token_id_is_tried_first(monkeypatch):
 
     async def fake_send(
         self, token, channel_id, text, attachments, *,
-        sticker_ids=None, use_proxy=False, reply_to=None,
+        sticker_ids=None, use_proxy=False, reply_to=None, guild_id=None,
     ):
         used["token"] = token
         return SEND_OK, 111
@@ -311,7 +311,7 @@ async def test_sticky_exclusive_never_falls_back_to_other_tokens(monkeypatch):
 
     async def fake_send(
         self, token, channel_id, text, attachments, *,
-        sticker_ids=None, use_proxy=False, reply_to=None,
+        sticker_ids=None, use_proxy=False, reply_to=None, guild_id=None,
     ):
         tried.append(token)
         return SEND_DEAD, None
@@ -598,7 +598,7 @@ async def test_no_consecutive_repeat_same_channel(monkeypatch):
 
     async def fake_send_with_token(
         self, token, channel_id, text, attachments, *,
-        sticker_ids=None, use_proxy=False, reply_to=None,
+        sticker_ids=None, use_proxy=False, reply_to=None, guild_id=None,
     ):
         # Record which token actually sent (order[0] always succeeds here).
         used.append(token)

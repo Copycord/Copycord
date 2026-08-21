@@ -20,7 +20,9 @@ from curl_cffi.requests.exceptions import RequestException as CurlRequestExcepti
 
 from common.proxy_pool import get_pool as get_proxy_pool
 from common.selfbot_headers import (
+    SUPPRESSED_PROFILE_HEADERS,
     build_headers,
+    channel_referer,
     close_tls_session,
     context_properties,
     get_tls_session,
@@ -142,6 +144,7 @@ class UserTokenSender:
         sent_as: Optional[list] = None,
         sent_ids: Optional[list] = None,
         reply_to: Optional[dict] = None,
+        guild_id=None,
     ) -> str:
         """
         Attempt to post a message into ``target_channel_id`` (a channel or thread
@@ -233,6 +236,7 @@ class UserTokenSender:
                         sticker_ids=stkr_ids,
                         use_proxy=use_proxy,
                         reply_to=reply_to,
+                        guild_id=guild_id,
                     )
                 except Exception:
                     self._log.exception(
@@ -301,6 +305,7 @@ class UserTokenSender:
         content: Optional[str],
         embeds: Optional[list] = None,
         use_proxy: bool = False,
+        guild_id=None,
     ) -> str:
         """Edit a message, as the account that posted it.
 
@@ -324,6 +329,7 @@ class UserTokenSender:
             timeout=30,
             ctx=f"editing message {message_id}",
             use_proxy=use_proxy,
+            referer=channel_referer(channel_id, guild_id),
             not_found_status=SEND_NOT_FOUND,
         )
         return status
@@ -336,6 +342,7 @@ class UserTokenSender:
         message_id: int,
         token_id: Optional[str],
         use_proxy: bool = False,
+        guild_id=None,
     ) -> str:
         """Delete a message, as the account that posted it.
 
@@ -353,6 +360,7 @@ class UserTokenSender:
             timeout=30,
             ctx=f"deleting message {message_id}",
             use_proxy=use_proxy,
+            referer=channel_referer(channel_id, guild_id),
             not_found_status=SEND_NOT_FOUND,
         )
         return status
@@ -761,6 +769,7 @@ class UserTokenSender:
         use_proxy: bool = False,
         method: str = "POST",
         not_found_status: str = SEND_UNDELIVERABLE,
+        referer: Optional[str] = None,
     ) -> tuple[str, Optional[dict]]:
         """Call the API as one account, with rate-limit gating and retries.
 
@@ -781,7 +790,7 @@ class UserTokenSender:
                 proxy = get_proxy_pool().current(token)
                 try:
                     session = await self._tls_session(token, use_proxy=use_proxy)
-                    headers = self._build_headers(token)
+                    headers = self._build_headers(token, referer)
                     if extra_headers:
                         headers = {**headers, **extra_headers}
 
@@ -937,6 +946,7 @@ class UserTokenSender:
         sticker_ids: Optional[list] = None,
         use_proxy: bool = False,
         reply_to: Optional[dict] = None,
+        guild_id=None,
     ) -> str:
         """Post a message as one account. Returns a ``SEND_*`` status."""
         session = self._session_provider()
@@ -960,6 +970,7 @@ class UserTokenSender:
         extra = {"X-Context-Properties": _CHAT_INPUT_CONTEXT}
 
         reply_bits = _reply_bits(reply_to)
+        referer = channel_referer(channel_id, guild_id)
 
         if files:
             status, data = await self._request_with_token(
@@ -972,6 +983,7 @@ class UserTokenSender:
                 ctx=ctx,
                 extra_headers=extra,
                 use_proxy=use_proxy,
+                referer=referer,
             )
         else:
             payload = {"content": body_text}
@@ -986,6 +998,7 @@ class UserTokenSender:
                 ctx=ctx,
                 extra_headers=extra,
                 use_proxy=use_proxy,
+                referer=referer,
             )
 
         cloned_message_id = None
@@ -1278,6 +1291,11 @@ class UserTokenSender:
         except Exception:
             return ""
 
-    def _build_headers(self, token: str) -> dict:
+    def _build_headers(self, token: str, referer: str | None = None) -> dict:
         """Realistic Discord desktop-client headers, unique & stable per token."""
-        return build_headers(token)
+        # The suppression entries are curl_cffi-only (None deletes a
+        # header); this is the curl_cffi path, so merge them here.
+        return {
+            **build_headers(token, referer=referer),
+            **SUPPRESSED_PROFILE_HEADERS,
+        }
