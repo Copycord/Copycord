@@ -11,6 +11,8 @@ import types
 import aiohttp
 import pytest
 
+from curl_cffi.requests.exceptions import RequestException as CurlRequestException
+
 from server.token_sender import (
     UserTokenSender,
     SEND_OK,
@@ -20,6 +22,22 @@ from server.token_sender import (
     SEND_TRANSIENT,
     SEND_NO_TOKENS,
 )
+
+
+def _use_session(sender, provider):
+    """Point a sender at a fake HTTP session.
+
+    Two seams, because two different things reach for a session: attachment
+    downloads go through ``_session_provider`` (aiohttp), while the Discord
+    call itself goes through ``_tls_session`` (a per-token curl_cffi session).
+    Setting only the first leaves the request hitting the real network.
+    """
+    sender._session_provider = provider
+
+    async def _fake_tls(token, *, use_proxy=False):
+        return provider()
+
+    sender._tls_session = _fake_tls
 
 
 def _make_sender():
@@ -191,9 +209,12 @@ async def test_links_only_skips_upload(monkeypatch):
 
     captured = {}
 
-    async def fake_send(self, token, channel_id, text, attachments, *, sticker_ids=None):
+    async def fake_send(
+        self, token, channel_id, text, attachments, *,
+        sticker_ids=None, use_proxy=False, reply_to=None,
+    ):
         captured["attachments"] = attachments
-        return SEND_OK
+        return SEND_OK, 111
 
     monkeypatch.setattr(UserTokenSender, "_send_with_token", fake_send)
 
@@ -239,9 +260,12 @@ async def test_forced_token_id_is_tried_first(monkeypatch):
 
     used = {}
 
-    async def fake_send(self, token, channel_id, text, attachments, *, sticker_ids=None):
+    async def fake_send(
+        self, token, channel_id, text, attachments, *,
+        sticker_ids=None, use_proxy=False, reply_to=None,
+    ):
         used["token"] = token
-        return SEND_OK
+        return SEND_OK, 111
 
     monkeypatch.setattr(UserTokenSender, "_send_with_token", fake_send)
 
@@ -285,9 +309,12 @@ async def test_sticky_exclusive_never_falls_back_to_other_tokens(monkeypatch):
 
     tried = []
 
-    async def fake_send(self, token, channel_id, text, attachments, *, sticker_ids=None):
+    async def fake_send(
+        self, token, channel_id, text, attachments, *,
+        sticker_ids=None, use_proxy=False, reply_to=None,
+    ):
         tried.append(token)
-        return SEND_DEAD
+        return SEND_DEAD, None
 
     monkeypatch.setattr(UserTokenSender, "_send_with_token", fake_send)
 
@@ -332,14 +359,14 @@ async def test_uploaded_attachment_url_stripped_from_text(monkeypatch):
 
     captured = {}
 
-    def fake_multipart(self, content, files, sticker_ids=None):
+    def fake_multipart(self, content, files, sticker_ids=None, *, reply_bits=None):
         captured["content"] = content
         return "FORM"
 
     monkeypatch.setattr(UserTokenSender, "_build_multipart", fake_multipart)
 
     class _Resp:
-        status = 200
+        status_code = 200
 
         async def __aenter__(self):
             return self
@@ -348,12 +375,12 @@ async def test_uploaded_attachment_url_stripped_from_text(monkeypatch):
             return False
 
     class _Session:
-        def post(self, *a, **k):
+        async def post(self, *a, **k):
             return _Resp()
 
-    s._session_provider = lambda: _Session()
+    _use_session(s, lambda: _Session())
 
-    ok = await s._send_with_token(
+    ok, _mid = await s._send_with_token(
         "tok", 1, f"lol\n{url}", [{"url": url, "filename": "att.png"}]
     )
     assert ok == SEND_OK
@@ -374,7 +401,7 @@ async def test_sticker_only_message_sends_sticker_ids():
     captured = {}
 
     class _Resp:
-        status = 200
+        status_code = 200
 
         async def __aenter__(self):
             return self
@@ -383,7 +410,7 @@ async def test_sticker_only_message_sends_sticker_ids():
             return False
 
     class _Session:
-        def post(self, url, json=None, data=None, headers=None, timeout=None):
+        async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
             captured["json"] = json
             return _Resp()
 
@@ -398,6 +425,7 @@ async def test_sticker_only_message_sends_sticker_ids():
             exception=lambda *a, **k: None,
         ),
     )
+    _use_session(s, lambda: _Session())
 
     # A sticker-only message (no text/attachments) still sends via token.
     ok = await s.send(
@@ -478,12 +506,12 @@ async def test_pace_shows_typing_for_the_delay():
             return False
 
     class _Session:
-        def post(self, url, headers=None, timeout=None):
+        async def post(self, url, headers=None, timeout=None, **kw):
             posts.append(url)
             return _Resp()
 
     s = _make_sender()
-    s._session_provider = lambda: _Session()
+    _use_session(s, lambda: _Session())
     t0 = _t.monotonic()
     # Typing enabled → the indicator fires and the message waits the delay.
     await s._pace_channel(100, 0.05, 0.05, typing=True, token="tok")
@@ -508,7 +536,7 @@ async def test_send_serializes_typing_then_send_per_channel():
             return None
 
     class _Resp:
-        status = 200
+        status_code = 200
 
         async def __aenter__(self):
             return self
@@ -517,7 +545,7 @@ async def test_send_serializes_typing_then_send_per_channel():
             return False
 
     class _Session:
-        def post(self, url, json=None, data=None, headers=None, timeout=None):
+        async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
             events.append("type" if url.endswith("/typing") else "send")
             return _Resp()
 
@@ -532,6 +560,7 @@ async def test_send_serializes_typing_then_send_per_channel():
             exception=lambda *a, **k: None,
         ),
     )
+    _use_session(s, lambda: _Session())
 
     async def one():
         await s.send(
@@ -568,11 +597,12 @@ async def test_no_consecutive_repeat_same_channel(monkeypatch):
     used = []
 
     async def fake_send_with_token(
-        self, token, channel_id, text, attachments, *, sticker_ids=None
+        self, token, channel_id, text, attachments, *,
+        sticker_ids=None, use_proxy=False, reply_to=None,
     ):
         # Record which token actually sent (order[0] always succeeds here).
         used.append(token)
-        return SEND_OK
+        return SEND_OK, 111
 
     monkeypatch.setattr(
         UserTokenSender, "_send_with_token", fake_send_with_token
@@ -632,10 +662,10 @@ async def test_send_returns_false_without_tokens():
 
 
 class _JsonResp:
-    """Minimal aiohttp-style response returning a fixed status + JSON body."""
+    """Minimal curl_cffi-style response returning a fixed status + JSON body."""
 
     def __init__(self, status, body=None):
-        self.status = status
+        self.status_code = status
         self._body = body or {}
         self.headers = {}
 
@@ -645,15 +675,16 @@ class _JsonResp:
     async def __aexit__(self, *a):
         return False
 
-    async def json(self):
+    def json(self):
         return self._body
 
-    async def text(self):
+    @property
+    def text(self):
         return json.dumps(self._body)
 
 
 def _forum_sender(db, session):
-    return UserTokenSender(
+    s = UserTokenSender(
         db=db,
         ratelimit=_FakeRateLimit(),
         action_type="user_message",
@@ -664,6 +695,8 @@ def _forum_sender(db, session):
             exception=lambda *a, **k: None,
         ),
     )
+    _use_session(s, lambda: session)
+    return s
 
 
 class TestCreateForumThread:
@@ -680,7 +713,7 @@ class TestCreateForumThread:
         captured = {}
 
         class _Session:
-            def post(self, url, json=None, data=None, headers=None, timeout=None):
+            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
                 captured["url"] = url
                 captured["json"] = json
                 return _JsonResp(201, {"id": "998877"})
@@ -715,7 +748,7 @@ class TestCreateForumThread:
         used = {}
 
         class _Session:
-            def post(self, url, json=None, data=None, headers=None, timeout=None):
+            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
                 # The Authorization header reveals which account is posting.
                 used["auth"] = headers.get("Authorization")
                 return _JsonResp(201, {"id": "5"})
@@ -741,7 +774,7 @@ class TestCreateForumThread:
         posted = {"called": False}
 
         class _Session:
-            def post(self, *a, **k):
+            async def post(self, *a, **k):
                 posted["called"] = True
                 return _JsonResp(201, {"id": "1"})
 
@@ -771,7 +804,7 @@ class TestCreateForumThread:
         attempts = {"n": 0}
 
         class _Session:
-            def post(self, url, json=None, data=None, headers=None, timeout=None):
+            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
                 attempts["n"] += 1
                 return _JsonResp(403, {"message": "Missing Access"})
 
@@ -798,7 +831,7 @@ class TestCreateForumThread:
         captured = {}
 
         class _Session:
-            def post(self, url, json=None, data=None, headers=None, timeout=None):
+            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
                 captured["json"] = json
                 return _JsonResp(201, {"id": "77"})
 
@@ -828,7 +861,7 @@ class TestCreateTextThread:
         captured = {}
 
         class _Session:
-            def post(self, url, json=None, data=None, headers=None, timeout=None):
+            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
                 captured["url"] = url
                 captured["json"] = json
                 return _JsonResp(201, {"id": "444"})
@@ -859,7 +892,7 @@ class TestCreateTextThread:
         captured = {}
 
         class _Session:
-            def post(self, url, json=None, data=None, headers=None, timeout=None):
+            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
                 captured["url"] = url
                 captured["json"] = json
                 return _JsonResp(201, {"id": "555"})
@@ -889,7 +922,7 @@ class TestCreateTextThread:
         used = {}
 
         class _Session:
-            def post(self, url, json=None, data=None, headers=None, timeout=None):
+            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
                 used["auth"] = headers.get("Authorization")
                 return _JsonResp(201, {"id": "9"})
 
@@ -919,7 +952,7 @@ class TestCreateTextThread:
         attempts = {"n": 0}
 
         class _Session:
-            def post(self, url, json=None, data=None, headers=None, timeout=None):
+            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
                 attempts["n"] += 1
                 return _JsonResp(403, {"message": "Missing Access"})
 
@@ -959,7 +992,7 @@ class _ScriptedSession:
         self._script = list(script)
         self.calls = 0
 
-    def post(self, url, json=None, data=None, headers=None, timeout=None):
+    async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
         self.calls += 1
         item = self._script.pop(0) if self._script else ("resp", 200, {})
         if item[0] == "raise":
@@ -974,18 +1007,18 @@ class TestSendStatusTaxonomy:
     @pytest.mark.asyncio
     async def test_401_is_dead(self):
         s = _make_sender()
-        s._session_provider = lambda: _ScriptedSession([("resp", 401, {})])
+        _use_session(s, lambda: _ScriptedSession([("resp", 401, {})]))
         # Revoked/invalid token → dead → caller benches it.
-        assert await s._send_with_token("t", 1, "hi", []) == SEND_DEAD
+        assert (await s._send_with_token("t", 1, "hi", []))[0] == SEND_DEAD
 
     @pytest.mark.asyncio
     async def test_403_is_undeliverable(self):
         s = _make_sender()
-        s._session_provider = lambda: _ScriptedSession(
-            [("resp", 403, {"message": "Missing Access"})]
+        _use_session(
+            s, lambda: _ScriptedSession([("resp", 403, {"message": "Missing Access"})])
         )
         # Can't post here, but the token itself isn't dead → try another account.
-        assert await s._send_with_token("t", 1, "hi", []) == SEND_UNDELIVERABLE
+        assert (await s._send_with_token("t", 1, "hi", []))[0] == SEND_UNDELIVERABLE
 
     @pytest.mark.asyncio
     async def test_429_then_success_retries_and_parks_account(self, monkeypatch):
@@ -996,9 +1029,9 @@ class TestSendStatusTaxonomy:
             [("resp", 429, {"retry_after": 5}), ("resp", 200, {})]
         )
         s = _make_sender()
-        s._session_provider = lambda: session
+        _use_session(s, lambda: session)
         # A 429 sleeps its retry_after then retries the SAME account (no swap).
-        assert await s._send_with_token("t", 1, "hi", []) == SEND_OK
+        assert (await s._send_with_token("t", 1, "hi", []))[0] == SEND_OK
         assert session.calls == 2
         # The account was parked so its other queued messages wait too.
         assert "t" in s._token_cooldown
@@ -1010,10 +1043,10 @@ class TestSendStatusTaxonomy:
         monkeypatch.setattr(asyncio, "sleep", _instant_sleep)
         session = _ScriptedSession([("resp", 429, {"retry_after": 0.001})] * 20)
         s = _make_sender()
-        s._session_provider = lambda: session
+        _use_session(s, lambda: session)
         # Still limited after the retries → a distinct status the caller must NOT
         # webhook (it's not the token's fault).
-        assert await s._send_with_token("t", 1, "hi", []) == SEND_RATE_LIMITED
+        assert (await s._send_with_token("t", 1, "hi", []))[0] == SEND_RATE_LIMITED
 
     @pytest.mark.asyncio
     async def test_network_error_is_retried_then_transient(self, monkeypatch):
@@ -1021,12 +1054,12 @@ class TestSendStatusTaxonomy:
 
         monkeypatch.setattr(asyncio, "sleep", _instant_sleep)
         session = _ScriptedSession(
-            [("raise", aiohttp.ClientError("boom"))] * 20
+            [("raise", CurlRequestException("boom"))] * 20
         )
         s = _make_sender()
-        s._session_provider = lambda: session
+        _use_session(s, lambda: session)
         # Network errors are retried (never webhooked); after the cap → transient.
-        assert await s._send_with_token("t", 1, "hi", []) == SEND_TRANSIENT
+        assert (await s._send_with_token("t", 1, "hi", []))[0] == SEND_TRANSIENT
         assert session.calls > 1
 
     @pytest.mark.asyncio
@@ -1049,27 +1082,21 @@ class TestSendStatusTaxonomy:
         active = {"n": 0, "max": 0}
 
         class _Resp:
-            status = 200
+            status_code = 200
 
-            async def __aenter__(self):
-                active["n"] += 1
-                active["max"] = max(active["max"], active["n"])
-                await _a.sleep(0.02)
-                return self
-
-            async def __aexit__(self, *a):
-                active["n"] -= 1
-                return False
-
-            async def json(self):
+            def json(self):
                 return {}
 
         class _Session:
-            def post(self, *a, **k):
+            async def post(self, *a, **k):
+                active["n"] += 1
+                active["max"] = max(active["max"], active["n"])
+                await _a.sleep(0.02)
+                active["n"] -= 1
                 return _Resp()
 
         s = _make_sender()
-        s._session_provider = lambda: _Session()
+        _use_session(s, lambda: _Session())
         await _a.gather(
             s._send_with_token("t", 1, "hi", []),
             s._send_with_token("t", 1, "hi", []),
