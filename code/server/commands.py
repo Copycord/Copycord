@@ -21,13 +21,23 @@ from datetime import datetime, timezone
 import time
 import logging
 import re
+import base64
 import json
 import io
 import zipfile
 import sqlite3
 from typing import Optional
 from common.config import Config
+from common.common_helpers import resolve_mapping_settings
 from common.db import DBManager
+from common.proxy_pool import _proxy_label, get_pool as get_proxy_pool
+from common.selfbot_headers import (
+    _token_log_id,
+    build_headers,
+    get_tls_session,
+    live_session_count,
+    session_state,
+)
 from server.rate_limiter import RateLimitManager, ActionType
 from server.helpers import PurgeAssetHelper
 
@@ -362,6 +372,187 @@ class CloneCommands(commands.Cog):
         embed.add_field(name="Uptime", value=uptime_str, inline=True)
 
         await ctx.respond(embed=embed, ephemeral=True)
+
+    @guild_scoped_slash_command(
+        name="token_debug",
+        description="Download a JSON dump of the proxy and headers each user token sends with.",
+    )
+    async def token_debug(
+        self,
+        ctx: discord.ApplicationContext,
+        check_egress: bool = Option(
+            description="Ask each proxy what IP Discord actually sees (slower, makes one request per token)",
+            required=False,
+            default=False,
+        ),
+        limit: int = Option(
+            description="Maximum tokens to include (default 25)",
+            required=False,
+            default=25,
+        ),
+    ):
+        """Dump what each user token looks like on the wire.
+
+        Deliberately shows the fingerprint, not the credential: the
+        Authorization header is the account itself, and this file lands in a
+        Discord channel.
+        """
+        guild = ctx.guild
+        if not guild:
+            return await ctx.respond(
+                "This command must be run inside a server.", ephemeral=True
+            )
+
+        await ctx.defer(ephemeral=True)
+
+        mapping = self.db.get_mapping_by_cloned_guild_id(guild.id)
+        if not mapping:
+            return await ctx.followup.send(
+                "This server isn't a clone mapping.", ephemeral=True
+            )
+        mapping = dict(mapping)
+        mapping_id = mapping.get("mapping_id")
+
+        try:
+            tokens = self.db.get_enabled_mapping_tokens(str(mapping_id)) or []
+        except Exception:
+            logger.exception("[token-debug] failed to load tokens")
+            tokens = []
+
+        if not tokens:
+            return await ctx.followup.send(
+                "No enabled user tokens on this mapping.", ephemeral=True
+            )
+
+        try:
+            limit = max(1, min(int(limit), 100))
+        except (TypeError, ValueError):
+            limit = 25
+        shown, omitted = tokens[:limit], max(0, len(tokens) - limit)
+
+        settings = resolve_mapping_settings(
+            self.db,
+            config,
+            original_guild_id=mapping.get("original_guild_id"),
+            cloned_guild_id=guild.id,
+        )
+        use_proxy = bool(settings.get("USER_TOKEN_USE_PROXIES", False))
+
+        pool = get_proxy_pool()
+        entries = []
+        for row in shown:
+            row = dict(row)
+            token = (row.get("token_value") or "").strip()
+            if not token:
+                continue
+
+            headers = build_headers(token)
+            proxy = pool.current(token)
+
+            entry = {
+                "token_id": row.get("token_id"),
+                "username": row.get("username"),
+                # Enough to correlate rows across dumps and with the logs,
+                # without putting the credential in the file.
+                "token_ref": _token_log_id(token),
+                "proxy": {
+                    "enabled_for_mapping": use_proxy,
+                    "leased": _proxy_label(proxy) if proxy else None,
+                },
+                "tls": session_state(token),
+                "headers": {
+                    k: ("[redacted]" if k.lower() == "authorization" else v)
+                    for k, v in headers.items()
+                },
+            }
+
+            sp = headers.get("X-Super-Properties")
+            if sp:
+                try:
+                    entry["x_super_properties_decoded"] = json.loads(
+                        base64.b64decode(sp)
+                    )
+                except Exception:
+                    entry["x_super_properties_decoded"] = None
+
+            if check_egress:
+                entry["egress_ip"] = await self._token_egress_ip(
+                    token, use_proxy=use_proxy
+                )
+
+            entries.append(entry)
+
+        report = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "mapping": {
+                "mapping_id": mapping_id,
+                "mapping_name": mapping.get("mapping_name"),
+                "original_guild_id": str(mapping.get("original_guild_id") or ""),
+                "cloned_guild_id": str(guild.id),
+            },
+            "settings": {
+                "USE_USER_TOKENS": bool(settings.get("USE_USER_TOKENS", False)),
+                "USER_TOKEN_USE_PROXIES": use_proxy,
+                "USER_TOKEN_STRATEGY": settings.get("USER_TOKEN_STRATEGY"),
+            },
+            "proxy_pool": {
+                "enabled": pool.enabled,
+                "total": pool.total,
+                "leased": pool.leased_count,
+            },
+            "tls_sessions_open": live_session_count(),
+            "tokens_enabled": len(tokens),
+            "tokens_shown": len(entries),
+            "tokens_omitted": omitted,
+            "note": (
+                "Authorization is redacted; token_ref is a stable hash for "
+                "correlating with the logs. Proxy credentials are masked."
+            ),
+            "tokens": entries,
+        }
+
+        buf = io.BytesIO(json.dumps(report, indent=2, default=str).encode())
+        buf.seek(0)
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+
+        desc = (
+            f"**{len(entries)}** token(s)"
+            + (f", {omitted} omitted (raise `limit`)" if omitted else "")
+            + ".\n\nAuthorization headers are **redacted** and proxy "
+            "credentials masked, but this still describes your accounts — "
+            "keep it private."
+        )
+        if not use_proxy:
+            desc += "\n\n⚠️ Proxies are **off** for this mapping, so no leases are shown."
+
+        embed = discord.Embed(
+            title="User Token Debug",
+            description=desc,
+            color=discord.Color.blurple(),
+        )
+        await ctx.followup.send(
+            embed=embed,
+            file=discord.File(buf, filename=f"copycord_token_debug_{ts}.json"),
+            ephemeral=True,
+        )
+
+    async def _token_egress_ip(self, token: str, *, use_proxy: bool) -> dict:
+        """What IP the outside world sees for this token's session.
+
+        Uses the token's own TLS session and proxy lease, so the answer is the
+        address Discord would see — not merely what the proxy file claims.
+        """
+        try:
+            session = await get_tls_session(token, use_proxy=use_proxy)
+            proxy = get_proxy_pool().current(token)
+            resp = await session.get(
+                "https://api.ipify.org?format=json", timeout=15, proxy=proxy
+            )
+            if resp.status_code != 200:
+                return {"ok": False, "error": f"HTTP {resp.status_code}"}
+            return {"ok": True, "ip": (resp.json() or {}).get("ip")}
+        except Exception as e:
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
     @guild_scoped_slash_command(
         name="ping_client",

@@ -442,3 +442,25 @@ async def reap_idle_tls_sessions(idle_ttl: float = TLS_SESSION_IDLE_TTL) -> int:
             len(_TLS_SESSIONS),
         )
     return len(stale)
+
+
+def session_state(token: str) -> dict:
+    """Live TLS-session state for one token, for debug output.
+
+    A closed session is not an error: sessions are created on first send and
+    reaped after ``TLS_SESSION_IDLE_TTL``, so a token that has not posted
+    recently simply has none.
+    """
+    now = time.monotonic()
+    last = _TLS_LAST_USED.get(token)
+    return {
+        "session_open": token in _TLS_SESSIONS,
+        "cookies_primed": token in _TLS_PRIMED,
+        "idle_seconds": round(now - last, 1) if last is not None else None,
+        "impersonate": TLS_IMPERSONATE,
+    }
+
+
+def live_session_count() -> int:
+    """How many per-token TLS sessions are currently open."""
+    return len(_TLS_SESSIONS)
