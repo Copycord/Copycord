@@ -202,25 +202,6 @@ async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> di
 
         fetched_version = str(dec.get("client_version") or "")
 
-        # The feed mixes a current build number with stale version strings:
-        # it reports build 595897 alongside client 1.0.9243 / Electron 37.6.0,
-        # while a real capture of that same build is 1.0.9254 / 42.7.1. When we
-        # hold a capture for the exact build it names, ours is the one taken
-        # from a real client, so keep it.
-        if (
-            build_number == DEFAULT_BUILD["client_build_number"]
-            and fetched_version != DEFAULT_BUILD["client_version"]
-        ):
-            logger.warning(
-                "Build feed reports build %s as client %s, but the built-in "
-                "capture of that build is %s. Keeping the captured set.",
-                build_number,
-                fetched_version or "?",
-                DEFAULT_BUILD["client_version"],
-            )
-            set_build_info(dict(DEFAULT_BUILD))
-            return get_build_info()
-
         # A set whose own version string is absent from its own user agent is
         # not self-consistent, so it cannot be worn as one identity.
         if fetched_version and fetched_version not in ua:
