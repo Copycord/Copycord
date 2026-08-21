@@ -6,11 +6,14 @@
 #  version 3.0. A copy of the license is available at:
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
+
+
 from __future__ import annotations
 
 import asyncio
 import json
 import random
+import re
 import time
 from typing import Callable, Optional
 
@@ -21,6 +24,7 @@ from curl_cffi.requests.exceptions import RequestException as CurlRequestExcepti
 from common.proxy_pool import get_pool as get_proxy_pool
 from common.selfbot_headers import (
     SUPPRESSED_PROFILE_HEADERS,
+    _token_log_id,
     build_headers,
     channel_referer,
     close_tls_session,
@@ -86,6 +90,39 @@ def _reply_bits(reply_to: Optional[dict]) -> dict:
     }
 
 
+CUSTOM_EMOJI_RE = re.compile(r"<(a?):(\w+):(\d+)>")
+_EMOJI_WITH_LEADING_SPACE_RE = re.compile(r" ?<(a?):(\w+):(\d+)>")
+
+
+_NITRO_PREMIUM_TYPES = {1, 2, 3}
+
+
+def strip_unusable_emoji(text: str, usable_ids: set) -> str:
+    """Drop custom emoji an account without Nitro cannot render.
+
+    Discord does not reject these; it strips the `<...>` wrapper and delivers
+    the bare `:name:`, so the cloned message reads "Hello all :wave:". Removing
+    them is closer to the original than leaving the shortcode behind.
+
+    Kept: static emoji owned by the guild being posted into -- any member may
+    use those. Dropped: animated emoji, which need Nitro anywhere, and any
+    emoji belonging to another guild, which is what an uncloned one still is.
+    """
+    if not text:
+        return text
+
+    def repl(m: re.Match) -> str:
+        animated, _name, raw_id = m.groups()
+        if animated:
+            return ""
+        try:
+            return m.group(0) if int(raw_id) in usable_ids else ""
+        except (TypeError, ValueError):
+            return ""
+
+    return _EMOJI_WITH_LEADING_SPACE_RE.sub(repl, text).strip()
+
+
 SEND_OK = "ok"
 SEND_NOT_FOUND = "not_found"
 SEND_DEAD = "dead"
@@ -122,6 +159,8 @@ class UserTokenSender:
         self._author_last_seen: dict = {}
 
         self._dead_tokens: set = set()
+
+        self._nitro_by_token: dict = {}
 
     async def send(
         self,
@@ -415,8 +454,6 @@ class UserTokenSender:
         forum_id = int(forum_channel_id)
         atts_to_upload = [] if links_only else atts
         tag_ids = [str(t) for t in (applied_tag_ids or []) if t]
-
-        # Same account ordering as send(): honour the identity manager's choice,
 
         if forced_token_id is not None:
             forced = [
@@ -752,6 +789,51 @@ class UserTokenSender:
             self._author_last_seen.pop(key, None)
         return len(stale)
 
+    async def _token_has_nitro(self, token: str, *, use_proxy: bool = False) -> bool:
+        """Whether this account may use custom emoji outside their own guild.
+
+        One lookup per account for the life of the process. On any failure we
+        answer True, which leaves the message untouched: a wrongly-kept emoji
+        renders as `:name:`, while a wrongly-stripped one is gone for good.
+        """
+        cached = self._nitro_by_token.get(token)
+        if cached is not None:
+            return cached
+
+        status, data = await self._request_with_token(
+            token,
+            f"{DISCORD_API_BASE}/users/@me",
+            method="GET",
+            timeout=15,
+            ctx="reading premium status",
+            use_proxy=use_proxy,
+        )
+        if status != SEND_OK or not isinstance(data, dict):
+            self._log.debug(
+                "[user-send] premium status unresolved (%s); assuming Nitro", status
+            )
+            return True
+
+        has_nitro = int(data.get("premium_type") or 0) in _NITRO_PREMIUM_TYPES
+        self._nitro_by_token[token] = has_nitro
+        self._log.debug(
+            "[user-send] token %s premium_type=%s nitro=%s",
+            _token_log_id(token),
+            data.get("premium_type"),
+            has_nitro,
+        )
+        return has_nitro
+
+    def _usable_emoji_ids(self, guild_id) -> set:
+        """Emoji ids a plain member of ``guild_id`` may use."""
+        if not guild_id:
+            return set()
+        try:
+            return self._db.get_cloned_emoji_ids(int(guild_id))
+        except Exception:
+            self._log.debug("[user-send] emoji lookup failed", exc_info=True)
+            return set()
+
     async def _tls_session(self, token: str, *, use_proxy: bool = False):
         """The per-token curl_cffi session. Overridden in tests."""
         return await get_tls_session(token, use_proxy=use_proxy)
@@ -783,10 +865,6 @@ class UserTokenSender:
         async with self._token_lock(token):
             while True:
                 await self._await_cooldown(token)
-
-                # this token's session was primed through a proxy (by any
-
-                # prior iteration's report_failure() may have swapped it.
                 proxy = get_proxy_pool().current(token)
                 try:
                     session = await self._tls_session(token, use_proxy=use_proxy)
@@ -799,7 +877,7 @@ class UserTokenSender:
                     elif json_body is not None:
                         kwargs = {"json": json_body}
                     else:
-                        # DELETE carries no body.
+
                         kwargs = {}
                     kwargs.update(headers=headers, timeout=timeout, proxy=proxy)
 
@@ -957,6 +1035,15 @@ class UserTokenSender:
             url = a.get("url")
             if url and url in uploaded_urls and url in body_text:
                 body_text = body_text.replace(url, "").strip()
+
+        if body_text and CUSTOM_EMOJI_RE.search(body_text):
+            if not await self._token_has_nitro(token, use_proxy=use_proxy):
+                cleaned = strip_unusable_emoji(
+                    body_text, self._usable_emoji_ids(guild_id)
+                )
+
+                if cleaned or files or stkr_ids:
+                    body_text = cleaned
 
         if len(body_text) > MAX_CONTENT_LEN:
             body_text = body_text[: MAX_CONTENT_LEN - 1] + "…"
@@ -1293,8 +1380,7 @@ class UserTokenSender:
 
     def _build_headers(self, token: str, referer: str | None = None) -> dict:
         """Realistic Discord desktop-client headers, unique & stable per token."""
-        # The suppression entries are curl_cffi-only (None deletes a
-        # header); this is the curl_cffi path, so merge them here.
+
         return {
             **build_headers(token, referer=referer),
             **SUPPRESSED_PROFILE_HEADERS,
