@@ -41,6 +41,14 @@ from client.export_runners import (
 from client.forwarding import ForwardingManager
 from client.proxy_rotator import ProxyRotator, _mask_proxy_url
 
+try:
+    # Sentinel discord.py uses as the pre-login value of Client.loop. login()
+    # only runs its async setup hook while loop is still this object, so a
+    # restarted client has to be put back into that state. See _clear_bot_state.
+    from discord.client import _loop as _DISCORD_LOOP_SENTINEL
+except Exception:  # pragma: no cover - depends on library internals
+    _DISCORD_LOOP_SENTINEL = None
+
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -90,6 +98,21 @@ for lib in ("discord.state", "discord.client"):
 logger = logging.getLogger("client")
 logger.setLevel(LEVEL)
 
+# Seconds a single gateway attempt gets to reach on_connect before we tear it
+# down and try again (0 disables the watchdog entirely).
+GATEWAY_CONNECT_TIMEOUT_DEFAULT = 15
+# Attempts to make when there are no proxies to rotate through.
+GATEWAY_CONNECT_RETRIES_DEFAULT = 3
+
+
+class GatewayConnectTimeout(OSError):
+    """The gateway did not come up in time.
+
+    Subclasses OSError so it lands in the same rotation path as a dead proxy:
+    discord.py's connect() loop swallows OSError/TimeoutError and retries
+    forever on the *same* route, so a hung proxy never surfaces on its own.
+    """
+
 
 class ClientListener:
     def __init__(self):
@@ -100,6 +123,13 @@ class ClientListener:
         self.proxy_rotator = ProxyRotator()
         self._init_proxy_rotator()
         self._initial_proxy = self.proxy_rotator.next() if self.proxy_rotator.enabled else None
+        self._connect_timeout = self._db_int(
+            "GATEWAY_CONNECT_TIMEOUT", GATEWAY_CONNECT_TIMEOUT_DEFAULT
+        )
+        self._connect_retries = max(
+            1, self._db_int("GATEWAY_CONNECT_RETRIES", GATEWAY_CONNECT_RETRIES_DEFAULT)
+        )
+        self._gateway_connected: Optional[asyncio.Event] = None
         self.bot = commands.Bot(command_prefix="!", self_bot=True, proxy=self._initial_proxy)
         self.proxy_rotator.on_rotate = self._on_proxy_rotate
         self.proxy_rotator.on_all_dead = self._on_all_proxies_dead
@@ -113,6 +143,7 @@ class ClientListener:
         self._dm_export_task: asyncio.Task | None = None
         self._dm_export_running: bool = False
         self.bot.event(self.on_ready)
+        self.bot.event(self.on_connect)
         self.bot.event(self.on_disconnect)
         self.bot.event(self.on_resumed)
         self.bot.event(self.on_message)
@@ -211,6 +242,13 @@ class ClientListener:
         except Exception:
             logger.exception("Failed reloading mapped origins")
 
+    def _db_int(self, key: str, default: int) -> int:
+        raw = (self.db.get_config(key, "") or "").strip()
+        try:
+            return int(raw) if raw else default
+        except (ValueError, TypeError):
+            return default
+
     def _init_proxy_rotator(self) -> None:
         """Load proxy list and configure rotation from DB flags."""
         self.proxy_rotator.reload()
@@ -219,17 +257,10 @@ class ClientListener:
         ).strip().lower() in ("1", "true", "yes")
         self.proxy_rotator.set_enabled(enabled)
 
-        def _db_int(key, default):
-            raw = (self.db.get_config(key, "") or "").strip()
-            try:
-                return int(raw) if raw else default
-            except (ValueError, TypeError):
-                return default
-
         self.proxy_rotator.set_rotation_interval(
-            _db_int("PROXY_ROTATION_INTERVAL", 0)
+            self._db_int("PROXY_ROTATION_INTERVAL", 0)
         )
-        self.proxy_rotator.SUSPEND_SECONDS = _db_int("PROXY_SUSPEND_DURATION", 300)
+        self.proxy_rotator.SUSPEND_SECONDS = self._db_int("PROXY_SUSPEND_DURATION", 300)
 
     def _on_proxy_rotate(self, proxy_url: str) -> None:
         """Called by the proxy rotator when the active proxy changes."""
@@ -2425,13 +2456,20 @@ class ClientListener:
 
                 try:
                     logger.info("[🔁] Trying backup token %s", row["token_id"])
-                    loop.run_until_complete(self.bot.start(token))
+                    self._reset_bot_for_retry()
+                    loop.run_until_complete(self._start_with_watchdog(token))
                     self.db.mark_backup_token_used(row["token_id"])
                     logger.info("[✅] Backup token succeeded: %s", row["token_id"])
                     return True
 
                 except LoginFailure:
                     logger.warning("[⚠️] Backup token invalid: %s", row["token_id"])
+                    continue
+
+                except GatewayConnectTimeout as e:
+                    logger.warning(
+                        "[⏱️] Backup token %s: %s", row["token_id"], e
+                    )
                     continue
 
                 except Exception:
@@ -2444,6 +2482,173 @@ class ClientListener:
             logger.exception("[backup] failed to switch to a backup token")
             return False
 
+
+    async def on_connect(self) -> None:
+        """Gateway websocket is up and READY has been parsed."""
+        ev = self._gateway_connected
+        if ev is not None:
+            ev.set()
+
+    async def _start_with_watchdog(self, token: str, timeout: int = 0) -> None:
+        """Run bot.start(), but give the gateway a deadline to come up.
+
+        login() failures propagate on their own, but the gateway phase does not:
+        connect() catches OSError/TimeoutError and retries the *same* route
+        forever, so a hung proxy just stalls. We race start() against the
+        on_connect event and tear the attempt down if neither lands in time.
+        """
+        timeout = timeout or self._connect_timeout
+        if timeout <= 0:
+            await self.bot.start(token)
+            return
+
+        # Own event rather than bot.wait_for(): wait_for touches bot.loop, which
+        # discord.py leaves unset until login() runs inside start().
+        self._gateway_connected = asyncio.Event()
+        start_task = asyncio.ensure_future(self.bot.start(token))
+        connected = asyncio.ensure_future(self._gateway_connected.wait())
+
+        try:
+            done, _ = await asyncio.wait(
+                {start_task, connected},
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except BaseException:
+            connected.cancel()
+            start_task.cancel()
+            raise
+
+        # start() finished first: it returned or raised. Either way that answer
+        # is the real one, so surface it untouched.
+        if start_task in done:
+            connected.cancel()
+            return await start_task
+
+        # Gateway is up. Hand the rest of the session back to start(), which
+        # only returns when the client actually stops.
+        if connected in done:
+            return await start_task
+
+        connected.cancel()
+        await self._abort_stalled_connect(start_task)
+        raise GatewayConnectTimeout(
+            f"gateway did not connect within {timeout}s"
+        )
+
+    async def _abort_stalled_connect(self, start_task: asyncio.Future) -> None:
+        """Tear down a half-open connect so the bot can be started again."""
+        try:
+            await asyncio.wait_for(self.bot.close(), timeout=10)
+        except Exception:
+            logger.debug("[gateway] close() during abort failed", exc_info=True)
+
+        start_task.cancel()
+        try:
+            await start_task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            # Expected: we just closed the client out from under it. Keep the
+            # reason (a dead proxy shows up here) but not the stack.
+            logger.debug("[gateway] connect aborted: %s: %s", type(e).__name__, e)
+
+        # close() marks the client closed; this makes it startable again.
+        self._clear_bot_state()
+
+    def _clear_bot_state(self) -> None:
+        """Reset a closed client so it can be started again.
+
+        Works around three gaps in discord.py's own restart path:
+
+        - Client.clear() calls self._ready.clear(), but _ready is MISSING until
+          login() runs. close() guards that; clear() does not. A stall during
+          login therefore aborts clear() part-way through.
+        - close() sets loop = MISSING, while login() only re-runs
+          _async_setup_hook() when loop is still the _loop sentinel. Restarting
+          therefore leaves loop MISSING, and the gateway's keepalive dies on it
+          the moment a websocket does come up.
+        - HTTPClient.clear() drops the closed sessions but leaves _started
+          True, so startup() early-returns and the next request() calls into
+          the MISSING sentinel.
+        """
+        bot = self.bot
+        try:
+            if not hasattr(getattr(bot, "_ready", None), "clear"):
+                bot._ready = asyncio.Event()
+            bot.clear()
+        except Exception:
+            logger.debug("[gateway] clear() failed", exc_info=True)
+            # clear() sets _closing_task first, but make sure: while it is set
+            # is_closed() stays True and connect() returns immediately.
+            try:
+                bot._closing_task = None
+            except Exception:
+                pass
+
+        # Put loop back to the pre-login sentinel so login() rebuilds loop,
+        # _connection.loop, http.loop and _ready. Done after clear(), which
+        # touches _connection and http.
+        if _DISCORD_LOOP_SENTINEL is not None:
+            try:
+                bot.loop = _DISCORD_LOOP_SENTINEL
+            except Exception:
+                logger.debug("[gateway] loop reset failed", exc_info=True)
+
+        # Force startup() to rebuild the HTTP sessions, which also re-reads the
+        # proxy we may have just rotated to.
+        try:
+            http = getattr(bot, "http", None)
+            if http is not None:
+                http._started = False
+        except Exception:
+            logger.debug("[gateway] http session reset failed", exc_info=True)
+
+    def _reset_bot_for_retry(self) -> None:
+        """Make the bot startable again after a failed attempt."""
+        try:
+            if self.bot.is_closed():
+                self._clear_bot_state()
+        except Exception:
+            logger.debug("[gateway] reset before retry failed", exc_info=True)
+
+    def _retry_connect_directly(
+        self, token: str, loop: asyncio.AbstractEventLoop
+    ) -> None:
+        """Retry the connect when there is no proxy to rotate to.
+
+        A fresh login + websocket is the thing that actually clears a stall,
+        which is exactly what discord.py's own reconnect loop will not do.
+        The deadline widens each attempt: a hung route is caught fast, while an
+        account that is merely slow to send READY still gets in rather than
+        being torn down forever.
+        """
+        for attempt in range(2, self._connect_retries + 1):
+            self._reset_bot_for_retry()
+            deadline = self._connect_timeout * attempt
+            logger.info(
+                "[🔁] Retrying gateway connect (attempt %d/%d, %ds)",
+                attempt,
+                self._connect_retries,
+                deadline,
+            )
+            try:
+                loop.run_until_complete(
+                    self._start_with_watchdog(token, timeout=deadline)
+                )
+                return
+            except GatewayConnectTimeout as e:
+                logger.warning("[⏱️] %s", e)
+            except LoginFailure as e:
+                logger.error("[⛔] Discord login failed (LoginFailure): %s", e)
+                return
+            except Exception:
+                logger.exception("[⛔] Unexpected error while running client")
+                return
+
+        logger.error(
+            "[⛔] Gateway did not connect after %d attempts", self._connect_retries
+        )
 
     def _run_client_gracefully(self, loop: asyncio.AbstractEventLoop) -> None:
         """
@@ -2459,7 +2664,12 @@ class ClientListener:
             return
 
         try:
-            loop.run_until_complete(self.bot.start(token))
+            loop.run_until_complete(self._start_with_watchdog(token))
+
+        except GatewayConnectTimeout as e:
+            logger.warning("[⏱️] %s", e)
+            if not self._try_next_proxy_on_error(e, token, loop):
+                self._retry_connect_directly(token, loop)
 
         except LoginFailure as e:
             logger.error("[⛔] Discord login failed (LoginFailure): %s", e)
@@ -2511,6 +2721,8 @@ class ClientListener:
 
     def _is_proxy_error(self, exc: Exception) -> bool:
         """Check if an exception is a proxy connection failure."""
+        if isinstance(exc, GatewayConnectTimeout):
+            return True
         # curl_cffi.requests.exceptions.RequestException inherits OSError
         if isinstance(exc, (ConnectionError, OSError)):
             err = str(exc).lower()
@@ -2534,9 +2746,10 @@ class ClientListener:
             new_proxy = self.proxy_rotator.rotate_now()
             if not new_proxy:
                 break
+            self._reset_bot_for_retry()
             self.bot.http.proxy = new_proxy
             try:
-                loop.run_until_complete(self.bot.start(token))
+                loop.run_until_complete(self._start_with_watchdog(token))
                 return True
             except LoginFailure:
                 logger.error("[⛔] Discord login failed — not a proxy issue")
