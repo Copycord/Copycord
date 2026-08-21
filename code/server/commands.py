@@ -32,13 +32,13 @@ from common.common_helpers import resolve_mapping_settings
 from common.db import DBManager
 from common.proxy_pool import _proxy_label, get_pool as get_proxy_pool
 from common.selfbot_headers import (
+    SUPPRESSED_PROFILE_HEADERS,
     _token_log_id,
     build_headers,
+    channel_referer,
     context_properties,
     diff_against_real_client,
     get_tls_session,
-    live_session_count,
-    session_state,
 )
 from server.rate_limiter import RateLimitManager, ActionType
 from server.helpers import PurgeAssetHelper
@@ -459,7 +459,12 @@ class CloneCommands(commands.Cog):
                 "token_ref": _token_log_id(token),
             }
 
-            wire = await self._token_wire_probe(token, use_proxy=use_proxy)
+            wire = await self._token_wire_probe(
+                token,
+                use_proxy=use_proxy,
+                channel_id=ctx.channel_id,
+                guild_id=guild.id,
+            )
             if wire.get("ok"):
                 entry["egress_ip"] = wire.get("egress_ip")
                 entry["headers"] = wire.get("headers_on_wire")
@@ -501,7 +506,9 @@ class CloneCommands(commands.Cog):
             ephemeral=True,
         )
 
-    async def _token_wire_probe(self, token: str, *, use_proxy: bool) -> dict:
+    async def _token_wire_probe(
+        self, token: str, *, use_proxy: bool, channel_id, guild_id
+    ) -> dict:
         """What actually leaves the machine for this token.
 
         build_headers() is only our half of the request — curl_cffi's
@@ -517,7 +524,15 @@ class CloneCommands(commands.Cog):
             session = await get_tls_session(token, use_proxy=use_proxy)
             proxy = get_proxy_pool().current(token)
 
-            headers = build_headers(token)
+            # Build the headers exactly as a real send does, or the probe
+            # reports differences that only exist in the probe: the referer
+            # and the profile-header deletions are both added on this path.
+            headers = {
+                **build_headers(
+                    token, referer=channel_referer(channel_id, guild_id)
+                ),
+                **SUPPRESSED_PROFILE_HEADERS,
+            }
             headers["Authorization"] = "PROBE." + "x" * max(0, len(token) - 6)
             headers["X-Context-Properties"] = context_properties("chat_input")
 
