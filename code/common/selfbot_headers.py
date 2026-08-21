@@ -464,3 +464,70 @@ def session_state(token: str) -> dict:
 def live_session_count() -> int:
     """How many per-token TLS sessions are currently open."""
     return len(_TLS_SESSIONS)
+
+
+# Headers a real Discord desktop client sends on a message POST, from a
+# capture taken 2026-08-21. Values that vary per install/session are given as
+# None, meaning "must be present, value not compared".
+REAL_CLIENT_HEADERS = {
+    "sec-ch-ua-platform": '"Windows"',
+    "sec-ch-ua": '"Not/A)Brand";v="99", "Chromium";v="148"',
+    "sec-ch-ua-mobile": "?0",
+    "sec-fetch-site": "same-origin",
+    "sec-fetch-mode": "cors",
+    "sec-fetch-dest": "empty",
+    "origin": "https://discord.com",
+    "referer": None,
+    "x-installation-id": None,
+    "x-debug-options": "bugReporterEnabled",
+    "x-discord-locale": None,
+    "x-discord-timezone": None,
+    "x-super-properties": None,
+    "x-context-properties": None,
+    "authorization": None,
+    "user-agent": None,
+    "accept": "*/*",
+    "accept-language": None,
+    "accept-encoding": "gzip, deflate, br, zstd",
+    "content-type": "application/json",
+}
+
+# The real client sends none of these. They are navigation artifacts that give
+# away a browser impersonation profile being used for an API call.
+REAL_CLIENT_ABSENT = (
+    "sec-fetch-user",
+    "upgrade-insecure-requests",
+    "priority",
+)
+
+# Set by the transport or the request itself, not part of the persona.
+_WIRE_IGNORE = ("host", "content-length", "cookie", "x-forwarded-proto", "x-amzn-trace-id")
+
+
+def diff_against_real_client(wire_headers: dict) -> dict:
+    """Compare headers actually sent against the real-client reference."""
+    got = {k.lower(): v for k, v in (wire_headers or {}).items()}
+
+    missing, mismatched = [], {}
+    for name, expected in REAL_CLIENT_HEADERS.items():
+        if name not in got:
+            missing.append(name)
+        elif expected is not None and got[name] != expected:
+            mismatched[name] = {"expected": expected, "got": got[name]}
+
+    extra = [n for n in REAL_CLIENT_ABSENT if n in got]
+    unexpected = sorted(
+        n
+        for n in got
+        if n not in REAL_CLIENT_HEADERS
+        and n not in REAL_CLIENT_ABSENT
+        and n not in _WIRE_IGNORE
+    )
+
+    return {
+        "matches_real_client": not (missing or mismatched or extra),
+        "missing": missing,
+        "mismatched": mismatched,
+        "present_but_real_client_omits": extra,
+        "not_in_reference": unexpected,
+    }

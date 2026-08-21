@@ -34,6 +34,8 @@ from common.proxy_pool import _proxy_label, get_pool as get_proxy_pool
 from common.selfbot_headers import (
     _token_log_id,
     build_headers,
+    context_properties,
+    diff_against_real_client,
     get_tls_session,
     live_session_count,
     session_state,
@@ -380,8 +382,8 @@ class CloneCommands(commands.Cog):
     async def token_debug(
         self,
         ctx: discord.ApplicationContext,
-        check_egress: bool = Option(
-            description="Ask each proxy what IP Discord actually sees (slower, makes one request per token)",
+        probe_wire: bool = Option(
+            description="Send a real request per token to capture the headers actually sent + egress IP (slower)",
             required=False,
             default=False,
         ),
@@ -460,7 +462,7 @@ class CloneCommands(commands.Cog):
                     "leased": _proxy_label(proxy) if proxy else None,
                 },
                 "tls": session_state(token),
-                "headers": {
+                "headers_configured": {
                     k: ("[redacted]" if k.lower() == "authorization" else v)
                     for k, v in headers.items()
                 },
@@ -475,8 +477,8 @@ class CloneCommands(commands.Cog):
                 except Exception:
                     entry["x_super_properties_decoded"] = None
 
-            if check_egress:
-                entry["egress_ip"] = await self._token_egress_ip(
+            if probe_wire:
+                entry["wire"] = await self._token_wire_probe(
                     token, use_proxy=use_proxy
                 )
 
@@ -505,8 +507,12 @@ class CloneCommands(commands.Cog):
             "tokens_shown": len(entries),
             "tokens_omitted": omitted,
             "note": (
-                "Authorization is redacted; token_ref is a stable hash for "
-                "correlating with the logs. Proxy credentials are masked."
+                "headers_configured is what build_headers() produces. With "
+                "probe_wire it is joined by wire.headers_on_wire, which is what "
+                "curl_cffi actually sent after its impersonation profile added "
+                "and overrode headers -- the two are not the same. "
+                "Authorization is redacted and never sent to the echo service; "
+                "token_ref is a stable hash for correlating with the logs."
             ),
             "tokens": entries,
         }
@@ -536,21 +542,51 @@ class CloneCommands(commands.Cog):
             ephemeral=True,
         )
 
-    async def _token_egress_ip(self, token: str, *, use_proxy: bool) -> dict:
-        """What IP the outside world sees for this token's session.
+    async def _token_wire_probe(self, token: str, *, use_proxy: bool) -> dict:
+        """What actually leaves the machine for this token.
 
-        Uses the token's own TLS session and proxy lease, so the answer is the
-        address Discord would see — not merely what the proxy file claims.
+        build_headers() is only our half of the request — curl_cffi's
+        impersonation profile adds and overrides headers on top of it, so the
+        configured dict does not tell you what Discord receives. This sends a
+        real request through the token's own session and proxy lease and
+        reports the headers as observed, plus the egress IP.
+
+        The Authorization value is swapped for a placeholder: this goes to a
+        third-party echo service, and the header is the account itself.
         """
         try:
             session = await get_tls_session(token, use_proxy=use_proxy)
             proxy = get_proxy_pool().current(token)
-            resp = await session.get(
-                "https://api.ipify.org?format=json", timeout=15, proxy=proxy
+
+            headers = build_headers(token)
+            headers["Authorization"] = "PROBE." + "x" * max(0, len(token) - 6)
+            headers["X-Context-Properties"] = context_properties("chat_input")
+
+            resp = await session.post(
+                "https://httpbin.org/anything",
+                json={"content": "probe"},
+                headers=headers,
+                timeout=20,
+                proxy=proxy,
             )
             if resp.status_code != 200:
                 return {"ok": False, "error": f"HTTP {resp.status_code}"}
-            return {"ok": True, "ip": (resp.json() or {}).get("ip")}
+
+            body = resp.json() or {}
+            wire = {k.lower(): v for k, v in (body.get("headers") or {}).items()}
+
+            # Diff first, then drop the value: the header's presence is part
+            # of the comparison, its contents are not ours to write down.
+            diff = diff_against_real_client(wire)
+            if "authorization" in wire:
+                wire["authorization"] = "[redacted]"
+
+            return {
+                "ok": True,
+                "egress_ip": body.get("origin"),
+                "headers_on_wire": wire,
+                "diff_vs_real_client": diff,
+            }
         except Exception as e:
             return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
