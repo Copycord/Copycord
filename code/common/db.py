@@ -4032,6 +4032,25 @@ class DBManager:
             (int(original_id), int(cloned_guild_id)),
         ).fetchone()
 
+    def get_cloned_emoji_ids(self, cloned_guild_id: int) -> set[int]:
+        """Emoji ids that actually live in this clone guild.
+
+        A member can use their own guild's static emoji without Nitro, so this
+        is the set a non-Nitro account may keep in a message.
+        """
+        rows = self.conn.execute(
+            "SELECT cloned_emoji_id FROM emoji_mappings "
+            "WHERE cloned_guild_id = ? AND cloned_emoji_id IS NOT NULL",
+            (int(cloned_guild_id),),
+        ).fetchall()
+        out: set[int] = set()
+        for r in rows:
+            try:
+                out.add(int(r[0]))
+            except (TypeError, ValueError):
+                continue
+        return out
+
     def get_emoji_mappings_for_original(self, original_id: int) -> list:
         return self.conn.execute(
             "SELECT * FROM emoji_mappings WHERE original_emoji_id = ? ORDER BY cloned_guild_id",
