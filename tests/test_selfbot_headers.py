@@ -68,6 +68,17 @@ class TestFingerprintShape:
         assert h["Sec-CH-UA"] == f'"Not/A)Brand";v="99", "Chromium";v="{chrome_major}"'
         assert "Google Chrome" not in h["Sec-CH-UA"]
 
+    def test_every_header_value_is_a_string(self):
+        # build_headers() is shared with aiohttp callers (the scraper,
+        # message_utils, admin token validation). A None value is a curl_cffi
+        # instruction to delete a header; aiohttp dies on it with
+        # "Cannot serialize non-str key None", which surfaced as every token
+        # being reported invalid. Keep the deletions out of here.
+        h = sh.build_headers("token-abc", referer="https://discord.com/channels/1/2")
+        assert all(isinstance(v, str) for v in h.values()), {
+            k: v for k, v in h.items() if not isinstance(v, str)
+        }
+
     def test_api_call_not_a_page_load(self):
         # curl_cffi's impersonation profile defaults these to a top-level
         # navigation, which contradicts a POST carrying an Authorization
@@ -77,8 +88,12 @@ class TestFingerprintShape:
         assert h["Sec-Fetch-Site"] == "same-origin"
         assert h["Sec-Fetch-Mode"] == "cors"
         assert h["Sec-Fetch-Dest"] == "empty"
+
+        # The deletions are curl_cffi-only and live apart from build_headers,
+        # which aiohttp callers share and which must stay all-string.
         for banned in ("sec-fetch-user", "upgrade-insecure-requests", "priority"):
-            assert banned in h and h[banned] is None
+            assert sh.SUPPRESSED_PROFILE_HEADERS[banned] is None
+            assert banned not in h
 
     def test_build_fingerprint_is_internally_consistent(self):
         # A build number belongs to exactly one client and Electron version.

@@ -324,7 +324,11 @@ def _sec_ch_ua(user_agent: str) -> str:
 # curl_cffi's impersonation profile adds these; the real client sends none of
 # them. A None value removes a header rather than blanking it (an empty string
 # leaves it in place).
-_SUPPRESSED_HEADERS = {
+#
+# NOT part of build_headers(): only curl_cffi understands a None value, and
+# aiohttp -- which the scraper and message_utils use -- raises on one. Merge it
+# in at the curl_cffi call site instead.
+SUPPRESSED_PROFILE_HEADERS = {
     "sec-fetch-user": None,
     "upgrade-insecure-requests": None,
     "priority": None,
@@ -336,6 +340,9 @@ def build_headers(token: str, *, referer: str | None = None) -> dict:
 
     ``referer`` should be the clone channel the message is going to; the real
     client always sends the channel it is looking at.
+
+    Every value is a string, so this is safe for aiohttp. Callers going out
+    through curl_cffi should also merge SUPPRESSED_PROFILE_HEADERS.
     """
     fp = _FINGERPRINT_CACHE.get(token)
     if fp is None:
@@ -345,7 +352,6 @@ def build_headers(token: str, *, referer: str | None = None) -> dict:
         **fp["headers"],
         "Authorization": token,
         "X-Super-Properties": fp["super_props_b64"],
-        **_SUPPRESSED_HEADERS,
     }
     if referer:
         headers["Referer"] = referer

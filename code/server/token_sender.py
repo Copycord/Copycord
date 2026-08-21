@@ -20,6 +20,7 @@ from curl_cffi.requests.exceptions import RequestException as CurlRequestExcepti
 
 from common.proxy_pool import get_pool as get_proxy_pool
 from common.selfbot_headers import (
+    SUPPRESSED_PROFILE_HEADERS,
     build_headers,
     channel_referer,
     close_tls_session,
@@ -1292,4 +1293,9 @@ class UserTokenSender:
 
     def _build_headers(self, token: str, referer: str | None = None) -> dict:
         """Realistic Discord desktop-client headers, unique & stable per token."""
-        return build_headers(token, referer=referer)
+        # The suppression entries are curl_cffi-only (None deletes a
+        # header); this is the curl_cffi path, so merge them here.
+        return {
+            **build_headers(token, referer=referer),
+            **SUPPRESSED_PROFILE_HEADERS,
+        }
