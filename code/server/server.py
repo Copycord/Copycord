@@ -53,6 +53,7 @@ from server.rate_limiter import RateLimitManager, ActionType
 from server.token_sender import (
     UserTokenSender,
     SEND_OK,
+    SEND_NOT_FOUND,
     SEND_DEAD,
     SEND_UNDELIVERABLE,
     SEND_RATE_LIMITED,
@@ -103,13 +104,13 @@ ch.setLevel(LEVEL)
 root.addHandler(ch)
 
 
-# Parent logger, so websockets.client is covered too — these processes dial
-# OUT to the admin bus, and the client child logs the whole handshake plus
+
+
 # every frame at DEBUG ("< Sec-WebSocket-Accept", "> TEXT ...", "= connection
 # is OPEN"), which buries our own output on a debug run.
 logging.getLogger("websockets").setLevel(logging.WARNING)
-# asyncio emits "Using selector: EpollSelector" and tzlocal dumps its
-# /etc/localtime probing, both at DEBUG on every boot. WARNING keeps the
+
+
 # parts worth seeing (asyncio's slow-callback warnings, real errors).
 for lib in ("asyncio", "tzlocal"):
     logging.getLogger(lib).setLevel(logging.WARNING)
@@ -7607,6 +7608,150 @@ class ServerReceiver:
         except Exception:
             return None
 
+    def _resolve_reply_target(self, msg: dict, cloned_guild_id) -> dict | None:
+        """Map a message's reply reference onto the cloned message it answers.
+
+        Returns ``{"guild_id", "channel_id", "message_id", "link"}``, or None if
+        the message is not a reply or the message it replies to was never
+        cloned (older than the backfill window, filtered out, deleted).
+        """
+        try:
+            ref = msg.get("reference") or {}
+        except Exception:
+            return None
+        if not isinstance(ref, dict):
+            return None
+
+        ref_msg_id = ref.get("message_id")
+        if not ref_msg_id:
+            return None
+
+        try:
+            clone_gid = int(cloned_guild_id or 0)
+        except (TypeError, ValueError):
+            return None
+        if not clone_gid:
+            return None
+
+        try:
+            row = self.db.get_message_mapping_pair(
+                original_message_id=int(ref_msg_id),
+                cloned_guild_id=clone_gid,
+            )
+        except Exception:
+            row = None
+        if row is None:
+            
+            
+            
+            logger.debug(
+                "[reply] orig %s replies to %s, which is not cloned in guild %s; "
+                "sending without a reference",
+                msg.get("message_id"),
+                ref_msg_id,
+                clone_gid,
+            )
+            return None
+
+        try:
+            cloned_channel_id = int(row["cloned_channel_id"])
+            cloned_message_id = int(row["cloned_message_id"])
+        except Exception:
+            return None
+        if not cloned_channel_id or not cloned_message_id:
+            return None
+
+        return {
+            "guild_id": clone_gid,
+            "channel_id": cloned_channel_id,
+            "message_id": cloned_message_id,
+            "link": (
+                f"https://discord.com/channels/"
+                f"{clone_gid}/{cloned_channel_id}/{cloned_message_id}"
+            ),
+        }
+
+    @staticmethod
+    def _reply_header(link: str) -> str:
+        """The line webhook sends carry in place of a real reply."""
+        return f"> In reply to: {link}"
+
+    @classmethod
+    def _strip_reply_header(cls, content: str | None, link: str) -> str | None:
+        """Drop the webhook reply header from content sent as a native reply.
+
+        Matches on the whole line rather than a prefix: role mentions are
+        prepended after the header is built, so it is not always first.
+        """
+        if not content:
+            return content
+        header = cls._reply_header(link)
+        kept = [ln for ln in content.split("\n") if ln.strip() != header]
+        out = "\n".join(kept).strip()
+        return out or None
+
+    @classmethod
+    def _strip_reply_header_from_embeds(cls, embeds, link: str):
+        """Same strip, for text that was moved into an embed.
+
+        A message over 2000 characters is rehoused wholesale into an embed by
+        the payload builder, taking the header line with it. Embeds are copied
+        before editing because the webhook fallback reuses these same objects
+        and still needs the link.
+        """
+        if not embeds:
+            return embeds
+        header = cls._reply_header(link)
+        out = []
+        changed = False
+        for e in embeds:
+            desc = getattr(e, "description", None)
+            if desc and header in desc:
+                e = e.copy()
+                e.description = cls._strip_reply_header(desc, link) or ""
+                changed = True
+            out.append(e)
+        return out if changed else embeds
+
+    def _record_token_message(
+        self,
+        *,
+        msg: dict,
+        cloned_guild_id,
+        cloned_channel_id,
+        cloned_message_id,
+        sent_token_id=None,
+    ) -> None:
+        """Record what a token send produced, the way the webhook path does.
+
+        Without this the ``messages`` table only ever learns about webhook
+        sends, so nothing posted by a token can be replied to, edited or
+        deleted. ``webhook_url`` stays NULL and ``sent_token_id`` names the
+        account that posted, which is how the edit and delete paths tell the
+        two kinds of row apart — and Discord only lets an author edit its own
+        message, so the specific account matters.
+        """
+        try:
+            orig_mid = int(msg.get("message_id") or 0)
+        except (TypeError, ValueError):
+            orig_mid = 0
+        if not orig_mid or not cloned_message_id:
+            return
+
+        try:
+            self.db.upsert_message_mapping(
+                original_guild_id=int(msg.get("guild_id") or 0),
+                original_channel_id=int(msg.get("channel_id") or 0),
+                original_message_id=orig_mid,
+                cloned_channel_id=int(cloned_channel_id),
+                cloned_message_id=int(cloned_message_id),
+                webhook_url=None,
+                cloned_guild_id=int(cloned_guild_id) if cloned_guild_id else None,
+                sent_token_id=str(sent_token_id) if sent_token_id else None,
+            )
+        except Exception:
+            logger.exception("upsert_message_mapping failed (user token)")
+
     async def _cleanup_token_identity(self, mapping_id) -> None:
         """Reset leftover sticky identities once after the feature is disabled."""
         key = str(mapping_id)
@@ -7668,6 +7813,14 @@ class ServerReceiver:
 
             return None, self._identity_exhausted_action(settings)
 
+        # An edit payload carries no identity fields. Absent is not "this
+        # author has no roles" — applying it that way clears the nickname and
+        # strips every mirrored role from the account.
+        identity_known = (
+            msg.get("author_display_name") is not None
+            or msg.get("author_role_ids") is not None
+        )
+
         try:
             return await self.token_identity.prepare(
                 mapping_id=mapping_id,
@@ -7678,6 +7831,7 @@ class ServerReceiver:
                 settings=settings,
                 tokens=tokens,
                 exclude=exclude,
+                identity_known=identity_known,
             )
         except Exception:
             logger.debug(
@@ -7785,18 +7939,37 @@ class ServerReceiver:
 
         identity_active = self._identity_active(settings)
 
-        # Filled in by the sender with the account that actually delivered,
-        # so the "Forwarded" line below can name both the source author and
-        # the sending account on one line.
+        
+        
+        
+        
+        
+        content = (payload or {}).get("content")
+        embeds = (payload or {}).get("embeds")
+        reply_to = None
+        if settings.get("TAG_REPLY_MSG", False):
+            reply_to = self._resolve_reply_target(msg, cloned_guild_id)
+            if reply_to:
+                link = reply_to["link"]
+                content = self._strip_reply_header(content, link)
+                embeds = self._strip_reply_header_from_embeds(embeds, link)
+
+        
+        
+        
         sent_as: list = []
+        
+        
+        
+        sent_ids: list = []
 
         async def _do_send(forced, exclusive) -> str:
             try:
                 return await self.user_token_sender.send(
                     mapping_id=mapping_id,
                     target_channel_id=int(target_channel_id),
-                    content=(payload or {}).get("content"),
-                    embeds=(payload or {}).get("embeds"),
+                    content=content,
+                    embeds=embeds,
                     attachments=msg.get("attachments"),
                     author_id=msg.get("author_id"),
                     strategy=str(settings.get("USER_TOKEN_STRATEGY") or "round_robin"),
@@ -7808,6 +7981,8 @@ class ServerReceiver:
                     sticky_exclusive=exclusive,
                     use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
                     sent_as=sent_as,
+                    sent_ids=sent_ids,
+                    reply_to=reply_to,
                 )
             except Exception:
                 logger.exception(
@@ -7851,6 +8026,16 @@ class ServerReceiver:
             return f" [{d} sent]"
 
         if delivered:
+            if sent_ids:
+                cloned_mid, sent_token_id = sent_ids[-1]
+                self._record_token_message(
+                    msg=msg,
+                    cloned_guild_id=cloned_guild_id,
+                    cloned_channel_id=target_channel_id,
+                    cloned_message_id=cloned_mid,
+                    sent_token_id=sent_token_id,
+                )
+
             as_who = sent_as[-1] if sent_as else "?"
             if mark_bf:
                 suffix = _note_backfill()
@@ -8135,7 +8320,12 @@ class ServerReceiver:
 
         identity_active = self._identity_active(settings)
 
+        reply_to = None
+        if settings.get("TAG_REPLY_MSG", False):
+            reply_to = self._resolve_reply_target(msg, clone_gid)
+
         sent_as: list = []
+        sent_ids: list = []
 
         async def _sticker_send(forced, exclusive) -> str:
             try:
@@ -8154,6 +8344,8 @@ class ServerReceiver:
                     sticky_exclusive=exclusive,
                     use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
                     sent_as=sent_as,
+                    sent_ids=sent_ids,
+                    reply_to=reply_to,
                 )
             except Exception:
                 logger.exception(
@@ -8176,6 +8368,15 @@ class ServerReceiver:
             disp = self._disposition_for(await _sticker_send(None, False), settings)
 
         if disp == "ok":
+            if sent_ids:
+                cloned_mid, sent_token_id = sent_ids[-1]
+                self._record_token_message(
+                    msg=msg,
+                    cloned_guild_id=clone_gid,
+                    cloned_channel_id=target_channel_id,
+                    cloned_message_id=cloned_mid,
+                    sent_token_id=sent_token_id,
+                )
             logger.info(
                 "[💬] Forwarded (user token, sticker) to clone ch=%s from %s as %s",
                 target_channel_id,
@@ -8489,50 +8690,16 @@ class ServerReceiver:
                             f.value = _strip_role_mentions(f.value)
 
             if tag_reply_msg:
-                try:
-                    ref = msg.get("reference") or {}
-                except Exception:
-                    ref = {}
-
-                ref_msg_id = None
-                ref_guild_id = None
-
-                if isinstance(ref, dict):
-                    ref_msg_id = ref.get("message_id")
-                    ref_guild_id = ref.get("guild_id") or orig_gid
-
-                try:
-                    clone_gid_int = int(clone_gid or 0)
-                except Exception:
-                    clone_gid_int = 0
-
-                if ref_msg_id and ref_guild_id and clone_gid_int:
-                    try:
-                        row = self.db.get_message_mapping_pair(
-                            original_message_id=int(ref_msg_id),
-                            cloned_guild_id=clone_gid_int,
-                        )
-                    except Exception:
-                        row = None
-
-                    if row is not None:
-                        try:
-                            cloned_channel_id = int(row["cloned_channel_id"])
-                            cloned_message_id = int(row["cloned_message_id"])
-                        except Exception:
-                            cloned_channel_id = 0
-                            cloned_message_id = 0
-
-                        if cloned_channel_id and cloned_message_id:
-                            reply_link = (
-                                f"https://discord.com/channels/"
-                                f"{clone_gid_int}/{cloned_channel_id}/{cloned_message_id}"
-                            )
-                            header = f"> In reply to: {reply_link}"
-                            if text:
-                                text = f"{header}\n{text}"
-                            else:
-                                text = header
+                
+                
+                
+                reply_target = self._resolve_reply_target(msg, clone_gid)
+                if reply_target:
+                    header = self._reply_header(reply_target["link"])
+                    if text:
+                        text = f"{header}\n{text}"
+                    else:
+                        text = header
 
             append_parts = []
             if mapping_settings.get("APPEND_TIMESTAMP", False):
@@ -9880,6 +10047,90 @@ class ServerReceiver:
 
         return []
 
+    def _token_row_context(self, row) -> tuple[str, str] | None:
+        """(mapping_id, token_id) when this row was posted by a user token."""
+        try:
+            token_id = row.get("sent_token_id")
+        except Exception:
+            return None
+        if not token_id:
+            return None
+        mapping_id = self._mapping_id_for(
+            row.get("original_guild_id"), row.get("cloned_guild_id")
+        )
+        if not mapping_id:
+            return None
+        return mapping_id, str(token_id)
+
+    async def _edit_with_token(self, row, data: dict, orig_mid: int) -> bool:
+        """Edit a token-posted message as the account that posted it."""
+        ctx = self._token_row_context(row)
+        if not ctx:
+            return False
+        mapping_id, token_id = ctx
+
+        try:
+            cloned_mid = int(row["cloned_message_id"])
+            cloned_cid = int(row["cloned_channel_id"])
+        except Exception:
+            return False
+        if not (cloned_mid and cloned_cid):
+            return False
+
+        clone_gid = int(row.get("cloned_guild_id") or 0)
+        try:
+            settings = resolve_mapping_settings(
+                self.db,
+                self.config,
+                original_guild_id=int(row.get("original_guild_id") or 0) or None,
+                cloned_guild_id=clone_gid or None,
+            )
+        except Exception:
+            settings = {}
+
+        with self._clone_log_label(clone_gid):
+            built = self._build_webhook_payload(
+                data,
+                ctx_guild_id=int(row.get("original_guild_id") or 0) or None,
+                ctx_mapping_row=row,
+            )
+
+            
+            
+            
+            content = built.get("content")
+            embeds = built.get("embeds")
+            if settings.get("TAG_REPLY_MSG", False):
+                reply_target = self._resolve_reply_target(data, clone_gid)
+                if reply_target:
+                    link = reply_target["link"]
+                    content = self._strip_reply_header(content, link)
+                    embeds = self._strip_reply_header_from_embeds(embeds, link)
+
+            status = await self.user_token_sender.edit_message(
+                mapping_id=mapping_id,
+                channel_id=cloned_cid,
+                message_id=cloned_mid,
+                token_id=token_id,
+                content=content,
+                embeds=embeds,
+                use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+            )
+
+            if status == SEND_OK:
+                logger.info(
+                    "[✏️] Edited cloned msg %s (orig %s) in #%s (user token)",
+                    cloned_mid,
+                    orig_mid,
+                    data.get("channel_name"),
+                )
+                return True
+
+            logger.warning(
+                "[⚠️] Token edit failed for orig %s (%s)", orig_mid, status
+            )
+            return False
+
     async def _edit_with_row(self, row, data: dict, orig_mid: int) -> bool:
         try:
             cloned_mid = int(row["cloned_message_id"])
@@ -9887,6 +10138,11 @@ class ServerReceiver:
         except Exception:
             cloned_mid = None
             webhook_url = None
+
+        
+        
+        if cloned_mid and not webhook_url:
+            return await self._edit_with_token(row, data, orig_mid)
 
         if not (cloned_mid and webhook_url):
             return False
@@ -12490,6 +12746,141 @@ class ServerReceiver:
         )
         return self._tls_reap_task
 
+    async def _delete_token_message(
+        self, row, orig_mid: int, channel_name: str | None, cloned_mid: int
+    ) -> bool:
+        """Delete a token-posted clone, with the bot.
+
+        Deleting is not an author-only operation the way editing is — the bot
+        already holds Manage Messages in the clone guild, so it can remove
+        anyone's message there. Using it keeps the delete working after the
+        sending account is disabled, revoked or removed from the mapping, and
+        spends no selfbot API calls. The account is only asked as a fallback,
+        for a channel where the bot somehow cannot.
+        """
+        try:
+            cloned_cid = int(row["cloned_channel_id"])
+        except Exception:
+            return False
+        if not cloned_cid:
+            return False
+
+        clone_gid = int(row.get("cloned_guild_id") or 0)
+
+        ch = self.bot.get_channel(cloned_cid)
+        if ch is None:
+            try:
+                ch = await self.bot.fetch_channel(cloned_cid)
+            except (NotFound, HTTPException):
+                ch = None
+
+        if ch is not None and hasattr(ch, "get_partial_message"):
+            try:
+                
+                await ch.get_partial_message(cloned_mid).delete()
+                with self._clone_log_label(clone_gid):
+                    logger.info(
+                        "[🗑️] Deleted cloned msg %s (orig %s) in #%s",
+                        cloned_mid,
+                        orig_mid,
+                        channel_name,
+                    )
+                self._clear_message_mapping(orig_mid)
+                return True
+            except NotFound:
+                with self._clone_log_label(clone_gid):
+                    logger.info(
+                        "[🗑️] Cloned msg already gone (orig %s) in #%s; treating as deleted",
+                        orig_mid,
+                        channel_name,
+                    )
+                self._clear_message_mapping(orig_mid)
+                return True
+            except Forbidden:
+                logger.debug(
+                    "[🗑️] Bot lacks Manage Messages in clone ch=%s; asking the "
+                    "sending account instead",
+                    cloned_cid,
+                )
+            except Exception as e:
+                logger.warning(
+                    "[⚠️] Bot delete failed for orig %s: %s; asking the sending account",
+                    orig_mid,
+                    e,
+                )
+
+        return await self._delete_with_token(
+            row, orig_mid, channel_name, cloned_mid, cloned_cid, clone_gid
+        )
+
+    def _clear_message_mapping(self, orig_mid: int) -> None:
+        try:
+            self.db.delete_message_mapping(orig_mid)
+        except Exception:
+            logger.debug("Failed clearing mapping after delete", exc_info=True)
+
+    async def _delete_with_token(
+        self,
+        row,
+        orig_mid: int,
+        channel_name: str | None,
+        cloned_mid: int,
+        cloned_cid: int,
+        clone_gid: int,
+    ) -> bool:
+        """Fallback: delete as the account that posted it."""
+        ctx = self._token_row_context(row)
+        if not ctx:
+            logger.debug(
+                "[🗑️] No sending account recorded for orig %s; nothing to delete",
+                orig_mid,
+            )
+            return False
+        mapping_id, token_id = ctx
+
+        try:
+            settings = resolve_mapping_settings(
+                self.db,
+                self.config,
+                original_guild_id=int(row.get("original_guild_id") or 0) or None,
+                cloned_guild_id=clone_gid or None,
+            )
+        except Exception:
+            settings = {}
+
+        status = await self.user_token_sender.delete_message(
+            mapping_id=mapping_id,
+            channel_id=cloned_cid,
+            message_id=cloned_mid,
+            token_id=token_id,
+            use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+        )
+
+        with self._clone_log_label(clone_gid):
+            if status == SEND_OK:
+                logger.info(
+                    "[🗑️] Deleted cloned msg %s (orig %s) in #%s (user token)",
+                    cloned_mid,
+                    orig_mid,
+                    channel_name,
+                )
+            elif status == SEND_NOT_FOUND:
+                
+                
+                logger.info(
+                    "[🗑️] Cloned msg already gone (orig %s) in #%s; treating as deleted",
+                    orig_mid,
+                    channel_name,
+                )
+            else:
+                logger.warning(
+                    "[⚠️] Token delete failed for orig %s (%s)", orig_mid, status
+                )
+                return False
+
+        self._clear_message_mapping(orig_mid)
+        return True
+
     async def _delete_with_row(
         self, row, orig_mid: int, channel_name: str | None = None
     ) -> bool:
@@ -12501,6 +12892,13 @@ class ServerReceiver:
                 "[🗑️] Mapping incomplete for orig %s; nothing to delete", orig_mid
             )
             return False
+
+        
+        
+        if cloned_mid and not webhook_url:
+            return await self._delete_token_message(
+                row, orig_mid, channel_name, cloned_mid
+            )
 
         if not (cloned_mid and webhook_url):
             logger.debug(

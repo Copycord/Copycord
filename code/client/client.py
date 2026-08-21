@@ -1289,6 +1289,8 @@ class ClientListener:
                 "channel_type": after.channel.type.value,
                 "author": author,
                 "author_id": after.author.id,
+                "author_display_name": getattr(after.author, "display_name", None),
+                "author_role_ids": self.msg.author_role_ids(after),
                 "avatar_url": (
                     str(after.author.display_avatar.url)
                     if after.author.display_avatar
@@ -1437,6 +1439,8 @@ class ClientListener:
             author_obj = getattr(msg, "author", None)
             author = getattr(author_obj, "name", None)
             author_id = getattr(author_obj, "id", None)
+            author_display_name = getattr(author_obj, "display_name", None)
+            author_role_ids = self.msg.author_role_ids(msg)
             avatar_url = (
                 str(author_obj.display_avatar.url)
                 if author_obj and getattr(author_obj, "display_avatar", None)
@@ -1452,6 +1456,8 @@ class ClientListener:
             a = data.get("author") or {}
             author = a.get("global_name") or a.get("username") or a.get("name")
             author_id = a.get("id")
+            author_display_name = None
+            author_role_ids = None
 
             if a.get("id") and a.get("avatar"):
                 avatar_url = (
@@ -1483,6 +1489,8 @@ class ClientListener:
                 ),
                 "author": author,
                 "author_id": author_id,
+                "author_display_name": author_display_name,
+                "author_role_ids": author_role_ids,
                 "avatar_url": avatar_url,
                 "content": content,
                 "timestamp": timestamp,

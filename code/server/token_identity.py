@@ -95,8 +95,15 @@ class TokenIdentityManager:
         settings: dict,
         tokens: list[dict],
         exclude: set | None = None,
+        identity_known: bool = True,
     ) -> tuple[str | None, str | None]:
-        """Assign (or keep) this author's token and apply its identity."""
+        """Assign (or keep) this author's token and apply its identity.
+
+        ``identity_known=False`` means the caller has no display name or role
+        list for this author, not that the author has neither. Message-edit
+        payloads carry no identity fields, so treating absent as empty would
+        clear the account's nickname and strip every mirrored role.
+        """
         exhausted = (
             "webhook" if settings.get("USER_TOKEN_FALLBACK_WEBHOOK", True) else "skip"
         )
@@ -129,6 +136,12 @@ class TokenIdentityManager:
                 chosen = str(cur["token_id"])
                 reset_prev = None
                 keep = True
+
+                # Nothing to apply and nothing to compare against: send from
+                # the account this author already owns and leave its nickname
+                # and roles exactly as they are.
+                if not identity_known:
+                    return chosen, None
             else:
 
                 identities = self._db.list_token_identities(mapping_id)

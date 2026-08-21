@@ -632,6 +632,7 @@ class DBManager:
                 cloned_channel_id    INTEGER,
                 cloned_message_id    INTEGER,
                 webhook_url          TEXT,
+                sent_token_id        TEXT,
                 created_at           INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
                 updated_at           INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
                 PRIMARY KEY (original_message_id, cloned_guild_id)
@@ -645,6 +646,7 @@ class DBManager:
                 "cloned_channel_id",
                 "cloned_message_id",
                 "webhook_url",
+                "sent_token_id",
                 "created_at",
                 "updated_at",
             },
@@ -652,10 +654,17 @@ class DBManager:
                 "original_message_id": "original_message_id",
                 "original_guild_id": "original_guild_id",
                 "original_channel_id": "original_channel_id",
-                "cloned_guild_id": "NULL",
+                # Copy, do not blank. This read "NULL" from when the column was
+                # new, which was harmless only because nothing had rebuilt the
+                # table since; any later rebuild would have wiped the guild off
+                # every mapping, and it is half the primary key.
+                "cloned_guild_id": "cloned_guild_id",
                 "cloned_channel_id": "cloned_channel_id",
                 "cloned_message_id": "cloned_message_id",
                 "webhook_url": "webhook_url",
+                # Absent on older tables; _ensure_table turns an unknown
+                # identifier into NULL, which is the right default here.
+                "sent_token_id": "sent_token_id",
                 "created_at": "created_at",
                 "updated_at": "updated_at",
             },
@@ -2521,6 +2530,7 @@ class DBManager:
         webhook_url: str | None = None,
         *,
         cloned_guild_id: int | None = None,
+        sent_token_id: str | None = None,
     ) -> None:
         with self.lock, self.conn:
             self.conn.execute(
@@ -2533,10 +2543,11 @@ class DBManager:
                     cloned_channel_id,
                     cloned_message_id,
                     webhook_url,
+                    sent_token_id,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now'), strftime('%s','now'))
                 ON CONFLICT(original_message_id, cloned_guild_id) DO UPDATE SET
                     -- never overwrite with NULL; keep existing when excluded is NULL
                     original_guild_id   = COALESCE(excluded.original_guild_id, messages.original_guild_id),
@@ -2545,6 +2556,7 @@ class DBManager:
                     cloned_channel_id   = COALESCE(excluded.cloned_channel_id,   messages.cloned_channel_id),
                     cloned_message_id   = COALESCE(excluded.cloned_message_id,   messages.cloned_message_id),
                     webhook_url         = COALESCE(excluded.webhook_url,         messages.webhook_url),
+                    sent_token_id       = COALESCE(excluded.sent_token_id,       messages.sent_token_id),
                     -- preserve created_at from first insert
                     created_at          = messages.created_at,
                     updated_at          = strftime('%s','now')
@@ -2557,6 +2569,7 @@ class DBManager:
                     int(cloned_channel_id) if cloned_channel_id is not None else None,
                     int(cloned_message_id) if cloned_message_id is not None else None,
                     str(webhook_url) if webhook_url else None,
+                    str(sent_token_id) if sent_token_id else None,
                 ),
             )
 

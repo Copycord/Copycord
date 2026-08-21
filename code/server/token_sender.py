@@ -40,7 +40,52 @@ MAX_429_RETRIES = 5
 MAX_NET_RETRIES = 3
 
 
+def _reply_bits(reply_to: Optional[dict]) -> dict:
+    """Payload fields that turn a message POST into a native reply.
+
+    ``fail_if_not_exists`` is False so a reference to a message that has since
+    been deleted in the clone degrades to a plain message instead of failing
+    the whole send with a 400.
+
+    ``allowed_mentions`` is spelled out rather than left off: a reply pings the
+    author it answers by default, which a clone should never do. ``parse``
+    lists every type so mentions inside the content keep behaving exactly as
+    they do on a non-reply send — omitting it would silently make them inert.
+    """
+    if not reply_to:
+        return {}
+
+    try:
+        message_id = int(reply_to.get("message_id") or 0)
+        channel_id = int(reply_to.get("channel_id") or 0)
+    except (TypeError, ValueError):
+        return {}
+    if not message_id or not channel_id:
+        return {}
+
+    ref = {
+        "message_id": str(message_id),
+        "channel_id": str(channel_id),
+        "fail_if_not_exists": False,
+    }
+    try:
+        guild_id = int(reply_to.get("guild_id") or 0)
+    except (TypeError, ValueError):
+        guild_id = 0
+    if guild_id:
+        ref["guild_id"] = str(guild_id)
+
+    return {
+        "message_reference": ref,
+        "allowed_mentions": {
+            "parse": ["users", "roles", "everyone"],
+            "replied_user": False,
+        },
+    }
+
+
 SEND_OK = "ok"
+SEND_NOT_FOUND = "not_found"
 SEND_DEAD = "dead"
 SEND_UNDELIVERABLE = "undeliverable"
 SEND_RATE_LIMITED = "rate_limited"
@@ -69,16 +114,11 @@ class UserTokenSender:
         self._pace_locks: dict = {}
         self._token_locks: dict = {}
         self._token_cooldown: dict = {}
-        # Last-activity timestamps backing reap_idle_state() — every dict
-        # above is keyed by token/channel/author and grows for the life of
-        # the process otherwise, which matters at large token counts or
-        # high-churn source servers (many distinct authors).
+
         self._token_last_seen: dict = {}
         self._channel_last_seen: dict = {}
         self._author_last_seen: dict = {}
-        # Token values Discord answered 401 for. Also disabled in the DB, so
-        # this is mostly a same-tick guard (the DB write can fail, and the
-        # remaining tokens in an in-flight order list are already loaded).
+
         self._dead_tokens: set = set()
 
     async def send(
@@ -100,16 +140,27 @@ class UserTokenSender:
         sticky_exclusive: bool = False,
         use_proxy: bool = False,
         sent_as: Optional[list] = None,
+        sent_ids: Optional[list] = None,
+        reply_to: Optional[dict] = None,
     ) -> str:
         """
         Attempt to post a message into ``target_channel_id`` (a channel or thread
         id in the clone guild) as one of the mapping's user tokens.
+
+        ``reply_to``: ``{"message_id", "channel_id", "guild_id"}`` of the cloned
+        message this one answers. Tokens are real accounts, so this posts an
+        actual Discord reply rather than the link header webhooks have to use.
 
         ``sent_as``: optional list the account label that delivered the
         message is appended to. An out-param rather than a richer return
         value because the ``SEND_*`` string is compared directly at every
         call site; this lets the caller fold "which account sent it" into
         its own log line instead of us emitting a near-duplicate one here.
+
+        ``sent_ids``: same idea, receiving a ``(message_id, token_id)`` pair.
+        The caller records it, which is what makes a later message able to
+        reply to this one, and what lets an edit or delete go out as the same
+        account Discord requires.
         """
         if not mapping_id or not target_channel_id:
             return SEND_NO_TOKENS
@@ -172,14 +223,16 @@ class UserTokenSender:
                 token_value = (tok.get("token_value") or "").strip()
                 if not token_value:
                     continue
+                cloned_mid = None
                 try:
-                    status = await self._send_with_token(
+                    status, cloned_mid = await self._send_with_token(
                         token_value,
                         chan,
                         text,
                         atts_to_upload,
                         sticker_ids=stkr_ids,
                         use_proxy=use_proxy,
+                        reply_to=reply_to,
                     )
                 except Exception:
                     self._log.exception(
@@ -197,11 +250,12 @@ class UserTokenSender:
                             pass
                     if sent_as is not None:
                         sent_as.append(tok.get("username") or tok.get("token_id"))
+                    if sent_ids is not None and cloned_mid:
+
+                        sent_ids.append((cloned_mid, tid))
                     return SEND_OK
                 if status == SEND_DEAD:
-                    # Discord revoked it. Bench + disable, or every future
-                    # message pays another lease/session/prime round trip
-                    # just to collect the same 401.
+
                     self._mark_token_dead(tok)
                 last = status
 
@@ -216,6 +270,92 @@ class UserTokenSender:
             async with self._chan_lock(chan):
                 return await _deliver()
         return await _deliver()
+
+    def _token_value_for(
+        self, mapping_id: Optional[str], token_id: Optional[str]
+    ) -> Optional[str]:
+        """The token value behind a stored token id, if it is still usable."""
+        if not mapping_id or not token_id:
+            return None
+        try:
+            tokens = self._filter_dead(
+                self._db.get_enabled_mapping_tokens(str(mapping_id)) or []
+            )
+        except Exception:
+            self._log.exception(
+                "[user-send] Failed to load tokens for mapping %s", mapping_id
+            )
+            return None
+        for t in tokens:
+            if str(t.get("token_id")) == str(token_id):
+                return (t.get("token_value") or "").strip() or None
+        return None
+
+    async def edit_message(
+        self,
+        *,
+        mapping_id: Optional[str],
+        channel_id: int,
+        message_id: int,
+        token_id: Optional[str],
+        content: Optional[str],
+        embeds: Optional[list] = None,
+        use_proxy: bool = False,
+    ) -> str:
+        """Edit a message, as the account that posted it.
+
+        Discord only lets an author edit their own message, so this is not a
+        "pick any token" operation the way sending is — it needs the exact
+        account recorded when the message went out.
+        """
+        token = self._token_value_for(mapping_id, token_id)
+        if not token:
+            return SEND_NO_TOKENS
+
+        text = self._compose_text(content, embeds)
+        if len(text) > MAX_CONTENT_LEN:
+            text = text[: MAX_CONTENT_LEN - 1] + "…"
+
+        status, _ = await self._request_with_token(
+            token,
+            f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}",
+            method="PATCH",
+            json_body={"content": text},
+            timeout=30,
+            ctx=f"editing message {message_id}",
+            use_proxy=use_proxy,
+            not_found_status=SEND_NOT_FOUND,
+        )
+        return status
+
+    async def delete_message(
+        self,
+        *,
+        mapping_id: Optional[str],
+        channel_id: int,
+        message_id: int,
+        token_id: Optional[str],
+        use_proxy: bool = False,
+    ) -> str:
+        """Delete a message, as the account that posted it.
+
+        Returns ``SEND_NOT_FOUND`` when it is already gone, which the caller
+        treats as success — the desired end state is the same.
+        """
+        token = self._token_value_for(mapping_id, token_id)
+        if not token:
+            return SEND_NO_TOKENS
+
+        status, _ = await self._request_with_token(
+            token,
+            f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}",
+            method="DELETE",
+            timeout=30,
+            ctx=f"deleting message {message_id}",
+            use_proxy=use_proxy,
+            not_found_status=SEND_NOT_FOUND,
+        )
+        return status
 
     async def create_forum_thread(
         self,
@@ -594,9 +734,7 @@ class UserTokenSender:
         return reaped
 
     def _reap_idle_author_state(self, idle_ttl: float) -> int:
-        # No lock objects involved for author assignments (plain dict
-        # entries, read/written without locking already), so no acquire
-        # dance is needed here.
+
         now = time.monotonic()
         stale = [
             k for k, t in list(self._author_last_seen.items()) if now - t >= idle_ttl
@@ -617,17 +755,24 @@ class UserTokenSender:
         ctx: str = "",
         extra_headers: Optional[dict] = None,
         use_proxy: bool = False,
+        method: str = "POST",
+        not_found_status: str = SEND_UNDELIVERABLE,
     ) -> tuple[str, Optional[dict]]:
-        """POST as one account with per-account rate-limit gating and retries."""
+        """Call the API as one account, with rate-limit gating and retries.
+
+        ``not_found_status`` lets a caller separate 404 from 403, which matter
+        differently once this is used for more than sending: a delete whose
+        target is already gone is done, while one that is forbidden is not.
+        Sends keep conflating them, which is the behaviour they had.
+        """
         r429 = 0
         rnet = 0
         async with self._token_lock(token):
             while True:
                 await self._await_cooldown(token)
-                # Read the lease unconditionally, not gated on use_proxy: if
+
                 # this token's session was primed through a proxy (by any
-                # mapping), its cookies belong to that IP and every request
-                # must keep following it. Re-read each attempt because a
+
                 # prior iteration's report_failure() may have swapped it.
                 proxy = get_proxy_pool().current(token)
                 try:
@@ -637,24 +782,36 @@ class UserTokenSender:
                         headers = {**headers, **extra_headers}
 
                     if mime_factory is not None:
-                        resp = await session.post(
+                        resp = await session.request(
+                            method,
                             url,
                             multipart=mime_factory(),
                             headers=headers,
                             timeout=timeout,
                             proxy=proxy,
                         )
-                    else:
-                        resp = await session.post(
+                    elif json_body is not None:
+                        resp = await session.request(
+                            method,
                             url,
                             json=json_body,
                             headers=headers,
                             timeout=timeout,
                             proxy=proxy,
                         )
+                    else:
+
+                        resp = await session.request(
+                            method,
+                            url,
+                            headers=headers,
+                            timeout=timeout,
+                            proxy=proxy,
+                        )
 
                     status = resp.status_code
-                    if status in (200, 201):
+
+                    if status in (200, 201, 204):
                         if proxy:
                             get_proxy_pool().report_success(proxy)
                         try:
@@ -685,12 +842,16 @@ class UserTokenSender:
                         await close_tls_session(token, reason="revoked-401")
                         return SEND_DEAD, None
 
-                    if status in (403, 404):
+                    if status == 404:
+                        self._log.debug(
+                            "[user-send] target does not exist (HTTP 404) %s", ctx
+                        )
+                        return not_found_status, None
+
+                    if status == 403:
 
                         self._log.debug(
-                            "[user-send] token can't deliver (HTTP %s) %s",
-                            status,
-                            ctx,
+                            "[user-send] token can't deliver (HTTP 403) %s", ctx
                         )
                         return SEND_UNDELIVERABLE, None
 
@@ -721,11 +882,7 @@ class UserTokenSender:
                         "[user-send] Network error %s (attempt %d): %s", ctx, rnet, e
                     )
                     if proxy:
-                        # A connection-level failure (not an HTTP error status
-                        # from Discord) is the signal that this specific
-                        # proxy — not the account — is the problem. Swap it;
-                        # the next loop iteration picks up whatever
-                        # report_failure() reassigned.
+
                         await get_proxy_pool().report_failure(token)
                     if rnet > MAX_NET_RETRIES:
                         return SEND_TRANSIENT, None
@@ -789,6 +946,7 @@ class UserTokenSender:
         *,
         sticker_ids: Optional[list] = None,
         use_proxy: bool = False,
+        reply_to: Optional[dict] = None,
     ) -> str:
         """Post a message as one account. Returns a ``SEND_*`` status."""
         session = self._session_provider()
@@ -808,14 +966,18 @@ class UserTokenSender:
 
         url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
         ctx = f"posting to channel {channel_id}"
-        # The real client tags a message POST with where it came from.
+
         extra = {"X-Context-Properties": _CHAT_INPUT_CONTEXT}
 
+        reply_bits = _reply_bits(reply_to)
+
         if files:
-            status, _ = await self._request_with_token(
+            status, data = await self._request_with_token(
                 token,
                 url,
-                mime_factory=lambda: self._build_multipart(body_text, files, stkr_ids),
+                mime_factory=lambda: self._build_multipart(
+                    body_text, files, stkr_ids, reply_bits=reply_bits
+                ),
                 timeout=60,
                 ctx=ctx,
                 extra_headers=extra,
@@ -825,7 +987,8 @@ class UserTokenSender:
             payload = {"content": body_text}
             if stkr_ids:
                 payload["sticker_ids"] = stkr_ids
-            status, _ = await self._request_with_token(
+            payload.update(reply_bits)
+            status, data = await self._request_with_token(
                 token,
                 url,
                 json_body=payload,
@@ -834,7 +997,14 @@ class UserTokenSender:
                 extra_headers=extra,
                 use_proxy=use_proxy,
             )
-        return status
+
+        cloned_message_id = None
+        if status == SEND_OK and isinstance(data, dict):
+            try:
+                cloned_message_id = int(data.get("id") or 0) or None
+            except (TypeError, ValueError):
+                cloned_message_id = None
+        return status, cloned_message_id
 
     async def _create_thread_with_token(
         self,
@@ -996,7 +1166,12 @@ class UserTokenSender:
         return files, uploaded_urls
 
     def _build_multipart(
-        self, content: str, files: list, sticker_ids: Optional[list] = None
+        self,
+        content: str,
+        files: list,
+        sticker_ids: Optional[list] = None,
+        *,
+        reply_bits: Optional[dict] = None,
     ) -> "CurlMime":
         payload = {
             "content": content or "",
@@ -1006,6 +1181,8 @@ class UserTokenSender:
         }
         if sticker_ids:
             payload["sticker_ids"] = [str(s) for s in sticker_ids]
+        if reply_bits:
+            payload.update(reply_bits)
         mime = CurlMime()
         mime.addpart(
             "payload_json",
