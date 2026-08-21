@@ -377,16 +377,11 @@ class CloneCommands(commands.Cog):
 
     @guild_scoped_slash_command(
         name="token_debug",
-        description="Download a JSON dump of the proxy and headers each user token sends with.",
+        description="Dump the proxy, egress IP and real on-the-wire headers for each user token.",
     )
     async def token_debug(
         self,
         ctx: discord.ApplicationContext,
-        probe_wire: bool = Option(
-            description="Send a real request per token to capture the headers actually sent + egress IP (slower)",
-            required=False,
-            default=False,
-        ),
         limit: int = Option(
             description="Maximum tokens to include (default 25)",
             required=False,
@@ -449,100 +444,59 @@ class CloneCommands(commands.Cog):
                 continue
 
             headers = build_headers(token)
-
-            entry = {
-                "token_id": row.get("token_id"),
-                "username": row.get("username"),
-                # Enough to correlate rows across dumps and with the logs,
-                # without putting the credential in the file.
-                "token_ref": _token_log_id(token),
-                "headers_configured": {
-                    k: ("[redacted]" if k.lower() == "authorization" else v)
-                    for k, v in headers.items()
-                },
-            }
-
+            fingerprint = None
             sp = headers.get("X-Super-Properties")
             if sp:
                 try:
-                    entry["x_super_properties_decoded"] = json.loads(
-                        base64.b64decode(sp)
-                    )
+                    fingerprint = json.loads(base64.b64decode(sp))
                 except Exception:
-                    entry["x_super_properties_decoded"] = None
+                    fingerprint = None
 
-            if probe_wire:
-                entry["wire"] = await self._token_wire_probe(
-                    token, use_proxy=use_proxy
-                )
-
-            # Read after the probe, not before: a token that has not posted
-            # recently has no session and no lease until something opens one,
-            # and the probe is what opens it. Reading first reported "no proxy"
-            # for every idle token while the pool counted the lease.
-            proxy = pool.current(token)
-            entry["proxy"] = {
-                "enabled_for_mapping": use_proxy,
-                "leased": _proxy_label(proxy) if proxy else None,
+            entry = {
+                "username": row.get("username"),
+                "token_id": row.get("token_id"),
+                # Correlates a row with the logs without carrying the credential.
+                "token_ref": _token_log_id(token),
             }
-            entry["tls"] = session_state(token)
+
+            wire = await self._token_wire_probe(token, use_proxy=use_proxy)
+            if wire.get("ok"):
+                entry["egress_ip"] = wire.get("egress_ip")
+                entry["headers"] = wire.get("headers_on_wire")
+                entry["diff_vs_real_client"] = wire.get("diff_vs_real_client")
+            else:
+                # Fall back to the configured dict so the dump still says
+                # something when the probe cannot reach the echo service.
+                entry["probe_error"] = wire.get("error")
+                entry["headers_configured"] = {
+                    k: ("[redacted]" if k.lower() == "authorization" else v)
+                    for k, v in headers.items()
+                    if v is not None
+                }
+
+            entry["fingerprint"] = fingerprint
+
+            # Read after the probe: the probe is what opens the session and
+            # takes the lease, so reading first reports neither.
+            proxy = pool.current(token)
+            entry["proxy"] = _proxy_label(proxy) if proxy else None
 
             entries.append(entry)
 
         report = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
-            "mapping": {
-                "mapping_id": mapping_id,
-                "mapping_name": mapping.get("mapping_name"),
-                "original_guild_id": str(mapping.get("original_guild_id") or ""),
-                "cloned_guild_id": str(guild.id),
-            },
-            "settings": {
-                "USE_USER_TOKENS": bool(settings.get("USE_USER_TOKENS", False)),
-                "USER_TOKEN_USE_PROXIES": use_proxy,
-                "USER_TOKEN_STRATEGY": settings.get("USER_TOKEN_STRATEGY"),
-            },
-            "proxy_pool": {
-                "enabled": pool.enabled,
-                "total": pool.total,
-                "leased": pool.leased_count,
-            },
-            "tls_sessions_open": live_session_count(),
-            "tokens_enabled": len(tokens),
-            "tokens_shown": len(entries),
-            "tokens_omitted": omitted,
-            "note": (
-                "headers_configured is what build_headers() produces. With "
-                "probe_wire it is joined by wire.headers_on_wire, which is what "
-                "curl_cffi actually sent after its impersonation profile added "
-                "and overrode headers -- the two are not the same. "
-                "Authorization is redacted and never sent to the echo service; "
-                "token_ref is a stable hash for correlating with the logs."
-            ),
+            "mapping": mapping.get("mapping_name"),
+            "proxies_enabled": use_proxy,
             "tokens": entries,
         }
+        if omitted:
+            report["tokens_omitted"] = omitted
 
         buf = io.BytesIO(json.dumps(report, indent=2, default=str).encode())
         buf.seek(0)
         ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
-        desc = (
-            f"**{len(entries)}** token(s)"
-            + (f", {omitted} omitted (raise `limit`)" if omitted else "")
-            + ".\n\nAuthorization headers are **redacted** and proxy "
-            "credentials masked, but this still describes your accounts — "
-            "keep it private."
-        )
-        if not use_proxy:
-            desc += "\n\n⚠️ Proxies are **off** for this mapping, so no leases are shown."
-
-        embed = discord.Embed(
-            title="User Token Debug",
-            description=desc,
-            color=discord.Color.blurple(),
-        )
         await ctx.followup.send(
-            embed=embed,
             file=discord.File(buf, filename=f"copycord_token_debug_{ts}.json"),
             ephemeral=True,
         )
