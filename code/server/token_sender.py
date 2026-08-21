@@ -744,6 +744,10 @@ class UserTokenSender:
             self._author_last_seen.pop(key, None)
         return len(stale)
 
+    async def _tls_session(self, token: str, *, use_proxy: bool = False):
+        """The per-token curl_cffi session. Overridden in tests."""
+        return await get_tls_session(token, use_proxy=use_proxy)
+
     async def _request_with_token(
         self,
         token: str,
@@ -776,38 +780,24 @@ class UserTokenSender:
                 # prior iteration's report_failure() may have swapped it.
                 proxy = get_proxy_pool().current(token)
                 try:
-                    session = await get_tls_session(token, use_proxy=use_proxy)
+                    session = await self._tls_session(token, use_proxy=use_proxy)
                     headers = self._build_headers(token)
                     if extra_headers:
                         headers = {**headers, **extra_headers}
 
                     if mime_factory is not None:
-                        resp = await session.request(
-                            method,
-                            url,
-                            multipart=mime_factory(),
-                            headers=headers,
-                            timeout=timeout,
-                            proxy=proxy,
-                        )
+                        kwargs = {"multipart": mime_factory()}
                     elif json_body is not None:
-                        resp = await session.request(
-                            method,
-                            url,
-                            json=json_body,
-                            headers=headers,
-                            timeout=timeout,
-                            proxy=proxy,
-                        )
+                        kwargs = {"json": json_body}
                     else:
+                        # DELETE carries no body.
+                        kwargs = {}
+                    kwargs.update(headers=headers, timeout=timeout, proxy=proxy)
 
-                        resp = await session.request(
-                            method,
-                            url,
-                            headers=headers,
-                            timeout=timeout,
-                            proxy=proxy,
-                        )
+                    if method == "POST":
+                        resp = await session.post(url, **kwargs)
+                    else:
+                        resp = await session.request(method, url, **kwargs)
 
                     status = resp.status_code
 
@@ -922,7 +912,7 @@ class UserTokenSender:
         async def _fire():
             self._token_last_seen[token] = time.monotonic()
             try:
-                session = await get_tls_session(token, use_proxy=use_proxy)
+                session = await self._tls_session(token, use_proxy=use_proxy)
                 proxy = get_proxy_pool().current(token)
                 await session.post(url, headers=headers, timeout=10, proxy=proxy)
             except Exception:
