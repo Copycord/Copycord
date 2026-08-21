@@ -449,7 +449,6 @@ class CloneCommands(commands.Cog):
                 continue
 
             headers = build_headers(token)
-            proxy = pool.current(token)
 
             entry = {
                 "token_id": row.get("token_id"),
@@ -457,11 +456,6 @@ class CloneCommands(commands.Cog):
                 # Enough to correlate rows across dumps and with the logs,
                 # without putting the credential in the file.
                 "token_ref": _token_log_id(token),
-                "proxy": {
-                    "enabled_for_mapping": use_proxy,
-                    "leased": _proxy_label(proxy) if proxy else None,
-                },
-                "tls": session_state(token),
                 "headers_configured": {
                     k: ("[redacted]" if k.lower() == "authorization" else v)
                     for k, v in headers.items()
@@ -481,6 +475,17 @@ class CloneCommands(commands.Cog):
                 entry["wire"] = await self._token_wire_probe(
                     token, use_proxy=use_proxy
                 )
+
+            # Read after the probe, not before: a token that has not posted
+            # recently has no session and no lease until something opens one,
+            # and the probe is what opens it. Reading first reported "no proxy"
+            # for every idle token while the pool counted the lease.
+            proxy = pool.current(token)
+            entry["proxy"] = {
+                "enabled_for_mapping": use_proxy,
+                "leased": _proxy_label(proxy) if proxy else None,
+            }
+            entry["tls"] = session_state(token)
 
             entries.append(entry)
 
