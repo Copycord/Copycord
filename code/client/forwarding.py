@@ -31,9 +31,7 @@ from common.common_helpers import (
 
 log = logging.getLogger(__name__)
 
-# How many Discord webhook POSTs to keep in flight at once while a single rule
-# fans a message out to its URLs. Bounds concurrency for latency and rate-limit
-# safety
+
 DISCORD_WEBHOOK_FANOUT_CONCURRENCY = 8
 
 
@@ -376,10 +374,6 @@ class ForwardingFilters:
         if is_bot and not self.include_bots:
             return False
 
-        # Discord writes these itself (joins, boosts, pins, thread creation).
-        # They are off by default: their `content` is empty, so before this
-        # existed every one of them forwarded as the bare placeholder text
-        # rather than as anything a reader could act on.
         if bool(attrs.get("is_system", False)) and not self.include_system:
             return False
 
@@ -518,9 +512,6 @@ class ForwardingManager:
         self._max_attempts = int(os.getenv("FORWARDING_QUEUE_MAX_ATTEMPTS", "3"))
         self._retry_max_delay = float(os.getenv("FORWARDING_RETRY_MAX_DELAY", "60"))
 
-        # How many Discord webhook POSTs to keep in flight at once while a single
-        # rule fans a message out to its URLs. Bounds concurrency for latency and
-        # rate-limit safety; NOT a cap on how many URLs a rule may have.
         self._discord_fanout_concurrency = max(
             1,
             int(
@@ -807,9 +798,7 @@ class ForwardingManager:
 
         if provider in ("discord",):
             urls = [
-                u
-                for u in discord_urls_from_config(config)
-                if is_discord_webhook_url(u)
+                u for u in discord_urls_from_config(config) if is_discord_webhook_url(u)
             ]
             if not urls:
                 self.log.warning(
@@ -903,10 +892,14 @@ class ForwardingManager:
             is_system = False
 
         message_type = None
+        message_type_id = None
         try:
-            message_type = getattr(getattr(message, "type", None), "name", None)
+            _t = getattr(message, "type", None)
+            message_type = getattr(_t, "name", None)
+            _v = getattr(_t, "value", None)
+            message_type_id = int(_v) if _v is not None else None
         except Exception:
-            message_type = None
+            pass
         content = message.content or ""
         if is_system and not content:
             try:
@@ -948,6 +941,7 @@ class ForwardingManager:
             "is_bot": is_bot,
             "is_system": is_system,
             "message_type": message_type,
+            "message_type_id": message_type_id,
             "content": content,
             "attachments": attachments,
             "embeds": embeds,
@@ -960,9 +954,10 @@ class ForwardingManager:
         now = time.monotonic()
         key = (message_id, rule_id)
 
-        # Evict expired entries when cache is large
         if len(self._dedup_cache) >= self._dedup_max_size:
-            expired = [k for k, ts in self._dedup_cache.items() if now - ts > self._dedup_ttl]
+            expired = [
+                k for k, ts in self._dedup_cache.items() if now - ts > self._dedup_ttl
+            ]
             for k in expired:
                 del self._dedup_cache[k]
 
@@ -1682,10 +1677,7 @@ class ForwardingManager:
         raw_content = (attrs.get("content") or "").strip()
         has_embed_text = any(
             isinstance(e, dict)
-            and (
-                (e.get("description") or "").strip()
-                or (e.get("title") or "").strip()
-            )
+            and ((e.get("description") or "").strip() or (e.get("title") or "").strip())
             for e in (embeds or [])
         )
         has_non_image_att = any(
@@ -1918,10 +1910,11 @@ class ForwardingManager:
             if is_discord_webhook_url(u)
         ]
         if not urls:
-            self.log.debug("[⏩] Discord webhook rule %s has no valid url", rule.rule_id)
+            self.log.debug(
+                "[⏩] Discord webhook rule %s has no valid url", rule.rule_id
+            )
             return
 
-        # ---- build payload once (UNCHANGED from previous single-URL logic) ----
         content = (attrs.get("content") or "").strip()
 
         non_image_links: list[str] = []
@@ -2002,7 +1995,6 @@ class ForwardingManager:
                     rule.rule_id,
                 )
 
-        # ---- DB dedup: skip if this rule already fully forwarded this message ----
         msg_id = attrs.get("message_id")
         if msg_id and self.db:
             try:
@@ -2022,10 +2014,6 @@ class ForwardingManager:
             except Exception:
                 self.log.debug("[⏩] DB dedup check failed, proceeding", exc_info=True)
 
-        # ---- fan out to every URL concurrently, tracking per-URL outcome ----
-        # There is no cap on URL count; a bounded semaphore limits how many
-        # POSTs are in flight at once so latency stays flat as the list grows
-        # and we never open one socket per URL or brush the global rate limit.
         to_send = [u for u in urls if u not in job.delivered_urls]
         sem = asyncio.Semaphore(self._discord_fanout_concurrency)
 
@@ -2062,7 +2050,7 @@ class ForwardingManager:
                     status,
                     (body or "")[:300],
                 )
-            else:  # pending
+            else:
                 pending = True
                 pending_status = status
                 pending_body = body or ""
@@ -2079,7 +2067,6 @@ class ForwardingManager:
                 body=pending_body,
             )
 
-        # ---- all URLs delivered or dropped: log once, record exactly one event ----
         delivered = len(job.delivered_urls)
         total = len(urls)
         if delivered:
@@ -2151,9 +2138,8 @@ async def _post_with_discord_429_retry(
             )
             return status, body, retry_after2
 
-    # Proactive pacing: if this request drained the bucket, pause briefly so the
     # next call in this slot doesn't immediately 429. Short resets only — longer
-    # ones fall through to the reactive 429 + requeue path.
+
     reset_after = _extract_ratelimit_reset_after(headers)
     if (
         _extract_ratelimit_remaining(headers) == 0
