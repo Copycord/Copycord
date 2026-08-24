@@ -727,8 +727,18 @@ class TestCreateForumThread:
             applied_tag_ids=[111, 222],
         )
         assert new_id == 998877
-        assert captured["url"].endswith("/channels/42/threads")
+        # The client asks for nested fields on a forum thread.
+        assert captured["url"].endswith(
+            "/channels/42/threads?use_nested_fields=true"
+        )
         assert captured["json"]["name"] == "My Thread"
+        # applied_tags sits ahead of message in the capture.
+        assert list(captured["json"]) == [
+            "name",
+            "auto_archive_duration",
+            "applied_tags",
+            "message",
+        ]
         assert captured["json"]["message"]["content"] == "first post"
         assert captured["json"]["applied_tags"] == ["111", "222"]
 
@@ -1102,3 +1112,187 @@ class TestSendStatusTaxonomy:
             s._send_with_token("t", 1, "hi", []),
         )
         assert active["max"] == 1
+
+
+class TestMessagePayload:
+    """The JSON body a real desktop client posts, from a capture 2026-08-21.
+
+    We used to send `{"content": ...}` alone, which is a smaller body than any
+    real client sends.
+    """
+
+    def test_keys_and_order_match_the_capture(self):
+        from server.token_sender import message_payload
+
+        p = message_payload("hi")
+        assert list(p.keys()) == [
+            "mobile_network_type",
+            "content",
+            "nonce",
+            "tts",
+            "flags",
+        ]
+        assert p["content"] == "hi"
+        assert p["mobile_network_type"] == "unknown"
+        assert p["tts"] is False
+        assert p["flags"] == 0
+
+    def test_nonce_is_a_snowflake_string(self):
+        from server.token_sender import message_payload
+
+        nonce = message_payload("hi")["nonce"]
+        # A string, not a number: it is a snowflake and would lose precision.
+        assert isinstance(nonce, str) and nonce.isdigit()
+        assert 18 <= len(nonce) <= 19
+
+    def test_nonce_is_unique_per_message(self):
+        from server.token_sender import message_payload
+
+        # Discord dedupes on the nonce, so a repeat can swallow a real message.
+        assert len({message_payload("x")["nonce"] for _ in range(500)}) == 500
+
+    def test_nonce_decodes_to_now(self):
+        import time
+
+        from server.token_sender import message_payload
+
+        nonce = int(message_payload("hi")["nonce"])
+        stamped_ms = (nonce >> 22) + 1420070400000
+        assert abs(stamped_ms - time.time() * 1000) < 10_000
+
+
+class TestReplyPayload:
+    """A reply body, from a captured desktop-client reply 2026-08-21."""
+
+    def _built(self):
+        from server.token_sender import _reply_bits, message_payload
+
+        return message_payload(
+            "lol",
+            _reply_bits(
+                {
+                    "guild_id": 1194020058721165494,
+                    "channel_id": 1496283358181724232,
+                    "message_id": 1541466050892140555,
+                }
+            ),
+        )
+
+    def test_key_order_matches_the_capture(self):
+        # flags comes last: the reference and allowed_mentions sit between it
+        # and tts, so appending the reply fields is not enough.
+        assert list(self._built().keys()) == [
+            "mobile_network_type",
+            "content",
+            "nonce",
+            "tts",
+            "message_reference",
+            "allowed_mentions",
+            "flags",
+        ]
+
+    def test_guild_reply_reference_matches_the_capture(self):
+        from server.token_sender import _reply_bits
+
+        # A guild reply carries guild_id, and it comes FIRST.
+        ref = _reply_bits(
+            {
+                "guild_id": 1194020058721165494,
+                "channel_id": 1496283358181724232,
+                "message_id": 1541466050892140555,
+            }
+        )["message_reference"]
+        assert ref == {
+            "guild_id": "1194020058721165494",
+            "channel_id": "1496283358181724232",
+            "message_id": "1541466050892140555",
+        }
+        assert list(ref) == ["guild_id", "channel_id", "message_id"]
+
+    def test_dm_reply_reference_omits_the_guild(self):
+        from server.token_sender import _reply_bits
+
+        ref = _reply_bits(
+            {
+                "channel_id": 1419807830998777936,
+                "message_id": 1541461886027960351,
+            }
+        )["message_reference"]
+        assert ref == {
+            "channel_id": "1419807830998777936",
+            "message_id": "1541461886027960351",
+        }
+
+    def test_never_sends_fail_if_not_exists(self):
+        # Ours, not the client's. A deleted target is handled by resending
+        # without the reference instead.
+        assert "fail_if_not_exists" not in self._built()["message_reference"]
+
+    def test_allowed_mentions_matches_the_capture(self):
+        # A reply pings the author it answers unless replied_user is False,
+        # and omitting parse would make every mention in the content inert.
+        assert self._built()["allowed_mentions"] == {
+            "parse": ["users", "roles", "everyone"],
+            "replied_user": False,
+        }
+
+    def test_a_plain_message_is_unaffected(self):
+        from server.token_sender import message_payload
+
+        assert list(message_payload("hi").keys()) == [
+            "mobile_network_type",
+            "content",
+            "nonce",
+            "tts",
+            "flags",
+        ]
+
+
+class TestBodyKeyOrder:
+    """Captured bodies are not uniformly ordered.
+
+    A reply carries message_reference and allowed_mentions BEFORE flags, while
+    an attachment or sticker send carries its field AFTER it.
+    """
+
+    def test_reply_fields_come_before_flags(self):
+        from server.token_sender import _reply_bits, message_payload
+
+        p = message_payload(
+            "lol", _reply_bits({"guild_id": 1, "channel_id": 2, "message_id": 3})
+        )
+        assert list(p) == [
+            "mobile_network_type",
+            "content",
+            "nonce",
+            "tts",
+            "message_reference",
+            "allowed_mentions",
+            "flags",
+        ]
+
+    def test_sticker_ids_come_after_flags(self):
+        from server.token_sender import message_payload
+
+        p = message_payload("sticker", {"sticker_ids": ["819128604311027752"]})
+        assert list(p) == [
+            "mobile_network_type",
+            "content",
+            "nonce",
+            "tts",
+            "flags",
+            "sticker_ids",
+        ]
+
+    def test_attachments_come_after_flags(self):
+        from server.token_sender import message_payload
+
+        p = message_payload("lol", {"attachments": [{"id": "0"}]})
+        assert list(p) == [
+            "mobile_network_type",
+            "content",
+            "nonce",
+            "tts",
+            "flags",
+            "attachments",
+        ]

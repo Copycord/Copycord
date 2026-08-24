@@ -89,11 +89,17 @@ class TestFingerprintShape:
         assert h["Sec-Fetch-Mode"] == "cors"
         assert h["Sec-Fetch-Dest"] == "empty"
 
+        # The real client DOES send priority, just not curl_cffi's page-load
+        # value of "u=0, i". This previously asserted it was deleted, which a
+        # later capture disproved.
+        assert h["Priority"] == "u=1, i"
+
         # The deletions are curl_cffi-only and live apart from build_headers,
         # which aiohttp callers share and which must stay all-string.
-        for banned in ("sec-fetch-user", "upgrade-insecure-requests", "priority"):
+        for banned in ("sec-fetch-user", "upgrade-insecure-requests"):
             assert sh.SUPPRESSED_PROFILE_HEADERS[banned] is None
             assert banned not in h
+        assert "priority" not in sh.SUPPRESSED_PROFILE_HEADERS
 
     def test_build_fingerprint_is_internally_consistent(self):
         # A build number belongs to exactly one client and Electron version.

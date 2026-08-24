@@ -49,10 +49,6 @@ MAX_NET_RETRIES = 3
 def _reply_bits(reply_to: Optional[dict]) -> dict:
     """Payload fields that turn a message POST into a native reply.
 
-    ``fail_if_not_exists`` is False so a reference to a message that has since
-    been deleted in the clone degrades to a plain message instead of failing
-    the whole send with a 400.
-
     ``allowed_mentions`` is spelled out rather than left off: a reply pings the
     author it answers by default, which a clone should never do. ``parse``
     lists every type so mentions inside the content keep behaving exactly as
@@ -69,17 +65,15 @@ def _reply_bits(reply_to: Optional[dict]) -> dict:
     if not message_id or not channel_id:
         return {}
 
-    ref = {
-        "message_id": str(message_id),
-        "channel_id": str(channel_id),
-        "fail_if_not_exists": False,
-    }
+    ref = {}
     try:
         guild_id = int(reply_to.get("guild_id") or 0)
     except (TypeError, ValueError):
         guild_id = 0
     if guild_id:
         ref["guild_id"] = str(guild_id)
+    ref["channel_id"] = str(channel_id)
+    ref["message_id"] = str(message_id)
 
     return {
         "message_reference": ref,
@@ -121,6 +115,47 @@ def strip_unusable_emoji(text: str, usable_ids: set) -> str:
             return ""
 
     return _EMOJI_WITH_LEADING_SPACE_RE.sub(repl, text).strip()
+
+
+_DISCORD_EPOCH_MS = 1420070400000
+
+
+def _message_nonce() -> str:
+    """A per-message nonce shaped like the client's.
+
+    The real client always sends one; Discord uses it to dedupe a retry and to
+    match the optimistic echo it already rendered. It must be unique per
+    message, or a resend can be swallowed as a duplicate.
+    """
+    ms = int(time.time() * 1000) - _DISCORD_EPOCH_MS
+    return str((ms << 22) | random.getrandbits(22))
+
+
+_BEFORE_FLAGS = ("message_reference", "allowed_mentions")
+
+
+def message_payload(content: str, extra: Optional[dict] = None) -> dict:
+    """The JSON body the desktop client posts for a message.
+
+    Key order follows real captures, which are not uniform: a reply carries
+    message_reference and allowed_mentions ahead of ``flags``, while an
+    attachment or sticker send carries its field after it.
+    """
+    payload = {
+        "mobile_network_type": "unknown",
+        "content": content or "",
+        "nonce": _message_nonce(),
+        "tts": False,
+    }
+    extra = extra or {}
+    for key in _BEFORE_FLAGS:
+        if key in extra:
+            payload[key] = extra[key]
+    payload["flags"] = 0
+    for key, value in extra.items():
+        if key not in _BEFORE_FLAGS:
+            payload[key] = value
+    return payload
 
 
 SEND_OK = "ok"
@@ -364,7 +399,13 @@ class UserTokenSender:
             token,
             f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}",
             method="PATCH",
-            json_body={"content": text},
+            json_body={
+                "content": text,
+                "allowed_mentions": {
+                    "parse": ["users", "roles", "everyone"],
+                    "replied_user": False,
+                },
+            },
             timeout=30,
             ctx=f"editing message {message_id}",
             use_proxy=use_proxy,
@@ -1014,6 +1055,110 @@ class UserTokenSender:
             if remaining > 0:
                 await _fire()
 
+    async def _request_upload_slots(
+        self, token: str, channel_id: int, files: list, *, use_proxy: bool, referer: str
+    ) -> Optional[list]:
+        """Ask Discord where to put each file.
+
+        Step one of the client's upload flow: it declares the files and gets
+        back a signed URL per file. ``id`` here is the client's own counter for
+        matching the answers up, not the index the message will use.
+        """
+        body = {
+            "files": [
+                {
+                    "filename": fn,
+                    "file_size": len(data),
+                    "id": str(i),
+                    "is_clip": False,
+                    "original_content_type": ct or "application/octet-stream",
+                }
+                for i, (fn, data, ct) in enumerate(files)
+            ]
+        }
+        status, payload = await self._request_with_token(
+            token,
+            f"{DISCORD_API_BASE}/channels/{channel_id}/attachments",
+            json_body=body,
+            timeout=30,
+            ctx=f"reserving {len(files)} upload(s) in channel {channel_id}",
+            use_proxy=use_proxy,
+            referer=referer,
+        )
+        if status != SEND_OK or not isinstance(payload, dict):
+            return None
+        slots = payload.get("attachments")
+        if not isinstance(slots, list) or len(slots) != len(files):
+            return None
+        return slots
+
+    async def _put_upload(
+        self,
+        token: str,
+        upload_url: str,
+        data: bytes,
+        content_type: str,
+        *,
+        use_proxy: bool,
+    ) -> bool:
+        """Step two: the bytes go straight to the signed URL, not to Discord.
+
+        No Discord headers here -- the URL carries its own authorisation, and
+        sending a token to storage would be handing it to a third party.
+        """
+        try:
+            session = await self._tls_session(token, use_proxy=use_proxy)
+            proxy = get_proxy_pool().current(token)
+            resp = await session.request(
+                "PUT",
+                upload_url,
+                data=data,
+                headers={"Content-Type": content_type or "application/octet-stream"},
+                timeout=120,
+                proxy=proxy,
+            )
+            return 200 <= resp.status_code < 300
+        except Exception as e:
+            self._log.warning("[user-send] upload PUT failed: %s", e)
+            return False
+
+    async def _upload_files(
+        self, token: str, channel_id: int, files: list, *, use_proxy: bool, referer: str
+    ) -> Optional[list]:
+        """Run the client's upload flow, returning the message's attachments.
+
+        None means it did not complete, and the caller falls back to posting
+        the files inline.
+        """
+        slots = await self._request_upload_slots(
+            token, channel_id, files, use_proxy=use_proxy, referer=referer
+        )
+        if not slots:
+            return None
+
+        out = []
+        for i, ((filename, data, ctype), slot) in enumerate(zip(files, slots)):
+            if not isinstance(slot, dict):
+                return None
+            upload_url = slot.get("upload_url")
+
+            uploaded = slot.get("upload_filename")
+            if not upload_url or not uploaded:
+                return None
+            if not await self._put_upload(
+                token, upload_url, data, ctype, use_proxy=use_proxy
+            ):
+                return None
+            out.append(
+                {
+                    "id": str(i),
+                    "filename": filename,
+                    "uploaded_filename": uploaded,
+                    "original_content_type": ctype or "application/octet-stream",
+                }
+            )
+        return out
+
     async def _send_with_token(
         self,
         token: str,
@@ -1059,7 +1204,17 @@ class UserTokenSender:
         reply_bits = _reply_bits(reply_to)
         referer = channel_referer(channel_id, guild_id)
 
+        uploaded = None
         if files:
+            uploaded = await self._upload_files(
+                token, channel_id, files, use_proxy=use_proxy, referer=referer
+            )
+            if uploaded is None:
+                self._log.debug(
+                    "[user-send] upload flow unavailable %s; posting inline", ctx
+                )
+
+        if files and uploaded is None:
             status, data = await self._request_with_token(
                 token,
                 url,
@@ -1073,20 +1228,40 @@ class UserTokenSender:
                 referer=referer,
             )
         else:
-            payload = {"content": body_text}
+            extra_fields = dict(reply_bits)
             if stkr_ids:
-                payload["sticker_ids"] = stkr_ids
-            payload.update(reply_bits)
+                extra_fields["sticker_ids"] = stkr_ids
+            if uploaded:
+                extra_fields["attachments"] = uploaded
+
             status, data = await self._request_with_token(
                 token,
                 url,
-                json_body=payload,
+                json_body=message_payload(body_text, extra_fields),
                 timeout=30,
                 ctx=ctx,
                 extra_headers=extra,
                 use_proxy=use_proxy,
                 referer=referer,
             )
+
+            if status == SEND_UNDELIVERABLE and reply_bits:
+
+                self._log.debug(
+                    "[user-send] reply rejected %s; resending without the reference",
+                    ctx,
+                )
+                retry_fields = {"sticker_ids": stkr_ids} if stkr_ids else None
+                status, data = await self._request_with_token(
+                    token,
+                    url,
+                    json_body=message_payload(body_text, retry_fields),
+                    timeout=30,
+                    ctx=ctx,
+                    extra_headers=extra,
+                    use_proxy=use_proxy,
+                    referer=referer,
+                )
 
         cloned_message_id = None
         if status == SEND_OK and isinstance(data, dict):
@@ -1133,12 +1308,16 @@ class UserTokenSender:
         thread_body: dict = {
             "name": (thread_name or "thread")[:100],
             "auto_archive_duration": int(auto_archive_duration or 60),
-            "message": message,
         }
+
         if applied_tag_ids:
             thread_body["applied_tags"] = [str(t) for t in applied_tag_ids]
+        thread_body["message"] = message
 
-        url = f"{DISCORD_API_BASE}/channels/{forum_channel_id}/threads"
+        url = (
+            f"{DISCORD_API_BASE}/channels/{forum_channel_id}"
+            "/threads?use_nested_fields=true"
+        )
         ctx = f"creating forum thread in {forum_channel_id}"
 
         if files:
@@ -1194,6 +1373,8 @@ class UserTokenSender:
         else:
             url = f"{DISCORD_API_BASE}/channels/{parent_channel_id}/threads"
             body["type"] = 11
+
+            body["location"] = "Plus Button"
 
         status, data = await self._request_with_token(
             token,
@@ -1263,16 +1444,13 @@ class UserTokenSender:
         *,
         reply_bits: Optional[dict] = None,
     ) -> "CurlMime":
-        payload = {
-            "content": content or "",
-            "attachments": [
-                {"id": i, "filename": fn} for i, (fn, _data, _ct) in enumerate(files)
-            ],
-        }
+        extra = dict(reply_bits or {})
+        extra["attachments"] = [
+            {"id": i, "filename": fn} for i, (fn, _data, _ct) in enumerate(files)
+        ]
         if sticker_ids:
-            payload["sticker_ids"] = [str(s) for s in sticker_ids]
-        if reply_bits:
-            payload.update(reply_bits)
+            extra["sticker_ids"] = [str(s) for s in sticker_ids]
+        payload = message_payload(content, extra)
         mime = CurlMime()
         mime.addpart(
             "payload_json",
