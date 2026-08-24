@@ -6358,6 +6358,7 @@ def _normalize_forwarding_rule_filters(raw: dict | str | None) -> dict:
     - case_sensitive: bool
     - include_embeds: bool
     - include_bots: bool (default False to preserve old behaviour)
+    - include_system: bool (default False; Discord's own join/boost/pin notices)
     - has_attachments: bool (default False)
     """
     if not raw:
@@ -6396,6 +6397,7 @@ def _normalize_forwarding_rule_filters(raw: dict | str | None) -> dict:
         "case_sensitive": to_bool(raw.get("case_sensitive"), False),
         "include_embeds": to_bool(raw.get("include_embeds"), False),
         "include_bots": to_bool(raw.get("include_bots"), False),
+        "include_system": to_bool(raw.get("include_system"), False),
         "has_attachments": to_bool(
             raw.get("has_attachments", raw.get("hasMedia")), False
         ),
