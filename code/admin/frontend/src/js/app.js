@@ -3822,15 +3822,21 @@
         let catCell = "";
         if (kind === "channel") {
           const pid = obj.parent_id ? String(obj.parent_id) : "";
-          const parentName = pid && catMap.get(pid);
+          // A thread hangs off a channel, not a category, so its parent is
+          // never in catMap -- the endpoint sends the name alongside it.
+          const parentName = obj.is_thread
+            ? obj.parent_name || ""
+            : (pid && catMap.get(pid)) || "";
           catCell = `<td class="filter-obj-cat">
-          <span class="filter-obj-cat-text">${escapeHtml(
-            parentName || ""
-          )}</span>
+          <span class="filter-obj-cat-text">${escapeHtml(parentName)}</span>
         </td>`;
         } else {
           catCell = `<td class="filter-obj-cat"></td>`;
         }
+
+        const threadTag = obj.is_thread
+          ? ' <span class="filter-obj-thread-tag">thread</span>'
+          : "";
 
         return `
         <tr data-obj-id="${id}">
@@ -3844,7 +3850,7 @@
             </label>
           </td>
           <td class="filter-obj-name-col">
-            <span class="filter-obj-name">${safeName}</span>
+            <span class="filter-obj-name">${safeName}</span>${threadTag}
           </td>
           ${catCell}
           <td class="filter-obj-id-col"><code>${id}</code></td>
@@ -4030,7 +4036,7 @@
 
     if (titleEl) {
       const prefix = listKey.startsWith("wl_") ? "Allow" : "Block";
-      const what = kind === "category" ? "Categories" : "Channels";
+      const what = kind === "category" ? "Categories" : "Channels & Threads";
       titleEl.textContent = `${prefix} ${what}`;
     }
     if (helpEl) {
@@ -4040,8 +4046,8 @@
           : "The selected categories (and their channels) will not be cloned.";
       } else {
         helpEl.textContent = listKey.startsWith("wl_")
-          ? "Only the selected channels will be cloned."
-          : "The selected channels will not be cloned.";
+          ? "Only the selected channels and threads will be cloned."
+          : "The selected channels and threads will not be cloned. Blocking a channel also covers its threads.";
       }
     }
     if (catHeader) {
@@ -4099,7 +4105,7 @@
       const items = kind === "category" ? categories : channels;
       if (!items.length) {
         tbody.innerHTML = `<tr><td colspan="4" class="text-center small">No ${
-          kind === "category" ? "categories" : "channels"
+          kind === "category" ? "categories" : "channels or active threads"
         } found for this guild.</td></tr>`;
         return;
       }

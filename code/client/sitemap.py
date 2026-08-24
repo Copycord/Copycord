@@ -1172,11 +1172,18 @@ class SitemapService:
         channel_id: int | None,
         category_id: int | None,
         view: Dict[str, object],
+        thread_id: int | None = None,
     ) -> bool:
         """
         Return True if this channel/category should be filtered out (hidden),
         using the *per-origin-guild* filter view rather than the old global config.
         This is the same logic we use when trimming the sitemap.
+
+        ``thread_id`` is the thread's own id, judged alongside its parent so a
+        single noisy thread can be dropped without losing the channel it lives
+        in, or kept while the rest of that channel is filtered away. A thread
+        inherits its parent's verdict when it is not named itself, which is
+        what makes excluding a whole channel still cover its threads.
         """
         include_category_ids = view["include_category_ids"]
         include_channel_ids = view["include_channel_ids"]
@@ -1187,20 +1194,79 @@ class SitemapService:
 
         wl_ch = bool(channel_id and channel_id in include_channel_ids)
         wl_cat = bool(category_id and category_id in include_category_ids)
+        wl_th = bool(thread_id and thread_id in include_channel_ids)
 
         ex_ch = bool(channel_id and channel_id in excluded_channel_ids)
         ex_cat = bool(category_id and category_id in excluded_category_ids)
+        ex_th = bool(thread_id and thread_id in excluded_channel_ids)
 
-        if wl_on and not (wl_ch or wl_cat):
+        if wl_on and not (wl_ch or wl_cat or wl_th):
             return True
 
-        if ex_ch and not wl_ch:
+        # Naming the thread itself is the most specific instruction there is,
+        # so it beats an allowed parent.
+        if ex_th and not wl_th:
             return True
 
-        if ex_cat and not (wl_cat or wl_ch):
+        # An explicitly included thread survives its parent being excluded.
+        if ex_ch and not (wl_ch or wl_th):
+            return True
+
+        if ex_cat and not (wl_cat or wl_ch or wl_th):
             return True
 
         return False
+
+    def _clone_ids_for_origin(self, origin_guild_id: int) -> list[int]:
+        """Every clone guild this source guild is mapped to."""
+        out: list[int] = []
+        try:
+            for m in self.db.list_guild_mappings() or []:
+                try:
+                    if int(m["original_guild_id"]) != int(origin_guild_id):
+                        continue
+                    cid = int(m["cloned_guild_id"] or 0)
+                except Exception:
+                    continue
+                if cid:
+                    out.append(cid)
+        except Exception:
+            self.logger.debug("[filter] could not list mappings", exc_info=True)
+        return out
+
+    def _filtered_out_for_every_mapping(
+        self,
+        origin_guild_id: int,
+        channel_id: int | None,
+        category_id: int | None,
+        thread_id: int | None = None,
+    ) -> bool:
+        """True when no clone of this guild wants this channel or thread.
+
+        Filters are stored per mapping, and a guild-scoped lookup cannot see
+        those rows at all -- so asking at guild scope silently answered "keep
+        everything". Ask each mapping instead, and only drop the message when
+        every one of them has filtered it out; the client sends one payload per
+        source message, so if any clone still wants it, it has to go.
+        """
+        clone_ids = self._clone_ids_for_origin(origin_guild_id)
+        if not clone_ids:
+            # Unmapped guild: fall back to the guild-level view, which is
+            # where genuinely global filter rows live.
+            return self._is_filtered_out_view(
+                channel_id,
+                category_id,
+                self._build_filter_view_for_guild(origin_guild_id),
+                thread_id=thread_id,
+            )
+
+        for clone_id in clone_ids:
+            view = self._build_filter_view_for_mapping(origin_guild_id, clone_id)
+            if not self._is_filtered_out_view(
+                channel_id, category_id, view, thread_id=thread_id
+            ):
+                return False
+        return True
 
     def in_scope_channel(self, ch, cloned_guild_id: int | None = None) -> bool:
         """
@@ -1234,13 +1300,25 @@ class SitemapService:
                 if parent is None:
                     return False
                 cat_id = getattr(parent, "category_id", None)
+                if cloned_guild_id is None:
+                    return not self._filtered_out_for_every_mapping(
+                        origin_gid,
+                        getattr(parent, "id", None),
+                        cat_id,
+                        thread_id=getattr(ch, "id", None),
+                    )
                 return not self._is_filtered_out_view(
                     getattr(parent, "id", None),
                     cat_id,
                     view,
+                    thread_id=getattr(ch, "id", None),
                 )
 
             cat_id = getattr(ch, "category_id", None)
+            if cloned_guild_id is None:
+                return not self._filtered_out_for_every_mapping(
+                    origin_gid, getattr(ch, "id", None), cat_id
+                )
             return not self._is_filtered_out_view(
                 getattr(ch, "id", None),
                 cat_id,
@@ -1283,8 +1361,15 @@ class SitemapService:
         self, thr: discord.Thread, cloned_guild_id: int | None = None
     ) -> bool:
         """
-        True if this thread's parent channel is allowed for its origin guild,
-        using per-mapping filters when a clone is specified.
+        True if this thread is allowed for its origin guild, using per-mapping
+        filters when a clone is specified.
+
+        The thread's own id is judged alongside its parent, so a single thread
+        can be filtered out without losing the channel it lives in. This is the
+        gate every message in a thread passes through -- a forum post that is
+        filtered out of the sitemap never gets created, but a text-channel
+        thread is made on demand from the message itself, so without this check
+        it is created and forwarded regardless.
         """
         try:
             parent = getattr(thr, "parent", None)
@@ -1302,10 +1387,18 @@ class SitemapService:
                 view = self._build_filter_view_for_guild(origin_gid)
 
             cat_id = getattr(parent, "category_id", None)
+            if cloned_guild_id is None:
+                return not self._filtered_out_for_every_mapping(
+                    origin_gid,
+                    getattr(parent, "id", None),
+                    cat_id,
+                    thread_id=getattr(thr, "id", None),
+                )
             return not self._is_filtered_out_view(
                 getattr(parent, "id", None),
                 cat_id,
                 view,
+                thread_id=getattr(thr, "id", None),
             )
         except Exception:
             return True

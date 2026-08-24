@@ -3094,6 +3094,12 @@ async def api_mapping_channels(mapping_id: str):
         else:
             channels.append(base)
 
+    threads = await _fetch_active_threads(orig_id, client_token)
+    channel_names = {c["id"]: c["name"] for c in channels}
+    for th in threads:
+        th["parent_name"] = channel_names.get(th.get("parent_id") or "")
+    channels.extend(threads)
+
     categories.sort(key=lambda c: (c["position"], c["name"].lower()))
     channels.sort(
         key=lambda c: (c["parent_id"] or "", c["position"], c["name"].lower())
@@ -3106,6 +3112,50 @@ async def api_mapping_channels(mapping_id: str):
             "channels": channels,
         }
     )
+
+
+async def _fetch_active_threads(guild_id: int, client_token: str) -> list[dict]:
+    """Currently-active threads in a guild, shaped like the channel rows.
+
+    Best effort: a guild with no active threads, or a call that fails, simply
+    means the picker offers none. Archived threads are not listed -- Discord
+    pages them per channel, and a thread nobody has posted in is not what
+    someone is trying to filter out.
+    """
+    url = f"{DISCORD_API_BASE}/guilds/{guild_id}/threads/active"
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(
+                url, headers=_selfbot_headers(client_token), timeout=10
+            ) as resp:
+                if resp.status != 200:
+                    LOGGER.debug(
+                        "Active threads fetch for %s: HTTP %s", guild_id, resp.status
+                    )
+                    return []
+                payload = json.loads(await resp.text())
+    except Exception:
+        LOGGER.debug("Active threads fetch failed for %s", guild_id, exc_info=True)
+        return []
+
+    out: list[dict] = []
+    for th in (payload or {}).get("threads") or []:
+        try:
+            tid = str(th["id"])
+        except Exception:
+            continue
+        parent = th.get("parent_id")
+        out.append(
+            {
+                "id": tid,
+                "name": str(th.get("name") or f"ID {tid}"),
+                "type": int(th.get("type") or 0),
+                "position": 0,
+                "parent_id": str(parent) if parent else None,
+                "is_thread": True,
+            }
+        )
+    return out
 
 
 @app.get("/api/mappings/{mapping_id}/roles", response_class=JSONResponse)
