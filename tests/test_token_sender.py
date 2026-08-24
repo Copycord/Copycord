@@ -1161,10 +1161,9 @@ class TestReplyPayload:
             "lol",
             _reply_bits(
                 {
-                    "message_id": 1541461886027960351,
-                    "channel_id": 1419807830998777936,
-                    # Known, and still deliberately not sent.
-                    "guild_id": 111,
+                    "guild_id": 1194020058721165494,
+                    "channel_id": 1496283358181724232,
+                    "message_id": 1541466050892140555,
                 }
             ),
         )
@@ -1182,16 +1181,42 @@ class TestReplyPayload:
             "flags",
         ]
 
-    def test_message_reference_is_exactly_what_the_client_sends(self):
-        ref = self._built()["message_reference"]
+    def test_guild_reply_reference_matches_the_capture(self):
+        from server.token_sender import _reply_bits
+
+        # A guild reply carries guild_id, and it comes FIRST.
+        ref = _reply_bits(
+            {
+                "guild_id": 1194020058721165494,
+                "channel_id": 1496283358181724232,
+                "message_id": 1541466050892140555,
+            }
+        )["message_reference"]
+        assert ref == {
+            "guild_id": "1194020058721165494",
+            "channel_id": "1496283358181724232",
+            "message_id": "1541466050892140555",
+        }
+        assert list(ref) == ["guild_id", "channel_id", "message_id"]
+
+    def test_dm_reply_reference_omits_the_guild(self):
+        from server.token_sender import _reply_bits
+
+        ref = _reply_bits(
+            {
+                "channel_id": 1419807830998777936,
+                "message_id": 1541461886027960351,
+            }
+        )["message_reference"]
         assert ref == {
             "channel_id": "1419807830998777936",
             "message_id": "1541461886027960351",
         }
-        # The client sends neither of these. fail_if_not_exists was ours; a
-        # deleted target is now handled by resending without the reference.
-        assert "fail_if_not_exists" not in ref
-        assert "guild_id" not in ref
+
+    def test_never_sends_fail_if_not_exists(self):
+        # Ours, not the client's. A deleted target is handled by resending
+        # without the reference instead.
+        assert "fail_if_not_exists" not in self._built()["message_reference"]
 
     def test_allowed_mentions_matches_the_capture(self):
         # A reply pings the author it answers unless replied_user is False,

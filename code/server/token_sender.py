@@ -65,15 +65,20 @@ def _reply_bits(reply_to: Optional[dict]) -> dict:
     if not message_id or not channel_id:
         return {}
 
-    # Field order and contents from a captured reply: channel then message, and
-    # neither guild_id nor fail_if_not_exists. The client omits the latter, so
-    # a reference to a deleted message is recovered by resending without the
-    # reference (see _send_with_token) rather than by sending a field it never
-    # sends.
-    ref = {
-        "channel_id": str(channel_id),
-        "message_id": str(message_id),
-    }
+    # Field order from captured replies: guild, then channel, then message. A
+    # guild reply carries guild_id first; a DM has no guild and omits it.
+    # Neither carries fail_if_not_exists, so a reference to a deleted message
+    # is recovered by resending without the reference (see _send_with_token)
+    # rather than by sending a field the client never sends.
+    ref = {}
+    try:
+        guild_id = int(reply_to.get("guild_id") or 0)
+    except (TypeError, ValueError):
+        guild_id = 0
+    if guild_id:
+        ref["guild_id"] = str(guild_id)
+    ref["channel_id"] = str(channel_id)
+    ref["message_id"] = str(message_id)
 
     return {
         "message_reference": ref,
