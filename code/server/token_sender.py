@@ -1066,6 +1066,106 @@ class UserTokenSender:
             if remaining > 0:
                 await _fire()
 
+    async def _request_upload_slots(
+        self, token: str, channel_id: int, files: list, *, use_proxy: bool, referer: str
+    ) -> Optional[list]:
+        """Ask Discord where to put each file.
+
+        Step one of the client's upload flow: it declares the files and gets
+        back a signed URL per file. ``id`` here is the client's own counter for
+        matching the answers up, not the index the message will use.
+        """
+        body = {
+            "files": [
+                {
+                    "filename": fn,
+                    "file_size": len(data),
+                    "id": str(i),
+                    "is_clip": False,
+                    "original_content_type": ct or "application/octet-stream",
+                }
+                for i, (fn, data, ct) in enumerate(files)
+            ]
+        }
+        status, payload = await self._request_with_token(
+            token,
+            f"{DISCORD_API_BASE}/channels/{channel_id}/attachments",
+            json_body=body,
+            timeout=30,
+            ctx=f"reserving {len(files)} upload(s) in channel {channel_id}",
+            use_proxy=use_proxy,
+            referer=referer,
+        )
+        if status != SEND_OK or not isinstance(payload, dict):
+            return None
+        slots = payload.get("attachments")
+        if not isinstance(slots, list) or len(slots) != len(files):
+            return None
+        return slots
+
+    async def _put_upload(
+        self, token: str, upload_url: str, data: bytes, content_type: str, *,
+        use_proxy: bool,
+    ) -> bool:
+        """Step two: the bytes go straight to the signed URL, not to Discord.
+
+        No Discord headers here -- the URL carries its own authorisation, and
+        sending a token to storage would be handing it to a third party.
+        """
+        try:
+            session = await self._tls_session(token, use_proxy=use_proxy)
+            proxy = get_proxy_pool().current(token)
+            resp = await session.request(
+                "PUT",
+                upload_url,
+                data=data,
+                headers={"Content-Type": content_type or "application/octet-stream"},
+                timeout=120,
+                proxy=proxy,
+            )
+            return 200 <= resp.status_code < 300
+        except Exception as e:
+            self._log.warning("[user-send] upload PUT failed: %s", e)
+            return False
+
+    async def _upload_files(
+        self, token: str, channel_id: int, files: list, *, use_proxy: bool, referer: str
+    ) -> Optional[list]:
+        """Run the client's upload flow, returning the message's attachments.
+
+        None means it did not complete, and the caller falls back to posting
+        the files inline.
+        """
+        slots = await self._request_upload_slots(
+            token, channel_id, files, use_proxy=use_proxy, referer=referer
+        )
+        if not slots:
+            return None
+
+        out = []
+        for i, ((filename, data, ctype), slot) in enumerate(zip(files, slots)):
+            if not isinstance(slot, dict):
+                return None
+            upload_url = slot.get("upload_url")
+            # Discord answers with upload_filename and expects it back as
+            # uploaded_filename. The names really do differ.
+            uploaded = slot.get("upload_filename")
+            if not upload_url or not uploaded:
+                return None
+            if not await self._put_upload(
+                token, upload_url, data, ctype, use_proxy=use_proxy
+            ):
+                return None
+            out.append(
+                {
+                    "id": str(i),
+                    "filename": filename,
+                    "uploaded_filename": uploaded,
+                    "original_content_type": ctype or "application/octet-stream",
+                }
+            )
+        return out
+
     async def _send_with_token(
         self,
         token: str,
@@ -1111,7 +1211,21 @@ class UserTokenSender:
         reply_bits = _reply_bits(reply_to)
         referer = channel_referer(channel_id, guild_id)
 
+        # The client uploads files to storage first and then posts a message
+        # referencing them; it never posts the bytes inline. Inline multipart
+        # still works and is kept for when the upload flow cannot complete,
+        # since a delivered message beats a faithful failure.
+        uploaded = None
         if files:
+            uploaded = await self._upload_files(
+                token, channel_id, files, use_proxy=use_proxy, referer=referer
+            )
+            if uploaded is None:
+                self._log.debug(
+                    "[user-send] upload flow unavailable %s; posting inline", ctx
+                )
+
+        if files and uploaded is None:
             status, data = await self._request_with_token(
                 token,
                 url,
@@ -1128,6 +1242,8 @@ class UserTokenSender:
             extra_fields = dict(reply_bits)
             if stkr_ids:
                 extra_fields["sticker_ids"] = stkr_ids
+            if uploaded:
+                extra_fields["attachments"] = uploaded
 
             status, data = await self._request_with_token(
                 token,
