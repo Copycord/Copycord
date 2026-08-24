@@ -65,11 +65,6 @@ def _reply_bits(reply_to: Optional[dict]) -> dict:
     if not message_id or not channel_id:
         return {}
 
-    # Field order from captured replies: guild, then channel, then message. A
-    # guild reply carries guild_id first; a DM has no guild and omits it.
-    # Neither carries fail_if_not_exists, so a reference to a deleted message
-    # is recovered by resending without the reference (see _send_with_token)
-    # rather than by sending a field the client never sends.
     ref = {}
     try:
         guild_id = int(reply_to.get("guild_id") or 0)
@@ -122,8 +117,6 @@ def strip_unusable_emoji(text: str, usable_ids: set) -> str:
     return _EMOJI_WITH_LEADING_SPACE_RE.sub(repl, text).strip()
 
 
-
-# Discord's epoch, so a nonce looks like the snowflake the client sends.
 _DISCORD_EPOCH_MS = 1420070400000
 
 
@@ -138,8 +131,6 @@ def _message_nonce() -> str:
     return str((ms << 22) | random.getrandbits(22))
 
 
-# Captured bodies put these two between `tts` and `flags`; everything else
-# (attachments, sticker_ids) comes after `flags`.
 _BEFORE_FLAGS = ("message_reference", "allowed_mentions")
 
 
@@ -408,8 +399,6 @@ class UserTokenSender:
             token,
             f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}",
             method="PATCH",
-            # The client sends allowed_mentions on an edit too, so a mention
-            # introduced by the edit behaves the way it does on a fresh send.
             json_body={
                 "content": text,
                 "allowed_mentions": {
@@ -1104,7 +1093,12 @@ class UserTokenSender:
         return slots
 
     async def _put_upload(
-        self, token: str, upload_url: str, data: bytes, content_type: str, *,
+        self,
+        token: str,
+        upload_url: str,
+        data: bytes,
+        content_type: str,
+        *,
         use_proxy: bool,
     ) -> bool:
         """Step two: the bytes go straight to the signed URL, not to Discord.
@@ -1147,8 +1141,7 @@ class UserTokenSender:
             if not isinstance(slot, dict):
                 return None
             upload_url = slot.get("upload_url")
-            # Discord answers with upload_filename and expects it back as
-            # uploaded_filename. The names really do differ.
+
             uploaded = slot.get("upload_filename")
             if not upload_url or not uploaded:
                 return None
@@ -1211,10 +1204,6 @@ class UserTokenSender:
         reply_bits = _reply_bits(reply_to)
         referer = channel_referer(channel_id, guild_id)
 
-        # The client uploads files to storage first and then posts a message
-        # referencing them; it never posts the bytes inline. Inline multipart
-        # still works and is kept for when the upload flow cannot complete,
-        # since a delivered message beats a faithful failure.
         uploaded = None
         if files:
             uploaded = await self._upload_files(
@@ -1257,11 +1246,7 @@ class UserTokenSender:
             )
 
             if status == SEND_UNDELIVERABLE and reply_bits:
-                # Most likely the message being replied to is gone, which the
-                # real client avoids by never replying to one it thinks is
-                # deleted. Rather than send fail_if_not_exists (a field the
-                # client does not send), drop the reference and resend, which
-                # is the same outcome that flag would have produced.
+
                 self._log.debug(
                     "[user-send] reply rejected %s; resending without the reference",
                     ctx,
@@ -1324,7 +1309,7 @@ class UserTokenSender:
             "name": (thread_name or "thread")[:100],
             "auto_archive_duration": int(auto_archive_duration or 60),
         }
-        # Key order from the capture: applied_tags ahead of the message.
+
         if applied_tag_ids:
             thread_body["applied_tags"] = [str(t) for t in applied_tag_ids]
         thread_body["message"] = message
@@ -1388,8 +1373,7 @@ class UserTokenSender:
         else:
             url = f"{DISCORD_API_BASE}/channels/{parent_channel_id}/threads"
             body["type"] = 11
-            # The client reports which control created the thread. A standalone
-            # thread comes from the composer's plus button.
+
             body["location"] = "Plus Button"
 
         status, data = await self._request_with_token(
