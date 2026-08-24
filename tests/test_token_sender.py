@@ -1149,3 +1149,65 @@ class TestMessagePayload:
         nonce = int(message_payload("hi")["nonce"])
         stamped_ms = (nonce >> 22) + 1420070400000
         assert abs(stamped_ms - time.time() * 1000) < 10_000
+
+
+class TestReplyPayload:
+    """A reply body, from a captured desktop-client reply 2026-08-21."""
+
+    def _built(self):
+        from server.token_sender import _reply_bits, message_payload
+
+        return message_payload(
+            "lol",
+            _reply_bits(
+                {
+                    "message_id": 1541461886027960351,
+                    "channel_id": 1419807830998777936,
+                    # Known, and still deliberately not sent.
+                    "guild_id": 111,
+                }
+            ),
+        )
+
+    def test_key_order_matches_the_capture(self):
+        # flags comes last: the reference and allowed_mentions sit between it
+        # and tts, so appending the reply fields is not enough.
+        assert list(self._built().keys()) == [
+            "mobile_network_type",
+            "content",
+            "nonce",
+            "tts",
+            "message_reference",
+            "allowed_mentions",
+            "flags",
+        ]
+
+    def test_message_reference_is_exactly_what_the_client_sends(self):
+        ref = self._built()["message_reference"]
+        assert ref == {
+            "channel_id": "1419807830998777936",
+            "message_id": "1541461886027960351",
+        }
+        # The client sends neither of these. fail_if_not_exists was ours; a
+        # deleted target is now handled by resending without the reference.
+        assert "fail_if_not_exists" not in ref
+        assert "guild_id" not in ref
+
+    def test_allowed_mentions_matches_the_capture(self):
+        # A reply pings the author it answers unless replied_user is False,
+        # and omitting parse would make every mention in the content inert.
+        assert self._built()["allowed_mentions"] == {
+            "parse": ["users", "roles", "everyone"],
+            "replied_user": False,
+        }
+
+    def test_a_plain_message_is_unaffected(self):
+        from server.token_sender import message_payload
+
+        assert list(message_payload("hi").keys()) == [
+            "mobile_network_type",
+            "content",
+            "nonce",
+            "tts",
+            "flags",
+        ]

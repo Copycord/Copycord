@@ -49,10 +49,6 @@ MAX_NET_RETRIES = 3
 def _reply_bits(reply_to: Optional[dict]) -> dict:
     """Payload fields that turn a message POST into a native reply.
 
-    ``fail_if_not_exists`` is False so a reference to a message that has since
-    been deleted in the clone degrades to a plain message instead of failing
-    the whole send with a 400.
-
     ``allowed_mentions`` is spelled out rather than left off: a reply pings the
     author it answers by default, which a clone should never do. ``parse``
     lists every type so mentions inside the content keep behaving exactly as
@@ -69,17 +65,15 @@ def _reply_bits(reply_to: Optional[dict]) -> dict:
     if not message_id or not channel_id:
         return {}
 
+    # Field order and contents from a captured reply: channel then message, and
+    # neither guild_id nor fail_if_not_exists. The client omits the latter, so
+    # a reference to a deleted message is recovered by resending without the
+    # reference (see _send_with_token) rather than by sending a field it never
+    # sends.
     ref = {
-        "message_id": str(message_id),
         "channel_id": str(channel_id),
-        "fail_if_not_exists": False,
+        "message_id": str(message_id),
     }
-    try:
-        guild_id = int(reply_to.get("guild_id") or 0)
-    except (TypeError, ValueError):
-        guild_id = 0
-    if guild_id:
-        ref["guild_id"] = str(guild_id)
 
     return {
         "message_reference": ref,
@@ -139,19 +133,22 @@ def _message_nonce() -> str:
     return str((ms << 22) | random.getrandbits(22))
 
 
-def message_payload(content: str) -> dict:
+def message_payload(content: str, extra: Optional[dict] = None) -> dict:
     """The JSON body the desktop client posts for a message.
 
-    Key order matches a real capture. `content` alone is a smaller body than
-    any real client sends.
+    Key order matches a real capture, including ``flags`` coming last: a reply
+    carries message_reference and allowed_mentions between ``tts`` and it.
     """
-    return {
+    payload = {
         "mobile_network_type": "unknown",
         "content": content or "",
         "nonce": _message_nonce(),
         "tts": False,
-        "flags": 0,
     }
+    if extra:
+        payload.update(extra)
+    payload["flags"] = 0
+    return payload
 
 
 SEND_OK = "ok"
@@ -1104,20 +1101,42 @@ class UserTokenSender:
                 referer=referer,
             )
         else:
-            payload = message_payload(body_text)
+            extra_fields = dict(reply_bits)
             if stkr_ids:
-                payload["sticker_ids"] = stkr_ids
-            payload.update(reply_bits)
+                extra_fields["sticker_ids"] = stkr_ids
+
             status, data = await self._request_with_token(
                 token,
                 url,
-                json_body=payload,
+                json_body=message_payload(body_text, extra_fields),
                 timeout=30,
                 ctx=ctx,
                 extra_headers=extra,
                 use_proxy=use_proxy,
                 referer=referer,
             )
+
+            if status == SEND_UNDELIVERABLE and reply_bits:
+                # Most likely the message being replied to is gone, which the
+                # real client avoids by never replying to one it thinks is
+                # deleted. Rather than send fail_if_not_exists (a field the
+                # client does not send), drop the reference and resend, which
+                # is the same outcome that flag would have produced.
+                self._log.debug(
+                    "[user-send] reply rejected %s; resending without the reference",
+                    ctx,
+                )
+                retry_fields = {"sticker_ids": stkr_ids} if stkr_ids else None
+                status, data = await self._request_with_token(
+                    token,
+                    url,
+                    json_body=message_payload(body_text, retry_fields),
+                    timeout=30,
+                    ctx=ctx,
+                    extra_headers=extra,
+                    use_proxy=use_proxy,
+                    referer=referer,
+                )
 
         cloned_message_id = None
         if status == SEND_OK and isinstance(data, dict):
@@ -1294,14 +1313,13 @@ class UserTokenSender:
         *,
         reply_bits: Optional[dict] = None,
     ) -> "CurlMime":
-        payload = message_payload(content)
-        payload["attachments"] = [
+        extra = dict(reply_bits or {})
+        extra["attachments"] = [
             {"id": i, "filename": fn} for i, (fn, _data, _ct) in enumerate(files)
         ]
         if sticker_ids:
-            payload["sticker_ids"] = [str(s) for s in sticker_ids]
-        if reply_bits:
-            payload.update(reply_bits)
+            extra["sticker_ids"] = [str(s) for s in sticker_ids]
+        payload = message_payload(content, extra)
         mime = CurlMime()
         mime.addpart(
             "payload_json",
