@@ -313,6 +313,9 @@ def make_fingerprint(token: str) -> dict:
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Dest": "empty",
         "Origin": "https://discord.com",
+        # A fetch from the app, not a navigation: curl_cffi's profile
+        # supplies "u=0, i", which is the page-load priority.
+        "Priority": "u=1, i",
     }
     return {"headers": headers, "super_props_b64": super_props_b64}
 
@@ -342,7 +345,6 @@ def _sec_ch_ua(user_agent: str) -> str:
 SUPPRESSED_PROFILE_HEADERS = {
     "sec-fetch-user": None,
     "upgrade-insecure-requests": None,
-    "priority": None,
 }
 
 
@@ -582,6 +584,7 @@ REAL_CLIENT_HEADERS = {
     "accept-language": None,
     "accept-encoding": "gzip, deflate, br, zstd",
     "content-type": "application/json",
+    "priority": "u=1, i",
 }
 
 # The real client sends none of these. They are navigation artifacts that give
@@ -589,7 +592,6 @@ REAL_CLIENT_HEADERS = {
 REAL_CLIENT_ABSENT = (
     "sec-fetch-user",
     "upgrade-insecure-requests",
-    "priority",
 )
 
 # Set by the transport or the request itself, not part of the persona.

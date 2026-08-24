@@ -123,6 +123,37 @@ def strip_unusable_emoji(text: str, usable_ids: set) -> str:
     return _EMOJI_WITH_LEADING_SPACE_RE.sub(repl, text).strip()
 
 
+
+# Discord's epoch, so a nonce looks like the snowflake the client sends.
+_DISCORD_EPOCH_MS = 1420070400000
+
+
+def _message_nonce() -> str:
+    """A per-message nonce shaped like the client's.
+
+    The real client always sends one; Discord uses it to dedupe a retry and to
+    match the optimistic echo it already rendered. It must be unique per
+    message, or a resend can be swallowed as a duplicate.
+    """
+    ms = int(time.time() * 1000) - _DISCORD_EPOCH_MS
+    return str((ms << 22) | random.getrandbits(22))
+
+
+def message_payload(content: str) -> dict:
+    """The JSON body the desktop client posts for a message.
+
+    Key order matches a real capture. `content` alone is a smaller body than
+    any real client sends.
+    """
+    return {
+        "mobile_network_type": "unknown",
+        "content": content or "",
+        "nonce": _message_nonce(),
+        "tts": False,
+        "flags": 0,
+    }
+
+
 SEND_OK = "ok"
 SEND_NOT_FOUND = "not_found"
 SEND_DEAD = "dead"
@@ -1073,7 +1104,7 @@ class UserTokenSender:
                 referer=referer,
             )
         else:
-            payload = {"content": body_text}
+            payload = message_payload(body_text)
             if stkr_ids:
                 payload["sticker_ids"] = stkr_ids
             payload.update(reply_bits)
@@ -1263,12 +1294,10 @@ class UserTokenSender:
         *,
         reply_bits: Optional[dict] = None,
     ) -> "CurlMime":
-        payload = {
-            "content": content or "",
-            "attachments": [
-                {"id": i, "filename": fn} for i, (fn, _data, _ct) in enumerate(files)
-            ],
-        }
+        payload = message_payload(content)
+        payload["attachments"] = [
+            {"id": i, "filename": fn} for i, (fn, _data, _ct) in enumerate(files)
+        ]
         if sticker_ids:
             payload["sticker_ids"] = [str(s) for s in sticker_ids]
         if reply_bits:

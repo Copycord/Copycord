@@ -1102,3 +1102,50 @@ class TestSendStatusTaxonomy:
             s._send_with_token("t", 1, "hi", []),
         )
         assert active["max"] == 1
+
+
+class TestMessagePayload:
+    """The JSON body a real desktop client posts, from a capture 2026-08-21.
+
+    We used to send `{"content": ...}` alone, which is a smaller body than any
+    real client sends.
+    """
+
+    def test_keys_and_order_match_the_capture(self):
+        from server.token_sender import message_payload
+
+        p = message_payload("hi")
+        assert list(p.keys()) == [
+            "mobile_network_type",
+            "content",
+            "nonce",
+            "tts",
+            "flags",
+        ]
+        assert p["content"] == "hi"
+        assert p["mobile_network_type"] == "unknown"
+        assert p["tts"] is False
+        assert p["flags"] == 0
+
+    def test_nonce_is_a_snowflake_string(self):
+        from server.token_sender import message_payload
+
+        nonce = message_payload("hi")["nonce"]
+        # A string, not a number: it is a snowflake and would lose precision.
+        assert isinstance(nonce, str) and nonce.isdigit()
+        assert 18 <= len(nonce) <= 19
+
+    def test_nonce_is_unique_per_message(self):
+        from server.token_sender import message_payload
+
+        # Discord dedupes on the nonce, so a repeat can swallow a real message.
+        assert len({message_payload("x")["nonce"] for _ in range(500)}) == 500
+
+    def test_nonce_decodes_to_now(self):
+        import time
+
+        from server.token_sender import message_payload
+
+        nonce = int(message_payload("hi")["nonce"])
+        stamped_ms = (nonce >> 22) + 1420070400000
+        assert abs(stamped_ms - time.time() * 1000) < 10_000
