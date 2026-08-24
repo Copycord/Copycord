@@ -140,6 +140,7 @@ class Config:
             "USER_TOKEN_MAX_DELAY": 0,
             "USER_TOKEN_LINKS_ONLY": False,
             "USER_TOKEN_STICKY_NICKNAME": False,
+            "USER_TOKEN_STICKY_AVATAR": False,
             "USER_TOKEN_STICKY_ROLES": False,
             # Off by default on purpose: proxies.txt is shared with the client
             # (ENABLE_CLIENT_PROXIES), so anyone already using proxies for

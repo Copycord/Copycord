@@ -19,7 +19,7 @@ Copycord provides a comprehensive set of slash commands for managing your clone 
 
 | Category | Commands | Purpose |
 |----------|----------|---------|
-| [Monitoring](/docs/commands/monitoring) | `ping_server`, `ping_client` | Check bot status and latency |
+| [Monitoring](/docs/commands/monitoring) | `ping_server`, `ping_client`, `token_debug` | Check bot status, latency, and how user tokens appear to Discord |
 | [Filtering](/docs/commands/filtering) | `block_add`, `block_list` | Block messages by keyword |
 | [Announcements](/docs/commands/announcements) | `announcement_trigger_add`, `announce_subscription_toggle`, etc. | Keyword-triggered notifications |
 | [Roles](/docs/commands/roles) | `onjoin_role`, `onjoin_dm`, `role_block`, `role_mention`, etc. | Role management and auto-assignment |
@@ -35,6 +35,7 @@ All commands at a glance:
 ```
 /ping_server                              — Bot latency and server info
 /ping_client                              — Client latency and uptime
+/token_debug                              — How each user token appears to Discord
 /block_add <keyword>                      — Toggle keyword block
 /block_list                               — List blocked keywords
 /announcement_trigger_add                 — Create announcement trigger

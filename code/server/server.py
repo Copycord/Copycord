@@ -266,6 +266,7 @@ class ServerReceiver:
             bot=self.bot,
             db=self.db,
             logger=logger,
+            session_provider=self._ensure_aiohttp_session,
         )
 
         self._identity_cleaned: set[str] = set()
@@ -7770,6 +7771,7 @@ class ServerReceiver:
         return str(settings.get("USER_TOKEN_STRATEGY") or "") == "sticky_author" and (
             bool(settings.get("USER_TOKEN_STICKY_NICKNAME"))
             or bool(settings.get("USER_TOKEN_STICKY_ROLES"))
+            or bool(settings.get("USER_TOKEN_STICKY_AVATAR"))
         )
 
     @staticmethod
@@ -7828,6 +7830,7 @@ class ServerReceiver:
                 author_id=msg.get("author_id"),
                 author_display_name=msg.get("author_display_name") or msg.get("author"),
                 author_role_ids=msg.get("author_role_ids") or [],
+                author_avatar_url=msg.get("avatar_url"),
                 settings=settings,
                 tokens=tokens,
                 exclude=exclude,

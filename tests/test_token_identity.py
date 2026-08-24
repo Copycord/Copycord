@@ -177,6 +177,7 @@ class _DB:
     def upsert_token_identity(
         self, *, mapping_id, author_id, token_id, cloned_guild_id,
         applied_nick, applied_role_ids, assigned_at,
+        applied_avatar_hash=None,
     ):
         self.upserts += 1
         self.identities[(str(mapping_id), str(author_id))] = {
@@ -185,6 +186,7 @@ class _DB:
             "cloned_guild_id": cloned_guild_id,
             "applied_nick": applied_nick,
             "applied_role_ids": sorted(int(x) for x in (applied_role_ids or [])),
+            "applied_avatar_hash": applied_avatar_hash,
             "assigned_at": int(assigned_at),
         }
 

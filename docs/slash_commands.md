@@ -35,6 +35,26 @@ This document provides easy-to-follow instructions on how to use the available s
 
 ---
 
+### `/token_debug`
+
+**Description:** Downloads a JSON file describing how each of this mapping's user
+tokens appears to Discord — its proxy, the egress IP the outside world actually
+sees, the exact headers sent on a real request, the device fingerprint the
+account reports, and a comparison against a real Discord desktop client.
+
+Authorization headers are redacted and proxy passwords masked, but the file
+still describes your accounts. The reply is only visible to you.
+
+**Usage:**
+
+```
+/token_debug [limit]
+```
+
+`limit` — how many tokens to include (default 25, maximum 100).
+
+---
+
 ### `/block_add <keyword>`
 
 **Description:** Toggles a keyword in the block list. Messages with blocked keywords will be dropped.
