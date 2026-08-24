@@ -138,11 +138,17 @@ def _message_nonce() -> str:
     return str((ms << 22) | random.getrandbits(22))
 
 
+# Captured bodies put these two between `tts` and `flags`; everything else
+# (attachments, sticker_ids) comes after `flags`.
+_BEFORE_FLAGS = ("message_reference", "allowed_mentions")
+
+
 def message_payload(content: str, extra: Optional[dict] = None) -> dict:
     """The JSON body the desktop client posts for a message.
 
-    Key order matches a real capture, including ``flags`` coming last: a reply
-    carries message_reference and allowed_mentions between ``tts`` and it.
+    Key order follows real captures, which are not uniform: a reply carries
+    message_reference and allowed_mentions ahead of ``flags``, while an
+    attachment or sticker send carries its field after it.
     """
     payload = {
         "mobile_network_type": "unknown",
@@ -150,9 +156,14 @@ def message_payload(content: str, extra: Optional[dict] = None) -> dict:
         "nonce": _message_nonce(),
         "tts": False,
     }
-    if extra:
-        payload.update(extra)
+    extra = extra or {}
+    for key in _BEFORE_FLAGS:
+        if key in extra:
+            payload[key] = extra[key]
     payload["flags"] = 0
+    for key, value in extra.items():
+        if key not in _BEFORE_FLAGS:
+            payload[key] = value
     return payload
 
 
@@ -397,7 +408,15 @@ class UserTokenSender:
             token,
             f"{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}",
             method="PATCH",
-            json_body={"content": text},
+            # The client sends allowed_mentions on an edit too, so a mention
+            # introduced by the edit behaves the way it does on a fresh send.
+            json_body={
+                "content": text,
+                "allowed_mentions": {
+                    "parse": ["users", "roles", "everyone"],
+                    "replied_user": False,
+                },
+            },
             timeout=30,
             ctx=f"editing message {message_id}",
             use_proxy=use_proxy,
@@ -1188,12 +1207,16 @@ class UserTokenSender:
         thread_body: dict = {
             "name": (thread_name or "thread")[:100],
             "auto_archive_duration": int(auto_archive_duration or 60),
-            "message": message,
         }
+        # Key order from the capture: applied_tags ahead of the message.
         if applied_tag_ids:
             thread_body["applied_tags"] = [str(t) for t in applied_tag_ids]
+        thread_body["message"] = message
 
-        url = f"{DISCORD_API_BASE}/channels/{forum_channel_id}/threads"
+        url = (
+            f"{DISCORD_API_BASE}/channels/{forum_channel_id}"
+            "/threads?use_nested_fields=true"
+        )
         ctx = f"creating forum thread in {forum_channel_id}"
 
         if files:
@@ -1249,6 +1272,9 @@ class UserTokenSender:
         else:
             url = f"{DISCORD_API_BASE}/channels/{parent_channel_id}/threads"
             body["type"] = 11
+            # The client reports which control created the thread. A standalone
+            # thread comes from the composer's plus button.
+            body["location"] = "Plus Button"
 
         status, data = await self._request_with_token(
             token,

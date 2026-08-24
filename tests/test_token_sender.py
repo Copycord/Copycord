@@ -1236,3 +1236,53 @@ class TestReplyPayload:
             "tts",
             "flags",
         ]
+
+
+class TestBodyKeyOrder:
+    """Captured bodies are not uniformly ordered.
+
+    A reply carries message_reference and allowed_mentions BEFORE flags, while
+    an attachment or sticker send carries its field AFTER it.
+    """
+
+    def test_reply_fields_come_before_flags(self):
+        from server.token_sender import _reply_bits, message_payload
+
+        p = message_payload(
+            "lol", _reply_bits({"guild_id": 1, "channel_id": 2, "message_id": 3})
+        )
+        assert list(p) == [
+            "mobile_network_type",
+            "content",
+            "nonce",
+            "tts",
+            "message_reference",
+            "allowed_mentions",
+            "flags",
+        ]
+
+    def test_sticker_ids_come_after_flags(self):
+        from server.token_sender import message_payload
+
+        p = message_payload("sticker", {"sticker_ids": ["819128604311027752"]})
+        assert list(p) == [
+            "mobile_network_type",
+            "content",
+            "nonce",
+            "tts",
+            "flags",
+            "sticker_ids",
+        ]
+
+    def test_attachments_come_after_flags(self):
+        from server.token_sender import message_payload
+
+        p = message_payload("lol", {"attachments": [{"id": "0"}]})
+        assert list(p) == [
+            "mobile_network_type",
+            "content",
+            "nonce",
+            "tts",
+            "flags",
+            "attachments",
+        ]
