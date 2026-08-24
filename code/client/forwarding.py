@@ -247,6 +247,7 @@ class ForwardingFilters:
 
     case_sensitive: bool = False
     include_bots: bool = False
+    include_system: bool = False
     include_embeds: bool = False
     has_attachments: bool = False
 
@@ -299,6 +300,7 @@ class ForwardingFilters:
 
         case_sensitive = bool(data.get("case_sensitive", False))
         include_bots = bool(data.get("include_bots", False))
+        include_system = bool(data.get("include_system", False))
         include_embeds = bool(data.get("include_embeds", False))
         has_attachments = bool(data.get("has_attachments", False))
 
@@ -348,6 +350,7 @@ class ForwardingFilters:
             exclude_keywords=kw_excl,
             case_sensitive=case_sensitive,
             include_bots=include_bots,
+            include_system=include_system,
             include_embeds=include_embeds,
             has_attachments=has_attachments,
         )
@@ -371,6 +374,13 @@ class ForwardingFilters:
             return False
 
         if is_bot and not self.include_bots:
+            return False
+
+        # Discord writes these itself (joins, boosts, pins, thread creation).
+        # They are off by default: their `content` is empty, so before this
+        # existed every one of them forwarded as the bare placeholder text
+        # rather than as anything a reader could act on.
+        if bool(attrs.get("is_system", False)) and not self.include_system:
             return False
 
         content = attrs.get("content") or ""
@@ -887,6 +897,23 @@ class ForwardingManager:
         except Exception:
             embeds = []
 
+        try:
+            is_system = bool(message.is_system())
+        except Exception:
+            is_system = False
+
+        message_type = None
+        try:
+            message_type = getattr(getattr(message, "type", None), "name", None)
+        except Exception:
+            message_type = None
+        content = message.content or ""
+        if is_system and not content:
+            try:
+                content = getattr(message, "system_content", "") or ""
+            except Exception:
+                content = ""
+
         jump_url = getattr(message, "jump_url", None)
 
         author_name = None
@@ -919,7 +946,9 @@ class ForwardingManager:
             "author_name": author_name,
             "role_ids": role_ids,
             "is_bot": is_bot,
-            "content": message.content or "",
+            "is_system": is_system,
+            "message_type": message_type,
+            "content": content,
             "attachments": attachments,
             "embeds": embeds,
             "has_attachments": has_attachments,

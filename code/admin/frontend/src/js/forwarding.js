@@ -924,6 +924,7 @@ export class ForwardingSystem {
       parts.push(`users: ${users.map((u) => `@${u}`).join(", ")}`);
 
     if (filters.has_attachments) parts.push("has attachments");
+    if (filters.include_system) parts.push("system messages");
 
     if (!parts.length) return "No extra filters (all messages)";
     return parts.join(" · ");
@@ -1025,6 +1026,7 @@ export class ForwardingSystem {
     const caseCb = document.getElementById("fwd_case_sensitive");
     const embedsCb = document.getElementById("fwd_include_embeds");
     const botsCb = document.getElementById("fwd_bot_messages");
+    const systemCb = document.getElementById("fwd_system_messages");
     const mediaCb = document.getElementById("fwd_has_attachments");
 
     const anyValue = this.toArray(filters.keywords_any).join(", ");
@@ -1039,6 +1041,7 @@ export class ForwardingSystem {
     if (caseCb) caseCb.checked = !!filters.case_sensitive;
     if (embedsCb) embedsCb.checked = !!filters.include_embeds;
     if (botsCb) botsCb.checked = !!filters.include_bots;
+    if (systemCb) systemCb.checked = !!filters.include_system;
     if (mediaCb) mediaCb.checked = !!filters.has_attachments;
 
     const anyWrap = document.querySelector(
@@ -1061,6 +1064,7 @@ export class ForwardingSystem {
       !!filters.case_sensitive ||
       !!filters.include_embeds ||
       !!filters.include_bots ||
+      !!filters.include_system ||
       !!filters.has_attachments;
 
     this.setAdvancedFiltersOpen(anyAdvancedOn);
@@ -1453,6 +1457,7 @@ export class ForwardingSystem {
     const caseCb = document.getElementById("fwd_case_sensitive");
     const embedsCb = document.getElementById("fwd_include_embeds");
     const botsCb = document.getElementById("fwd_bot_messages");
+    const systemCb = document.getElementById("fwd_system_messages");
     const mediaCb = document.getElementById("fwd_has_attachments");
 
     const provider = (providerInput?.value || "").toLowerCase().trim();
@@ -1491,6 +1496,7 @@ export class ForwardingSystem {
       case_sensitive: !!(caseCb && caseCb.checked),
       include_embeds: !!(embedsCb && embedsCb.checked),
       include_bots: !!(botsCb && botsCb.checked),
+      include_system: !!(systemCb && systemCb.checked),
       has_attachments: !!(mediaCb && mediaCb.checked),
     };
 
