@@ -15,21 +15,29 @@ import time
 
 import discord
 
+from server.token_avatar import avatar_hash_from_url, set_avatar
+
 
 # Discord's hard limit for a member nickname.
 MAX_NICK_LEN = 32
 
 
 class TokenIdentityManager:
-    def __init__(self, *, bot, db, logger):
+    def __init__(self, *, bot, db, logger, session_provider=None):
         self._bot = bot
         self._db = db
         self._log = logger
+        # Used to download an author's avatar before mirroring it.
+        self._session_provider = session_provider
         # One lock per mapping so concurrent authors don't race token selection
         # or clobber each other's nickname edits.
         self._locks: dict[str, asyncio.Lock] = {}
 
         self._bad_tokens: set[str] = set()
+        # Tokens whose avatar could not be set this session. Separate from
+        # _bad_tokens on purpose: a captcha on a profile edit says nothing
+        # about whether the account can still send messages.
+        self._avatar_skip: set[str] = set()
 
     def mark_token_bad(self, token_id) -> None:
         """Bench a token for the rest of this session — Discord revoked it."""
@@ -49,6 +57,7 @@ class TokenIdentityManager:
     def clear_bad_tokens(self) -> None:
         """Forget all benched tokens (e.g. after the user re-verifies them)."""
         self._bad_tokens.clear()
+        self._avatar_skip.clear()
 
     @staticmethod
     def _select_token(
@@ -92,6 +101,7 @@ class TokenIdentityManager:
         author_id,
         author_display_name,
         author_role_ids,
+        author_avatar_url=None,
         settings: dict,
         tokens: list[dict],
         exclude: set | None = None,
@@ -114,6 +124,7 @@ class TokenIdentityManager:
         author_id = str(author_id)
         do_nick = bool(settings.get("USER_TOKEN_STICKY_NICKNAME"))
         do_roles = bool(settings.get("USER_TOKEN_STICKY_ROLES"))
+        do_avatar = bool(settings.get("USER_TOKEN_STICKY_AVATAR"))
 
         skip = {str(t) for t in (exclude or ())} | self._bad_tokens
         token_by_id = {
@@ -172,18 +183,44 @@ class TokenIdentityManager:
                 else []
             )
             desired_role_ids = sorted({r.id for r in desired_roles})
+            desired_avatar_hash = (
+                avatar_hash_from_url(author_avatar_url) if do_avatar else None
+            )
 
             if keep:
                 nick_ok = (not do_nick) or (cur.get("applied_nick") == desired_nick)
                 roles_ok = (not do_roles) or (
                     list(cur.get("applied_role_ids") or []) == desired_role_ids
                 )
-                if nick_ok and roles_ok:
+                # An unresolvable avatar URL counts as "nothing to do" rather
+                # than a change, so a CDN quirk cannot cause a re-upload loop.
+                avatar_ok = (
+                    (not do_avatar)
+                    or not desired_avatar_hash
+                    or cur.get("applied_avatar_hash") == desired_avatar_hash
+                )
+                if nick_ok and roles_ok and avatar_ok:
                     return chosen, None
 
-            # Without the clone guild cached we can't touch members; still force
-            # the chosen token for the send, but don't churn the DB.
+            applied_avatar_hash = cur.get("applied_avatar_hash") if keep else None
+            if do_avatar and desired_avatar_hash != applied_avatar_hash:
+                if await self._mirror_avatar(
+                    token_by_id.get(chosen) or {}, author_avatar_url, settings
+                ):
+                    applied_avatar_hash = desired_avatar_hash
+
+            # Without the clone guild cached we can't touch members. The avatar
+            # above needed no guild, so persist it before bailing or it would
+            # be re-uploaded on every message.
             if guild is None:
+                if applied_avatar_hash != (cur.get("applied_avatar_hash") if keep else None):
+                    self._persist(
+                        mapping_id, author_id, chosen, cloned_guild_id,
+                        cur.get("applied_nick") if keep else None,
+                        cur.get("applied_role_ids") or [] if keep else [],
+                        int(cur["assigned_at"]) if keep and cur.get("assigned_at") else now,
+                        applied_avatar_hash,
+                    )
                 return chosen, None
 
             applied_nick = cur.get("applied_nick") if keep else None
@@ -235,22 +272,77 @@ class TokenIdentityManager:
             assigned_at = (
                 int(cur["assigned_at"]) if keep and cur.get("assigned_at") else now
             )
-            try:
-                self._db.upsert_token_identity(
-                    mapping_id=mapping_id,
-                    author_id=author_id,
-                    token_id=chosen,
-                    cloned_guild_id=int(cloned_guild_id or 0),
-                    applied_nick=applied_nick,
-                    applied_role_ids=applied_role_ids,
-                    assigned_at=assigned_at,
-                )
-            except Exception:
-                self._log.debug(
-                    "[identity] failed to persist assignment", exc_info=True
-                )
+            self._persist(
+                mapping_id,
+                author_id,
+                chosen,
+                cloned_guild_id,
+                applied_nick,
+                applied_role_ids,
+                assigned_at,
+                applied_avatar_hash,
+            )
 
             return chosen, None
+
+    def _persist(
+        self, mapping_id, author_id, token_id, cloned_guild_id,
+        applied_nick, applied_role_ids, assigned_at, applied_avatar_hash,
+    ) -> None:
+        try:
+            self._db.upsert_token_identity(
+                mapping_id=mapping_id,
+                author_id=author_id,
+                token_id=token_id,
+                cloned_guild_id=int(cloned_guild_id or 0),
+                applied_nick=applied_nick,
+                applied_role_ids=applied_role_ids,
+                assigned_at=assigned_at,
+                applied_avatar_hash=applied_avatar_hash,
+            )
+        except Exception:
+            self._log.debug("[identity] failed to persist assignment", exc_info=True)
+
+    async def _mirror_avatar(self, token_row: dict, avatar_url, settings: dict) -> bool:
+        """Put this author's picture on the account sending as them.
+
+        Only called when the hash actually moved, so a stable author costs
+        nothing. Failure is not retried here -- the hash stays unrecorded, so
+        the next message tries again.
+        """
+        token_id = str(token_row.get("token_id") or "")
+        if token_id in self._avatar_skip:
+            return False
+
+        token = (token_row.get("token_value") or "").strip()
+        if not token or not avatar_url:
+            return False
+        if self._session_provider is None:
+            self._log.debug("[avatar] no HTTP session available; skipping")
+            return False
+        try:
+            ok = await set_avatar(
+                token,
+                str(avatar_url),
+                http_session=self._session_provider(),
+                logger=self._log,
+                use_proxy=bool(settings.get("USER_TOKEN_USE_PROXIES", False)),
+            )
+        except Exception:
+            self._log.debug("[avatar] mirror failed", exc_info=True)
+            ok = False
+
+        if not ok and token_id:
+            # Whatever the reason -- captcha, rate limit, a refused gateway --
+            # it will not resolve by trying again on the next message, and the
+            # hash is never recorded so we would retry forever.
+            self._avatar_skip.add(token_id)
+            self._log.info(
+                "[avatar] token %s skipped for this session after a failed "
+                "profile change",
+                token_id,
+            )
+        return ok
 
     async def reset_mapping(self, mapping_id) -> None:
         """Clear every applied nickname/role for a mapping and drop its state.

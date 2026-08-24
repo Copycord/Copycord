@@ -1158,6 +1158,7 @@ class DBManager:
                     cloned_guild_id  INTEGER NOT NULL,
                     applied_nick     TEXT,
                     applied_role_ids TEXT,
+                    applied_avatar_hash TEXT,
                     assigned_at      INTEGER NOT NULL DEFAULT (CAST(strftime('%s','now') AS INTEGER)),
                     PRIMARY KEY (mapping_id, author_id),
                     FOREIGN KEY (mapping_id) REFERENCES guild_mappings(mapping_id) ON DELETE CASCADE
@@ -1170,6 +1171,7 @@ class DBManager:
                 "cloned_guild_id",
                 "applied_nick",
                 "applied_role_ids",
+                "applied_avatar_hash",
                 "assigned_at",
             },
             copy_map={
@@ -1179,6 +1181,7 @@ class DBManager:
                 "cloned_guild_id": "cloned_guild_id",
                 "applied_nick": "applied_nick",
                 "applied_role_ids": "applied_role_ids",
+                "applied_avatar_hash": "applied_avatar_hash",
                 "assigned_at": "assigned_at",
             },
             post_sql=[
@@ -5543,6 +5546,7 @@ class DBManager:
         applied_nick: str | None,
         applied_role_ids: list[int] | None,
         assigned_at: int,
+        applied_avatar_hash: str | None = None,
     ) -> None:
         """Insert/replace the identity assignment for a (mapping, author)."""
         role_json = json.dumps(sorted(int(r) for r in (applied_role_ids or [])))
@@ -5551,13 +5555,20 @@ class DBManager:
                 """
                 INSERT INTO mapping_token_identities
                     (mapping_id, author_id, token_id, cloned_guild_id,
-                     applied_nick, applied_role_ids, assigned_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                     applied_nick, applied_role_ids, applied_avatar_hash,
+                     assigned_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(mapping_id, author_id) DO UPDATE SET
                     token_id = excluded.token_id,
                     cloned_guild_id = excluded.cloned_guild_id,
                     applied_nick = excluded.applied_nick,
                     applied_role_ids = excluded.applied_role_ids,
+                    -- COALESCE: a caller that did not touch the avatar passes
+                    -- None, which must not erase what is already mirrored.
+                    applied_avatar_hash = COALESCE(
+                        excluded.applied_avatar_hash,
+                        mapping_token_identities.applied_avatar_hash
+                    ),
                     assigned_at = excluded.assigned_at
                 """,
                 (
@@ -5567,6 +5578,7 @@ class DBManager:
                     int(cloned_guild_id),
                     applied_nick,
                     role_json,
+                    applied_avatar_hash,
                     int(assigned_at),
                 ),
             )
