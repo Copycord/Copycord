@@ -727,8 +727,18 @@ class TestCreateForumThread:
             applied_tag_ids=[111, 222],
         )
         assert new_id == 998877
-        assert captured["url"].endswith("/channels/42/threads")
+        # The client asks for nested fields on a forum thread.
+        assert captured["url"].endswith(
+            "/channels/42/threads?use_nested_fields=true"
+        )
         assert captured["json"]["name"] == "My Thread"
+        # applied_tags sits ahead of message in the capture.
+        assert list(captured["json"]) == [
+            "name",
+            "auto_archive_duration",
+            "applied_tags",
+            "message",
+        ]
         assert captured["json"]["message"]["content"] == "first post"
         assert captured["json"]["applied_tags"] == ["111", "222"]
 
