@@ -100,6 +100,14 @@ class ProxyPool:
     sticky — it is NEVER swapped just because time passed, only because the
     proxy actually failed. Releasing a lease (token's session closed/reaped)
     returns that proxy to the free pool for another token to pick up.
+
+    Stickiness outlives the lease: the proxy a token last used is remembered
+    and preferred when it comes back, so an account keeps the same address
+    across sessions instead of re-rolling every time its TLS session is
+    reaped. The memory is a preference, not a reservation — a remembered
+    proxy that another token holds is not waited for, which is what keeps a
+    small pool serving far more tokens than it has entries. Bounded by the
+    number of distinct tokens the process has seen.
     """
 
     MAX_FAILURES = MAX_FAILURES
@@ -107,6 +115,9 @@ class ProxyPool:
     def __init__(self) -> None:
         self._all: list[str] = []
         self._leases: dict[str, str] = {}
+        # token -> the proxy it last held. Survives release(), so a
+        # returning token can be given the same address again.
+        self._preferred: dict[str, str] = {}
         self._in_use: set[str] = set()
         self._health: dict[str, dict] = {}
         self._lock = asyncio.Lock()
@@ -147,6 +158,11 @@ class ProxyPool:
 
         self._all = normalised
         self._health = {k: v for k, v in self._health.items() if k in normalised}
+        # A preference for a proxy that is no longer in the file is dead
+        # weight, and would otherwise never be cleared.
+        self._preferred = {
+            t: p for t, p in self._preferred.items() if p in normalised
+        }
         logger.info("Loaded %d proxies", len(normalised))
         return len(normalised)
 
@@ -173,11 +189,14 @@ class ProxyPool:
             info["failures"] = 0
         return False
 
-    async def lease(self, token: str) -> Optional[str]:
+    async def lease(self, token: str, *, exclude: Optional[str] = None) -> Optional[str]:
         """Return the proxy leased to ``token``, assigning a fresh random
         healthy-and-free one if it doesn't already have one. ``None`` if the
         pool is disabled/empty, or exhausted (every proxy is either leased
         to another token or currently suspended).
+
+        ``exclude`` skips a specific proxy, used when replacing one that just
+        failed so the sticky preference cannot hand the same one straight back.
         """
         async with self._lock:
             existing = self._leases.get(token)
@@ -187,11 +206,31 @@ class ProxyPool:
                 return None
 
             now = time.monotonic()
-            candidates = [
-                p
-                for p in self._all
-                if p not in self._in_use and not self._is_suspended(p, now)
-            ]
+
+            def _free(proxy: str) -> bool:
+                return (
+                    proxy in self._all
+                    and proxy != exclude
+                    and proxy not in self._in_use
+                    and not self._is_suspended(proxy, now)
+                )
+
+            # Same address as last time, when it is still available. Falling
+            # back rather than waiting is deliberate: blocking on a held proxy
+            # would stall the send and cap concurrency at the pool size.
+            remembered = self._preferred.get(token)
+            if remembered and _free(remembered):
+                self._leases[token] = remembered
+                self._in_use.add(remembered)
+                logger.debug(
+                    "Proxy re-leased (sticky): proxy=%s leased=%d/%d",
+                    _proxy_label(remembered),
+                    len(self._in_use),
+                    len(self._all),
+                )
+                return remembered
+
+            candidates = [p for p in self._all if _free(p)]
             if not candidates:
                 logger.warning(
                     "Proxy pool exhausted: %d total, %d leased, none free/healthy",
@@ -203,6 +242,10 @@ class ProxyPool:
             chosen = random.choice(candidates)
             self._leases[token] = chosen
             self._in_use.add(chosen)
+            # Remember what was actually granted, not what was wanted: a token
+            # that could not get its old proxy should settle on the new one
+            # rather than drift every time it reconnects.
+            self._preferred[token] = chosen
             logger.debug(
                 "Proxy leased: proxy=%s leased=%d/%d",
                 _proxy_label(chosen),
@@ -213,7 +256,11 @@ class ProxyPool:
 
     async def release(self, token: str) -> None:
         """Return a token's leased proxy to the free pool (e.g. its TLS
-        session was closed/reaped)."""
+        session was closed/reaped).
+
+        The preference is kept, so the same proxy is handed back when this
+        token returns and nothing else has taken it.
+        """
         async with self._lock:
             proxy = self._leases.pop(token, None)
             if proxy:
@@ -247,7 +294,11 @@ class ProxyPool:
                             info["failures"],
                             _proxy_label(proxy),
                         )
-        return await self.lease(token)
+                # Drop the preference too: this proxy just failed, and a
+                # suspension only kicks in after several failures, so without
+                # this the sticky path would hand it straight back.
+                self._preferred.pop(token, None)
+        return await self.lease(token, exclude=proxy)
 
     def report_success(self, proxy: str) -> None:
         """Clear a proxy's failure count after a genuinely successful
