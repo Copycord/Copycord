@@ -13083,3 +13083,18 @@ tr.log-expanded td {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Marks a thread in the filter picker, where it sits among channels. */
+.filter-obj-thread-tag {
+  display: inline-block;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.35rem;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  opacity: 0.75;
+  border: 1px solid currentColor;
+  vertical-align: middle;
+}
