@@ -4208,6 +4208,30 @@ async def api_scraper_proxies_put(request: Request):
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
 
 
+def _get_favorite_proxies() -> list:
+    """Starred proxies, stored as a JSON list of the raw lines the user typed."""
+    raw = (db.get_config("CLIENT_FAVORITE_PROXIES", "") or "").strip()
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return []
+    return [x for x in data if isinstance(x, str)] if isinstance(data, list) else []
+
+
+def _set_favorite_proxies(values: list) -> None:
+    db.set_config("CLIENT_FAVORITE_PROXIES", json.dumps(list(values)))
+
+
+def _get_favorite_recheck_interval() -> int:
+    raw = (db.get_config("PROXY_FAVORITE_RECHECK_INTERVAL", "") or "").strip()
+    try:
+        return int(raw) if raw else 300
+    except (ValueError, TypeError):
+        return 300
+
+
 @app.get("/api/server/proxies", response_class=JSONResponse)
 async def api_server_proxies_get():
     """Return client proxy list, enabled state, and rotation interval."""
@@ -4235,6 +4259,11 @@ async def api_server_proxies_get():
                 "proxies": lines,
                 "enabled": enabled,
                 "rotation_interval": rotation_interval,
+                "favorites": _get_favorite_proxies(),
+                "favorite_recheck": (
+                    db.get_config("PROXY_FAVORITE_RECHECK", "") or ""
+                ).strip().lower() in ("1", "true", "yes"),
+                "favorite_recheck_interval": _get_favorite_recheck_interval(),
             }
         )
     except Exception as e:
@@ -4256,9 +4285,64 @@ async def api_server_proxies_put(request: Request):
         _PROXY_FILE.write_text(
             "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8"
         )
+        # A favorite naming a proxy that no longer exists would sit in
+        # the config forever and still count as a favorite to the rotator.
+        _set_favorite_proxies(
+            [f for f in _get_favorite_proxies() if f in set(lines)]
+        )
         return JSONResponse({"ok": True, "count": len(lines)})
     except Exception as e:
         return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/server/proxies/favorites", response_class=JSONResponse)
+async def api_server_proxies_favorites(request: Request):
+    """Set which proxies are preferred for the client's gateway connection."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    favorites = payload.get("favorites", [])
+    if not isinstance(favorites, list):
+        raise HTTPException(400, detail="favorites must be a list")
+
+    known = set()
+    if _PROXY_FILE.exists():
+        text = _PROXY_FILE.read_text(encoding="utf-8").strip()
+        known = {ln.strip() for ln in text.splitlines() if ln.strip()}
+
+    # Only keep favorites naming a proxy we actually have, so a stale UI
+    # cannot leave the client preferring something not in the list.
+    cleaned = [
+        f for f in favorites if isinstance(f, str) and f.strip() and f.strip() in known
+    ]
+    try:
+        _set_favorite_proxies(cleaned)
+        return JSONResponse({"ok": True, "favorites": cleaned})
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.put("/api/server/proxies/favorite-recheck", response_class=JSONResponse)
+async def api_server_proxies_favorite_recheck(request: Request):
+    """Toggle (and time) the periodic re-check that returns to a favorite."""
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(400, detail="Invalid JSON")
+    enabled = bool(payload.get("enabled", False))
+    try:
+        db.set_config("PROXY_FAVORITE_RECHECK", "true" if enabled else "false")
+        if "interval" in payload:
+            interval = max(30, int(payload.get("interval") or 300))
+            db.set_config("PROXY_FAVORITE_RECHECK_INTERVAL", str(interval))
+    except (ValueError, TypeError):
+        raise HTTPException(400, detail="interval must be an integer")
+    except Exception as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse(
+        {"ok": True, "enabled": enabled, "interval": _get_favorite_recheck_interval()}
+    )
 
 
 @app.put("/api/server/proxies/toggle", response_class=JSONResponse)
