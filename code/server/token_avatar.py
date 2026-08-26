@@ -6,47 +6,38 @@
 #  version 3.0. A copy of the license is available at:
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
-"""
-Mirror a host author's profile picture onto the account sending as them.
-
-Unlike the nickname and roles, an avatar is not a per-guild attribute: it is
-set on the ACCOUNT, so this changes how that token looks everywhere. Tokens
-belong to exactly one mapping and, under sticky_author, to one author within
-it, so the picture stays put rather than thrashing between authors.
-
-The change is made with a gateway session open. A real client is always
-connected when its user edits their profile, and an account that only ever
-mutates over REST -- never having identified -- is a shape worth avoiding. The
-session is opened for the change and closed straight after, so nothing is held
-open per token; see the note in `set_avatar` about why that matters here.
-"""
 from __future__ import annotations
 
 import asyncio
 import base64
 import json
 import re
+import uuid
+import zlib
 from typing import Optional
+
+from curl_cffi import CurlWsFlag
 
 from common.selfbot_headers import (
     _token_log_id,
     build_headers,
+    gateway_properties,
     get_tls_session,
-    make_fingerprint,
+    set_heartbeat_session_id,
 )
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
-GATEWAY_URL = "wss://gateway.discord.gg/?encoding=json&v=10"
+GATEWAY_URL = "wss://gateway.discord.gg/?v=9&encoding=json&compress=zlib-stream"
 
 
 _OP_DISPATCH = 0
 _OP_HEARTBEAT = 1
 _OP_IDENTIFY = 2
 _OP_HELLO = 10
-_OP_HEARTBEAT_ACK = 11
+_OP_INVALID_SESSION = 9
 
 
-_CAPABILITIES = 30717
+_CAPABILITIES = 1767421
 
 
 _READY_TIMEOUT = 20.0
@@ -91,16 +82,32 @@ def to_data_uri(data: bytes, content_type: str) -> str:
     return f"data:{content_type};base64,{base64.b64encode(data).decode()}"
 
 
-async def _identify_payload(token: str) -> dict:
-    """The IDENTIFY a desktop client sends.
+# Close codes that mean this token/session will never work: retrying only
+# burns the account further. Everything else is worth another attempt.
+_FATAL_CLOSE_CODES = {4004, 4010, 4011, 4012, 4013, 4014}
 
-    ``properties`` is the same fingerprint the REST headers carry, decoded --
-    the gateway wants the object, not the base64 the header uses. Sending a
-    different device here than the one the HTTP requests claim would be a
-    contradiction inside a single session.
+# curl_cffi sets this flag on a fragment that is not the end of a message.
+_WS_OFFSET = getattr(CurlWsFlag, "OFFSET", 32)
+
+
+class _GatewayClosed(Exception):
+    def __init__(self, code: int):
+        super().__init__(f"gateway closed with code {code}")
+        self.code = code
+
+
+
+_ZLIB_SUFFIX = b"\x00\x00\xff\xff"
+
+
+async def _identify_payload(token: str) -> dict:
+    """The IDENTIFY the web client sends.
+
+    ``properties`` is the gateway's own shape, not the REST one, but both come
+    from a single fingerprint: a socket claiming a different device than the
+    requests it accompanies contradicts itself inside one session.
     """
-    fp = make_fingerprint(token)
-    props = json.loads(base64.b64decode(fp["super_props_b64"]))
+    props = gateway_properties(token)
     return {
         "op": _OP_IDENTIFY,
         "d": {
@@ -122,13 +129,13 @@ async def _identify_payload(token: str) -> dict:
 
 
 class GatewaySession:
-    """A gateway connection held only for as long as one action needs it.
+    """A gateway connection held only as long as one action needs it.
 
     Deliberately not a full client: no RESUME, no event handling, no
-    reconnection. It exists so a profile edit happens the way a real one does
-    -- with the account actually online -- and then gets out of the way.
-    Holding thousands of these open would exhaust the proxy pool, since a
-    lease is exclusive and a live socket never returns it.
+    reconnection. A profile edit should happen the way a real one does, with
+    the account actually online. Holding thousands of these open would
+    exhaust the proxy pool, since a lease is exclusive and a live socket
+    never returns it.
     """
 
     def __init__(self, token: str, logger, *, use_proxy: bool = False):
@@ -137,6 +144,10 @@ class GatewaySession:
         self._use_proxy = use_proxy
         self._ws = None
         self._heartbeat: Optional[asyncio.Task] = None
+        self._inflator = None
+        self._buf = bytearray()
+        self.heartbeat_session_id: Optional[str] = None
+        self.fatal = False
 
     async def __aenter__(self):
         await self.connect()
@@ -147,7 +158,11 @@ class GatewaySession:
         return False
 
     async def connect(self) -> bool:
-        """Open the socket and identify. True once READY has arrived."""
+        """Open the socket and identify. True once READY has arrived.
+
+        Sets ``fatal`` when Discord's close code says this token is finished,
+        so a caller can tell "try again later" from "never going to work".
+        """
         session = await get_tls_session(self._token, use_proxy=self._use_proxy)
         try:
             self._ws = await session.ws_connect(GATEWAY_URL)
@@ -155,8 +170,11 @@ class GatewaySession:
             self._log.debug("[avatar] gateway connect failed: %s", e)
             return False
 
+        self._inflator = zlib.decompressobj()
+        self._buf = bytearray()
+
         try:
-            hello = await asyncio.wait_for(self._ws.recv_json(), timeout=_READY_TIMEOUT)
+            hello = await asyncio.wait_for(self._recv(), timeout=_READY_TIMEOUT)
             if (hello or {}).get("op") != _OP_HELLO:
                 self._log.debug(
                     "[avatar] expected HELLO, got op=%s", (hello or {}).get("op")
@@ -164,33 +182,92 @@ class GatewaySession:
                 return False
             interval = float(hello["d"]["heartbeat_interval"]) / 1000.0
 
+            # The client mints this when it opens the session and then quotes
+            # it on every REST call for the session's lifetime.
+            self.heartbeat_session_id = str(uuid.uuid4())
+
             await self._ws.send_json(await _identify_payload(self._token))
             self._heartbeat = asyncio.create_task(self._heartbeat_loop(interval))
 
             deadline = asyncio.get_running_loop().time() + _READY_TIMEOUT
             while asyncio.get_running_loop().time() < deadline:
-                frame = await asyncio.wait_for(
-                    self._ws.recv_json(), timeout=_READY_TIMEOUT
-                )
+                frame = await asyncio.wait_for(self._recv(), timeout=_READY_TIMEOUT)
                 if not frame:
                     continue
-                if frame.get("op") == _OP_DISPATCH and frame.get("t") == "READY":
+                op = frame.get("op")
+                if op == _OP_DISPATCH and frame.get("t") == "READY":
+                    set_heartbeat_session_id(self._token, self.heartbeat_session_id)
                     return True
-                if frame.get("op") == 9:
-
-                    self._log.debug("[avatar] gateway rejected the session")
+                if op == _OP_INVALID_SESSION:
+                    # d=True means resumable, so the token itself is fine.
+                    self.fatal = frame.get("d") is not True
+                    self._log.debug(
+                        "[avatar] gateway rejected the session (fatal=%s)",
+                        self.fatal,
+                    )
                     return False
+                if op == _OP_HEARTBEAT:
+                    await self._ws.send_json({"op": _OP_HEARTBEAT, "d": None})
+        except _GatewayClosed as e:
+            self.fatal = e.code in _FATAL_CLOSE_CODES
+            self._log.debug(
+                "[avatar] gateway closed code=%s fatal=%s", e.code, self.fatal
+            )
         except asyncio.TimeoutError:
             self._log.debug("[avatar] gateway did not reach READY in time")
         except Exception as e:
             self._log.debug("[avatar] gateway handshake failed: %s", e)
         return False
 
-    async def _heartbeat_loop(self, interval: float) -> None:
-        """Keep the session alive for the short while we hold it.
+    async def _recv(self) -> dict | None:
+        """One logical gateway frame, reassembled and inflated.
 
-        The first beat is jittered the way the client does it, so a fleet that
-        reconnects together does not then beat in lockstep forever.
+        zlib-stream means frames are fragments of one continuous deflate
+        stream: the decompressor is stateful for the whole connection and a
+        message only ends at the Z_SYNC_FLUSH suffix. Treating each websocket
+        frame as a message loses the tail of anything large, READY included.
+        """
+        while True:
+            chunk, flags = await self._ws.recv()
+
+            if flags & CurlWsFlag.CLOSE:
+                raw = chunk if isinstance(chunk, (bytes, bytearray)) else chunk.encode()
+                code = int.from_bytes(raw[:2], "big") if len(raw) >= 2 else 0
+                raise _GatewayClosed(code)
+
+            self._buf.extend(
+                chunk if isinstance(chunk, (bytes, bytearray)) else chunk.encode()
+            )
+            if flags & _WS_OFFSET:
+                continue
+
+            raw = bytes(self._buf)
+            self._buf.clear()
+            if not raw:
+                return None
+
+            if raw[-4:] == _ZLIB_SUFFIX:
+                try:
+                    text = self._inflator.decompress(raw).decode("utf-8")
+                except Exception as e:
+                    self._log.debug("[avatar] zlib inflate failed: %s", e)
+                    continue
+            else:
+                try:
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError:
+                    continue
+
+            try:
+                return json.loads(text)
+            except Exception:
+                continue
+
+    async def _heartbeat_loop(self, interval: float) -> None:
+        """Keep the session alive while we hold it.
+
+        The first beat is jittered the way the client does it, so a fleet
+        reconnecting together does not then beat in lockstep forever.
         """
         try:
             import random
@@ -205,6 +282,8 @@ class GatewaySession:
             return
 
     async def close(self) -> None:
+        set_heartbeat_session_id(self._token, None)
+        self.heartbeat_session_id = None
         if self._heartbeat is not None:
             self._heartbeat.cancel()
             try:
