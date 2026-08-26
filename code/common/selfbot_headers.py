@@ -51,7 +51,15 @@ _BUILD_NUMBER_MARKERS = (
 )
 
 
-TLS_IMPERSONATE = "chrome150"
+try:
+    from curl_cffi.requests import impersonate as _impersonate
+
+    TLS_IMPERSONATE = _impersonate.DEFAULT_CHROME
+except Exception:
+    TLS_IMPERSONATE = "chrome150"
+
+_m = re.search(r"(\d+)", TLS_IMPERSONATE or "")
+CHROME_MAJOR = _m.group(1) if _m else "150"
 
 
 TLS_SESSION_IDLE_TTL = 3600
@@ -61,9 +69,9 @@ DEFAULT_BUILD: dict = {
     "release_channel": "stable",
     "browser_user_agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+        f"(KHTML, like Gecko) Chrome/{CHROME_MAJOR}.0.0.0 Safari/537.36"
     ),
-    "browser_version": "150.0.0.0",
+    "browser_version": f"{CHROME_MAJOR}.0.0.0",
     "client_build_number": 600590,
 }
 
