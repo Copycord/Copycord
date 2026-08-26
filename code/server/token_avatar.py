@@ -26,7 +26,7 @@ from common.selfbot_headers import (
     set_heartbeat_session_id,
 )
 
-DISCORD_API_BASE = "https://discord.com/api/v10"
+DISCORD_API_BASE = "https://discord.com/api/v9"
 GATEWAY_URL = "wss://gateway.discord.gg/?v=9&encoding=json&compress=zlib-stream"
 
 

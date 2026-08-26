@@ -821,7 +821,7 @@ async def _close_ws_quietly(
         await ws.close(code=code, reason=reason)
 
 
-DISCORD_API_BASE = "https://discord.com/api/v10"
+DISCORD_API_BASE = "https://discord.com/api/v9"
 
 
 async def _check_client_token_valid(raw_token: str) -> bool:
