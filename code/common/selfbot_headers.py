@@ -18,6 +18,7 @@ import logging
 import random
 import re
 import time
+import uuid
 
 import aiohttp
 
@@ -39,14 +40,18 @@ def _token_log_id(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()[:10]
 
 
-BUILD_INFO_URL = "https://api.macslodge.com/discord/build"
 _DISCORD_APP_URL = "https://discord.com/app"
 _DISCORD_ASSET_URL = "https://discord.com/assets/{asset}"
 _ASSET_RE = re.compile(r'(?:src|href)="/assets/([^"]+\.js)"')
-_BUILD_NUMBER_MARKERS = ('buildNumber:"', 'build_number:"')
+_BUILD_NUMBER_MARKERS = (
+    'buildNumber:"',
+    'build_number:"',
+    '"buildNumber":"',
+    '"build_number":',
+)
 
 
-TLS_IMPERSONATE = "chrome146"
+TLS_IMPERSONATE = "chrome150"
 
 
 TLS_SESSION_IDLE_TTL = 3600
@@ -54,15 +59,12 @@ TLS_SESSION_IDLE_TTL = 3600
 
 DEFAULT_BUILD: dict = {
     "release_channel": "stable",
-    "client_version": "1.0.9254",
     "browser_user_agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) discord/1.0.9254 Chrome/148.0.7778.280 "
-        "Electron/42.7.1 Safari/537.36"
+        "(KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
     ),
-    "browser_version": "42.7.1",
-    "client_build_number": 595897,
-    "native_build_number": 88466,
+    "browser_version": "150.0.0.0",
+    "client_build_number": 600590,
 }
 
 
@@ -72,26 +74,10 @@ _BUILD: dict = dict(DEFAULT_BUILD)
 _FINGERPRINT_CACHE: dict[str, dict] = {}
 
 
-_WINDOWS_BUILDS = [
-    ("10.0.19045", "19045"),
-    ("10.0.22621", "22621"),
-    ("10.0.22631", "22631"),
-    ("10.0.26100", "26100"),
-    ("10.0.26200", "26200"),
-]
+_OS_VERSION = "10"
 
-
-_LOCALE_TIMEZONES = [
-    ("en-US", "America/New_York"),
-    ("en-US", "America/Chicago"),
-    ("en-US", "America/Los_Angeles"),
-    ("en-GB", "Europe/London"),
-    ("de", "Europe/Berlin"),
-    ("fr", "Europe/Paris"),
-    ("es-ES", "Europe/Madrid"),
-    ("nl", "Europe/Amsterdam"),
-    ("pt-BR", "America/Sao_Paulo"),
-]
+LOCALE = "en-US"
+TIMEZONE = "America/New_York"
 
 
 def get_build_info() -> dict:
@@ -112,8 +98,7 @@ def set_build_info(build: dict) -> None:
 async def _scrape_build_number_from_web(
     sess: aiohttp.ClientSession,
 ) -> int | None:
-    """Fallback: read the live build number straight from Discord's own web
-    assets."""
+    """Read the live build number out of Discord's web assets."""
     try:
         async with sess.get(
             _DISCORD_APP_URL, timeout=aiohttp.ClientTimeout(total=8)
@@ -142,81 +127,22 @@ async def _scrape_build_number_from_web(
 
 
 async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> dict:
-    """Fetch the current Discord *stable* build fingerprint."""
+    """Refresh the shared build number from Discord's live web assets."""
     owns = session is None
     sess = session or aiohttp.ClientSession()
     try:
-        dec: dict = {}
-        try:
-            async with sess.get(
-                BUILD_INFO_URL, timeout=aiohttp.ClientTimeout(total=10)
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    dec = (
-                        ((data or {}).get("clients") or {}).get("Discord") or {}
-                    ).get("decoded") or {}
-                else:
-                    logger.debug("build-info fetch: HTTP %s", resp.status)
-        except Exception as e:
-            logger.debug("build-info fetch failed: %r", e)
-
-        build_number = int(dec.get("client_build_number") or 0)
-        ua = str(dec.get("browser_user_agent") or "")
-
-        if build_number < 400000 or "discord/" not in ua:
+        scraped = await _scrape_build_number_from_web(sess)
+        if not scraped or scraped < 400000:
             logger.debug(
-                "build-info fetch: implausible or missing payload; scraping web assets"
-            )
-            scraped = await _scrape_build_number_from_web(sess)
-            if scraped is not None and scraped >= 400000:
-                if scraped == DEFAULT_BUILD["client_build_number"]:
-                    logger.debug(
-                        "Discord build fingerprint confirmed current: build=%s",
-                        scraped,
-                    )
-                else:
-
-                    logger.warning(
-                        "Discord build %s is newer than the built-in fingerprint "
-                        "(%s / %s). Keeping the built-in set intact: the scrape "
-                        "cannot supply the matching client and Electron versions. "
-                        "Update DEFAULT_BUILD from a real client capture.",
-                        scraped,
-                        DEFAULT_BUILD["client_build_number"],
-                        DEFAULT_BUILD["client_version"],
-                    )
-            return get_build_info()
-
-        fetched_version = str(dec.get("client_version") or "")
-
-        if fetched_version and fetched_version not in ua:
-            logger.warning(
-                "Build feed is internally inconsistent (client %s not present "
-                "in its own user agent). Keeping the built-in set.",
-                fetched_version,
+                "build number unresolved; keeping built-in %s",
+                DEFAULT_BUILD["client_build_number"],
             )
             return get_build_info()
 
-        parsed = {
-            "release_channel": dec.get("release_channel")
-            or DEFAULT_BUILD["release_channel"],
-            "client_version": fetched_version or DEFAULT_BUILD["client_version"],
-            "browser_user_agent": ua,
-            "browser_version": dec.get("browser_version")
-            or DEFAULT_BUILD["browser_version"],
-            "client_build_number": build_number,
-            "native_build_number": int(
-                dec.get("native_build_number") or DEFAULT_BUILD["native_build_number"]
-            ),
-        }
-        set_build_info(parsed)
-        logger.debug(
-            "Discord build fingerprint updated: build=%s version=%s",
-            parsed["client_build_number"],
-            parsed["client_version"],
-        )
-        return parsed
+        logger.info("Fetched latest Discord build: %s", scraped)
+        if scraped != get_build_info().get("client_build_number"):
+            set_build_info({"client_build_number": scraped})
+        return get_build_info()
     except Exception as e:
         logger.debug("build-info fetch failed: %r", e)
         return get_build_info()
@@ -228,73 +154,91 @@ async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> di
                 pass
 
 
-def _stable_uuid(rng: random.Random) -> str:
-    """A deterministic UUIDv4-format string from a seeded RNG."""
-    b = bytearray(rng.getrandbits(8) for _ in range(16))
-    b[6] = (b[6] & 0x0F) | 0x40
-    b[8] = (b[8] & 0x3F) | 0x80
-    h = b.hex()
-    return f"{h[0:8]}-{h[8:12]}-{h[12:16]}-{h[16:20]}-{h[20:32]}"
-
-
 def make_fingerprint(token: str) -> dict:
-    """Build a stable, unique device fingerprint for a token."""
+    """Build a stable device fingerprint for a token."""
     seed = int(hashlib.sha256(token.encode("utf-8")).hexdigest()[:16], 16)
     rng = random.Random(seed)
 
     build = get_build_info()
-    os_version, os_sdk_version = rng.choice(_WINDOWS_BUILDS)
-    locale, tz = rng.choice(_LOCALE_TIMEZONES)
-    app_state = rng.choice(["focused", "unfocused"])
-    launch_id = _stable_uuid(rng)
-    launch_signature = _stable_uuid(rng)
-    heartbeat_session_id = _stable_uuid(rng)
+    install_id = _installation_id(rng)
+    launch_id = str(uuid.uuid4())
+    launch_signature = str(uuid.uuid4())
 
     user_agent = build["browser_user_agent"]
 
-    super_props = {
+    common = {
         "os": "Windows",
-        "browser": "Discord Client",
-        "release_channel": build["release_channel"],
-        "client_version": build["client_version"],
-        "os_version": os_version,
-        "os_arch": "x64",
-        "app_arch": "x64",
-        "system_locale": locale,
+        "browser": "Chrome",
+        "device": "",
+        "system_locale": LOCALE,
         "has_client_mods": False,
-        "client_launch_id": launch_id,
         "browser_user_agent": user_agent,
         "browser_version": build["browser_version"],
-        "os_sdk_version": os_sdk_version,
-        "client_build_number": build["client_build_number"],
-        "native_build_number": build["native_build_number"],
-        "client_event_source": None,
-        "launch_signature": launch_signature,
-        "client_heartbeat_session_id": heartbeat_session_id,
-        "client_app_state": app_state,
+        "os_version": _OS_VERSION,
+        "referrer": "",
+        "referring_domain": "",
     }
-    super_props_b64 = base64.b64encode(
-        json.dumps(super_props, separators=(",", ":")).encode()
-    ).decode()
+
+    super_props = {
+        **common,
+        "referrer_current": "https://discord.com/",
+        "referring_domain_current": "discord.com",
+        "release_channel": build["release_channel"],
+        "client_build_number": build["client_build_number"],
+        "client_event_source": None,
+        "client_launch_id": launch_id,
+        "launch_signature": launch_signature,
+        "client_app_state": "focused",
+        "client_heartbeat_session_id": "",
+    }
+
+    gateway_props = {
+        **common,
+        "referrer_current": "",
+        "referring_domain_current": "",
+        "release_channel": build["release_channel"],
+        "client_build_number": build["client_build_number"],
+        "client_event_source": None,
+        "client_launch_id": launch_id,
+        "installation_id": install_id,
+        "is_fast_connect": True,
+    }
 
     headers = {
         "User-Agent": user_agent,
-        "X-Discord-Locale": locale,
-        "X-Discord-Timezone": tz,
+        "X-Discord-Locale": LOCALE,
+        "X-Discord-Timezone": TIMEZONE,
         "X-Debug-Options": "bugReporterEnabled",
         "Accept": "*/*",
-        "Accept-Language": locale,
-        "X-Installation-Id": _installation_id(rng),
+        "Accept-Language": "en-US,en;q=0.9",
+        "Content-Type": "application/json",
+        "X-Installation-Id": install_id,
         "Sec-CH-UA": _sec_ch_ua(user_agent),
         "Sec-CH-UA-Mobile": "?0",
         "Sec-CH-UA-Platform": '"Windows"',
         "Sec-Fetch-Site": "same-origin",
         "Sec-Fetch-Mode": "cors",
         "Sec-Fetch-Dest": "empty",
+        "Sec-GPC": "1",
         "Origin": "https://discord.com",
         "Priority": "u=1, i",
     }
-    return {"headers": headers, "super_props_b64": super_props_b64}
+    return {
+        "headers": headers,
+        "super_props": super_props,
+        "super_props_b64": _b64_props(super_props),
+        "gateway_props": gateway_props,
+        "install_id": install_id,
+    }
+
+
+def _b64_props(props: dict) -> str:
+    return base64.b64encode(json.dumps(props, separators=(",", ":")).encode()).decode()
+
+
+def gateway_properties(token: str) -> dict:
+    """The ``properties`` object for a gateway IDENTIFY."""
+    return _fingerprint(token)["gateway_props"]
 
 
 def _installation_id(rng: random.Random) -> str:
@@ -306,10 +250,12 @@ def _installation_id(rng: random.Random) -> str:
 
 
 def _sec_ch_ua(user_agent: str) -> str:
-    """Electron's Sec-CH-UA brand list for the Chrome major in ``user_agent``."""
+    """Chrome's Sec-CH-UA brand list for the Chrome major in ``user_agent``."""
     m = re.search(r"Chrome/(\d+)", user_agent or "")
-    major = m.group(1) if m else "148"
-    return f'"Not/A)Brand";v="99", "Chromium";v="{major}"'
+    major = m.group(1) if m else "150"
+    return (
+        f'"Not=A?Brand";v="99", "Google Chrome";v="{major}", ' f'"Chromium";v="{major}"'
+    )
 
 
 SUPPRESSED_PROFILE_HEADERS = {
@@ -318,27 +264,60 @@ SUPPRESSED_PROFILE_HEADERS = {
 }
 
 
-def build_headers(token: str, *, referer: str | None = None) -> dict:
-    """Full header dict for a user-token REST request.
-
-    ``referer`` should be the clone channel the message is going to; the real
-    client always sends the channel it is looking at.
-
-    Every value is a string, so this is safe for aiohttp. Callers going out
-    through curl_cffi should also merge SUPPRESSED_PROFILE_HEADERS.
-    """
+def _fingerprint(token: str) -> dict:
     fp = _FINGERPRINT_CACHE.get(token)
     if fp is None:
         fp = make_fingerprint(token)
         _FINGERPRINT_CACHE[token] = fp
-    headers = {
-        **fp["headers"],
+    return fp
+
+
+_HEARTBEAT_SESSIONS: dict[str, str] = {}
+
+
+def set_heartbeat_session_id(token: str, session_id: str | None) -> None:
+    """Record the heartbeat session id a gateway connection just produced."""
+    if session_id:
+        _HEARTBEAT_SESSIONS[token] = str(session_id)
+    else:
+        _HEARTBEAT_SESSIONS.pop(token, None)
+
+
+def build_headers(token: str, *, referer: str | None = None) -> dict:
+    """Full header dict for a user-token REST request."""
+    fp = _fingerprint(token)
+
+    heartbeat_id = _HEARTBEAT_SESSIONS.get(token)
+    if heartbeat_id:
+        props = dict(fp["super_props"])
+        props["client_heartbeat_session_id"] = heartbeat_id
+        super_props_b64 = _b64_props(props)
+    else:
+        super_props_b64 = fp["super_props_b64"]
+
+    h = fp["headers"]
+    return {
+        "Accept": h["Accept"],
+        "Accept-Language": h["Accept-Language"],
         "Authorization": token,
-        "X-Super-Properties": fp["super_props_b64"],
+        "Content-Type": h["Content-Type"],
+        "Origin": h["Origin"],
+        "Priority": h["Priority"],
+        "Referer": referer or "https://discord.com/channels/@me",
+        "Sec-CH-UA": h["Sec-CH-UA"],
+        "Sec-CH-UA-Mobile": h["Sec-CH-UA-Mobile"],
+        "Sec-CH-UA-Platform": h["Sec-CH-UA-Platform"],
+        "Sec-Fetch-Dest": h["Sec-Fetch-Dest"],
+        "Sec-Fetch-Mode": h["Sec-Fetch-Mode"],
+        "Sec-Fetch-Site": h["Sec-Fetch-Site"],
+        "Sec-GPC": h["Sec-GPC"],
+        "User-Agent": h["User-Agent"],
+        "X-Debug-Options": h["X-Debug-Options"],
+        "X-Discord-Locale": h["X-Discord-Locale"],
+        "X-Discord-Timezone": h["X-Discord-Timezone"],
+        "X-Installation-Id": h["X-Installation-Id"],
+        "X-Super-Properties": super_props_b64,
     }
-    if referer:
-        headers["Referer"] = referer
-    return headers
 
 
 def channel_referer(channel_id, guild_id=None) -> str:
@@ -369,25 +348,7 @@ def _tls_session_lock(token: str) -> asyncio.Lock:
 
 
 async def get_tls_session(token: str, *, use_proxy: bool = False):
-    """Return a curl_cffi ``AsyncSession`` dedicated to this token.
-
-    When ``use_proxy`` is set (per-mapping ``USER_TOKEN_USE_PROXIES``) and
-    the pool has entries, first creation also leases this token a proxy and
-    primes the session's cookies *through* that proxy — priming from a
-    different network path than real requests will use would hand the token
-    cookies tied to the wrong source IP. The session itself never has a
-    proxy baked in; callers pass the token's current lease
-    (``proxy_pool.get_pool().current(token)``) per request instead, so a
-    proxy failure mid-life can swap the lease without tearing down the
-    cookie jar/TLS state.
-
-    The proxy decision is made ONCE, at session creation. A token reachable
-    from two mappings with different ``USER_TOKEN_USE_PROXIES`` values
-    resolves first-session-wins, deliberately: sessions and leases are keyed
-    by token value, and switching a live session between proxied and direct
-    would use cookies issued to one IP from another — a sharper anomaly than
-    either choice made consistently.
-    """
+    """Return a curl_cffi ``AsyncSession`` dedicated to this token."""
     if _CurlAsyncSession is None:
         raise RuntimeError("curl_cffi is not installed")
 
@@ -453,15 +414,12 @@ async def _prime_tls_session(sess, token: str, proxy: str | None = None) -> None
 async def close_tls_session(token: str, reason: str = "unspecified") -> None:
     """Drop a token's cached curl_cffi session (e.g. on token removal/revoke)
     and release its proxy lease, if any, back to the pool.
-
-    ``reason`` is purely for the log line — pass something like
-    "revoked-401", "idle-timeout", or "shutdown" so the log tells you *why*
-    a given session went away, not just that it did.
     """
     async with _tls_session_lock(token):
         sess = _TLS_SESSIONS.pop(token, None)
         _TLS_PRIMED.discard(token)
         _TLS_LAST_USED.pop(token, None)
+        _HEARTBEAT_SESSIONS.pop(token, None)
         if sess is not None:
             try:
                 await sess.close()
@@ -508,35 +466,14 @@ async def reap_idle_tls_sessions(idle_ttl: float = TLS_SESSION_IDLE_TTL) -> int:
     return len(stale)
 
 
-def session_state(token: str) -> dict:
-    """Live TLS-session state for one token, for debug output.
-
-    A closed session is not an error: sessions are created on first send and
-    reaped after ``TLS_SESSION_IDLE_TTL``, so a token that has not posted
-    recently simply has none.
-    """
-    now = time.monotonic()
-    last = _TLS_LAST_USED.get(token)
-    return {
-        "session_open": token in _TLS_SESSIONS,
-        "cookies_primed": token in _TLS_PRIMED,
-        "idle_seconds": round(now - last, 1) if last is not None else None,
-        "impersonate": TLS_IMPERSONATE,
-    }
-
-
-def live_session_count() -> int:
-    """How many per-token TLS sessions are currently open."""
-    return len(_TLS_SESSIONS)
-
-
 REAL_CLIENT_HEADERS = {
     "sec-ch-ua-platform": '"Windows"',
-    "sec-ch-ua": '"Not/A)Brand";v="99", "Chromium";v="148"',
+    "sec-ch-ua": None,
     "sec-ch-ua-mobile": "?0",
     "sec-fetch-site": "same-origin",
     "sec-fetch-mode": "cors",
     "sec-fetch-dest": "empty",
+    "sec-gpc": "1",
     "origin": "https://discord.com",
     "referer": None,
     "x-installation-id": None,
@@ -548,7 +485,7 @@ REAL_CLIENT_HEADERS = {
     "authorization": None,
     "user-agent": None,
     "accept": "*/*",
-    "accept-language": None,
+    "accept-language": "en-US,en;q=0.9",
     "accept-encoding": "gzip, deflate, br, zstd",
     "content-type": "application/json",
     "priority": "u=1, i",

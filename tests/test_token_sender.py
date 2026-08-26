@@ -4,6 +4,7 @@ Unit tests for the server-side user-token message sender.
 These cover the pure, network-free helpers: per-token header fingerprinting
 (unique per account, stable across calls) and embed flattening.
 """
+
 import base64
 import json
 import types
@@ -62,9 +63,9 @@ class TestHeaderFingerprint:
         assert h["Authorization"] == "token-abc"
         assert "X-Super-Properties" in h
         assert "User-Agent" in h
-        # Super properties decode to JSON with a client build number.
+
         props = json.loads(base64.b64decode(h["X-Super-Properties"]))
-        assert props["browser"] == "Discord Client"
+        assert props["browser"] == "Chrome"
         assert "client_build_number" in props
         assert props["browser_user_agent"] == h["User-Agent"]
 
@@ -77,14 +78,12 @@ class TestHeaderFingerprint:
 
     def test_fingerprint_unique_across_tokens(self):
         s = _make_sender()
-        # Different tokens should not share an identical device fingerprint.
-        sp = {
-            s._build_headers(f"token-{i}")["X-Super-Properties"] for i in range(12)
-        }
+
+        sp = {s._build_headers(f"token-{i}")["X-Super-Properties"] for i in range(12)}
         assert len(sp) > 1
 
     def test_fingerprint_deterministic_across_instances(self):
-        # A given account looks the same even after a process restart.
+
         a = _make_sender()._build_headers("same")
         b = _make_sender()._build_headers("same")
         assert a["X-Super-Properties"] == b["X-Super-Properties"]
@@ -152,7 +151,6 @@ class TestSelectionStrategies:
     def test_round_robin_independent_per_channel(self):
         s = _make_sender()
         toks = [{"token_id": "a"}, {"token_id": "b"}]
-        # Channel 1 advances without affecting channel 2's rotation.
         s._order_tokens(toks, 1, "round_robin", None)
         assert s._order_tokens(toks, 2, "round_robin", None)[0]["token_id"] == "a"
 
@@ -173,8 +171,7 @@ class TestSelectionStrategies:
         assert len(firsts) > 1
 
     def test_sticky_author_distinct_authors_get_distinct_tokens(self):
-        # Regression: different authors must not all land on the same account
-        # when there are enough tokens to go around.
+
         s = _make_sender()
         toks = [{"token_id": "a"}, {"token_id": "b"}, {"token_id": "c"}]
         picks = [
@@ -182,16 +179,16 @@ class TestSelectionStrategies:
             for a in ("userA", "userB", "userC")
         ]
         assert len(set(picks)) == 3
-        # And each author keeps its assignment on repeat.
-        assert s._order_tokens(toks, 1, "sticky_author", "userA")[0][
-            "token_id"
-        ] == picks[0]
+
+        assert (
+            s._order_tokens(toks, 1, "sticky_author", "userA")[0]["token_id"]
+            == picks[0]
+        )
 
     def test_sticky_author_scoped_per_mapping(self):
         s = _make_sender()
         toks_x = [{"token_id": "x1"}, {"token_id": "x2"}]
         toks_y = [{"token_id": "y1"}, {"token_id": "y2"}]
-        # Same author in two mappings resolves within each mapping's own tokens.
         px = s._order_tokens(toks_x, 1, "sticky_author", "u", "mapX")[0]["token_id"]
         py = s._order_tokens(toks_y, 1, "sticky_author", "u", "mapY")[0]["token_id"]
         assert px in ("x1", "x2")
@@ -210,8 +207,16 @@ async def test_links_only_skips_upload(monkeypatch):
     captured = {}
 
     async def fake_send(
-        self, token, channel_id, text, attachments, *,
-        sticker_ids=None, use_proxy=False, reply_to=None, guild_id=None,
+        self,
+        token,
+        channel_id,
+        text,
+        attachments,
+        *,
+        sticker_ids=None,
+        use_proxy=False,
+        reply_to=None,
+        guild_id=None,
     ):
         captured["attachments"] = attachments
         return SEND_OK, 111
@@ -238,7 +243,7 @@ async def test_links_only_skips_upload(monkeypatch):
         links_only=True,
     )
     assert ok == SEND_OK
-    # Links-only means nothing is handed to the uploader.
+
     assert captured["attachments"] == []
 
 
@@ -261,8 +266,16 @@ async def test_forced_token_id_is_tried_first(monkeypatch):
     used = {}
 
     async def fake_send(
-        self, token, channel_id, text, attachments, *,
-        sticker_ids=None, use_proxy=False, reply_to=None, guild_id=None,
+        self,
+        token,
+        channel_id,
+        text,
+        attachments,
+        *,
+        sticker_ids=None,
+        use_proxy=False,
+        reply_to=None,
+        guild_id=None,
     ):
         used["token"] = token
         return SEND_OK, 111
@@ -310,8 +323,16 @@ async def test_sticky_exclusive_never_falls_back_to_other_tokens(monkeypatch):
     tried = []
 
     async def fake_send(
-        self, token, channel_id, text, attachments, *,
-        sticker_ids=None, use_proxy=False, reply_to=None, guild_id=None,
+        self,
+        token,
+        channel_id,
+        text,
+        attachments,
+        *,
+        sticker_ids=None,
+        use_proxy=False,
+        reply_to=None,
+        guild_id=None,
     ):
         tried.append(token)
         return SEND_DEAD, None
@@ -337,9 +358,9 @@ async def test_sticky_exclusive_never_falls_back_to_other_tokens(monkeypatch):
         forced_token_id="a",
         sticky_exclusive=True,
     )
-    # The forced account failed and no other may be tried → its failure status.
+
     assert ok == SEND_DEAD
-    # Only the forced account was attempted — never the other token.
+
     assert tried == ["ta"]
 
 
@@ -352,7 +373,7 @@ async def test_uploaded_attachment_url_stripped_from_text(monkeypatch):
     url = "http://cdn.example/att.png?ex=abc"
 
     async def fake_prepare(self, session, attachments):
-        # Report the attachment as successfully uploaded.
+
         return [("att.png", b"data", "image/png")], {url}
 
     monkeypatch.setattr(UserTokenSender, "_prepare_files", fake_prepare)
@@ -384,7 +405,7 @@ async def test_uploaded_attachment_url_stripped_from_text(monkeypatch):
         "tok", 1, f"lol\n{url}", [{"url": url, "filename": "att.png"}]
     )
     assert ok == SEND_OK
-    # The link is gone; only the message text remains (the file carries it).
+
     assert url not in captured["content"]
     assert captured["content"].strip() == "lol"
 
@@ -410,7 +431,9 @@ async def test_sticker_only_message_sends_sticker_ids():
             return False
 
     class _Session:
-        async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
+        async def post(
+            self, url, json=None, data=None, headers=None, timeout=None, **kw
+        ):
             captured["json"] = json
             return _Resp()
 
@@ -427,7 +450,6 @@ async def test_sticker_only_message_sends_sticker_ids():
     )
     _use_session(s, lambda: _Session())
 
-    # A sticker-only message (no text/attachments) still sends via token.
     ok = await s.send(
         mapping_id="m",
         target_channel_id=1,
@@ -454,7 +476,7 @@ async def test_pace_waits_the_delay_every_message():
     import time as _t
 
     s = _make_sender()
-    # Every message waits its own delay before being sent.
+
     t0 = _t.monotonic()
     await s._pace_channel(100, 0.05, 0.05)
     assert _t.monotonic() - t0 >= 0.04
@@ -472,7 +494,7 @@ async def test_chan_lock_serializes_same_channel():
             await _a.sleep(0.05)
 
     t0 = _t.monotonic()
-    # Two holders of the same channel lock take turns (~0.10s), never bursting.
+
     await _a.gather(hold(), hold())
     assert _t.monotonic() - t0 >= 0.09
 
@@ -484,7 +506,7 @@ async def test_pace_independent_channels_run_concurrently():
 
     s = _make_sender()
     t0 = _t.monotonic()
-    # Different channels delay at the same time, not one-after-another.
+
     await _a.gather(
         s._pace_channel(100, 0.05, 0.05),
         s._pace_channel(200, 0.05, 0.05),
@@ -513,7 +535,7 @@ async def test_pace_shows_typing_for_the_delay():
     s = _make_sender()
     _use_session(s, lambda: _Session())
     t0 = _t.monotonic()
-    # Typing enabled → the indicator fires and the message waits the delay.
+
     await s._pace_channel(100, 0.05, 0.05, typing=True, token="tok")
     assert _t.monotonic() - t0 >= 0.04
     assert any("/typing" in u for u in posts)
@@ -545,7 +567,9 @@ async def test_send_serializes_typing_then_send_per_channel():
             return False
 
     class _Session:
-        async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
+        async def post(
+            self, url, json=None, data=None, headers=None, timeout=None, **kw
+        ):
             events.append("type" if url.endswith("/typing") else "send")
             return _Resp()
 
@@ -597,16 +621,22 @@ async def test_no_consecutive_repeat_same_channel(monkeypatch):
     used = []
 
     async def fake_send_with_token(
-        self, token, channel_id, text, attachments, *,
-        sticker_ids=None, use_proxy=False, reply_to=None, guild_id=None,
+        self,
+        token,
+        channel_id,
+        text,
+        attachments,
+        *,
+        sticker_ids=None,
+        use_proxy=False,
+        reply_to=None,
+        guild_id=None,
     ):
-        # Record which token actually sent (order[0] always succeeds here).
+
         used.append(token)
         return SEND_OK, 111
 
-    monkeypatch.setattr(
-        UserTokenSender, "_send_with_token", fake_send_with_token
-    )
+    monkeypatch.setattr(UserTokenSender, "_send_with_token", fake_send_with_token)
 
     s = UserTokenSender(
         db=_DB(),
@@ -630,7 +660,6 @@ async def test_no_consecutive_repeat_same_channel(monkeypatch):
         )
         assert ok == SEND_OK
 
-    # No two consecutive sends into the same channel used the same token.
     assert all(used[i] != used[i + 1] for i in range(len(used) - 1))
 
 
@@ -713,7 +742,9 @@ class TestCreateForumThread:
         captured = {}
 
         class _Session:
-            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
+            async def post(
+                self, url, json=None, data=None, headers=None, timeout=None, **kw
+            ):
                 captured["url"] = url
                 captured["json"] = json
                 return _JsonResp(201, {"id": "998877"})
@@ -727,12 +758,10 @@ class TestCreateForumThread:
             applied_tag_ids=[111, 222],
         )
         assert new_id == 998877
-        # The client asks for nested fields on a forum thread.
-        assert captured["url"].endswith(
-            "/channels/42/threads?use_nested_fields=true"
-        )
+
+        assert captured["url"].endswith("/channels/42/threads?use_nested_fields=true")
         assert captured["json"]["name"] == "My Thread"
-        # applied_tags sits ahead of message in the capture.
+
         assert list(captured["json"]) == [
             "name",
             "auto_archive_duration",
@@ -758,8 +787,10 @@ class TestCreateForumThread:
         used = {}
 
         class _Session:
-            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
-                # The Authorization header reveals which account is posting.
+            async def post(
+                self, url, json=None, data=None, headers=None, timeout=None, **kw
+            ):
+
                 used["auth"] = headers.get("Authorization")
                 return _JsonResp(201, {"id": "5"})
 
@@ -789,7 +820,7 @@ class TestCreateForumThread:
                 return _JsonResp(201, {"id": "1"})
 
         s = _forum_sender(_DB(), _Session())
-        # No text, no attachments, no stickers → webhook must create the thread.
+
         new_id = await s.create_forum_thread(
             mapping_id="m",
             forum_channel_id=1,
@@ -814,7 +845,9 @@ class TestCreateForumThread:
         attempts = {"n": 0}
 
         class _Session:
-            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
+            async def post(
+                self, url, json=None, data=None, headers=None, timeout=None, **kw
+            ):
                 attempts["n"] += 1
                 return _JsonResp(403, {"message": "Missing Access"})
 
@@ -826,7 +859,7 @@ class TestCreateForumThread:
             content="hi",
         )
         assert new_id is None
-        # Every token was tried before giving up.
+
         assert attempts["n"] == 2
 
     @pytest.mark.asyncio
@@ -841,7 +874,9 @@ class TestCreateForumThread:
         captured = {}
 
         class _Session:
-            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
+            async def post(
+                self, url, json=None, data=None, headers=None, timeout=None, **kw
+            ):
                 captured["json"] = json
                 return _JsonResp(201, {"id": "77"})
 
@@ -871,7 +906,9 @@ class TestCreateTextThread:
         captured = {}
 
         class _Session:
-            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
+            async def post(
+                self, url, json=None, data=None, headers=None, timeout=None, **kw
+            ):
                 captured["url"] = url
                 captured["json"] = json
                 return _JsonResp(201, {"id": "444"})
@@ -884,10 +921,10 @@ class TestCreateTextThread:
             starter_message_id=999,
         )
         assert new_id == 444
-        # Created FROM the message → id equals the message id in Discord.
+
         assert captured["url"].endswith("/channels/42/messages/999/threads")
         assert captured["json"]["name"] == "chat"
-        # A message-linked thread must not force a standalone thread type.
+
         assert "type" not in captured["json"]
 
     @pytest.mark.asyncio
@@ -902,7 +939,9 @@ class TestCreateTextThread:
         captured = {}
 
         class _Session:
-            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
+            async def post(
+                self, url, json=None, data=None, headers=None, timeout=None, **kw
+            ):
                 captured["url"] = url
                 captured["json"] = json
                 return _JsonResp(201, {"id": "555"})
@@ -932,7 +971,9 @@ class TestCreateTextThread:
         used = {}
 
         class _Session:
-            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
+            async def post(
+                self, url, json=None, data=None, headers=None, timeout=None, **kw
+            ):
                 used["auth"] = headers.get("Authorization")
                 return _JsonResp(201, {"id": "9"})
 
@@ -962,7 +1003,9 @@ class TestCreateTextThread:
         attempts = {"n": 0}
 
         class _Session:
-            async def post(self, url, json=None, data=None, headers=None, timeout=None, **kw):
+            async def post(
+                self, url, json=None, data=None, headers=None, timeout=None, **kw
+            ):
                 attempts["n"] += 1
                 return _JsonResp(403, {"message": "Missing Access"})
 
@@ -1018,7 +1061,7 @@ class TestSendStatusTaxonomy:
     async def test_401_is_dead(self):
         s = _make_sender()
         _use_session(s, lambda: _ScriptedSession([("resp", 401, {})]))
-        # Revoked/invalid token → dead → caller benches it.
+
         assert (await s._send_with_token("t", 1, "hi", []))[0] == SEND_DEAD
 
     @pytest.mark.asyncio
@@ -1027,7 +1070,7 @@ class TestSendStatusTaxonomy:
         _use_session(
             s, lambda: _ScriptedSession([("resp", 403, {"message": "Missing Access"})])
         )
-        # Can't post here, but the token itself isn't dead → try another account.
+
         assert (await s._send_with_token("t", 1, "hi", []))[0] == SEND_UNDELIVERABLE
 
     @pytest.mark.asyncio
@@ -1040,10 +1083,10 @@ class TestSendStatusTaxonomy:
         )
         s = _make_sender()
         _use_session(s, lambda: session)
-        # A 429 sleeps its retry_after then retries the SAME account (no swap).
+
         assert (await s._send_with_token("t", 1, "hi", []))[0] == SEND_OK
         assert session.calls == 2
-        # The account was parked so its other queued messages wait too.
+
         assert "t" in s._token_cooldown
 
     @pytest.mark.asyncio
@@ -1054,8 +1097,7 @@ class TestSendStatusTaxonomy:
         session = _ScriptedSession([("resp", 429, {"retry_after": 0.001})] * 20)
         s = _make_sender()
         _use_session(s, lambda: session)
-        # Still limited after the retries → a distinct status the caller must NOT
-        # webhook (it's not the token's fault).
+
         assert (await s._send_with_token("t", 1, "hi", []))[0] == SEND_RATE_LIMITED
 
     @pytest.mark.asyncio
@@ -1063,12 +1105,10 @@ class TestSendStatusTaxonomy:
         import asyncio
 
         monkeypatch.setattr(asyncio, "sleep", _instant_sleep)
-        session = _ScriptedSession(
-            [("raise", CurlRequestException("boom"))] * 20
-        )
+        session = _ScriptedSession([("raise", CurlRequestException("boom"))] * 20)
         s = _make_sender()
         _use_session(s, lambda: session)
-        # Network errors are retried (never webhooked); after the cap → transient.
+
         assert (await s._send_with_token("t", 1, "hi", []))[0] == SEND_TRANSIENT
         assert session.calls > 1
 
@@ -1077,7 +1117,7 @@ class TestSendStatusTaxonomy:
         import time as _t
 
         s = _make_sender()
-        # A parked account makes the next message wait out the cooldown.
+
         s._token_cooldown["t"] = _t.monotonic() + 0.05
         t0 = _t.monotonic()
         await s._await_cooldown("t")
@@ -1087,8 +1127,6 @@ class TestSendStatusTaxonomy:
     async def test_same_account_requests_serialize(self):
         import asyncio as _a
 
-        # Regression: one account's messages never overlap — a rate limit on one
-        # holds the others back instead of firing them all at once.
         active = {"n": 0, "max": 0}
 
         class _Resp:
@@ -1141,14 +1179,13 @@ class TestMessagePayload:
         from server.token_sender import message_payload
 
         nonce = message_payload("hi")["nonce"]
-        # A string, not a number: it is a snowflake and would lose precision.
+
         assert isinstance(nonce, str) and nonce.isdigit()
         assert 18 <= len(nonce) <= 19
 
     def test_nonce_is_unique_per_message(self):
         from server.token_sender import message_payload
 
-        # Discord dedupes on the nonce, so a repeat can swallow a real message.
         assert len({message_payload("x")["nonce"] for _ in range(500)}) == 500
 
     def test_nonce_decodes_to_now(self):
@@ -1179,8 +1216,7 @@ class TestReplyPayload:
         )
 
     def test_key_order_matches_the_capture(self):
-        # flags comes last: the reference and allowed_mentions sit between it
-        # and tts, so appending the reply fields is not enough.
+
         assert list(self._built().keys()) == [
             "mobile_network_type",
             "content",
@@ -1194,7 +1230,6 @@ class TestReplyPayload:
     def test_guild_reply_reference_matches_the_capture(self):
         from server.token_sender import _reply_bits
 
-        # A guild reply carries guild_id, and it comes FIRST.
         ref = _reply_bits(
             {
                 "guild_id": 1194020058721165494,
@@ -1224,13 +1259,11 @@ class TestReplyPayload:
         }
 
     def test_never_sends_fail_if_not_exists(self):
-        # Ours, not the client's. A deleted target is handled by resending
-        # without the reference instead.
+
         assert "fail_if_not_exists" not in self._built()["message_reference"]
 
     def test_allowed_mentions_matches_the_capture(self):
-        # A reply pings the author it answers unless replied_user is False,
-        # and omitting parse would make every mention in the content inert.
+
         assert self._built()["allowed_mentions"] == {
             "parse": ["users", "roles", "everyone"],
             "replied_user": False,

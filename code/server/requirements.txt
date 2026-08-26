@@ -2,7 +2,7 @@ py-cord==2.7.2
 websockets==11.0.3
 aiohttp>=3.9,<4
 aiohttp-socks>=0.8,<1
-curl_cffi>=0.16,<1
+curl_cffi==0.16.2
 Pillow==12.2.0
 PyYAML==6.0.2
 tzdata==2025.2

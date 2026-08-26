@@ -29,123 +29,172 @@ def _props(token):
 
 
 class TestFingerprintShape:
-    def test_desktop_super_props_shape(self):
+    def test_web_super_props_shape(self):
         h, props = _props("token-abc")
-        assert props["browser"] == "Discord Client"
+
+        assert props["browser"] == "Chrome"
         assert props["os"] == "Windows"
-        # The desktop client reports these keys — a browser fingerprint wouldn't.
+        assert props["os_version"] == "10"
         for key in (
-            "client_version",
+            "device",
+            "system_locale",
             "has_client_mods",
+            "referrer_current",
+            "referring_domain_current",
             "client_launch_id",
             "launch_signature",
-            "os_sdk_version",
-            "native_build_number",
             "client_build_number",
+            "client_app_state",
         ):
             assert key in props
-        # UA and the fingerprint's UA agree, and Authorization is the raw token.
+
+        for key in (
+            "client_version",
+            "native_build_number",
+            "os_sdk_version",
+            "os_arch",
+            "app_arch",
+        ):
+            assert key not in props, key
         assert h["User-Agent"] == props["browser_user_agent"]
         assert h["Authorization"] == "token-abc"
-        # os_sdk_version is the build part of os_version (they must stay in sync).
-        assert props["os_version"].endswith(props["os_sdk_version"])
+        assert "Electron" not in h["User-Agent"]
+        assert "discord/" not in h["User-Agent"]
 
-    def test_sends_the_client_hints_the_real_client_sends(self):
-        # This previously asserted the opposite, on the assumption that a
-        # desktop client sends no client hints. A capture of the real desktop
-        # client (2026-08-21) shows it sends all of these, so leaving them out
-        # was itself the tell.
+    def test_sends_the_client_hints_a_browser_sends(self):
         h = sh.build_headers("token-abc", referer="https://discord.com/channels/1/2")
         assert h["Sec-CH-UA-Platform"] == '"Windows"'
         assert h["Sec-CH-UA-Mobile"] == "?0"
         assert h["Origin"] == "https://discord.com"
         assert h["Referer"] == "https://discord.com/channels/1/2"
         assert h["X-Debug-Options"] == "bugReporterEnabled"
+        assert h["Sec-GPC"] == "1"
+        assert h["Content-Type"] == "application/json"
 
-        # Electron's brand list has no "Google Chrome" entry, and its Chromium
-        # major must match the user agent's.
         chrome_major = h["User-Agent"].split("Chrome/")[1].split(".")[0]
-        assert h["Sec-CH-UA"] == f'"Not/A)Brand";v="99", "Chromium";v="{chrome_major}"'
-        assert "Google Chrome" not in h["Sec-CH-UA"]
+        assert h["Sec-CH-UA"] == (
+            f'"Not=A?Brand";v="99", "Google Chrome";v="{chrome_major}", '
+            f'"Chromium";v="{chrome_major}"'
+        )
+        assert "Google Chrome" in h["Sec-CH-UA"]
+
+    def test_header_order_matches_chrome(self):
+
+        h = sh.build_headers("token-abc")
+        assert list(h) == sorted(h), list(h)
 
     def test_every_header_value_is_a_string(self):
-        # build_headers() is shared with aiohttp callers (the scraper,
-        # message_utils, admin token validation). A None value is a curl_cffi
-        # instruction to delete a header; aiohttp dies on it with
-        # "Cannot serialize non-str key None", which surfaced as every token
-        # being reported invalid. Keep the deletions out of here.
+
         h = sh.build_headers("token-abc", referer="https://discord.com/channels/1/2")
         assert all(isinstance(v, str) for v in h.values()), {
             k: v for k, v in h.items() if not isinstance(v, str)
         }
 
     def test_api_call_not_a_page_load(self):
-        # curl_cffi's impersonation profile defaults these to a top-level
-        # navigation, which contradicts a POST carrying an Authorization
-        # header. We pin them, and remove the navigation-only extras (None
-        # deletes a header in curl_cffi; an empty string leaves it in place).
+
         h = sh.build_headers("token-abc")
         assert h["Sec-Fetch-Site"] == "same-origin"
         assert h["Sec-Fetch-Mode"] == "cors"
         assert h["Sec-Fetch-Dest"] == "empty"
-
-        # The real client DOES send priority, just not curl_cffi's page-load
-        # value of "u=0, i". This previously asserted it was deleted, which a
-        # later capture disproved.
         assert h["Priority"] == "u=1, i"
 
-        # The deletions are curl_cffi-only and live apart from build_headers,
-        # which aiohttp callers share and which must stay all-string.
         for banned in ("sec-fetch-user", "upgrade-insecure-requests"):
             assert sh.SUPPRESSED_PROFILE_HEADERS[banned] is None
             assert banned not in h
         assert "priority" not in sh.SUPPRESSED_PROFILE_HEADERS
 
     def test_build_fingerprint_is_internally_consistent(self):
-        # A build number belongs to exactly one client and Electron version.
-        # Shipping a fresh number with stale version strings describes a client
-        # that never existed, which is worse than simply being behind.
         b = sh.DEFAULT_BUILD
-        assert b["client_version"] in b["browser_user_agent"]
-        assert b["browser_version"] in b["browser_user_agent"]
+
+        assert b["browser_version"].split(".")[0] in b["browser_user_agent"]
+        assert "Chrome/" in b["browser_user_agent"]
 
     def test_locale_and_timezone_are_a_plausible_pair(self):
-        # Drawn together, not independently: a French client on an
-        # America/New_York clock is a combination almost nobody has.
-        for i in range(200):
-            h = sh.build_headers(f"tok-{i}")
-            assert (h["X-Discord-Locale"], h["X-Discord-Timezone"]) in sh._LOCALE_TIMEZONES
-            # The desktop client sends the bare locale, not a weighted list.
-            assert h["Accept-Language"] == h["X-Discord-Locale"]
+        h = sh.build_headers("tok-1")
+        assert h["X-Discord-Locale"] == sh.LOCALE
+        assert h["X-Discord-Timezone"] == sh.TIMEZONE
 
-    def test_no_datacenter_windows_build(self):
-        # 10.0.20348 is Windows Server 2022; a desktop app running on a
-        # datacenter SKU is a tell by itself.
-        assert all(b[0] != "10.0.20348" for b in sh._WINDOWS_BUILDS)
+        assert h["Accept-Language"] == "en-US,en;q=0.9"
 
     def test_unique_per_account_but_shared_build(self):
         _, a = _props("account-1")
         _, b = _props("account-2")
-        # Launch ids differ per account (a fleet sharing one is a tell)…
         assert a["client_launch_id"] != b["client_launch_id"]
         assert a["launch_signature"] != b["launch_signature"]
-        # …but the build number is the same (all real clients on one build are).
         assert a["client_build_number"] == b["client_build_number"]
 
-    def test_stable_per_account(self):
-        _, a1 = _props("stable-account")
-        _, a2 = _props("stable-account")
-        assert a1 == a2
+    def test_installation_id_is_stable_per_account(self):
+
+        a = sh.build_headers("stable-account")["X-Installation-Id"]
+        b = sh.build_headers("stable-account")["X-Installation-Id"]
+        assert a == b
+        assert a != sh.build_headers("other-account")["X-Installation-Id"]
 
     def test_default_build_used_without_refresh(self):
         _, props = _props("token-abc")
         assert props["client_build_number"] == sh.DEFAULT_BUILD["client_build_number"]
 
 
+class TestGatewayProperties:
+    """IDENTIFY wants a different object than the REST header carries."""
+
+    def test_gateway_props_carry_the_gateway_only_fields(self):
+        g = sh.gateway_properties("token-abc")
+        assert (
+            g["installation_id"] == sh.build_headers("token-abc")["X-Installation-Id"]
+        )
+        assert g["is_fast_connect"] is True
+
+    def test_gateway_props_omit_the_rest_only_fields(self):
+        g = sh.gateway_properties("token-abc")
+        for key in (
+            "launch_signature",
+            "client_app_state",
+            "client_heartbeat_session_id",
+        ):
+            assert key not in g, key
+
+    def test_both_describe_the_same_device(self):
+
+        _, rest = _props("token-abc")
+        g = sh.gateway_properties("token-abc")
+        for key in (
+            "os",
+            "browser",
+            "browser_user_agent",
+            "browser_version",
+            "os_version",
+            "client_build_number",
+            "client_launch_id",
+        ):
+            assert rest[key] == g[key], key
+
+
+class TestHeartbeatSessionId:
+    def test_absent_until_a_gateway_session_reports_one(self):
+        sh.set_heartbeat_session_id("hb-token", None)
+        _, props = _props("hb-token")
+
+        assert props["client_heartbeat_session_id"] == ""
+
+    def test_carried_on_every_request_once_known(self):
+        sh.set_heartbeat_session_id("hb-token", "sess-42")
+        try:
+            _, props = _props("hb-token")
+            assert props["client_heartbeat_session_id"] == "sess-42"
+        finally:
+            sh.set_heartbeat_session_id("hb-token", None)
+
+    def test_clearing_it_restores_the_empty_value(self):
+        sh.set_heartbeat_session_id("hb-token", "sess-42")
+        sh.set_heartbeat_session_id("hb-token", None)
+        _, props = _props("hb-token")
+        assert props["client_heartbeat_session_id"] == ""
+
+
 class _FakeResp:
-    def __init__(self, status, payload):
-        self.status = status
-        self._payload = payload
+    def __init__(self, text):
+        self._text = text
 
     async def __aenter__(self):
         return self
@@ -153,83 +202,69 @@ class _FakeResp:
     async def __aexit__(self, *a):
         return False
 
-    async def json(self):
-        return self._payload
+    async def text(self):
+        return self._text
 
 
-class _FakeSession:
-    def __init__(self, *, status=200, payload=None, raise_exc=None):
-        self._status = status
-        self._payload = payload
+class _ScrapeSession:
+    """Stands in for Discord's web app: an index page linking JS assets."""
+
+    def __init__(self, *, build=None, raise_exc=None, asset_body=None):
+        self._build = build
         self._raise = raise_exc
+        self._asset_body = asset_body
 
     def get(self, url, timeout=None):
         if self._raise:
             raise self._raise
-        return _FakeResp(self._status, self._payload)
-
-
-def _payload(build_number=580123, ua=None):
-    ua = ua or (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) discord/1.0.9300 Chrome/140.0.0.0 "
-        "Electron/38.0.0 Safari/537.36"
-    )
-    return {
-        "clients": {
-            "Discord": {
-                "decoded": {
-                    "release_channel": "stable",
-                    "client_version": "1.0.9300",
-                    "browser_user_agent": ua,
-                    "browser_version": "38.0.0",
-                    "client_build_number": build_number,
-                    "native_build_number": 85000,
-                }
-            }
-        }
-    }
+        if url.endswith("/app"):
+            return _FakeResp('<script src="/assets/main.abc123.js"></script>')
+        if self._asset_body is not None:
+            return _FakeResp(self._asset_body)
+        return _FakeResp('x=1;buildNumber:"%s",y=2' % self._build)
 
 
 class TestRefreshBuildInfo:
+    """The build number is scraped from Discord's own assets.
+
+    There is no third-party build feed any more, so these drive the scrape.
+    """
+
     @pytest.mark.asyncio
-    async def test_refresh_applies_current_build(self):
-        session = _FakeSession(payload=_payload(build_number=580123))
-        out = await sh.refresh_build_info(session)
+    async def test_refresh_applies_scraped_build(self):
+        out = await sh.refresh_build_info(_ScrapeSession(build=580123))
         assert out["client_build_number"] == 580123
-        # It propagates to freshly-built fingerprints.
         _, props = _props("token-abc")
         assert props["client_build_number"] == 580123
-        assert props["client_version"] == "1.0.9300"
+
+    @pytest.mark.asyncio
+    async def test_refresh_never_invents_electron_fields(self):
+
+        await sh.refresh_build_info(_ScrapeSession(build=580123))
+        _, props = _props("token-abc")
+        assert "client_version" not in props
+        assert "native_build_number" not in props
 
     @pytest.mark.asyncio
     async def test_implausible_build_is_rejected(self):
-        # A too-low build number can't be real → keep the current (fallback) one.
-        session = _FakeSession(payload=_payload(build_number=1234))
         before = sh.get_build_info()["client_build_number"]
-        out = await sh.refresh_build_info(session)
+        out = await sh.refresh_build_info(_ScrapeSession(build=1234))
         assert out["client_build_number"] == before
 
     @pytest.mark.asyncio
-    async def test_non_desktop_ua_is_rejected(self):
-        # A UA without "discord/" isn't the desktop client → keep current.
-        session = _FakeSession(payload=_payload(ua="Mozilla/5.0 Chrome/140.0.0.0"))
+    async def test_no_marker_in_assets_keeps_fallback(self):
         before = sh.get_build_info()["client_build_number"]
-        out = await sh.refresh_build_info(session)
-        assert out["client_build_number"] == before
-
-    @pytest.mark.asyncio
-    async def test_http_error_keeps_fallback(self):
-        session = _FakeSession(status=500, payload={})
-        before = sh.get_build_info()["client_build_number"]
-        out = await sh.refresh_build_info(session)
+        out = await sh.refresh_build_info(
+            _ScrapeSession(asset_body="nothing useful here")
+        )
         assert out["client_build_number"] == before
 
     @pytest.mark.asyncio
     async def test_network_error_keeps_fallback(self):
-        session = _FakeSession(raise_exc=aiohttp.ClientError("boom"))
         before = sh.get_build_info()["client_build_number"]
-        out = await sh.refresh_build_info(session)
+        out = await sh.refresh_build_info(
+            _ScrapeSession(raise_exc=aiohttp.ClientError("boom"))
+        )
         assert out["client_build_number"] == before
 
 
