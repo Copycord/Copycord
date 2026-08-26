@@ -92,12 +92,92 @@ for lib in (
 for lib in ("discord.state", "discord.client"):
     logging.getLogger(lib).setLevel(logging.ERROR)
 
+def _is_proxy_exception(exc: BaseException | None) -> bool:
+    """Is this failure the proxy's fault, so another route is worth trying?
+
+    The exception that reaches us is often not the one that matters. Two cases
+    the obvious check misses:
+
+    * ``CurlError`` does not subclass ``OSError`` -- it inherits straight from
+      ``Exception`` -- so an isinstance test against the socket error types
+      never matches, even though curl_cffi raises it for every gateway dial
+      through a dead proxy.
+    * discord.py's connect loop reads ``self.ws.sequence`` when preparing to
+      retry, but on the FIRST failed dial ``self.ws`` is still None. It
+      therefore raises ``AttributeError`` while handling the real error, and
+      that is what propagates. The original failure survives only as the
+      chained ``__context__``.
+
+    So walk the chain rather than judging the outermost exception alone.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    depth = 0
+
+    while current is not None and depth < 10:
+        if id(current) in seen:
+            break
+        seen.add(id(current))
+        depth += 1
+
+        if isinstance(current, GatewayConnectTimeout):
+            return True
+
+        name = type(current).__name__
+        if name in ("CurlError", "ProxyError", "ProxyConnectionError"):
+            return True
+
+        if isinstance(current, (ConnectionError, OSError)):
+            err = str(current).lower()
+            if "proxy" in err or "curl" in err or "connect" in err or "aborted" in err:
+                return True
+
+        current = current.__cause__ or current.__context__
+
+    return False
+
+
+class _HandledReconnectFilter(logging.Filter):
+    """Drop discord.py's retry traceback when we are handling the failure.
+
+    ``Client.connect`` logs every failed dial with ``_log.exception``, which
+    means ERROR level and a full traceback, before retrying. Against a lossy
+    proxy pool that is a forty-line traceback per dead proxy for a condition
+    we already recover from, and it buries the one line that matters -- our
+    own rotation message.
+
+    Narrow on purpose: only this message, only from this logger, and only when
+    the chained cause is a proxy failure. A reconnect for any other reason,
+    and every other record, still comes through with its traceback intact. At
+    DEBUG nothing is dropped, since that is when you want the detail.
+    """
+
+    _MESSAGE = "Attempting a reconnect in"
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if LEVEL <= logging.DEBUG:
+            return True
+        if not str(record.getMessage()).startswith(self._MESSAGE):
+            return True
+        exc = (record.exc_info or (None, None, None))[1]
+        return not _is_proxy_exception(exc)
+
+
+logging.getLogger("discord.client").addFilter(_HandledReconnectFilter())
+
+
 logger = logging.getLogger("client")
 logger.setLevel(LEVEL)
 
 
 GATEWAY_CONNECT_TIMEOUT_DEFAULT = 15
 
+
+# How often to re-probe favorite proxies while running on a fallback.
+FAVORITE_RECHECK_INTERVAL_DEFAULT = 300
+# A favorite has to answer this within the timeout to count as recovered.
+FAVORITE_PROBE_URL = "https://discord.com/api/v9/gateway"
+FAVORITE_PROBE_TIMEOUT = 8
 
 BUILD_FETCH_ATTEMPTS_DEFAULT = 3
 BUILD_FETCH_TIMEOUT_DEFAULT = 10
@@ -143,6 +223,7 @@ class ClientListener:
         self._sync_task: Optional[asyncio.Task] = None
         self._ws_task: Optional[asyncio.Task] = None
         self._proxy_rotation_task: Optional[asyncio.Task] = None
+        self._favorite_recheck_task: Optional[asyncio.Task] = None
         self._m_user = re.compile(r"<@!?(\d+)>")
         self.do_precount = True
         self._dm_export_lock = asyncio.Lock()
@@ -272,6 +353,33 @@ class ClientListener:
             self._db_int("PROXY_ROTATION_INTERVAL", 0)
         )
         self.proxy_rotator.SUSPEND_SECONDS = self._db_int("PROXY_SUSPEND_DURATION", 300)
+        self.proxy_rotator.set_favorites(self._db_favorite_proxies())
+        self._favorite_recheck_enabled = self._db_bool("PROXY_FAVORITE_RECHECK", False)
+        self._favorite_recheck_interval = max(
+            30,
+            self._db_int(
+                "PROXY_FAVORITE_RECHECK_INTERVAL",
+                FAVORITE_RECHECK_INTERVAL_DEFAULT,
+            ),
+        )
+
+    def _db_bool(self, key: str, default: bool) -> bool:
+        raw = (self.db.get_config(key, "") or "").strip().lower()
+        if not raw:
+            return default
+        return raw in ("1", "true", "yes", "on")
+
+    def _db_favorite_proxies(self) -> list:
+        """The starred proxies, stored by the admin UI as a JSON list."""
+        raw = (self.db.get_config("CLIENT_FAVORITE_PROXIES", "") or "").strip()
+        if not raw:
+            return []
+        try:
+            data = json.loads(raw)
+        except Exception:
+            logger.debug("[⭐] favorite proxy list is not valid JSON; ignoring")
+            return []
+        return [x for x in data if isinstance(x, str)] if isinstance(data, list) else []
 
     def _on_proxy_rotate(self, proxy_url: str) -> None:
         """Called by the proxy rotator when the active proxy changes."""
@@ -797,6 +905,11 @@ class ClientListener:
         if self._proxy_rotation_task is None:
             self._proxy_rotation_task = asyncio.create_task(
                 self.proxy_rotator.run_rotation_loop()
+            )
+
+        if self._favorite_recheck_task is None:
+            self._favorite_recheck_task = asyncio.create_task(
+                self._favorite_recheck_loop()
             )
 
         asyncio.create_task(self.config.setup_release_watcher(self, should_dm=False))
@@ -2481,6 +2594,103 @@ class ClientListener:
         if ev is not None:
             ev.set()
 
+    async def _probe_proxy(self, proxy_url: str) -> bool:
+        """Is this proxy able to reach Discord right now?
+
+        A real request rather than a TCP connect: a proxy that accepts the
+        connection and then fails to tunnel is exactly the kind that got
+        suspended in the first place.
+        """
+        import aiohttp
+
+        timeout = aiohttp.ClientTimeout(total=FAVORITE_PROBE_TIMEOUT)
+        try:
+            if proxy_url.startswith(("socks4://", "socks5://", "socks5h://")):
+                try:
+                    from aiohttp_socks import ProxyConnector
+                except ImportError:
+                    # Cannot verify it, so do not claim it recovered.
+                    return False
+                connector = ProxyConnector.from_url(proxy_url)
+                async with aiohttp.ClientSession(connector=connector) as sess:
+                    async with sess.get(FAVORITE_PROBE_URL, timeout=timeout) as r:
+                        return r.status == 200
+            async with aiohttp.ClientSession() as sess:
+                async with sess.get(
+                    FAVORITE_PROBE_URL, proxy=proxy_url, timeout=timeout
+                ) as r:
+                    return r.status == 200
+        except Exception as e:
+            logger.debug(
+                "[⭐] probe failed for %s: %r", _mask_proxy_url(proxy_url), e
+            )
+            return False
+
+    async def _switch_to_proxy(self, proxy_url: str) -> None:
+        """Move the gateway onto ``proxy_url``.
+
+        Setting ``http.proxy`` alone is not enough: the live websocket was
+        dialled through the old proxy and stays there. Closing it with a
+        non-1000 code makes discord.py's own connect loop reconnect, and
+        ws_connect re-reads http.proxy when it does -- so the new route is
+        picked up without us having to drive the reconnect ourselves.
+        """
+        self.proxy_rotator._current_proxy = proxy_url
+        self.proxy_rotator._current_proxy_since = time.monotonic()
+        try:
+            self.bot.http.proxy = proxy_url
+        except Exception:
+            logger.debug("[⭐] could not set http.proxy", exc_info=True)
+
+        ws = getattr(self.bot, "ws", None)
+        if ws is None:
+            return
+        try:
+            await ws.close(code=4000)
+        except Exception:
+            logger.debug("[⭐] closing the socket to switch proxy failed", exc_info=True)
+
+    async def _favorite_recheck_loop(self) -> None:
+        """Return to a favorite proxy once one is reachable again.
+
+        Only runs while on a fallback: with no favorites there is nothing to
+        prefer, and while already on one there is nothing to go back to. The
+        rotator's own suspension timer is not enough on its own -- it expires
+        blindly, whereas this proves the proxy works before moving a live
+        gateway onto it.
+        """
+        while True:
+            try:
+                await asyncio.sleep(self._favorite_recheck_interval)
+            except asyncio.CancelledError:
+                return
+
+            try:
+                if not self._favorite_recheck_enabled:
+                    continue
+                if not self.proxy_rotator.enabled:
+                    continue
+                if not self.proxy_rotator.on_fallback():
+                    continue
+
+                for proxy in self.proxy_rotator.favorites:
+                    if proxy not in self.proxy_rotator.proxies:
+                        continue
+                    if not await self._probe_proxy(proxy):
+                        continue
+
+                    self.proxy_rotator.clear_suspension(proxy)
+                    logger.info(
+                        "[⭐] Favorite proxy %s is reachable again; switching back",
+                        _mask_proxy_url(proxy),
+                    )
+                    await self._switch_to_proxy(proxy)
+                    break
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                logger.debug("[⭐] favorite re-check failed", exc_info=True)
+
     async def _resolve_client_build(self) -> bool:
         """Pin the library's fingerprint to the live Discord build before login."""
         attempts = max(1, self._build_fetch_attempts)
@@ -2785,16 +2995,8 @@ class ClientListener:
                 logger.exception("[⛔] Unexpected error while running client")
 
     def _is_proxy_error(self, exc: Exception) -> bool:
-        """Check if an exception is a proxy connection failure."""
-        if isinstance(exc, GatewayConnectTimeout):
-            return True
-
-        if isinstance(exc, (ConnectionError, OSError)):
-            err = str(exc).lower()
-            return (
-                "proxy" in err or "curl" in err or "connect" in err or "aborted" in err
-            )
-        return False
+        """Is this failure the proxy's fault, so another route is worth trying?"""
+        return _is_proxy_exception(exc)
 
     def _try_next_proxy_on_error(self, exc: Exception, token: str, loop) -> bool:
         """If the error is proxy-related, try connecting through other proxies.

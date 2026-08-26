@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import random
@@ -91,6 +92,11 @@ class ProxyRotator:
 
         self._health: Dict[str, Dict] = {}
 
+        # Preferred proxies for the gateway connection. Empty means "no
+        # preference", which is not the same as "none are favorites" -- with
+        # no favorites configured every proxy is equally acceptable.
+        self._favorites: set[str] = set()
+
         # Time-based rotation (0 = per-request round-robin)
         self._rotation_interval: int = 0
         self._current_proxy: Optional[str] = None
@@ -140,6 +146,67 @@ class ProxyRotator:
                 )
             else:
                 logger.debug("[🔀] Timed rotation disabled (sticky mode)")
+
+    @property
+    def favorites(self) -> List[str]:
+        return sorted(self._favorites)
+
+    @property
+    def has_favorites(self) -> bool:
+        return bool(self._favorites & set(self._proxies))
+
+    def set_favorites(self, raw_lines: Optional[List[str]]) -> int:
+        """Mark proxies as preferred for the gateway.
+
+        Accepts the same raw forms as the proxy list itself and normalises
+        them, because the UI stores what the user typed while the rotator
+        works in normalised URLs -- comparing the two directly would silently
+        match nothing.
+        """
+        normalised: set[str] = set()
+        for line in raw_lines or []:
+            url = _normalise_proxy_url(line)
+            if url:
+                normalised.add(url)
+
+        if normalised != self._favorites:
+            self._favorites = normalised
+            logger.debug("[⭐] %d favorite prox(ies) configured", len(normalised))
+        return len(normalised)
+
+    def is_favorite(self, proxy_url: Optional[str]) -> bool:
+        return bool(proxy_url) and proxy_url in self._favorites
+
+    def healthy_favorites(self) -> List[str]:
+        """Favorites in the list that are not currently suspended."""
+        now = time.monotonic()
+        return [
+            p
+            for p in self._proxies
+            if p in self._favorites and not self._is_suspended(p, now)
+        ]
+
+    def on_fallback(self) -> bool:
+        """True when we are on a non-favorite while favorites are configured.
+
+        This is the only state the favorite re-check task should run in: with
+        no favorites there is nothing to prefer, and while already on one
+        there is nothing to go back to.
+        """
+        if not self.has_favorites:
+            return False
+        return not self.is_favorite(self._current_proxy)
+
+    def clear_suspension(self, proxy_url: str) -> None:
+        """Forget a proxy's failure history after it has been proven working.
+
+        The re-check task probes a favorite directly, so waiting out the
+        remaining suspension would ignore evidence we just gathered.
+        """
+        info = self._health.get(proxy_url)
+        if info:
+            info["failures"] = 0
+            info["suspended_until"] = 0
 
     def set_enabled(self, on: bool) -> None:
         prev = self._enabled
@@ -290,14 +357,20 @@ class ProxyRotator:
             await asyncio.sleep(5)
 
     def _next_healthy(self, exclude: set, now: float) -> Optional[str]:
-        """Pick a random healthy proxy that isn't excluded or suspended."""
+        """Pick a random healthy proxy that isn't excluded or suspended.
+
+        Favorites win outright: every healthy favorite is tried before any
+        non-favorite, so a fallback only happens when no favorite is usable.
+        """
         candidates = [
             url for url in self._proxies
             if url not in exclude and not self._is_suspended(url, now)
         ]
         if not candidates:
             return None
-        return random.choice(candidates)
+
+        preferred = [url for url in candidates if url in self._favorites]
+        return random.choice(preferred or candidates)
 
     def report_success(self, proxy_url: str) -> None:
         """Mark a proxy as healthy after a successful request."""
@@ -373,15 +446,23 @@ class ProxyRotator:
 
 
 def _mask_proxy_url(url: str) -> str:
-    """Mask credentials in a proxy URL for safe logging."""
+    """Mask credentials in a proxy URL for safe logging.
 
+    Ends with a short fingerprint of the whole URL. Rotating-proxy providers
+    hand out a pool that differs ONLY in the credentials -- same host, same
+    port, one session id per entry -- so masking the credentials alone made
+    all of them log as the same string, and "Switched to proxy ..." could not
+    be told apart from spinning on a single dead one.
+    """
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:6]
     try:
         if "@" in url:
             scheme_rest = url.split("://", 1)
             if len(scheme_rest) == 2:
                 creds_host = scheme_rest[1].split("@", 1)
                 if len(creds_host) == 2:
-                    return f"{scheme_rest[0]}://***@{creds_host[1]}"
+                    return f"{scheme_rest[0]}://***@{creds_host[1]} [{digest}]"
     except Exception:
         pass
-    return url[:40] + "…" if len(url) > 40 else url
+    short = url[:40] + "…" if len(url) > 40 else url
+    return f"{short} [{digest}]"

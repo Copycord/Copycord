@@ -13098,3 +13098,87 @@ tr.log-expanded td {
   border: 1px solid currentColor;
   vertical-align: middle;
 }
+
+
+/* ── Favorite proxies ── */
+.srv-proxy-chip-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-right: 2px;
+  border-radius: 4px;
+  color: rgba(255, 255, 255, 0.25);
+  cursor: pointer;
+  flex: 0 0 auto;
+  transition: color 0.12s ease, background 0.12s ease, transform 0.12s ease;
+}
+.srv-proxy-chip-star svg {
+  width: 12px;
+  height: 12px;
+  display: block;
+}
+.srv-proxy-chip-star:hover {
+  color: #ffc83d;
+  background: rgba(255, 200, 61, 0.16);
+  transform: scale(1.15);
+}
+.srv-proxy-chip-item.is-favorite {
+  border-color: rgba(255, 200, 61, 0.45);
+  background: rgba(255, 200, 61, 0.08);
+}
+.srv-proxy-chip-item.is-favorite .srv-proxy-chip-star {
+  color: #ffc83d;
+}
+/* The row-level hover tint is the "remove" affordance and would otherwise
+   read as though the whole chip were about to be deleted. */
+.srv-proxy-chip-item.is-favorite:hover {
+  border-color: rgba(255, 200, 61, 0.6);
+  background: rgba(255, 200, 61, 0.12);
+}
+.srv-proxy-fav-help-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+.srv-proxy-fav-help-btn:hover {
+  color: #ffc83d;
+  border-color: rgba(255, 200, 61, 0.4);
+  background: rgba(255, 200, 61, 0.1);
+}
+.srv-proxy-fav-inline {
+  color: #ffc83d;
+}
+.srv-proxy-fav-list {
+  margin: 10px 0 12px;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.srv-proxy-fav-list li {
+  margin-bottom: 4px;
+}
+
+
+/* Both of these only affect how the client picks a proxy, so neither can do
+   anything while proxies are switched off for the client. */
+.srv-proxy-rotation-section.is-locked {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.srv-proxy-rotation-section.is-locked .srv-proxy-check,
+.srv-proxy-rotation-section.is-locked input,
+.srv-proxy-rotation-section.is-locked select {
+  cursor: not-allowed;
+}

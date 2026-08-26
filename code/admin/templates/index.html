@@ -26,7 +26,8 @@
       <a class="header-docs-btn" href="https://copycord.github.io/Copycord/" target="_blank" rel="noopener"
         aria-label="Documentation">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
-          <path d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z"/>
+          <path
+            d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z" />
         </svg>
         <span>Docs</span>
       </a>
@@ -248,57 +249,74 @@
     "HOST_GUILD_ID": "ID of the host server to mirror. Your account bot must be a member of this server.",
     "CLONE_GUILD_ID": "ID of the clone server. Your bot must be a member of this server.",
     "DELETE_ROLES": "When enabled, remove any roles in the clone that do not exist in the host.",
-    "UPDATE_ROLES": "Keep role properties (name, color, permissions) in sync after creation. When off, you can freely edit roles in the clone.",
+    "UPDATE_ROLES": "Keep role properties (name, color, permissions) in sync after creation. When off, you can freely
+    edit roles in the clone.",
     "MIRROR_ROLE_PERMISSIONS": "When enabled, mirror role permissions from the host to the clone.",
     "EDIT_MESSAGES": "Messages that are edited in the host will be edited in the clone.",
-    "RESEND_EDITED_MESSAGES": "When enabled, if a message edited in the host does not exist in the clone, it will be resent as a new message. Requires Edit Messages to be enabled.",
+    "RESEND_EDITED_MESSAGES": "When enabled, if a message edited in the host does not exist in the clone, it will be
+    resent as a new message. Requires Edit Messages to be enabled.",
     "DELETE_MESSAGES": "Messages that are deleted in the host will be deleted in the clone.",
     "DELETE_THREADS": "When enabled, delete in the clone any threads that were removed in the host.",
     "DELETE_CHANNELS": "When enabled, delete in the clone any channels that were removed in the host.",
     "CLONE_EMOJI": "When enabled, synchronize emojis from the host to the clone.",
     "CLONE_STICKER": "When enabled, synchronize stickers from the host to the clone.",
     "CLONE_ROLES": "When enabled, synchronize roles from the host to the clone.",
-    "MIRROR_CHANNEL_PERMISSIONS": "When enabled, channel permissions will sync with the host. Clone Roles must be enabled.",
-    "ENABLE_CLONING": "Master switch for cloning. Turn this off to stop all sync activity while keeping other features running.",
-    "CLONE_MESSAGES": "When enabled, messages sent in the host will be copied to the clone in real-time. When disabled, webhook creation is also skipped during sync. Webhooks will be created automatically when re-enabled.",
+    "MIRROR_CHANNEL_PERMISSIONS": "When enabled, channel permissions will sync with the host. Clone Roles must be
+    enabled.",
+    "ENABLE_CLONING": "Master switch for cloning. Turn this off to stop all sync activity while keeping other features
+    running.",
+    "CLONE_MESSAGES": "When enabled, messages sent in the host will be copied to the clone in real-time. When disabled,
+    webhook creation is also skipped during sync. Webhooks will be created automatically when re-enabled.",
     "REPOSITION_CHANNELS": "When enabled, channels moved in the host server will be repositioned in the clone.",
     "RENAME_CHANNELS": "When enabled, channels/categories renamed in the host server will be renamed in the clone.",
     "SYNC_CHANNEL_NSFW": "When enabled, NSFW flags for channels will be synchronized from the host to the clone.",
     "SYNC_CHANNEL_TOPIC": "When enabled, channel topics will be synchronized from the host to the clone.",
-    "SYNC_CHANNEL_SLOWMODE": "When enabled, slowmode settings for channels will be synchronized from the host to the clone.",
+    "SYNC_CHANNEL_SLOWMODE": "When enabled, slowmode settings for channels will be synchronized from the host to the
+    clone.",
     "CLONE_VOICE": "When enabled, voice channels will be cloned from the host to the clone.",
-    "CLONE_VOICE_PROPERTIES": "When enabled, voice channel properties (bitrate, user limit) will be synchronized from the host to the clone.",
+    "CLONE_VOICE_PROPERTIES": "When enabled, voice channel properties (bitrate, user limit) will be synchronized from
+    the host to the clone.",
     "CLONE_STAGE": "When enabled, stage channels will be cloned from the host to the clone.",
-    "CLONE_STAGE_PROPERTIES": "When enabled, stage channel properties (bitrate, user limit) will be synchronized from the host to the clone.",
+    "CLONE_STAGE_PROPERTIES": "When enabled, stage channel properties (bitrate, user limit) will be synchronized from
+    the host to the clone.",
     "CLONE_GUILD_ICON": "Clone the server icon from the host to the clone.",
     "CLONE_GUILD_BANNER": "Clone the server banner from the host to the clone.",
     "CLONE_GUILD_SPLASH": "Clone the invite splash image from the host to the clone.",
     "CLONE_GUILD_DISCOVERY_SPLASH": "Clone the discovery splash image from the host to the clone.",
-    "CLONE_SERVER_TAG": "Clone the server tag from the host to the clone. Requires the clone server to have access to Server Tags.",
+    "CLONE_SERVER_TAG": "Clone the server tag from the host to the clone. Requires the clone server to have access to
+    Server Tags.",
     "SYNC_GUILD_DESCRIPTION": "Sync the server description from the host to the clone.",
-    "SYNC_FORUM_PROPERTIES": "When enabled, forum properties (topic, tags, etc.) will be synchronized from the host to the clone.",
+    "SYNC_FORUM_PROPERTIES": "When enabled, forum properties (topic, tags, etc.) will be synchronized from the host to
+    the clone.",
     "REARRANGE_ROLES": "When enabled, roles will be rearranged in the clone to match the host server's role hierarchy.",
-    "CLONE_ROLE_ICONS": "When enabled, role icons (custom images and unicode emoji) will be cloned from the host to the clone. Requires the clone server to have Boost Level 2+.",
-    "CLONE_ROLE_STYLES": "When enabled, role color styles will be cloned from the host to the clone. Requires the clone server to have Boost Level 2+.",
+    "CLONE_ROLE_ICONS": "When enabled, role icons (custom images and unicode emoji) will be cloned from the host to the
+    clone. Requires the clone server to have Boost Level 2+.",
+    "CLONE_ROLE_STYLES": "When enabled, role color styles will be cloned from the host to the clone. Requires the clone
+    server to have Boost Level 2+.",
     "ANONYMIZE_USERS": "When enabled, user identities will be anonymized with random names and avatar images.",
     "DISABLE_EVERYONE_MENTIONS": "When enabled, @everyone and @here mentions will be disabled in mirrored messages.",
     "DISABLE_ROLE_MENTIONS": "When enabled, role mentions will be disabled in mirrored messages to stop role pings.",
     "TAG_REPLY_MSG": "When enabled, messages that are replies will include a tag of the message being replied to.",
-    "APPEND_TIMESTAMP": "When enabled, the original message timestamp is appended below the cloned message in unix format.",
+    "APPEND_TIMESTAMP": "When enabled, the original message timestamp is appended below the cloned message in unix
+    format.",
     "APPEND_AUTHOR": "When enabled, the original author's username is appended below the cloned message.",
     "DB_CLEANUP_MSG": "Automatically clean up message records older than 7 days from the database.",
-    "ON_DEMAND_WEBHOOKS": "When enabled, webhooks are only created when a channel receives its first message, instead of during sync. This makes server cloning much faster by skipping upfront webhook creation.",
-    "COPYCORD_AUTOSTART": "Automatically start the server and client when Copycord launches. Valid tokens are required.",
-    "LOG_MAX_SIZE_MB": "Maximum size of each log file in megabytes before older entries are pruned. Set to 0 to disable pruning."
+    "ON_DEMAND_WEBHOOKS": "When enabled, webhooks are only created when a channel receives its first message, instead of
+    during sync. This makes server cloning much faster by skipping upfront webhook creation.",
+    "COPYCORD_AUTOSTART": "Automatically start the server and client when Copycord launches. Valid tokens are
+    required.",
+    "LOG_MAX_SIZE_MB": "Maximum size of each log file in megabytes before older entries are pruned. Set to 0 to disable
+    pruning."
     } %}
 
     <details class="card srv-proxy-card" id="global-config-card" open>
       <summary class="srv-proxy-summary">
         <h3>Global Configuration</h3>
         <a href="https://copycord.github.io/Copycord/docs/getting-started/first-run" target="_blank" rel="noopener"
-           class="card-doc-link" title="View docs">
+          class="card-doc-link" title="View docs">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-            <path d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z"/>
+            <path
+              d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z" />
           </svg>
         </a>
         <span class="card-chev" aria-hidden="true">&#9662;</span>
@@ -307,9 +325,9 @@
       <form method="post" action="/save" id="cfg-form" class="srv-proxy-body" novalidate>
         <div class="grid">
           {% set GC_NAMES = {
-            "SERVER_TOKEN": "Server Token",
-            "CLIENT_TOKEN": "Client Token",
-            "COMMAND_USERS": "Command Users",
+          "SERVER_TOKEN": "Server Token",
+          "CLIENT_TOKEN": "Client Token",
+          "COMMAND_USERS": "Command Users",
           } %}
           {% for k in text_keys if k != 'COMMAND_USERS' %}
           {% set is_token = 'TOKEN' in k %}
@@ -385,13 +403,15 @@
                 <span class="proxy-settings-sublabel">{{ FIELD_TIPS['COPYCORD_AUTOSTART'] }}</span>
               </div>
               <label class="toggle gc-setting-control">
-                <input type="checkbox" id="gc-autostart-toggle"
-                  {{ 'checked' if (env.get('COPYCORD_AUTOSTART','false')|lower)=='true' else '' }} />
+                <input type="checkbox" id="gc-autostart-toggle" {{ 'checked' if
+                  (env.get('COPYCORD_AUTOSTART','false')|lower)=='true' else '' }} />
                 <span class="toggle-track"><span class="toggle-thumb"></span></span>
               </label>
               <select id="COPYCORD_AUTOSTART" name="COPYCORD_AUTOSTART" data-dd style="display:none">
-                <option value="false" {{ 'selected' if (env.get('COPYCORD_AUTOSTART','false')|lower)=='false' else '' }}>false</option>
-                <option value="true" {{ 'selected' if (env.get('COPYCORD_AUTOSTART','false')|lower)=='true' else '' }}>true</option>
+                <option value="false" {{ 'selected' if (env.get('COPYCORD_AUTOSTART','false')|lower)=='false' else ''
+                  }}>false</option>
+                <option value="true" {{ 'selected' if (env.get('COPYCORD_AUTOSTART','false')|lower)=='true' else '' }}>
+                  true</option>
               </select>
             </div>
 
@@ -413,8 +433,7 @@
               </div>
               <div class="proxy-settings-input-wrap gc-setting-control">
                 <input type="number" id="LOG_MAX_SIZE_MB" name="LOG_MAX_SIZE_MB"
-                  value="{{ env.get('LOG_MAX_SIZE_MB','10') }}" min="0" step="1"
-                  class="ps-input" />
+                  value="{{ env.get('LOG_MAX_SIZE_MB','10') }}" min="0" step="1" class="ps-input" />
                 <span class="proxy-settings-unit">MB</span>
               </div>
             </div>
@@ -425,11 +444,15 @@
             <button type="button" class="btn btn-ghost" id="cfg-cancel-btn">Cancel</button>
             <span class="flex-spacer"></span>
             <a id="bot-invite-btn" class="bot-invite-btn bot-invite-disabled" href="#" target="_blank" rel="noopener"
-               title="Invite your bot to a clone server">
+              title="Invite your bot to a clone server">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/>
-                <path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 8V4H8" />
+                <rect width="16" height="12" x="4" y="8" rx="2" />
+                <path d="M2 14h2" />
+                <path d="M20 14h2" />
+                <path d="M15 13v2" />
+                <path d="M9 13v2" />
               </svg>
               Add Bot to Server
             </a>
@@ -442,9 +465,10 @@
       <summary class="srv-proxy-summary">
         <h3>Cloning Configuration</h3>
         <a href="https://copycord.github.io/Copycord/docs/configuration/cloning-options" target="_blank" rel="noopener"
-           class="card-doc-link" title="View docs">
+          class="card-doc-link" title="View docs">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-            <path d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z"/>
+            <path
+              d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z" />
           </svg>
         </a>
         <span class="card-chev" aria-hidden="true">&#9662;</span>
@@ -470,22 +494,24 @@
     <details class="card srv-proxy-card" id="notifications-card">
       <summary class="srv-proxy-summary">
         <h3>Notifications</h3>
-        <a href="https://copycord.github.io/Copycord/docs/configuration/advanced#notifications" target="_blank" rel="noopener"
-           class="card-doc-link" title="View docs">
+        <a href="https://copycord.github.io/Copycord/docs/configuration/advanced#notifications" target="_blank"
+          rel="noopener" class="card-doc-link" title="View docs">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-            <path d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z"/>
+            <path
+              d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z" />
           </svg>
         </a>
         <span class="card-chev" aria-hidden="true">&#9662;</span>
       </summary>
       <div class="srv-proxy-body">
         <p class="srv-proxy-hint">
-          Get notified via Discord webhook when something goes wrong — client goes offline, proxies die, tokens get revoked.
+          Get notified via Discord webhook when something goes wrong — client goes offline, proxies die, tokens get
+          revoked.
         </p>
 
         <div class="notif-webhook-row">
           <input type="text" id="notif-webhook-url" class="notif-webhook-input"
-                 placeholder="https://discord.com/api/webhooks/..." spellcheck="false" />
+            placeholder="https://discord.com/api/webhooks/..." spellcheck="false" />
           <button type="button" class="btn btn-ghost-green btn-xs" id="notif-test-btn">Test</button>
         </div>
 
@@ -495,28 +521,32 @@
               <span>Client Offline</span>
               <span class="proxy-settings-sublabel">When the client bot disconnects or stops</span>
             </div>
-            <label class="toggle notif-toggle"><input type="checkbox" data-event="CLIENT_OFFLINE" checked /><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+            <label class="toggle notif-toggle"><input type="checkbox" data-event="CLIENT_OFFLINE" checked /><span
+                class="toggle-track"><span class="toggle-thumb"></span></span></label>
           </div>
           <div class="notif-event-row">
             <div class="proxy-settings-label">
               <span>Server Offline</span>
               <span class="proxy-settings-sublabel">When the server bot disconnects or stops</span>
             </div>
-            <label class="toggle notif-toggle"><input type="checkbox" data-event="SERVER_OFFLINE" checked /><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+            <label class="toggle notif-toggle"><input type="checkbox" data-event="SERVER_OFFLINE" checked /><span
+                class="toggle-track"><span class="toggle-thumb"></span></span></label>
           </div>
           <div class="notif-event-row">
             <div class="proxy-settings-label">
               <span>All Proxies Dead</span>
               <span class="proxy-settings-sublabel">When every proxy fails and the client can't connect</span>
             </div>
-            <label class="toggle notif-toggle"><input type="checkbox" data-event="PROXIES_DEAD" checked /><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+            <label class="toggle notif-toggle"><input type="checkbox" data-event="PROXIES_DEAD" checked /><span
+                class="toggle-track"><span class="toggle-thumb"></span></span></label>
           </div>
           <div class="notif-event-row">
             <div class="proxy-settings-label">
               <span>Token Invalid</span>
               <span class="proxy-settings-sublabel">When a token is revoked or becomes invalid</span>
             </div>
-            <label class="toggle notif-toggle"><input type="checkbox" data-event="TOKEN_INVALID" checked /><span class="toggle-track"><span class="toggle-thumb"></span></span></label>
+            <label class="toggle notif-toggle"><input type="checkbox" data-event="TOKEN_INVALID" checked /><span
+                class="toggle-track"><span class="toggle-thumb"></span></span></label>
           </div>
         </div>
       </div>
@@ -526,17 +556,20 @@
     <details class="card srv-proxy-card" id="sync-settings-card">
       <summary class="srv-proxy-summary">
         <h3>Sync Settings</h3>
-        <a href="https://copycord.github.io/Copycord/docs/configuration/advanced#sync-timing" target="_blank" rel="noopener"
-           class="card-doc-link" title="View docs">
+        <a href="https://copycord.github.io/Copycord/docs/configuration/advanced#sync-timing" target="_blank"
+          rel="noopener" class="card-doc-link" title="View docs">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-            <path d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z"/>
+            <path
+              d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z" />
           </svg>
         </a>
         <span class="card-chev" aria-hidden="true">&#9662;</span>
       </summary>
       <div class="srv-proxy-body">
         <p class="srv-proxy-hint">
-          When the client starts, it scans each server you're cloning and sends the full structure (channels, roles, emojis) to the bot so it knows what to sync. These settings control how fast that happens. Slower is always safer if you have many servers. Changes apply on next client restart.
+          When the client starts, it scans each server you're cloning and sends the full structure (channels, roles,
+          emojis) to the bot so it knows what to sync. These settings control how fast that happens. Slower is always
+          safer if you have many servers. Changes apply on next client restart.
         </p>
         <div class="proxy-settings-fields" style="margin-top:10px">
           <label class="proxy-settings-field">
@@ -562,7 +595,8 @@
           <div class="proxy-settings-field">
             <div class="proxy-settings-label">
               <span>Randomize Order</span>
-              <span class="proxy-settings-sublabel">Process servers in random order each startup to avoid predictable patterns</span>
+              <span class="proxy-settings-sublabel">Process servers in random order each startup to avoid predictable
+                patterns</span>
             </div>
             <label class="toggle" style="flex-shrink:0;margin:0">
               <input type="checkbox" id="sync-randomize" checked />
@@ -577,20 +611,32 @@
     <details class="card srv-proxy-card" id="srv-proxy-card">
       <summary class="srv-proxy-summary">
         <h3>Proxy</h3>
-        <a href="https://copycord.github.io/Copycord/docs/configuration/advanced#proxy-support" target="_blank" rel="noopener"
-           class="card-doc-link" title="View docs">
+        <a href="https://copycord.github.io/Copycord/docs/configuration/advanced#proxy-support" target="_blank"
+          rel="noopener" class="card-doc-link" title="View docs">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
-            <path d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z"/>
+            <path
+              d="M21 5c-1.11-.35-2.33-.5-3.5-.5-1.95 0-4.05.4-5.5 1.5-1.45-1.1-3.55-1.5-5.5-1.5S2.45 4.9 1 6v14.65c0 .25.25.5.5.5.1 0 .15-.05.25-.05C3.1 20.45 5.05 20 6.5 20c1.95 0 4.05.4 5.5 1.5 1.35-.85 3.8-1.5 5.5-1.5 1.65 0 3.35.3 4.75 1.05.1.05.15.05.25.05.25 0 .5-.25.5-.5V6c-.6-.45-1.25-.75-2-1zm0 13.5c-1.1-.35-2.3-.5-3.5-.5-1.7 0-4.15.65-5.5 1.5V8c1.35-.85 3.8-1.5 5.5-1.5 1.2 0 2.4.15 3.5.5v11.5z" />
           </svg>
         </a>
         <span class="srv-proxy-chip" id="srv-proxy-status"></span>
-        <button type="button" class="srv-proxy-settings-btn" id="srv-proxy-settings-btn" title="Proxy Settings" onclick="event.preventDefault()">
+        <button type="button" class="srv-proxy-settings-btn" id="srv-proxy-settings-btn" title="Proxy Settings"
+          onclick="event.preventDefault()">
           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/>
-            <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/>
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path
+              d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z" />
+            <path d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
           </svg>
           Settings
+        </button>
+        <button type="button" class="srv-proxy-fav-help-btn" id="srv-proxy-fav-help-btn" title="What do favorites do?"
+          onclick="event.preventDefault()">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon
+              points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2">
+            </polygon>
+          </svg>
         </button>
         <span class="card-chev" aria-hidden="true">&#9662;</span>
       </summary>
@@ -620,18 +666,18 @@
         </div>
         <div class="srv-proxy-chips" id="srv-proxy-chips">
           <input type="text" class="srv-proxy-chips-input" id="srv-proxy-chips-input"
-                 placeholder="Paste or type a proxy and press Enter" spellcheck="false" />
+            placeholder="Paste or type a proxy and press Enter" spellcheck="false" />
         </div>
 
-        <div class="srv-proxy-rotation-section">
+        <div class="srv-proxy-rotation-section" id="srv-proxy-rotation-section">
           <div class="srv-proxy-rotation-row">
             <label class="srv-proxy-check" for="srv-proxy-rotation-toggle">
               <input type="checkbox" id="srv-proxy-rotation-toggle" />
               <span>Rotate every</span>
             </label>
             <div class="srv-proxy-interval-inline" id="srv-proxy-rotation-controls">
-              <input type="number" id="srv-proxy-interval" class="input srv-proxy-interval-input"
-                     min="1" max="1440" value="30" />
+              <input type="number" id="srv-proxy-interval" class="input srv-proxy-interval-input" min="1" max="1440"
+                value="30" />
               <select id="srv-proxy-interval-unit" class="input srv-proxy-interval-select">
                 <option value="60" selected>minutes</option>
                 <option value="3600">hours</option>
@@ -643,8 +689,59 @@
             When off, one proxy is used until it fails.
           </p>
         </div>
+
+        <div class="srv-proxy-rotation-section" id="srv-proxy-fav-section">
+          <div class="srv-proxy-rotation-row">
+            <label class="srv-proxy-check" for="srv-proxy-fav-recheck-toggle">
+              <input type="checkbox" id="srv-proxy-fav-recheck-toggle" />
+              <span>Return to a favorite every</span>
+            </label>
+            <div class="srv-proxy-interval-inline" id="srv-proxy-fav-recheck-controls">
+              <input type="number" id="srv-proxy-fav-recheck-interval" class="input srv-proxy-interval-input" min="1"
+                max="1440" value="5" />
+              <select id="srv-proxy-fav-recheck-unit" class="input srv-proxy-interval-select">
+                <option value="60" selected>minutes</option>
+                <option value="3600">hours</option>
+              </select>
+            </div>
+          </div>
+          <p class="srv-proxy-hint srv-proxy-rotation-hint">
+            While the client is on a proxy you have not starred, re-test the
+            favorites on this interval and switch back as soon as one works again.
+          </p>
+        </div>
       </div>
     </details>
+
+    <!-- ─── Favorite Proxies Help Modal ─── -->
+    <div id="proxy-fav-help-modal" class="modal" aria-hidden="true">
+      <div class="modal-backdrop"></div>
+      <div class="modal-content proxy-settings-content" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h4 class="modal-title">Favorite proxies</h4>
+          <button type="button" id="proxy-fav-help-close" class="icon-btn verify-close"
+            aria-label="Close">&#10005;</button>
+        </div>
+        <div class="proxy-settings-body">
+          <p class="srv-proxy-hint">
+            Click the <span class="srv-proxy-fav-inline">&#9733;</span> on any proxy to
+            mark it a favorite. Favorites apply <strong>only</strong> to how the client
+            connects to the Discord gateway. Nothing else uses them.
+          </p>
+          <ul class="srv-proxy-fav-list">
+            <li>The client logs in through a favorite whenever one is available.</li>
+            <li>If that proxy drops, it moves to another favorite first.</li>
+            <li>With no favorite working, it falls back to a normal proxy so the
+              client stays connected rather than waiting.</li>
+            <li>While on a fallback, you can enable the option to return to a favorite if the proxy is working again.</li>
+          </ul>
+          <p class="srv-proxy-hint">
+            Starring nothing keeps the old behaviour, where every proxy is treated
+            equally.
+          </p>
+        </div>
+      </div>
+    </div>
 
     <!-- ─── Proxy Settings Modal ─── -->
     <div id="proxy-settings-modal" class="modal" aria-hidden="true">
@@ -652,18 +749,22 @@
       <div class="modal-content proxy-settings-content" role="dialog" aria-modal="true">
         <div class="modal-header">
           <h4 class="modal-title">Proxy Settings</h4>
-          <button type="button" id="proxy-settings-close" class="icon-btn verify-close" aria-label="Close">&#10005;</button>
+          <button type="button" id="proxy-settings-close" class="icon-btn verify-close"
+            aria-label="Close">&#10005;</button>
         </div>
         <div class="proxy-settings-body">
           <div class="proxy-settings-group">
             <div class="proxy-settings-group-header">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path
+                  d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2" />
               </svg>
               <h5 class="proxy-settings-group-title">Failover</h5>
             </div>
-            <p class="proxy-settings-desc">If your proxy drops or goes down, the client detects it automatically and switches to the next available proxy. A failed proxy is temporarily blocked to avoid reconnecting to it immediately.</p>
+            <p class="proxy-settings-desc">If your proxy drops or goes down, the client detects it automatically and
+              switches to the next available proxy. A failed proxy is temporarily blocked to avoid reconnecting to it
+              immediately.</p>
             <div class="proxy-settings-fields">
               <label class="proxy-settings-field">
                 <div class="proxy-settings-label">
@@ -671,7 +772,8 @@
                   <span class="proxy-settings-sublabel">How long a failed proxy stays blocked before retrying</span>
                 </div>
                 <div class="proxy-settings-input-wrap">
-                  <input type="number" id="ps-suspend-duration" class="input ps-input" min="10" max="3600" value="300" />
+                  <input type="number" id="ps-suspend-duration" class="input ps-input" min="10" max="3600"
+                    value="300" />
                   <span class="proxy-settings-unit">sec</span>
                 </div>
               </label>
@@ -680,13 +782,14 @@
           <div class="proxy-settings-group">
             <div class="proxy-settings-group-header">
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none"
-                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="m15 6 2 2 4-4"/>
-                <path d="M2 12h20A10 10 0 1 1 12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 4-10"/>
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="m15 6 2 2 4-4" />
+                <path d="M2 12h20A10 10 0 1 1 12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 4-10" />
               </svg>
               <h5 class="proxy-settings-group-title">Proxy Testing</h5>
             </div>
-            <p class="proxy-settings-desc">When you click "Test All", every proxy in your list is checked by connecting to Discord through it. These settings control how many are tested at once and what counts as too slow.</p>
+            <p class="proxy-settings-desc">When you click "Test All", every proxy in your list is checked by connecting
+              to Discord through it. These settings control how many are tested at once and what counts as too slow.</p>
             <div class="proxy-settings-fields">
               <label class="proxy-settings-field">
                 <div class="proxy-settings-label">
@@ -713,9 +816,9 @@
           <div class="proxy-settings-footer-row">
             <button type="button" class="ps-reset-btn" id="ps-reset-defaults">
               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none"
-                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
-                <path d="M3 3v5h5"/>
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+                <path d="M3 3v5h5" />
               </svg>
               Reset to Defaults
             </button>
@@ -833,22 +936,28 @@
           <input type="hidden" id="map_mapping_id" name="mapping_id" />
           <!-- Hidden selects for message features (managed by sub-modal) -->
           <select id="map_TAG_REPLY_MSG" name="TAG_REPLY_MSG" data-dd style="display:none">
-            <option value="True">True</option><option value="False" selected>False</option>
+            <option value="True">True</option>
+            <option value="False" selected>False</option>
           </select>
           <select id="map_ANONYMIZE_USERS" name="ANONYMIZE_USERS" data-dd style="display:none">
-            <option value="True">True</option><option value="False" selected>False</option>
+            <option value="True">True</option>
+            <option value="False" selected>False</option>
           </select>
           <select id="map_DISABLE_EVERYONE_MENTIONS" name="DISABLE_EVERYONE_MENTIONS" data-dd style="display:none">
-            <option value="True">True</option><option value="False" selected>False</option>
+            <option value="True">True</option>
+            <option value="False" selected>False</option>
           </select>
           <select id="map_DISABLE_ROLE_MENTIONS" name="DISABLE_ROLE_MENTIONS" data-dd style="display:none">
-            <option value="True">True</option><option value="False" selected>False</option>
+            <option value="True">True</option>
+            <option value="False" selected>False</option>
           </select>
           <select id="map_APPEND_TIMESTAMP" name="APPEND_TIMESTAMP" data-dd style="display:none">
-            <option value="True">True</option><option value="False" selected>False</option>
+            <option value="True">True</option>
+            <option value="False" selected>False</option>
           </select>
           <select id="map_APPEND_AUTHOR" name="APPEND_AUTHOR" data-dd style="display:none">
-            <option value="True">True</option><option value="False" selected>False</option>
+            <option value="True">True</option>
+            <option value="False" selected>False</option>
           </select>
 
           <div class="mapping-section">
@@ -875,7 +984,7 @@
                   </span>
                 </label>
                 <input type="text" id="map_original_guild_id" name="original_guild_id" inputmode="numeric"
-                       placeholder="Server ID to mirror from" />
+                  placeholder="Server ID to mirror from" />
               </div>
               <div class="field">
                 <label for="map_cloned_guild_id" class="has-tip">
@@ -887,74 +996,79 @@
                   </span>
                 </label>
                 <input type="text" id="map_cloned_guild_id" name="cloned_guild_id" inputmode="numeric"
-                       placeholder="Server ID to mirror to" />
+                  placeholder="Server ID to mirror to" />
               </div>
             </div>
           </div>
 
           <div class="mapping-toolbar">
             <div class="mapping-search-row">
-              <input id="mappingSettingsSearch" class="mapping-search-input" type="text"
-                placeholder="Search settings…" autocomplete="off" />
+              <input id="mappingSettingsSearch" class="mapping-search-input" type="text" placeholder="Search settings…"
+                autocomplete="off" />
             </div>
             <button type="button" class="mapping-msg-features-btn" id="msg-features-open">
               <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none"
-                   stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
               Message Features
             </button>
           </div>
 
           {% set FRIENDLY_NAMES = {
-            "ENABLE_CLONING": "Enable Cloning",
-            "CLONE_MESSAGES": "Clone Messages",
-            "ON_DEMAND_WEBHOOKS": "On-Demand Webhooks",
-            "DB_CLEANUP_MSG": "Auto-Clean Message DB",
-            "DELETE_CHANNELS": "Delete Removed Channels",
-            "DELETE_THREADS": "Delete Removed Threads",
-            "REPOSITION_CHANNELS": "Reposition Channels",
-            "RENAME_CHANNELS": "Rename Channels",
-            "SYNC_CHANNEL_NSFW": "Sync NSFW Flag",
-            "SYNC_CHANNEL_TOPIC": "Sync Channel Topic",
-            "SYNC_CHANNEL_SLOWMODE": "Sync Slowmode",
-            "SYNC_FORUM_PROPERTIES": "Sync Forum Properties",
-            "MIRROR_CHANNEL_PERMISSIONS": "Mirror Channel Permissions",
-            "DELETE_MESSAGES": "Delete Messages",
-            "EDIT_MESSAGES": "Edit Messages",
-            "RESEND_EDITED_MESSAGES": "Resend Edited Messages",
-            "CLONE_ROLES": "Clone Roles",
-            "DELETE_ROLES": "Delete Removed Roles",
-            "UPDATE_ROLES": "Update Role Properties",
-            "REARRANGE_ROLES": "Rearrange Roles",
-            "CLONE_ROLE_ICONS": "Clone Role Icons",
-            "CLONE_ROLE_STYLES": "Clone Role Styles",
-            "MIRROR_ROLE_PERMISSIONS": "Mirror Role Permissions",
-            "CLONE_EMOJI": "Clone Emoji",
-            "CLONE_STICKER": "Clone Stickers",
-            "CLONE_VOICE": "Clone Voice Channels",
-            "CLONE_VOICE_PROPERTIES": "Sync Voice Properties",
-            "CLONE_STAGE": "Clone Stage Channels",
-            "CLONE_STAGE_PROPERTIES": "Sync Stage Properties",
-            "CLONE_GUILD_ICON": "Clone Server Icon",
-            "CLONE_GUILD_BANNER": "Clone Server Banner",
-            "CLONE_GUILD_SPLASH": "Clone Invite Splash",
-            "CLONE_GUILD_DISCOVERY_SPLASH": "Clone Discovery Splash",
-            "CLONE_SERVER_TAG": "Clone Server Tag",
-            "SYNC_GUILD_DESCRIPTION": "Sync Server Description",
+          "ENABLE_CLONING": "Enable Cloning",
+          "CLONE_MESSAGES": "Clone Messages",
+          "ON_DEMAND_WEBHOOKS": "On-Demand Webhooks",
+          "DB_CLEANUP_MSG": "Auto-Clean Message DB",
+          "DELETE_CHANNELS": "Delete Removed Channels",
+          "DELETE_THREADS": "Delete Removed Threads",
+          "REPOSITION_CHANNELS": "Reposition Channels",
+          "RENAME_CHANNELS": "Rename Channels",
+          "SYNC_CHANNEL_NSFW": "Sync NSFW Flag",
+          "SYNC_CHANNEL_TOPIC": "Sync Channel Topic",
+          "SYNC_CHANNEL_SLOWMODE": "Sync Slowmode",
+          "SYNC_FORUM_PROPERTIES": "Sync Forum Properties",
+          "MIRROR_CHANNEL_PERMISSIONS": "Mirror Channel Permissions",
+          "DELETE_MESSAGES": "Delete Messages",
+          "EDIT_MESSAGES": "Edit Messages",
+          "RESEND_EDITED_MESSAGES": "Resend Edited Messages",
+          "CLONE_ROLES": "Clone Roles",
+          "DELETE_ROLES": "Delete Removed Roles",
+          "UPDATE_ROLES": "Update Role Properties",
+          "REARRANGE_ROLES": "Rearrange Roles",
+          "CLONE_ROLE_ICONS": "Clone Role Icons",
+          "CLONE_ROLE_STYLES": "Clone Role Styles",
+          "MIRROR_ROLE_PERMISSIONS": "Mirror Role Permissions",
+          "CLONE_EMOJI": "Clone Emoji",
+          "CLONE_STICKER": "Clone Stickers",
+          "CLONE_VOICE": "Clone Voice Channels",
+          "CLONE_VOICE_PROPERTIES": "Sync Voice Properties",
+          "CLONE_STAGE": "Clone Stage Channels",
+          "CLONE_STAGE_PROPERTIES": "Sync Stage Properties",
+          "CLONE_GUILD_ICON": "Clone Server Icon",
+          "CLONE_GUILD_BANNER": "Clone Server Banner",
+          "CLONE_GUILD_SPLASH": "Clone Invite Splash",
+          "CLONE_GUILD_DISCOVERY_SPLASH": "Clone Discovery Splash",
+          "CLONE_SERVER_TAG": "Clone Server Tag",
+          "SYNC_GUILD_DESCRIPTION": "Sync Server Description",
           } %}
 
           {% set sections = {
-            "General": ["ENABLE_CLONING", "CLONE_MESSAGES", "ON_DEMAND_WEBHOOKS", "DB_CLEANUP_MSG"],
-            "Channels": ["DELETE_CHANNELS", "DELETE_THREADS", "REPOSITION_CHANNELS", "RENAME_CHANNELS", "SYNC_CHANNEL_NSFW", "SYNC_CHANNEL_TOPIC", "SYNC_CHANNEL_SLOWMODE", "SYNC_FORUM_PROPERTIES", "MIRROR_CHANNEL_PERMISSIONS"],
-            "Messages": ["DELETE_MESSAGES", "EDIT_MESSAGES", "RESEND_EDITED_MESSAGES"],
-            "Roles": ["CLONE_ROLES", "DELETE_ROLES", "UPDATE_ROLES", "REARRANGE_ROLES", "CLONE_ROLE_ICONS", "CLONE_ROLE_STYLES", "MIRROR_ROLE_PERMISSIONS"],
-            "Assets": ["CLONE_EMOJI", "CLONE_STICKER", "CLONE_VOICE", "CLONE_VOICE_PROPERTIES", "CLONE_STAGE", "CLONE_STAGE_PROPERTIES"],
-            "Server Identity": ["CLONE_GUILD_ICON", "CLONE_GUILD_BANNER", "CLONE_GUILD_SPLASH", "CLONE_GUILD_DISCOVERY_SPLASH", "CLONE_SERVER_TAG", "SYNC_GUILD_DESCRIPTION"],
+          "General": ["ENABLE_CLONING", "CLONE_MESSAGES", "ON_DEMAND_WEBHOOKS", "DB_CLEANUP_MSG"],
+          "Channels": ["DELETE_CHANNELS", "DELETE_THREADS", "REPOSITION_CHANNELS", "RENAME_CHANNELS",
+          "SYNC_CHANNEL_NSFW", "SYNC_CHANNEL_TOPIC", "SYNC_CHANNEL_SLOWMODE", "SYNC_FORUM_PROPERTIES",
+          "MIRROR_CHANNEL_PERMISSIONS"],
+          "Messages": ["DELETE_MESSAGES", "EDIT_MESSAGES", "RESEND_EDITED_MESSAGES"],
+          "Roles": ["CLONE_ROLES", "DELETE_ROLES", "UPDATE_ROLES", "REARRANGE_ROLES", "CLONE_ROLE_ICONS",
+          "CLONE_ROLE_STYLES", "MIRROR_ROLE_PERMISSIONS"],
+          "Assets": ["CLONE_EMOJI", "CLONE_STICKER", "CLONE_VOICE", "CLONE_VOICE_PROPERTIES", "CLONE_STAGE",
+          "CLONE_STAGE_PROPERTIES"],
+          "Server Identity": ["CLONE_GUILD_ICON", "CLONE_GUILD_BANNER", "CLONE_GUILD_SPLASH",
+          "CLONE_GUILD_DISCOVERY_SPLASH", "CLONE_SERVER_TAG", "SYNC_GUILD_DESCRIPTION"],
           } %}
 
           {% set DISABLED_SETTINGS = {
-            "CLONE_SERVER_TAG": "Discord doesn't allow bots to set server tags yet, so this can't be applied.",
+          "CLONE_SERVER_TAG": "Discord doesn't allow bots to set server tags yet, so this can't be applied.",
           } %}
 
           {% for section_name, keys in sections.items() %}
@@ -967,7 +1081,7 @@
               {% for k in keys %}
               {% set disabled_reason = DISABLED_SETTINGS.get(k) %}
               <div class="mapping-toggle-row mapping-setting-field{% if disabled_reason %} is-disabled{% endif %}"
-                   data-setting-key="{{ k | lower }}">
+                data-setting-key="{{ k | lower }}">
                 <div class="mapping-toggle-info">
                   <span class="mapping-toggle-name">{{ FRIENDLY_NAMES.get(k, k) }}</span>
                   {% if FIELD_TIPS.get(k) %}
@@ -978,7 +1092,8 @@
                   {% endif %}
                 </div>
                 <label class="toggle mapping-toggle-switch">
-                  <input type="checkbox" id="map_{{ k }}" name="{{ k }}" data-map-toggle {% if disabled_reason %}disabled{% endif %} />
+                  <input type="checkbox" id="map_{{ k }}" name="{{ k }}" data-map-toggle {% if disabled_reason
+                    %}disabled{% endif %} />
                   <span class="toggle-track"><span class="toggle-thumb"></span></span>
                 </label>
               </div>
@@ -994,13 +1109,15 @@
             </summary>
             <div class="mapping-section-body">
               <div class="user-token-disclaimer">
-                <strong>Warning:</strong> This feature uses user tokens. Discord may rate limit your accounts or permanently ban them at any
+                <strong>Warning:</strong> This feature uses user tokens. Discord may rate limit your accounts or
+                permanently ban them at any
                 time. Only use accounts you are willing to lose.
               </div>
               <div class="mapping-toggle-row mapping-setting-field" data-setting-key="use_user_tokens">
                 <div class="mapping-toggle-info">
                   <span class="mapping-toggle-name">Send messages as users</span>
-                  <span class="mapping-toggle-desc">Send cloned messages from real user accounts instead of webhooks. Accounts must be in the clone server.</span>
+                  <span class="mapping-toggle-desc">Send cloned messages from real user accounts instead of webhooks.
+                    Accounts must be in the clone server.</span>
                 </div>
                 <label class="toggle mapping-toggle-switch">
                   <input type="checkbox" id="map_USE_USER_TOKENS" name="USE_USER_TOKENS" data-map-toggle />
@@ -1037,7 +1154,8 @@
                   <div class="mapping-toggle-row" data-setting-key="user_token_sticky_avatar">
                     <div class="mapping-toggle-info">
                       <span class="mapping-toggle-name">Mirror author avatar</span>
-                      <span class="mapping-toggle-desc">Attempt to replace the avatar of the token via API to match the sender.</span>
+                      <span class="mapping-toggle-desc">Attempt to replace the avatar of the token via API to match the
+                        sender.</span>
                     </div>
                     <label class="toggle mapping-toggle-switch">
                       <input type="checkbox" id="map_USER_TOKEN_STICKY_AVATAR" name="USER_TOKEN_STICKY_AVATAR"
@@ -1064,7 +1182,8 @@
                 <div class="mapping-toggle-row" data-setting-key="user_token_fallback_webhook">
                   <div class="mapping-toggle-info">
                     <span class="mapping-toggle-name">Fall back to webhook</span>
-                    <span class="mapping-toggle-desc">If no token can send the message, use the normal webhook instead of
+                    <span class="mapping-toggle-desc">If no token can send the message, use the normal webhook instead
+                      of
                       dropping it.</span>
                   </div>
                   <label class="toggle mapping-toggle-switch">
@@ -1093,7 +1212,8 @@
                       files.</span>
                   </div>
                   <label class="toggle mapping-toggle-switch">
-                    <input type="checkbox" id="map_USER_TOKEN_LINKS_ONLY" name="USER_TOKEN_LINKS_ONLY" data-map-toggle />
+                    <input type="checkbox" id="map_USER_TOKEN_LINKS_ONLY" name="USER_TOKEN_LINKS_ONLY"
+                      data-map-toggle />
                     <span class="toggle-track"><span class="toggle-thumb"></span></span>
                   </label>
                 </div>
@@ -1101,7 +1221,8 @@
                 <div class="mapping-toggle-row" data-setting-key="user_token_use_proxies">
                   <div class="mapping-toggle-info">
                     <span class="mapping-toggle-name">Send through proxies</span>
-                    <span class="mapping-toggle-desc">Give each account its own proxy from your proxy list. Uses the same proxy list on the dashboard.</span>
+                    <span class="mapping-toggle-desc">Give each account its own proxy from your proxy list. Uses the
+                      same proxy list on the dashboard.</span>
                   </div>
                   <label class="toggle mapping-toggle-switch">
                     <input type="checkbox" id="map_USER_TOKEN_USE_PROXIES" name="USER_TOKEN_USE_PROXIES"
@@ -1144,9 +1265,9 @@
                             <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12Z" />
                             <circle cx="12" cy="12" r="3" />
                           </svg>
-                          <svg class="icon-eye-off" xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none"
-                            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                            viewBox="0 0 24 24" style="display:none">
+                          <svg class="icon-eye-off" xmlns="http://www.w3.org/2000/svg" width="16" height="16"
+                            fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                            stroke-linejoin="round" viewBox="0 0 24 24" style="display:none">
                             <path
                               d="M17.94 17.94A10.07 10.07 0 0 1 12 19c-7 0-11-7-11-7a18.4 18.4 0 0 1 5.06-5.94M9.9 9.9A3 3 0 0 0 9 12a3 3 0 0 0 3 3 3 3 0 0 0 2.1-.9M1 1l22 22" />
                           </svg>
@@ -1156,8 +1277,8 @@
                     <div class="user-token-add-row">
                       <button type="button" id="user-token-add" class="btn btn-primary user-token-add-btn">Add
                         token</button>
-                      <button type="button" id="user-token-bulk-open"
-                        class="btn btn-ghost user-token-bulk-btn">Bulk add</button>
+                      <button type="button" id="user-token-bulk-open" class="btn btn-ghost user-token-bulk-btn">Bulk
+                        add</button>
                       <span class="user-token-status" id="user-token-status" aria-live="polite"></span>
                     </div>
                   </div>
@@ -1168,9 +1289,8 @@
                     <div class="user-token-settings">
                       <button type="button" id="user-token-settings-open" class="user-token-settings-btn"
                         title="Token options" aria-haspopup="true" aria-expanded="false" aria-label="Token options">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none"
-                          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
-                          viewBox="0 0 24 24">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" fill="none" stroke="currentColor"
+                          stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24">
                           <circle cx="12" cy="12" r="3" />
                           <path
                             d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -1225,7 +1345,8 @@
       <div class="modal-content msg-features-content" role="dialog" aria-modal="true">
         <div class="modal-header">
           <h4 class="modal-title">Optional Message Features</h4>
-          <button type="button" id="msg-features-close" class="icon-btn verify-close" aria-label="Close">&#10005;</button>
+          <button type="button" id="msg-features-close" class="icon-btn verify-close"
+            aria-label="Close">&#10005;</button>
         </div>
         <div class="msg-features-body">
           <p class="msg-features-desc">
@@ -1236,7 +1357,8 @@
             <div class="msg-feature-item">
               <div class="msg-feature-info">
                 <span class="msg-feature-name">Tag Replies</span>
-                <span class="msg-feature-desc">When a message is a reply, prepend a link to the original message being replied to.</span>
+                <span class="msg-feature-desc">When a message is a reply, prepend a link to the original message being
+                  replied to.</span>
               </div>
               <label class="toggle msg-feature-toggle" data-key="TAG_REPLY_MSG">
                 <input type="checkbox" />
@@ -1258,7 +1380,8 @@
             <div class="msg-feature-item">
               <div class="msg-feature-info">
                 <span class="msg-feature-name">Disable @everyone</span>
-                <span class="msg-feature-desc">Strip @everyone and @here mentions so they don't ping in the clone.</span>
+                <span class="msg-feature-desc">Strip @everyone and @here mentions so they don't ping in the
+                  clone.</span>
               </div>
               <label class="toggle msg-feature-toggle" data-key="DISABLE_EVERYONE_MENTIONS">
                 <input type="checkbox" />
@@ -1280,7 +1403,8 @@
             <div class="msg-feature-item">
               <div class="msg-feature-info">
                 <span class="msg-feature-name">Append Timestamp</span>
-                <span class="msg-feature-desc">Shows when the original message was sent using Discord's native timestamp format.</span>
+                <span class="msg-feature-desc">Shows when the original message was sent using Discord's native timestamp
+                  format.</span>
               </div>
               <label class="toggle msg-feature-toggle" data-key="APPEND_TIMESTAMP">
                 <input type="checkbox" />
@@ -1485,8 +1609,7 @@
             <div class="field">
               <label for="channel_name_blacklist_input" class="has-tip">
                 <span class="label-text">Blocked Channel Name Patterns</span>
-                <button type="button" class="info-dot"
-                  aria-label="Channels matching these patterns will not be cloned."
+                <button type="button" class="info-dot" aria-label="Channels matching these patterns will not be cloned."
                   aria-describedby="tip-channel_name_blacklist"></button>
                 <span id="tip-channel_name_blacklist" role="tooltip" class="tip-bubble">
                   Channels whose name matches a pattern will be skipped during
@@ -1740,7 +1863,8 @@
           <div class="modal-title-wrap">
             <div class="modal-title-main" id="user-token-bulk-title">Bulk add user tokens</div>
           </div>
-          <button type="button" id="user-token-bulk-close" class="icon-btn verify-close" aria-label="Close">&#10005;</button>
+          <button type="button" id="user-token-bulk-close" class="icon-btn verify-close"
+            aria-label="Close">&#10005;</button>
         </div>
         <div class="user-token-bulk-body">
           <textarea id="user_token_bulk_input" class="user-token-bulk-textarea" rows="6" spellcheck="false"
@@ -1761,7 +1885,10 @@
         <span class="footer-brand" aria-label="Copycord version {{ version or 'dev' }}">
           <span class="brand-name">Copycord</span>
           <span class="brand-sep" aria-hidden="true">&middot;</span>
-          <bdi class="brand-version" id="footer-version">{% if version %}<a id="footer-version-link" href="{{ links.github }}/releases/tag/{{ version }}" target="_blank" rel="noopener" class="footer-link" data-default-href="{{ links.github }}/releases/tag/{{ version }}">{{ version }}</a>{% else %}<span id="footer-version-text">dev</span>{% endif %}</bdi>
+          <bdi class="brand-version" id="footer-version">{% if version %}<a id="footer-version-link"
+              href="{{ links.github }}/releases/tag/{{ version }}" target="_blank" rel="noopener" class="footer-link"
+              data-default-href="{{ links.github }}/releases/tag/{{ version }}">{{ version }}</a>{% else %}<span
+              id="footer-version-text">dev</span>{% endif %}</bdi>
         </span>
 
         <div class="footer-links" role="group" aria-label="Links">

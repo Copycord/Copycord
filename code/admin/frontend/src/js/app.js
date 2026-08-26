@@ -5526,17 +5526,84 @@
         .filter(Boolean);
     }
 
+    const STAR_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>`;
+
+    // Raw proxy strings the user has starred. Kept as what they typed,
+    // matching what the chips and the saved file hold.
+    let favoriteProxies = new Set();
+
+    function isFavoriteProxy(proxy) {
+      return favoriteProxies.has(proxy);
+    }
+
+    function applyFavoriteState(el) {
+      const on = isFavoriteProxy(el.dataset.proxy);
+      el.classList.toggle("is-favorite", on);
+      const star = el.querySelector(".srv-proxy-chip-star");
+      if (star) {
+        star.title = on ? "Favorite: preferred for the gateway" : "Mark as favorite";
+        star.setAttribute("aria-pressed", on ? "true" : "false");
+      }
+    }
+
+    function toggleFavoriteProxy(proxy) {
+      if (favoriteProxies.has(proxy)) favoriteProxies.delete(proxy);
+      else favoriteProxies.add(proxy);
+      srvProxyChips
+        ?.querySelectorAll(".srv-proxy-chip-item")
+        .forEach(applyFavoriteState);
+      saveFavoriteProxies();
+    }
+
     function createProxyChip(proxy) {
       const el = document.createElement("span");
       el.className = "srv-proxy-chip-item";
       el.dataset.proxy = proxy;
-      el.innerHTML = `<span class="srv-proxy-chip-text">${escapeHtml(proxy)}</span><span class="srv-proxy-chip-x">×</span>`;
+      el.innerHTML = `<span class="srv-proxy-chip-star" role="button" tabindex="0">${STAR_SVG}</span><span class="srv-proxy-chip-text">${escapeHtml(proxy)}</span><span class="srv-proxy-chip-x">×</span>`;
       el.querySelector(".srv-proxy-chip-x").addEventListener("click", () => {
+        favoriteProxies.delete(proxy);
         el.remove();
         refreshStatusChip();
         scheduleProxySave();
       });
+      const star = el.querySelector(".srv-proxy-chip-star");
+      star.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        toggleFavoriteProxy(proxy);
+      });
+      star.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          ev.stopPropagation();
+          toggleFavoriteProxy(proxy);
+        }
+      });
+      applyFavoriteState(el);
       return el;
+    }
+
+    async function saveFavoriteProxies() {
+      try {
+        const r = await fetch("/api/server/proxies/favorites", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ favorites: Array.from(favoriteProxies) }),
+        });
+        const j = await r.json();
+        if (!j.ok) {
+          showToast(j.error || "Failed to save favorites", { type: "error" });
+          return;
+        }
+        // The server drops favorites naming a proxy it does not have, so take
+        // its answer as the truth rather than assuming ours was accepted.
+        favoriteProxies = new Set(j.favorites || []);
+        srvProxyChips
+          ?.querySelectorAll(".srv-proxy-chip-item")
+          .forEach(applyFavoriteState);
+      } catch (e) {
+        console.error(e);
+        showToast("Failed to save favorites", { type: "error" });
+      }
     }
 
     function escapeHtml(s) {
@@ -5591,6 +5658,25 @@
       } else {
         srvProxyStatus.textContent = "Disabled";
         srvProxyStatus.className = "srv-proxy-chip";
+      }
+    }
+
+    // Rotation and favorite re-check both only decide WHICH proxy the client
+    // uses, so with proxies off for the client there is nothing for either to
+    // act on. Left enabled they would read as settings that do something.
+    function updateProxyDependentControls(enabled) {
+      const locked = !enabled;
+      for (const id of ["srv-proxy-rotation-section", "srv-proxy-fav-section"]) {
+        const section = document.getElementById(id);
+        if (!section) continue;
+        section.classList.toggle("is-locked", locked);
+        section.setAttribute("aria-disabled", locked ? "true" : "false");
+        section.title = locked ? "Enable proxies for client to use this" : "";
+        // pointer-events only stops the mouse; without disabled these stay
+        // tabbable and still fire change events from the keyboard.
+        section.querySelectorAll("input, select").forEach((el) => {
+          el.disabled = locked;
+        });
       }
     }
 
@@ -5692,6 +5778,104 @@
       }
     }
 
+    // ── Favorite re-check controls ──
+
+    const favRecheckToggle   = document.getElementById("srv-proxy-fav-recheck-toggle");
+    const favRecheckControls = document.getElementById("srv-proxy-fav-recheck-controls");
+    const favRecheckInput    = document.getElementById("srv-proxy-fav-recheck-interval");
+    const favRecheckUnit     = document.getElementById("srv-proxy-fav-recheck-unit");
+
+    function updateFavRecheckControls(enabled, intervalSec) {
+      if (!favRecheckToggle || !favRecheckControls) return;
+      favRecheckToggle.checked = !!enabled;
+      favRecheckControls.style.opacity = enabled ? "1" : "0.45";
+      favRecheckControls.style.pointerEvents = enabled ? "" : "none";
+      if (!favRecheckInput || !favRecheckUnit) return;
+      const secs = Math.max(60, intervalSec || 300);
+      if (secs % 3600 === 0 && secs >= 3600) {
+        favRecheckUnit.value = "3600";
+        favRecheckInput.value = String(secs / 3600);
+      } else {
+        favRecheckUnit.value = "60";
+        favRecheckInput.value = String(Math.max(1, Math.round(secs / 60)));
+      }
+    }
+
+    function getFavRecheckIntervalSec() {
+      if (!favRecheckInput || !favRecheckUnit) return 300;
+      const n = Math.max(1, parseInt(favRecheckInput.value, 10) || 5);
+      return n * (parseInt(favRecheckUnit.value, 10) || 60);
+    }
+
+    let _favRecheckTimer = null;
+    function scheduleFavRecheckSave() {
+      clearTimeout(_favRecheckTimer);
+      _favRecheckTimer = setTimeout(saveFavRecheck, 400);
+    }
+
+    async function saveFavRecheck() {
+      if (!favRecheckToggle) return;
+      const enabled = !!favRecheckToggle.checked;
+      updateFavRecheckControls(enabled, getFavRecheckIntervalSec());
+      try {
+        const r = await fetch("/api/server/proxies/favorite-recheck", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            enabled,
+            interval: getFavRecheckIntervalSec(),
+          }),
+        });
+        const j = await r.json();
+        if (!j.ok) showToast(j.error || "Failed to save", { type: "error" });
+      } catch (e) {
+        console.error(e);
+        showToast("Failed to save favorite re-check", { type: "error" });
+      }
+    }
+
+    favRecheckToggle?.addEventListener("change", saveFavRecheck);
+    favRecheckInput?.addEventListener("input", scheduleFavRecheckSave);
+    favRecheckUnit?.addEventListener("change", scheduleFavRecheckSave);
+
+    // ── Favorite help modal ──
+
+    const favHelpBtn   = document.getElementById("srv-proxy-fav-help-btn");
+    const favHelpModal = document.getElementById("proxy-fav-help-modal");
+    const favHelpClose = document.getElementById("proxy-fav-help-close");
+
+    function setFavHelpOpen(open) {
+      if (!favHelpModal) return;
+      // Matches the proxy settings modal: .show is the class the stylesheet
+      // keys on, and the body scroll lock is released only when no other
+      // modal is still up.
+      favHelpModal.classList.toggle("show", open);
+      favHelpModal.setAttribute("aria-hidden", open ? "false" : "true");
+      if (open) {
+        document.body.classList.add("body-lock-scroll");
+        return;
+      }
+      const anyOther = document.querySelector(
+        "#confirm-modal.show, #log-modal.show, #mapping-modal.show, " +
+        "#filters-modal.show, #proxy-settings-modal.show"
+      );
+      if (!anyOther) document.body.classList.remove("body-lock-scroll");
+    }
+
+    favHelpBtn?.addEventListener("click", (ev) => {
+      // The card header is a <summary>; without this the click also toggles
+      // the whole proxy panel shut behind the modal.
+      ev.preventDefault();
+      ev.stopPropagation();
+      setFavHelpOpen(true);
+    });
+    favHelpClose?.addEventListener("click", () => setFavHelpOpen(false));
+    favHelpModal?.querySelector(".modal-backdrop")
+      ?.addEventListener("click", () => setFavHelpOpen(false));
+    document.addEventListener("keydown", (ev) => {
+      if (ev.key === "Escape") setFavHelpOpen(false);
+    });
+
     // ── API calls ──
 
     async function loadSrvProxies() {
@@ -5700,10 +5884,17 @@
         const r = await fetch("/api/server/proxies");
         const j = await r.json();
         if (j.ok) {
+          // Before setProxyChips: the chips read this when they render.
+          favoriteProxies = new Set(j.favorites || []);
           setProxyChips(j.proxies || []);
           if (srvProxyToggle) srvProxyToggle.checked = !!j.enabled;
           updateSrvProxyChip(!!j.enabled, (j.proxies || []).length);
           updateRotationControls(j.rotation_interval || 0);
+          updateFavRecheckControls(
+            !!j.favorite_recheck,
+            j.favorite_recheck_interval || 300
+          );
+          updateProxyDependentControls(!!j.enabled);
         }
       } catch (e) {
         console.error("Failed to load client proxies:", e);
@@ -6014,7 +6205,10 @@
         onConfirm: () => { setProxyChips([]); saveProxySettings(); },
       });
     });
-    if (srvProxyToggle)     srvProxyToggle.addEventListener("change", () => toggleSrvProxies(srvProxyToggle.checked));
+    if (srvProxyToggle)     srvProxyToggle.addEventListener("change", () => {
+      updateProxyDependentControls(srvProxyToggle.checked);
+      toggleSrvProxies(srvProxyToggle.checked);
+    });
     if (srvRotationToggle)  srvRotationToggle.addEventListener("change", () => toggleRotation(srvRotationToggle.checked));
     if (srvIntervalInput) {
       srvIntervalInput.addEventListener("input", () => {
