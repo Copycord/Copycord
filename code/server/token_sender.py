@@ -32,7 +32,7 @@ from common.selfbot_headers import (
     get_tls_session,
 )
 
-DISCORD_API_BASE = "https://discord.com/api/v10"
+DISCORD_API_BASE = "https://discord.com/api/v9"
 
 
 _CHAT_INPUT_CONTEXT = context_properties("chat_input")

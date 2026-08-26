@@ -543,8 +543,8 @@ class StandaloneScraper:
     Independent member scraper using multiple tokens via Discord gateway.
     """
 
-    DISCORD_API = "https://discord.com/api/v10"
-    GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json"
+    DISCORD_API = "https://discord.com/api/v9"
+    GATEWAY_URL = "wss://gateway.discord.gg/?v=9&encoding=json"
 
     def __init__(self, config: ScraperConfig):
         self.config = config
