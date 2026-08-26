@@ -103,6 +103,26 @@ class TestFingerprintShape:
             assert banned not in h
         assert "priority" not in sh.SUPPRESSED_PROFILE_HEADERS
 
+    def test_the_tls_target_and_the_claimed_chrome_agree(self):
+        # These are one decision, not two. A chrome150 handshake under
+        # Chrome/152 headers is a contradiction, and it is exactly what
+        # discord.py-self ships: its TLS target comes from curl_cffi while its
+        # browser version comes from Google's version-history API, and Google
+        # always runs ahead of what curl_cffi can actually impersonate.
+        major = sh.TLS_IMPERSONATE.replace("chrome", "").split("_")[0]
+        h = sh.build_headers("token-abc")
+        assert h["User-Agent"].split("Chrome/")[1].split(".")[0] == major
+        assert sh.DEFAULT_BUILD["browser_version"].split(".")[0] == major
+        assert f'"Chromium";v="{major}"' in h["Sec-CH-UA"]
+
+    def test_the_chrome_major_is_derived_not_written_down(self):
+        # Pins the derivation itself: hardcoding the version is what let the
+        # two drift apart in the first place.
+        import re
+
+        assert sh.CHROME_MAJOR == re.search(r"(\d+)", sh.TLS_IMPERSONATE).group(1)
+        assert sh.CHROME_MAJOR in sh.DEFAULT_BUILD["browser_user_agent"]
+
     def test_build_fingerprint_is_internally_consistent(self):
         b = sh.DEFAULT_BUILD
 
