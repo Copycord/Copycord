@@ -9,10 +9,13 @@
 
 
 import asyncio
+import base64
 import contextlib
+import json
 import re
 import signal
 import time
+import uuid
 from datetime import datetime, timezone
 import logging
 from typing import Optional, Any
@@ -24,6 +27,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from discord.errors import ConnectionClosed, LoginFailure
 from common.config import Config, CURRENT_VERSION
+from common.selfbot_headers import refresh_build_info
 from common.db import DBManager
 from client.sitemap import SitemapService
 from client.message_utils import (
@@ -42,11 +46,9 @@ from client.forwarding import ForwardingManager
 from client.proxy_rotator import ProxyRotator, _mask_proxy_url
 
 try:
-    # Sentinel discord.py uses as the pre-login value of Client.loop. login()
-    # only runs its async setup hook while loop is still this object, so a
-    # restarted client has to be put back into that state. See _clear_bot_state.
+
     from discord.client import _loop as _DISCORD_LOOP_SENTINEL
-except Exception:  # pragma: no cover - depends on library internals
+except Exception:
     _DISCORD_LOOP_SENTINEL = None
 
 
@@ -74,14 +76,9 @@ ch.setLevel(LEVEL)
 root.addHandler(ch)
 
 
-# Parent logger, so websockets.client is covered too — these processes dial
-# OUT to the admin bus, and the client child logs the whole handshake plus
-# every frame at DEBUG ("< Sec-WebSocket-Accept", "> TEXT ...", "= connection
-# is OPEN"), which buries our own output on a debug run.
 logging.getLogger("websockets").setLevel(logging.WARNING)
-# asyncio emits "Using selector: EpollSelector" and tzlocal dumps its
-# /etc/localtime probing, both at DEBUG on every boot. WARNING keeps the
-# parts worth seeing (asyncio's slow-callback warnings, real errors).
+
+
 for lib in ("asyncio", "tzlocal"):
     logging.getLogger(lib).setLevel(logging.WARNING)
 for lib in (
@@ -98,20 +95,18 @@ for lib in ("discord.state", "discord.client"):
 logger = logging.getLogger("client")
 logger.setLevel(LEVEL)
 
-# Seconds a single gateway attempt gets to reach on_connect before we tear it
-# down and try again (0 disables the watchdog entirely).
+
 GATEWAY_CONNECT_TIMEOUT_DEFAULT = 15
-# Attempts to make when there are no proxies to rotate through.
+
+
+BUILD_FETCH_ATTEMPTS_DEFAULT = 3
+BUILD_FETCH_TIMEOUT_DEFAULT = 10
+
 GATEWAY_CONNECT_RETRIES_DEFAULT = 3
 
 
 class GatewayConnectTimeout(OSError):
-    """The gateway did not come up in time.
-
-    Subclasses OSError so it lands in the same rotation path as a dead proxy:
-    discord.py's connect() loop swallows OSError/TimeoutError and retries
-    forever on the *same* route, so a hung proxy never surfaces on its own.
-    """
+    """The gateway did not come up in time."""
 
 
 class ClientListener:
@@ -122,15 +117,26 @@ class ClientListener:
         self.start_time = datetime.now(timezone.utc)
         self.proxy_rotator = ProxyRotator()
         self._init_proxy_rotator()
-        self._initial_proxy = self.proxy_rotator.next() if self.proxy_rotator.enabled else None
+        self._initial_proxy = (
+            self.proxy_rotator.next() if self.proxy_rotator.enabled else None
+        )
         self._connect_timeout = self._db_int(
             "GATEWAY_CONNECT_TIMEOUT", GATEWAY_CONNECT_TIMEOUT_DEFAULT
         )
         self._connect_retries = max(
             1, self._db_int("GATEWAY_CONNECT_RETRIES", GATEWAY_CONNECT_RETRIES_DEFAULT)
         )
+        self._build_fetch_attempts = max(
+            1, self._db_int("BUILD_FETCH_ATTEMPTS", BUILD_FETCH_ATTEMPTS_DEFAULT)
+        )
+        self._build_fetch_timeout = self._db_int(
+            "BUILD_FETCH_TIMEOUT", BUILD_FETCH_TIMEOUT_DEFAULT
+        )
         self._gateway_connected: Optional[asyncio.Event] = None
-        self.bot = commands.Bot(command_prefix="!", self_bot=True, proxy=self._initial_proxy)
+        self._build_pinned = False
+        self.bot = commands.Bot(
+            command_prefix="!", self_bot=True, proxy=self._initial_proxy
+        )
         self.proxy_rotator.on_rotate = self._on_proxy_rotate
         self.proxy_rotator.on_all_dead = self._on_all_proxies_dead
         self.msg = MessageUtils(self.bot)
@@ -174,28 +180,33 @@ class ClientListener:
             listen_port=self.config.CLIENT_WS_PORT,
             logger=logger,
         )
-        
+
         self.forwarding = ForwardingManager(
             config=self.config,
             db=self.db,
             ws=self.ws,
             logger=logging.getLogger("client.forwarding"),
         )
-        
+
         self.sitemap = SitemapService(
             bot=self.bot, config=self.config, db=self.db, ws=self.ws, logger=logger
         )
-        # Load configurable sync timing from DB
+
         def _db_int_sync(key, default):
             raw = (self.db.get_config(key, "") or "").strip()
             try:
                 return int(raw) if raw else default
             except (ValueError, TypeError):
                 return default
+
         self.sitemap._startup_delay = _db_int_sync("SYNC_STARTUP_DELAY", 15)
         self.sitemap._inter_guild_delay = _db_int_sync("SYNC_INTER_GUILD_DELAY", 3)
-        _rand_raw = (self.db.get_config("SYNC_RANDOMIZE_ORDER", "") or "").strip().lower()
-        self.sitemap._randomize_order = _rand_raw not in ("0", "false", "no") if _rand_raw else True
+        _rand_raw = (
+            (self.db.get_config("SYNC_RANDOMIZE_ORDER", "") or "").strip().lower()
+        )
+        self.sitemap._randomize_order = (
+            _rand_raw not in ("0", "false", "no") if _rand_raw else True
+        )
         self.ui_controller = ClientUiController(
             bus=self.bus,
             admin_base_url=self.config.ADMIN_WS_URL,
@@ -272,9 +283,14 @@ class ClientListener:
     def _on_all_proxies_dead(self, rotator) -> None:
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(self.bus.publish("proxies_dead", {
-                "total": len(rotator._proxies),
-            }))
+            loop.create_task(
+                self.bus.publish(
+                    "proxies_dead",
+                    {
+                        "total": len(rotator._proxies),
+                    },
+                )
+            )
         except RuntimeError:
             pass
         except Exception:
@@ -319,7 +335,7 @@ class ClientListener:
                 asyncio.create_task(self.sitemap.build_and_send_all())
 
             return {"ok": True}
-        
+
         elif typ == "forwarding_reload":
             try:
                 await self.forwarding.reload_config()
@@ -617,9 +633,6 @@ class ClientListener:
         """
         Maps a cloned channel id to its host channel id (if applicable), and returns a
         channel object you can actually access along with the resolved channel_id and guild.
-
-        Returns: (channel: discord.TextChannel, channel_id: int, guild: discord.Guild)
-        Raises: discord.Forbidden if no accessible channel can be found.
         """
         logger = logging.getLogger("client")
 
@@ -694,16 +707,20 @@ class ClientListener:
         await self.bot.wait_until_ready()
 
         startup_delay = self.sitemap._startup_delay
-        logger.info(
-            "[sitemap] Waiting %ds before startup sync", startup_delay
-        )
+        logger.info("[sitemap] Waiting %ds before startup sync", startup_delay)
         await asyncio.sleep(startup_delay)
 
-        stress_test = os.getenv("SITEMAP_STRESS_TEST", "").lower() in ("1", "true", "yes")
+        stress_test = os.getenv("SITEMAP_STRESS_TEST", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
 
         if stress_test:
             cycle = 0
-            logger.warning("[sitemap] STRESS TEST enabled — will loop sitemaps continuously")
+            logger.warning(
+                "[sitemap] STRESS TEST enabled — will loop sitemaps continuously"
+            )
             while True:
                 cycle += 1
                 logger.info("[sitemap] Stress test cycle %d", cycle)
@@ -711,7 +728,7 @@ class ClientListener:
                     await self.sitemap.build_and_send_all()
                 except Exception:
                     logger.exception("[sitemap] Stress test cycle %d failed", cycle)
-                # Wait for the queue to finish before starting next cycle
+
                 while self.sitemap._queue:
                     await asyncio.sleep(1)
                 await asyncio.sleep(2)
@@ -724,10 +741,6 @@ class ClientListener:
     def schedule_sync(self, guild_id: int | None = None, delay: float = 1.0):
         """
         Ask SitemapService to (debounced) resend sitemap(s).
-
-        guild_id:
-        - int -> only that origin guild's sitemap will be rebuilt/sent
-        - None -> fallback: mark all mapped origins dirty (legacy "send everything")
         """
         try:
             self.sitemap.schedule_sync(guild_id=guild_id, delay=delay)
@@ -758,13 +771,7 @@ class ClientListener:
             self.proxy_rotator.report_success(self.proxy_rotator._current_proxy)
 
     async def _status_heartbeat_loop(self):
-        """Periodically re-publish status so the admin watchdog keeps us online.
-
-        The admin marks a component offline after ~90s of bus silence. Incidental
-        log/event traffic normally refreshes that, but an otherwise-idle bot would
-        be shown offline while running fine. Gated on readiness so a genuine
-        disconnect or shutdown isn't masked by a stale "running" heartbeat.
-        """
+        """Periodically re-publish status so the admin watchdog keeps us online."""
         while True:
             try:
                 await asyncio.sleep(30)
@@ -803,9 +810,6 @@ class ClientListener:
             discord={"ready": True},
         )
 
-        # Keep re-publishing status so the admin's watchdog keeps us marked
-        # online during quiet periods (it presumes offline after ~90s of bus
-        # silence). Started once; survives gateway reconnects.
         if (
             getattr(self, "_status_hb_task", None) is None
             or self._status_hb_task.done()
@@ -823,13 +827,6 @@ class ClientListener:
         asyncio.create_task(self._snapshot_all_guilds_once())
 
     def _rebuild_blocklist(self, kw_map: dict | None = None) -> None:
-        """
-        kw_map: { origin_guild_id (int/str or 0): ["badword", ...], ... }
-
-        After this runs:
-        self.blocked_keywords_map[guild_id] = ["badword", "otherword", ...]
-        self._blocked_patterns_map[guild_id] = [(compiled_regex, "badword"), ...]
-        """
         if kw_map is None:
             kw_map = self.db.get_blocked_keywords_by_origin()
 
@@ -950,10 +947,10 @@ class ClientListener:
         """
         Handles incoming Discord messages and processes them for forwarding.
         """
-        asyncio.create_task(self.forwarding.handle_new_message(
-            discord_message=message, bot=self.bot
-        ))
-        
+        asyncio.create_task(
+            self.forwarding.handle_new_message(discord_message=message, bot=self.bot)
+        )
+
         g = getattr(message, "guild", None)
         if not g or not self._is_mapped_origin(g.id):
             return
@@ -1140,14 +1137,14 @@ class ClientListener:
                     "thread_parent_id": parent.id,
                     "thread_parent_name": getattr(parent, "name", str(parent.id)),
                     "thread_id": target_chan.id,
-                    "thread_name": getattr(
-                        target_chan, "name", str(target_chan.id)
-                    ),
+                    "thread_name": getattr(target_chan, "name", str(target_chan.id)),
                 }
-                # Include applied forum tag names if this is a forum thread
+
                 if isinstance(parent, discord.ForumChannel):
                     try:
-                        tag_names = [t.name for t in (target_chan.applied_tags or []) if t.name]
+                        tag_names = [
+                            t.name for t in (target_chan.applied_tags or []) if t.name
+                        ]
                     except Exception:
                         tag_names = []
                     if tag_names:
@@ -1167,8 +1164,6 @@ class ClientListener:
             message.channel.name,
             message.author.name,
         )
-        
-
 
     def _is_meaningful_edit(
         self, before: discord.Message, after: discord.Message
@@ -1682,9 +1677,6 @@ class ClientListener:
     async def on_thread_delete(self, thread: discord.Thread):
         """
         Event handler that is triggered when a thread is deleted in a Discord server.
-
-        This method checks if the deleted thread belongs to the host guild. If it does,
-        it sends a notification payload to the WebSocket server with the thread's ID.
         """
         g = getattr(thread, "guild", None)
         if not g or not self._is_mapped_origin(g.id):
@@ -1739,11 +1731,14 @@ class ClientListener:
             )
             await self.ws.send(payload)
 
-        # Detect applied tag changes on forum threads
         if isinstance(getattr(after, "parent", None), discord.ForumChannel):
             try:
-                before_names = sorted(t.name for t in (before.applied_tags or []) if t.name)
-                after_names = sorted(t.name for t in (after.applied_tags or []) if t.name)
+                before_names = sorted(
+                    t.name for t in (before.applied_tags or []) if t.name
+                )
+                after_names = sorted(
+                    t.name for t in (after.applied_tags or []) if t.name
+                )
             except Exception:
                 before_names = []
                 after_names = []
@@ -1804,11 +1799,6 @@ class ClientListener:
     async def on_guild_channel_update(self, before, after):
         """
         Handles updates to guild channels within the host guild.
-        This method is triggered when a guild channel is updated. It checks if the
-        update occurred in the host guild and determines whether the update involves
-        structural changes (such as a name change or a change in the parent category).
-        If a structural or relevant metadata change is detected, it schedules a
-        synchronization process (sitemap).
         """
         g = getattr(before, "guild", None)
 
@@ -2183,17 +2173,6 @@ class ClientListener:
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
         """
         Fired when the host guild updates.
-
-        - Always upserts basic guild row into DB.
-        - If any of the tracked metadata fields change:
-            - icon
-            - banner
-            - splash
-            - discovery_splash
-            - description
-
-          then we schedule a sitemap sync for that origin guild so the server/UI
-          see the updated metadata and can drive guild-metadata sync to clones.
         """
         try:
 
@@ -2432,7 +2411,7 @@ class ClientListener:
         with contextlib.suppress(Exception):
             await self.bot.close()
         logger.info("Client shutdown complete.")
-        
+
     def _mask_token(self, token: str) -> str:
         t = (token or "").strip()
         if not t:
@@ -2441,13 +2420,18 @@ class ClientListener:
             return t[:2] + "***"
         return f"{t[:6]}...{t[-4:]}"
 
-    async def _notify_token_dead(self, reason: str, token: str, kind: str = "primary") -> None:
+    async def _notify_token_dead(
+        self, reason: str, token: str, kind: str = "primary"
+    ) -> None:
         try:
-            await self.bus.publish("token_dead", {
-                "reason": reason,
-                "kind": kind,
-                "token_preview": self._mask_token(token),
-            })
+            await self.bus.publish(
+                "token_dead",
+                {
+                    "reason": reason,
+                    "kind": kind,
+                    "token_preview": self._mask_token(token),
+                },
+            )
             logger.info("[📨] Notified admin of dead %s token.", kind)
         except Exception as e:
             logger.warning("[⚠️] Failed to notify admin of dead token: %s", e)
@@ -2475,13 +2459,14 @@ class ClientListener:
                     continue
 
                 except GatewayConnectTimeout as e:
-                    logger.warning(
-                        "[⏱️] Backup token %s: %s", row["token_id"], e
-                    )
+                    logger.warning("[⏱️] Backup token %s: %s", row["token_id"], e)
                     continue
 
                 except Exception:
-                    logger.exception("[⛔] Unexpected error while using backup token %s", row["token_id"])
+                    logger.exception(
+                        "[⛔] Unexpected error while using backup token %s",
+                        row["token_id"],
+                    )
                     continue
 
             return False
@@ -2490,28 +2475,123 @@ class ClientListener:
             logger.exception("[backup] failed to switch to a backup token")
             return False
 
-
     async def on_connect(self) -> None:
         """Gateway websocket is up and READY has been parsed."""
         ev = self._gateway_connected
         if ev is not None:
             ev.set()
 
-    async def _start_with_watchdog(self, token: str, timeout: int = 0) -> None:
-        """Run bot.start(), but give the gateway a deadline to come up.
+    async def _resolve_client_build(self) -> bool:
+        """Pin the library's fingerprint to the live Discord build before login."""
+        attempts = max(1, self._build_fetch_attempts)
 
-        login() failures propagate on their own, but the gateway phase does not:
-        connect() catches OSError/TimeoutError and retries the *same* route
-        forever, so a hung proxy just stalls. We race start() against the
-        on_connect event and tear the attempt down if neither lands in time.
-        """
+        for attempt in range(1, attempts + 1):
+            proxy = None
+            if self.proxy_rotator.enabled:
+                proxy = self.proxy_rotator._current_proxy or self._initial_proxy
+
+            try:
+                build = await asyncio.wait_for(
+                    refresh_build_info(), timeout=self._build_fetch_timeout
+                )
+            except Exception as e:
+                logger.debug("[build] attempt %d/%d failed: %r", attempt, attempts, e)
+                build = None
+
+            number = (build or {}).get("client_build_number")
+            if number and int(number) >= 400000:
+                self._apply_client_build(build)
+                return True
+
+            if attempt < attempts and self.proxy_rotator.enabled:
+                nxt = self.proxy_rotator.rotate_now()
+                if nxt:
+                    self.bot.http.proxy = nxt
+                    logger.debug(
+                        "[build] rotated to %s and retrying",
+                        _mask_proxy_url(nxt),
+                    )
+                elif proxy:
+                    logger.debug("[build] no healthy proxy to rotate to")
+
+        logger.warning(
+            "[⚠️] Could not resolve the live Discord build after %d attempt(s); "
+            "the library will fall back to its hardcoded value",
+            attempts,
+        )
+        return False
+
+    def _apply_client_build(self, build: dict) -> None:
+        """Make discord.py-self use a build we resolved instead of fetching one."""
+        from discord.utils import Headers
+
+        ua = build["browser_user_agent"]
+        major = int(build["browser_version"].split(".")[0])
+
+        props = {
+            "os": "Windows",
+            "browser": "Chrome",
+            "device": "",
+            "system_locale": "en-US",
+            "browser_user_agent": ua,
+            "browser_version": build["browser_version"],
+            "os_version": "10",
+            "referrer": "",
+            "referring_domain": "",
+            "referrer_current": "",
+            "referring_domain_current": "",
+            "release_channel": build["release_channel"],
+            "client_build_number": int(build["client_build_number"]),
+            "client_event_source": None,
+            "has_client_mods": False,
+            "client_launch_id": str(uuid.uuid4()),
+            "client_heartbeat_session_id": str(uuid.uuid4()),
+        }
+        encoded = base64.b64encode(
+            json.dumps(props, separators=(",", ":")).encode()
+        ).decode()
+
+        async def _pinned(cls, session, proxy=None, proxy_auth=None):
+
+            d = dict(props)
+            d["client_launch_id"] = str(uuid.uuid4())
+            d["client_heartbeat_session_id"] = str(uuid.uuid4())
+            return cls(
+                platform="Windows",
+                major_version=major,
+                super_properties=d,
+                encoded_super_properties=base64.b64encode(
+                    json.dumps(d, separators=(",", ":")).encode()
+                ).decode(),
+                extra_gateway_properties={
+                    "client_app_state": "unfocused",
+                    "is_fast_connect": False,
+                },
+            )
+
+        Headers.default = classmethod(_pinned)
+
+        self.bot.http.headers = Headers(
+            platform="Windows",
+            major_version=major,
+            super_properties=props,
+            encoded_super_properties=encoded,
+            extra_gateway_properties={
+                "client_app_state": "unfocused",
+                "is_fast_connect": False,
+            },
+        )
+
+    async def _start_with_watchdog(self, token: str, timeout: int = 0) -> None:
+        """Run bot.start(), but give the gateway a deadline to come up."""
+        if not self._build_pinned:
+            self._build_pinned = await self._resolve_client_build()
+
         timeout = timeout or self._connect_timeout
         if timeout <= 0:
             await self.bot.start(token)
             return
 
-        # Own event rather than bot.wait_for(): wait_for touches bot.loop, which
-        # discord.py leaves unset until login() runs inside start().
         self._gateway_connected = asyncio.Event()
         start_task = asyncio.ensure_future(self.bot.start(token))
         connected = asyncio.ensure_future(self._gateway_connected.wait())
@@ -2527,22 +2607,16 @@ class ClientListener:
             start_task.cancel()
             raise
 
-        # start() finished first: it returned or raised. Either way that answer
-        # is the real one, so surface it untouched.
         if start_task in done:
             connected.cancel()
             return await start_task
 
-        # Gateway is up. Hand the rest of the session back to start(), which
-        # only returns when the client actually stops.
         if connected in done:
             return await start_task
 
         connected.cancel()
         await self._abort_stalled_connect(start_task)
-        raise GatewayConnectTimeout(
-            f"gateway did not connect within {timeout}s"
-        )
+        raise GatewayConnectTimeout(f"gateway did not connect within {timeout}s")
 
     async def _abort_stalled_connect(self, start_task: asyncio.Future) -> None:
         """Tear down a half-open connect so the bot can be started again."""
@@ -2557,29 +2631,13 @@ class ClientListener:
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            # Expected: we just closed the client out from under it. Keep the
-            # reason (a dead proxy shows up here) but not the stack.
+
             logger.debug("[gateway] connect aborted: %s: %s", type(e).__name__, e)
 
-        # close() marks the client closed; this makes it startable again.
         self._clear_bot_state()
 
     def _clear_bot_state(self) -> None:
-        """Reset a closed client so it can be started again.
-
-        Works around three gaps in discord.py's own restart path:
-
-        - Client.clear() calls self._ready.clear(), but _ready is MISSING until
-          login() runs. close() guards that; clear() does not. A stall during
-          login therefore aborts clear() part-way through.
-        - close() sets loop = MISSING, while login() only re-runs
-          _async_setup_hook() when loop is still the _loop sentinel. Restarting
-          therefore leaves loop MISSING, and the gateway's keepalive dies on it
-          the moment a websocket does come up.
-        - HTTPClient.clear() drops the closed sessions but leaves _started
-          True, so startup() early-returns and the next request() calls into
-          the MISSING sentinel.
-        """
+        """Reset a closed client so it can be started again."""
         bot = self.bot
         try:
             if not hasattr(getattr(bot, "_ready", None), "clear"):
@@ -2587,24 +2645,18 @@ class ClientListener:
             bot.clear()
         except Exception:
             logger.debug("[gateway] clear() failed", exc_info=True)
-            # clear() sets _closing_task first, but make sure: while it is set
-            # is_closed() stays True and connect() returns immediately.
+
             try:
                 bot._closing_task = None
             except Exception:
                 pass
 
-        # Put loop back to the pre-login sentinel so login() rebuilds loop,
-        # _connection.loop, http.loop and _ready. Done after clear(), which
-        # touches _connection and http.
         if _DISCORD_LOOP_SENTINEL is not None:
             try:
                 bot.loop = _DISCORD_LOOP_SENTINEL
             except Exception:
                 logger.debug("[gateway] loop reset failed", exc_info=True)
 
-        # Force startup() to rebuild the HTTP sessions, which also re-reads the
-        # proxy we may have just rotated to.
         try:
             http = getattr(bot, "http", None)
             if http is not None:
@@ -2623,14 +2675,7 @@ class ClientListener:
     def _retry_connect_directly(
         self, token: str, loop: asyncio.AbstractEventLoop
     ) -> None:
-        """Retry the connect when there is no proxy to rotate to.
-
-        A fresh login + websocket is the thing that actually clears a stall,
-        which is exactly what discord.py's own reconnect loop will not do.
-        The deadline widens each attempt: a hung route is caught fast, while an
-        account that is merely slow to send READY still gets in rather than
-        being torn down forever.
-        """
+        """Retry the connect when there is no proxy to rotate to."""
         for attempt in range(2, self._connect_retries + 1):
             self._reset_bot_for_retry()
             deadline = self._connect_timeout * attempt
@@ -2689,7 +2734,9 @@ class ClientListener:
                 logger.error("[⛔] No valid backup token available.")
                 loop.run_until_complete(
                     self._notify_token_dead(
-                        "All tokens exhausted (no valid backup).", token, kind="exhausted"
+                        "All tokens exhausted (no valid backup).",
+                        token,
+                        kind="exhausted",
                     )
                 )
 
@@ -2709,19 +2756,29 @@ class ClientListener:
                 )
                 backup = self._try_backup_token(loop)
                 if not backup:
-                    logger.error("[⛔] No valid backup token available after disconnection.")
+                    logger.error(
+                        "[⛔] No valid backup token available after disconnection."
+                    )
                     loop.run_until_complete(
                         self._notify_token_dead(
-                            "All tokens exhausted after gateway 4004.", token, kind="exhausted"
+                            "All tokens exhausted after gateway 4004.",
+                            token,
+                            kind="exhausted",
                         )
                     )
             else:
-                logger.exception("[⛔] Discord gateway connection closed (code=%s)", code)
+                logger.exception(
+                    "[⛔] Discord gateway connection closed (code=%s)", code
+                )
                 backup = self._try_backup_token(loop)
                 if backup:
-                    logger.info("[✅] Backup token restored client after unexpected close.")
+                    logger.info(
+                        "[✅] Backup token restored client after unexpected close."
+                    )
                 else:
-                    logger.error("[⛔] No valid backup token available after connection close.")
+                    logger.error(
+                        "[⛔] No valid backup token available after connection close."
+                    )
 
         except Exception as e:
             if not self._try_next_proxy_on_error(e, token, loop):
@@ -2731,10 +2788,12 @@ class ClientListener:
         """Check if an exception is a proxy connection failure."""
         if isinstance(exc, GatewayConnectTimeout):
             return True
-        # curl_cffi.requests.exceptions.RequestException inherits OSError
+
         if isinstance(exc, (ConnectionError, OSError)):
             err = str(exc).lower()
-            return "proxy" in err or "curl" in err or "connect" in err or "aborted" in err
+            return (
+                "proxy" in err or "curl" in err or "connect" in err or "aborted" in err
+            )
         return False
 
     def _try_next_proxy_on_error(self, exc: Exception, token: str, loop) -> bool:
@@ -2765,7 +2824,9 @@ class ClientListener:
             except Exception as retry_e:
                 if self._is_proxy_error(retry_e):
                     safe = _mask_proxy_url(new_proxy)
-                    logger.warning("[🔀] Proxy %s also failed: %s", safe, type(retry_e).__name__)
+                    logger.warning(
+                        "[🔀] Proxy %s also failed: %s", safe, type(retry_e).__name__
+                    )
                     self.proxy_rotator.report_failure(new_proxy)
                 else:
                     logger.exception("[⛔] Unexpected error while running client")
@@ -2798,7 +2859,12 @@ class ClientListener:
 def _autostart_enabled() -> bool:
     import os
 
-    return os.getenv("COPYCORD_AUTOSTART", "false").lower() in ("1", "true", "yes", "on")
+    return os.getenv("COPYCORD_AUTOSTART", "false").lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 if __name__ == "__main__":
