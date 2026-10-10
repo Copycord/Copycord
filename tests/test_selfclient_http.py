@@ -1,0 +1,428 @@
+"""
+selfclient.http: rate limits, paginators and per-method headers.
+
+Driven against a fake AsyncSession that replays canned responses, so nothing
+here touches the network. The clock and sleep are injected: sleeping advances
+the fake clock, so a bucket wait is observable as exactly one recorded sleep
+of the expected length.
+"""
+import json as _json
+
+import pytest
+
+from selfclient import http as sc_http
+from selfclient.errors import Forbidden, NotFound, RateLimited
+from selfclient.http import HTTPClient, MESSAGE_PAGE, _route_key
+
+CHANNEL = "111111111111111111"
+GUILD = "999999999999999999"
+
+
+class _Headers(dict):
+    """Case-insensitive header lookup, like curl_cffi's."""
+
+    def get(self, name, default=None):
+        for key, value in self.items():
+            if key.lower() == name.lower():
+                return value
+        return default
+
+
+class FakeResponse:
+    def __init__(self, status=200, body=None, headers=None, text=None):
+        self.status_code = status
+        self._body = body
+        self.headers = _Headers(headers or {})
+        if text is not None:
+            self.text = text
+        elif body is not None:
+            self.text = _json.dumps(body)
+        else:
+            self.text = ""
+        self.content = self.text.encode()
+
+    def json(self):
+        if self._body is None:
+            raise ValueError("no json")
+        return self._body
+
+
+class FakeSession:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    async def request(self, method, url, **kwargs):
+        self.calls.append({"method": method, "url": url, **kwargs})
+        if not self.responses:
+            raise AssertionError(f"unexpected extra request {method} {url}")
+        return self.responses.pop(0)
+
+    async def close(self):
+        pass
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+        self.sleeps = []
+
+    def __call__(self):
+        return self.now
+
+    async def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+def _client(responses, **kw):
+    clock = FakeClock()
+    session = FakeSession(responses)
+    client = HTTPClient(
+        "token-abc",
+        session=session,
+        sleep=clock.sleep,
+        clock=clock,
+        page_delay=0,
+        **kw,
+    )
+    return client, session, clock
+
+
+def _msgs(start, count):
+    """Newest-first message dicts with descending ids."""
+    return [{"id": str(start - i), "content": f"m{start - i}"} for i in range(count)]
+
+
+# ---------------------------------------------------------------------------
+# 429 / retry_after
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimited:
+    @pytest.mark.asyncio
+    async def test_429_waits_body_retry_after_then_succeeds(self):
+        client, session, clock = _client(
+            [
+                FakeResponse(429, {"retry_after": 2.5, "global": False}, {"X-RateLimit-Scope": "user"}),
+                FakeResponse(200, {"ok": True}),
+            ]
+        )
+        assert await client.get("/users/@me") == {"ok": True}
+        assert len(session.calls) == 2
+        assert clock.sleeps == [2.5]
+
+    @pytest.mark.asyncio
+    async def test_429_every_attempt_raises_rate_limited(self):
+        client, session, clock = _client(
+            [FakeResponse(429, {"retry_after": 1.0}) for _ in range(3)], max_retries=3
+        )
+        with pytest.raises(RateLimited) as info:
+            await client.get("/users/@me")
+        assert info.value.retry_after == 1.0
+        assert info.value.status == 429
+        assert len(session.calls) == 3
+        # One wait before each retry, none after the last refusal.
+        assert clock.sleeps == [1.0, 1.0]
+
+    @pytest.mark.asyncio
+    async def test_retry_after_falls_back_when_body_is_not_json(self):
+        client, session, clock = _client(
+            [FakeResponse(429, None, text="slow down"), FakeResponse(200, [])]
+        )
+        assert await client.get("/users/@me") == []
+        assert clock.sleeps == [sc_http.FALLBACK_RETRY_AFTER]
+
+    @pytest.mark.asyncio
+    async def test_global_429_holds_every_route(self):
+        client, session, clock = _client(
+            [FakeResponse(429, {"retry_after": 3.0, "global": True}), FakeResponse(200, {})],
+            max_retries=1,
+        )
+        with pytest.raises(RateLimited):
+            await client.get("/users/@me")
+        assert clock.sleeps == []
+        # A different route still has to wait out the global limit.
+        await client.get(f"/channels/{CHANNEL}")
+        assert clock.sleeps == [3.0]
+
+
+# ---------------------------------------------------------------------------
+# bucket pacing
+# ---------------------------------------------------------------------------
+
+
+class TestBucketPacing:
+    @pytest.mark.asyncio
+    async def test_empty_bucket_delays_the_next_request_on_that_route(self):
+        empty = {
+            "X-RateLimit-Bucket": "abc",
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset-After": "1.5",
+        }
+        client, session, clock = _client(
+            [
+                FakeResponse(200, [], empty),
+                FakeResponse(200, [], {"X-RateLimit-Bucket": "abc", "X-RateLimit-Remaining": "4"}),
+                FakeResponse(200, []),
+            ]
+        )
+        path = f"/channels/{CHANNEL}/messages"
+        await client.get(path)
+        # The response that emptied the bucket is returned without waiting.
+        assert clock.sleeps == []
+        await client.get(path)
+        assert clock.sleeps == [1.5]
+        # Bucket refilled: no further wait.
+        await client.get(path)
+        assert clock.sleeps == [1.5]
+
+    @pytest.mark.asyncio
+    async def test_bucket_with_requests_left_never_waits(self):
+        ok = {"X-RateLimit-Bucket": "abc", "X-RateLimit-Remaining": "3", "X-RateLimit-Reset-After": "9"}
+        client, session, clock = _client([FakeResponse(200, [], ok), FakeResponse(200, [], ok)])
+        await client.get("/users/@me")
+        await client.get("/users/@me")
+        assert clock.sleeps == []
+
+    @pytest.mark.asyncio
+    async def test_other_routes_are_not_held_by_an_empty_bucket(self):
+        empty = {"X-RateLimit-Bucket": "abc", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset-After": "5"}
+        client, session, clock = _client([FakeResponse(200, [], empty), FakeResponse(200, {})])
+        await client.get(f"/channels/{CHANNEL}/messages")
+        await client.get("/users/@me")
+        assert clock.sleeps == []
+
+    def test_route_key_keeps_major_ids_and_collapses_the_rest(self):
+        key = _route_key("DELETE", f"/channels/{CHANNEL}/messages/222222222222222222")
+        assert key == f"DELETE /channels/{CHANNEL}/messages/{{id}}"
+        assert _route_key("GET", f"/guilds/{GUILD}/members/333333333333333333") == (
+            f"GET /guilds/{GUILD}/members/{{id}}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# refusals, headers, proxy
+# ---------------------------------------------------------------------------
+
+
+class TestRequests:
+    @pytest.mark.asyncio
+    async def test_403_raises_forbidden_with_discord_code(self):
+        client, _, _ = _client([FakeResponse(403, {"code": 50013, "message": "Missing Permissions"})])
+        with pytest.raises(Forbidden) as info:
+            await client.get(f"/channels/{CHANNEL}/messages")
+        assert info.value.status == 403
+        assert info.value.code == 50013
+        assert info.value.json["message"] == "Missing Permissions"
+
+    @pytest.mark.asyncio
+    async def test_404_raises_not_found(self):
+        client, _, _ = _client([FakeResponse(404, {"code": 10003, "message": "Unknown Channel"})])
+        with pytest.raises(NotFound):
+            await client.get(f"/channels/{CHANNEL}")
+
+    @pytest.mark.asyncio
+    async def test_204_returns_none(self):
+        client, _, _ = _client([FakeResponse(204)])
+        assert await client.delete(f"/channels/{CHANNEL}/messages/222222222222222222") is None
+
+    @pytest.mark.asyncio
+    async def test_get_carries_no_origin_or_content_type(self):
+        client, session, _ = _client([FakeResponse(200, {})])
+        await client.get("/users/@me")
+        headers = session.calls[0]["headers"]
+        assert "Origin" not in headers
+        assert "Content-Type" not in headers
+        assert headers["Authorization"] == "token-abc"
+        assert session.calls[0]["method"] == "GET"
+        assert session.calls[0]["url"] == "https://discord.com/api/v9/users/@me"
+
+    @pytest.mark.asyncio
+    async def test_post_carries_origin_and_content_type(self):
+        client, session, _ = _client([FakeResponse(200, {"id": "5"})])
+        await client.post("/users/@me/channels", json={"recipients": ["1"]})
+        call = session.calls[0]
+        assert call["headers"]["Origin"] == "https://discord.com"
+        assert call["headers"]["Content-Type"] == "application/json"
+        assert call["json"] == {"recipients": ["1"]}
+
+    @pytest.mark.asyncio
+    async def test_profile_headers_are_suppressed(self):
+        client, session, _ = _client([FakeResponse(200, {})])
+        await client.get("/users/@me")
+        headers = session.calls[0]["headers"]
+        assert headers["sec-fetch-user"] is None
+        assert headers["upgrade-insecure-requests"] is None
+
+    @pytest.mark.asyncio
+    async def test_proxy_is_passed_through(self):
+        client, session, _ = _client([FakeResponse(200, {}), FakeResponse(200, {})], proxy="http://p:1")
+        await client.get("/users/@me")
+        assert session.calls[0]["proxy"] == "http://p:1"
+        client.set_proxy(None)
+        await client.get("/users/@me")
+        assert "proxy" not in session.calls[1]
+
+    def test_secret_headers_are_redacted(self):
+        out = sc_http.redact_request_headers(
+            {"Authorization": "token-abc", "X-Super-Properties": "eyJ4", "Accept": "*/*"}
+        )
+        assert out["Authorization"] == "<redacted, 9 chars>"
+        assert "eyJ4" not in out["X-Super-Properties"]
+        assert out["Accept"] == "*/*"
+
+    def test_failure_log_redacts_response_secrets(self):
+        resp = FakeResponse(403, {"code": 1}, {"Set-Cookie": "__dcfduid=secret", "cf-ray": "abc"})
+        dumped = sc_http._safe_headers(resp)
+        assert "secret" not in dumped
+        assert "cf-ray: abc" in dumped
+
+
+# ---------------------------------------------------------------------------
+# messages() paginator
+# ---------------------------------------------------------------------------
+
+
+class TestMessagesPaginator:
+    @pytest.mark.asyncio
+    async def test_pages_backwards_newest_first_until_a_short_page(self):
+        page1 = _msgs(1300, MESSAGE_PAGE)  # 1300..1201
+        page2 = _msgs(1200, 50)  # 1200..1151, short: last page
+        client, session, _ = _client([FakeResponse(200, page1), FakeResponse(200, page2)])
+
+        got = [m["id"] async for m in client.messages(CHANNEL)]
+
+        assert got == [str(i) for i in range(1300, 1150, -1)]
+        assert len(session.calls) == 2
+        assert session.calls[0]["params"] == {"limit": str(MESSAGE_PAGE)}
+        assert session.calls[1]["params"] == {"limit": str(MESSAGE_PAGE), "before": "1201"}
+
+    @pytest.mark.asyncio
+    async def test_after_id_is_a_floor_that_stops_the_walk(self):
+        client, session, _ = _client([FakeResponse(200, _msgs(1300, MESSAGE_PAGE))])
+
+        got = [m["id"] async for m in client.messages(CHANNEL, after_id=1250)]
+
+        assert got == [str(i) for i in range(1300, 1250, -1)]
+        assert "1250" not in got
+        # The floor was reached inside the first page: no second request.
+        assert len(session.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_limit_caps_both_the_request_and_the_yield(self):
+        client, session, _ = _client([FakeResponse(200, _msgs(1300, 5))])
+        got = [m["id"] async for m in client.messages(CHANNEL, limit=5)]
+        assert got == ["1300", "1299", "1298", "1297", "1296"]
+        assert session.calls[0]["params"]["limit"] == "5"
+        assert len(session.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_before_seeds_the_cursor(self):
+        client, session, _ = _client([FakeResponse(200, [])])
+        _ = [m async for m in client.messages(CHANNEL, before=5000)]
+        assert session.calls[0]["params"]["before"] == "5000"
+
+    @pytest.mark.asyncio
+    async def test_empty_page_terminates(self):
+        client, session, _ = _client([FakeResponse(200, [])])
+        assert [m async for m in client.messages(CHANNEL)] == []
+        assert len(session.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_unreadable_channel_ends_quietly(self):
+        client, _, _ = _client([FakeResponse(403, {"code": 50001, "message": "Missing Access"})])
+        assert [m async for m in client.messages(CHANNEL)] == []
+
+    @pytest.mark.asyncio
+    async def test_unreadable_channel_raises_when_asked(self):
+        client, _, _ = _client([FakeResponse(403, {"code": 50001, "message": "Missing Access"})])
+        with pytest.raises(Forbidden):
+            _ = [m async for m in client.messages(CHANNEL, raise_on_error=True)]
+
+    @pytest.mark.asyncio
+    async def test_referer_names_the_channel_page_when_guild_known(self):
+        client, session, _ = _client([FakeResponse(200, [])], guild_id=GUILD)
+        _ = [m async for m in client.messages(CHANNEL)]
+        assert session.calls[0]["headers"]["Referer"] == (
+            f"https://discord.com/channels/{GUILD}/{CHANNEL}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# archived_threads() paginator
+# ---------------------------------------------------------------------------
+
+
+def _threads(ids, stamps):
+    return [
+        {"id": str(i), "name": f"t{i}", "thread_metadata": {"archive_timestamp": ts}}
+        for i, ts in zip(ids, stamps)
+    ]
+
+
+class TestArchivedThreadsPaginator:
+    @pytest.mark.asyncio
+    async def test_public_list_pages_on_archive_timestamp_until_has_more_false(self):
+        page1 = _threads([30, 29], ["2026-03-03T00:00:00+00:00", "2026-03-02T00:00:00+00:00"])
+        page2 = _threads([28], ["2026-03-01T00:00:00+00:00"])
+        client, session, _ = _client(
+            [
+                FakeResponse(200, {"threads": page1, "has_more": True}),
+                FakeResponse(200, {"threads": page2, "has_more": False}),
+            ]
+        )
+
+        got = [t["id"] async for t in client.archived_threads(CHANNEL)]
+
+        assert got == ["30", "29", "28"]
+        assert len(session.calls) == 2
+        assert session.calls[0]["url"].endswith(f"/channels/{CHANNEL}/threads/archived/public")
+        assert "before" not in session.calls[0]["params"]
+        assert session.calls[1]["params"]["before"] == "2026-03-02T00:00:00+00:00"
+
+    @pytest.mark.asyncio
+    async def test_private_list_uses_the_private_route(self):
+        client, session, _ = _client([FakeResponse(200, {"threads": [], "has_more": False})])
+        _ = [t async for t in client.archived_threads(CHANNEL, private=True)]
+        assert session.calls[0]["url"].endswith(f"/channels/{CHANNEL}/threads/archived/private")
+
+    @pytest.mark.asyncio
+    async def test_joined_list_pages_on_thread_id(self):
+        page1 = _threads([50, 40], ["x", "y"])
+        page2 = _threads([30], ["z"])
+        client, session, _ = _client(
+            [
+                FakeResponse(200, {"threads": page1, "has_more": True}),
+                FakeResponse(200, {"threads": page2, "has_more": False}),
+            ]
+        )
+
+        got = [t["id"] async for t in client.archived_threads(CHANNEL, private=True, joined=True)]
+
+        assert got == ["50", "40", "30"]
+        assert session.calls[0]["url"].endswith(
+            f"/channels/{CHANNEL}/users/@me/threads/archived/private"
+        )
+        assert session.calls[1]["params"]["before"] == "40"
+
+    @pytest.mark.asyncio
+    async def test_full_page_without_has_more_is_the_last(self):
+        page = _threads(range(100, 0, -1), ["2026-01-01T00:00:00+00:00"] * 100)
+        client, session, _ = _client([FakeResponse(200, {"threads": page, "has_more": False})])
+        got = [t async for t in client.archived_threads(CHANNEL)]
+        assert len(got) == 100
+        assert len(session.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_missing_cursor_stops_instead_of_looping(self):
+        page = [{"id": "1", "thread_metadata": {}}]
+        client, session, _ = _client([FakeResponse(200, {"threads": page, "has_more": True})])
+        got = [t["id"] async for t in client.archived_threads(CHANNEL)]
+        assert got == ["1"]
+        assert len(session.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_private_refusal_ends_quietly(self):
+        client, _, _ = _client([FakeResponse(403, {"code": 50013, "message": "Missing Permissions"})])
+        assert [t async for t in client.archived_threads(CHANNEL, private=True)] == []
