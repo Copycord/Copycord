@@ -18,6 +18,13 @@ logger = logging.getLogger(__name__)
 CURRENT_VERSION = "v3.28.0"
 
 
+def _peer_host(compose_name: str) -> str:
+    """Default host of another role: loopback under ROLE=all, else its compose service."""
+    if (os.getenv("ROLE") or "").strip().lower() == "all":
+        return "127.0.0.1"
+    return compose_name
+
+
 class Config:
     def __init__(self, logger: Optional[logging.Logger] = None):
         self.DB_PATH = os.getenv("DB_PATH", "/data/data.db")
@@ -51,7 +58,7 @@ class Config:
         self.SERVER_TOKEN = _str("SERVER_TOKEN")
         self.CLIENT_TOKEN = _str("CLIENT_TOKEN")
 
-        self.SERVER_WS_HOST = _str("SERVER_WS_HOST", "server") or "server"
+        self.SERVER_WS_HOST = _str("SERVER_WS_HOST", _peer_host("server")) or _peer_host("server")
         self.SERVER_WS_PORT = _int("SERVER_WS_PORT", "8765")
 
         self.SERVER_WS_URL = _str(
@@ -60,10 +67,10 @@ class Config:
 
         self.ADMIN_WS_URL = _str(
             "ADMIN_WS_URL",
-            f"ws://{os.getenv('ADMIN_HOST', 'admin')}:{os.getenv('ADMIN_PORT', '8080')}/bus",
+            f"ws://{os.getenv('ADMIN_HOST', _peer_host('admin'))}:{os.getenv('ADMIN_PORT', '8080')}/bus",
         )
 
-        self.CLIENT_WS_HOST = _str("CLIENT_WS_HOST", "client") or "client"
+        self.CLIENT_WS_HOST = _str("CLIENT_WS_HOST", _peer_host("client")) or _peer_host("client")
         self.CLIENT_WS_PORT = _int("CLIENT_WS_PORT", "8766")
         self.CLIENT_WS_URL = _str(
             "WS_CLIENT_URL", f"ws://{self.CLIENT_WS_HOST}:{self.CLIENT_WS_PORT}"

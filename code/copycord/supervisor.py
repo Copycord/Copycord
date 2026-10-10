@@ -442,6 +442,8 @@ def _set_runtime_env(split: bool) -> None:
     data = Path(os.getenv("DATA_DIR", str(CODE_DIR.parent / "data"))).resolve()
     with contextlib.suppress(Exception):
         data.mkdir(parents=True, exist_ok=True)
+    # admin.app reads DATA_DIR itself; keep it on the same directory as DB_PATH.
+    os.environ.setdefault("DATA_DIR", str(data))
     os.environ.setdefault("DB_PATH", str(data / "data.db"))
     if split:
         return
