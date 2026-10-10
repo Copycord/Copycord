@@ -60,6 +60,7 @@ COPY code/admin/   ./admin/
 COPY code/server/  ./server/
 COPY code/client/  ./client/
 COPY code/common/  ./common/
+COPY code/selfclient/ ./selfclient/
 COPY code/control/ ./control/
 COPY code/entrypoint.sh /entrypoint.sh
 

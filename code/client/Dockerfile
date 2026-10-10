@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # copy shared code + client package
 COPY common    ./common
 COPY client    ./client
+COPY selfclient ./selfclient
 
 ENV PYTHONPATH=/app:${PYTHONPATH}
 CMD ["python", "-m", "client.client"]
