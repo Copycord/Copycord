@@ -12,14 +12,15 @@
 Replaces discord.py-self for the client role (docs/v4/PLAN.md section 3). No
 ``discord`` import anywhere in this package.
 
-This is the v4/selfclient-core cut: errors, enums, model wrappers over raw
-payloads, the curl_cffi REST client with rate-limit pacing and paginators, and
-the fingerprint re-export. ``Client`` and the gateway (HELLO/IDENTIFY/RESUME,
-heartbeat, op 37 subscriptions, zlib-stream, event dispatch) land in
-v4/selfclient-gateway; nothing in code/client uses this package yet.
+So far: errors, enums, model wrappers over raw payloads, the curl_cffi REST
+client with rate-limit pacing and paginators, the fingerprint re-export, the
+raw-websockets gateway (HELLO/IDENTIFY/RESUME, heartbeat, op 37 subscriptions,
+zlib-stream, reconnect) and the event dispatch table. ``Client``, which ties
+them together, lands in v4/selfclient-events; nothing in code/client uses this
+package yet.
 """
 
-from . import enums, errors, fingerprint, http, models
+from . import enums, errors, events, fingerprint, gateway, http, models
 from .enums import (
     API_VERSION,
     Capabilities,
@@ -42,6 +43,8 @@ from .errors import (
     RateLimited,
     SelfClientException,
 )
+from .events import Dispatch, parse as parse_event
+from .gateway import GatewayClient
 from .http import HTTPClient
 from .models import (
     Asset,
@@ -79,7 +82,9 @@ from .models import (
 __all__ = [
     "enums",
     "errors",
+    "events",
     "fingerprint",
+    "gateway",
     "http",
     "models",
     "API_VERSION",
@@ -100,7 +105,10 @@ __all__ = [
     "NotFound",
     "RateLimited",
     "SelfClientException",
+    "Dispatch",
+    "GatewayClient",
     "HTTPClient",
+    "parse_event",
     "Asset",
     "Attachment",
     "CategoryChannel",
