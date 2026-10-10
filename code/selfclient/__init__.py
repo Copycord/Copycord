@@ -15,12 +15,13 @@ Replaces discord.py-self for the client role (docs/v4/PLAN.md section 3). No
 So far: errors, enums, model wrappers over raw payloads, the curl_cffi REST
 client with rate-limit pacing and paginators, the fingerprint re-export, the
 raw-websockets gateway (HELLO/IDENTIFY/RESUME, heartbeat, op 37 subscriptions,
-zlib-stream, reconnect) and the event dispatch table. ``Client``, which ties
-them together, lands in v4/selfclient-events; nothing in code/client uses this
-package yet.
+zlib-stream, reconnect), the event dispatch table, the cache state and
+``Client``, which ties them together. Nothing in code/client uses this package
+yet.
 """
 
-from . import enums, errors, events, fingerprint, gateway, http, models
+from . import client, enums, errors, events, fingerprint, gateway, http, models, state
+from .client import Client
 from .enums import (
     API_VERSION,
     Capabilities,
@@ -46,6 +47,7 @@ from .errors import (
 from .events import Dispatch, parse as parse_event
 from .gateway import GatewayClient
 from .http import HTTPClient
+from .state import ConnectionState
 from .models import (
     Asset,
     Attachment,
@@ -80,6 +82,7 @@ from .models import (
 )
 
 __all__ = [
+    "client",
     "enums",
     "errors",
     "events",
@@ -87,6 +90,9 @@ __all__ = [
     "gateway",
     "http",
     "models",
+    "state",
+    "Client",
+    "ConnectionState",
     "API_VERSION",
     "Capabilities",
     "ChannelType",
