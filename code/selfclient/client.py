@@ -570,22 +570,39 @@ class Client:
         before: Any = None,
         after: Any = None,
         oldest_first: Optional[bool] = None,
+        raise_on_error: bool = False,
     ) -> AsyncIterator[Message]:
         """``channel.history(...)``: newest first unless ``oldest_first``.
 
         ``before``/``after`` take a message, an id or a datetime. With
         ``after`` set the default order is oldest first, as in discord.py.
+        A bounded oldest-first walk pages forward from ``after`` (or from the
+        start of the channel), so ``limit`` picks the oldest messages, as in
+        discord.py. ``raise_on_error`` raises the HTTPException a refused page
+        came back with instead of ending the walk quietly.
         """
         cid = _snowflake(channel)
         obj = self._channel_obj(channel)
         if oldest_first is None:
             oldest_first = after is not None
+        if oldest_first and limit is not None:
+            async for raw in self._http().messages_after(
+                cid,
+                limit=limit,
+                after_id=_cursor(after, high=True),
+                before_id=_cursor(before),
+                guild_id=self._channel_guild_id(channel),
+                raise_on_error=raise_on_error,
+            ):
+                yield self._wrap_message(raw, obj)
+            return
         walk = self._http().messages(
             cid,
             limit=limit,
             before=_cursor(before),
             after_id=_cursor(after, high=True),
             guild_id=self._channel_guild_id(channel),
+            raise_on_error=raise_on_error,
         )
         if not oldest_first:
             async for raw in walk:
@@ -604,13 +621,20 @@ class Client:
         joined: bool = False,
         limit: Optional[int] = 100,
         before: Any = None,
+        raise_on_error: bool = False,
     ) -> AsyncIterator[Any]:
         """``parent.archived_threads(...)``: Thread wrappers, newest archive first."""
         cid = _snowflake(channel)
         gid = self._channel_guild_id(channel)
         owner = self._guild_for(gid)
         async for raw in self._http().archived_threads(
-            cid, private=private, joined=joined, limit=limit, before=before, guild_id=gid
+            cid,
+            private=private,
+            joined=joined,
+            limit=limit,
+            before=before,
+            guild_id=gid,
+            raise_on_error=raise_on_error,
         ):
             yield channel_from_dict(raw, owner, self._connection)
 

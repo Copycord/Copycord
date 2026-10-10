@@ -588,6 +588,62 @@ class HTTPClient:
                 return
             await self._sleep(self.page_delay)
 
+    async def messages_after(
+        self,
+        channel_id: Any,
+        *,
+        limit: Optional[int] = None,
+        after_id: Any = None,
+        before_id: Any = None,
+        guild_id: Any = None,
+        raise_on_error: bool = False,
+    ) -> AsyncIterator[Dict[str, Any]]:
+        """Yield a channel's messages oldest first, starting just after ``after_id``.
+
+        Pages forward on Discord's ``after`` cursor, so a bounded walk such as
+        "the next 100 after X" costs one call instead of reading everything
+        above X and keeping the tail. That is discord.py's oldest_first walk;
+        with no ``after_id`` it starts at the beginning of the channel.
+        ``before_id`` is an exclusive ceiling.
+        """
+        cursor = int(getattr(after_id, "id", after_id) or 0)
+        ceiling = int(getattr(before_id, "id", before_id)) if before_id is not None else None
+        remaining = limit
+        referer = self.referer(channel_id, guild_id)
+
+        while True:
+            page_size = MESSAGE_PAGE if remaining is None else min(MESSAGE_PAGE, remaining)
+            if page_size <= 0:
+                return
+            params: Dict[str, Any] = {"limit": page_size, "after": str(cursor)}
+            try:
+                page = await self.get(f"/channels/{channel_id}/messages", params=params, referer=referer)
+            except HTTPException:
+                if raise_on_error:
+                    raise
+                return
+            if not isinstance(page, list) or not page:
+                return
+
+            # The API returns the page newest first even when paging on after.
+            page = sorted(page, key=lambda m: int(m.get("id") or 0))
+            for message in page:
+                mid = int(message.get("id") or 0)
+                if ceiling is not None and mid >= ceiling:
+                    return
+                yield message
+                if remaining is not None:
+                    remaining -= 1
+                    if remaining <= 0:
+                        return
+
+            if len(page) < page_size:
+                return
+            cursor = int(page[-1].get("id") or 0)
+            if not cursor:
+                return
+            await self._sleep(self.page_delay)
+
     async def archived_threads(
         self,
         channel_id: Any,
