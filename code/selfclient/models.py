@@ -2329,7 +2329,7 @@ class Message(_Wrapper):
     def system_content(self) -> str:
         """Discord's rendering of a system message, else the plain content.
 
-        Ported from discord.py's Message.system_content for the types the
+        A port of discord.py's Message.system_content for the types the
         client can see; anything unrecognised falls back to ``content``.
         """
         t = self._data.get("type", 0)

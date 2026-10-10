@@ -25,7 +25,7 @@ browser puts ``Origin`` only on requests whose method is not GET/HEAD, and
 ``Content-Type`` only when there is a body. An Origin on a same-origin GET is a
 header no browser would have produced (wizard/core/headers.py:447-451).
 
-Cursor discipline, as wizard documents it (from discord.py 2.5.2):
+Cursor discipline, as wizard documents it (discord.py 2.5.2's):
 
   * messages page backwards on ``before`` = the id of the last (oldest) entry
     of the page just read, and stop on a short page;
