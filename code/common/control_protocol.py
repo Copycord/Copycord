@@ -1,0 +1,90 @@
+# =============================================================================
+#  Copycord
+#  Copyright (C) 2026 github.com/Copycord
+#
+#  This source code is released under the GNU Affero General Public License
+#  version 3.0. A copy of the license is available at:
+#  https://www.gnu.org/licenses/agpl-3.0.en.html
+# =============================================================================
+
+"""
+Wire protocol for the server/client control ports (9101/9102).
+
+The admin sends JSON like {"cmd": "status" | "start" | "stop"} and gets one
+JSON reply per message. Shared by control/control.py (split mode, role runs as
+a subprocess) and copycord/supervisor.py (role runs as an in-process task) so
+both answer the admin with the same shapes.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from datetime import datetime, timezone
+from typing import Any, Awaitable, Callable, Optional
+
+# Config keys copied from DB.app_config into a role's environment on start.
+ALLOWED_ENV = frozenset(
+    {
+        "SERVER_TOKEN",
+        "CLONE_GUILD_ID",
+        "COMMAND_USERS",
+        "DELETE_CHANNELS",
+        "DELETE_THREADS",
+        "DELETE_ROLES",
+        "CLONE_EMOJI",
+        "CLONE_STICKER",
+        "CLONE_ROLES",
+        "MIRROR_ROLE_PERMISSIONS",
+        "CLIENT_TOKEN",
+        "HOST_GUILD_ID",
+        "ENABLE_CLONING",
+        "LOG_LEVEL",
+    }
+)
+
+
+def status_payload(
+    running: bool,
+    pid: Optional[int],
+    started_wall: Optional[float],
+    started_mono: Optional[float],
+) -> dict:
+    """Reply to {"cmd": "status"}."""
+    started_at = (
+        datetime.fromtimestamp(started_wall, tz=timezone.utc).isoformat()
+        if running and started_wall
+        else None
+    )
+    uptime_sec = (
+        max(0.0, time.monotonic() - started_mono)
+        if running and started_mono
+        else None
+    )
+    return {
+        "ok": True,
+        "running": running,
+        "pid": (pid if running else None),
+        "started_at": started_at,
+        "uptime_sec": uptime_sec,
+    }
+
+
+async def serve_json(ws, handle: Callable[[dict], Awaitable[Any]]) -> None:
+    """
+    Read JSON messages from a control websocket and answer each with
+    the JSON-encoded result of handle(msg).
+    """
+    try:
+        async for raw in ws:
+            try:
+                data = json.loads(raw) if isinstance(raw, (str, bytes)) else {}
+            except Exception:
+                data = {}
+            resp = await handle(data)
+            await ws.send(json.dumps(resp))
+    except Exception as e:
+        try:
+            await ws.send(json.dumps({"ok": False, "error": str(e)}))
+        except Exception:
+            pass

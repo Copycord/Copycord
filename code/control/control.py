@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import signal
 import subprocess
@@ -19,9 +18,9 @@ import threading
 from pathlib import Path
 from typing import Optional
 import time
-from datetime import datetime, timezone
 from dotenv import load_dotenv
 from common.db import DBManager
+from common.control_protocol import ALLOWED_ENV, serve_json, status_payload
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -61,22 +60,7 @@ class ControlService:
     Central Control hub for Client/Server.
     """
 
-    ALLOWED_ENV = {
-        "SERVER_TOKEN",
-        "CLONE_GUILD_ID",
-        "COMMAND_USERS",
-        "DELETE_CHANNELS",
-        "DELETE_THREADS",
-        "DELETE_ROLES",
-        "CLONE_EMOJI",
-        "CLONE_STICKER",
-        "CLONE_ROLES",
-        "MIRROR_ROLE_PERMISSIONS",
-        "CLIENT_TOKEN",
-        "HOST_GUILD_ID",
-        "ENABLE_CLONING",
-        "LOG_LEVEL",
-    }
+    ALLOWED_ENV = ALLOWED_ENV
 
     def __init__(
         self,
@@ -221,23 +205,12 @@ class ControlService:
         cmd = (msg or {}).get("cmd")
         if cmd == "status":
             running = self.is_running()
-            started_at = (
-                datetime.fromtimestamp(self._started_wall, tz=timezone.utc).isoformat()
-                if running and self._started_wall
-                else None
+            return status_payload(
+                running,
+                self._child.pid if running else None,
+                self._started_wall,
+                self._started_mono,
             )
-            uptime_sec = (
-                max(0.0, time.monotonic() - self._started_mono)
-                if running and self._started_mono
-                else None
-            )
-            return {
-                "ok": True,
-                "running": running,
-                "pid": (self._child.pid if running else None),
-                "started_at": started_at,
-                "uptime_sec": uptime_sec,
-            }
         if cmd == "start":
             return self.start()
         if cmd == "stop":
@@ -249,19 +222,7 @@ class ControlService:
         Accept JSON messages like:
           {"cmd": "status" | "start" | "stop"}
         """
-        try:
-            async for raw in ws:
-                try:
-                    data = json.loads(raw) if isinstance(raw, (str, bytes)) else {}
-                except Exception:
-                    data = {}
-                resp = await self._handle_ws_message(data)
-                await ws.send(json.dumps(resp))
-        except Exception as e:
-            try:
-                await ws.send(json.dumps({"ok": False, "error": str(e)}))
-            except Exception:
-                pass
+        await serve_json(ws, self._handle_ws_message)
 
     async def run(self):
         import websockets
