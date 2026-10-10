@@ -12,11 +12,11 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional
 from datetime import datetime, timezone
-import discord
 import aiohttp
-from discord import Member
 
 from common.selfbot_headers import build_headers
+from selfclient import Client
+from selfclient.models import Member, Message
 
 
 class MessageUtils:
@@ -30,11 +30,11 @@ class MessageUtils:
 
     _MENTION_RE = re.compile(r"<@!?(\d+)>")
 
-    def __init__(self, bot: discord.Client):
+    def __init__(self, bot: Client):
         self.bot = bot
 
     async def build_mention_map(
-        self, message: discord.Message, embed_dicts: List[dict]
+        self, message: Message, embed_dicts: List[dict]
     ) -> Dict[str, str]:
         ids: set[str] = set()
 
@@ -67,7 +67,7 @@ class MessageUtils:
                 continue
             try:
                 if g:
-                    mem = await g.fetch_member(uid)
+                    mem = await self.bot.fetch_member(g, uid)
                     id_to_name[sid] = f"@{mem.display_name or mem.name}"
                     continue
             except Exception:
@@ -82,7 +82,7 @@ class MessageUtils:
     def humanize_user_mentions(
         self,
         content: str,
-        message: discord.Message,
+        message: Message,
         id_to_name_override: Optional[Dict[str, str]] = None,
     ) -> str:
         if not content:
@@ -108,7 +108,7 @@ class MessageUtils:
         return self._MENTION_RE.sub(repl, content)
 
     def sanitize_inline(
-        self, s: Optional[str], message: Optional[discord.Message] = None, id_map=None
+        self, s: Optional[str], message: Optional[Message] = None, id_map=None
     ):
         if not s:
             return s
@@ -121,7 +121,7 @@ class MessageUtils:
     def sanitize_embed_dict(
         self,
         d: dict,
-        message: discord.Message,
+        message: Message,
         id_map: Optional[Dict[str, str]] = None,
     ) -> dict:
         e = dict(d)
@@ -204,7 +204,7 @@ class MessageUtils:
             )
         return out
 
-    def extract_public_message_attrs(self, message: discord.Message) -> dict:
+    def extract_public_message_attrs(self, message: Message) -> dict:
         attrs = {}
         for name in dir(message):
             if name.startswith("_"):
@@ -218,7 +218,7 @@ class MessageUtils:
             attrs[name] = value
         return attrs
 
-    def serialize(self, message: discord.Message) -> dict:
+    def serialize(self, message: Message) -> dict:
         """Convert a Discord message into a serializable dict for dm export."""
         data = {
             "id": str(message.id),
@@ -265,7 +265,7 @@ class MessageUtils:
 
         return data
 
-    def _build_role_mentions_payload(self, src_msg: discord.Message) -> list[dict]:
+    def _build_role_mentions_payload(self, src_msg: Message) -> list[dict]:
         roles = getattr(src_msg, "role_mentions", None) or []
         out: list[dict] = []
         for r in roles:
@@ -277,7 +277,7 @@ class MessageUtils:
         return out
 
     @staticmethod
-    def author_role_ids(src_msg: discord.Message) -> list[int]:
+    def author_role_ids(src_msg: Message) -> list[int]:
         """The host author's own role ids (excluding @everyone).
 
         Used by the server's sticky-author identity feature to mirror the
@@ -548,7 +548,7 @@ async def _resolve_forward(bot, wrapper_msg, max_depth: int = 4):
 
         next_msg = None
         try:
-            next_msg = await ch.fetch_message(int(ref.message_id))
+            next_msg = await bot.fetch_message(ch, int(ref.message_id))
         except Exception:
             next_msg = None
 
