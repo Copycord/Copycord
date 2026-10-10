@@ -68,6 +68,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from common.config import CURRENT_VERSION
 from common.db import DBManager
+from common import inprocess
 from common.backup_scheduler import BackupConfig, DailySQLiteBackupScheduler
 from common.common_helpers import (
     discord_urls_from_config,
@@ -1484,6 +1485,10 @@ async def _ws_cmd(url: str, payload: dict, timeout: float = 0.7) -> dict:
     with _Timer(f"_ws_cmd {url}") as t:
         try:
             async with asyncio.timeout(timeout):
+                # Single-process mode: role agents answer in-process.
+                res = await inprocess.admin_request(url, payload, timeout)
+                if res is not None:
+                    return res
                 async with websockets.connect(
                     url,
                     open_timeout=timeout,
@@ -2125,6 +2130,32 @@ async def _start_log_pruner():
 @_on_startup
 async def _start_watchdog():
     hub.start_watchdog()
+
+
+async def _inprocess_bus_event(ev: dict) -> None:
+    """In-process twin of the /bus websocket handler."""
+    if not isinstance(ev, dict):
+        ev = {"kind": "log", "role": "unknown", "payload": {"raw": _safe(ev)}}
+    await hub.publish(
+        ev.get("kind") or "log", ev.get("role") or "unknown", ev.get("payload") or {}
+    )
+
+
+@_on_startup
+async def _register_inprocess_bus():
+    # Single-process mode: AdminBus publish/subscribe reach the hub directly.
+    reg = inprocess.active()
+    if reg is not None:
+        reg.register(inprocess.BUS_PATH, _inprocess_bus_event)
+        reg.register_feed(hub.add_ui, hub.remove_ui)
+
+
+@_on_shutdown
+async def _unregister_inprocess_bus():
+    reg = inprocess.active()
+    if reg is not None:
+        reg.unregister(inprocess.BUS_PATH)
+        reg.unregister_feed()
 
 
 @_on_startup

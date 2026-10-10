@@ -26,6 +26,8 @@ from websockets.exceptions import (
 )
 from websockets.server import WebSocketServerProtocol
 
+from common import inprocess
+
 logger = logging.getLogger(__name__)
 
 MessageHandler = Callable[[dict], Awaitable[None]]
@@ -90,7 +92,12 @@ class WebsocketManager:
         """
         Spins up a websockets.server using `handler` for each incoming JSON message.
         Runs until cancelled by the event loop.
+        In single-process mode the handler is registered in-process instead.
         """
+        reg = inprocess.active()
+        if reg is not None:
+            await self._serve_inprocess(reg, handler)
+            return
         server = await websockets.serve(
             lambda ws: self._serve_loop(ws, ws.path, handler),
             self.listen_host,
@@ -107,6 +114,20 @@ class WebsocketManager:
             server.close()
             await server.wait_closed()
             self.logger.debug("WS server closed.")
+
+    async def _serve_inprocess(
+        self,
+        reg: "inprocess.Registry",
+        handler: Callable[[dict], Awaitable[dict | None]],
+    ) -> None:
+        key = ("port", int(self.listen_port))
+        ep = reg.register(key, handler)
+        self.logger.debug("WS in-process endpoint registered on port %s", self.listen_port)
+        try:
+            await asyncio.Future()
+        finally:
+            reg.unregister(key, ep)
+            self.logger.debug("WS in-process endpoint closed.")
 
     async def _serve_loop(
         self,
@@ -278,6 +299,13 @@ class WebsocketManager:
             if send_timeout is None or send_timeout > 0.25:
                 send_timeout = 0.25
 
+        reg = inprocess.active()
+        if reg is not None:
+            await self._send_inprocess(
+                reg, payload, rid, ptype, max_attempts, base_backoff, backoff_cap, jitter
+            )
+            return
+
         for attempt in range(1, max_attempts + 1):
             try:
                 # Only announce retries. The first attempt is the boring case
@@ -353,6 +381,47 @@ class WebsocketManager:
 
         self.logger.info("[WS] send give-up rid=%s type=%s", rid, ptype)
 
+    async def _send_inprocess(
+        self,
+        reg: "inprocess.Registry",
+        payload: dict,
+        rid: str,
+        ptype: str,
+        max_attempts: int,
+        base_backoff: float,
+        backoff_cap: float,
+        jitter: float,
+    ) -> None:
+        """send() over the in-process registry: schedule the handler, don't wait for it."""
+        for attempt in range(1, max_attempts + 1):
+            try:
+                reg.dispatch(self.send_url, payload, self.logger)
+                return
+            except inprocess.EndpointUnavailable as e:
+                lvl = (
+                    self.logger.info
+                    if (self._shutting_down or attempt >= max_attempts)
+                    else self.logger.warning
+                )
+                lvl(
+                    "[WS] send error attempt %d/%d rid=%s type=%s: %s",
+                    attempt,
+                    max_attempts,
+                    rid,
+                    ptype,
+                    e,
+                )
+                if self._shutting_down or attempt >= max_attempts:
+                    break
+                await self._sleep_backoff(attempt, base_backoff, backoff_cap, jitter)
+            except Exception as e:
+                self.logger.error(
+                    "[⛔] WS send unexpected failure rid=%s type=%s: %s", rid, ptype, e
+                )
+                break
+
+        self.logger.info("[WS] send give-up rid=%s type=%s", rid, ptype)
+
     async def request(
         self,
         payload: dict,
@@ -389,6 +458,12 @@ class WebsocketManager:
             timeout,
             max_attempts,
         )
+
+        reg = inprocess.active()
+        if reg is not None:
+            return await self._request_inprocess(
+                reg, payload, rid, ptype, timeout, max_attempts, base_backoff, backoff_cap, jitter
+            )
 
         for attempt in range(1, max_attempts + 1):
             try:
@@ -485,6 +560,76 @@ class WebsocketManager:
 
         return None
 
+    async def _request_inprocess(
+        self,
+        reg: "inprocess.Registry",
+        payload: dict,
+        rid: str,
+        ptype: str,
+        timeout: float | None,
+        max_attempts: int,
+        base_backoff: float,
+        backoff_cap: float,
+        jitter: float,
+    ) -> dict | None:
+        """request() over the in-process registry, same retries and return values."""
+        for attempt in range(1, max_attempts + 1):
+            try:
+                t1 = time.monotonic()
+                data = await reg.request(
+                    self.send_url, payload, timeout=timeout, logger=self.logger
+                )
+                self.logger.debug(
+                    "[ws] in-process request type=%s rid=%s %.1fms",
+                    ptype,
+                    rid,
+                    (time.monotonic() - t1) * 1000,
+                )
+                drid = (data or {}).get("rid") if isinstance(data, dict) else None
+                if drid and drid != rid:
+                    self.logger.info(
+                        "WS request rid mismatch sent=%s got=%s type=%s",
+                        rid,
+                        drid,
+                        ptype,
+                    )
+                return data
+
+            except asyncio.CancelledError:
+                self.logger.info(
+                    "WS request cancelled (shutdown) rid=%s type=%s", rid, ptype
+                )
+                return None
+
+            except (asyncio.TimeoutError, inprocess.EndpointUnavailable) as e:
+                lvl = (
+                    self.logger.info
+                    if (self._shutting_down or attempt >= max_attempts)
+                    else self.logger.warning
+                )
+                lvl(
+                    "[WS] request error (attempt %d/%d) rid=%s type=%s: %s",
+                    attempt,
+                    max_attempts,
+                    rid,
+                    ptype,
+                    str(e) or e.__class__.__name__,
+                )
+                if self._shutting_down or attempt >= max_attempts:
+                    return None
+                await self._sleep_backoff(attempt, base_backoff, backoff_cap, jitter)
+
+            except Exception as e:
+                self.logger.error(
+                    "[⛔] WS request unexpected failure rid=%s type=%s: %s",
+                    rid,
+                    ptype,
+                    e,
+                )
+                break
+
+        return None
+
 
 class AdminBus:
     """
@@ -527,7 +672,12 @@ class AdminBus:
     async def subscribe(self, admin_ws_url: str, handler: MessageHandler):
         """
         Connect to admin /ws/out and invoke `handler(event_dict)` per JSON event.
+        In single-process mode the admin's hub feeds this loop directly.
         """
+        reg = inprocess.active()
+        if reg is not None:
+            await self._subscribe_inprocess(reg, handler)
+            return
 
         base = (admin_ws_url or "").rstrip("/")
         if base.endswith("/bus"):
@@ -571,3 +721,74 @@ class AdminBus:
             except Exception as e:
                 self.logger.exception("AdminBus subscribe unexpected error: %s", e)
                 await asyncio.sleep(1.0)
+
+    async def _dispatch_event(self, raw: str, handler: MessageHandler) -> None:
+        try:
+            ev = json.loads(raw)
+        except Exception:
+            return
+        if isinstance(ev, dict) and "kind" in ev and "role" in ev:
+            try:
+                await handler(ev)
+            except Exception:
+                self.logger.exception(
+                    "AdminBus handler failed kind=%s role=%s",
+                    ev.get("kind"),
+                    ev.get("role"),
+                )
+
+    async def _subscribe_inprocess(
+        self, reg: "inprocess.Registry", handler: MessageHandler
+    ) -> None:
+        """
+        Attach a LoopSink to the admin hub (on the admin's loop) and drain it
+        on ours. Reattaches with backoff if the admin is not up yet or drops
+        the sink, as the socket version reconnects.
+        """
+        loop = asyncio.get_running_loop()
+        attempt = 0
+        while True:
+            feed = reg.feed()
+            sink = None
+            try:
+                if feed is None:
+                    raise inprocess.EndpointUnavailable("admin bus not registered")
+                queue: asyncio.Queue = asyncio.Queue()
+                sink = inprocess.LoopSink(loop, queue)
+                self.logger.debug("AdminBus subscribe → in-process")
+                await asyncio.wrap_future(
+                    asyncio.run_coroutine_threadsafe(feed.attach(sink), feed.loop)
+                )
+                attempt = 0
+                while True:
+                    try:
+                        raw = await asyncio.wait_for(queue.get(), 1.0)
+                    except asyncio.TimeoutError:
+                        # The hub closes sinks on admin shutdown or a failed send.
+                        if sink.closed or reg.feed() is not feed:
+                            raise inprocess.EndpointUnavailable("admin bus went away")
+                        continue
+                    await self._dispatch_event(raw, handler)
+            except asyncio.CancelledError:
+                self.logger.debug("AdminBus subscribe cancelled/closed")
+                return
+            except (inprocess.EndpointUnavailable, RuntimeError) as e:
+                attempt += 1
+                delay = min(8.0, 0.5 * (2 ** (attempt - 1))) * (
+                    1 + random.random() * 0.2
+                )
+                self.logger.warning(
+                    "AdminBus subscribe error: %s (retry in %.2fs)", e, delay
+                )
+                await asyncio.sleep(delay)
+            except Exception as e:
+                self.logger.exception("AdminBus subscribe unexpected error: %s", e)
+                await asyncio.sleep(1.0)
+            finally:
+                if sink is not None:
+                    sink.closed = True
+                    if feed is not None:
+                        with contextlib.suppress(RuntimeError):
+                            asyncio.run_coroutine_threadsafe(
+                                feed.detach(sink), feed.loop
+                            )

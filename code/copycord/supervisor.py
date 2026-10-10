@@ -474,12 +474,17 @@ def build_supervisor(
     control_host: Optional[str] = None,
     control_ports: Optional[Dict[str, int]] = None,
     backoff: Optional[Backoff] = None,
+    inprocess_transport: Optional[bool] = None,
 ) -> Supervisor:
     """
     role=None: all three roles in this process; the admin is autostarted and
     drives server/client through loopback control ports, as it does in split
     mode. role="admin"|"server"|"client": just that role, the split-mode
     equivalent of one container (server/client wait for the admin's start).
+
+    In all-roles mode WebsocketManager/AdminBus switch to the in-process
+    transport (common.inprocess); split mode keeps real sockets.
+    inprocess_transport overrides that (tests use fake factories).
 
     factories/control_* overrides exist for tests.
     """
@@ -489,6 +494,12 @@ def build_supervisor(
     names = [role] if split else list(ROLES)
 
     real = factories is None
+    if inprocess_transport is None:
+        inprocess_transport = real and not split
+    if inprocess_transport:
+        from common import inprocess
+
+        inprocess.enable()
     if real:
         factories = {}
         if "admin" in names:
