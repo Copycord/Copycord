@@ -20,7 +20,6 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence
 
 import aiohttp
-import discord
 import re
 import html
 from client.message_utils import _resolve_forward, _resolve_forward_via_snapshot
@@ -28,6 +27,7 @@ from common.common_helpers import (
     discord_urls_from_config,
     is_discord_webhook_url,
 )
+from selfclient.models import Member, Message, User
 
 log = logging.getLogger(__name__)
 
@@ -643,7 +643,7 @@ class ForwardingManager:
     async def handle_new_message(
         self,
         *,
-        discord_message: discord.Message,
+        discord_message: Message,
         attrs_override: Optional[dict] = None,
         bot: Any = None,
     ) -> None:
@@ -655,7 +655,7 @@ class ForwardingManager:
 
     async def handle_message(
         self,
-        message: discord.Message,
+        message: Message,
         *,
         attrs_override: Optional[dict] = None,
         bot: Any = None,
@@ -681,7 +681,7 @@ class ForwardingManager:
             if rule.enabled and rule.filters.apply(attrs):
                 await self._dispatch_forwarding(rule, attrs)
 
-    def _looks_like_forward_wrapper(self, message: discord.Message) -> bool:
+    def _looks_like_forward_wrapper(self, message: Message) -> bool:
         raw = (getattr(message, "content", "") or "").strip()
         sys = (getattr(message, "system_content", "") or "").strip()
         if raw or sys:
@@ -705,8 +705,8 @@ class ForwardingManager:
         return bool(getattr(message, "reference", None) or (forwarded_flag_val & 16384))
 
     async def _maybe_resolve_forward(
-        self, bot: Any, wrapper_msg: discord.Message
-    ) -> Optional[discord.Message]:
+        self, bot: Any, wrapper_msg: Message
+    ) -> Optional[Message]:
         if bot is None or not self._looks_like_forward_wrapper(wrapper_msg):
             return wrapper_msg
 
@@ -823,7 +823,7 @@ class ForwardingManager:
             filters=filters,
         )
 
-    def _get_message_attributes(self, message: discord.Message) -> dict:
+    def _get_message_attributes(self, message: Message) -> dict:
         author = message.author
         guild = message.guild
 
@@ -840,7 +840,7 @@ class ForwardingManager:
         role_ids: Sequence[int] = []
         if (
             guild
-            and isinstance(author, (discord.Member, discord.User))
+            and isinstance(author, (Member, User))
             and hasattr(author, "roles")
         ):
             try:
