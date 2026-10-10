@@ -244,7 +244,7 @@ class ControlService:
             return self.stop()
         return {"ok": False, "error": "unknown-cmd"}
 
-    async def ws_handler(self, ws, path):
+    async def ws_handler(self, ws):
         """
         Accept JSON messages like:
           {"cmd": "status" | "start" | "stop"}

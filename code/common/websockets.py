@@ -92,7 +92,7 @@ class WebsocketManager:
         Runs until cancelled by the event loop.
         """
         server = await websockets.serve(
-            lambda ws, path: self._serve_loop(ws, path, handler),
+            lambda ws: self._serve_loop(ws, ws.path, handler),
             self.listen_host,
             self.listen_port,
             max_size=None,

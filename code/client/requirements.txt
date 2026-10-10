@@ -1,5 +1,5 @@
 discord.py-self==2.1.0
-websockets==11.0.3
+websockets==13.1
 PyYAML==6.0.2
 aiohttp>=3.9,<4
 tzdata==2025.2
