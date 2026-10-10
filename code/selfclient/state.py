@@ -59,6 +59,9 @@ class ConnectionState:
         self.max_messages: Optional[int] = max_messages
         self.user: Optional[User] = None
         self.session_id: Optional[str] = None
+        #: The Client's HTTPClient, for code that reaches REST through a
+        #: model's ``_state`` the way it reaches ``guild._state.http`` today.
+        self.http: Any = None
         self._guilds: Dict[int, Guild] = {}
         self._private_channels: Dict[int, DMChannel] = {}
         self._users: Dict[int, User] = {}
