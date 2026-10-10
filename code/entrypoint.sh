@@ -2,7 +2,12 @@
 set -euo pipefail
 export PYTHONPATH=${PYTHONPATH:-/app}
 
-case "${ROLE:-admin}" in
+case "${ROLE:-all}" in
+  all)
+    # Admin, server and client in one process (copycord/supervisor.py).
+    exec /opt/venvs/copycord/bin/python -u -m copycord run
+    ;;
+
   admin)
     exec /opt/venvs/admin/bin/uvicorn admin.app:app \
       --host 0.0.0.0 \
