@@ -205,12 +205,11 @@ class Registry:
         ep = self._live(key)
         if ep is None:
             raise EndpointUnavailable(f"no in-process endpoint for {url}")
-        raw = _dumps(payload)
+        coro = serve_one(ep.handler, _dumps(payload), logger)
         try:
-            return asyncio.run_coroutine_threadsafe(
-                serve_one(ep.handler, raw, logger), ep.loop
-            )
+            return asyncio.run_coroutine_threadsafe(coro, ep.loop)
         except RuntimeError as e:
+            coro.close()
             self.unregister(key, ep)
             raise EndpointUnavailable(f"in-process endpoint for {url} is gone: {e}")
 

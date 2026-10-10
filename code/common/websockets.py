@@ -756,9 +756,13 @@ class AdminBus:
                 queue: asyncio.Queue = asyncio.Queue()
                 sink = inprocess.LoopSink(loop, queue)
                 self.logger.debug("AdminBus subscribe → in-process")
-                await asyncio.wrap_future(
-                    asyncio.run_coroutine_threadsafe(feed.attach(sink), feed.loop)
-                )
+                attach = feed.attach(sink)
+                try:
+                    cfut = asyncio.run_coroutine_threadsafe(attach, feed.loop)
+                except RuntimeError:
+                    attach.close()
+                    raise
+                await asyncio.wrap_future(cfut)
                 attempt = 0
                 while True:
                     try:
@@ -787,8 +791,9 @@ class AdminBus:
             finally:
                 if sink is not None:
                     sink.closed = True
-                    if feed is not None:
-                        with contextlib.suppress(RuntimeError):
-                            asyncio.run_coroutine_threadsafe(
-                                feed.detach(sink), feed.loop
-                            )
+                    if feed is not None and not feed.loop.is_closed():
+                        detach = feed.detach(sink)
+                        try:
+                            asyncio.run_coroutine_threadsafe(detach, feed.loop)
+                        except RuntimeError:
+                            detach.close()
