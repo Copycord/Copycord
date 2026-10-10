@@ -337,6 +337,21 @@ class Client:
         if self.gateway is not None:
             self.gateway.proxy = self.proxy
 
+    async def drop_socket(self, *, code: int = 4000) -> bool:
+        """Close the live gateway socket with ``code`` but keep the client running.
+
+        A non-1000 code leaves the session resumable, so the gateway's own
+        reconnect loop dials again (reading ``proxy`` afresh) and RESUMEs.
+        This is how code/client moves a live connection onto another proxy;
+        ``close()`` would stop the gateway for good. Returns False when no
+        socket is open.
+        """
+        ws = getattr(self.gateway, "_ws", None)
+        if ws is None:
+            return False
+        await ws.close(code=code)
+        return True
+
     async def change_presence(
         self,
         *,

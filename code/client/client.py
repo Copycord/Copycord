@@ -9,23 +9,32 @@
 
 
 import asyncio
-import base64
 import contextlib
 import json
 import re
 import signal
 import time
-import uuid
 from datetime import datetime, timezone
 import logging
 from typing import Optional, Any
-import discord
-from discord import ChannelType, ForumChannel, MessageType
 import os
-from discord.ext import commands
 from pathlib import Path
 from dotenv import load_dotenv
-from discord.errors import ConnectionClosed, LoginFailure
+from selfclient import Client, fingerprint
+from selfclient.enums import ChannelType, MessageType
+from selfclient.errors import ConnectionClosed, Forbidden, LoginFailure
+from selfclient.models import (
+    Emoji,
+    ForumChannel,
+    Guild,
+    GuildChannel,
+    Member,
+    Message,
+    PartialEmoji,
+    Role,
+    Thread,
+)
+from selfclient.events import RawMessageDeleteEvent, RawMessageUpdateEvent
 from common.config import Config, CURRENT_VERSION
 from common.selfbot_headers import refresh_build_info
 from common.db import DBManager
@@ -44,12 +53,6 @@ from client.export_runners import (
 )
 from client.forwarding import ForwardingManager
 from client.proxy_rotator import ProxyRotator, _mask_proxy_url
-
-try:
-
-    from discord.client import _loop as _DISCORD_LOOP_SENTINEL
-except Exception:
-    _DISCORD_LOOP_SENTINEL = None
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -82,14 +85,14 @@ logging.getLogger("websockets").setLevel(logging.WARNING)
 for lib in ("asyncio", "tzlocal"):
     logging.getLogger(lib).setLevel(logging.WARNING)
 for lib in (
-    "discord",
-    "discord.client",
-    "discord.gateway",
-    "discord.state",
-    "discord.http",
+    "selfclient",
+    "selfclient.client",
+    "selfclient.gateway",
+    "selfclient.state",
+    "selfclient.http",
 ):
     logging.getLogger(lib).setLevel(logging.WARNING)
-for lib in ("discord.state", "discord.client"):
+for lib in ("selfclient.state", "selfclient.client"):
     logging.getLogger(lib).setLevel(logging.ERROR)
 
 def _is_proxy_exception(exc: BaseException | None) -> bool:
@@ -135,35 +138,6 @@ def _is_proxy_exception(exc: BaseException | None) -> bool:
         current = current.__cause__ or current.__context__
 
     return False
-
-
-class _HandledReconnectFilter(logging.Filter):
-    """Drop discord.py's retry traceback when we are handling the failure.
-
-    ``Client.connect`` logs every failed dial with ``_log.exception``, which
-    means ERROR level and a full traceback, before retrying. Against a lossy
-    proxy pool that is a forty-line traceback per dead proxy for a condition
-    we already recover from, and it buries the one line that matters -- our
-    own rotation message.
-
-    Narrow on purpose: only this message, only from this logger, and only when
-    the chained cause is a proxy failure. A reconnect for any other reason,
-    and every other record, still comes through with its traceback intact. At
-    DEBUG nothing is dropped, since that is when you want the detail.
-    """
-
-    _MESSAGE = "Attempting a reconnect in"
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        if LEVEL <= logging.DEBUG:
-            return True
-        if not str(record.getMessage()).startswith(self._MESSAGE):
-            return True
-        exc = (record.exc_info or (None, None, None))[1]
-        return not _is_proxy_exception(exc)
-
-
-logging.getLogger("discord.client").addFilter(_HandledReconnectFilter())
 
 
 logger = logging.getLogger("client")
@@ -214,9 +188,7 @@ class ClientListener:
         )
         self._gateway_connected: Optional[asyncio.Event] = None
         self._build_pinned = False
-        self.bot = commands.Bot(
-            command_prefix="!", self_bot=True, proxy=self._initial_proxy
-        )
+        self.bot = self._new_bot(self._initial_proxy)
         self.proxy_rotator.on_rotate = self._on_proxy_rotate
         self.proxy_rotator.on_all_dead = self._on_all_proxies_dead
         self.msg = MessageUtils(self.bot)
@@ -229,29 +201,6 @@ class ClientListener:
         self._dm_export_lock = asyncio.Lock()
         self._dm_export_task: asyncio.Task | None = None
         self._dm_export_running: bool = False
-        self.bot.event(self.on_ready)
-        self.bot.event(self.on_connect)
-        self.bot.event(self.on_disconnect)
-        self.bot.event(self.on_resumed)
-        self.bot.event(self.on_message)
-        self.bot.event(self.on_message_edit)
-        self.bot.event(self.on_raw_message_edit)
-        self.bot.event(self.on_message_delete)
-        self.bot.event(self.on_raw_message_delete)
-        self.bot.event(self.on_guild_channel_create)
-        self.bot.event(self.on_guild_channel_delete)
-        self.bot.event(self.on_guild_channel_update)
-        self.bot.event(self.on_thread_delete)
-        self.bot.event(self.on_thread_update)
-        self.bot.event(self.on_member_join)
-        self.bot.event(self.on_guild_role_create)
-        self.bot.event(self.on_guild_role_delete)
-        self.bot.event(self.on_guild_role_update)
-        self.bot.event(self.on_guild_join)
-        self.bot.event(self.on_guild_remove)
-        self.bot.event(self.on_guild_update)
-        self.bot.event(self.on_guild_emojis_update)
-        self.bot.event(self.on_guild_stickers_update)
         self.bus = AdminBus(
             role="client", logger=logger, admin_ws_url=self.config.ADMIN_WS_URL
         )
@@ -319,6 +268,52 @@ class ClientListener:
             except (NotImplementedError, RuntimeError):
                 break
 
+    #: Every gateway handler, registered on each Client by name.
+    EVENT_HANDLERS = (
+        "on_ready",
+        "on_connect",
+        "on_disconnect",
+        "on_resumed",
+        "on_message",
+        "on_message_edit",
+        "on_raw_message_edit",
+        "on_message_delete",
+        "on_raw_message_delete",
+        "on_guild_channel_create",
+        "on_guild_channel_delete",
+        "on_guild_channel_update",
+        "on_thread_delete",
+        "on_thread_update",
+        "on_member_join",
+        "on_guild_role_create",
+        "on_guild_role_delete",
+        "on_guild_role_update",
+        "on_guild_join",
+        "on_guild_remove",
+        "on_guild_update",
+        "on_guild_emojis_update",
+        "on_guild_stickers_update",
+    )
+
+    def _new_bot(self, proxy: Optional[str]) -> Client:
+        """A fresh selfclient Client with every handler registered.
+
+        The build is resolved and pinned by _resolve_client_build before each
+        start, so the gateway does not fetch it again.
+        """
+        bot = Client(proxy=proxy, refresh_build=False)
+        for name in self.EVENT_HANDLERS:
+            bot.event(getattr(self, name))
+        return bot
+
+    def _install_bot(self, bot: Client) -> None:
+        """Make ``bot`` the live client everywhere that holds a reference."""
+        self.bot = bot
+        for attr in ("msg", "sitemap", "ui_controller", "runner", "backfill"):
+            holder = getattr(self, attr, None)
+            if holder is not None and hasattr(holder, "bot"):
+                holder.bot = bot
+
     def _is_mapped_origin(self, guild_id: int | None) -> bool:
         try:
             return bool(guild_id and int(guild_id) in self._mapped_original_ids)
@@ -384,7 +379,7 @@ class ClientListener:
     def _on_proxy_rotate(self, proxy_url: str) -> None:
         """Called by the proxy rotator when the active proxy changes."""
         try:
-            self.bot.http.proxy = proxy_url
+            self.bot.set_proxy(proxy_url)
         except Exception:
             pass
 
@@ -767,7 +762,7 @@ class ClientListener:
         if not channel:
             try:
                 channel = await self.bot.fetch_channel(channel_id)
-            except discord.Forbidden:
+            except Forbidden:
                 channel = None
 
         guild = getattr(channel, "guild", None)
@@ -800,8 +795,8 @@ class ClientListener:
 
             readable = next((ch for ch in guild.text_channels if can_read(ch)), None)
             if not readable:
-                raise discord.Forbidden(
-                    None,
+                raise Forbidden(
+                    403,
                     {"message": "No accessible text channel found in the host guild."},
                 )
 
@@ -869,7 +864,7 @@ class ClientListener:
             logger.warning("[🔀] Proxy %s dropped connection, switching", safe)
             new_proxy = self.proxy_rotator.rotate_now()
             if new_proxy:
-                self.bot.http.proxy = new_proxy
+                self.bot.set_proxy(new_proxy)
             else:
                 logger.warning("[🔀] No healthy proxies available")
 
@@ -973,13 +968,13 @@ class ClientListener:
 
         logger.debug("[⚙️] Block list now: %s", self.blocked_keywords_map)
 
-    def should_ignore(self, message: discord.Message) -> bool:
+    def should_ignore(self, message: Message) -> bool:
         """
         Determines whether a given Discord message should be ignored based on various conditions.
         """
         ch = message.channel
         try:
-            if isinstance(ch, discord.Thread):
+            if isinstance(ch, Thread):
                 if not self.sitemap.in_scope_thread(ch):
                     return True
             else:
@@ -998,7 +993,7 @@ class ClientListener:
         if not g or not self._is_mapped_origin(g.id):
             return True
 
-    async def maybe_send_announcement(self, message: discord.Message) -> bool:
+    async def maybe_send_announcement(self, message: Message) -> bool:
         content = message.content
         lower = content.lower()
         author = message.author
@@ -1056,7 +1051,7 @@ class ClientListener:
 
         return False
 
-    async def on_message(self, message: discord.Message):
+    async def on_message(self, message: Message):
         """
         Handles incoming Discord messages and processes them for forwarding.
         """
@@ -1151,30 +1146,11 @@ class ClientListener:
         safe_content = self.msg.sanitize_inline(content, src_msg, mention_map)
         safe_content = self.msg.sanitize_inline(content, src_msg, mention_map)
 
-        components: list[dict] = []
-        for comp in getattr(src_msg, "components", []):
-            try:
-                components.append(comp.to_dict())
-            except NotImplementedError:
-                row: dict = {
-                    "type": getattr(comp, "type", None),
-                    "components": [],
-                }
-                for child in getattr(comp, "children", []):
-                    child_data: dict = {}
-                    for attr in ("custom_id", "label", "style", "url", "disabled"):
-                        if hasattr(child, attr):
-                            child_data[attr] = getattr(child, attr)
-                    if hasattr(child, "emoji") and child.emoji:
-                        emoji = child.emoji
-                        emoji_data: dict = {}
-                        if hasattr(emoji, "name"):
-                            emoji_data["name"] = emoji.name
-                        if getattr(emoji, "id", None):
-                            emoji_data["id"] = emoji.id
-                        child_data["emoji"] = emoji_data
-                    row["components"].append(child_data)
-                components.append(row)
+        components: list[dict] = [
+            dict(comp)
+            for comp in getattr(src_msg, "components", [])
+            if isinstance(comp, dict)
+        ]
 
         target_chan = message.channel
         target_guild = message.guild
@@ -1253,7 +1229,7 @@ class ClientListener:
                     "thread_name": getattr(target_chan, "name", str(target_chan.id)),
                 }
 
-                if isinstance(parent, discord.ForumChannel):
+                if isinstance(parent, ForumChannel):
                     try:
                         tag_names = [
                             t.name for t in (target_chan.applied_tags or []) if t.name
@@ -1279,7 +1255,7 @@ class ClientListener:
         )
 
     def _is_meaningful_edit(
-        self, before: discord.Message, after: discord.Message
+        self, before: Message, after: Message
     ) -> bool:
         if (before.content or "") != (after.content or ""):
             return True
@@ -1298,7 +1274,7 @@ class ClientListener:
             pass
         return False
 
-    async def on_message_edit(self, before: discord.Message, after: discord.Message):
+    async def on_message_edit(self, before: Message, after: Message):
         """
         When an upstream message is edited, forward the new content/embeds/components.
         """
@@ -1355,27 +1331,9 @@ class ClientListener:
         ]
         content = self.msg.sanitize_inline(content, after, mention_map)
 
-        components: list[dict] = []
-        for comp in after.components:
-            try:
-                components.append(comp.to_dict())
-            except NotImplementedError:
-                row: dict = {"type": getattr(comp, "type", None), "components": []}
-                for child in getattr(comp, "children", []):
-                    child_data: dict = {}
-                    for attr in ("custom_id", "label", "style", "url", "disabled"):
-                        if hasattr(child, attr):
-                            child_data[attr] = getattr(child, attr)
-                    if hasattr(child, "emoji") and child.emoji:
-                        emoji = child.emoji
-                        emoji_data: dict = {}
-                        if hasattr(emoji, "name"):
-                            emoji_data["name"] = emoji.name
-                        if getattr(emoji, "id", None):
-                            emoji_data["id"] = emoji.id
-                        child_data["emoji"] = emoji_data
-                    row["components"].append(child_data)
-                components.append(row)
+        components: list[dict] = [
+            dict(comp) for comp in after.components if isinstance(comp, dict)
+        ]
 
         role_mentions = self.msg._build_role_mentions_payload(after)
 
@@ -1462,7 +1420,7 @@ class ClientListener:
             author,
         )
 
-    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent):
+    async def on_raw_message_edit(self, payload: RawMessageUpdateEvent):
 
         g = getattr(payload, "guild", None)
 
@@ -1484,7 +1442,7 @@ class ClientListener:
             except Exception:
                 return
 
-        if isinstance(channel, discord.Thread):
+        if isinstance(channel, Thread):
             if not self.sitemap.in_scope_thread(channel):
                 return
         else:
@@ -1495,7 +1453,7 @@ class ClientListener:
 
         if getattr(self.config, "IGNORE_THREAD_LINK_EDITS", True):
 
-            if "thread" in data and not isinstance(channel, discord.Thread):
+            if "thread" in data and not isinstance(channel, Thread):
                 thread_info = data.get("thread") or {}
                 logger.debug(
                     "[edit] Ignoring raw thread-link edit for %s (thread_id=%s)",
@@ -1530,7 +1488,7 @@ class ClientListener:
 
         if msg is None:
             try:
-                msg = await channel.fetch_message(payload.message_id)
+                msg = await self.bot.fetch_message(channel, payload.message_id)
             except Exception:
                 msg = None
 
@@ -1579,8 +1537,8 @@ class ClientListener:
             role_mentions = self.msg._build_role_mentions_payload(msg)
 
         is_thread = getattr(channel, "type", None) in (
-            discord.ChannelType.public_thread,
-            discord.ChannelType.private_thread,
+            ChannelType.public_thread,
+            ChannelType.private_thread,
         )
 
         out = {
@@ -1660,7 +1618,7 @@ class ClientListener:
             out["data"]["channel_name"],
         )
 
-    async def on_message_delete(self, message: discord.Message):
+    async def on_message_delete(self, message: Message):
         """
         When an upstream message is deleted, tell the server to delete the cloned webhook message.
         """
@@ -1705,7 +1663,7 @@ class ClientListener:
             payload["data"]["channel_name"],
         )
 
-    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent):
+    async def on_raw_message_delete(self, payload: RawMessageDeleteEvent):
         """
         Handle deletes for messages that weren't cached.
         """
@@ -1730,7 +1688,7 @@ class ClientListener:
             except Exception:
                 return
 
-        if isinstance(channel, discord.Thread):
+        if isinstance(channel, Thread):
             if not self.sitemap.in_scope_thread(channel):
                 return
         else:
@@ -1787,7 +1745,7 @@ class ClientListener:
             payload_out["data"]["channel_name"],
         )
 
-    async def on_thread_delete(self, thread: discord.Thread):
+    async def on_thread_delete(self, thread: Thread):
         """
         Event handler that is triggered when a thread is deleted in a Discord server.
         """
@@ -1809,7 +1767,7 @@ class ClientListener:
         await self.ws.send(payload)
         logger.info("[📩] Forwarded thread %s delete from %s", thread.id, g.name)
 
-    async def on_thread_update(self, before: discord.Thread, after: discord.Thread):
+    async def on_thread_update(self, before: Thread, after: Thread):
         """
         Handles updates to a Discord thread, such as renaming.
         """
@@ -1844,7 +1802,7 @@ class ClientListener:
             )
             await self.ws.send(payload)
 
-        if isinstance(getattr(after, "parent", None), discord.ForumChannel):
+        if isinstance(getattr(after, "parent", None), ForumChannel):
             try:
                 before_names = sorted(
                     t.name for t in (before.applied_tags or []) if t.name
@@ -1875,7 +1833,7 @@ class ClientListener:
                 )
                 await self.ws.send(payload)
 
-    async def on_guild_channel_create(self, channel: discord.abc.GuildChannel):
+    async def on_guild_channel_create(self, channel: GuildChannel):
         """
         Event handler that is triggered when a new channel is created in a guild.
         """
@@ -1892,7 +1850,7 @@ class ClientListener:
             return
         self.schedule_sync(guild_id=g.id)
 
-    async def on_guild_channel_delete(self, channel: discord.abc.GuildChannel):
+    async def on_guild_channel_delete(self, channel: GuildChannel):
         """
         Event handler that is triggered when a guild channel is deleted.
         """
@@ -1974,7 +1932,7 @@ class ClientListener:
 
         voice_properties_changed = False
         try:
-            is_voice = isinstance(after, discord.VoiceChannel)
+            is_voice = getattr(after, "type", None) == ChannelType.voice
             if is_voice:
                 bitrate_before = getattr(before, "bitrate", 64000)
                 bitrate_after = getattr(after, "bitrate", 64000)
@@ -2090,7 +2048,7 @@ class ClientListener:
             def _norm_forum_emoji(val):
                 if val is None:
                     return (None, None, False)
-                if isinstance(val, (discord.Emoji, discord.PartialEmoji)):
+                if isinstance(val, (Emoji, PartialEmoji)):
                     eid = getattr(val, "id", None)
                     name = getattr(val, "name", None)
                     animated = bool(getattr(val, "animated", False))
@@ -2112,7 +2070,7 @@ class ClientListener:
                 forum_default_reaction_changed = False
 
             def _norm_tag_emoji_value(val):
-                if isinstance(val, (discord.Emoji, discord.PartialEmoji)):
+                if isinstance(val, (Emoji, PartialEmoji)):
                     if getattr(val, "id", None):
                         return f"custom:{val.id}"
                     return getattr(val, "name", "") or ""
@@ -2233,7 +2191,7 @@ class ClientListener:
                 before.id,
             )
 
-    async def on_guild_role_create(self, role: discord.Role):
+    async def on_guild_role_create(self, role: Role):
 
         g = getattr(role, "guild", None)
 
@@ -2243,7 +2201,7 @@ class ClientListener:
         logger.debug("[roles] create: %s (%d) → scheduling sitemap", role.name, role.id)
         self.schedule_sync(guild_id=g.id)
 
-    async def on_guild_role_delete(self, role: discord.Role):
+    async def on_guild_role_delete(self, role: Role):
         g = getattr(role, "guild", None)
 
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
@@ -2252,7 +2210,7 @@ class ClientListener:
         logger.debug("[roles] delete: %s (%d) → scheduling sitemap", role.name, role.id)
         self.schedule_sync(guild_id=g.id)
 
-    async def on_guild_role_update(self, before: discord.Role, after: discord.Role):
+    async def on_guild_role_update(self, before: Role, after: Role):
         g = getattr(before, "guild", None)
 
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
@@ -2268,7 +2226,7 @@ class ClientListener:
         )
         self.schedule_sync(guild_id=g.id)
 
-    async def on_guild_join(self, guild: discord.Guild):
+    async def on_guild_join(self, guild: Guild):
         try:
             row = self._guild_row_from_obj(guild)
             self.db.upsert_guild(**row)
@@ -2276,14 +2234,14 @@ class ClientListener:
         except Exception:
             logger.exception("[guilds] on_guild_join failed")
 
-    async def on_guild_remove(self, guild: discord.Guild):
+    async def on_guild_remove(self, guild: Guild):
         try:
             self.db.delete_guild(guild.id)
             logger.debug("[guilds] remove → delete %s", guild.id)
         except Exception:
             logger.exception("[guilds] on_guild_remove failed")
 
-    async def on_guild_update(self, before: discord.Guild, after: discord.Guild):
+    async def on_guild_update(self, before: Guild, after: Guild):
         """
         Fired when the host guild updates.
         """
@@ -2298,7 +2256,7 @@ class ClientListener:
         if not self._is_mapped_origin(getattr(after, "id", None)):
             return
 
-        def _asset_hash_from_attr(g: discord.Guild, attr: str) -> str | None:
+        def _asset_hash_from_attr(g: Guild, attr: str) -> str | None:
             try:
                 asset = getattr(g, attr, None)
             except Exception:
@@ -2363,7 +2321,7 @@ class ClientListener:
                 after.id,
             )
 
-    async def on_member_join(self, member: discord.Member):
+    async def on_member_join(self, member: Member):
         try:
             guild = member.guild
 
@@ -2407,7 +2365,7 @@ class ClientListener:
             return
         self.schedule_sync(guild_id=guild.id)
 
-    def _guild_row_from_obj(self, g: discord.Guild) -> dict:
+    def _guild_row_from_obj(self, g: Guild) -> dict:
         try:
             icon_url = str(g.icon.url) if getattr(g, "icon", None) else None
         except Exception:
@@ -2629,24 +2587,21 @@ class ClientListener:
     async def _switch_to_proxy(self, proxy_url: str) -> None:
         """Move the gateway onto ``proxy_url``.
 
-        Setting ``http.proxy`` alone is not enough: the live websocket was
-        dialled through the old proxy and stays there. Closing it with a
-        non-1000 code makes discord.py's own connect loop reconnect, and
-        ws_connect re-reads http.proxy when it does -- so the new route is
-        picked up without us having to drive the reconnect ourselves.
+        Setting the proxy alone is not enough: the live websocket was dialled
+        through the old proxy and stays there. Dropping it with a non-1000
+        code makes the selfclient gateway reconnect (and resume), and it reads
+        the proxy again when it dials -- so the new route is picked up without
+        us having to drive the reconnect ourselves.
         """
         self.proxy_rotator._current_proxy = proxy_url
         self.proxy_rotator._current_proxy_since = time.monotonic()
         try:
-            self.bot.http.proxy = proxy_url
+            self.bot.set_proxy(proxy_url)
         except Exception:
-            logger.debug("[⭐] could not set http.proxy", exc_info=True)
+            logger.debug("[⭐] could not set the proxy", exc_info=True)
 
-        ws = getattr(self.bot, "ws", None)
-        if ws is None:
-            return
         try:
-            await ws.close(code=4000)
+            await self.bot.drop_socket(code=4000)
         except Exception:
             logger.debug("[⭐] closing the socket to switch proxy failed", exc_info=True)
 
@@ -2716,7 +2671,7 @@ class ClientListener:
             if attempt < attempts and self.proxy_rotator.enabled:
                 nxt = self.proxy_rotator.rotate_now()
                 if nxt:
-                    self.bot.http.proxy = nxt
+                    self.bot.set_proxy(nxt)
                     logger.debug(
                         "[build] rotated to %s and retrying",
                         _mask_proxy_url(nxt),
@@ -2726,70 +2681,25 @@ class ClientListener:
 
         logger.warning(
             "[⚠️] Could not resolve the live Discord build after %d attempt(s); "
-            "the library will fall back to its hardcoded value",
+            "the built-in fingerprint build will be used",
             attempts,
         )
         return False
 
     def _apply_client_build(self, build: dict) -> None:
-        """Make discord.py-self use a build we resolved instead of fetching one."""
-        from discord.utils import Headers
+        """Pin the shared fingerprint to a build we resolved.
 
-        ua = build["browser_user_agent"]
-        major = int(build["browser_version"].split(".")[0])
-
-        props = {
-            "os": "Windows",
-            "browser": "Chrome",
-            "device": "",
-            "system_locale": "en-US",
-            "browser_user_agent": ua,
-            "browser_version": build["browser_version"],
-            "os_version": "10",
-            "referrer": "",
-            "referring_domain": "",
-            "referrer_current": "",
-            "referring_domain_current": "",
-            "release_channel": build["release_channel"],
-            "client_build_number": int(build["client_build_number"]),
-            "client_event_source": None,
-            "has_client_mods": False,
-            "client_launch_id": str(uuid.uuid4()),
-            "client_heartbeat_session_id": str(uuid.uuid4()),
-        }
-        encoded = base64.b64encode(
-            json.dumps(props, separators=(",", ":")).encode()
-        ).decode()
-
-        async def _pinned(cls, session, proxy=None, proxy_auth=None):
-
-            d = dict(props)
-            d["client_launch_id"] = str(uuid.uuid4())
-            d["client_heartbeat_session_id"] = str(uuid.uuid4())
-            return cls(
-                platform="Windows",
-                major_version=major,
-                super_properties=d,
-                encoded_super_properties=base64.b64encode(
-                    json.dumps(d, separators=(",", ":")).encode()
-                ).decode(),
-                extra_gateway_properties={
-                    "client_app_state": "unfocused",
-                    "is_fast_connect": False,
-                },
-            )
-
-        Headers.default = classmethod(_pinned)
-
-        self.bot.http.headers = Headers(
-            platform="Windows",
-            major_version=major,
-            super_properties=props,
-            encoded_super_properties=encoded,
-            extra_gateway_properties={
-                "client_app_state": "unfocused",
-                "is_fast_connect": False,
-            },
+        REST headers and the gateway IDENTIFY are both built from
+        selfclient.fingerprint, so this one call covers both, and the pin
+        holds across reconnects and fresh Clients for the life of the process.
+        """
+        fingerprint.set_build_info(
+            {
+                "release_channel": build.get("release_channel"),
+                "browser_user_agent": build.get("browser_user_agent"),
+                "browser_version": build.get("browser_version"),
+                "client_build_number": int(build["client_build_number"]),
+            }
         )
 
     async def _start_with_watchdog(self, token: str, timeout: int = 0) -> None:
@@ -2847,37 +2757,33 @@ class ClientListener:
         self._clear_bot_state()
 
     def _clear_bot_state(self) -> None:
-        """Reset a closed client so it can be started again."""
-        bot = self.bot
+        """Replace the spent client with a fresh one on the same proxy.
+
+        A selfclient Client is not restarted in place: the new one starts with
+        empty caches, no gateway and its own HTTP session, so nothing from the
+        failed attempt (token, socket, half-filled cache) carries over.
+        """
+        old = self.bot
+        self._install_bot(self._new_bot(getattr(old, "proxy", None)))
+        self._retire_bot(old)
+
+    def _retire_bot(self, bot: Client) -> None:
+        """Close a replaced client that a raised start() left open."""
         try:
-            if not hasattr(getattr(bot, "_ready", None), "clear"):
-                bot._ready = asyncio.Event()
-            bot.clear()
+            if bot.is_closed():
+                return
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(bot.close())
+            else:
+                loop.run_until_complete(bot.close())
         except Exception:
-            logger.debug("[gateway] clear() failed", exc_info=True)
-
-            try:
-                bot._closing_task = None
-            except Exception:
-                pass
-
-        if _DISCORD_LOOP_SENTINEL is not None:
-            try:
-                bot.loop = _DISCORD_LOOP_SENTINEL
-            except Exception:
-                logger.debug("[gateway] loop reset failed", exc_info=True)
-
-        try:
-            http = getattr(bot, "http", None)
-            if http is not None:
-                http._started = False
-        except Exception:
-            logger.debug("[gateway] http session reset failed", exc_info=True)
+            logger.debug("[gateway] closing the replaced client failed", exc_info=True)
 
     def _reset_bot_for_retry(self) -> None:
         """Make the bot startable again after a failed attempt."""
         try:
-            if self.bot.is_closed():
+            if self.bot.is_closed() or self.bot.token is not None:
                 self._clear_bot_state()
         except Exception:
             logger.debug("[gateway] reset before retry failed", exc_info=True)
@@ -3016,7 +2922,7 @@ class ClientListener:
             if not new_proxy:
                 break
             self._reset_bot_for_retry()
-            self.bot.http.proxy = new_proxy
+            self.bot.set_proxy(new_proxy)
             try:
                 loop.run_until_complete(self._start_with_watchdog(token))
                 return True
