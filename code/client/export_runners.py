@@ -604,7 +604,7 @@ class ExportMessagesRunner:
 
             json_file: Optional[str] = None
             try:
-                ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+                ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
                 gid_str = str(getattr(guild, "id", "unknown"))
                 subdir = os.path.join(self.out_root, gid_str, ts)
                 os.makedirs(subdir, exist_ok=True)
@@ -1185,7 +1185,7 @@ class DmHistoryExporter:
 
             if self.save_json:
                 try:
-                    ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+                    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
                     subdir = os.path.join(self.out_root, "dm", str(user_id), ts)
                     os.makedirs(subdir, exist_ok=True)
                     json_path = os.path.join(subdir, "messages.json")
@@ -2563,7 +2563,7 @@ class AssetExportRunner:
             base_dir = os.path.join(self.out_root, f"{safe_gname}_{gid}")
             os.makedirs(base_dir, exist_ok=True)
 
-            ts = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+            ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
             run_dir = os.path.join(base_dir, ts)
             os.makedirs(run_dir, exist_ok=True)
 

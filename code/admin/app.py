@@ -82,7 +82,7 @@ from admin.web_config import startup_links, shutdown_links
 from contextlib import suppress
 from time import perf_counter
 import sys as _sys, json as _json, contextvars
-from datetime import datetime
+from datetime import datetime, timezone
 import aiohttp
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -177,7 +177,7 @@ _backup_cfg = BackupConfig(
 async def _record_backup_stats(archive_path: Path):
     try:
         size = archive_path.stat().st_size if archive_path.exists() else 0
-        now_iso = datetime.utcnow().isoformat() + "Z"
+        now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         db.set_config("DB_LAST_BACKUP_AT", now_iso)
         db.set_config("DB_LAST_BACKUP_FILE", archive_path.name)
         db.set_config("DB_LAST_BACKUP_SIZE", str(size))
@@ -2483,7 +2483,7 @@ async def backup_restore(
         except Exception as e:
             return PlainTextResponse(f"restore failed: {e}", status_code=500)
 
-    db.set_config("DB_LAST_RESTORE_AT", datetime.utcnow().isoformat() + "Z")
+    db.set_config("DB_LAST_RESTORE_AT", datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z")
     return {"ok": True, "restored_from": arc.name}
 
 

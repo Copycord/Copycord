@@ -13,7 +13,7 @@ import os
 import sys as _sys
 import json as _json
 import contextvars
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 REDACT_KEYS = {"SERVER_TOKEN", "CLIENT_TOKEN"}
@@ -25,7 +25,7 @@ client_var = contextvars.ContextVar("client", default="-")
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
 def _redact_value(val):

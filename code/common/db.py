@@ -8,7 +8,7 @@
 # =============================================================================
 
 
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import sqlite3, threading
 import time
@@ -2741,7 +2741,7 @@ class DBManager:
         cloned_guild_id: int | None = None,
     ) -> str:
         run_id = run_id or uuid.uuid4().hex
-        now = datetime.utcnow().isoformat() + "Z"
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
 
         with self.lock, self.conn:
             self.conn.execute(
@@ -2771,7 +2771,7 @@ class DBManager:
         return run_id
 
     def backfill_set_clone(self, run_id: str, clone_channel_id: int | None):
-        now = datetime.utcnow().isoformat() + "Z"
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         self.conn.execute(
             "UPDATE backfill_runs SET clone_channel_id=?, updated_at=? WHERE run_id=?",
             (int(clone_channel_id) if clone_channel_id else None, now, run_id),
@@ -2787,7 +2787,7 @@ class DBManager:
         last_orig_message_id: str | None = None,
         last_orig_timestamp: str | None = None,
     ):
-        cols, vals = ["updated_at"], [datetime.utcnow().isoformat() + "Z"]
+        cols, vals = ["updated_at"], [datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"]
         if delivered is not None:
             cols += ["delivered"]
             vals += [int(delivered)]
@@ -2807,7 +2807,7 @@ class DBManager:
         self.conn.commit()
 
     def backfill_mark_done(self, run_id: str):
-        now = datetime.utcnow().isoformat() + "Z"
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         self.conn.execute(
             "UPDATE backfill_runs SET status='completed', updated_at=? WHERE run_id=?",
             (now, run_id),
@@ -2815,7 +2815,7 @@ class DBManager:
         self.conn.commit()
 
     def backfill_mark_failed(self, run_id: str, error: str | None):
-        now = datetime.utcnow().isoformat() + "Z"
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         self.conn.execute(
             "UPDATE backfill_runs SET status='failed', error=?, updated_at=? WHERE run_id=?",
             (error, now, run_id),
@@ -2823,7 +2823,7 @@ class DBManager:
         self.conn.commit()
 
     def backfill_abandon_running_on_boot(self):
-        now = datetime.utcnow().isoformat() + "Z"
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         self.conn.execute(
             "UPDATE backfill_runs SET status='aborted', updated_at=? WHERE status='running'",
             (now,),
@@ -2863,7 +2863,7 @@ class DBManager:
         return dict(zip(cols, row))
 
     def backfill_mark_aborted(self, run_id: str, reason: str | None = None) -> None:
-        now = datetime.utcnow().isoformat() + "Z"
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         self.conn.execute(
             "UPDATE backfill_runs SET status='cancelled', error=COALESCE(?, error), updated_at=? WHERE run_id=?",
             (reason, now, run_id),
@@ -2873,7 +2873,7 @@ class DBManager:
     def backfill_abort_running_for_channel(
         self, original_channel_id: int, reason: str | None = None
     ) -> int:
-        now = datetime.utcnow().isoformat() + "Z"
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         cur = self.conn.execute(
             "UPDATE backfill_runs SET status='cancelled', error=COALESCE(?, error), updated_at=? "
             "WHERE original_channel_id=? AND status='running'",
@@ -3569,7 +3569,7 @@ class DBManager:
         Abort any 'running' backfill_runs rows for this (source channel, target clone guild)
         combo only. We do NOT touch runs for other cloned_guild_id values.
         """
-        now = datetime.utcnow().isoformat() + "Z"
+        now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         cur = self.conn.execute(
             """
             UPDATE backfill_runs

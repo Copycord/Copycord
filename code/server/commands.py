@@ -367,7 +367,7 @@ class CloneCommands(commands.Cog):
         uptime_str = f"{hours}h {minutes}m {seconds}s"
         guild = ctx.guild
 
-        embed = discord.Embed(title="📡 Pong! (Server)", timestamp=datetime.utcnow())
+        embed = discord.Embed(title="📡 Pong! (Server)", timestamp=datetime.now(timezone.utc))
         embed.add_field(name="Latency", value=f"{latency_ms:.2f} ms", inline=True)
         embed.add_field(name="Server", value=guild.name, inline=True)
         embed.add_field(name="Members", value=str(guild.member_count), inline=True)
@@ -591,7 +591,7 @@ class CloneCommands(commands.Cog):
         minutes, sec = divmod(rem, 60)
         uptime_str = f"{hours}h {minutes}m {sec}s"
 
-        embed = discord.Embed(title="📡 Pong! (Client)", timestamp=datetime.utcnow())
+        embed = discord.Embed(title="📡 Pong! (Client)", timestamp=datetime.now(timezone.utc))
         embed.add_field(name="Latency", value=f"{ws_latency_ms:.2f} ms", inline=True)
         embed.add_field(
             name="Round‑Trip Time", value=f"{round_trip_ms:.2f} ms", inline=True

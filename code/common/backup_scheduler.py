@@ -16,7 +16,7 @@ import tarfile
 import tempfile
 import time
 from dataclasses import dataclass
-from datetime import datetime, time as dtime, timedelta
+from datetime import datetime, timezone, time as dtime, timedelta
 from pathlib import Path
 from typing import Awaitable, Callable, Iterable, Optional
 from zoneinfo import ZoneInfo
@@ -205,7 +205,7 @@ class DailySQLiteBackupScheduler:
                 delta,
             )
         else:
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
             run_at = now.replace(hour=hh_i, minute=mm_i, second=0, microsecond=0)
             if run_at <= now:
                 run_at += timedelta(days=1)
@@ -230,7 +230,7 @@ class DailySQLiteBackupScheduler:
             raise
 
     def _now(self) -> datetime:
-        return datetime.now(self._tz) if self._tz else datetime.utcnow()
+        return datetime.now(self._tz) if self._tz else datetime.now(timezone.utc).replace(tzinfo=None)
 
     def _unique_archive_path(self, when: datetime) -> Path:
         """
