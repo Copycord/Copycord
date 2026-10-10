@@ -33,8 +33,15 @@ from typing import (
     TypeAlias,
     AsyncIterator,
 )
-from discord import ChannelType, ForumChannel, MessageType, Object as DiscordObject
-from discord.errors import HTTPException, Forbidden
+from selfclient.enums import ChannelType, MessageType
+from selfclient.errors import HTTPException, Forbidden
+from selfclient.models import (
+    DMChannel,
+    ForumChannel,
+    GroupChannel,
+    Object as DiscordObject,
+    TextChannel,
+)
 from client.message_utils import (
     _resolve_forward,
     _resolve_forward_via_snapshot,
@@ -44,6 +51,26 @@ from client.message_utils import (
 
 DictLike: TypeAlias = Dict[str, Any]
 DISCORD_EPOCH_MS = 1420070400000
+
+
+def _has_archived_threads(ch: Any) -> bool:
+    """Whether `ch` is a channel the archived-thread lists exist for."""
+    return isinstance(ch, (TextChannel, ForumChannel))
+
+
+def _archived_threads(
+    bot: Any, ch: Any, *, private: bool = False, joined: bool = False, **kwargs: Any
+) -> AsyncIterator:
+    """`ch.archived_threads(...)` through the client.
+
+    Forum channels only have the public list, so asking one for private
+    threads raises TypeError, as the old library's ForumChannel did.
+    """
+    if (private or joined) and isinstance(ch, ForumChannel):
+        raise TypeError("forum channels have no private archived threads")
+    return bot.archived_threads(
+        ch, private=private, joined=joined, raise_on_error=True, **kwargs
+    )
 
 
 def _dt_from_snowflake(snow_id: int | str) -> datetime:
@@ -138,8 +165,10 @@ class ExportMessagesRunner:
             pass
 
         try:
-            if hasattr(ch, "archived_threads"):
-                async for th in ch.archived_threads(limit=None, private=False):
+            if _has_archived_threads(ch):
+                async for th in _archived_threads(
+                    self.bot, ch, limit=None, private=False
+                ):
                     try:
                         if (
                             me is None
@@ -154,8 +183,10 @@ class ExportMessagesRunner:
 
         if include_private_threads:
             try:
-                if hasattr(ch, "archived_threads"):
-                    async for th in ch.archived_threads(limit=None, private=True):
+                if _has_archived_threads(ch):
+                    async for th in _archived_threads(
+                        self.bot, ch, limit=None, private=True
+                    ):
                         try:
                             if (
                                 me is None
@@ -305,9 +336,9 @@ class ExportMessagesRunner:
                     pass
 
                 try:
-                    if hasattr(parent, "archived_threads"):
-                        async for th in parent.archived_threads(
-                            limit=None, private=False
+                    if _has_archived_threads(parent):
+                        async for th in _archived_threads(
+                            self.bot, parent, limit=None, private=False
                         ):
                             try:
                                 if (me is None) or getattr(th, "permissions_for")(
@@ -321,9 +352,9 @@ class ExportMessagesRunner:
 
                 if F["private_threads"]:
                     try:
-                        if hasattr(parent, "archived_threads"):
-                            async for th in parent.archived_threads(
-                                limit=None, private=True
+                        if _has_archived_threads(parent):
+                            async for th in _archived_threads(
+                                self.bot, parent, limit=None, private=True
                             ):
                                 try:
                                     if (me is None) or getattr(th, "permissions_for")(
@@ -460,7 +491,9 @@ class ExportMessagesRunner:
                     if before_dt:
                         kwargs["before"] = before_dt
 
-                    async for msg in ch.history(**kwargs):
+                    async for msg in self.bot.history(
+                        ch, raise_on_error=True, **kwargs
+                    ):
                         ch_scanned += 1
                         total_scanned += 1
 
@@ -1173,13 +1206,17 @@ class DmHistoryExporter:
 
             if self.do_precache_count:
                 found = 0
-                async for _ in dm.history(limit=None, oldest_first=True):
+                async for _ in self.bot.history(
+                    dm, limit=None, oldest_first=True, raise_on_error=True
+                ):
                     found += 1
                 self.log.info(
                     f"[📥] Starting DM export for {uname} ({user_id}) — messages found: {found}"
                 )
 
-            async for msg in dm.history(limit=None, oldest_first=True):
+            async for msg in self.bot.history(
+                dm, limit=None, oldest_first=True, raise_on_error=True
+            ):
                 serialized = self.serialize(msg)
                 buffered.append(serialized)
 
@@ -1281,12 +1318,8 @@ class DmHistoryExporter:
             dm = user.dm_channel
 
         if dm is None:
-            try:
-                import discord
-            except Exception:
-                discord = None
             for ch in getattr(self.bot, "private_channels", []):
-                if discord and isinstance(ch, getattr(discord, "DMChannel", ())):
+                if isinstance(ch, DMChannel) and not isinstance(ch, GroupChannel):
                     if (
                         getattr(ch, "recipient", None)
                         and getattr(ch.recipient, "id", None) == user_id
@@ -2200,7 +2233,7 @@ class BackfillEngine:
         seen: set[int] = set()
 
         has_threads_attr = getattr(parent, "threads", None) is not None
-        has_archived_attr = callable(getattr(parent, "archived_threads", None))
+        has_archived_attr = _has_archived_threads(parent)
 
         if not has_threads_attr and not has_archived_attr:
             self.logger.debug(
@@ -2268,7 +2301,7 @@ class BackfillEngine:
                     raise
 
         def _public_iter():
-            return parent.archived_threads(limit=None)
+            return _archived_threads(self.bot, parent, limit=None)
 
         async for th in _drain(_public_iter, "archived public"):
             yield th
@@ -2277,7 +2310,7 @@ class BackfillEngine:
             return
 
         def _private_iter():
-            return parent.archived_threads(private=True, limit=None)
+            return _archived_threads(self.bot, parent, private=True, limit=None)
 
         try:
             async for th in _drain(_private_iter, "archived private"):
@@ -2287,7 +2320,9 @@ class BackfillEngine:
             pass
 
         def _joined_private_iter():
-            return parent.archived_threads(private=True, joined=True, limit=None)
+            return _archived_threads(
+                self.bot, parent, private=True, joined=True, limit=None
+            )
 
         try:
             async for th in _drain(_joined_private_iter, "archived private (joined)"):
@@ -2340,7 +2375,7 @@ class BackfillEngine:
 
             try:
                 fetched_any = False
-                async for m in obj.history(**kw):
+                async for m in self.bot.history(obj, raise_on_error=True, **kw):
                     fetched_any = True
                     last_id = m.id
                     yield m
@@ -2544,14 +2579,14 @@ class AssetExportRunner:
                 emojis = list(getattr(guild, "emojis", []) or [])
                 if not emojis:
                     try:
-                        emojis = list(await guild.fetch_emojis())
+                        emojis = list(await self.bot.fetch_emojis(guild))
                     except Exception:
                         emojis = []
             if include_stickers:
                 stickers = list(getattr(guild, "stickers", []) or [])
                 if not stickers:
                     try:
-                        stickers = list(await guild.fetch_stickers())
+                        stickers = list(await self.bot.fetch_stickers(guild))
                     except Exception:
                         stickers = []
 
