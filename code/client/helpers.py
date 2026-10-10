@@ -16,8 +16,10 @@ import inspect
 import uuid
 from datetime import datetime
 from typing import Optional, Any, Dict
-import discord
 from common.config import CURRENT_VERSION
+from selfclient import Client
+from selfclient.errors import Forbidden, NotFound
+from selfclient.models import Guild, Message
 
 
 class ClientUiController:
@@ -26,7 +28,7 @@ class ClientUiController:
         *,
         bus,
         admin_base_url: str,
-        bot: discord.Client,
+        bot: Client,
         guild_id: Optional[int] = None,
         listener,
         logger: Optional[logging.Logger] = None,
@@ -299,7 +301,7 @@ class ClientUiController:
             self.log.exception("Fatal error in _listen_loop subscribe | err=%s", e)
             await asyncio.sleep(0.5)
 
-    def _pick_guild(self) -> Optional["discord.Guild"]:
+    def _pick_guild(self) -> Optional[Guild]:
         """Return the configured guild if available, otherwise the first guild (fallback)."""
         g = None
         if self.guild_id:
@@ -357,12 +359,12 @@ async def dm_member_by_id(bot, member_id: int, message: str) -> bool:
         if not member:
             return False
 
-        await member.send(message)
+        await bot.send_dm(member, message)
         return True
 
-    except discord.Forbidden:
+    except Forbidden:
         return False
-    except discord.NotFound:
+    except NotFound:
         return False
     except Exception as e:
         return False
@@ -428,7 +430,7 @@ def _safe_primitive(val: Any) -> Any:
         return f"<unserializable {val.__class__.__name__}>"
 
 
-def dump_message_debug(message: "discord.Message") -> str:
+def dump_message_debug(message: Message) -> str:
     """
     Produce a pretty, multi-line JSON-ish string describing the full message.
     Safe for logging. Does not include tokens.
