@@ -10,8 +10,6 @@ told that this was one.
 """
 import pytest
 
-pytest.importorskip("discord", reason="client module needs a discord library")
-
 import client.client as cc  # noqa: E402
 
 _is_proxy_error = cc.ClientListener._is_proxy_error
@@ -162,78 +160,3 @@ class TestMaskedProxiesAreDistinguishable:
         out = _mask_proxy_url("http://1.2.3.4:8080")
         assert "1.2.3.4:8080" in out
         assert out != "http://1.2.3.4:8080"
-
-
-class TestTheHandledReconnectFilter:
-    """discord.py logs every failed dial at ERROR with a full traceback.
-
-    Against a lossy proxy pool that is forty lines per dead proxy for a
-    condition we already recover from, burying our own rotation line. The
-    filter drops only that record, and only when we are handling it.
-    """
-
-    def _record(self, exc, msg="Attempting a reconnect in 0.35s"):
-        import logging
-        import sys
-
-        try:
-            raise exc
-        except BaseException:
-            info = sys.exc_info()
-        return logging.LogRecord(
-            "discord.client", logging.ERROR, __file__, 1, msg, None, info
-        )
-
-    def _filter(self):
-        return cc._HandledReconnectFilter()
-
-    def test_a_proxy_reconnect_is_dropped(self):
-        from curl_cffi.curl import CurlError
-
-        exc = _chained(
-            CurlError("curl: (7) CONNECT tunnel failed, response 502."),
-            AttributeError("'NoneType' object has no attribute 'sequence'"),
-        )
-        assert self._filter().filter(self._record(exc)) is False
-
-    def test_a_reconnect_for_another_reason_is_kept(self):
-        # Suppressing every reconnect would hide real gateway trouble behind
-        # silence, which is worse than the noise it removes.
-        assert self._filter().filter(self._record(ValueError("real bug"))) is True
-
-    def test_other_messages_from_that_logger_are_kept(self):
-        from curl_cffi.curl import CurlError
-
-        rec = self._record(
-            CurlError("curl: (7) CONNECT tunnel failed"),
-            msg="Websocket closed unexpectedly",
-        )
-        assert self._filter().filter(rec) is True
-
-    def test_a_record_with_no_exception_is_kept(self):
-        import logging
-
-        rec = logging.LogRecord(
-            "discord.client",
-            logging.ERROR,
-            __file__,
-            1,
-            "Attempting a reconnect in 0.35s",
-            None,
-            None,
-        )
-        assert self._filter().filter(rec) is True
-
-    def test_it_is_attached_to_the_library_logger(self):
-        import logging
-
-        names = [
-            type(f).__name__ for f in logging.getLogger("discord.client").filters
-        ]
-        assert "_HandledReconnectFilter" in names
-
-    def test_our_own_logger_is_not_filtered(self):
-        # The rotation lines are the ones worth reading; they must survive.
-        import logging
-
-        assert logging.getLogger("client").filters == []

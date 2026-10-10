@@ -1,31 +1,19 @@
 """
 Pinning the client's Discord build number before it logs in.
 
-discord.py-self resolves this itself, single-shot, through whichever proxy it
-was constructed with. Any failure falls through to FALLBACK_BUILD_NUMBER --
+discord.py-self resolved this itself, single-shot, through whichever proxy it
+was constructed with. Any failure fell through to FALLBACK_BUILD_NUMBER --
 9999, a build Discord has never shipped -- so one slow proxy at startup made
-the whole session identify as something that cannot exist. The browser version
-falls back separately to Chrome 136, so a partial failure is its own tell.
+the whole session identify as something that cannot exist. The client now
+resolves it with retries and pins it into selfclient.fingerprint, which every
+REST header and the gateway IDENTIFY are built from.
 
 These drive the real resolver.
 """
-import types
-
 import pytest
 
-pytest.importorskip("discord", reason="client module needs a discord library")
-
-# utils.Headers is discord.py-self's. CI installs py-cord, which has no such
-# class, so there is nothing there to pin a build onto -- and the production
-# client only ever runs on discord.py-self.
-_discord_utils = pytest.importorskip("discord.utils")
-if not hasattr(_discord_utils, "Headers"):
-    pytest.skip(
-        "discord.py-self only: py-cord has no utils.Headers",
-        allow_module_level=True,
-    )
-
 import client.client as cc  # noqa: E402
+from selfclient import Client, fingerprint
 
 BUILD = {
     "release_channel": "stable",
@@ -61,7 +49,7 @@ def _listener(monkeypatch, *, rotator=None, results=None, attempts=3):
     self._build_fetch_attempts = attempts
     self._build_fetch_timeout = 5
     self._build_pinned = False
-    self.bot = types.SimpleNamespace(http=types.SimpleNamespace(proxy=None))
+    self.bot = Client(proxy=None, refresh_build=False)
 
     calls = []
     queue = list(results if results is not None else [BUILD])
@@ -74,6 +62,12 @@ def _listener(monkeypatch, *, rotator=None, results=None, attempts=3):
         return outcome
 
     monkeypatch.setattr(cc, "refresh_build_info", fake_refresh)
+    # The pin is process-wide; put the shared build back after each test.
+    saved = fingerprint.get_build_info()
+    monkeypatch.setattr(
+        fingerprint.selfbot_headers, "_BUILD", dict(saved), raising=True
+    )
+    monkeypatch.setattr(fingerprint.selfbot_headers, "_FINGERPRINT_CACHE", {})
     return self, calls
 
 
@@ -82,30 +76,24 @@ class TestItPinsTheLiveBuild:
     async def test_a_resolved_build_is_applied(self, monkeypatch):
         self, _ = _listener(monkeypatch)
         assert await self._resolve_client_build() is True
-        props = self.bot.http.headers.super_properties
-        assert props["client_build_number"] == 600590
+        assert fingerprint.get_build_info()["client_build_number"] == 600590
 
     @pytest.mark.asyncio
     async def test_it_never_ships_the_impossible_fallback(self, monkeypatch):
-        from discord.utils import Headers
-
         self, _ = _listener(monkeypatch)
         await self._resolve_client_build()
-        props = self.bot.http.headers.super_properties
-        assert props["client_build_number"] != Headers.FALLBACK_BUILD_NUMBER
+        props = fingerprint.gateway_properties("tok")
         assert props["client_build_number"] != 9999
 
     @pytest.mark.asyncio
     async def test_the_browser_version_comes_from_the_same_build(self, monkeypatch):
-        # The library resolves the build and the browser version with two
-        # independent calls, so one could succeed while the other fell back to
-        # Chrome 136. One source means they cannot disagree.
+        # One source for the build and the browser version means they cannot
+        # disagree.
         self, _ = _listener(monkeypatch)
         await self._resolve_client_build()
-        h = self.bot.http.headers
-        assert h.super_properties["browser_version"] == "150.0.0.0"
-        assert h.major_version == 150
-        assert "Chrome/150" in h.user_agent
+        build = fingerprint.get_build_info()
+        assert build["browser_version"] == "150.0.0.0"
+        assert "Chrome/150" in build["browser_user_agent"]
 
 
 class TestItRetriesAcrossProxies:
@@ -121,7 +109,7 @@ class TestItRetriesAcrossProxies:
         assert await self._resolve_client_build() is True
         assert len(calls) == 3
         assert len(rot.rotations) == 2
-        assert self.bot.http.proxy == "http://p2:1"
+        assert self.bot.proxy == "http://p2:1"
 
     @pytest.mark.asyncio
     async def test_it_gives_up_after_the_configured_attempts(self, monkeypatch):
@@ -168,63 +156,25 @@ class TestItRetriesAcrossProxies:
         low = dict(BUILD, client_build_number=9999)
         self, calls = _listener(monkeypatch, results=[low, low, BUILD])
         assert await self._resolve_client_build() is True
-        assert self.bot.http.headers.super_properties["client_build_number"] == 600590
+        assert fingerprint.get_build_info()["client_build_number"] == 600590
         assert len(calls) == 3
 
 
 class TestItSurvivesAReconnect:
     @pytest.mark.asyncio
-    async def test_the_pin_outlives_httpclient_startup(self, monkeypatch):
-        # Why this patches Headers.default instead of http.headers:
-        # HTTPClient.startup() reassigns self.headers unconditionally, and it
-        # runs again on every reconnect because _clear_bot_state has to reset
-        # _started to make the client restartable. Assigning the attribute
-        # would survive only until the first retry -- exactly when a proxy is
-        # least healthy and the fallback hurts most.
-        import aiohttp
-        from discord.utils import Headers
-
+    async def test_the_pin_outlives_a_fresh_client(self, monkeypatch):
+        # A restart builds a new Client; the pin lives in the shared
+        # fingerprint, not on the Client, so the new one identifies with it.
         self, _ = _listener(monkeypatch)
         await self._resolve_client_build()
-
-        async with aiohttp.ClientSession() as s:
-            refetched = await Headers.default(s, None, None)
-        assert refetched.super_properties["client_build_number"] == 600590
+        self.bot = Client(proxy=None, refresh_build=False)
+        props = fingerprint.gateway_properties("tok")
+        assert props["client_build_number"] == 600590
+        assert "Chrome/150" in fingerprint.build_headers("tok")["User-Agent"]
 
     @pytest.mark.asyncio
     async def test_no_third_party_call_is_made(self, monkeypatch):
-        # Headers.default() POSTs to a third-party properties API first. That
-        # put an outside host on the critical path of our identity and showed
-        # it our proxy egress IP on every boot.
-        import aiohttp
-        from discord.utils import Headers
-
-        hits = []
-
-        async def spy(*a, **k):
-            hits.append(1)
-            raise AssertionError("third-party properties API was called")
-
-        monkeypatch.setattr(Headers, "get_api_properties", staticmethod(spy))
-
-        self, _ = _listener(monkeypatch)
+        # Pinning is a local set_build_info: no properties API is called.
+        self, calls = _listener(monkeypatch)
         await self._resolve_client_build()
-        async with aiohttp.ClientSession() as s:
-            await Headers.default(s, None, None)
-        assert hits == []
-
-    @pytest.mark.asyncio
-    async def test_launch_ids_are_fresh_per_connect(self, monkeypatch):
-        # A real browser mints these per page load, so reusing one across
-        # reconnects would be its own signal.
-        import aiohttp
-        from discord.utils import Headers
-
-        self, _ = _listener(monkeypatch)
-        await self._resolve_client_build()
-        first = self.bot.http.headers.super_properties["client_launch_id"]
-        async with aiohttp.ClientSession() as s:
-            second = (await Headers.default(s, None, None)).super_properties[
-                "client_launch_id"
-            ]
-        assert first != second
+        assert calls == [1]

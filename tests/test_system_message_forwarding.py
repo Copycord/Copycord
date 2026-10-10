@@ -9,11 +9,8 @@ off. They now have a filter of their own and carry their rendered text.
 The tests call the real filter and the real attribute builder.
 """
 
-import pytest
-
-pytest.importorskip("discord", reason="client module needs a discord library present")
-
-import discord
+from selfclient.enums import MessageType
+from selfclient.models import Message
 
 from client.forwarding import ForwardingFilters, ForwardingManager
 
@@ -43,17 +40,19 @@ class _Author:
 
 
 class _Message:
-    """Enough of discord.Message for the attribute builder.
+    """Enough of selfclient's Message for the attribute builder.
 
-    is_system() is discord.py's own implementation, bound to this object, so
+    is_system() is selfclient's own implementation, bound to this object, so
     the type classification under test is the library's and not a guess about
     it -- it deliberately treats replies and slash-command responses as normal
-    messages, which a naive "type != default" check would get wrong.
+    messages, which a naive "type != default" check would get wrong. It reads
+    the wire type out of ``_data``, so that is set alongside ``type``.
     """
 
     def __init__(self, *, msg_type, content="", system_content="", bot=False):
         self.id = 90001
         self.type = msg_type
+        self._data = {"type": int(msg_type)}
         self.content = content
         self.system_content = system_content
         self.guild = _Guild()
@@ -64,7 +63,7 @@ class _Message:
         self.jump_url = "https://discord.com/channels/1/2/3"
 
     def is_system(self):
-        return discord.Message.is_system(self)
+        return Message.is_system(self)
 
 
 def _attrs(message):
@@ -74,7 +73,7 @@ def _attrs(message):
 def _join_message():
 
     return _Message(
-        msg_type=discord.MessageType.new_member,
+        msg_type=MessageType.new_member,
         content="",
         system_content="Yay you made it, Tunmise!",
     )
@@ -89,17 +88,17 @@ class TestSystemMessagesAreRecognised:
         assert _attrs(_join_message())["is_system"] is True
 
     def test_a_normal_message_is_not(self):
-        msg = _Message(msg_type=discord.MessageType.default, content="hello")
+        msg = _Message(msg_type=MessageType.default, content="hello")
         assert _attrs(msg)["is_system"] is False
 
     def test_a_reply_is_not_a_system_message(self):
 
-        msg = _Message(msg_type=discord.MessageType.reply, content="hello")
+        msg = _Message(msg_type=MessageType.reply, content="hello")
         assert _attrs(msg)["is_system"] is False
 
     def test_the_message_type_is_reported(self):
         reported = _attrs(_join_message())["message_type"]
-        assert reported == discord.MessageType.new_member.name
+        assert reported == MessageType.new_member.name
         assert isinstance(reported, str)
         assert "MessageType" not in reported
         assert not reported.isdigit()
@@ -115,7 +114,7 @@ class TestTheTextIsRecovered:
 
     def test_a_normal_message_keeps_its_own_content(self):
         msg = _Message(
-            msg_type=discord.MessageType.default,
+            msg_type=MessageType.default,
             content="real text",
             system_content="real text",
         )
@@ -124,14 +123,14 @@ class TestTheTextIsRecovered:
     def test_content_wins_when_a_system_message_has_some(self):
 
         msg = _Message(
-            msg_type=discord.MessageType.channel_name_change,
+            msg_type=MessageType.channel_name_change,
             content="new-name",
             system_content="x changed the channel name: **new-name**",
         )
         assert _attrs(msg)["content"] == "new-name"
 
     def test_a_system_message_with_no_text_at_all_is_still_safe(self):
-        msg = _Message(msg_type=discord.MessageType.pins_add)
+        msg = _Message(msg_type=MessageType.pins_add)
         assert _attrs(msg)["content"] == ""
 
 
@@ -144,13 +143,13 @@ class TestTheFilter:
         assert _filters(include_system=True).apply(_attrs(_join_message())) is True
 
     def test_normal_messages_are_unaffected_when_it_is_off(self):
-        msg = _Message(msg_type=discord.MessageType.default, content="hello")
+        msg = _Message(msg_type=MessageType.default, content="hello")
         assert _filters().apply(_attrs(msg)) is True
 
     def test_it_does_not_imply_bot_messages(self):
         # The two switches are independent: opting into Discord's notices must
 
-        msg = _Message(msg_type=discord.MessageType.default, content="hi", bot=True)
+        msg = _Message(msg_type=MessageType.default, content="hi", bot=True)
         assert _filters(include_system=True).apply(_attrs(msg)) is False
 
     def test_bot_messages_alone_do_not_admit_system_messages(self):

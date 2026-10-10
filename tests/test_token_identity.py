@@ -10,6 +10,7 @@ import types
 
 import pytest
 
+from server import token_identity
 from server.token_identity import TokenIdentityManager
 
 
@@ -234,9 +235,11 @@ class TestPrepareIdempotency:
         class _Blocked(_Member):
             async def edit(self, *, nick=None, reason=None):
                 self.edits.append(nick)
-                import discord
-
-                raise discord.Forbidden.__new__(discord.Forbidden)
+                # The server role's own Forbidden, the class token_identity
+                # catches; reached through the module so this test does not
+                # import a Discord library itself.
+                forbidden = token_identity.discord.Forbidden
+                raise forbidden.__new__(forbidden)
 
         member = _Blocked(500)
         bot = _Bot(_Guild(2, {500: member}, {}))

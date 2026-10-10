@@ -122,8 +122,8 @@ class TestFallbackDetection:
         assert r.healthy_favorites() == [C]
 
 
-pytest.importorskip("discord", reason="client module needs a discord library")
 import client.client as cc  # noqa: E402
+from selfclient import Client  # noqa: E402
 
 
 class _FakeWS:
@@ -139,40 +139,41 @@ def _listener(rotator, *, enabled=True, interval=1):
     self.proxy_rotator = rotator
     self._favorite_recheck_enabled = enabled
     self._favorite_recheck_interval = interval
-    self.bot = types.SimpleNamespace(
-        http=types.SimpleNamespace(proxy=None), ws=_FakeWS()
-    )
+    # A real selfclient Client whose gateway holds a fake live socket.
+    self.bot = Client(proxy=None, refresh_build=False)
+    self.bot.gateway = types.SimpleNamespace(_ws=_FakeWS(), proxy=None)
     return self
 
 
 class TestSwitchingBack:
     @pytest.mark.asyncio
     async def test_it_moves_the_live_gateway_not_just_http(self):
-        # Setting http.proxy alone leaves the existing websocket on the old
+        # Setting the proxy alone leaves the existing websocket on the old
         # route: it was dialled through that proxy and stays there. The socket
-        # has to be closed for discord.py's connect loop to redial.
+        # has to be closed for the gateway's reconnect loop to redial.
         r = _rotator(favorites=(C,))
         self = _listener(r)
         await self._switch_to_proxy(C)
-        assert self.bot.http.proxy == C
-        assert self.bot.ws.closed_with == 4000
+        assert self.bot.proxy == C
+        assert self.bot.gateway.proxy == C
+        assert self.bot.gateway._ws.closed_with == 4000
 
     @pytest.mark.asyncio
     async def test_a_clean_close_code_is_not_used(self):
-        # discord.py treats 1000 as a deliberate shutdown and will not
-        # reconnect, which would leave the client offline rather than moved.
+        # 1000 is a deliberate shutdown that drops the session instead of
+        # resuming it, which would leave the client re-identifying, not moved.
         r = _rotator(favorites=(C,))
         self = _listener(r)
         await self._switch_to_proxy(C)
-        assert self.bot.ws.closed_with != 1000
+        assert self.bot.gateway._ws.closed_with != 1000
 
     @pytest.mark.asyncio
     async def test_it_survives_having_no_socket_yet(self):
         r = _rotator(favorites=(C,))
         self = _listener(r)
-        self.bot.ws = None
+        self.bot.gateway = None
         await self._switch_to_proxy(C)
-        assert self.bot.http.proxy == C
+        assert self.bot.proxy == C
 
     @pytest.mark.asyncio
     async def test_the_rotator_is_told_about_the_move(self):
@@ -220,7 +221,7 @@ class TestTheRecheckLoop:
         listener = _listener(r, interval=0.01)
         probed = await self._run_once(listener, {C: True})
         assert C in probed
-        assert listener.bot.http.proxy == C
+        assert listener.bot.proxy == C
         assert r.on_fallback() is False
 
     @pytest.mark.asyncio
@@ -230,7 +231,7 @@ class TestTheRecheckLoop:
         listener = _listener(r, interval=0.01)
         await self._run_once(listener, {C: False})
         assert r._current_proxy == before
-        assert listener.bot.ws.closed_with is None
+        assert listener.bot.gateway._ws.closed_with is None
 
     @pytest.mark.asyncio
     async def test_it_does_nothing_while_the_toggle_is_off(self):
