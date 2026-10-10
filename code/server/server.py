@@ -8836,11 +8836,11 @@ class ServerReceiver:
     async def _bf_gate(self, clone_id: int) -> None:
         st = self._bf_state(int(clone_id))
         async with st["lock"]:
-            now = asyncio.get_event_loop().time()
+            now = asyncio.get_running_loop().time()
             wait = max(0.0, (st["last"] + self._bf_delay) - now)
             if wait >= 0.001:
                 await asyncio.sleep(wait)
-            st["last"] = asyncio.get_event_loop().time()
+            st["last"] = asyncio.get_running_loop().time()
 
     def _clear_bf_throttle(self, clone_id: int) -> None:
         self._bf_throttle.pop(int(clone_id), None)
@@ -10911,7 +10911,7 @@ class ServerReceiver:
                     if is_backfill:
                         try:
                             st = self._bf_state(int(cloned_id))
-                            now = asyncio.get_event_loop().time()
+                            now = asyncio.get_running_loop().time()
                             wait_s = max(0.0, (st["last"] + self._bf_delay) - now)
                         except Exception:
                             wait_s = 0.0

@@ -357,7 +357,7 @@ class BackfillManager:
             with contextlib.suppress(Exception):
                 self.r.db.backfill_set_clone(run_id, int(clone_id))
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         st["started_at"] = loop.time()
         st["started_dt"] = datetime.now(timezone.utc)
         st.setdefault("last_count", 0)
@@ -447,7 +447,7 @@ class BackfillManager:
         st["last_count"] = max(prev, int(count))
 
         if st.get("msg"):
-            now = asyncio.get_event_loop().time()
+            now = asyncio.get_running_loop().time()
             if (now - st.get("last_edit_ts", 0.0) >= 2.0) or (count - prev >= 100):
                 try:
                     elapsed = int(now - st["started_at"])
@@ -827,7 +827,7 @@ class BackfillManager:
         no_progress_timeout: float = 1800.0,
         log_every: float = 5.0,
     ) -> None:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         first_seen = loop.time()
         last_change_ts = first_seen
         last_inflight = self._inflight.get(cid, 0)

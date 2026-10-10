@@ -1344,7 +1344,7 @@ class BackfillEngine:
         """
         Primary entry point used by client code to backfill a single channel.
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         t0 = loop.time()
         sent = 0
         skipped = 0
