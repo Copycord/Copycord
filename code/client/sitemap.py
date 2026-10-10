@@ -14,7 +14,24 @@ import logging
 import random
 from collections import deque
 from typing import Any, List, Dict, Optional, Set
-import discord
+from selfclient.enums import StickerType
+from selfclient.errors import HTTPException, RateLimited
+from selfclient.models import (
+    CategoryChannel,
+    GuildChannel,
+    Guild,
+    Role,
+    StageChannel,
+    TextChannel,
+    Thread,
+    VoiceChannel,
+)
+
+
+def _is_voice(ch: Any) -> bool:
+    # selfclient's StageChannel subclasses VoiceChannel; discord.py's did not,
+    # and stage channels are serialized separately (they carry a topic).
+    return isinstance(ch, VoiceChannel) and not isinstance(ch, StageChannel)
 
 
 class SitemapService:
@@ -38,7 +55,7 @@ class SitemapService:
         self._inter_guild_delay: int = 3     # seconds between guilds
         self._randomize_order: bool = True   # shuffle guild order
 
-    def _pick_guild(self) -> Optional[discord.Guild]:
+    def _pick_guild(self) -> Optional[Guild]:
         return self.bot.guilds[0] if self.bot.guilds else None
 
     def _mapped_original_ids(self) -> list[int]:
@@ -236,7 +253,7 @@ class SitemapService:
                             processed, total, g.name, clone_id,
                         )
 
-                except discord.RateLimited as e:
+                except RateLimited as e:
                     wait = e.retry_after + 1.0
                     self.logger.warning(
                         "[sitemap] Rate limited building %s, sleeping %.1fs",
@@ -249,7 +266,7 @@ class SitemapService:
                         total += 1
                     break
 
-                except discord.HTTPException as e:
+                except HTTPException as e:
                     if e.status == 429:
                         retry_after = 5.0
                         try:
@@ -368,7 +385,7 @@ class SitemapService:
         tasks: list[asyncio.Future] = []
 
         async def _handle_mapping(
-            g: discord.Guild,
+            g: Guild,
             clone_id: int | None,
         ) -> None:
             async with sem:
@@ -508,7 +525,7 @@ class SitemapService:
         self.enqueue_all()
 
     async def build_for_guild(
-        self, guild: "discord.Guild", cloned_guild_id: int | None = None
+        self, guild: Guild, cloned_guild_id: int | None = None
     ) -> Dict:
         """Build the raw sitemap for a specific guild, then filter it per config."""
         if not guild:
@@ -637,7 +654,7 @@ class SitemapService:
 
         def _serialize_video_quality(ch):
             """
-            Normalize discord.VideoQualityMode → 'auto' / 'full' / None
+            Normalize VideoQualityMode → 'auto' / 'full' / None
             so it can safely go into JSON.
             """
             vqm = getattr(ch, "video_quality_mode", None)
@@ -683,13 +700,13 @@ class SitemapService:
                 return None
 
         try:
-            fetched_stickers = await guild.fetch_stickers()
+            fetched_stickers = await self.bot.fetch_stickers(guild)
         except Exception as e:
             self.logger.warning("[🎟️] Could not fetch stickers: %s", e)
             fetched_stickers = list(getattr(guild, "stickers", []))
 
         try:
-            guild_sticker_type_val = getattr(discord.StickerType, "guild").value
+            guild_sticker_type_val = getattr(StickerType, "guild").value
         except Exception:
             guild_sticker_type_val = 1
 
@@ -738,15 +755,15 @@ class SitemapService:
         except Exception:
             widget_channel_id = None
 
-        # The installed discord.py-self doesn't parse the newer role "colors"
-        # object (gradient/holographic styles), so pull the raw role payloads.
+        # Fetch the roles fresh for the newer role "colors" object
+        # (gradient/holographic styles); Role.colors is the raw dict.
         raw_role_colors: Dict[int, Dict[str, object]] = {}
         try:
-            raw_roles = await guild._state.http.get_roles(guild.id)
-            for rr in raw_roles or []:
-                cols = rr.get("colors")
+            fetched_roles = await self.bot.fetch_roles(guild)
+            for rr in fetched_roles or []:
+                cols = rr.colors
                 if isinstance(cols, dict):
-                    raw_role_colors[int(rr["id"])] = {
+                    raw_role_colors[int(rr.id)] = {
                         "primary_color": cols.get("primary_color"),
                         "secondary_color": cols.get("secondary_color"),
                         "tertiary_color": cols.get("tertiary_color"),
@@ -849,7 +866,7 @@ class SitemapService:
         for cat in guild.categories:
             channels = []
             for ch in cat.channels:
-                if isinstance(ch, discord.TextChannel):
+                if isinstance(ch, TextChannel):
                     channels.append(
                         {
                             "id": ch.id,
@@ -865,7 +882,7 @@ class SitemapService:
                             ),
                         }
                     )
-                elif isinstance(ch, discord.VoiceChannel):
+                elif _is_voice(ch):
                     channels.append(
                         {
                             "id": ch.id,
@@ -884,7 +901,7 @@ class SitemapService:
                             ),
                         }
                     )
-                elif isinstance(ch, discord.StageChannel):
+                elif isinstance(ch, StageChannel):
                     channels.append(
                         {
                             "id": ch.id,
@@ -921,7 +938,7 @@ class SitemapService:
         sitemap["standalone_channels"] = []
         for ch in guild.channels:
             if ch.category is None:
-                if isinstance(ch, discord.TextChannel):
+                if isinstance(ch, TextChannel):
                     sitemap["standalone_channels"].append(
                         {
                             "id": ch.id,
@@ -937,7 +954,7 @@ class SitemapService:
                             ),
                         }
                     )
-                elif isinstance(ch, discord.VoiceChannel):
+                elif _is_voice(ch):
                     sitemap["standalone_channels"].append(
                         {
                             "id": ch.id,
@@ -956,7 +973,7 @@ class SitemapService:
                             ),
                         }
                     )
-                elif isinstance(ch, discord.StageChannel):
+                elif isinstance(ch, StageChannel):
                     sitemap["standalone_channels"].append(
                         {
                             "id": ch.id,
@@ -1040,7 +1057,7 @@ class SitemapService:
                     thr = await self.bot.fetch_channel(orig_tid)
                 except Exception:
                     continue
-            if not isinstance(thr, discord.Thread):
+            if not isinstance(thr, Thread):
                 continue
 
             applied_tag_ids = []
@@ -1073,7 +1090,7 @@ class SitemapService:
         return sitemap
 
     async def build_for_guild_and_clone(
-        self, guild: "discord.Guild", cloned_guild_id: int
+        self, guild: Guild, cloned_guild_id: int
     ) -> Dict:
         sm = await self.build_for_guild(guild, cloned_guild_id=int(cloned_guild_id))
         if not sm:
@@ -1275,7 +1292,7 @@ class SitemapService:
         """
         try:
             g = getattr(ch, "guild", None)
-            if g is None and isinstance(ch, discord.Thread):
+            if g is None and isinstance(ch, Thread):
                 parent = getattr(ch, "parent", None)
                 g = getattr(parent, "guild", None)
 
@@ -1288,14 +1305,14 @@ class SitemapService:
             else:
                 view = self._build_filter_view_for_guild(origin_gid)
 
-            if isinstance(ch, discord.CategoryChannel):
+            if isinstance(ch, CategoryChannel):
                 return not self._is_filtered_out_view(
                     None,
                     getattr(ch, "id", None),
                     view,
                 )
 
-            if isinstance(ch, discord.Thread):
+            if isinstance(ch, Thread):
                 parent = getattr(ch, "parent", None)
                 if parent is None:
                     return False
@@ -1327,7 +1344,7 @@ class SitemapService:
         except Exception:
             return True
 
-    def _serialize_role_overwrites(self, obj: discord.abc.GuildChannel) -> list[dict]:
+    def _serialize_role_overwrites(self, obj: GuildChannel) -> list[dict]:
         out: list[dict] = []
 
         raw = (
@@ -1358,7 +1375,7 @@ class SitemapService:
         return out
 
     def in_scope_thread(
-        self, thr: discord.Thread, cloned_guild_id: int | None = None
+        self, thr: Thread, cloned_guild_id: int | None = None
     ) -> bool:
         """
         True if this thread is allowed for its origin guild, using per-mapping
@@ -1404,7 +1421,7 @@ class SitemapService:
             return True
 
     def role_change_is_relevant(
-        self, before: discord.Role, after: discord.Role
+        self, before: Role, after: Role
     ) -> bool:
         """Ignore @everyone and managed roles; check for meaningful changes."""
         try:
