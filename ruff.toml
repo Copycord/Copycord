@@ -1,7 +1,7 @@
 # Ruff linter configuration for Copycord
 # Runs on PRs to catch syntax errors, undefined names, and unused imports
 
-target-version = "py311"
+target-version = "py312"
 
 [lint]
 select = [

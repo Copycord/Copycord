@@ -146,7 +146,7 @@ def find_system_python() -> list[str]:
 
     raise SystemExit(
         "[Copycord] ERROR: No suitable Python interpreter found on this system.\n"
-        "Please install Python 3.11.x (64-bit) from https://www.python.org/downloads/ "
+        "Please install Python 3.12.x (64-bit) from https://www.python.org/downloads/ "
         "and then run this .exe again."
     )
 
@@ -571,7 +571,7 @@ def write_start_scripts(repo_root: Path) -> None:
     Always (re)write start scripts so installer and updater behave the same.
     - Windows:
         - copycord_windows.bat (spawns 3 PS windows)
-        - scripts\preflight.ps1 (checks ALL ports + Python 3.11.x in venvs)
+        - scripts\preflight.ps1 (checks ALL ports + Python 3.12.x in venvs)
     - Linux/macOS:
         - copycord_linux.sh (LF, +x) with preflight
     """
@@ -600,7 +600,7 @@ $venvAdmin = Join-Path $root 'venvs\admin\Scripts\python.exe'
 $venvServer= Join-Path $root 'venvs\server\Scripts\python.exe'
 $venvClient= Join-Path $root 'venvs\client\Scripts\python.exe'
 
-function Assert-Py311 {
+function Assert-Py312 {
   param([string]$Interpreter, [string]$Name)
   if (-not (Test-Path -LiteralPath $Interpreter)) {
     throw "Missing $Name interpreter at $Interpreter"
@@ -610,8 +610,8 @@ function Assert-Py311 {
   $parts = $ver.Split('.') | ForEach-Object { [int]$_ }
   $major = $parts[0]
   $minor = $parts[1]
-  if ($major -ne 3 -or $minor -ne 11) {
-    throw "$Name requires Python 3.11.x (found $ver at $Interpreter)"
+  if ($major -ne 3 -or $minor -ne 12) {
+    throw "$Name requires Python 3.12.x (found $ver at $Interpreter)"
   }
 }
 
@@ -656,11 +656,11 @@ function Test-PortBusy {
   return $false
 }
 
-Write-Host '[preflight] Checking Python versions in venvs (need 3.11.x)…'
+Write-Host '[preflight] Checking Python versions in venvs (need 3.12.x)…'
 try {
-  Assert-Py311 -Interpreter $venvAdmin -Name 'admin venv'
-  Assert-Py311 -Interpreter $venvServer -Name 'server venv'
-  Assert-Py311 -Interpreter $venvClient -Name 'client venv'
+  Assert-Py312 -Interpreter $venvAdmin -Name 'admin venv'
+  Assert-Py312 -Interpreter $venvServer -Name 'server venv'
+  Assert-Py312 -Interpreter $venvClient -Name 'client venv'
 } catch {
   Write-Host ('[preflight] ERROR: ' + $_)
   exit 1
@@ -802,7 +802,7 @@ if not exist "%VENV_ROOT%\admin\Scripts\python.exe" ( echo Error: admin venv mis
 if not exist "%VENV_ROOT%\server\Scripts\python.exe" ( echo Error: server venv missing & goto :EOF )
 if not exist "%VENV_ROOT%\client\Scripts\python.exe" ( echo Error: client venv missing & goto :EOF )
 
-rem ---- Preflight: Python 3.11.x in venvs + ALL ports free ----
+rem ---- Preflight: Python 3.12.x in venvs + ALL ports free ----
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\scripts\preflight.ps1"
 if errorlevel 1 (
   echo.
@@ -845,15 +845,15 @@ CLIENT_VENV="$VENV_ROOT/client"
 
 ENV_FILE="$CODE_DIR/.env"
 
-ensure_py311 () {
+ensure_py312 () {
   local bin="$1" name="$2"
   [[ -x "$bin" ]] || { echo "[preflight] ERROR: Missing $name interpreter at $bin"; exit 1; }
   local ver
   ver="$("$bin" -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")')" || {
     echo "[preflight] ERROR: Unable to get Python version for $name ($bin)"; exit 1; }
   local major="${ver%%.*}"; local rest="${ver#*.}"; local minor="${rest%%.*}"
-  if ! (( major == 3 && minor == 11 )); then
-    echo "[preflight] ERROR: $name requires Python 3.11.x (found $ver at $bin)"; exit 1;
+  if ! (( major == 3 && minor == 12 )); then
+    echo "[preflight] ERROR: $name requires Python 3.12.x (found $ver at $bin)"; exit 1;
   fi
 }
 
@@ -878,9 +878,9 @@ port_in_use() {
   fi
 }
 
-ensure_py311 "$ADMIN_VENV/bin/python"  "admin venv"
-ensure_py311 "$SERVER_VENV/bin/python" "server venv"
-ensure_py311 "$CLIENT_VENV/bin/python" "client venv"
+ensure_py312 "$ADMIN_VENV/bin/python"  "admin venv"
+ensure_py312 "$SERVER_VENV/bin/python" "server venv"
+ensure_py312 "$CLIENT_VENV/bin/python" "client venv"
 echo "[preflight] Python looks good."
 
 mapfile -t PORTS < <(get_ports | awk '$1>=1 && $1<=65535 {print $1}' | sort -n | uniq)
@@ -967,7 +967,7 @@ def check_prereqs() -> None:
     Check that required tools are available and clearly print what's missing.
 
     Requirements:
-      - Python 3.11.x (the interpreter running this script or the system Python we use)
+      - Python 3.12.x (the interpreter running this script or the system Python we use)
       - pip OR ensurepip (for that Python)
       - npm (Node.js) for building the admin frontend
     """
@@ -989,11 +989,11 @@ def check_prereqs() -> None:
         py_detail = py_ver_str
         try:
             major, minor, *_ = (int(x) for x in py_ver_str.split("."))
-            py_ok = major == 3 and minor == 11
+            py_ok = major == 3 and minor == 12
         except Exception:
             py_ok = False
     if stage:
-        stage.tick("Checking Python 3.11…")
+        stage.tick("Checking Python 3.12…")
 
     pip_ver = _probe(python_cmd + ["-m", "pip", "--version"])
     ensurepip_ver = _probe(python_cmd + ["-m", "ensurepip", "--version"])
@@ -1009,7 +1009,7 @@ def check_prereqs() -> None:
 
     if not QUIET:
         print("[installer] Detected:")
-        print(f"  - Python: {py_detail} ({'OK' if py_ok else 'need 3.11.x'})")
+        print(f"  - Python: {py_detail} ({'OK' if py_ok else 'need 3.12.x'})")
         print(
             f"  - pip: {'found' if pip_ver else 'not found'}"
             f"{f' ({pip_ver})' if pip_ver else ''}"
@@ -1025,7 +1025,7 @@ def check_prereqs() -> None:
 
     missing: list[str] = []
     if not py_ok:
-        missing.append(f"Python 3.11.x (found {py_detail})")
+        missing.append(f"Python 3.12.x (found {py_detail})")
     if not pip_ok:
         missing.append("pip or ensurepip for the detected Python")
     if not npm_ok:
@@ -1037,7 +1037,7 @@ def check_prereqs() -> None:
             error(f"  • {item}")
         error(
             "\nHow to fix:\n"
-            "  - Install Python 3.11.x from https://www.python.org/downloads/ (ensure it’s on PATH).\n"
+            "  - Install Python 3.12.x from https://www.python.org/downloads/ (ensure it’s on PATH).\n"
             "  - Ensure `pip` works for that Python (or install `ensurepip`).\n"
             "  - Install Node.js (which includes npm): https://nodejs.org/\n"
             "\nOnce configured, re-run the Copycord installer."
