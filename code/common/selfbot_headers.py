@@ -22,6 +22,12 @@ import uuid
 
 import aiohttp
 
+from common.exit_timezone import (
+    FALLBACK_TIMEZONE,
+    forget_token as _forget_exit_timezone,
+    note_token_proxy as _note_token_proxy,
+    timezone_for as _timezone_for,
+)
 from common.proxy_pool import get_pool as _get_proxy_pool
 
 try:
@@ -85,7 +91,8 @@ _FINGERPRINT_CACHE: dict[str, dict] = {}
 _OS_VERSION = "10"
 
 LOCALE = "en-US"
-TIMEZONE = "America/New_York"
+# Fallback only; the header uses the zone of the IP the token exits through.
+TIMEZONE = FALLBACK_TIMEZONE
 
 
 def get_build_info() -> dict:
@@ -215,7 +222,7 @@ def make_fingerprint(token: str) -> dict:
     headers = {
         "User-Agent": user_agent,
         "X-Discord-Locale": LOCALE,
-        "X-Discord-Timezone": TIMEZONE,
+        "X-Discord-Timezone": _timezone_for(token),
         "X-Debug-Options": "bugReporterEnabled",
         "Accept": "*/*",
         "Accept-Language": "en-US,en;q=0.9",
@@ -322,7 +329,7 @@ def build_headers(token: str, *, referer: str | None = None) -> dict:
         "User-Agent": h["User-Agent"],
         "X-Debug-Options": h["X-Debug-Options"],
         "X-Discord-Locale": h["X-Discord-Locale"],
-        "X-Discord-Timezone": h["X-Discord-Timezone"],
+        "X-Discord-Timezone": _timezone_for(token),
         "X-Installation-Id": h["X-Installation-Id"],
         "X-Super-Properties": super_props_b64,
     }
@@ -382,6 +389,7 @@ async def get_tls_session(token: str, *, use_proxy: bool = False):
             pool = _get_proxy_pool()
             if use_proxy and pool.enabled:
                 proxy = await pool.lease(token)
+            await _note_token_proxy(token, proxy)
             await _prime_tls_session(sess, token, proxy=proxy)
             _TLS_PRIMED.add(token)
 
@@ -428,6 +436,7 @@ async def close_tls_session(token: str, reason: str = "unspecified") -> None:
         _TLS_PRIMED.discard(token)
         _TLS_LAST_USED.pop(token, None)
         _HEARTBEAT_SESSIONS.pop(token, None)
+        _forget_exit_timezone(token)
         if sess is not None:
             try:
                 await sess.close()
