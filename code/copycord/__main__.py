@@ -8,6 +8,7 @@
 # =============================================================================
 
 """
+copycord onboard              guided first-run setup (tokens, command users, port)
 copycord run                  admin, server and client in one process
 copycord version              print the version and the update channel
 copycord doctor               preflight checks (no network)
@@ -18,10 +19,14 @@ copycord config import FILE   load app_config values from a JSON object
 copycord service install [--user] [--data-dir PATH]
                               run Copycord as a systemd/launchd/Scheduled Task service
 copycord service start|stop|status|uninstall [--user]
-copycord update [--check] [--channel stable|beta|dev [--branch NAME]] [--tag VERSION]
-                [--no-install]
+copycord update [--channel stable|beta|dev [--repo OWNER/NAME] [--ref REF]]
+                [--tag VERSION] [--no-install]
                               update (uv tool / pipx) from the saved or given
                               channel and restart a running service
+copycord update status        installed version, channel and latest on it
+copycord uninstall [--purge] [--yes] [--keep-service] [--dry-run]
+                              remove the service and the program (and the
+                              data directory with --purge)
 """
 
 from __future__ import annotations
@@ -66,16 +71,143 @@ MASK = "********"
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 
 
+# (group, [(command, one-line description)]) for the top-level help.
+COMMAND_GROUPS = (
+    ("Get started", (
+        ("onboard", "Guided first-run setup: tokens, command users, port"),
+        ("run", "Run Copycord (dashboard, server bot and client)"),
+        ("doctor", "Check this machine can run Copycord"),
+    )),
+    ("Settings", (
+        ("config", "Read or write the stored app config (get, set, export, import)"),
+    )),
+    ("Service", (
+        ("service", "Run Copycord as an OS service (install, start, stop, status)"),
+    )),
+    ("Updates", (
+        ("update", "Update Copycord; switch channel with --channel stable|beta|dev"),
+        ("version", "Print the version and the update channel"),
+    )),
+    ("Remove", (
+        ("uninstall", "Remove the service and the program; --purge deletes the data"),
+    )),
+)
+
+EXAMPLES = (
+    ("copycord onboard", "set up Copycord step by step"),
+    ("copycord run", "start Copycord in this terminal"),
+    ("copycord service install", "run it in the background"),
+    ("copycord update status", "see whether an update is available"),
+    ("copycord update --channel beta", "switch to pre-releases"),
+    ("copycord update --channel dev --ref main", "install from git"),
+)
+
+
+def _version() -> str:
+    try:
+        from common.config import CURRENT_VERSION
+
+        return CURRENT_VERSION
+    except Exception:
+        return "unknown"
+
+
+def format_help() -> str:
+    from copycord import ui
+
+    import io
+
+    buf = io.StringIO()
+    out = sys.stdout
+
+    def w(text: str = "") -> None:
+        buf.write(text + "\n")
+
+    if ui.use_color(out):
+        logo = "\n".join(ui.paint(r, "accent", "bold") for r in ui.LOGO)
+        w()
+        w(logo)
+        w(f"  {ui.dim(_version() + '  ' + ui.TAGLINE)}")
+    else:
+        w(f"Copycord {_version()}")
+    w()
+    w(f"{ui.bold('Usage:')} copycord <command> [options]")
+    width = max(len(c) for _, cmds in COMMAND_GROUPS for c, _ in cmds)
+    for group, cmds in COMMAND_GROUPS:
+        w()
+        w(ui.accent(group + ":"))
+        for name, text in cmds:
+            w(f"  {ui.cmd(name.ljust(width))}  {text}")
+    w()
+    w(ui.accent("Examples:"))
+    ex_width = max(len(c) for c, _ in EXAMPLES)
+    for example, text in EXAMPLES:
+        w(f"  {ui.cmd(example.ljust(ex_width))}  {ui.dim(text)}")
+    w()
+    w(ui.accent("Options:"))
+    opt_width = max(width, len("-V, --version"))
+    w(f"  {ui.cmd('-h, --help'.ljust(opt_width))}  Show this help")
+    w(f"  {ui.cmd('-V, --version'.ljust(opt_width))}  Print the version and exit")
+    w()
+    w(ui.dim("Run `copycord <command> --help` for the options of one command."))
+    w(ui.dim("Docs: https://copycord.github.io/Copycord/docs/cli"))
+    return buf.getvalue()
+
+
+class _Parser(argparse.ArgumentParser):
+    def format_help(self) -> str:
+        if self.prog == "copycord":
+            return format_help()
+        return super().format_help()
+
+
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="copycord")
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser = _Parser(prog="copycord")
+    parser.add_argument("-V", "--version", action="version", version=f"copycord {_version()}")
+    sub = parser.add_subparsers(dest="command", required=True, parser_class=argparse.ArgumentParser)
 
     data_dir = argparse.ArgumentParser(add_help=False)
     data_dir.add_argument(
         "--data-dir", metavar="PATH", help="data directory (sets DATA_DIR)"
     )
 
-    sub.add_parser("run", parents=[data_dir], help="run Copycord")
+    onboard = sub.add_parser(
+        "onboard",
+        parents=[data_dir],
+        help="guided first-run setup",
+        description="Guided setup of what Copycord needs: the server bot token, "
+        "the client token, the command users and the dashboard port. "
+        "Values go to the app config in the database.",
+        epilog="examples:\n"
+        "  copycord onboard\n"
+        "  copycord onboard --non-interactive --server-token XXX --client-token YYY\n"
+        "  SERVER_TOKEN=XXX CLIENT_TOKEN=YYY copycord onboard --non-interactive",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    onboard.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="no prompts: take values from the flags and the environment",
+    )
+    onboard.add_argument("--server-token", metavar="TOKEN",
+                         help="Discord bot token for the clone server (SERVER_TOKEN)")
+    onboard.add_argument("--client-token", metavar="TOKEN",
+                         help="Discord user token that reads the source server (CLIENT_TOKEN)")
+    onboard.add_argument("--command-users", metavar="IDS",
+                         help="comma-separated Discord user IDs allowed to run bot commands")
+    onboard.add_argument("--port", type=int, metavar="PORT",
+                         help="dashboard port to show in the URL (ADMIN_PORT, default 8080)")
+    onboard.add_argument("--force", action="store_true",
+                         help="ask again even for values that are already set")
+
+    sub.add_parser(
+        "run",
+        parents=[data_dir],
+        help="run Copycord",
+        description="Run the dashboard, the server bot and the client in one process. "
+        "On first start in a terminal, with no tokens saved yet, runs `copycord onboard` first.",
+    ).add_argument("--no-onboard", action="store_true",
+                   help="never start the onboarding, even when unconfigured")
     sub.add_parser(
         "version", parents=[data_dir], help="print the Copycord version and update channel"
     )
@@ -125,18 +257,43 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     ):
         ssub.add_parser(name, parents=[user], help=text)
 
-    update = sub.add_parser("update", help="update Copycord")
+    update = sub.add_parser(
+        "update",
+        parents=[data_dir],
+        help="update Copycord",
+        description="Update Copycord from the saved channel (default stable), or "
+        "switch channel. The channel is saved in <data dir>/update.json.",
+        epilog="channels:\n"
+        "  stable  newest GitHub release\n"
+        "  beta    newest GitHub release, pre-releases included\n"
+        "  dev     git install: uv tool install --force git+https://github.com/<repo>@<ref>\n"
+        "          (needs npm to build the admin UI)\n"
+        "\nexamples:\n"
+        "  copycord update status\n"
+        "  copycord update\n"
+        "  copycord update --channel beta\n"
+        "  copycord update --channel dev --ref v4-dev\n"
+        "  copycord update --channel dev --repo you/Copycord --ref 1a2b3c4\n"
+        "  copycord update --tag 4.0.0",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    update.add_argument(
+        "action",
+        nargs="?",
+        choices=("status",),
+        help="status: print the installed version, the channel and the latest on it",
+    )
     update.add_argument(
         "--check",
         action="store_true",
-        help="only print the installed version, the channel and the latest on it",
+        help="same as `copycord update status`",
     )
     target = update.add_mutually_exclusive_group()
     target.add_argument(
         "--channel",
         choices=("stable", "beta", "dev"),
         help="switch to this channel and save it (stable: GitHub releases, "
-        "beta: GitHub pre-releases too, dev: a git branch, needs npm)",
+        "beta: GitHub pre-releases too, dev: a git ref, needs npm)",
     )
     target.add_argument(
         "--tag",
@@ -144,15 +301,45 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="install this exact version once; the saved channel does not change",
     )
     update.add_argument(
+        "--ref",
         "--branch",
-        metavar="NAME",
-        help="dev channel: the git branch to install (default main)",
+        dest="branch",
+        metavar="REF",
+        help="dev channel: the git branch, tag or commit to install (default main)",
+    )
+    update.add_argument(
+        "--repo",
+        metavar="OWNER/NAME",
+        help="dev channel: the GitHub repo to install from (default Copycord/Copycord)",
     )
     update.add_argument(
         "--no-install",
         action="store_true",
-        help="only save --channel/--branch, install nothing (used by the install scripts)",
+        help="only save --channel/--repo/--ref, install nothing (used by the install scripts)",
     )
+
+    uninst = sub.add_parser(
+        "uninstall",
+        parents=[data_dir],
+        help="remove Copycord from this machine",
+        description="Stop and remove the OS service, remove the copycord program "
+        "(uv tool or pipx) and the saved update channel. The data directory stays "
+        "unless --purge is given.",
+        epilog="examples:\n"
+        "  copycord uninstall --dry-run\n"
+        "  copycord uninstall\n"
+        "  copycord uninstall --purge\n"
+        "  copycord uninstall --yes --keep-service",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    uninst.add_argument("--purge", action="store_true",
+                        help="also delete the data directory (database, logs, backups)")
+    uninst.add_argument("--yes", "-y", action="store_true",
+                        help="skip the confirmation prompts (needed without a terminal)")
+    uninst.add_argument("--keep-service", action="store_true",
+                        help="leave the OS service installed")
+    uninst.add_argument("--dry-run", action="store_true",
+                        help="print the steps and change nothing")
     return parser.parse_args(argv)
 
 
@@ -328,10 +515,22 @@ def run_doctor() -> List[Check]:
 
 
 def doctor() -> int:
+    from copycord import ui
+
     checks = run_doctor()
+    if ui.use_color():
+        ui.heading("Copycord doctor")
+    status = {PASS: "ok", WARN: "warn", FAIL: "fail"}
     for c in checks:
-        print(f"{c.status}  {c.name}: {c.reason}")
-    return 1 if any(c.status == FAIL for c in checks) else 0
+        ui.line(status[c.status], c.name, c.reason, stream=sys.stdout)
+    failed = sum(c.status == FAIL for c in checks)
+    if ui.use_color():
+        print()
+        if failed:
+            ui.fail(f"{failed} check(s) failed", stream=sys.stdout)
+        else:
+            ui.ok("ready to run", ui.cmd("copycord run"))
+    return 1 if failed else 0
 
 
 # --------------------------------------------------------------------------
@@ -432,17 +631,214 @@ def config_command(args: argparse.Namespace) -> int:
     return 2
 
 
+# --------------------------------------------------------------------------
+# uninstall
+# --------------------------------------------------------------------------
+
+INSTALL_SCRIPT = (
+    "curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh"
+)
+
+
+def purge_refusal(path: Path) -> Optional[str]:
+    """Why --purge must not delete path; None when it may."""
+    if not str(path).strip() or str(path) == ".":
+        return "the data directory path is empty"
+    resolved = path.expanduser().resolve()
+    if resolved == Path(resolved.anchor):
+        return f"{resolved} is a filesystem root"
+    if resolved == Path.home().resolve():
+        return f"{resolved} is your home directory"
+    return None
+
+
+def _uninstall_service(dry_run: bool, removed: list, kept: list) -> bool:
+    from copycord import ui
+    from copycord.service import ServiceError, SystemdService, get_service
+
+    if sys.platform in ("win32", "darwin"):
+        services = [get_service()]
+    else:
+        services = [SystemdService(True), SystemdService(False)]
+    ok = True
+    for svc in services:
+        if not svc.state().installed:
+            ui.info("service not installed", svc.where)
+            continue
+        if dry_run:
+            ui.info("would stop and remove the service", svc.where)
+            removed.append(f"service: {svc.where}")
+            continue
+        try:
+            for note in svc.uninstall():
+                ui.ok("service", note)
+            removed.append(f"service: {svc.where}")
+        except ServiceError as e:
+            ui.fail("service not removed", str(e))
+            kept.append(f"service: {svc.where}")
+            ok = False
+    return ok
+
+
+def _uninstall_program(dry_run: bool, purge: bool, removed: list, kept: list) -> bool:
+    import shutil
+
+    from copycord import ui
+    from copycord.service import run_cmd
+    from copycord.update import settings_path
+
+    ok = True
+    channel_file = settings_path()
+    if not purge and channel_file.exists():
+        if dry_run:
+            ui.info("would remove the update channel file", str(channel_file))
+            removed.append(f"update channel file: {channel_file}")
+        else:
+            try:
+                channel_file.unlink()
+                ui.ok("removed the update channel file", str(channel_file))
+                removed.append(f"update channel file: {channel_file}")
+            except OSError as e:
+                ui.fail("update channel file not removed", f"{channel_file}: {e}")
+                kept.append(f"update channel file: {channel_file}")
+                ok = False
+
+    commands = []
+    if shutil.which("uv"):
+        commands.append(["uv", "tool", "uninstall", "copycord"])
+    if shutil.which("pipx"):
+        commands.append(["pipx", "uninstall", "copycord"])
+    manual = f'"{sys.executable}" -m pip uninstall copycord'
+    if not commands:
+        ui.warn("neither uv nor pipx is on PATH", f"remove the program by hand: {manual}")
+        kept.append(f"copycord program (remove it with: {manual})")
+        return ok
+    if dry_run:
+        ui.info("would run", " ".join(commands[0]))
+        removed.append("copycord program")
+        return ok
+    for command in commands:
+        text = " ".join(command)
+        res = run_cmd(command)
+        if res.returncode == 0:
+            ui.ok("removed the copycord program", text)
+            removed.append("copycord program")
+            return ok
+        detail = (res.stderr or res.stdout or "").strip().splitlines()
+        ui.warn(f"{text} failed", detail[-1] if detail else f"exit {res.returncode}")
+    kept.append(f"copycord program (remove it with: {manual})")
+    return False
+
+
+def uninstall_command(args: argparse.Namespace) -> int:
+    from common.paths import data_dir
+    from copycord import ui
+
+    purge, dry_run, yes = args.purge, args.dry_run, args.yes
+    target = data_dir()
+    if purge:
+        why = purge_refusal(target)
+        if why:
+            ui.fail("refusing to delete the data directory", why)
+            return 1
+    if not yes and not dry_run and not ui.is_interactive():
+        ui.fail(
+            "copycord uninstall needs a confirmation",
+            "no terminal to ask in; rerun with --yes to uninstall without prompts",
+        )
+        return 1
+
+    if ui.use_color():
+        ui.banner(_version())
+    ui.heading("Uninstall Copycord" + (" (dry run, nothing changes)" if dry_run else ""))
+    if not args.keep_service:
+        ui.line("step", "stop and remove the OS service")
+    if purge:
+        ui.line("step", "delete the data directory", str(target))
+    ui.line("step", "remove the copycord program and its update channel")
+    print()
+
+    if not yes and not dry_run:
+        try:
+            if not ui.confirm("Uninstall Copycord?", default=False):
+                ui.warn("uninstall cancelled", "nothing was changed")
+                return 1
+            if purge:
+                typed = ui.ask(f"Type DELETE to remove {target} and everything in it")
+                if typed != "DELETE":
+                    ui.warn("uninstall cancelled", "DELETE was not typed; nothing was changed")
+                    return 1
+        except (KeyboardInterrupt, EOFError):
+            print()
+            ui.warn("uninstall cancelled", "nothing was changed")
+            return 130
+
+    removed: list = []
+    kept: list = []
+    ok = True
+    if args.keep_service:
+        kept.append("OS service (--keep-service)")
+    else:
+        ok = _uninstall_service(dry_run, removed, kept) and ok
+
+    if not purge:
+        kept.append(f"data directory: {target} (add --purge to delete it)")
+    elif not target.exists():
+        ui.info("data directory does not exist", str(target))
+    elif dry_run:
+        ui.info("would delete the data directory", str(target))
+        removed.append(f"data directory: {target}")
+    else:
+        import shutil
+
+        try:
+            shutil.rmtree(target)
+            ui.ok("deleted the data directory", str(target))
+            removed.append(f"data directory: {target}")
+        except OSError as e:
+            ui.fail("data directory not deleted", f"{target}: {e}")
+            kept.append(f"data directory: {target}")
+            ok = False
+
+    ok = _uninstall_program(dry_run, purge, removed, kept) and ok
+
+    lines = [ui.bold("Would remove" if dry_run else "Removed")]
+    lines += [f"  {x}" for x in removed or ["nothing"]]
+    lines += ["", ui.bold("Kept")]
+    lines += [f"  {x}" for x in kept or ["nothing"]]
+    lines += ["", ui.bold("Reinstall"), f"  {ui.cmd(INSTALL_SCRIPT)}"]
+    if dry_run:
+        title, status = "Dry run: nothing changed", "info"
+    elif ok:
+        title, status = "Copycord uninstalled", "ok"
+    else:
+        title, status = "Uninstall incomplete", "warn"
+    print()
+    ui.box(lines, title=title, status=status)
+    return 0 if ok else 1
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     apply_data_dir(args)
 
     if args.command == "version":
         from common.config import CURRENT_VERSION
+        from copycord import ui
         from copycord.update import load_channel
 
-        print(CURRENT_VERSION)
-        print(f"channel {load_channel().describe()}")
+        if ui.use_color():
+            ui.banner(CURRENT_VERSION)
+            ui.kv([("version", CURRENT_VERSION), ("channel", load_channel().describe())])
+        else:
+            print(CURRENT_VERSION)
+            print(f"channel {load_channel().describe()}")
         return 0
+
+    if args.command == "onboard":
+        from copycord.onboard import onboard
+
+        return onboard(args)
 
     if args.command == "doctor":
         return doctor()
@@ -455,15 +851,19 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         return service_command(args)
 
+    if args.command == "uninstall":
+        return uninstall_command(args)
+
     if args.command == "update":
         from copycord.update import update
 
         return update(
-            check_only=args.check,
+            check_only=args.check or args.action == "status",
             channel=args.channel,
             branch=args.branch,
             tag=args.tag,
             no_install=args.no_install,
+            repo=args.repo,
         )
 
     if args.command == "run":
@@ -473,6 +873,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         setup_logging(roles=())
         if not check_removed_options():
             return 1
+
+        if not getattr(args, "no_onboard", False):
+            from copycord.onboard import maybe_onboard_first_run
+
+            rc = maybe_onboard_first_run()
+            if rc is not None:
+                return rc
 
         from copycord import supervisor
 
