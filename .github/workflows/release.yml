@@ -1,9 +1,10 @@
-name: Release to PyPI
+name: Release assets
 
 # A published GitHub release tagged v* builds the frontend, the sdist and the
-# wheel, and publishes them to PyPI with trusted publishing (no secrets).
-# Pre-release tags (v4.0.0b1) become PyPI pre-releases by their version, which
-# the beta update channel picks up; final tags feed the stable channel.
+# wheel, and uploads them as assets of that release. install.sh, install.ps1
+# and `copycord update` install the wheel asset: pre-release tags (v4.0.0b1,
+# marked as pre-release on GitHub) feed the beta channel, final releases the
+# stable channel.
 
 on:
   release:
@@ -81,20 +82,23 @@ jobs:
           path: dist/
           if-no-files-found: error
 
-  publish:
-    name: Publish to PyPI
+  upload:
+    name: Upload release assets
     needs: build
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/project/copycord/
     permissions:
-      id-token: write
+      contents: write
     steps:
       - uses: actions/download-artifact@v6
         with:
           name: copycord-dist
           path: dist/
 
-      - name: Publish
-        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Upload the wheel and sdist to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          ls -l dist/
+          gh release upload "$TAG" dist/copycord-*.whl dist/copycord-*.tar.gz \
+            --repo "$GITHUB_REPOSITORY" --clobber
