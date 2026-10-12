@@ -1,13 +1,16 @@
 """
 Tests for single-process logging (code/copycord/logging_setup.py).
 """
+import asyncio
 import io
 import logging
 import threading
 
 import pytest
 
+from common.config import CURRENT_VERSION
 from copycord import logging_setup as ls
+from copycord import supervisor
 
 
 @pytest.fixture()
@@ -33,9 +36,9 @@ def clean_root(monkeypatch):
         logging.getLogger(n).setLevel(lvl)
 
 
-def _emit_on_thread(name, logger_name, msg):
+def _emit_on_thread(name, logger_name, msg, level=logging.INFO):
     t = threading.Thread(
-        target=lambda: logging.getLogger(logger_name).info(msg), name=name
+        target=lambda: logging.getLogger(logger_name).log(level, msg), name=name
     )
     t.start()
     t.join()
@@ -67,9 +70,64 @@ def test_records_route_by_thread_and_print_once(tmp_path, clean_root):
     assert client.count("from-client") == 1 and "from-server" not in client
     assert "from-admin" not in server + client
     console = buf.getvalue()
-    for msg in ("from-server", "from-client", "from-admin"):
-        assert console.count(msg) == 1
+    assert console.count("from-admin") == 1
+    assert "from-server" not in console and "from-client" not in console
     assert " | INFO  | from-server" in server
+    assert "[server]" not in server
+
+
+def test_role_warning_reaches_file_and_console_tagged(tmp_path, clean_root):
+    _, buf = _setup(tmp_path, clean_root)
+    _emit_on_thread("copycord-server", "server.server", "s-warn", logging.WARNING)
+    _emit_on_thread("copycord-client", "client.client", "c-err", logging.ERROR)
+    for h in clean_root.handlers:
+        h.flush()
+    assert "| WARNING | [server] s-warn" in buf.getvalue()
+    assert "| ERROR | [client] c-err" in buf.getvalue()
+    assert _read(tmp_path, "server").count("s-warn") == 1
+    assert _read(tmp_path, "client").count("c-err") == 1
+
+
+def test_admin_info_reaches_console_tagged(tmp_path, clean_root):
+    _, buf = _setup(tmp_path, clean_root)
+    _emit_on_thread("MainThread", "copycord.supervisor", "admin-info")
+    _emit_on_thread("uvicorn-1", "copycord.supervisor", "uv-info")
+    out = buf.getvalue()
+    assert "| INFO  | [admin] admin-info" in out
+    assert "[admin] uv-info" in out
+    assert "admin-info" not in _read(tmp_path, "server") + _read(tmp_path, "client")
+
+
+def test_startup_banner_prints_once(tmp_path, clean_root, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(supervisor, "_set_runtime_env", lambda: None)
+
+    class _Sup:
+        async def run(self, stop):
+            # what the role modules log when they start
+            _emit_on_thread(
+                "copycord-server", "server.server", f"[x] Starting Copycord Server {CURRENT_VERSION}"
+            )
+            _emit_on_thread(
+                "copycord-client", "client.client", f"[x] Starting Copycord Client {CURRENT_VERSION}"
+            )
+
+    monkeypatch.setattr(supervisor, "build_supervisor", lambda: _Sup())
+    buf = io.StringIO()
+    orig = ls.setup_logging
+
+    def _setup_capture(*a, **kw):
+        handlers = orig(*a, **kw)
+        next(
+            h for h in clean_root.handlers if getattr(h, ls.CONSOLE_MARK, False)
+        ).setStream(buf)
+        return handlers
+
+    monkeypatch.setattr(supervisor, "setup_logging", _setup_capture)
+    asyncio.run(supervisor.run())
+    out = buf.getvalue()
+    assert out.count(CURRENT_VERSION) == 1
+    assert "[admin]" in out and "Starting Copycord" in out
 
 
 def test_setup_is_idempotent(tmp_path, clean_root):
