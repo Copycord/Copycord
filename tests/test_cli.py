@@ -247,30 +247,84 @@ def test_data_dir_flag_sets_env(data_dir, tmp_path, monkeypatch):
 @pytest.fixture()
 def native(monkeypatch, tmp_path):
     """No DATA_DIR, not in Docker, HOME at a temp dir."""
-    _unset(monkeypatch, "DATA_DIR", "DB_PATH", "LOCALAPPDATA")
+    _unset(monkeypatch, "DATA_DIR", "DB_PATH", "LOCALAPPDATA", "COPYCORD_HOME")
     monkeypatch.setattr(paths, "in_docker", lambda: False)
     home = tmp_path / "home"
     monkeypatch.setattr(paths.Path, "home", classmethod(lambda cls: home))
     return home
 
 
-def test_default_linux(native, monkeypatch):
-    monkeypatch.setattr(sys, "platform", "linux")
-    assert paths.data_dir() == (native / ".local" / "share" / "copycord").resolve()
+@pytest.mark.parametrize("platform", ["linux", "darwin", "win32"])
+def test_default_is_copycord_home_everywhere(native, monkeypatch, platform):
+    monkeypatch.setattr(sys, "platform", platform)
+    _unset(monkeypatch, "COPYCORD_HOME")
+    assert paths.data_dir() == (native / ".copycord").resolve()
     assert paths.db_path() == paths.data_dir() / "data.db"
 
 
-def test_default_macos(native, monkeypatch):
-    monkeypatch.setattr(sys, "platform", "darwin")
-    expected = native / "Library" / "Application Support" / "Copycord"
-    assert paths.data_dir() == expected.resolve()
+def test_copycord_home_env_overrides(native, monkeypatch, tmp_path):
+    monkeypatch.setenv("COPYCORD_HOME", str(tmp_path / "ch"))
+    assert paths.data_dir() == (tmp_path / "ch").resolve()
 
 
-def test_default_windows(native, monkeypatch, tmp_path):
+def test_data_dir_beats_copycord_home(native, monkeypatch, tmp_path):
+    monkeypatch.setenv("COPYCORD_HOME", str(tmp_path / "ch"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "dd"))
+    assert paths.data_dir() == (tmp_path / "dd").resolve()
+
+
+def test_docker_beats_copycord_home(native, monkeypatch, tmp_path):
+    monkeypatch.setenv("COPYCORD_HOME", str(tmp_path / "ch"))
+    monkeypatch.setattr(paths, "in_docker", lambda: True)
+    assert paths.data_dir() == Path("/data").resolve()
+
+
+def test_saved_home_pointer(native, monkeypatch, tmp_path):
+    _unset(monkeypatch, "COPYCORD_HOME")
+    native.mkdir(parents=True)
+    (native / ".copycord-home").write_text(str(tmp_path / "saved") + "\n")
+    assert paths.data_dir() == (tmp_path / "saved").resolve()
+    monkeypatch.setenv("COPYCORD_HOME", str(tmp_path / "ch"))
+    assert paths.data_dir() == (tmp_path / "ch").resolve()
+
+
+@pytest.mark.parametrize(
+    "platform,rel",
+    [
+        ("linux", Path(".local") / "share" / "copycord"),
+        ("darwin", Path("Library") / "Application Support" / "Copycord"),
+    ],
+)
+def test_legacy_dir_used_when_home_missing(native, monkeypatch, capsys, platform, rel):
+    monkeypatch.setattr(sys, "platform", platform)
+    _unset(monkeypatch, "COPYCORD_HOME")
+    paths._notified.clear()
+    old = native / rel
+    old.mkdir(parents=True)
+    (old / "data.db").write_bytes(b"")
+    assert paths.data_dir() == old.resolve()
+    assert "old data directory" in capsys.readouterr().err
+    paths.data_dir()
+    assert capsys.readouterr().err == ""
+    (native / ".copycord").mkdir()
+    assert paths.data_dir() == (native / ".copycord").resolve()
+
+
+def test_legacy_dir_windows(native, monkeypatch, tmp_path):
     monkeypatch.setattr(sys, "platform", "win32")
+    _unset(monkeypatch, "COPYCORD_HOME")
     local = tmp_path / "LocalAppData"
     monkeypatch.setenv("LOCALAPPDATA", str(local))
+    (local / "Copycord").mkdir(parents=True)
+    (local / "Copycord" / "data.db").write_bytes(b"")
     assert paths.data_dir() == (local / "Copycord").resolve()
+
+
+def test_legacy_dir_without_db_is_ignored(native, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    _unset(monkeypatch, "COPYCORD_HOME")
+    (native / ".local" / "share" / "copycord").mkdir(parents=True)
+    assert paths.data_dir() == (native / ".copycord").resolve()
 
 
 def test_default_windows_without_localappdata(native, monkeypatch):

@@ -10,10 +10,16 @@
 """
 Where Copycord keeps its data (DB, logs, backups, exports).
 
-DATA_DIR wins when set (Docker sets it to /data, `copycord run --data-dir`
-sets it). Otherwise Docker falls back to /data and a native install uses the
-per-user platform directory. Everything that needs the data dir resolves it
-here so the supervisor, logging and config agree.
+One visible home directory holds everything Copycord owns: ~/.copycord, or
+COPYCORD_HOME when set. The data dir is the home root itself; a git install
+keeps its checkout in src/ and its per-user Node in node/.
+
+Precedence: DATA_DIR (Docker sets it to /data, `copycord run --data-dir` sets
+it), then /data inside Docker, then COPYCORD_HOME, then ~/.copycord. The
+installer saves a custom --home in ~/.copycord-home so the service and the CLI
+agree without an environment variable; COPYCORD_HOME wins over that file.
+Everything that needs the data dir resolves it here so the supervisor,
+logging and config agree.
 """
 
 from __future__ import annotations
@@ -24,18 +30,22 @@ from pathlib import Path
 from typing import Mapping, Optional
 
 DOCKER_DATA_DIR = "/data"
+HOME_DIRNAME = ".copycord"
+HOME_POINTER = ".copycord-home"
+
+_notified: set = set()
 
 
 def in_docker() -> bool:
     return os.path.exists("/.dockerenv")
 
 
-def platform_data_dir(
+def legacy_data_dir(
     platform: Optional[str] = None,
     env: Optional[Mapping[str, str]] = None,
     home: Optional[Path] = None,
 ) -> Path:
-    """The per-user data directory for a native (non-Docker) install."""
+    """The pre-4.0 per-user platform data directory."""
     platform = sys.platform if platform is None else platform
     env = os.environ if env is None else env
     home = Path.home() if home is None else Path(home)
@@ -45,6 +55,50 @@ def platform_data_dir(
     if platform == "darwin":
         return home / "Library" / "Application Support" / "Copycord"
     return home / ".local" / "share" / "copycord"
+
+
+def copycord_home(
+    env: Optional[Mapping[str, str]] = None,
+    home: Optional[Path] = None,
+) -> Path:
+    """COPYCORD_HOME, else the path saved by the installer, else ~/.copycord."""
+    env = os.environ if env is None else env
+    home = Path.home() if home is None else Path(home)
+    raw = env.get("COPYCORD_HOME")
+    if raw:
+        return Path(raw).expanduser()
+    try:
+        saved = (home / HOME_POINTER).read_text(encoding="utf-8").strip()
+    except OSError:
+        saved = ""
+    if saved:
+        return Path(saved).expanduser()
+    return home / HOME_DIRNAME
+
+
+def platform_data_dir(
+    platform: Optional[str] = None,
+    env: Optional[Mapping[str, str]] = None,
+    home: Optional[Path] = None,
+) -> Path:
+    """The data directory for a native (non-Docker) install.
+
+    The Copycord home, unless it does not exist yet while the old platform
+    directory holds a data.db: that one keeps being used (nothing is moved).
+    """
+    target = copycord_home(env, home)
+    if not target.exists():
+        old = legacy_data_dir(platform, env, home)
+        if (old / "data.db").is_file():
+            if str(old) not in _notified:
+                _notified.add(str(old))
+                print(
+                    f"copycord: using the old data directory {old}; to move to "
+                    f"{target}, stop Copycord and move that directory there",
+                    file=sys.stderr,
+                )
+            return old
+    return target
 
 
 def default_data_dir(
