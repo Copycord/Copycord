@@ -22,6 +22,7 @@ import aiohttp
 from curl_cffi import CurlMime
 from curl_cffi.requests.exceptions import RequestException as CurlRequestException
 
+from common.exit_timezone import note_token_proxy
 from common.proxy_pool import get_pool as get_proxy_pool
 from common.selfbot_headers import (
     SUPPRESSED_PROFILE_HEADERS,
@@ -922,6 +923,8 @@ class UserTokenSender:
                 proxy = get_proxy_pool().current(token)
                 try:
                     session = await self._tls_session(token, use_proxy=use_proxy)
+                    proxy = get_proxy_pool().current(token)
+                    await note_token_proxy(token, proxy)
                     headers = self._build_headers(token, referer)
                     if extra_headers:
                         headers = {**headers, **extra_headers}

@@ -132,7 +132,9 @@ class TestFingerprintShape:
     def test_locale_and_timezone_are_a_plausible_pair(self):
         h = sh.build_headers("tok-1")
         assert h["X-Discord-Locale"] == sh.LOCALE
+        # No exit lookup has succeeded for this token, so the fallback applies.
         assert h["X-Discord-Timezone"] == sh.TIMEZONE
+        assert sh.TIMEZONE == "America/New_York"
 
         assert h["Accept-Language"] == "en-US,en;q=0.9"
 

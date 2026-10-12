@@ -48,6 +48,8 @@ import re
 import time
 from typing import Any, AsyncIterator, Callable, Dict, Optional, Tuple
 
+from common.exit_timezone import note_token_proxy
+
 from .enums import API_VERSION
 from .errors import HTTPException, LoginFailure, RateLimited, for_status
 from .fingerprint import (
@@ -445,6 +447,8 @@ class HTTPClient:
         # curl_cffi builds the query string itself and wants strings for it.
         query = {k: str(v) for k, v in (params or {}).items() if v is not None} or None
         has_body = json is not None
+        if self.token and self._headers_factory is None:
+            await note_token_proxy(self.token, self.proxy)
         send_headers = self.headers_for(method, has_body=has_body, referer=referer, extra=headers)
         route = _route_key(method, path)
 

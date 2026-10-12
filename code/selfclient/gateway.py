@@ -51,6 +51,8 @@ import zlib
 from typing import Any, Awaitable, Callable, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import unquote, urlencode, urlsplit, urlunsplit
 
+from common.exit_timezone import note_token_proxy
+
 from . import fingerprint
 from .enums import API_VERSION, FATAL_CLOSE_CODES, Capabilities, CloseCode, GatewayOp
 from .errors import ConnectionClosed, LoginFailure
@@ -619,11 +621,14 @@ class GatewayClient:
         pool = self.proxy_pool
         if pool is not None and getattr(pool, "enabled", False):
             try:
-                return await pool.lease(self.token)
+                proxy = await pool.lease(self.token)
             except Exception as exc:
                 log.warning("proxy lease failed: %r", exc)
                 return None
-        return self.proxy
+        else:
+            proxy = self.proxy
+        await note_token_proxy(self.token, proxy)
+        return proxy
 
     async def _rotate_proxy(self) -> None:
         pool = self.proxy_pool

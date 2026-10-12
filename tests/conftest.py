@@ -48,3 +48,18 @@ def pytest_sessionfinish(session, exitstatus):
     import shutil
 
     shutil.rmtree(_SESSION_DATA_DIR, ignore_errors=True)
+
+
+@pytest.fixture(autouse=True)
+def _no_exit_ip_lookup(request, monkeypatch):
+    """The exit-IP timezone lookup never reaches ipinfo.io from a test; it
+    fails (so the fallback zone applies) unless a test fakes _fetch_json."""
+    from common import exit_timezone
+
+    async def _offline(proxy, timeout):
+        raise OSError("network disabled in tests")
+
+    monkeypatch.setattr(exit_timezone, "_fetch_json", _offline)
+    exit_timezone.clear_cache()
+    yield
+    exit_timezone.clear_cache()
