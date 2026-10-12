@@ -9,7 +9,7 @@
 
 """
 copycord run                  admin, server and client in one process
-copycord version              print the version
+copycord version              print the version and the update channel
 copycord doctor               preflight checks (no network)
 copycord config get KEY       read one app_config value from the DB
 copycord config set KEY VAL   write one app_config value
@@ -18,7 +18,9 @@ copycord config import FILE   load app_config values from a JSON object
 copycord service install [--user] [--data-dir PATH]
                               run Copycord as a systemd/launchd/Scheduled Task service
 copycord service start|stop|status|uninstall [--user]
-copycord update [--check]     upgrade (uv tool / pipx) and restart a running service
+copycord update [--check] [--channel stable|beta|dev [--branch NAME]] [--tag VERSION]
+                              update (uv tool / pipx) from the saved or given
+                              channel and restart a running service
 """
 
 from __future__ import annotations
@@ -73,7 +75,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
 
     sub.add_parser("run", parents=[data_dir], help="run Copycord")
-    sub.add_parser("version", help="print the Copycord version")
+    sub.add_parser(
+        "version", parents=[data_dir], help="print the Copycord version and update channel"
+    )
     sub.add_parser(
         "doctor", parents=[data_dir], help="check this machine can run Copycord"
     )
@@ -120,11 +124,28 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     ):
         ssub.add_parser(name, parents=[user], help=text)
 
-    update = sub.add_parser("update", help="upgrade Copycord")
+    update = sub.add_parser("update", help="update Copycord")
     update.add_argument(
         "--check",
         action="store_true",
-        help="only print the installed and the latest version",
+        help="only print the installed version, the channel and the latest on it",
+    )
+    target = update.add_mutually_exclusive_group()
+    target.add_argument(
+        "--channel",
+        choices=("stable", "beta", "dev"),
+        help="switch to this channel and save it (stable: PyPI releases, "
+        "beta: PyPI pre-releases too, dev: a git branch, needs npm)",
+    )
+    target.add_argument(
+        "--tag",
+        metavar="VERSION",
+        help="install this exact version once; the saved channel does not change",
+    )
+    update.add_argument(
+        "--branch",
+        metavar="NAME",
+        help="dev channel: the git branch to install (default main)",
     )
     return parser.parse_args(argv)
 
@@ -407,13 +428,15 @@ def config_command(args: argparse.Namespace) -> int:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
+    apply_data_dir(args)
+
     if args.command == "version":
         from common.config import CURRENT_VERSION
+        from copycord.update import load_channel
 
         print(CURRENT_VERSION)
+        print(f"channel {load_channel().describe()}")
         return 0
-
-    apply_data_dir(args)
 
     if args.command == "doctor":
         return doctor()
@@ -429,7 +452,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.command == "update":
         from copycord.update import update
 
-        return update(check_only=args.check)
+        return update(
+            check_only=args.check,
+            channel=args.channel,
+            branch=args.branch,
+            tag=args.tag,
+        )
 
     if args.command == "run":
         from copycord.logging_setup import setup_logging
