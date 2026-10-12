@@ -489,7 +489,8 @@ def restart_service() -> None:
 
 
 def install_data_dir(user: bool, env=None, platform: Optional[str] = None) -> Path:
-    """Data dir baked into the service: DATA_DIR / --data-dir, else the default.
+    """Data dir baked into the service: DATA_DIR / --data-dir, else the Copycord
+    home (COPYCORD_HOME or ~/.copycord).
     A system unit installed with sudo runs as SUDO_USER, so it defaults to
     that user's data dir rather than root's."""
     from common.paths import data_dir, platform_data_dir

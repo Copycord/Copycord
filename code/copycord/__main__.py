@@ -323,8 +323,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         parents=[data_dir],
         help="remove Copycord from this machine",
         description="Stop and remove the OS service, remove the copycord program "
-        "(uv tool or pipx) and the saved update channel. The data directory stays "
-        "unless --purge is given.",
+        "(uv tool or pipx) and the saved update channel. The Copycord home "
+        "(~/.copycord or COPYCORD_HOME: data, src, node) stays unless --purge is given.",
         epilog="examples:\n"
         "  copycord uninstall --dry-run\n"
         "  copycord uninstall\n"
@@ -333,7 +333,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     uninst.add_argument("--purge", action="store_true",
-                        help="also delete the data directory (database, logs, backups)")
+                        help="also delete the Copycord home (database, logs, backups, src, node)")
     uninst.add_argument("--yes", "-y", action="store_true",
                         help="skip the confirmation prompts (needed without a terminal)")
     uninst.add_argument("--keep-service", action="store_true",
@@ -643,13 +643,25 @@ INSTALL_SCRIPT = (
 def purge_refusal(path: Path) -> Optional[str]:
     """Why --purge must not delete path; None when it may."""
     if not str(path).strip() or str(path) == ".":
-        return "the data directory path is empty"
+        return "the Copycord home path is empty"
     resolved = path.expanduser().resolve()
     if resolved == Path(resolved.anchor):
         return f"{resolved} is a filesystem root"
     if resolved == Path.home().resolve():
         return f"{resolved} is your home directory"
     return None
+
+
+def _forget_saved_home(removed: list) -> None:
+    """Drop the home pointer the installer saved for a custom --home."""
+    from common.paths import HOME_POINTER
+
+    pointer = Path.home() / HOME_POINTER
+    try:
+        pointer.unlink()
+        removed.append(f"saved home pointer: {pointer}")
+    except OSError:
+        pass
 
 
 def _uninstall_service(dry_run: bool, removed: list, kept: list) -> bool:
@@ -739,7 +751,7 @@ def uninstall_command(args: argparse.Namespace) -> int:
     if purge:
         why = purge_refusal(target)
         if why:
-            ui.fail("refusing to delete the data directory", why)
+            ui.fail("refusing to delete the Copycord home", why)
             return 1
     if not yes and not dry_run and not ui.is_interactive():
         ui.fail(
@@ -754,7 +766,7 @@ def uninstall_command(args: argparse.Namespace) -> int:
     if not args.keep_service:
         ui.line("step", "stop and remove the OS service")
     if purge:
-        ui.line("step", "delete the data directory", str(target))
+        ui.line("step", "delete the Copycord home, including src and node", str(target))
     ui.line("step", "remove the copycord program and its update channel")
     print()
 
@@ -782,22 +794,23 @@ def uninstall_command(args: argparse.Namespace) -> int:
         ok = _uninstall_service(dry_run, removed, kept) and ok
 
     if not purge:
-        kept.append(f"data directory: {target} (add --purge to delete it)")
+        kept.append(f"Copycord home: {target} (add --purge to delete it)")
     elif not target.exists():
-        ui.info("data directory does not exist", str(target))
+        ui.info("Copycord home does not exist", str(target))
     elif dry_run:
-        ui.info("would delete the data directory", str(target))
-        removed.append(f"data directory: {target}")
+        ui.info("would delete the Copycord home", str(target))
+        removed.append(f"Copycord home: {target}")
     else:
         import shutil
 
         try:
             shutil.rmtree(target)
-            ui.ok("deleted the data directory", str(target))
-            removed.append(f"data directory: {target}")
+            ui.ok("deleted the Copycord home", str(target))
+            removed.append(f"Copycord home: {target}")
+            _forget_saved_home(removed)
         except OSError as e:
-            ui.fail("data directory not deleted", f"{target}: {e}")
-            kept.append(f"data directory: {target}")
+            ui.fail("Copycord home not deleted", f"{target}: {e}")
+            kept.append(f"Copycord home: {target}")
             ok = False
 
     ok = _uninstall_program(dry_run, purge, removed, kept) and ok
