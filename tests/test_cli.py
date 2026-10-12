@@ -243,7 +243,7 @@ def test_config_env_only_keys_go_to_env_file(data_dir, monkeypatch, capsys):
     env.write_text("# my notes\nADMIN_PORT=9000\n", encoding="utf-8")
 
     assert cli.main(["config", "set", "PASSWORD", "it's a #pass", *dd]) == 0
-    assert "restart Copycord to apply" in capsys.readouterr().err
+    assert "apply it with: copycord restart" in capsys.readouterr().err
     assert cli.main(["config", "set", "ADMIN_PORT", "9090", *dd]) == 0
     text = env.read_text(encoding="utf-8")
     assert text.startswith("# my notes\nADMIN_PORT=9090\n")
@@ -284,13 +284,28 @@ def test_env_file_is_loaded_without_overriding(data_dir, monkeypatch):
     assert os.environ["COPYCORD_TEST_REAL"] == "real"
 
 
-def test_env_template_lists_every_env_key():
+def test_env_template_sets_the_password_and_lists_every_env_key(tmp_path):
     from copycord import envfile
 
     text = envfile.template()
+    lines = text.splitlines()
+    assert "PASSWORD=copycord" in lines
+    assert envfile.DEFAULT_PASSWORD == "copycord"
     for key in envfile.ENV_KEYS:
-        assert f"#{key}=" in text
-    assert all(line == "" or line.startswith("#") for line in text.splitlines())
+        if key != "PASSWORD":
+            assert f"#{key}={envfile.ENV_DEFAULTS.get(key, '')}" in lines
+        # A one-line description above each key.
+        above = lines[next(i for i, x in enumerate(lines) if x.lstrip("#").startswith(key + "=")) - 1]
+        assert above.startswith("# ") and len(above) > 4
+    active = [x for x in lines if x and not x.startswith("#")]
+    assert active == ["PASSWORD=copycord"]
+    assert "copycord restart" in text
+
+    env = tmp_path / ".env"
+    env.write_text(text, encoding="utf-8")
+    from dotenv import dotenv_values
+
+    assert dotenv_values(env) == {"PASSWORD": "copycord"}
 
 
 def test_config_set_fills_the_template_placeholder(tmp_path):
@@ -299,9 +314,63 @@ def test_config_set_fills_the_template_placeholder(tmp_path):
     env = tmp_path / ".env"
     env.write_text(envfile.template(), encoding="utf-8")
     envfile.set_value("PASSWORD", "pw", env)
+    envfile.set_value("ADMIN_PORT", "9000", env)
     lines = env.read_text(encoding="utf-8").splitlines()
-    assert "PASSWORD=pw" in lines and "#PASSWORD=" not in lines
+    assert "PASSWORD=pw" in lines and "PASSWORD=copycord" not in lines
+    assert "ADMIN_PORT=9000" in lines and "#ADMIN_PORT=8080" not in lines
+    assert lines.index("ADMIN_PORT=9000") == envfile.template().splitlines().index("#ADMIN_PORT=8080")
     assert lines[0].startswith("# Copycord settings")
+
+
+def _service_state(monkeypatch, installed, running, restart_error=None):
+    from copycord import service
+
+    restarts = []
+
+    def restart():
+        if restart_error:
+            raise service.ServiceError(restart_error)
+        restarts.append(1)
+
+    state = service.State(installed, running, "systemd user unit /x/copycord.service")
+    monkeypatch.setattr(service, "service_state", lambda: state)
+    monkeypatch.setattr(service, "restart_service", restart)
+    return restarts
+
+
+def test_restart_restarts_a_running_service(monkeypatch, capsys):
+    restarts = _service_state(monkeypatch, True, True)
+    assert cli.main(["restart"]) == 0
+    assert restarts == [1]
+    assert "restarted the copycord service" in capsys.readouterr().out
+
+
+def test_restart_without_a_service_says_to_rerun_in_the_terminal(monkeypatch, capsys):
+    restarts = _service_state(monkeypatch, False, False)
+    assert cli.main(["restart"]) == 1
+    assert restarts == []
+    out = capsys.readouterr().out
+    assert "Copycord is not running as a service" in out
+    assert "copycord run" in out
+
+
+def test_restart_a_stopped_service_points_at_service_start(monkeypatch, capsys):
+    restarts = _service_state(monkeypatch, True, False)
+    assert cli.main(["restart"]) == 1
+    assert restarts == []
+    assert "copycord service start" in capsys.readouterr().out
+
+
+def test_restart_reports_a_failed_restart(monkeypatch, capsys):
+    _service_state(monkeypatch, True, True, restart_error="needs root")
+    assert cli.main(["restart"]) == 1
+    assert "copycord restart: needs root" in capsys.readouterr().err
+
+
+def test_help_lists_restart(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    assert "restart" in capsys.readouterr().out
 
 
 def test_config_import_rejects_bad_json(data_dir, tmp_path):

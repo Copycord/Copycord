@@ -85,15 +85,40 @@ def test_prints_next_steps(path):
     assert "onboard" not in text.lower()
 
 
-@pytest.mark.parametrize("path", [SH, PS1])
-def test_writes_the_env_template_once(path):
+def _sh_env_template():
+    text = _text(SH)
+    start = text.index("<<'ENVEOF'\n") + len("<<'ENVEOF'\n")
+    return text[start:text.index("\nENVEOF\n", start)]
+
+
+def _ps1_env_template():
+    text = _text(PS1)
+    start = text.index("$envTemplate = @(\n") + len("$envTemplate = @(\n")
+    body = text[start:text.index(") -join", start)]
+    items = re.findall(r"^\s*'((?:[^']|'')*)',?$", body, re.M)
+    return "\n".join(item.replace("''", "'") for item in items)
+
+
+@pytest.mark.parametrize("read", [_sh_env_template, _ps1_env_template])
+def test_env_template_matches_envfile(read):
     from copycord import envfile
 
+    assert read() == envfile.template().rstrip("\n")
+    assert "PASSWORD=copycord" in read().splitlines()
+
+
+@pytest.mark.parametrize("path", [SH, PS1])
+def test_writes_the_env_template_once(path):
     text = _text(path)
-    for line in envfile.template().splitlines():
-        if line:
-            assert line.replace("'", "''") in text or line in text
     assert "Test-Path $envFile" in text or '[ -e "$ENV_FILE" ]' in text
+
+
+@pytest.mark.parametrize("path", [SH, PS1])
+def test_success_box_names_the_env_file_and_default_password(path):
+    text = _text(path)
+    assert "Settings: $ENV_FILE" in text or "Settings: $envFile" in text
+    assert "Default dashboard password: copycord" in text
+    assert "copycord restart" in text
 
 
 @pytest.mark.parametrize("path", [SH, PS1])

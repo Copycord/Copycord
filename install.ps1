@@ -433,46 +433,48 @@ Test a branch, no release needed:
         } elseif ((Test-Path $homePointer) -and -not $dryRun) { Remove-Item -Force $homePointer }
 
         # Settings that are read from the environment only live in <home>\.env,
-        # which copycord loads at startup. Write a commented template once; never
-        # overwrite it. Keep the keys in step with code/copycord/envfile.py (ENV_KEYS).
+        # which copycord loads at every start. Make sure it exists: write the
+        # template (PASSWORD set to the default, the rest commented out) once;
+        # never overwrite it. Keep the keys in step with code/copycord/envfile.py (ENV_KEYS).
         $envFile = Join-Path $homeDir '.env'
         if (-not (Test-Path $envFile)) {
             if ($dryRun) { Dry "write a commented settings template to $envFile" }
             else {
                 $envTemplate = @(
             '# Copycord settings that are read from the environment only.',
-            '# Everything else is set in the dashboard. Uncomment a line to use it,',
-            '# or run `copycord config set KEY VALUE`, then restart Copycord.',
+            '# Everything else is set in the dashboard. Edit a value here (uncomment a',
+            '# line to use it) or run `copycord config set KEY VALUE`, then run',
+            '# `copycord restart` to apply it.',
             '',
-            '# dashboard login password; no login page when unset',
-            '#PASSWORD=',
+            '# dashboard login password; change it from the default (unset: no login page)',
+            'PASSWORD=copycord',
             '',
             '# signs the dashboard login cookie (default: a key saved in <home>)',
             '#SECRET_KEY=',
             '',
-            '# dashboard port (default 8080)',
-            '#ADMIN_PORT=',
+            '# dashboard port',
+            '#ADMIN_PORT=8080',
             '',
-            '# time zone for the daily backup, e.g. Europe/Berlin (default UTC)',
-            '#TZ=',
+            '# time zone for the daily backup, e.g. Europe/Berlin',
+            '#TZ=UTC',
             '',
-            '# time zone shown in exports (default America/New_York)',
-            '#UI_TZ=',
+            '# time zone shown in exports',
+            '#UI_TZ=America/New_York',
             '',
-            '# HUMAN or JSON log lines (default HUMAN)',
-            '#LOG_FORMAT=',
+            '# HUMAN or JSON log lines',
+            '#LOG_FORMAT=HUMAN',
             '',
             '# where the daily database backups go (default <home>/backups)',
             '#BACKUP_DIR=',
             '',
-            '# time of the daily backup, HH:MM (default 03:17)',
-            '#BACKUP_AT=',
+            '# time of the daily backup, HH:MM',
+            '#BACKUP_AT=03:17',
             '',
-            '# how many daily backups to keep (default 14)',
-            '#BACKUP_RETAIN=',
+            '# how many daily backups to keep',
+            '#BACKUP_RETAIN=14',
             '',
             '# 1 turns off the update check on start',
-            '#COPYCORD_NO_UPDATE_CHECK='
+            '#COPYCORD_NO_UPDATE_CHECK=0'
                 ) -join "`n"
                 New-Item -ItemType Directory -Force -Path $homeDir | Out-Null
                 [IO.File]::WriteAllText($envFile, $envTemplate + "`n", (New-Object Text.UTF8Encoding $false))
@@ -531,9 +533,14 @@ Test a branch, no release needed:
     foreach ($text in @(
             "Copycord $label is installed",
             "Home: $homeDir",
+            "Settings: $envFile",
+            '',
+            'Default dashboard password: copycord',
+            '  edit it in that file, then: copycord restart',
             '',
             'Next:',
             '  copycord run       start Copycord',
+            '  copycord restart   apply a changed setting',
             '  copycord update    update it later',
             '',
             'Finish the setup in the dashboard once it runs:',

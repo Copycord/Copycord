@@ -29,16 +29,31 @@ FILENAME = ".env"
 
 # Env-only keys and a one-line description each, in template order.
 ENV_KEYS: Dict[str, str] = {
-    "PASSWORD": "dashboard login password; no login page when unset",
+    "PASSWORD": "dashboard login password; change it from the default (unset: no login page)",
     "SECRET_KEY": "signs the dashboard login cookie (default: a key saved in <home>)",
-    "ADMIN_PORT": "dashboard port (default 8080)",
-    "TZ": "time zone for the daily backup, e.g. Europe/Berlin (default UTC)",
-    "UI_TZ": "time zone shown in exports (default America/New_York)",
-    "LOG_FORMAT": "HUMAN or JSON log lines (default HUMAN)",
+    "ADMIN_PORT": "dashboard port",
+    "TZ": "time zone for the daily backup, e.g. Europe/Berlin",
+    "UI_TZ": "time zone shown in exports",
+    "LOG_FORMAT": "HUMAN or JSON log lines",
     "BACKUP_DIR": "where the daily database backups go (default <home>/backups)",
-    "BACKUP_AT": "time of the daily backup, HH:MM (default 03:17)",
-    "BACKUP_RETAIN": "how many daily backups to keep (default 14)",
+    "BACKUP_AT": "time of the daily backup, HH:MM",
+    "BACKUP_RETAIN": "how many daily backups to keep",
     "COPYCORD_NO_UPDATE_CHECK": "1 turns off the update check on start",
+}
+
+# The dashboard password a new install starts with; the template sets it.
+DEFAULT_PASSWORD = "copycord"
+
+# Defaults shown on the template's commented lines; the template sets PASSWORD.
+ENV_DEFAULTS: Dict[str, str] = {
+    "PASSWORD": DEFAULT_PASSWORD,
+    "ADMIN_PORT": "8080",
+    "TZ": "UTC",
+    "UI_TZ": "America/New_York",
+    "LOG_FORMAT": "HUMAN",
+    "BACKUP_AT": "03:17",
+    "BACKUP_RETAIN": "14",
+    "COPYCORD_NO_UPDATE_CHECK": "0",
 }
 
 # Tuning knobs read with os.getenv; set them only when asked to.
@@ -116,9 +131,11 @@ def set_value(key: str, value: str, path: Optional[Path] = None) -> Path:
         out.append(line)
     if not done:
         # Fill the template's commented placeholder, else append.
-        placeholder = f"#{key}="
-        if placeholder in out:
-            out[out.index(placeholder)] = new
+        placeholder = next(
+            (i for i, line in enumerate(out) if line.startswith(f"#{key}=")), None
+        )
+        if placeholder is not None:
+            out[placeholder] = new
         else:
             out.append(new)
     _write_lines(path, out)
@@ -137,15 +154,18 @@ def unset(key: str, path: Optional[Path] = None) -> bool:
 
 
 def template() -> str:
-    """The commented <home>/.env the installer writes on first install."""
+    """The <home>/.env the installer writes on first install: PASSWORD set to
+    the default, every other key commented out with its default."""
     lines = [
         "# Copycord settings that are read from the environment only.",
-        "# Everything else is set in the dashboard. Uncomment a line to use it,",
-        "# or run `copycord config set KEY VALUE`, then restart Copycord.",
+        "# Everything else is set in the dashboard. Edit a value here (uncomment a",
+        "# line to use it) or run `copycord config set KEY VALUE`, then run",
+        "# `copycord restart` to apply it.",
         "",
     ]
     for key, text in ENV_KEYS.items():
+        default = ENV_DEFAULTS.get(key, "")
         lines.append(f"# {text}")
-        lines.append(f"#{key}=")
+        lines.append(f"{key}={default}" if key == "PASSWORD" else f"#{key}={default}")
         lines.append("")
     return "\n".join(lines)

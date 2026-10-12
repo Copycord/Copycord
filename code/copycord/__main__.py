@@ -9,6 +9,7 @@
 
 """
 copycord run                  admin, server and client in one process
+copycord restart              restart the OS service so it re-reads <home>/.env
 copycord --version            print the version and the update channel
 copycord doctor               preflight checks (no network)
 copycord config get KEY       read one setting (secrets masked)
@@ -78,6 +79,7 @@ PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 COMMAND_GROUPS = (
     ("Get started", (
         ("run", "Run Copycord (dashboard, server bot and client)"),
+        ("restart", "Restart the Copycord service to apply changed settings"),
         ("doctor", "Check this machine can run Copycord"),
     )),
     ("Settings", (
@@ -201,6 +203,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="run Copycord",
         description="Run the dashboard, the server bot and the client in one process. "
         "Finish the setup in the dashboard.",
+    )
+    sub.add_parser(
+        "restart",
+        help="restart the Copycord service",
+        description="Restart the OS service so it applies changed settings; "
+        "<home>/.env is read on every start.",
     )
     sub.add_parser(
         "doctor", parents=[data_dir], help="check this machine can run Copycord"
@@ -570,17 +578,38 @@ def _import_values(raw) -> dict:
 
 
 def restart_hint() -> str:
-    """How to apply a changed setting: restart Copycord, or its service."""
-    try:
-        from copycord.service import get_service
+    """How to apply a changed setting."""
+    return "apply it with: copycord restart"
 
-        installed = get_service().state().installed
-    except Exception:
-        installed = False
-    if installed:
-        return ("restart Copycord to apply: copycord service stop, "
-                "then copycord service start")
-    return "restart Copycord to apply"
+
+NOT_A_SERVICE = (
+    "Copycord is not running as a service. Stop it in its terminal (Ctrl+C) "
+    "and run `copycord run` again; <home>/.env is read on every start."
+)
+
+
+def restart_command() -> int:
+    """Restart the OS service when it is installed and running."""
+    from copycord import service
+
+    try:
+        state = service.service_state()
+    except Exception as e:
+        print(f"copycord restart: could not read the service state: {e}", file=sys.stderr)
+        state = None
+    if state is None or not state.installed:
+        print(NOT_A_SERVICE)
+        return 1
+    if not state.running:
+        print(f"{state.line()}; start it with: copycord service start")
+        return 1
+    try:
+        service.restart_service()
+    except service.ServiceError as e:
+        print(f"copycord restart: {e}", file=sys.stderr)
+        return 1
+    print(f"restarted the copycord service ({state.where})")
+    return 0
 
 
 def _print_value(key: str, value: str, show_secrets: bool) -> None:
@@ -915,6 +944,9 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.command == "doctor":
         return doctor()
+
+    if args.command == "restart":
+        return restart_command()
 
     if args.command == "config":
         return config_command(args)
