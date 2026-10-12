@@ -119,7 +119,7 @@ def test_check_reports_newer_version(monkeypatch, capsys, fake_net):
     assert "current 3.28.0" in out
     assert "channel stable" in out
     assert "latest  4.0.0 (v4.0.0)" in out
-    assert "update is available" in out
+    assert "Update available" in out
     assert fake_net["seen"] == [(LIST_URL, 5.0)]
 
 

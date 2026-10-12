@@ -72,13 +72,14 @@ def test_refuses_root_unless_allowed(path):
 
 @pytest.mark.parametrize("path", [SH, PS1])
 def test_saves_the_channel(path):
-    assert "update --channel" in _text(path) and "--no-install" in _text(path)
+    text = _text(path)
+    assert "--channel" in text and "--no-install" in text
 
 
 @pytest.mark.parametrize("path", [SH, PS1])
 def test_prints_next_steps(path):
     text = _text(path)
-    for step in ("copycord doctor", "copycord run", "copycord service install --user"):
+    for step in ("copycord doctor", "copycord update", "localhost:8080"):
         assert step in text
 
 
