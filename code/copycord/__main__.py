@@ -24,6 +24,9 @@ copycord update [--channel stable|beta|dev [--repo OWNER/NAME] [--ref REF]]
                               update (uv tool / pipx) from the saved or given
                               channel and restart a running service
 copycord update status        installed version, channel and latest on it
+copycord uninstall [--purge] [--yes] [--keep-service] [--dry-run]
+                              remove the service and the program (and the
+                              data directory with --purge)
 """
 
 from __future__ import annotations
@@ -84,6 +87,9 @@ COMMAND_GROUPS = (
     ("Updates", (
         ("update", "Update Copycord; switch channel with --channel stable|beta|dev"),
         ("version", "Print the version and the update channel"),
+    )),
+    ("Remove", (
+        ("uninstall", "Remove the service and the program; --purge deletes the data"),
     )),
 )
 
@@ -311,6 +317,29 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="only save --channel/--repo/--ref, install nothing (used by the install scripts)",
     )
+
+    uninst = sub.add_parser(
+        "uninstall",
+        parents=[data_dir],
+        help="remove Copycord from this machine",
+        description="Stop and remove the OS service, remove the copycord program "
+        "(uv tool or pipx) and the saved update channel. The data directory stays "
+        "unless --purge is given.",
+        epilog="examples:\n"
+        "  copycord uninstall --dry-run\n"
+        "  copycord uninstall\n"
+        "  copycord uninstall --purge\n"
+        "  copycord uninstall --yes --keep-service",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    uninst.add_argument("--purge", action="store_true",
+                        help="also delete the data directory (database, logs, backups)")
+    uninst.add_argument("--yes", "-y", action="store_true",
+                        help="skip the confirmation prompts (needed without a terminal)")
+    uninst.add_argument("--keep-service", action="store_true",
+                        help="leave the OS service installed")
+    uninst.add_argument("--dry-run", action="store_true",
+                        help="print the steps and change nothing")
     return parser.parse_args(argv)
 
 
@@ -602,6 +631,193 @@ def config_command(args: argparse.Namespace) -> int:
     return 2
 
 
+# --------------------------------------------------------------------------
+# uninstall
+# --------------------------------------------------------------------------
+
+INSTALL_SCRIPT = (
+    "curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh"
+)
+
+
+def purge_refusal(path: Path) -> Optional[str]:
+    """Why --purge must not delete path; None when it may."""
+    if not str(path).strip() or str(path) == ".":
+        return "the data directory path is empty"
+    resolved = path.expanduser().resolve()
+    if resolved == Path(resolved.anchor):
+        return f"{resolved} is a filesystem root"
+    if resolved == Path.home().resolve():
+        return f"{resolved} is your home directory"
+    return None
+
+
+def _uninstall_service(dry_run: bool, removed: list, kept: list) -> bool:
+    from copycord import ui
+    from copycord.service import ServiceError, SystemdService, get_service
+
+    if sys.platform in ("win32", "darwin"):
+        services = [get_service()]
+    else:
+        services = [SystemdService(True), SystemdService(False)]
+    ok = True
+    for svc in services:
+        if not svc.state().installed:
+            ui.info("service not installed", svc.where)
+            continue
+        if dry_run:
+            ui.info("would stop and remove the service", svc.where)
+            removed.append(f"service: {svc.where}")
+            continue
+        try:
+            for note in svc.uninstall():
+                ui.ok("service", note)
+            removed.append(f"service: {svc.where}")
+        except ServiceError as e:
+            ui.fail("service not removed", str(e))
+            kept.append(f"service: {svc.where}")
+            ok = False
+    return ok
+
+
+def _uninstall_program(dry_run: bool, purge: bool, removed: list, kept: list) -> bool:
+    import shutil
+
+    from copycord import ui
+    from copycord.service import run_cmd
+    from copycord.update import settings_path
+
+    ok = True
+    channel_file = settings_path()
+    if not purge and channel_file.exists():
+        if dry_run:
+            ui.info("would remove the update channel file", str(channel_file))
+            removed.append(f"update channel file: {channel_file}")
+        else:
+            try:
+                channel_file.unlink()
+                ui.ok("removed the update channel file", str(channel_file))
+                removed.append(f"update channel file: {channel_file}")
+            except OSError as e:
+                ui.fail("update channel file not removed", f"{channel_file}: {e}")
+                kept.append(f"update channel file: {channel_file}")
+                ok = False
+
+    commands = []
+    if shutil.which("uv"):
+        commands.append(["uv", "tool", "uninstall", "copycord"])
+    if shutil.which("pipx"):
+        commands.append(["pipx", "uninstall", "copycord"])
+    manual = f'"{sys.executable}" -m pip uninstall copycord'
+    if not commands:
+        ui.warn("neither uv nor pipx is on PATH", f"remove the program by hand: {manual}")
+        kept.append(f"copycord program (remove it with: {manual})")
+        return ok
+    if dry_run:
+        ui.info("would run", " ".join(commands[0]))
+        removed.append("copycord program")
+        return ok
+    for command in commands:
+        text = " ".join(command)
+        res = run_cmd(command)
+        if res.returncode == 0:
+            ui.ok("removed the copycord program", text)
+            removed.append("copycord program")
+            return ok
+        detail = (res.stderr or res.stdout or "").strip().splitlines()
+        ui.warn(f"{text} failed", detail[-1] if detail else f"exit {res.returncode}")
+    kept.append(f"copycord program (remove it with: {manual})")
+    return False
+
+
+def uninstall_command(args: argparse.Namespace) -> int:
+    from common.paths import data_dir
+    from copycord import ui
+
+    purge, dry_run, yes = args.purge, args.dry_run, args.yes
+    target = data_dir()
+    if purge:
+        why = purge_refusal(target)
+        if why:
+            ui.fail("refusing to delete the data directory", why)
+            return 1
+    if not yes and not dry_run and not ui.is_interactive():
+        ui.fail(
+            "copycord uninstall needs a confirmation",
+            "no terminal to ask in; rerun with --yes to uninstall without prompts",
+        )
+        return 1
+
+    if ui.use_color():
+        ui.banner(_version())
+    ui.heading("Uninstall Copycord" + (" (dry run, nothing changes)" if dry_run else ""))
+    if not args.keep_service:
+        ui.line("step", "stop and remove the OS service")
+    if purge:
+        ui.line("step", "delete the data directory", str(target))
+    ui.line("step", "remove the copycord program and its update channel")
+    print()
+
+    if not yes and not dry_run:
+        try:
+            if not ui.confirm("Uninstall Copycord?", default=False):
+                ui.warn("uninstall cancelled", "nothing was changed")
+                return 1
+            if purge:
+                typed = ui.ask(f"Type DELETE to remove {target} and everything in it")
+                if typed != "DELETE":
+                    ui.warn("uninstall cancelled", "DELETE was not typed; nothing was changed")
+                    return 1
+        except (KeyboardInterrupt, EOFError):
+            print()
+            ui.warn("uninstall cancelled", "nothing was changed")
+            return 130
+
+    removed: list = []
+    kept: list = []
+    ok = True
+    if args.keep_service:
+        kept.append("OS service (--keep-service)")
+    else:
+        ok = _uninstall_service(dry_run, removed, kept) and ok
+
+    if not purge:
+        kept.append(f"data directory: {target} (add --purge to delete it)")
+    elif not target.exists():
+        ui.info("data directory does not exist", str(target))
+    elif dry_run:
+        ui.info("would delete the data directory", str(target))
+        removed.append(f"data directory: {target}")
+    else:
+        import shutil
+
+        try:
+            shutil.rmtree(target)
+            ui.ok("deleted the data directory", str(target))
+            removed.append(f"data directory: {target}")
+        except OSError as e:
+            ui.fail("data directory not deleted", f"{target}: {e}")
+            kept.append(f"data directory: {target}")
+            ok = False
+
+    ok = _uninstall_program(dry_run, purge, removed, kept) and ok
+
+    lines = [ui.bold("Would remove" if dry_run else "Removed")]
+    lines += [f"  {x}" for x in removed or ["nothing"]]
+    lines += ["", ui.bold("Kept")]
+    lines += [f"  {x}" for x in kept or ["nothing"]]
+    lines += ["", ui.bold("Reinstall"), f"  {ui.cmd(INSTALL_SCRIPT)}"]
+    if dry_run:
+        title, status = "Dry run: nothing changed", "info"
+    elif ok:
+        title, status = "Copycord uninstalled", "ok"
+    else:
+        title, status = "Uninstall incomplete", "warn"
+    print()
+    ui.box(lines, title=title, status=status)
+    return 0 if ok else 1
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     apply_data_dir(args)
@@ -634,6 +850,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         from copycord.service import service_command
 
         return service_command(args)
+
+    if args.command == "uninstall":
+        return uninstall_command(args)
 
     if args.command == "update":
         from copycord.update import update

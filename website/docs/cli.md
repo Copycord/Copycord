@@ -20,6 +20,7 @@ copycord service install [--user] [--data-dir PATH]
 copycord service start|stop|status|uninstall [--user]
 copycord update [--channel stable|beta|dev] [--repo OWNER/NAME] [--ref REF] [--tag VERSION] [--no-install]
 copycord update status
+copycord uninstall [--purge] [--yes] [--keep-service] [--dry-run] [--data-dir PATH]
 copycord --version
 ```
 
@@ -78,7 +79,7 @@ Copycord keeps its database (`data.db`), logs, backups and the saved update chan
 | Windows | `%LOCALAPPDATA%\Copycord` |
 | Docker | `/data` (your `./data` volume) |
 
-`--data-dir PATH` uses another folder for that command. It does the same as setting the `DATA_DIR` environment variable. It is accepted by `run`, `version`, `doctor`, every `config` command and `service install`.
+`--data-dir PATH` uses another folder for that command. It does the same as setting the `DATA_DIR` environment variable. It is accepted by `run`, `version`, `doctor`, every `config` command, `service install` and `uninstall`.
 
 ## copycord run {#copycord-run}
 
@@ -184,7 +185,7 @@ copycord service uninstall    # stop and remove
 | `start` | Starts the service |
 | `stop` | Stops the service |
 | `status` | Prints whether the service is installed and running. Exits with 0 when running, 3 when not. |
-| `uninstall` | Stops and removes the service. Your data is kept. |
+| `uninstall` | Stops and removes the service. Your data is kept. To remove Copycord itself too, use [`copycord uninstall`](#copycord-uninstall). |
 
 The data directory is fixed when you install the service: the one given with `--data-dir` (or `DATA_DIR`), else the default for your user. To change it, run `copycord service install` again with the new `--data-dir`.
 
@@ -232,6 +233,40 @@ The service does not see variables you set in your terminal. To give it `PASSWOR
 
 - **macOS:** add the variables to the `EnvironmentVariables` dictionary in `~/Library/LaunchAgents/com.copycord.plist`, then run `copycord service stop` and `copycord service start`. Running `copycord service install` again rewrites this file.
 - **Windows:** set them as user environment variables, for example `setx PASSWORD changeme`, then sign out and back in so the task starts with them.
+
+## copycord uninstall {#copycord-uninstall}
+
+Removes Copycord from this machine. Your data stays unless you add `--purge`.
+
+```bash
+copycord uninstall --dry-run          # show what would be removed, change nothing
+copycord uninstall                    # remove the service and the program, keep the data
+copycord uninstall --purge            # also delete the data directory
+copycord uninstall --yes --keep-service
+```
+
+It runs these steps in order:
+
+1. Stops and removes the [service](#copycord-service), the same as `copycord service uninstall`. On Linux it checks both the user and the system service; removing the system service needs root. A service that is not installed is skipped.
+2. With `--purge`, deletes the [data directory](#data-dir) (database, logs, backups). It refuses when that path is `/`, your home directory or empty.
+3. Removes the program with `uv tool uninstall copycord`, or `pipx uninstall copycord` when `uv` is not on your `PATH`, and deletes the saved `update.json`. When neither tool is found it prints the command to run yourself.
+4. Prints a summary of what was removed and kept, and how to reinstall.
+
+| Option | What it does |
+|--------|--------------|
+| `--purge` | Also deletes the data directory. Without `--yes` you must type `DELETE` to confirm. |
+| `--yes`, `-y` | Skips the confirmation prompts |
+| `--keep-service` | Leaves the OS service installed |
+| `--dry-run` | Prints the steps and changes nothing |
+| `--data-dir PATH` | The data directory to keep or delete |
+
+Without a terminal (in a script or a pipe) it never asks: it exits with status 1 unless you add `--yes`. It also exits with status 1 when a step fails.
+
+To install Copycord again:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh
+```
 
 ## copycord update {#copycord-update}
 
