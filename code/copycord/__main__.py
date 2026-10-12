@@ -15,6 +15,9 @@ copycord config get KEY       read one app_config value from the DB
 copycord config set KEY VAL   write one app_config value
 copycord config export [FILE] app_config as JSON (secrets masked on stdout)
 copycord config import FILE   load app_config values from a JSON object
+copycord service install [--user] [--data-dir PATH]
+                              run Copycord as a systemd/launchd/Scheduled Task service
+copycord service start|stop|status|uninstall [--user]
 """
 
 from __future__ import annotations
@@ -96,6 +99,25 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "import", parents=[data_dir], help="store values from a JSON object"
     )
     imp.add_argument("file")
+
+    user = argparse.ArgumentParser(add_help=False)
+    user.add_argument(
+        "--user",
+        action="store_true",
+        help="Linux: per-user systemd unit (systemctl --user) instead of a system one",
+    )
+    service = sub.add_parser("service", help="run Copycord as an OS service")
+    ssub = service.add_subparsers(dest="service_command", required=True)
+    ssub.add_parser(
+        "install", parents=[user, data_dir], help="install, enable and start the service"
+    )
+    for name, text in (
+        ("start", "start the service"),
+        ("stop", "stop the service"),
+        ("status", "print whether the service is installed and running"),
+        ("uninstall", "stop and remove the service"),
+    ):
+        ssub.add_parser(name, parents=[user], help=text)
     return parser.parse_args(argv)
 
 
@@ -390,6 +412,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.command == "config":
         return config_command(args)
+
+    if args.command == "service":
+        from copycord.service import service_command
+
+        return service_command(args)
 
     if args.command == "run":
         from copycord.logging_setup import setup_logging
