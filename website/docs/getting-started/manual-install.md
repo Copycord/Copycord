@@ -57,42 +57,44 @@ The git method clones the repository into `~/.copycord/src` (Windows: `%USERPROF
 Install a branch straight from GitHub, for example `v4-dev`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/v4-dev/install.sh | sh -s -- --git --version v4-dev
+curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/v4-dev/install.sh | sh -s -- --version v4-dev
 ```
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Copycord/Copycord/v4-dev/install.ps1))) -Git -Version v4-dev
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/Copycord/Copycord/v4-dev/install.ps1))) -Version v4-dev
 ```
+
+`--version` alone picks the method: a release version (`4.0.0`, `v4.0.0`, `4.0.0b1`, `4.0.0-rc.1`) installs that release, and anything else (a branch, tag or commit SHA) installs from git at that ref.
 
 A branch of a fork works the same way with `--repo`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh -s -- --git --repo you/Copycord --version my-fix
+curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh -s -- --repo you/Copycord --version my-fix
 ```
 
 A git install of a `Copycord/Copycord` branch saves the `dev` channel with that branch, so `copycord update` keeps following it. For a tag, a commit or a fork the channel is left as it is; run the script again to update.
 
 ### Install options
 
-Pass flags after `sh -s --` on Linux and macOS. On Windows, run the script as a script block to pass parameters (see the example above). Each option also has an environment variable; flags win.
+Pass flags after `sh -s --` on Linux and macOS. On Windows, run the script as a script block to pass parameters (see the example above). Flags win over environment variables.
 
 | Flag (`install.sh`) | Parameter (`install.ps1`) | Environment | What it does |
 |---------------------|---------------------------|-------------|--------------|
-| `--install-method release\|git` | `-InstallMethod release\|git` | `COPYCORD_INSTALL_METHOD` | Install method (default `release`). |
-| `--git` | `-Git` | | Shortcut for the git method. |
 | `--repo owner/name` | `-Repo owner/name` | `COPYCORD_REPO` | Repository to install from (default `Copycord/Copycord`). |
-| `--version <value>` | `-Version <value>` (alias `-Tag`) | `COPYCORD_VERSION` | Release method: a release version such as `4.0.0`. Git method: a branch, tag or commit SHA (default `main`). |
-| `--beta` | `-Beta` | `COPYCORD_BETA=1` or `COPYCORD_CHANNEL=beta` | Release method: also consider pre-releases. The channel is saved and used by `copycord update`. |
+| `--version <value>` | `-Version <value>` (alias `-Tag`) | `COPYCORD_VERSION` | A release version such as `4.0.0` installs that release; a branch, tag or commit SHA installs from git at that ref. With no value the newest release is installed. |
+| `--beta` | `-Beta` | | Release method: also consider pre-releases. The channel is saved and used by `copycord update`. |
 | `--home <path>` | `-CopycordHome <path>` | `COPYCORD_HOME` | Copycord home: data, `src/` and `node/` (default `~/.copycord`). A custom one is saved in `~/.copycord-home` so the CLI and the service use it. |
-| `--git-dir <path>` | `-GitDir <path>` | `COPYCORD_GIT_DIR` | Git method: checkout directory. |
-| `--no-onboard` | `-NoOnboard` | `COPYCORD_NO_ONBOARD=1` | Skip the `copycord doctor` run at the end. |
-| `--verify` | `-Verify` | `COPYCORD_VERIFY=1` | Run `copycord version` and `copycord doctor` after installing and fail if either fails. |
-| `--dry-run` | `-DryRun` | `COPYCORD_DRY_RUN=1` | Print the plan and every action without changing anything. |
-| `--verbose` | `-ShowOutput` | `COPYCORD_VERBOSE=1` | Show the full output of every step instead of a spinner. |
+| `--git-dir <path>` | `-GitDir <path>` | | Git method: checkout directory. |
+| `--no-onboard` | `-NoOnboard` | | Skip the `copycord doctor` run at the end. |
+| `--verify` | `-Verify` | | Run `copycord version` and `copycord doctor` after installing and fail if either fails. |
+| `--dry-run` | `-DryRun` | | Print the plan and every action without changing anything. |
+| `--verbose` | `-ShowOutput` | | Show the full output of every step instead of a spinner. |
 | `--help` | `-Help` | | Show the options. |
-| | | `COPYCORD_NODE_VERSION` | Node.js version to install when Node 20+ is missing (default `22.12.0`). |
-| | | `COPYCORD_ALLOW_ROOT=1` | Allow running as root (or as Administrator on Windows). It refuses by default because Copycord installs for your user. |
 | | | `NO_COLOR=1` | Plain output. Colors are only used on a terminal. |
+
+The other environment variables (`COPYCORD_CHANNEL`, `COPYCORD_BETA`, `COPYCORD_GIT_DIR`, `COPYCORD_NO_ONBOARD`, `COPYCORD_VERIFY`, `COPYCORD_DRY_RUN`, `COPYCORD_VERBOSE`, `COPYCORD_NODE_VERSION`, `COPYCORD_ALLOW_ROOT`) are rarely needed; most mirror the flags.
+
+Advanced: `--install-method release|git` (alias `--method`), `--git` and `--release` (PowerShell: `-InstallMethod`, `-Git`) force the method instead of inferring it from `--version`. `COPYCORD_INSTALL_METHOD` does the same.
 
 Examples:
 
@@ -104,15 +106,13 @@ curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh |
 curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh -s -- --version 4.0.0 --verify
 
 # Linux/macOS: see what the script would do
-curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh -s -- --git --version v4-dev --dry-run
+curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh -s -- --version v4-dev --dry-run
 ```
 
 ```powershell
 # Windows: install the newest beta
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1))) -Beta
 ```
-
-The environment variables from earlier versions of the script (`COPYCORD_CHANNEL`, `COPYCORD_VERSION`, `COPYCORD_ALLOW_ROOT`) still work.
 
 :::note Building from source without the script
 `uv tool install` on a checkout builds the admin frontend through `hatch_build.py` when `code/admin/frontend/dist` is missing, and stops with an error if npm is not on `PATH`. Set `COPYCORD_SKIP_FRONTEND=1` to build without the admin UI.
