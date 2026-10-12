@@ -386,7 +386,8 @@ Test a branch, no release needed:
             } else {
                 # A fresh dist for this ref; hatch_build.py then ships it in the wheel.
                 Remove-Item -Recurse -Force (Join-Path $frontend 'dist') -ErrorAction SilentlyContinue
-                $npm = (Get-Command npm).Source
+                # npm.cmd, not npm.ps1: Start-Process cannot launch a .ps1 directly.
+                $npm = (Get-Command npm.cmd).Source
                 Run 'npm ci' $npm @('ci', '--no-audit', '--no-fund') $frontend
                 Run 'npm run build' $npm @('run', 'build') $frontend
             }
