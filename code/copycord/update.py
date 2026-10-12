@@ -18,11 +18,17 @@ copycord update --tag VERSION         install that exact version once; the
                                       saved channel stays as it is
 copycord update --check               print the installed version, the saved
                                       channel and the latest on that channel
+copycord update --channel beta --no-install
+                                      only save the channel (the install
+                                      scripts use this)
 
-stable  latest final release on PyPI
-beta    latest PyPI release, pre-releases included (e.g. 4.0.0b1)
+stable  newest GitHub release that is not a draft or a pre-release
+beta    newest GitHub release that is not a draft, pre-releases included
+        (e.g. v4.0.0b1)
 dev     git install of a branch (default main) of REPO_URL; needs npm to
         build the admin UI
+
+stable, beta and --tag install the wheel asset of the release by its URL.
 """
 
 from __future__ import annotations
@@ -37,9 +43,9 @@ from typing import NamedTuple, Optional, Tuple
 
 from copycord import service
 
-PYPI_URL = "https://pypi.org/pypi/copycord/json"
-PYPI_TIMEOUT = 5.0
 REPO_URL = "https://github.com/Copycord/Copycord"
+RELEASES_URL = "https://api.github.com/repos/Copycord/Copycord/releases"
+RELEASE_TAG_URL = RELEASES_URL + "/tags/{tag}"
 GITHUB_COMMITS_URL = "https://api.github.com/repos/Copycord/Copycord/commits/{branch}"
 GITHUB_TIMEOUT = 5.0
 
@@ -153,45 +159,41 @@ def detect_installer(
     return PIP
 
 
-def package_spec(channel: Channel, tag: Optional[str] = None) -> str:
-    """What to install: copycord, copycord==TAG or copycord @ git+REPO_URL@BRANCH."""
-    if tag:
-        return f"copycord=={tag.lstrip('v')}"
-    if channel.channel == DEV:
-        return f"copycord @ git+{REPO_URL}@{channel.branch or DEFAULT_BRANCH}"
-    return "copycord"
+def git_spec(branch: Optional[str] = None) -> str:
+    return f"copycord @ git+{REPO_URL}@{branch or DEFAULT_BRANCH}"
 
 
 def _quote(arg: str) -> str:
     return f'"{arg}"' if " " in arg else arg
 
 
-def install_command(
-    kind: str, channel: Channel, tag: Optional[str] = None
-) -> Tuple[Optional[list], str]:
-    """(command to run, or None) and a human hint for the install kind and channel."""
-    spec = package_spec(channel, tag)
-    beta = channel.channel == BETA and not tag
+def install_command(kind: str, spec: str) -> Tuple[Optional[list], str]:
+    """(command to run, or None) and a human hint for installing spec with kind.
+
+    spec is a release wheel URL (stable, beta, --tag) or git_spec() (dev).
+    """
     if kind == UV_TOOL:
-        cmd = ["uv", "tool", "install", "--force"]
-        cmd += ["--prerelease", "allow"] if beta else []
-        cmd.append(spec)
+        cmd = ["uv", "tool", "install", "--force", spec]
         return cmd, " ".join(_quote(a) for a in cmd)
     if kind == PIPX:
-        cmd = ["pipx", "install", "--force"]
-        cmd += ["--pip-args=--pre"] if beta else []
-        cmd.append(spec)
+        cmd = ["pipx", "install", "--force", spec]
         return cmd, " ".join(_quote(a) for a in cmd)
     py = sys.executable
     if kind == UV_PIP:
-        pre = " --prerelease allow" if beta else ""
-        return None, f'uv pip install --upgrade{pre} --python "{py}" "{spec}"'
+        return None, f'uv pip install --upgrade --python "{py}" "{spec}"'
     if kind == PIP:
-        pre = " --pre" if beta else ""
-        return None, f'"{py}" -m pip install --upgrade{pre} "{spec}"'
+        return None, f'"{py}" -m pip install --upgrade "{spec}"'
+    return None, manual_hint(kind)
+
+
+def manual_hint(kind: str) -> str:
+    """How to update an install `copycord update` cannot reinstall from a URL."""
     if kind == DOCKER:
-        return None, "pull the new image and recreate the container (docker compose pull && docker compose up -d)"
-    return None, "update your checkout (git pull), or install the package: uv tool install copycord"
+        return "pull the new image and recreate the container (docker compose pull && docker compose up -d)"
+    return (
+        "update your checkout (git pull), or install a release with the install script: "
+        "curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -258,29 +260,80 @@ def _fetch_json(url: str, timeout: float):
         return json.load(resp)
 
 
-def latest_from_pypi(data: dict, prerelease: bool) -> str:
-    """Highest non-yanked release in a PyPI JSON document.
+class ReleaseError(Exception):
+    """A release that cannot be installed (not found, no wheel asset)."""
 
-    Final releases only unless prerelease; falls back to info.version.
-    """
+
+class Release(NamedTuple):
+    tag: str
+    version: str
+    prerelease: bool
+    wheel_url: Optional[str]  # None when the release has no wheel asset
+
+    def wheel(self) -> str:
+        if not self.wheel_url:
+            raise ReleaseError(
+                f"release {self.tag} has no wheel asset (copycord-*.whl); "
+                f"see {REPO_URL}/releases/tag/{self.tag}"
+            )
+        return self.wheel_url
+
+
+def _wheel_asset(release: dict) -> Optional[str]:
+    """browser_download_url of the copycord-*.whl asset of a GitHub release."""
+    for asset in release.get("assets") or []:
+        name = str(asset.get("name") or "")
+        if name.startswith("copycord-") and name.endswith(".whl"):
+            return asset.get("browser_download_url") or None
+    return None
+
+
+def _release(data: dict) -> Release:
+    tag = str(data["tag_name"])
+    return Release(tag, tag.lstrip("v"), bool(data.get("prerelease")), _wheel_asset(data))
+
+
+def latest_from_releases(data: list, prerelease: bool) -> Release:
+    """Newest release in a GitHub releases list: drafts are skipped, pre-releases
+    too unless prerelease. Newest is the highest version; tags that are not
+    versions are skipped."""
     best = None
-    for version, files in (data.get("releases") or {}).items():
-        if not files or all(f.get("yanked") for f in files):
+    for item in data or []:
+        if not isinstance(item, dict) or item.get("draft"):
             continue
-        key = parse_version(version)
-        if key is None or (not prerelease and is_prerelease(version)):
+        if item.get("prerelease") and not prerelease:
+            continue
+        key = parse_version(str(item.get("tag_name") or ""))
+        if key is None:
             continue
         if best is None or key > best[0]:
-            best = (key, version)
-    if best is not None:
-        return best[1]
-    return str(data["info"]["version"])
+            best = (key, item)
+    if best is None:
+        kind = "release" if prerelease else "stable release"
+        raise ReleaseError(f"no published {kind} found on {REPO_URL}/releases")
+    return _release(best[1])
 
 
-def fetch_latest_version(
-    prerelease: bool = False, url: str = PYPI_URL, timeout: float = PYPI_TIMEOUT
-) -> str:
-    return latest_from_pypi(_fetch_json(url, timeout), prerelease)
+def fetch_latest_release(
+    prerelease: bool = False, url: str = RELEASES_URL, timeout: float = GITHUB_TIMEOUT
+) -> Release:
+    return latest_from_releases(_fetch_json(f"{url}?per_page=100", timeout), prerelease)
+
+
+def fetch_release(tag: str, timeout: float = GITHUB_TIMEOUT) -> Release:
+    """The release tagged v<VERSION> (tag may be given with or without the v)."""
+    import urllib.error
+
+    tag = "v" + tag.lstrip("v")
+    try:
+        data = _fetch_json(RELEASE_TAG_URL.format(tag=tag), timeout)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            raise ReleaseError(f"no release {tag} on {REPO_URL}/releases") from e
+        raise
+    if data.get("draft"):
+        raise ReleaseError(f"release {tag} is a draft")
+    return _release(data)
 
 
 class Commit(NamedTuple):
@@ -332,11 +385,17 @@ def check(channel: Optional[Channel] = None) -> int:
         return 0
 
     try:
-        latest = fetch_latest_version(prerelease=channel.channel == BETA)
-    except Exception as e:
-        print(f"WARN  could not get the latest version from PyPI: {e}")
+        release = fetch_latest_release(prerelease=channel.channel == BETA)
+    except ReleaseError as e:
+        print(f"WARN  {e}")
         return 0
-    print(f"latest  {latest}")
+    except Exception as e:
+        print(f"WARN  could not get the latest release from GitHub: {e}")
+        return 0
+    latest = release.version
+    print(f"latest  {latest} ({release.tag})")
+    if release.wheel_url is None:
+        print(f"WARN  release {release.tag} has no wheel asset yet")
     if is_newer(latest, current):
         print("an update is available: run `copycord update`")
     else:
@@ -354,6 +413,7 @@ def update(
     channel: Optional[str] = None,
     branch: Optional[str] = None,
     tag: Optional[str] = None,
+    no_install: bool = False,
 ) -> int:
     saved = load_channel()
     if tag and (channel or branch):
@@ -372,11 +432,45 @@ def update(
     else:
         target = saved
 
+    if no_install:
+        if tag or not (channel or branch):
+            print("--no-install only saves a channel; give --channel (and --branch for dev)",
+                  file=sys.stderr)
+            return 2
+        try:
+            path = save_channel(target)
+        except OSError as e:
+            print(f"could not save the update channel: {e}", file=sys.stderr)
+            return 1
+        print(f"update channel set to {target.describe()} ({path})")
+        return 0
+
     if check_only:
         return check(target)
 
     kind = detect_installer()
-    cmd, hint = install_command(kind, target, tag)
+    if kind in (DOCKER, SOURCE):
+        print(f"Copycord was installed with {kind}; update it with:\n  {manual_hint(kind)}")
+        return 1
+
+    if target.channel == DEV and not tag:
+        spec = git_spec(target.branch)
+    else:
+        try:
+            if tag:
+                release = fetch_release(tag)
+            else:
+                release = fetch_latest_release(prerelease=target.channel == BETA)
+            spec = release.wheel()
+        except ReleaseError as e:
+            print(f"cannot update: {e}", file=sys.stderr)
+            return 1
+        except Exception as e:
+            print(f"cannot update: could not get the release from GitHub: {e}", file=sys.stderr)
+            return 1
+        print(f"release {release.tag}")
+
+    cmd, hint = install_command(kind, spec)
     if cmd is None:
         print(f"Copycord was installed with {kind}; update it with:\n  {hint}")
         return 1

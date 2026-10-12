@@ -19,6 +19,7 @@ copycord service install [--user] [--data-dir PATH]
                               run Copycord as a systemd/launchd/Scheduled Task service
 copycord service start|stop|status|uninstall [--user]
 copycord update [--check] [--channel stable|beta|dev [--branch NAME]] [--tag VERSION]
+                [--no-install]
                               update (uv tool / pipx) from the saved or given
                               channel and restart a running service
 """
@@ -134,8 +135,8 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     target.add_argument(
         "--channel",
         choices=("stable", "beta", "dev"),
-        help="switch to this channel and save it (stable: PyPI releases, "
-        "beta: PyPI pre-releases too, dev: a git branch, needs npm)",
+        help="switch to this channel and save it (stable: GitHub releases, "
+        "beta: GitHub pre-releases too, dev: a git branch, needs npm)",
     )
     target.add_argument(
         "--tag",
@@ -146,6 +147,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "--branch",
         metavar="NAME",
         help="dev channel: the git branch to install (default main)",
+    )
+    update.add_argument(
+        "--no-install",
+        action="store_true",
+        help="only save --channel/--branch, install nothing (used by the install scripts)",
     )
     return parser.parse_args(argv)
 
@@ -457,6 +463,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             channel=args.channel,
             branch=args.branch,
             tag=args.tag,
+            no_install=args.no_install,
         )
 
     if args.command == "run":
