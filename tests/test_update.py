@@ -1,16 +1,40 @@
 """
 Tests for `copycord update` (code/copycord/update.py): installer detection,
---check against a faked PyPI response, and restarting the service only when
-it was running. No network, no real uv/pipx.
+the install command per installer, --check against faked GitHub releases API
+responses, and restarting the service only when it was running. No network,
+no real uv/pipx.
 """
-import io
-import json
 import subprocess
+import urllib.error
 
 import pytest
 
 from copycord import __main__ as cli
 from copycord import service, update
+
+RELEASES = "https://api.github.com/repos/Copycord/Copycord/releases"
+LIST_URL = RELEASES + "?per_page=100"
+
+
+def wheel_url(tag):
+    return (
+        f"https://github.com/Copycord/Copycord/releases/download/{tag}/"
+        f"copycord-{tag.lstrip('v')}-py3-none-any.whl"
+    )
+
+
+def release(tag, prerelease=False, draft=False):
+    name = wheel_url(tag).rsplit("/", 1)[1]
+    return {
+        "tag_name": tag,
+        "prerelease": prerelease,
+        "draft": draft,
+        "assets": [{"name": name, "browser_download_url": wheel_url(tag)}],
+    }
+
+
+RELEASE_LIST = [release("v4.1.0b1", prerelease=True), release("v4.0.0"), release("v3.28.0")]
+WHEEL = wheel_url("v4.0.0")
 
 
 @pytest.fixture(autouse=True)
@@ -55,18 +79,17 @@ def test_detect_source_checkout_and_docker(tmp_path):
     assert update.detect_installer(str(tmp_path), "pip", docker=True) == update.DOCKER
 
 
-def test_upgrade_commands():
-    stable = update.Channel(update.STABLE)
-    assert update.install_command(update.UV_TOOL, stable)[0] == [
-        "uv", "tool", "install", "--force", "copycord"
+def test_install_commands():
+    assert update.install_command(update.UV_TOOL, WHEEL)[0] == [
+        "uv", "tool", "install", "--force", WHEEL
     ]
-    assert update.install_command(update.PIPX, stable)[0] == [
-        "pipx", "install", "--force", "copycord"
+    assert update.install_command(update.PIPX, WHEEL)[0] == [
+        "pipx", "install", "--force", WHEEL
     ]
-    cmd, hint = update.install_command(update.PIP, stable)
-    assert cmd is None and '-m pip install --upgrade "copycord"' in hint
-    cmd, hint = update.install_command(update.UV_PIP, stable)
-    assert cmd is None and "uv pip install --upgrade" in hint
+    cmd, hint = update.install_command(update.PIP, WHEEL)
+    assert cmd is None and f'-m pip install --upgrade "{WHEEL}"' in hint
+    cmd, hint = update.install_command(update.UV_PIP, WHEEL)
+    assert cmd is None and "uv pip install --upgrade" in hint and WHEEL in hint
 
 
 # --------------------------------------------------------------------------
@@ -74,48 +97,48 @@ def test_upgrade_commands():
 # --------------------------------------------------------------------------
 
 
-def _fake_pypi(monkeypatch, version=None, error=None):
-    seen = {}
+@pytest.fixture()
+def fake_net(monkeypatch):
+    """_fetch_json serving the faked releases list; an Exception is raised."""
+    state = {"value": RELEASE_LIST, "seen": []}
 
-    def urlopen(req, timeout=None):
-        seen["url"], seen["timeout"] = req.full_url, timeout
-        if error:
-            raise error
-        return io.BytesIO(json.dumps({"info": {"version": version}}).encode())
+    def fetch(url, timeout):
+        state["seen"].append((url, timeout))
+        if isinstance(state["value"], Exception):
+            raise state["value"]
+        return state["value"]
 
-    monkeypatch.setattr(update.urllib.request, "urlopen", urlopen)
-    return seen
+    monkeypatch.setattr(update, "_fetch_json", fetch)
+    return state
 
 
-def test_check_reports_newer_version(monkeypatch, capsys):
+def test_check_reports_newer_version(monkeypatch, capsys, fake_net):
     monkeypatch.setattr(update, "current_version", lambda: "3.28.0")
-    seen = _fake_pypi(monkeypatch, "4.0.0")
     assert cli.main(["update", "--check"]) == 0
     out = capsys.readouterr().out
     assert "current 3.28.0" in out
-    assert "latest  4.0.0" in out
+    assert "channel stable" in out
+    assert "latest  4.0.0 (v4.0.0)" in out
     assert "update is available" in out
-    assert seen == {"url": "https://pypi.org/pypi/copycord/json", "timeout": 5.0}
+    assert fake_net["seen"] == [(LIST_URL, 5.0)]
 
 
-def test_check_up_to_date(monkeypatch, capsys):
+def test_check_up_to_date(monkeypatch, capsys, fake_net):
     monkeypatch.setattr(update, "current_version", lambda: "4.0.0")
-    _fake_pypi(monkeypatch, "4.0.0")
     assert update.update(check_only=True) == 0
     assert "up to date" in capsys.readouterr().out
 
 
-def test_check_pypi_failure_is_a_warning(monkeypatch, capsys):
+def test_check_github_failure_is_a_warning(monkeypatch, capsys, fake_net):
     monkeypatch.setattr(update, "current_version", lambda: "4.0.0")
-    _fake_pypi(monkeypatch, error=OSError("timed out"))
+    fake_net["value"] = urllib.error.URLError("timed out")
     assert update.update(check_only=True) == 0
     out = capsys.readouterr().out
     assert "WARN" in out and "timed out" in out
 
 
-def test_check_does_not_upgrade(monkeypatch):
-    monkeypatch.setattr(update, "current_version", lambda: "4.0.0")
-    _fake_pypi(monkeypatch, "4.0.1")
+def test_check_does_not_upgrade(monkeypatch, fake_net):
+    monkeypatch.setattr(update, "current_version", lambda: "3.28.0")
     monkeypatch.setattr(service, "run_cmd", lambda *a, **k: pytest.fail("ran a command"))
     assert update.update(check_only=True) == 0
 
@@ -143,7 +166,7 @@ class Recorder:
 
 
 @pytest.fixture()
-def uv_tool(monkeypatch):
+def uv_tool(monkeypatch, fake_net):
     monkeypatch.setattr(update, "detect_installer", lambda: update.UV_TOOL)
     monkeypatch.setattr(update.shutil, "which", lambda name: f"/usr/bin/{name}")
     rec = Recorder()
@@ -163,7 +186,7 @@ def test_update_restarts_running_service(uv_tool, monkeypatch):
     rec, restarts = uv_tool
     _state(monkeypatch, True, True)
     assert cli.main(["update"]) == 0
-    assert rec.calls == [["uv", "tool", "install", "--force", "copycord"]]
+    assert rec.calls == [["uv", "tool", "install", "--force", WHEEL]]
     assert restarts == [1]
 
 
@@ -174,7 +197,7 @@ def test_update_does_not_restart_stopped_or_missing_service(
     rec, restarts = uv_tool
     _state(monkeypatch, installed, running)
     assert update.update() == 0
-    assert rec.calls == [["uv", "tool", "install", "--force", "copycord"]]
+    assert rec.calls == [["uv", "tool", "install", "--force", WHEEL]]
     assert restarts == []
 
 
@@ -186,26 +209,26 @@ def test_update_failure_skips_restart(uv_tool, monkeypatch):
     assert restarts == []
 
 
-def test_update_pipx(monkeypatch):
+def test_update_pipx(monkeypatch, fake_net):
     monkeypatch.setattr(update, "detect_installer", lambda: update.PIPX)
     monkeypatch.setattr(update.shutil, "which", lambda name: f"/usr/bin/{name}")
     rec = Recorder()
     monkeypatch.setattr(service, "run_cmd", rec)
     _state(monkeypatch, False, False)
     assert update.update() == 0
-    assert rec.calls == [["pipx", "install", "--force", "copycord"]]
+    assert rec.calls == [["pipx", "install", "--force", WHEEL]]
 
 
-def test_update_plain_pip_prints_command(monkeypatch, capsys):
+def test_update_plain_pip_prints_command(monkeypatch, capsys, fake_net):
     monkeypatch.setattr(update, "detect_installer", lambda: update.PIP)
     monkeypatch.setattr(service, "run_cmd", lambda *a, **k: pytest.fail("ran a command"))
     assert update.update() == 1
-    assert '-m pip install --upgrade "copycord"' in capsys.readouterr().out
+    assert f'-m pip install --upgrade "{WHEEL}"' in capsys.readouterr().out
 
 
-def test_update_tool_missing_from_path(monkeypatch, capsys):
+def test_update_tool_missing_from_path(monkeypatch, capsys, fake_net):
     monkeypatch.setattr(update, "detect_installer", lambda: update.UV_TOOL)
     monkeypatch.setattr(update.shutil, "which", lambda name: None)
     monkeypatch.setattr(service, "run_cmd", lambda *a, **k: pytest.fail("ran a command"))
     assert update.update() == 1
-    assert "uv tool install --force copycord" in capsys.readouterr().err
+    assert f"uv tool install --force {WHEEL}" in capsys.readouterr().err

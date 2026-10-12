@@ -30,6 +30,20 @@ def db(tmp_db_path):
     return DBManager(tmp_db_path, init_schema=True)
 
 
+@pytest.fixture(autouse=True)
+def _update_tests_never_touch_the_network(request, monkeypatch):
+    """A real urllib call from copycord.update fails the update tests loudly
+    instead of reaching GitHub; tests fake _fetch_json or urlopen themselves."""
+    if request.module.__name__.rsplit(".", 1)[-1] not in ("test_update", "test_update_channels"):
+        return
+    import urllib.request
+
+    def blocked(*args, **kwargs):
+        raise AssertionError("test made a real network call: fake it")
+
+    monkeypatch.setattr(urllib.request, "urlopen", blocked)
+
+
 def pytest_sessionfinish(session, exitstatus):
     import shutil
 
