@@ -13,6 +13,7 @@ import logging
 from typing import Optional
 
 from common.db import DBManager
+from common.paths import db_path
 
 logger = logging.getLogger(__name__)
 CURRENT_VERSION = "v3.28.0"
@@ -25,7 +26,7 @@ def _peer_host(_compose_name: str) -> str:
 
 class Config:
     def __init__(self, logger: Optional[logging.Logger] = None):
-        self.DB_PATH = os.getenv("DB_PATH", "/data/data.db")
+        self.DB_PATH = str(db_path())
         self.db = DBManager(self.DB_PATH)
 
         def _get_from_db(key: str):

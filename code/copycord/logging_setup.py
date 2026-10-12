@@ -59,9 +59,10 @@ def _level() -> int:
 
 
 def logs_dir() -> Path:
-    """Where the admin reads <role>.out, resolved like the v3 control service."""
-    default = Path(__file__).resolve().parent.parent.parent / "data"
-    return Path(os.getenv("DATA_DIR", str(default))).resolve()
+    """Where the admin reads <role>.out: the data dir (common.paths)."""
+    from common.paths import data_dir
+
+    return data_dir()
 
 
 class ThreadRoleFilter(logging.Filter):

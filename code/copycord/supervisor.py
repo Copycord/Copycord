@@ -26,11 +26,11 @@ import signal
 import threading
 import time
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Awaitable, Callable, Dict, List, Optional
 
 from common.config import CURRENT_VERSION
 from common.control_protocol import ALLOWED_ENV, serve_json, status_payload
+from common.paths import data_dir
 from copycord.logging_setup import setup_logging
 
 logger = logging.getLogger("copycord.supervisor")
@@ -44,9 +44,6 @@ SHUTDOWN_ORDER = ("client", "server", "admin")
 
 DEFAULT_SERVER_CONTROL_PORT = 9101
 DEFAULT_CLIENT_CONTROL_PORT = 9102
-
-CODE_DIR = Path(__file__).resolve().parent.parent
-
 
 @dataclass
 class Backoff:
@@ -436,7 +433,7 @@ def admin_factory(host: str, port: int, log_level: str) -> RoleFactory:
 
 def _set_runtime_env() -> None:
     """Data paths plus loopback addresses so roles find each other in-process."""
-    data = Path(os.getenv("DATA_DIR", str(CODE_DIR.parent / "data"))).resolve()
+    data = data_dir()
     with contextlib.suppress(Exception):
         data.mkdir(parents=True, exist_ok=True)
     # admin.app reads DATA_DIR itself; keep it on the same directory as DB_PATH.

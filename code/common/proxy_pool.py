@@ -11,16 +11,16 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import logging
-import os
 import random
 import re
 import time
-from pathlib import Path
 from typing import Optional
+
+from common.paths import data_dir
 
 logger = logging.getLogger(__name__)
 
-DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
+DATA_DIR = data_dir()
 _PROXY_FILE = DATA_DIR / "proxies.txt"
 
 MAX_FAILURES = 3
