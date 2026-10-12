@@ -11,7 +11,9 @@ from copycord import logging_setup as ls
 
 
 @pytest.fixture()
-def clean_root():
+def clean_root(monkeypatch):
+    # tests/test_api.py sets LOG_LEVEL=WARNING for the whole session at import.
+    monkeypatch.setenv("LOG_LEVEL", "INFO")
     root = logging.getLogger()
     saved, level = root.handlers[:], root.level
     root.handlers = []
