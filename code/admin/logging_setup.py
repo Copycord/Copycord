@@ -129,7 +129,7 @@ class HumanFormatter(logging.Formatter):
             if v not in (None, "", []):
                 extras.append(f"{k}={v}")
         extras_s = f" | {' '.join(extras)}" if extras else ""
-        return f"{ts} {mark} {record.levelname:<8} [{scope}] (rid={rid} cli={cli}) {msg}{extras_s}"
+        return f"{ts} {mark} {record.levelname:<8} [admin] [{scope}] (rid={rid} cli={cli}) {msg}{extras_s}"
 
 
 class JSONFormatter(logging.Formatter):
@@ -138,6 +138,7 @@ class JSONFormatter(logging.Formatter):
             "time": _now_iso(),
             "lvl": record.levelname,
             "msg": super().format(record),
+            "role": "admin",
             "scope": getattr(record, "scope", "-"),
             "req_id": getattr(record, "req_id", "-"),
             "client": getattr(record, "client", "-"),

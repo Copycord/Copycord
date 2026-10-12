@@ -10,10 +10,12 @@
 """
 Process-wide logging for the single-process run.
 
-One console handler on the root logger prints every record once. Each role's
-records (routed by the ThreadedRole thread they were emitted on) are also
-written to <DATA_DIR>/<role>.out, the files the admin's log tabs read.
-Admin/supervisor records go to the console only.
+One console handler on the root logger prints every record once, tagged
+[admin], [server] or [client] by the thread it was emitted on. Server and
+client records are shown on the console only at WARNING and above; all their
+records (routed by the ThreadedRole thread) are written to <DATA_DIR>/<role>.out,
+the files the admin's log tabs read. Admin/supervisor records go to the console
+only.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 FORMAT = "%(asctime)s | %(levelname)-5s | %(message)s"
+CONSOLE_FORMAT = "%(asctime)s | %(levelname)-5s | %(role_tag)s %(message)s"
 DATEFMT = "%Y-%m-%d %H:%M:%S"
 
 # Set on every handler that prints to the console, so server.py/client.py
@@ -33,6 +36,9 @@ DATEFMT = "%Y-%m-%d %H:%M:%S"
 CONSOLE_MARK = "_copycord_console"
 
 FILE_ROLES = ("server", "client")
+# Server and client INFO stays in their log files; the console only shows
+# their records at this level and above.
+ROLE_CONSOLE_LEVEL = logging.WARNING
 # The v3 log files were unbounded; keep the last ~10 MB (+ one backup).
 MAX_BYTES = 10 * 1024 * 1024
 BACKUP_COUNT = 1
@@ -67,6 +73,35 @@ class ThreadRoleFilter(logging.Filter):
 
     def filter(self, record: logging.LogRecord) -> bool:
         return record.threadName == self.thread_name
+
+
+def thread_role(thread_name: str) -> str:
+    """The role a record belongs to; anything off the role threads is admin."""
+    for role in FILE_ROLES:
+        if thread_name == f"copycord-{role}":
+            return role
+    return "admin"
+
+
+class ConsoleRoleFilter(logging.Filter):
+    """
+    Console routing: records from the server/client role threads pass only at
+    ROLE_CONSOLE_LEVEL and above, everything else passes (the handler level
+    still applies).
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if thread_role(record.threadName) in FILE_ROLES:
+            return record.levelno >= ROLE_CONSOLE_LEVEL
+        return True
+
+
+class ConsoleFormatter(logging.Formatter):
+    """Console format with the [role] tag derived from the thread name."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        record.role_tag = f"[{thread_role(record.threadName)}]"
+        return super().format(record)
 
 
 class TruncateSafeRotatingFileHandler(RotatingFileHandler):
@@ -107,8 +142,9 @@ def setup_logging(
 
     if not has_console_handler(root):
         ch = mark_console(logging.StreamHandler())
-        ch.setFormatter(formatter)
+        ch.setFormatter(ConsoleFormatter(CONSOLE_FORMAT, datefmt=DATEFMT))
         ch.setLevel(level)
+        ch.addFilter(ConsoleRoleFilter())
         root.addHandler(ch)
 
     directory = Path(directory) if directory is not None else logs_dir()

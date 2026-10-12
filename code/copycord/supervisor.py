@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Awaitable, Callable, Dict, List, Optional
 
+from common.config import CURRENT_VERSION
 from common.control_protocol import ALLOWED_ENV, serve_json, status_payload
 from copycord.logging_setup import setup_logging
 
@@ -523,6 +524,9 @@ def build_supervisor(
 async def run() -> None:
     _set_runtime_env()
     setup_logging()
+    # The one startup banner; the role modules' own banners are INFO on their
+    # role threads, so they reach the role files but not the console.
+    logger.info("[✨] Starting Copycord %s", CURRENT_VERSION)
     sup = build_supervisor()
 
     loop = asyncio.get_running_loop()
