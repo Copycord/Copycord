@@ -329,7 +329,7 @@ def test_legacy_dir_without_db_is_ignored(native, monkeypatch):
 
 def test_default_windows_without_localappdata(native, monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
-    expected = native / "AppData" / "Local" / "Copycord"
+    expected = native / ".copycord"
     assert paths.data_dir() == expected.resolve()
 
 
@@ -349,13 +349,13 @@ def test_db_path_env_wins(native, monkeypatch, tmp_path):
     assert paths.db_path() == (tmp_path / "x.db").resolve()
 
 
-def test_platform_data_dir_is_pure(tmp_path):
+def test_legacy_data_dir_is_pure(tmp_path):
     home = tmp_path
-    assert paths.platform_data_dir("linux", {}, home) == home / ".local/share/copycord"
-    assert paths.platform_data_dir("darwin", {}, home) == (
+    assert paths.legacy_data_dir("linux", {}, home) == home / ".local/share/copycord"
+    assert paths.legacy_data_dir("darwin", {}, home) == (
         home / "Library/Application Support/Copycord"
     )
-    assert paths.platform_data_dir("win32", {"LOCALAPPDATA": "C:/L"}, home) == (
+    assert paths.legacy_data_dir("win32", {"LOCALAPPDATA": "C:/L"}, home) == (
         Path("C:/L") / "Copycord"
     )
 

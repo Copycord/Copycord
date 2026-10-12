@@ -492,7 +492,7 @@ def test_check_beta_considers_prereleases(data_dir, fake_net, no_install, capsys
     out = capsys.readouterr().out
     assert "channel beta" in out
     assert "latest  4.1.0b2 (v4.1.0b2)" in out
-    assert "update is available" in out
+    assert "Update available" in out
 
 
 def test_check_with_channel_does_not_save(data_dir, fake_net, no_install, capsys):
@@ -536,7 +536,7 @@ def test_check_dev_shows_branch_head(data_dir, fake_net, no_install, monkeypatch
     out = capsys.readouterr().out
     assert "channel dev (branch v4-dev)" in out
     assert "latest  v4-dev @ 0123456789ab 2026-10-11T12:00:00Z client: fix reconnect" in out
-    assert "update is available" in out
+    assert "Update available" in out
     assert seen == [(url, 5.0)]
 
 
