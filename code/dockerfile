@@ -14,10 +14,10 @@ FROM python:3.14-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
     VENV_BASE=/opt/venvs \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=60 \
+    DATA_DIR=/data \
     LOG_LEVEL=info \
     ADMIN_PORT=8080 \
     SERVER_PORT=8765 \
@@ -36,26 +36,26 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-${TARGETPLATF
 # requirements no longer conflict.
 RUN python -m venv /opt/venvs/copycord
 
-COPY code/admin/requirements.txt  /tmp/req-admin.txt
-COPY code/server/requirements.txt /tmp/req-server.txt
-COPY code/client/requirements.txt /tmp/req-client.txt
-
+# Installed the same way as a native install: pyproject.toml is the one source
+# for dependencies and packages. The built frontend goes where hatch_build.py
+# picks it up and ships it as admin/static.
+WORKDIR /src
+COPY pyproject.toml hatch_build.py README.md LICENSE ./
+COPY code/admin/   ./code/admin/
+COPY code/server/  ./code/server/
+COPY code/client/  ./code/client/
+COPY code/common/  ./code/common/
+COPY code/selfclient/ ./code/selfclient/
+COPY code/copycord/ ./code/copycord/
+COPY --from=webbuild /frontend/dist/ ./code/admin/frontend/dist/
 
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked,id=pip-copycord-${TARGETPLATFORM} \
     /opt/venvs/copycord/bin/pip install --upgrade pip \
-        -r /tmp/req-admin.txt -r /tmp/req-server.txt -r /tmp/req-client.txt \
-        websockets python-dotenv
+    && /opt/venvs/copycord/bin/pip install /src \
+    && rm -rf /src
 
 WORKDIR /app
-COPY code/admin/   ./admin/
-COPY code/server/  ./server/
-COPY code/client/  ./client/
-COPY code/common/  ./common/
-COPY code/selfclient/ ./selfclient/
-COPY code/copycord/ ./copycord/
 COPY code/entrypoint.sh /entrypoint.sh
-
-COPY --from=webbuild /frontend/dist/ /app/admin/static/
 
 RUN sed -i 's/\r$//' /entrypoint.sh \
     && sed -i '1s/^\xEF\xBB\xBF//' /entrypoint.sh \

@@ -1,6 +1,6 @@
 #!/bin/sh
 set -euo pipefail
-export PYTHONPATH=${PYTHONPATH:-/app}
 
-# Admin, server and client in one process (copycord/supervisor.py).
-exec /opt/venvs/copycord/bin/python -u -m copycord run
+# Admin, server and client in one process (copycord/supervisor.py), via the
+# console script pyproject.toml installs into the venv.
+exec /opt/venvs/copycord/bin/copycord run
