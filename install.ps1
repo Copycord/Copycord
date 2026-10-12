@@ -183,6 +183,8 @@ Test a branch, no release needed:
         $err = "$log.err"
         $p = Start-Process -FilePath $File -ArgumentList $quoted -WorkingDirectory $Cwd -NoNewWindow -PassThru `
             -RedirectStandardOutput $log -RedirectStandardError $err
+        # Touch the handle now: without it ExitCode stays empty once the process exits.
+        $null = $p.Handle
         $i = 0
         while (-not $p.HasExited) {
             if ($useColor) { Out ("`r  " + $frames[$i % $frames.Count] + " $Label") Magenta -NoNewline }
