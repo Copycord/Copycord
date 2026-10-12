@@ -13,6 +13,12 @@ from copycord import __main__ as cli
 from copycord import service, update
 
 
+@pytest.fixture(autouse=True)
+def _data_dir(tmp_path, monkeypatch):
+    # The saved update channel lives in the data dir: start each test on stable.
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+
+
 # --------------------------------------------------------------------------
 # installer detection
 # --------------------------------------------------------------------------
@@ -50,11 +56,16 @@ def test_detect_source_checkout_and_docker(tmp_path):
 
 
 def test_upgrade_commands():
-    assert update.upgrade_command(update.UV_TOOL)[0] == ["uv", "tool", "upgrade", "copycord"]
-    assert update.upgrade_command(update.PIPX)[0] == ["pipx", "upgrade", "copycord"]
-    cmd, hint = update.upgrade_command(update.PIP)
-    assert cmd is None and "-m pip install --upgrade copycord" in hint
-    cmd, hint = update.upgrade_command(update.UV_PIP)
+    stable = update.Channel(update.STABLE)
+    assert update.install_command(update.UV_TOOL, stable)[0] == [
+        "uv", "tool", "install", "--force", "copycord"
+    ]
+    assert update.install_command(update.PIPX, stable)[0] == [
+        "pipx", "install", "--force", "copycord"
+    ]
+    cmd, hint = update.install_command(update.PIP, stable)
+    assert cmd is None and '-m pip install --upgrade "copycord"' in hint
+    cmd, hint = update.install_command(update.UV_PIP, stable)
     assert cmd is None and "uv pip install --upgrade" in hint
 
 
@@ -152,7 +163,7 @@ def test_update_restarts_running_service(uv_tool, monkeypatch):
     rec, restarts = uv_tool
     _state(monkeypatch, True, True)
     assert cli.main(["update"]) == 0
-    assert rec.calls == [["uv", "tool", "upgrade", "copycord"]]
+    assert rec.calls == [["uv", "tool", "install", "--force", "copycord"]]
     assert restarts == [1]
 
 
@@ -163,7 +174,7 @@ def test_update_does_not_restart_stopped_or_missing_service(
     rec, restarts = uv_tool
     _state(monkeypatch, installed, running)
     assert update.update() == 0
-    assert rec.calls == [["uv", "tool", "upgrade", "copycord"]]
+    assert rec.calls == [["uv", "tool", "install", "--force", "copycord"]]
     assert restarts == []
 
 
@@ -182,14 +193,14 @@ def test_update_pipx(monkeypatch):
     monkeypatch.setattr(service, "run_cmd", rec)
     _state(monkeypatch, False, False)
     assert update.update() == 0
-    assert rec.calls == [["pipx", "upgrade", "copycord"]]
+    assert rec.calls == [["pipx", "install", "--force", "copycord"]]
 
 
 def test_update_plain_pip_prints_command(monkeypatch, capsys):
     monkeypatch.setattr(update, "detect_installer", lambda: update.PIP)
     monkeypatch.setattr(service, "run_cmd", lambda *a, **k: pytest.fail("ran a command"))
     assert update.update() == 1
-    assert "-m pip install --upgrade copycord" in capsys.readouterr().out
+    assert '-m pip install --upgrade "copycord"' in capsys.readouterr().out
 
 
 def test_update_tool_missing_from_path(monkeypatch, capsys):
@@ -197,4 +208,4 @@ def test_update_tool_missing_from_path(monkeypatch, capsys):
     monkeypatch.setattr(update.shutil, "which", lambda name: None)
     monkeypatch.setattr(service, "run_cmd", lambda *a, **k: pytest.fail("ran a command"))
     assert update.update() == 1
-    assert "uv tool upgrade copycord" in capsys.readouterr().err
+    assert "uv tool install --force copycord" in capsys.readouterr().err

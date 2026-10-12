@@ -47,9 +47,10 @@ def _statuses(out):
 # --------------------------------------------------------------------------
 
 
-def test_version_prints_current_version(capsys):
-    assert cli.main(["version"]) == 0
-    assert capsys.readouterr().out.strip() == CURRENT_VERSION
+def test_version_prints_current_version(data_dir, capsys):
+    assert cli.main(["version", "--data-dir", str(data_dir)]) == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines == [CURRENT_VERSION, "channel stable"]
 
 
 # --------------------------------------------------------------------------
