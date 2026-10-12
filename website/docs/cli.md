@@ -150,15 +150,48 @@ Some settings are read from the environment only, before the database is open. I
 
 With `COPYCORD_HOME` or `--data-dir` it is `.env` in that folder. `copycord` reads the file on every start, for `copycord run` and the service alike, so a restart applies your changes. Variables already set in the real environment win over the file.
 
-The installer makes sure the file exists. It writes it on first install and never overwrites it: `PASSWORD=copycord` is set, and every other key is commented out with its default and a one-line description:
+The installer makes sure the file exists. It writes it on first install and never overwrites it, with every key set to its default and a one-line description above it. On Linux, for a user named `alice`:
 
 ```ini
-# dashboard login password; change it from the default (unset: no login page)
+# Copycord settings that are read from the environment only.
+# Everything else is set in the dashboard. Each value below is the default.
+# Edit one here or run `copycord config set KEY VALUE`, then run
+# `copycord restart` to apply it.
+
+# dashboard login password; change it from the default (empty: no login page)
 PASSWORD=copycord
 
+# SECRET_KEY is left out: Copycord keeps its own key in <home>/secret.key
+
 # dashboard port
-#ADMIN_PORT=8080
+ADMIN_PORT=8080
+
+# time zone for the daily backup, e.g. Europe/Berlin
+TZ=UTC
+
+# time zone shown in exports
+UI_TZ=America/New_York
+
+# DEBUG or INFO; the dashboard's log level wins once it is saved
+LOG_LEVEL=INFO
+
+# HUMAN or JSON log lines
+LOG_FORMAT=HUMAN
+
+# where the daily database backups go
+BACKUP_DIR=/home/alice/.copycord/backups
+
+# time of the daily backup, HH:MM
+BACKUP_AT=03:17
+
+# how many daily backups to keep
+BACKUP_RETAIN=14
+
+# 1 turns off the update check on start; 0 keeps it on
+COPYCORD_NO_UPDATE_CHECK=0
 ```
+
+An empty value, such as `TZ=`, means the default, except for `PASSWORD`: an empty password turns the login page off.
 
 :::warning Change the default password
 The default dashboard password is `copycord`. The dashboard listens on all network interfaces, so change the password right after installing.
@@ -183,19 +216,20 @@ copycord restart
 
 | Key | Default | What it does |
 |-----|---------|--------------|
-| `PASSWORD` | `copycord` in the template | Dashboard login password; no login page when unset. |
-| `SECRET_KEY` | a key saved in the home | Signs the dashboard login cookie. |
+| `PASSWORD` | `copycord` in the file | Dashboard login password; no login page when empty or unset. |
+| `SECRET_KEY` | a key saved in `<home>/secret.key` | Signs the dashboard login cookie. Not in the file; add it only to use a key of your own. |
 | `ADMIN_PORT` | `8080` | Dashboard port. |
 | `TZ` | `UTC` | Time zone for the daily backup, e.g. `Europe/Berlin`. |
 | `UI_TZ` | `America/New_York` | Time zone shown in exports. |
+| `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG` for the first log lines; an app config key, so the dashboard's value wins once it is saved and `copycord config set LOG_LEVEL` writes the database. |
 | `LOG_FORMAT` | `HUMAN` | `HUMAN` or `JSON` log lines. |
 | `BACKUP_DIR` | `<home>/backups` | Where the daily database backups go. |
 | `BACKUP_AT` | `03:17` | Time of the daily backup, HH:MM. |
 | `BACKUP_RETAIN` | `14` | How many daily backups to keep. |
-| `COPYCORD_NO_UPDATE_CHECK` | `0` | `1` turns off the update check on start. |
+| `COPYCORD_NO_UPDATE_CHECK` | `0` | `1` turns off the update check on start; `0` keeps it on. |
 | `BACKFILL_*`, `FORWARDING_*` | | Tuning knobs for backfills and forwarding; leave them unset unless asked to change them. |
 
-`copycord config set` writes these keys to the file (creating it, readable only by you on Linux and macOS, if needed), updates a key in place, fills in a commented template line and keeps your comments. `copycord config get PASSWORD` prints `********`; add `--show-secrets` to see it. `copycord config unset PASSWORD` removes the line, which turns the login page off.
+`copycord config set` writes these keys to the file (creating it, readable only by you on Linux and macOS, if needed), updates a key's line in place (or a line you commented out) and keeps your comments. `copycord config get PASSWORD` prints `********`; add `--show-secrets` to see it. `copycord config unset PASSWORD` removes the line, which turns the login page off.
 
 ## copycord restart {#copycord-restart}
 

@@ -173,7 +173,7 @@ The dashboard listens on all network interfaces. A few settings, such as the das
 | Linux, macOS | `~/.copycord/.env` |
 | Windows | `%USERPROFILE%\.copycord\.env` |
 
-The installer makes sure this file exists. It writes it on first install and never overwrites it: it sets `PASSWORD=copycord` and lists every other key commented out with its default and a one-line description.
+The installer makes sure this file exists. It writes it on first install and never overwrites it, with every key set to its default and a one-line description above it (see the [full file](/docs/cli#env-file)).
 
 :::warning Change the default password
 The default dashboard password is `copycord`. Anyone who can reach the port and knows the default can open your dashboard and see your tokens, so change it right after installing.
@@ -184,8 +184,9 @@ The default dashboard password is `copycord`. Anyone who can reach the port and 
 | `PASSWORD` | `copycord` | Password for the dashboard login page; no login page when unset |
 | `ADMIN_PORT` | `8080` | Port of the dashboard |
 | `TZ` | `UTC` | Time zone of the daily backup |
+| `BACKUP_DIR` | `<home>/backups` | Where the daily backups go |
 
-To change a setting, edit the file (uncomment a line to use it), then restart Copycord:
+To change a setting, edit its line, then restart Copycord:
 
 ```bash
 nano ~/.copycord/.env                # Linux/macOS
