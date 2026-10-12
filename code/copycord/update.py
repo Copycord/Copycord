@@ -473,10 +473,10 @@ def update(
     saved = load_channel()
     if tag and (channel or branch or repo):
         _err("--tag installs one exact version; it cannot be combined with "
-             "--channel, --repo or --ref/--branch")
+             "--channel, --repo or --ref")
         return 2
     if (branch or repo) and (channel or saved.channel) != DEV:
-        _err("--ref/--branch and --repo only apply to the dev channel "
+        _err("--ref and --repo only apply to the dev channel "
              "(use --channel dev --repo OWNER/NAME --ref REF)")
         return 2
     if repo and not valid_repo(repo):

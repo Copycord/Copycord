@@ -124,7 +124,7 @@ copycord service install --user   # or run it in the background as a service
 
 Set `PASSWORD` before `copycord run` to protect the dashboard. Update later with `copycord update`.
 
-Installer options (after `sh -s --`): `--version` picks a release (`4.0.0`) or builds a branch, tag or commit from source, `--repo owner/name` picks a fork, `--beta`, `--home` (default `~/.copycord`, or `COPYCORD_HOME`), `--verify`, `--no-onboard` and `--dry-run`. Test a branch (a release-looking version installs that release, anything else is a git ref):
+Installer options (after `sh -s --`): `--version` picks a release (`4.0.0`) or builds a branch, tag or commit from source, `--repo owner/name` picks a fork, `--beta`, `--home` (default `~/.copycord`, or `COPYCORD_HOME`), `--verify` and `--dry-run`. Finish the setup in the dashboard at http://localhost:8080. Test a branch (a release-looking version installs that release, anything else is a git ref):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/v4-dev/install.sh | sh -s -- --version v4-dev
