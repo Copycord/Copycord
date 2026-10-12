@@ -405,6 +405,10 @@ def check(channel: Optional[Channel] = None) -> int:
     _row("current", current)
     _row("channel", channel.describe())
     _row("method", detect_installer())
+    from copycord import update_check
+
+    _row("checked", update_check.last_check_line())
+    _row("auto", "on (AUTO_UPDATE)" if update_check.auto_update_enabled() else "off (AUTO_UPDATE=true turns it on)")
 
     if channel.channel == DEV:
         ref, repo = channel.ref, channel.repo_name

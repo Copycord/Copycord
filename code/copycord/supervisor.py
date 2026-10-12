@@ -31,6 +31,7 @@ from typing import Awaitable, Callable, Dict, List, Optional
 from common.config import CURRENT_VERSION
 from common.control_protocol import ALLOWED_ENV, serve_json, status_payload
 from common.paths import data_dir
+from copycord import ui
 from copycord.logging_setup import setup_logging
 
 logger = logging.getLogger("copycord.supervisor")
@@ -518,6 +519,20 @@ def build_supervisor(
     return Supervisor(roles=roles, controls=controls, autostart=["admin"])
 
 
+async def _auto_update() -> None:
+    """AUTO_UPDATE=true: a background service updates itself; see copycord.update_check."""
+    from copycord import update_check
+
+    try:
+        if update_check.auto_update_enabled() and not ui.is_interactive():
+            logger.info("[⬆️] Auto-update is on, checking every 6 hours")
+            await update_check.auto_update_loop()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("auto-update stopped")
+
+
 async def run() -> None:
     _set_runtime_env()
     setup_logging()
@@ -536,4 +551,8 @@ async def run() -> None:
             # task, and Supervisor.run's finally still shuts down in order.
             pass
 
-    await sup.run(stop)
+    auto_update = asyncio.create_task(_auto_update())
+    try:
+        await sup.run(stop)
+    finally:
+        auto_update.cancel()

@@ -870,6 +870,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             print(CURRENT_VERSION)
             print(f"channel {load_channel().describe()}")
+        if sys.stdout.isatty():
+            from copycord import update_check
+
+            update_check.start(wait=2.0)
         return 0
 
     if args.command == "onboard":
@@ -918,8 +922,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             if rc is not None:
                 return rc
 
-        from copycord import supervisor
+        from copycord import supervisor, update_check
 
+        update_check.start()
         try:
             asyncio.run(supervisor.run())
         except KeyboardInterrupt:
