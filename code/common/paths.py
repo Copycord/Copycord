@@ -68,7 +68,8 @@ def copycord_home(
     if raw:
         return Path(raw).expanduser()
     try:
-        saved = (home / HOME_POINTER).read_text(encoding="utf-8").strip()
+        # utf-8-sig: earlier Windows installers wrote the pointer with a BOM.
+        saved = (home / HOME_POINTER).read_text(encoding="utf-8-sig").strip()
     except OSError:
         saved = ""
     if saved:

@@ -729,6 +729,24 @@ def _uninstall_program(dry_run: bool, purge: bool, removed: list, kept: list) ->
         ui.info("would run", " ".join(commands[0]))
         removed.append("copycord program")
         return ok
+    if sys.platform == "win32":
+        # Windows cannot delete the running copycord.exe, so the uninstall runs
+        # in a detached shell once this process has exited.
+        import subprocess
+
+        text = " ".join(commands[0])
+        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        subprocess.Popen(
+            ["cmd", "/c", f"timeout /t 3 /nobreak >nul & {text}"],
+            creationflags=flags,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+        )
+        ui.ok("removing the copycord program after this command exits", text)
+        removed.append("copycord program")
+        return ok
     for command in commands:
         text = " ".join(command)
         res = run_cmd(command)
@@ -802,9 +820,15 @@ def uninstall_command(args: argparse.Namespace) -> int:
         removed.append(f"Copycord home: {target}")
     else:
         import shutil
+        import stat
+
+        def _clear_readonly(func, path, _exc):
+            # git marks pack files read-only; Windows refuses to delete those.
+            os.chmod(path, stat.S_IWRITE)
+            func(path)
 
         try:
-            shutil.rmtree(target)
+            shutil.rmtree(target, onerror=_clear_readonly)
             ui.ok("deleted the Copycord home", str(target))
             removed.append(f"Copycord home: {target}")
             _forget_saved_home(removed)
