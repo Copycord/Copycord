@@ -50,7 +50,7 @@ If `copycord` is not found right after the install, open a new terminal so the u
 | `release` (default) | The wheel attached to a GitHub release | uv (installed for you) |
 | `git` | Any branch, tag or commit of a repository, built from source. No release needed. | uv, git and Node.js 20+ (Node is installed for your user if it is missing) |
 
-The git method clones the repository into `~/.local/share/copycord/src` (Windows: `%LOCALAPPDATA%\copycord\src`), checks out the ref, builds the admin frontend with `npm ci` and `npm run build`, then runs `uv tool install --force` on the checkout. Running it again updates the same checkout. When Node.js 20 or newer is missing, the script downloads the official Node.js build from nodejs.org, checks its SHA-256 and unpacks it into `~/.local/share/copycord/node`, without sudo.
+The git method clones the repository into `~/.copycord/src` (Windows: `%USERPROFILE%\.copycord\src`), checks out the ref, builds the admin frontend with `npm ci` and `npm run build`, then runs `uv tool install --force` on the checkout. Running it again updates the same checkout. When Node.js 20 or newer is missing, the script downloads the official Node.js build from nodejs.org, checks its SHA-256 and unpacks it into `~/.copycord/node`, without sudo.
 
 ### Test a branch
 
@@ -83,6 +83,7 @@ Pass flags after `sh -s --` on Linux and macOS. On Windows, run the script as a 
 | `--repo owner/name` | `-Repo owner/name` | `COPYCORD_REPO` | Repository to install from (default `Copycord/Copycord`). |
 | `--version <value>` | `-Version <value>` (alias `-Tag`) | `COPYCORD_VERSION` | Release method: a release version such as `4.0.0`. Git method: a branch, tag or commit SHA (default `main`). |
 | `--beta` | `-Beta` | `COPYCORD_BETA=1` or `COPYCORD_CHANNEL=beta` | Release method: also consider pre-releases. The channel is saved and used by `copycord update`. |
+| `--home <path>` | `-CopycordHome <path>` | `COPYCORD_HOME` | Copycord home: data, `src/` and `node/` (default `~/.copycord`). A custom one is saved in `~/.copycord-home` so the CLI and the service use it. |
 | `--git-dir <path>` | `-GitDir <path>` | `COPYCORD_GIT_DIR` | Git method: checkout directory. |
 | `--no-onboard` | `-NoOnboard` | `COPYCORD_NO_ONBOARD=1` | Skip the `copycord doctor` run at the end. |
 | `--verify` | `-Verify` | `COPYCORD_VERIFY=1` | Run `copycord version` and `copycord doctor` after installing and fail if either fails. |
@@ -128,8 +129,8 @@ copycord doctor
 ```
 PASS  python: Python 3.12.7
 PASS  ROLE: unset
-PASS  data dir: /home/you/.local/share/copycord will be created on first run
-PASS  database: /home/you/.local/share/copycord/data.db will be created on first run
+PASS  data dir: /home/you/.copycord will be created on first run
+PASS  database: /home/you/.copycord/data.db will be created on first run
 PASS  admin port: port 8080 is free
 ```
 
@@ -149,13 +150,12 @@ Press **Ctrl+C** to stop Copycord.
 
 ### Where your data lives
 
-Copycord keeps its database, logs and backups in a per-user data directory:
+Copycord keeps its database, logs and backups in a per-user home directory (`COPYCORD_HOME` changes it):
 
 | OS | Data directory |
 |----|----------------|
-| Linux | `~/.local/share/copycord` |
-| macOS | `~/Library/Application Support/Copycord` |
-| Windows | `%LOCALAPPDATA%\Copycord` |
+| Linux, macOS | `~/.copycord` |
+| Windows | `%USERPROFILE%\.copycord` |
 
 To use another folder, pass `--data-dir` (or set the `DATA_DIR` environment variable):
 

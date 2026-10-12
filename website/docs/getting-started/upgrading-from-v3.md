@@ -122,13 +122,14 @@ irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1 | iex
 
 ### 4. Bring your data
 
-Your v3 data is in the `data/` folder of your v3 install (for example `~/copycord/data` on Linux). v4 uses a per-user data directory instead:
+Your v3 data is in the `data/` folder of your v3 install (for example `~/copycord/data` on Linux). v4 uses a per-user home directory instead:
 
 | OS | v4 data directory |
 |----|-------------------|
-| Linux | `~/.local/share/copycord` |
-| macOS | `~/Library/Application Support/Copycord` |
-| Windows | `%LOCALAPPDATA%\Copycord` |
+| Linux, macOS | `~/.copycord` |
+| Windows | `%USERPROFILE%\.copycord` |
+
+Set `COPYCORD_HOME` to use another folder.
 
 Choose one of these:
 
@@ -148,19 +149,15 @@ copycord service install --user --data-dir ~/copycord/data
 **Option B: copy the data into the v4 data directory.** With Copycord stopped:
 
 ```bash
-# Linux
-mkdir -p ~/.local/share/copycord
-cp -a ~/copycord/data/. ~/.local/share/copycord/
-
-# macOS
-mkdir -p ~/Library/Application\ Support/Copycord
-cp -a ~/copycord/data/. ~/Library/Application\ Support/Copycord/
+# Linux and macOS
+mkdir -p ~/.copycord
+cp -a ~/copycord/data/. ~/.copycord/
 ```
 
 ```powershell
 # Windows (adjust the source path to your v3 folder)
-New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\Copycord" | Out-Null
-Copy-Item -Recurse -Force "C:\Copycord\data\*" "$env:LOCALAPPDATA\Copycord\"
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.copycord" | Out-Null
+Copy-Item -Recurse -Force "C:\Copycord\data\*" "$env:USERPROFILE\.copycord\"
 ```
 
 Then run `copycord doctor` and `copycord run` without `--data-dir`.

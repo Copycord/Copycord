@@ -33,7 +33,7 @@ In a terminal the CLI shows the Copycord banner, colored check marks and crosses
 Without colors every status line starts with a plain word, so scripts can match it:
 
 ```
-PASS  data dir: /home/you/.local/share/copycord is writable
+PASS  data dir: /home/you/.copycord is writable
 WARN  frontend: ... is missing, the admin UI will not load
 FAIL  admin port: port 8080 is in use
 ```
@@ -70,14 +70,15 @@ See [Discord Setup](/docs/getting-started/discord-setup) for how to get the toke
 
 ## The data directory {#data-dir}
 
-Copycord keeps its database (`data.db`), logs, backups and the saved update channel in one data directory:
+Copycord keeps its database (`data.db`), logs, backups and the saved update channel in one data directory (the Copycord home):
 
 | Where | Data directory |
 |-------|----------------|
-| Linux | `~/.local/share/copycord` |
-| macOS | `~/Library/Application Support/Copycord` |
-| Windows | `%LOCALAPPDATA%\Copycord` |
+| Linux, macOS | `~/.copycord` |
+| Windows | `%USERPROFILE%\.copycord` |
 | Docker | `/data` (your `./data` volume) |
+
+This folder is the Copycord home. A git install keeps its checkout in `src/` and its per-user Node in `node/` inside it. Set `COPYCORD_HOME` to use another folder; `--data-dir` and `DATA_DIR` still win over it. If `~/.copycord` does not exist but an older install left a `data.db` in `~/.local/share/copycord` (Linux), `~/Library/Application Support/Copycord` (macOS) or `%LOCALAPPDATA%\Copycord` (Windows), Copycord keeps using that folder and prints a notice. It never moves data by itself; to move, stop Copycord and move the folder to `~/.copycord`.
 
 `--data-dir PATH` uses another folder for that command. It does the same as setting the `DATA_DIR` environment variable. It is accepted by `run`, `version`, `doctor`, every `config` command, `service install` and `uninstall`.
 
@@ -236,25 +237,25 @@ The service does not see variables you set in your terminal. To give it `PASSWOR
 
 ## copycord uninstall {#copycord-uninstall}
 
-Removes Copycord from this machine. Your data stays unless you add `--purge`.
+Removes Copycord from this machine. The Copycord home (data, `src/`, `node/`) stays unless you add `--purge`; without it the command prints where the home is.
 
 ```bash
 copycord uninstall --dry-run          # show what would be removed, change nothing
 copycord uninstall                    # remove the service and the program, keep the data
-copycord uninstall --purge            # also delete the data directory
+copycord uninstall --purge            # also delete the Copycord home, src and node
 copycord uninstall --yes --keep-service
 ```
 
 It runs these steps in order:
 
 1. Stops and removes the [service](#copycord-service), the same as `copycord service uninstall`. On Linux it checks both the user and the system service; removing the system service needs root. A service that is not installed is skipped.
-2. With `--purge`, deletes the [data directory](#data-dir) (database, logs, backups). It refuses when that path is `/`, your home directory or empty.
+2. With `--purge`, deletes the [Copycord home](#data-dir) (database, logs, backups, `src/`, `node/`) and the saved `~/.copycord-home`. It refuses when that path is `/`, your home directory or empty.
 3. Removes the program with `uv tool uninstall copycord`, or `pipx uninstall copycord` when `uv` is not on your `PATH`, and deletes the saved `update.json`. When neither tool is found it prints the command to run yourself.
 4. Prints a summary of what was removed and kept, and how to reinstall.
 
 | Option | What it does |
 |--------|--------------|
-| `--purge` | Also deletes the data directory. Without `--yes` you must type `DELETE` to confirm. |
+| `--purge` | Also deletes the Copycord home. Without `--yes` you must type `DELETE` to confirm. |
 | `--yes`, `-y` | Skips the confirmation prompts |
 | `--keep-service` | Leaves the OS service installed |
 | `--dry-run` | Prints the steps and changes nothing |

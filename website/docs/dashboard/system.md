@@ -42,7 +42,7 @@ A terminal line looks like this:
 
 The `LOG_LEVEL` setting (`INFO` or `DEBUG`) applies to all of them. `server.out` and `client.out` are rotated at about 10 MB, keeping one older file (`server.out.1`, `client.out.1`).
 
-Where the [data directory](/docs/cli#data-dir) is depends on how you run Copycord: `./data` next to your `docker-compose.yml` for Docker, otherwise `~/.local/share/copycord` (Linux), `~/Library/Application Support/Copycord` (macOS) or `%LOCALAPPDATA%\Copycord` (Windows), unless you set `--data-dir`.
+Where the [data directory](/docs/cli#data-dir) is depends on how you run Copycord: `./data` next to your `docker-compose.yml` for Docker, otherwise `~/.copycord` (Windows: `%USERPROFILE%\.copycord`), unless you set `COPYCORD_HOME` or `--data-dir`.
 
 When Copycord runs as a [service](/docs/cli#copycord-service), the terminal output goes to:
 

@@ -124,7 +124,7 @@ CONTROL_PORT_CLIENT=9202
 
 ## Database location
 
-The SQLite database is `data.db` in the data directory: `/data/data.db` in Docker (your `./data` volume), otherwise `~/.local/share/copycord` (Linux), `~/Library/Application Support/Copycord` (macOS) or `%LOCALAPPDATA%\Copycord` (Windows).
+The SQLite database is `data.db` in the data directory: `/data/data.db` in Docker (your `./data` volume), otherwise `~/.copycord` (Windows: `%USERPROFILE%\.copycord`), or the folder in `COPYCORD_HOME`.
 
 To use another data directory, start Copycord with `--data-dir` (or set `DATA_DIR`). Logs and backups move with it:
 
