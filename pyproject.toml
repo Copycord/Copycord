@@ -1,0 +1,82 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "copycord"
+dynamic = ["version"]
+description = "Mirror Discord servers: admin UI, server bot and client in one process"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+# Union of code/admin, code/server and code/client requirements.txt (same pins).
+dependencies = [
+    "fastapi==0.116.1",
+    "uvicorn[standard]==0.35.0",
+    "jinja2==3.1.6",
+    "python-dotenv==1.2.2",
+    "python-multipart==0.0.26",
+    "websockets==13.1",
+    "aiohttp>=3.9,<4",
+    "aiohttp-socks>=0.8,<1",
+    "itsdangerous>=2.1",
+    "tzdata==2025.2",
+    "py-cord==2.8.1",
+    "curl_cffi==0.16.2",
+    "Pillow==12.2.0",
+    "PyYAML==6.0.2",
+    "audioop-lts==0.2.1; python_version >= '3.13'",
+]
+
+[project.urls]
+Homepage = "https://github.com/Copycord/Copycord"
+
+[project.scripts]
+copycord = "copycord.__main__:main"
+
+# Single source: CURRENT_VERSION in code/common/config.py ("v3.28.0" -> 3.28.0).
+[tool.hatch.version]
+path = "code/common/config.py"
+pattern = 'CURRENT_VERSION = "v?(?P<version>[^"]+)"'
+
+[tool.hatch.build.targets.wheel]
+# Kept as top-level packages (admin, server, client, ...): the supported install
+# is isolated (uv tool / pipx), so these names live in Copycord's own venv.
+packages = [
+    "code/admin",
+    "code/server",
+    "code/client",
+    "code/common",
+    "code/selfclient",
+    "code/copycord",
+]
+exclude = [
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/tests",
+    "code/admin/frontend",
+    "code/admin/data",
+]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/code/admin",
+    "/code/server",
+    "/code/client",
+    "/code/common",
+    "/code/selfclient",
+    "/code/copycord",
+    "/hatch_build.py",
+    "/README.md",
+    "/LICENSE",
+]
+exclude = [
+    "**/__pycache__",
+    "**/*.pyc",
+    "code/admin/frontend/node_modules",
+    "code/admin/data",
+]
+
+# Adds the built frontend (code/admin/frontend/dist) when present; see hatch_build.py.
+[tool.hatch.build.hooks.custom]
+path = "hatch_build.py"
