@@ -13,7 +13,7 @@
 #
 # With options:
 #
-#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1))) -Git -Version v4-dev
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1))) -Version v4-dev
 #
 # Two install methods:
 #   release (default)  the wheel asset of a GitHub release
@@ -64,11 +64,10 @@ Usage:
   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/$DefaultRepo/main/install.ps1))) [options]
 
 Options:
-  -InstallMethod release|git  install a GitHub release (default) or a git checkout
-  -Git                        shortcut for -InstallMethod git
   -Repo owner/name            GitHub repository (default: $DefaultRepo)
-  -Version <value>            release: a release version, e.g. 4.0.0 (alias -Tag)
-                              git: a branch, tag or commit sha (default: main)
+  -Version <value>            a release version (4.0.0, v4.0.0, 4.0.0b1) installs
+  (alias -Tag)                that release; anything else (a branch, tag or
+                              commit sha) installs from git at that ref
   -Beta                       release: newest release, pre-releases included;
                               saved as the ``copycord update`` channel
   -CopycordHome <path>        Copycord home: data, logs, backups, src\ and node\
@@ -82,13 +81,17 @@ Options:
   -ShowOutput                 stream the output of every step
   -Help                       show this help
 
+Advanced:
+  -InstallMethod release|git and -Git force the method instead of inferring it
+  from -Version; COPYCORD_INSTALL_METHOD does too.
+
 Environment (parameters win):
-  COPYCORD_INSTALL_METHOD, COPYCORD_REPO, COPYCORD_VERSION, COPYCORD_CHANNEL=stable|beta,
+  COPYCORD_REPO, COPYCORD_VERSION, COPYCORD_CHANNEL=stable|beta,
   COPYCORD_BETA=1, COPYCORD_GIT_DIR, COPYCORD_HOME, COPYCORD_NO_ONBOARD=1, COPYCORD_VERIFY=1,
   COPYCORD_DRY_RUN=1, COPYCORD_NODE_VERSION, COPYCORD_ALLOW_ROOT=1, NO_COLOR=1
 
 Test a branch, no release needed:
-  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/$DefaultRepo/v4-dev/install.ps1))) -Git -Version v4-dev
+  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/$DefaultRepo/v4-dev/install.ps1))) -Version v4-dev
 "@ | Write-Host
         return
     }
@@ -96,6 +99,7 @@ Test a branch, no release needed:
     # --- options ------------------------------------------------------------
 
     $method = if ($Opts.Git) { 'git' } else { $Opts.InstallMethod }
+    $inferred = ''
     if ($method -notin @('release', 'git')) {
         throw "copycord install: -InstallMethod must be release or git, not '$method'"
     }
@@ -112,6 +116,13 @@ Test a branch, no release needed:
     $dryRun = $Opts.DryRun -or $env:COPYCORD_DRY_RUN -eq '1'
     $showOutput = [bool]$Opts.ShowOutput
     $version = if ($Opts.Version) { $Opts.Version } else { '' }
+    # -Version alone picks the method: a release version (optional v, then
+    # digits.digits.digits and an optional pre-release suffix) is a release,
+    # anything else is a git ref. An explicit method wins.
+    if (-not $Opts.MethodSet -and -not $Opts.Git -and $version) {
+        $method = if ($version -cmatch '^v?\d+\.\d+\.\d+([-.]?(a|b|c|rc|alpha|beta|pre|preview|dev)[.-]?[0-9A-Za-z.]*)?$') { 'release' } else { 'git' }
+        $inferred = ', inferred from -Version'
+    }
     $homeDir = if ($Opts.CopycordHome) { $Opts.CopycordHome } else { Join-Path $env:USERPROFILE '.copycord' }
     if (-not [IO.Path]::IsPathRooted($homeDir)) { Write-Host "copycord install: -CopycordHome must be an absolute path (got $homeDir)"; return }
     $homeDir = $homeDir.TrimEnd('\', '/')
@@ -224,12 +235,12 @@ Test a branch, no release needed:
     Out '  Plan'
     if ($method -eq 'release') {
         PlanLine 'home' $homeDir
-        PlanLine 'method' 'release (GitHub release wheel)'
+        PlanLine 'method' "release (GitHub release wheel$inferred)"
         PlanLine 'repo' $repo
         if ($version) { PlanLine 'version' "v$version" } else { PlanLine 'channel' "$channel (newest release)" }
     } else {
         PlanLine 'home' $homeDir
-        PlanLine 'method' 'git (build from source, no release needed)'
+        PlanLine 'method' "git (build from source, no release needed$inferred)"
         PlanLine 'repo' $repoUrl
         PlanLine 'ref' $ref
         PlanLine 'checkout' $gitDir
@@ -284,7 +295,8 @@ Test a branch, no release needed:
                         $release = Invoke-RestMethod -Uri "$api/latest" -Headers $Headers -TimeoutSec 30
                     }
                 } catch {
-                    Fail "could not get the release from ${api}: $($_.Exception.Message)"
+                    $hint = if ($version) { " If $version is a branch, tag or commit, use -Version with that name, e.g. -Version v4-dev." } else { '' }
+                    Fail "could not get the release from ${api}: $($_.Exception.Message)$hint"
                 }
                 if (-not $release) { Fail "no $channel release found on $repoUrl/releases" }
                 $tag = $release.tag_name
@@ -499,7 +511,7 @@ Test a branch, no release needed:
 }
 
 Install-Copycord -Opts @{
-    InstallMethod = $InstallMethod; Git = $Git; Repo = $Repo; Version = $Version; Beta = $Beta
+    InstallMethod = $InstallMethod; MethodSet = ($PSBoundParameters.ContainsKey('InstallMethod') -or [bool]$env:COPYCORD_INSTALL_METHOD); Git = $Git; Repo = $Repo; Version = $Version; Beta = $Beta
     GitDir = $GitDir; CopycordHome = $CopycordHome; NoOnboard = $NoOnboard; Verify = $Verify; DryRun = $DryRun
     ShowOutput = $ShowOutput; Help = $Help
 }

@@ -283,7 +283,7 @@ json_field() {
 # anything else is a git ref. An explicit method wins.
 INFERRED=""
 if [ -z "$METHOD_SET" ] && [ -n "$VERSION" ]; then
-    if printf '%s' "$VERSION" | grep -Eq '^[vV]?[0-9]+\.[0-9]+\.[0-9]+([-.]?(a|b|c|rc|alpha|beta|pre|preview|dev)[.-]?[0-9A-Za-z.]*)?$'; then
+    if printf '%s' "$VERSION" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-.]?(a|b|c|rc|alpha|beta|pre|preview|dev)[.-]?[0-9A-Za-z.]*)?$'; then
         METHOD="release"
     else
         METHOD="git"
