@@ -1355,7 +1355,7 @@ class BackfillEngine:
         try:
             from zoneinfo import ZoneInfo
 
-            _DEFAULT_UI_TZ = os.getenv("UI_TZ", "America/New_York")
+            _DEFAULT_UI_TZ = os.getenv("UI_TZ") or "America/New_York"
             self.LOCAL_TZ = ZoneInfo(_DEFAULT_UI_TZ)
         except Exception:
             self.LOCAL_TZ = datetime.now().astimezone().tzinfo or timezone.utc

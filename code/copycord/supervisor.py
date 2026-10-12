@@ -489,8 +489,8 @@ def build_supervisor(
         factories = {
             "admin": admin_factory(
                 host="0.0.0.0",
-                port=int(os.getenv("ADMIN_PORT", "8080")),
-                log_level=os.getenv("LOG_LEVEL", "info").lower(),
+                port=int(os.getenv("ADMIN_PORT") or "8080"),
+                log_level=(os.getenv("LOG_LEVEL") or "info").lower(),
             ),
             "server": server_factory(),
             "client": client_factory(),

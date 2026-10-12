@@ -284,42 +284,106 @@ def test_env_file_is_loaded_without_overriding(data_dir, monkeypatch):
     assert os.environ["COPYCORD_TEST_REAL"] == "real"
 
 
-def test_env_template_sets_the_password_and_lists_every_env_key(tmp_path):
+def test_env_template_sets_every_default(tmp_path):
     from copycord import envfile
 
-    text = envfile.template()
+    home = tmp_path / "home"
+    text = envfile.template(home)
     lines = text.splitlines()
-    assert "PASSWORD=copycord" in lines
     assert envfile.DEFAULT_PASSWORD == "copycord"
-    for key in envfile.ENV_KEYS:
-        if key != "PASSWORD":
-            assert f"#{key}={envfile.ENV_DEFAULTS.get(key, '')}" in lines
-        # A one-line description above each key.
-        above = lines[next(i for i, x in enumerate(lines) if x.lstrip("#").startswith(key + "=")) - 1]
-        assert above.startswith("# ") and len(above) > 4
+    expected = {
+        "PASSWORD": "copycord",
+        "ADMIN_PORT": "8080",
+        "TZ": "UTC",
+        "UI_TZ": "America/New_York",
+        "LOG_LEVEL": "INFO",
+        "LOG_FORMAT": "HUMAN",
+        "BACKUP_DIR": str(home / "backups"),
+        "BACKUP_AT": "03:17",
+        "BACKUP_RETAIN": "14",
+        "COPYCORD_NO_UPDATE_CHECK": "0",
+    }
     active = [x for x in lines if x and not x.startswith("#")]
-    assert active == ["PASSWORD=copycord"]
+    assert active == [f"{k}={v}" for k, v in expected.items()]
+    for key in expected:
+        # A one-line description above each key.
+        above = lines[lines.index(f"{key}={expected[key]}") - 1]
+        assert above.startswith("# ") and len(above) > 4
+    # Copycord saves its own SECRET_KEY; the template says so instead of setting one.
+    assert not any(x.lstrip("#").startswith("SECRET_KEY=") for x in lines)
+    assert any(x.startswith("# SECRET_KEY") and "secret.key" in x for x in lines)
     assert "copycord restart" in text
+    assert set(envfile.ENV_KEYS) - {"SECRET_KEY"} <= set(expected)
 
     env = tmp_path / ".env"
     env.write_text(text, encoding="utf-8")
     from dotenv import dotenv_values
 
-    assert dotenv_values(env) == {"PASSWORD": "copycord"}
+    assert dotenv_values(env) == expected
 
 
-def test_config_set_fills_the_template_placeholder(tmp_path):
+def test_env_template_defaults_match_the_code(tmp_path, monkeypatch):
+    """The values the template writes, or an empty value, act like no value."""
+    from copycord import envfile, update_check
+
+    monkeypatch.delenv(update_check.ENV_OPT_OUT, raising=False)
+    monkeypatch.setattr(update_check, "_flag", lambda key, default: default)
+    assert update_check.check_enabled()
+    for value in (envfile.ENV_DEFAULTS["COPYCORD_NO_UPDATE_CHECK"], ""):
+        monkeypatch.setenv(update_check.ENV_OPT_OUT, value)
+        assert update_check.check_enabled()
+    monkeypatch.setenv(update_check.ENV_OPT_OUT, "1")
+    assert not update_check.check_enabled()
+
+    import re
+
+    root = Path(__file__).resolve().parents[1] / "code"
+    sources = "\n".join(
+        (root / f).read_text(encoding="utf-8")
+        for f in ("admin/app.py", "copycord/supervisor.py", "client/export_runners.py")
+    )
+    for key in ("ADMIN_PORT", "TZ", "UI_TZ", "BACKUP_AT", "BACKUP_RETAIN"):
+        reads = re.findall(rf'os\.getenv\("{key}"\) or "([^"]*)"', sources)
+        assert reads, key
+        assert set(reads) == {envfile.ENV_DEFAULTS[key]}, key
+        # No read that keeps an empty value instead of the default.
+        assert not re.search(rf'os\.getenv\("{key}", ', sources), key
+    assert 'os.getenv("BACKUP_DIR") or str(DATA_DIR / "backups")' in sources
+
+
+def test_config_set_updates_the_template_lines_in_place(tmp_path):
     from copycord import envfile
 
     env = tmp_path / ".env"
-    env.write_text(envfile.template(), encoding="utf-8")
+    template = envfile.template(tmp_path)
+    env.write_text(template, encoding="utf-8")
     envfile.set_value("PASSWORD", "pw", env)
     envfile.set_value("ADMIN_PORT", "9000", env)
+    envfile.set_value("COPYCORD_NO_UPDATE_CHECK", "1", env)
     lines = env.read_text(encoding="utf-8").splitlines()
-    assert "PASSWORD=pw" in lines and "PASSWORD=copycord" not in lines
-    assert "ADMIN_PORT=9000" in lines and "#ADMIN_PORT=8080" not in lines
-    assert lines.index("ADMIN_PORT=9000") == envfile.template().splitlines().index("#ADMIN_PORT=8080")
-    assert lines[0].startswith("# Copycord settings")
+    before = template.splitlines()
+    assert len(lines) == len(before)
+    for old, new in (
+        ("PASSWORD=copycord", "PASSWORD=pw"),
+        ("ADMIN_PORT=8080", "ADMIN_PORT=9000"),
+        ("COPYCORD_NO_UPDATE_CHECK=0", "COPYCORD_NO_UPDATE_CHECK=1"),
+    ):
+        assert old not in lines
+        assert lines.index(new) == before.index(old)
+    assert [x for x in lines if x.startswith("#")] == [x for x in before if x.startswith("#")]
+
+    # SECRET_KEY has no line in the template; set appends one.
+    envfile.set_value("SECRET_KEY", "s3cret", env)
+    assert env.read_text(encoding="utf-8").splitlines()[-1] == "SECRET_KEY=s3cret"
+
+
+def test_config_set_fills_a_commented_line(tmp_path):
+    from copycord import envfile
+
+    env = tmp_path / ".env"
+    env.write_text("# dashboard port\n#ADMIN_PORT=8080\n", encoding="utf-8")
+    envfile.set_value("ADMIN_PORT", "9000", env)
+    assert env.read_text(encoding="utf-8") == "# dashboard port\nADMIN_PORT=9000\n"
 
 
 def _service_state(monkeypatch, installed, running, restart_error=None):

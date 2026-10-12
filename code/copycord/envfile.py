@@ -27,34 +27,60 @@ from typing import Dict, List, Optional
 
 FILENAME = ".env"
 
-# Env-only keys and a one-line description each, in template order.
+# Env-only keys and a one-line description each.
 ENV_KEYS: Dict[str, str] = {
-    "PASSWORD": "dashboard login password; change it from the default (unset: no login page)",
-    "SECRET_KEY": "signs the dashboard login cookie (default: a key saved in <home>)",
+    "PASSWORD": "dashboard login password; change it from the default (empty: no login page)",
+    "SECRET_KEY": "signs the dashboard login cookie (default: a key saved in <home>/secret.key)",
     "ADMIN_PORT": "dashboard port",
     "TZ": "time zone for the daily backup, e.g. Europe/Berlin",
     "UI_TZ": "time zone shown in exports",
     "LOG_FORMAT": "HUMAN or JSON log lines",
-    "BACKUP_DIR": "where the daily database backups go (default <home>/backups)",
+    "BACKUP_DIR": "where the daily database backups go",
     "BACKUP_AT": "time of the daily backup, HH:MM",
     "BACKUP_RETAIN": "how many daily backups to keep",
-    "COPYCORD_NO_UPDATE_CHECK": "1 turns off the update check on start",
+    "COPYCORD_NO_UPDATE_CHECK": "1 turns off the update check on start; 0 keeps it on",
 }
 
-# The dashboard password a new install starts with; the template sets it.
+# The dashboard password a new install starts with.
 DEFAULT_PASSWORD = "copycord"
 
-# Defaults shown on the template's commented lines; the template sets PASSWORD.
+# The defaults the code uses, which the template writes as live values.
+# BACKUP_DIR defaults to <home>/backups (see template).
 ENV_DEFAULTS: Dict[str, str] = {
     "PASSWORD": DEFAULT_PASSWORD,
     "ADMIN_PORT": "8080",
     "TZ": "UTC",
     "UI_TZ": "America/New_York",
+    "LOG_LEVEL": "INFO",
     "LOG_FORMAT": "HUMAN",
     "BACKUP_AT": "03:17",
     "BACKUP_RETAIN": "14",
     "COPYCORD_NO_UPDATE_CHECK": "0",
 }
+
+# LOG_LEVEL is in the template so the first log lines follow it, but it is an
+# app config key: `copycord config` and the dashboard keep it in the database.
+LOG_LEVEL_TEXT = "DEBUG or INFO; the dashboard's log level wins once it is saved"
+
+# Copycord saves its own SECRET_KEY, so the template leaves it out and says so.
+SECRET_KEY_TEXT = (
+    "SECRET_KEY is left out: Copycord keeps its own key in <home>/secret.key"
+)
+
+# The keys the template lists, in order.
+TEMPLATE_KEYS = (
+    "PASSWORD",
+    "SECRET_KEY",
+    "ADMIN_PORT",
+    "TZ",
+    "UI_TZ",
+    "LOG_LEVEL",
+    "LOG_FORMAT",
+    "BACKUP_DIR",
+    "BACKUP_AT",
+    "BACKUP_RETAIN",
+    "COPYCORD_NO_UPDATE_CHECK",
+)
 
 # Tuning knobs read with os.getenv; set them only when asked to.
 ENV_PREFIXES = ("BACKFILL_", "FORWARDING_")
@@ -153,19 +179,22 @@ def unset(key: str, path: Optional[Path] = None) -> bool:
     return True
 
 
-def template() -> str:
-    """The <home>/.env the installer writes on first install: PASSWORD set to
-    the default, every other key commented out with its default."""
+def template(home: Optional[Path] = None) -> str:
+    """The <home>/.env the installer writes on first install: every key set
+    to its default, with a one-line description above it."""
+    home = env_path().parent if home is None else Path(home)
+    defaults = {**ENV_DEFAULTS, "BACKUP_DIR": str(home / "backups")}
     lines = [
         "# Copycord settings that are read from the environment only.",
-        "# Everything else is set in the dashboard. Edit a value here (uncomment a",
-        "# line to use it) or run `copycord config set KEY VALUE`, then run",
+        "# Everything else is set in the dashboard. Each value below is the default.",
+        "# Edit one here or run `copycord config set KEY VALUE`, then run",
         "# `copycord restart` to apply it.",
         "",
     ]
-    for key, text in ENV_KEYS.items():
-        default = ENV_DEFAULTS.get(key, "")
-        lines.append(f"# {text}")
-        lines.append(f"{key}={default}" if key == "PASSWORD" else f"#{key}={default}")
-        lines.append("")
+    texts = {**ENV_KEYS, "LOG_LEVEL": LOG_LEVEL_TEXT}
+    for key in TEMPLATE_KEYS:
+        if key == "SECRET_KEY":
+            lines += [f"# {SECRET_KEY_TEXT}", ""]
+        else:
+            lines += [f"# {texts[key]}", f"{key}={defaults[key]}", ""]
     return "\n".join(lines)

@@ -66,7 +66,7 @@ class Config:
 
         self.ADMIN_WS_URL = _str(
             "ADMIN_WS_URL",
-            f"ws://{os.getenv('ADMIN_HOST', _peer_host('admin'))}:{os.getenv('ADMIN_PORT', '8080')}/bus",
+            f"ws://{os.getenv('ADMIN_HOST', _peer_host('admin'))}:{os.getenv('ADMIN_PORT') or '8080'}/bus",
         )
 
         self.CLIENT_WS_HOST = _str("CLIENT_WS_HOST", _peer_host("client")) or _peer_host("client")

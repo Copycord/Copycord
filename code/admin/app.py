@@ -162,10 +162,10 @@ DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = os.getenv("DB_PATH", str(DATA_DIR / "data.db"))
 db = DBManager(DB_PATH, init_schema=True)
 
-BACKUP_DIR = Path(os.getenv("BACKUP_DIR", str(DATA_DIR / "backups")))
-BACKUP_RETAIN = int(os.getenv("BACKUP_RETAIN", "14"))
-BACKUP_AT = os.getenv("BACKUP_AT", "03:17")
-BACKUP_TZ = os.getenv("TZ", "UTC")
+BACKUP_DIR = Path(os.getenv("BACKUP_DIR") or str(DATA_DIR / "backups"))
+BACKUP_RETAIN = int(os.getenv("BACKUP_RETAIN") or "14")
+BACKUP_AT = os.getenv("BACKUP_AT") or "03:17"
+BACKUP_TZ = os.getenv("TZ") or "UTC"
 
 _backup_cfg = BackupConfig(
     db_path=DB_PATH,

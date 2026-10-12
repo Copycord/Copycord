@@ -594,52 +594,54 @@ elif [ -f "$HOME_POINTER" ] && [ "$DRY_RUN" != "1" ]; then
 fi
 
 # Settings that are read from the environment only live in <home>/.env, which
-# `copycord` loads at every start. Make sure it exists: write the template
-# (PASSWORD set to the default, the rest commented out) once; never overwrite
-# it. Keep the keys in step with code/copycord/envfile.py (ENV_KEYS).
+# `copycord` loads at every start. Make sure it exists: write it once with
+# every key set to its default; never overwrite it. Keep it in step with
+# envfile.template() in code/copycord/envfile.py.
 ENV_FILE="$COPYCORD_HOME/.env"
 if [ -e "$ENV_FILE" ]; then
     :
 elif [ "$DRY_RUN" = "1" ]; then
-    dry "write a commented settings template to $ENV_FILE"
-elif mkdir -p "$COPYCORD_HOME" && (umask 077 && cat >"$ENV_FILE" <<'ENVEOF'
+    dry "write the settings file $ENV_FILE"
+elif mkdir -p "$COPYCORD_HOME" && (umask 077 && cat >"$ENV_FILE" <<ENVEOF
 # Copycord settings that are read from the environment only.
-# Everything else is set in the dashboard. Edit a value here (uncomment a
-# line to use it) or run `copycord config set KEY VALUE`, then run
-# `copycord restart` to apply it.
+# Everything else is set in the dashboard. Each value below is the default.
+# Edit one here or run \`copycord config set KEY VALUE\`, then run
+# \`copycord restart\` to apply it.
 
-# dashboard login password; change it from the default (unset: no login page)
+# dashboard login password; change it from the default (empty: no login page)
 PASSWORD=copycord
 
-# signs the dashboard login cookie (default: a key saved in <home>)
-#SECRET_KEY=
+# SECRET_KEY is left out: Copycord keeps its own key in <home>/secret.key
 
 # dashboard port
-#ADMIN_PORT=8080
+ADMIN_PORT=8080
 
 # time zone for the daily backup, e.g. Europe/Berlin
-#TZ=UTC
+TZ=UTC
 
 # time zone shown in exports
-#UI_TZ=America/New_York
+UI_TZ=America/New_York
+
+# DEBUG or INFO; the dashboard's log level wins once it is saved
+LOG_LEVEL=INFO
 
 # HUMAN or JSON log lines
-#LOG_FORMAT=HUMAN
+LOG_FORMAT=HUMAN
 
-# where the daily database backups go (default <home>/backups)
-#BACKUP_DIR=
+# where the daily database backups go
+BACKUP_DIR=$COPYCORD_HOME/backups
 
 # time of the daily backup, HH:MM
-#BACKUP_AT=03:17
+BACKUP_AT=03:17
 
 # how many daily backups to keep
-#BACKUP_RETAIN=14
+BACKUP_RETAIN=14
 
-# 1 turns off the update check on start
-#COPYCORD_NO_UPDATE_CHECK=0
+# 1 turns off the update check on start; 0 keeps it on
+COPYCORD_NO_UPDATE_CHECK=0
 ENVEOF
 ); then
-    done_line "Wrote the settings template $ENV_FILE"
+    done_line "Wrote the settings file $ENV_FILE"
 else
     warn "could not write $ENV_FILE; \`copycord config set\` creates it later"
 fi
