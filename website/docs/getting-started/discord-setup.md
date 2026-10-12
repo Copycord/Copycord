@@ -100,5 +100,5 @@ At this point you should have:
 - ✅ A **bot token** from the Developer Portal
 
 Next, choose your installation method:
-- [Docker Install](/docs/getting-started/docker-install) (recommended)
-- [Manual Install](/docs/getting-started/manual-install)
+- [Install Script](/docs/getting-started/manual-install) (Linux, macOS, Windows)
+- [Docker Install](/docs/getting-started/docker-install)

@@ -9,9 +9,10 @@ const sidebars = {
       items: [
         'getting-started/prerequisites',
         'getting-started/discord-setup',
-        'getting-started/docker-install',
         'getting-started/manual-install',
+        'getting-started/docker-install',
         'getting-started/first-run',
+        'getting-started/upgrading-from-v3',
       ],
     },
     {

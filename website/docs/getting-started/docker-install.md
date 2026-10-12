@@ -1,11 +1,11 @@
 ---
-sidebar_position: 3
+sidebar_position: 4
 title: Docker Install
 ---
 
 # Docker Install
 
-Docker is the recommended way to run Copycord. It handles all dependencies and makes updates easy.
+Docker runs Copycord in a single container with everything it needs. Use it if you already run your apps with Docker; otherwise the [install script](/docs/getting-started/manual-install) is simpler.
 
 ## Install Docker
 
@@ -52,7 +52,7 @@ Create a file named `docker-compose.yml` with the following content. Copycord ru
 ```yaml
 services:
   copycord:
-    image: ghcr.io/copycord/copycord:latest # Using version tag is recommended
+    image: ghcr.io/copycord/copycord:latest # pinning a release tag (e.g. v4.0.0) is recommended
     container_name: copycord
     environment:
       - PASSWORD=copycord  # change this or remove the line to disable login
@@ -68,7 +68,7 @@ Change `PASSWORD=copycord` to your preferred password, or remove the line entire
 :::
 
 :::note Upgrading from v3
-Upgrading from v3? Delete the `server` and `client` services and every `ROLE` line from your compose file. Copycord now refuses to start while `ROLE` is set. To keep the three-container layout, stay on a v3 image tag.
+v3 used three services (`admin`, `server`, `client`) with a `ROLE` variable. Copycord v4 is this one service and refuses to start while `ROLE` is set. See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
 :::
 
 ### 3. Launch Copycord
@@ -99,17 +99,30 @@ You should see one container running: `copycord`.
 docker compose logs -f
 ```
 
+This shows the dashboard's log plus warnings and errors from the server and client, each line tagged `[admin]`, `[server]` or `[client]`. The full server and client logs are in `./data/server.out` and `./data/client.out` and in the log viewers of the dashboard. See [Logs](/docs/dashboard/system#where-logs-go).
+
+### Run CLI commands
+
+The [`copycord` command](/docs/cli) is installed inside the container. For example, to run the checks or read a setting:
+
+```bash
+docker compose exec copycord /opt/venvs/copycord/bin/copycord doctor
+docker compose exec copycord /opt/venvs/copycord/bin/copycord config get LOG_LEVEL
+```
+
+`copycord update` and `copycord service` are not used with Docker; update by pulling a new image as shown below.
+
 ### Stop Copycord
 
 ```bash
 docker compose down
 ```
 
-Or use **Docker Desktop** on Windows/macOS to stop the containers from the GUI.
+Or use **Docker Desktop** on Windows/macOS to stop the container from the GUI.
 
 ### Update Copycord
 
-1. Edit `docker-compose.yml` and update the image tag to the [latest release](https://github.com/Copycord/Copycord/releases)
+1. If you pinned a release tag, edit `docker-compose.yml` and change it to the [latest release](https://github.com/Copycord/Copycord/releases)
 2. Pull and restart:
 
 ```bash

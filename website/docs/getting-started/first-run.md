@@ -9,13 +9,15 @@ Now that Copycord is installed, let's configure it and create your first server 
 
 ## 1. Open the dashboard
 
+Make sure Copycord is running: `copycord run` (or the service) for the [install script](/docs/getting-started/manual-install), or `docker compose up -d` for [Docker](/docs/getting-started/docker-install). The dashboard, server bot and client all start together.
+
 Open your browser and go to:
 
 ```
 http://localhost:8080
 ```
 
-If you set a password during installation, you'll see a login screen. Enter the password you configured.
+If you set `PASSWORD`, you'll see a login screen. Enter the password you configured. If you changed the port, use that port instead of `8080`.
 
 ## 2. Enter your tokens
 
@@ -61,7 +63,7 @@ Once the mapping is created and both bots are running, Copycord will:
 2. **Create** matching channels, categories, and roles in the clone
 3. **Start forwarding** new messages in real time
 
-You'll see activity in the dashboard logs and messages appearing in your clone server.
+You'll see activity in the dashboard log viewers and messages appearing in your clone server. The terminal (or `docker compose logs`) only shows warnings and errors from the server and client; see [Logs](/docs/dashboard/system#where-logs-go).
 
 ## What's next?
 
