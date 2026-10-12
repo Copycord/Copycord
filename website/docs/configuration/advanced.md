@@ -11,21 +11,23 @@ This page covers advanced settings and deployment configurations.
 
 ### Docker
 
-Edit the port mapping in `docker-compose.yml`:
+Edit the port mapping of the `copycord` service in `docker-compose.yml`:
 
 ```yaml
-admin:
+copycord:
   ports:
     - '9060:8080'  # Dashboard at http://localhost:9060
 ```
 
-### Manual install
+### Install script
 
-Edit `ADMIN_PORT` in `code/.env`:
+Set the `ADMIN_PORT` environment variable when starting Copycord:
 
+```bash
+ADMIN_PORT=9060 copycord run
 ```
-ADMIN_PORT=9060
-```
+
+For a background service, see [Environment variables for the service](/docs/cli#environment-variables-for-the-service).
 
 ## Proxy support
 
@@ -103,28 +105,35 @@ This sets the retention period to 30 days. Message records older than this are a
 MESSAGE_RETENTION_DAYS=30
 ```
 
-## Custom WebSocket URLs
+## Internal ports
 
-For non-standard deployments where services aren't on the same Docker network, configure WebSocket URLs manually:
+The dashboard, server bot and client run in one process and talk to each other inside it, so there are no WebSocket URLs to configure. Only the dashboard port (`ADMIN_PORT`, default `8080`) needs to be reachable.
+
+Copycord also listens on two control ports on `127.0.0.1` only: `9101` (server) and `9102` (client). If another program already uses one of them, move them with environment variables:
 
 ```env
-WS_SERVER_URL=ws://custom-host:8765
-WS_CLIENT_URL=ws://custom-host:8766
-WS_SERVER_CTRL_URL=ws://custom-host:9101
-WS_CLIENT_CTRL_URL=ws://custom-host:9102
+CONTROL_PORT_SERVER=9201
+CONTROL_PORT_CLIENT=9202
 ```
 
 ## Database location
 
-By default, the SQLite database is at `/data/data.db` (Docker) or `data/data.db` (manual). To change it:
+The SQLite database is `data.db` in the data directory: `/data/data.db` in Docker (your `./data` volume), otherwise `~/.local/share/copycord` (Linux), `~/Library/Application Support/Copycord` (macOS) or `%LOCALAPPDATA%\Copycord` (Windows).
+
+To use another data directory, start Copycord with `--data-dir` (or set `DATA_DIR`). Logs and backups move with it:
+
+```bash
+copycord run --data-dir /custom/path
+```
+
+To move only the database file, set `DB_PATH`:
 
 ```env
 DB_PATH=/custom/path/data.db
-DATA_DIR=/custom/path
 ```
 
 :::warning
-Make sure the directory exists and is writable. For Docker, mount the appropriate volume.
+Make sure the directory is writable. For Docker, mount the appropriate volume. `copycord doctor --data-dir /custom/path` checks it.
 :::
 
 ## Auto-start
@@ -144,7 +153,7 @@ Copycord automatically prunes log files to prevent them from growing indefinitel
 - Default: `10` MB
 - Set to `0` to disable pruning
 - Checks run every 5 minutes
-- Applies to `server.out` and `client.out`
+- Applies to `server.out` and `client.out` (see [Where logs go](/docs/dashboard/system#where-logs-go))
 
 The pruner uses memory-efficient seek-based reading — only the tail of the file is loaded into memory, even for very large log files. Writes are atomic (via temp file) to prevent data loss.
 
@@ -173,10 +182,12 @@ For webhook message sending, Copycord uses a lightweight rate limiter (5 per 2.5
 To test how the system handles rate limits under load, enable the stress test mode via environment variable:
 
 ```yaml
-client:
+copycord:
   environment:
     SITEMAP_STRESS_TEST: "true"
 ```
+
+Without Docker: `SITEMAP_STRESS_TEST=true copycord run`.
 
 This continuously loops sitemap generation for all servers until the client is stopped. Only use this for testing — never in production.
 

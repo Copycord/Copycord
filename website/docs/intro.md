@@ -10,9 +10,9 @@ title: What is Copycord?
 
 ## How it works
 
-Copycord runs three lightweight services that work together:
+Copycord runs as a single process (or a single Docker container) with three parts that work together:
 
-| Service | Role | What it does |
+| Part | Role | What it does |
 |---------|------|-------------|
 | **Client** | Source watcher | A self-bot that monitors your source server for new messages, edits, deletes, and structure changes |
 | **Server** | Clone manager | A Discord bot that manages the cloned server — creates channels, posts messages via webhooks, syncs roles |
@@ -46,8 +46,10 @@ Source Server ──► Client (self-bot) ──► Server (bot) ──► Clone
 The fastest way to get running:
 
 1. [Set up your Discord tokens](/docs/getting-started/prerequisites)
-2. [Install with Docker](/docs/getting-started/docker-install) (recommended) or [manually](/docs/getting-started/manual-install)
+2. Install with the [install script](/docs/getting-started/manual-install) (Linux, macOS, Windows) or with [Docker](/docs/getting-started/docker-install)
 3. [Configure your first clone](/docs/getting-started/first-run)
+
+Coming from v3? See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
 
 :::warning Self-Bot Notice
 Copycord uses self-bot functionality (logging into Discord with a user token), which is against Discord's Terms of Service and could lead to account suspension. We strongly recommend using an **alternate account** to minimize risk.

@@ -32,11 +32,11 @@ The dashboard sidebar has these pages:
 
 ## Authentication
 
-If you set a `PASSWORD` environment variable (or configured it in `.env`), you'll need to log in before accessing the dashboard. The session persists via a secure cookie.
+If you set a `PASSWORD` environment variable, you'll need to log in before accessing the dashboard. The session persists via a secure cookie.
 
 To change or remove the password:
-- **Docker**: Edit the `PASSWORD` environment variable in `docker-compose.yml`
-- **Manual**: Edit `PASSWORD` in `code/.env`
+- **Docker**: Edit the `PASSWORD` environment variable in `docker-compose.yml`, then `docker compose up -d`
+- **Install script**: Set or unset `PASSWORD` before `copycord run`; for a service see [Environment variables for the service](/docs/cli#environment-variables-for-the-service)
 
 ## Starting and stopping bots
 
@@ -60,7 +60,7 @@ The Global Configuration card lets you set core settings:
 
 ## Log viewer
 
-Click **View server logs** or **View client logs** on the Bots card to open the log viewer. Features:
+Click **View server logs** or **View client logs** on the Bots card to open the log viewer. It shows the full `server.out` / `client.out` logs; the terminal only shows their warnings and errors (see [Where logs go](/docs/dashboard/system#where-logs-go)). Features:
 
 - Real-time log streaming
 - Search/filter logs
