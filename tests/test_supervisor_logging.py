@@ -14,6 +14,13 @@ from copycord import logging_setup as ls
 def clean_root(monkeypatch):
     # tests/test_api.py sets LOG_LEVEL=WARNING for the whole session at import.
     monkeypatch.setenv("LOG_LEVEL", "INFO")
+    # Importing admin.app (other tests do) turns propagation off on the
+    # "copycord" logger and may leave levels on role loggers; reset both.
+    monkeypatch.setattr(logging.getLogger("copycord"), "propagate", True)
+    names = ("copycord", "server", "server.server", "client", "client.client")
+    saved_levels = {n: logging.getLogger(n).level for n in names}
+    for n in names:
+        logging.getLogger(n).setLevel(logging.NOTSET)
     root = logging.getLogger()
     saved, level = root.handlers[:], root.level
     root.handlers = []
@@ -22,6 +29,8 @@ def clean_root(monkeypatch):
         h.close()
     root.handlers = saved
     root.setLevel(level)
+    for n, lvl in saved_levels.items():
+        logging.getLogger(n).setLevel(lvl)
 
 
 def _emit_on_thread(name, logger_name, msg):
