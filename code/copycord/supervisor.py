@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Dict, List, Optional
 
 from common.control_protocol import ALLOWED_ENV, serve_json, status_payload
+from copycord.logging_setup import setup_logging
 
 logger = logging.getLogger("copycord.supervisor")
 
@@ -521,6 +522,7 @@ def build_supervisor(
 
 async def run() -> None:
     _set_runtime_env()
+    setup_logging()
     sup = build_supervisor()
 
     loop = asyncio.get_running_loop()

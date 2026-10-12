@@ -47,11 +47,10 @@ def check_removed_options() -> bool:
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     if args.command == "run":
-        if not logging.getLogger().handlers:
-            logging.basicConfig(
-                level=logging.INFO,
-                format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-            )
+        from copycord.logging_setup import setup_logging
+
+        # Console only here; supervisor.run adds the per-role files once DATA_DIR is set.
+        setup_logging(roles=())
         if not check_removed_options():
             return 1
 

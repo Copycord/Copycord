@@ -98,10 +98,14 @@ formatter = logging.Formatter(
 root = logging.getLogger()
 root.setLevel(LEVEL)
 
-ch = logging.StreamHandler()
-ch.setFormatter(formatter)
-ch.setLevel(LEVEL)
-root.addHandler(ch)
+# Skip when the supervisor (or the other role module) already installed the
+# console handler, otherwise every record prints once per handler.
+if not any(getattr(h, "_copycord_console", False) for h in root.handlers):
+    ch = logging.StreamHandler()
+    ch._copycord_console = True
+    ch.setFormatter(formatter)
+    ch.setLevel(LEVEL)
+    root.addHandler(ch)
 
 
 
