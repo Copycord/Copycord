@@ -9,6 +9,7 @@ The [install script](/docs/getting-started/manual-install) installs the `copycor
 
 ```
 copycord run [--data-dir PATH]
+copycord restart
 copycord doctor [--data-dir PATH]
 copycord config get KEY [--show-secrets] [--data-dir PATH]
 copycord config set KEY VALUE [--data-dir PATH]
@@ -66,7 +67,7 @@ Useful environment variables (on a native install, set them in [`<home>/.env`](#
 
 | Variable | Default | What it does |
 |----------|---------|--------------|
-| `PASSWORD` | unset | Dashboard login password; no login page when unset |
+| `PASSWORD` | `copycord` (set by the installer) | Dashboard login password; no login page when unset |
 | `ADMIN_PORT` | `8080` | Dashboard port |
 | `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG`; also an app config key, which wins once it is saved |
 | `DATA_DIR` | see above | Same as `--data-dir` |
@@ -140,30 +141,77 @@ To move your settings to another machine, run `copycord config export settings.j
 
 ### Settings that live in .env {#env-file}
 
-Some settings are read from the environment only, before the database is open. In Docker you set them in the compose file. On a native install `copycord` loads `<home>/.env` (for example `~/.copycord/.env`, or `.env` in the `--data-dir` folder) when it starts, for `copycord run` and the service alike. Variables already set in the real environment win over the file.
+Some settings are read from the environment only, before the database is open. In Docker you set them in the compose file. On a native install they live in `.env` in the Copycord home:
 
-| Key | What it does |
-|-----|--------------|
-| `PASSWORD` | Dashboard login password; no login page when unset. |
-| `SECRET_KEY` | Signs the dashboard login cookie (default: a key saved in <home>). |
-| `ADMIN_PORT` | Dashboard port (default 8080). |
-| `TZ` | Time zone for the daily backup, e.g. Europe/Berlin (default UTC). |
-| `UI_TZ` | Time zone shown in exports (default America/New_York). |
-| `LOG_FORMAT` | HUMAN or JSON log lines (default HUMAN). |
-| `BACKUP_DIR` | Where the daily database backups go (default <home>/backups). |
-| `BACKUP_AT` | Time of the daily backup, HH:MM (default 03:17). |
-| `BACKUP_RETAIN` | How many daily backups to keep (default 14). |
-| `COPYCORD_NO_UPDATE_CHECK` | 1 turns off the update check on start. |
-| `BACKFILL_*`, `FORWARDING_*` | Tuning knobs for backfills and forwarding; leave them unset unless asked to change them. |
+| OS | File |
+|----|------|
+| Linux, macOS | `~/.copycord/.env` |
+| Windows | `%USERPROFILE%\.copycord\.env` |
 
-The installer writes a commented template of this file on first install and never overwrites it. `copycord config set` writes these keys there (creating the file, readable only by you on Linux and macOS, if needed), updates a key in place and keeps your comments. To change the dashboard password:
+With `COPYCORD_HOME` or `--data-dir` it is `.env` in that folder. `copycord` reads the file on every start, for `copycord run` and the service alike, so a restart applies your changes. Variables already set in the real environment win over the file.
+
+The installer makes sure the file exists. It writes it on first install and never overwrites it: `PASSWORD=copycord` is set, and every other key is commented out with its default and a one-line description:
+
+```ini
+# dashboard login password; change it from the default (unset: no login page)
+PASSWORD=copycord
+
+# dashboard port
+#ADMIN_PORT=8080
+```
+
+:::warning Change the default password
+The default dashboard password is `copycord`. The dashboard listens on all network interfaces, so change the password right after installing.
+:::
+
+To change a setting, edit the file, then restart Copycord:
+
+```bash
+nano ~/.copycord/.env                # Linux/macOS
+notepad "$HOME\.copycord\.env"       # Windows (PowerShell)
+copycord restart
+```
+
+Or let `copycord config set` edit the file for you:
 
 ```bash
 copycord config set PASSWORD 'new-pass'
-copycord service stop && copycord service start   # or stop and start `copycord run`
+copycord restart
 ```
 
-`copycord config get PASSWORD` prints `********`; add `--show-secrets` to see it. `copycord config unset PASSWORD` removes it.
+[`copycord restart`](#copycord-restart) restarts the service. If you run Copycord in a terminal instead, stop it with **Ctrl+C** and run `copycord run` again.
+
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `PASSWORD` | `copycord` in the template | Dashboard login password; no login page when unset. |
+| `SECRET_KEY` | a key saved in the home | Signs the dashboard login cookie. |
+| `ADMIN_PORT` | `8080` | Dashboard port. |
+| `TZ` | `UTC` | Time zone for the daily backup, e.g. `Europe/Berlin`. |
+| `UI_TZ` | `America/New_York` | Time zone shown in exports. |
+| `LOG_FORMAT` | `HUMAN` | `HUMAN` or `JSON` log lines. |
+| `BACKUP_DIR` | `<home>/backups` | Where the daily database backups go. |
+| `BACKUP_AT` | `03:17` | Time of the daily backup, HH:MM. |
+| `BACKUP_RETAIN` | `14` | How many daily backups to keep. |
+| `COPYCORD_NO_UPDATE_CHECK` | `0` | `1` turns off the update check on start. |
+| `BACKFILL_*`, `FORWARDING_*` | | Tuning knobs for backfills and forwarding; leave them unset unless asked to change them. |
+
+`copycord config set` writes these keys to the file (creating it, readable only by you on Linux and macOS, if needed), updates a key in place, fills in a commented template line and keeps your comments. `copycord config get PASSWORD` prints `********`; add `--show-secrets` to see it. `copycord config unset PASSWORD` removes the line, which turns the login page off.
+
+## copycord restart {#copycord-restart}
+
+Restarts Copycord so it applies changed settings. `<home>/.env` is read on every start.
+
+```bash
+copycord restart
+```
+
+| Copycord is running | What `copycord restart` does |
+|---------------------|------------------------------|
+| As a [service](#copycord-service) | Restarts the service. |
+| In a terminal (`copycord run`) | Prints that Copycord is not running as a service and exits with 1. Stop it with **Ctrl+C** and run `copycord run` again. |
+| Not at all, service installed | Prints the service state and exits with 1; start it with `copycord service start`. |
+
+Restarting the Linux system service needs root: `sudo "$(command -v copycord)" restart`.
 
 ## copycord service {#copycord-service}
 
@@ -219,9 +267,9 @@ Use `--user` with the other `service` commands as well. Without `--user`, `start
 
 ### Environment variables for the service
 
-The service does not see variables you set in your terminal. The simplest way to give it `PASSWORD`, `ADMIN_PORT` or the other env-only settings is [`<home>/.env`](#env-file): `copycord config set PASSWORD 'new-pass'`, then `copycord service stop` and `copycord service start`. You can also set real environment variables, which win over the file:
+The service does not see variables you set in your terminal. The simplest way to give it `PASSWORD`, `ADMIN_PORT` or the other env-only settings is [`<home>/.env`](#env-file): `copycord config set PASSWORD 'new-pass'`, then `copycord restart`. You can also set real environment variables, which win over the file:
 
-- **Linux:** run `systemctl --user edit copycord` (or `sudo systemctl edit copycord` for the system service), add the lines below, save, then restart with `copycord service stop` and `copycord service start`.
+- **Linux:** run `systemctl --user edit copycord` (or `sudo systemctl edit copycord` for the system service), add the lines below, save, then run `copycord restart`.
 
   ```ini
   [Service]

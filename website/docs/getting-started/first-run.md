@@ -17,7 +17,7 @@ Open your browser and go to:
 http://localhost:8080
 ```
 
-If you set `PASSWORD`, you'll see a login screen. Enter the password you configured. If you changed the port, use that port instead of `8080`.
+If `PASSWORD` is set, you'll see a login screen. Enter that password: `copycord` by default on an install-script or Docker install. Change it afterwards (see [Settings that live in .env](/docs/getting-started/manual-install#env-file)). If you changed the port, use that port instead of `8080`.
 
 ## 2. Enter your tokens
 

@@ -122,7 +122,7 @@ copycord run                      # start Copycord, then open http://localhost:8
 copycord service install --user   # or run it in the background as a service
 ```
 
-Set `PASSWORD` before `copycord run` to protect the dashboard. Update later with `copycord update`.
+The dashboard password is `copycord`. Change it in `~/.copycord/.env` (`%USERPROFILE%\.copycord\.env` on Windows) or with `copycord config set PASSWORD 'new-pass'`, then run `copycord restart`. Update later with `copycord update`.
 
 Installer options (after `sh -s --`): `--version` picks a release (`4.0.0`) or builds a branch, tag or commit from source, `--repo owner/name` picks a fork, `--beta`, `--home` (default `~/.copycord`, or `COPYCORD_HOME`), `--verify` and `--dry-run`. Finish the setup in the dashboard at http://localhost:8080. Test a branch (a release-looking version installs that release, anything else is a git ref):
 
