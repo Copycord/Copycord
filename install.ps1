@@ -430,7 +430,8 @@ Test a branch, no release needed:
             if ($dryRun) { Dry "save $homeDir in $homePointer" }
             else {
                 New-Item -ItemType Directory -Force -Path $homeDir | Out-Null
-                Set-Content -Path $homePointer -Value $homeDir -Encoding UTF8
+                # No BOM: Windows PowerShell's -Encoding UTF8 writes one.
+                [IO.File]::WriteAllText($homePointer, $homeDir, (New-Object Text.UTF8Encoding $false))
                 Done "Saved the Copycord home in $homePointer"
             }
         } elseif ((Test-Path $homePointer) -and -not $dryRun) { Remove-Item -Force $homePointer }
