@@ -34,6 +34,7 @@ param(
     [string]$Version = $env:COPYCORD_VERSION,
     [switch]$Beta,
     [string]$GitDir = $env:COPYCORD_GIT_DIR,
+    [string]$CopycordHome = $env:COPYCORD_HOME,
     [switch]$NoOnboard,
     [switch]$Verify,
     [switch]$DryRun,
@@ -70,8 +71,10 @@ Options:
                               git: a branch, tag or commit sha (default: main)
   -Beta                       release: newest release, pre-releases included;
                               saved as the ``copycord update`` channel
+  -CopycordHome <path>        Copycord home: data, logs, backups, src\ and node\
+                              (default: %USERPROFILE%\.copycord)
   -GitDir <path>              git: checkout directory
-                              (default: %LOCALAPPDATA%\copycord\src)
+                              (default: <home>\src)
   -NoOnboard                  skip the post-install ``copycord doctor`` run
   -Verify                     after installing, run ``copycord version`` and
                               ``copycord doctor`` and fail if either fails
@@ -81,7 +84,7 @@ Options:
 
 Environment (parameters win):
   COPYCORD_INSTALL_METHOD, COPYCORD_REPO, COPYCORD_VERSION, COPYCORD_CHANNEL=stable|beta,
-  COPYCORD_BETA=1, COPYCORD_GIT_DIR, COPYCORD_NO_ONBOARD=1, COPYCORD_VERIFY=1,
+  COPYCORD_BETA=1, COPYCORD_GIT_DIR, COPYCORD_HOME, COPYCORD_NO_ONBOARD=1, COPYCORD_VERIFY=1,
   COPYCORD_DRY_RUN=1, COPYCORD_NODE_VERSION, COPYCORD_ALLOW_ROOT=1, NO_COLOR=1
 
 Test a branch, no release needed:
@@ -109,9 +112,13 @@ Test a branch, no release needed:
     $dryRun = $Opts.DryRun -or $env:COPYCORD_DRY_RUN -eq '1'
     $showOutput = [bool]$Opts.ShowOutput
     $version = if ($Opts.Version) { $Opts.Version } else { '' }
-    $dataHome = Join-Path $env:LOCALAPPDATA 'copycord'
-    $gitDir = if ($Opts.GitDir) { $Opts.GitDir } else { Join-Path $dataHome 'src' }
-    $nodeHome = Join-Path $dataHome 'node'
+    $homeDir = if ($Opts.CopycordHome) { $Opts.CopycordHome } else { Join-Path $env:USERPROFILE '.copycord' }
+    if (-not [IO.Path]::IsPathRooted($homeDir)) { Write-Host "copycord install: -CopycordHome must be an absolute path (got $homeDir)"; return }
+    $homeDir = $homeDir.TrimEnd('\', '/')
+    $homePointer = Join-Path $env:USERPROFILE '.copycord-home'
+    $env:COPYCORD_HOME = $homeDir
+    $gitDir = if ($Opts.GitDir) { $Opts.GitDir } else { Join-Path $homeDir 'src' }
+    $nodeHome = Join-Path $homeDir 'node'
     $api = "https://api.github.com/repos/$repo/releases"
     $repoUrl = "https://github.com/$repo"
     if ($method -eq 'release') { $version = $version.TrimStart('v') } else { $ref = if ($version) { $version } else { 'main' } }
@@ -216,10 +223,12 @@ Test a branch, no release needed:
     Out ''
     Out '  Plan'
     if ($method -eq 'release') {
+        PlanLine 'home' $homeDir
         PlanLine 'method' 'release (GitHub release wheel)'
         PlanLine 'repo' $repo
         if ($version) { PlanLine 'version' "v$version" } else { PlanLine 'channel' "$channel (newest release)" }
     } else {
+        PlanLine 'home' $homeDir
         PlanLine 'method' 'git (build from source, no release needed)'
         PlanLine 'repo' $repoUrl
         PlanLine 'ref' $ref
@@ -399,6 +408,18 @@ Test a branch, no release needed:
             $exe = Join-Path $binDir 'copycord.exe'
         }
 
+        # Save a custom home where the CLI and the service find it without the
+        # environment variable (common/paths.py reads ~/.copycord-home).
+        $defaultHome = Join-Path $env:USERPROFILE '.copycord'
+        if ($homeDir -ne $defaultHome) {
+            if ($dryRun) { Dry "save $homeDir in $homePointer" }
+            else {
+                New-Item -ItemType Directory -Force -Path $homeDir | Out-Null
+                Set-Content -Path $homePointer -Value $homeDir -Encoding UTF8
+                Done "Saved the Copycord home in $homePointer"
+            }
+        } elseif ((Test-Path $homePointer) -and -not $dryRun) { Remove-Item -Force $homePointer }
+
         # The channel file (update.json) is written by `copycord update --no-install`,
         # so its format stays with the CLI.
         $channelArgs = @()
@@ -459,6 +480,7 @@ Test a branch, no release needed:
     Out ("  " + $box.TL + $rule + $box.TR) Magenta
     foreach ($text in @(
             "Copycord $label is installed",
+            "Home: $homeDir",
             '',
             'Next:',
             '  copycord           start Copycord',
@@ -478,6 +500,6 @@ Test a branch, no release needed:
 
 Install-Copycord -Opts @{
     InstallMethod = $InstallMethod; Git = $Git; Repo = $Repo; Version = $Version; Beta = $Beta
-    GitDir = $GitDir; NoOnboard = $NoOnboard; Verify = $Verify; DryRun = $DryRun
+    GitDir = $GitDir; CopycordHome = $CopycordHome; NoOnboard = $NoOnboard; Verify = $Verify; DryRun = $DryRun
     ShowOutput = $ShowOutput; Help = $Help
 }
