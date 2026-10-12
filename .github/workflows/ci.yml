@@ -172,3 +172,68 @@ jobs:
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           tail -15 /tmp/frontend-build.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+  # -----------------------------------------------------------------------
+  # 5. Package — wheel with the built frontend, installed into a fresh venv,
+  #    smoke-tested with `copycord version` and `copycord doctor`.
+  # -----------------------------------------------------------------------
+  package:
+    name: Wheel build & smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: code/admin/frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: code/admin/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Build wheel
+        run: pipx run --python python3.14 build --wheel --outdir dist/
+
+      - name: Install wheel into a fresh venv
+        run: |
+          python -m venv /tmp/cc-venv
+          /tmp/cc-venv/bin/python -m pip install --upgrade pip
+          /tmp/cc-venv/bin/python -m pip install dist/*.whl
+
+      - name: copycord version
+        working-directory: /tmp
+        run: /tmp/cc-venv/bin/copycord version
+
+      - name: copycord doctor
+        working-directory: /tmp
+        env:
+          DATA_DIR: /tmp/copycord-data
+        run: |
+          set +e
+          /tmp/cc-venv/bin/copycord doctor | tee /tmp/doctor.txt
+          rc=${PIPESTATUS[0]}
+          set -e
+          if grep -q '^FAIL' /tmp/doctor.txt; then
+            echo "::error::copycord doctor reported FAIL"
+            exit 1
+          fi
+          # Only the admin port may warn (the runner could have 8080 taken).
+          if grep '^WARN' /tmp/doctor.txt | grep -v '^WARN  admin port:'; then
+            echo "::error::copycord doctor warned about something other than the admin port"
+            exit 1
+          fi
+          exit "$rc"
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: copycord-wheel
+          path: dist/*.whl
+          if-no-files-found: error

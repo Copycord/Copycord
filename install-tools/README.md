@@ -1,3 +1,9 @@
+> **Deprecated in Copycord v4.** The launcher, installer and updater in this
+> folder are replaced by the `copycord` package. Install it with
+> `uv tool install copycord` (or `pipx install copycord`), update it with
+> `copycord update`, and run it in the background with
+> `copycord service install`. This folder stays for v3 installs only.
+
 # Copycord Standalone (Launcher, Installer & Updater)
 
 This folder contains the **standalone launcher/installer/updater** for Copycord.
