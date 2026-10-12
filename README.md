@@ -122,7 +122,15 @@ copycord run                      # start Copycord, then open http://localhost:8
 copycord service install --user   # or run it in the background as a service
 ```
 
-Set `PASSWORD` before `copycord run` to protect the dashboard. Update later with `copycord update`. See [Install Script](https://copycord.github.io/Copycord/docs/getting-started/manual-install) and the [CLI reference](https://copycord.github.io/Copycord/docs/cli).
+Set `PASSWORD` before `copycord run` to protect the dashboard. Update later with `copycord update`.
+
+Installer options (after `sh -s --`): `--git` builds any branch, tag or commit from source with no release needed, `--repo owner/name` picks a fork, `--version` picks the release or git ref, `--beta`, `--verify`, `--no-onboard` and `--dry-run`. Test a branch:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/v4-dev/install.sh | sh -s -- --git --version v4-dev
+```
+
+See [Install Script](https://copycord.github.io/Copycord/docs/getting-started/manual-install) and the [CLI reference](https://copycord.github.io/Copycord/docs/cli).
 
 ### Docker
 
