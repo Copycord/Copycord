@@ -18,6 +18,7 @@ copycord config import FILE   load app_config values from a JSON object
 copycord service install [--user] [--data-dir PATH]
                               run Copycord as a systemd/launchd/Scheduled Task service
 copycord service start|stop|status|uninstall [--user]
+copycord update [--check]     upgrade (uv tool / pipx) and restart a running service
 """
 
 from __future__ import annotations
@@ -118,6 +119,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         ("uninstall", "stop and remove the service"),
     ):
         ssub.add_parser(name, parents=[user], help=text)
+
+    update = sub.add_parser("update", help="upgrade Copycord")
+    update.add_argument(
+        "--check",
+        action="store_true",
+        help="only print the installed and the latest version",
+    )
     return parser.parse_args(argv)
 
 
@@ -417,6 +425,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         from copycord.service import service_command
 
         return service_command(args)
+
+    if args.command == "update":
+        from copycord.update import update
+
+        return update(check_only=args.check)
 
     if args.command == "run":
         from copycord.logging_setup import setup_logging
