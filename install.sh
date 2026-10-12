@@ -38,10 +38,9 @@ VERSION="${COPYCORD_VERSION:-}"
 CHANNEL="${COPYCORD_CHANNEL:-stable}"
 CHANNEL_SET="${COPYCORD_CHANNEL:+1}"
 [ "${COPYCORD_BETA:-0}" = "1" ] && CHANNEL="beta" && CHANNEL_SET=1
-DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-GIT_DIR_PATH="${COPYCORD_GIT_DIR:-$DATA_HOME/copycord/src}"
+COPYCORD_HOME="${COPYCORD_HOME:-$HOME/.copycord}"
+GIT_DIR_PATH="${COPYCORD_GIT_DIR:-}"
 NODE_VERSION="${COPYCORD_NODE_VERSION:-22.12.0}"
-NODE_HOME="$DATA_HOME/copycord/node"
 ONBOARD=1
 [ "${COPYCORD_NO_ONBOARD:-0}" = "1" ] && ONBOARD=0
 VERIFY="${COPYCORD_VERIFY:-0}"
@@ -66,9 +65,11 @@ Options:
                          git: a branch, tag or commit sha (default: main)
   --beta                 release: newest release, pre-releases included;
                          saved as the \`copycord update\` channel
+  --home <path>          Copycord home: data, logs, backups, src/ and node/
+                         (default: ~/.copycord)
   --git-dir, --dir <path>
                          git: checkout directory
-                         (default: \$XDG_DATA_HOME/copycord/src)
+                         (default: <home>/src)
   --no-onboard           skip the post-install \`copycord doctor\` run
   --verify               after installing, run \`copycord version\` and
                          \`copycord doctor\` and fail if either fails
@@ -83,6 +84,7 @@ Environment (flags win):
   COPYCORD_NO_ONBOARD=1                 COPYCORD_VERIFY=1
   COPYCORD_DRY_RUN=1                    COPYCORD_VERBOSE=1
   COPYCORD_NODE_VERSION=<x.y.z>         COPYCORD_ALLOW_ROOT=1
+  COPYCORD_HOME=<path>
   NO_COLOR=1                            plain output
 
 Examples:
@@ -113,6 +115,8 @@ while [ $# -gt 0 ]; do
         --version) need_value "$1" "${2:-}"; VERSION="$2"; shift ;;
         --version=*) VERSION="${1#*=}" ;;
         --beta) CHANNEL="beta"; CHANNEL_SET=1 ;;
+        --home) need_value "$1" "${2:-}"; COPYCORD_HOME="$2"; shift ;;
+        --home=*) COPYCORD_HOME="${1#*=}" ;;
         --git-dir | --dir) need_value "$1" "${2:-}"; GIT_DIR_PATH="$2"; shift ;;
         --git-dir=* | --dir=*) GIT_DIR_PATH="${1#*=}" ;;
         --no-onboard) ONBOARD=0 ;;
@@ -130,6 +134,20 @@ if [ "$SHOW_HELP" = "1" ]; then
     usage
     exit 0
 fi
+
+case "$COPYCORD_HOME" in
+    "~") COPYCORD_HOME="$HOME" ;;
+    "~/"*) COPYCORD_HOME="$HOME/${COPYCORD_HOME#"~/"}" ;;
+esac
+case "$COPYCORD_HOME" in
+    /*) ;;
+    *) printf 'copycord install: --home must be an absolute path (got %s)\n' "$COPYCORD_HOME" >&2; exit 2 ;;
+esac
+COPYCORD_HOME="${COPYCORD_HOME%/}"
+[ -n "$GIT_DIR_PATH" ] || GIT_DIR_PATH="$COPYCORD_HOME/src"
+NODE_HOME="$COPYCORD_HOME/node"
+HOME_POINTER="$HOME/.copycord-home"
+export COPYCORD_HOME
 
 # --- output -------------------------------------------------------------------
 
@@ -309,6 +327,7 @@ command -v uv >/dev/null 2>&1 || need_uv=1
 banner
 say "  ${BOLD}Plan$RESET"
 if [ "$METHOD" = "release" ]; then
+    plan_line "home" "$COPYCORD_HOME"
     plan_line "method" "release (GitHub release wheel)"
     plan_line "repo" "$REPO"
     if [ -n "$VERSION" ]; then
@@ -317,6 +336,7 @@ if [ "$METHOD" = "release" ]; then
         plan_line "channel" "$CHANNEL (newest release)"
     fi
 else
+    plan_line "home" "$COPYCORD_HOME"
     plan_line "method" "git (build from source, no release needed)"
     plan_line "repo" "$REPO_URL"
     plan_line "ref" "$REF"
@@ -550,6 +570,20 @@ else
     esac
 fi
 
+# Save a custom home where the CLI and the service find it without the
+# environment variable (common/paths.py reads ~/.copycord-home).
+if [ "$COPYCORD_HOME" != "$HOME/.copycord" ]; then
+    if [ "$DRY_RUN" = "1" ]; then
+        dry "save $COPYCORD_HOME in $HOME_POINTER"
+    else
+        mkdir -p "$COPYCORD_HOME" && printf '%s\n' "$COPYCORD_HOME" >"$HOME_POINTER" \
+            || die "could not save the home in $HOME_POINTER"
+        done_line "Saved the Copycord home in $HOME_POINTER"
+    fi
+elif [ -f "$HOME_POINTER" ] && [ "$DRY_RUN" != "1" ]; then
+    rm -f "$HOME_POINTER"
+fi
+
 # The channel file (update.json) is written by `copycord update --no-install`,
 # so its format stays with the CLI.
 CHANNEL_ARGS=""
@@ -619,6 +653,7 @@ if [ "$DRY_RUN" = "1" ]; then
 fi
 box_rule "$BOX_TL" "$BOX_TR"
 box_line "Copycord $LABEL is installed"
+box_line "Home: $COPYCORD_HOME"
 box_line ""
 box_line "Next:"
 box_line "  copycord           start Copycord"
