@@ -12,12 +12,13 @@ copycord update                       reinstall from the saved channel (default
                                       stable) with the tool that installed
                                       Copycord, then restart the service if it
                                       is installed and running
-copycord update --channel stable|beta|dev [--branch NAME]
+copycord update --channel stable|beta|dev [--repo OWNER/NAME] [--ref REF]
                                       switch channel (saved in <data dir>/update.json)
 copycord update --tag VERSION         install that exact version once; the
                                       saved channel stays as it is
-copycord update --check               print the installed version, the saved
+copycord update status              print the installed version, the saved
                                       channel and the latest on that channel
+                                      (--check is the same)
 copycord update --channel beta --no-install
                                       only save the channel (the install
                                       scripts use this)
@@ -25,8 +26,13 @@ copycord update --channel beta --no-install
 stable  newest GitHub release that is not a draft or a pre-release
 beta    newest GitHub release that is not a draft, pre-releases included
         (e.g. v4.0.0b1)
-dev     git install of a branch (default main) of REPO_URL; needs npm to
-        build the admin UI
+dev     git install of a branch, tag or commit (--ref, default main) of a
+        GitHub repo (--repo, default Copycord/Copycord):
+        uv tool install --force git+https://github.com/<repo>@<ref>
+        needs npm to build the admin UI
+
+update.json is {"channel": ...}; dev adds "branch" (the ref) and, when it is
+not the default, "repo". Files without "repo" read as Copycord/Copycord.
 
 stable, beta and --tag install the wheel asset of the release by its URL.
 """
@@ -41,12 +47,13 @@ import urllib.request
 from pathlib import Path
 from typing import NamedTuple, Optional, Tuple
 
-from copycord import service
+from copycord import service, ui
 
-REPO_URL = "https://github.com/Copycord/Copycord"
+DEFAULT_REPO = "Copycord/Copycord"
+REPO_URL = f"https://github.com/{DEFAULT_REPO}"
 RELEASES_URL = "https://api.github.com/repos/Copycord/Copycord/releases"
 RELEASE_TAG_URL = RELEASES_URL + "/tags/{tag}"
-GITHUB_COMMITS_URL = "https://api.github.com/repos/Copycord/Copycord/commits/{branch}"
+GITHUB_COMMITS_URL = "https://api.github.com/repos/{repo}/commits/{branch}"
 GITHUB_TIMEOUT = 5.0
 
 STABLE, BETA, DEV = "stable", "beta", "dev"
@@ -70,13 +77,31 @@ UV_TOOL, PIPX, UV_PIP, PIP, DOCKER, SOURCE = (
 # --------------------------------------------------------------------------
 
 
+_REPO_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+
+
+def valid_repo(repo: str) -> bool:
+    return bool(_REPO_RE.match(repo or ""))
+
+
 class Channel(NamedTuple):
     channel: str
-    branch: Optional[str] = None  # set for DEV only
+    branch: Optional[str] = None  # DEV only: the git ref (branch, tag or sha)
+    repo: Optional[str] = None  # DEV only: owner/name; None means DEFAULT_REPO
+
+    @property
+    def ref(self) -> str:
+        return self.branch or DEFAULT_BRANCH
+
+    @property
+    def repo_name(self) -> str:
+        return self.repo or DEFAULT_REPO
 
     def describe(self) -> str:
         if self.channel == DEV:
-            return f"{DEV} (branch {self.branch or DEFAULT_BRANCH})"
+            if self.repo and self.repo != DEFAULT_REPO:
+                return f"{DEV} ({self.repo}@{self.ref})"
+            return f"{DEV} (branch {self.ref})"
         return self.channel
 
 
@@ -97,7 +122,9 @@ def load_channel(path: Optional[Path] = None) -> Channel:
         return Channel(DEFAULT_CHANNEL)
     if raw["channel"] == DEV:
         branch = raw.get("branch")
-        return Channel(DEV, branch if isinstance(branch, str) and branch else DEFAULT_BRANCH)
+        repo = raw.get("repo")
+        repo = repo if isinstance(repo, str) and valid_repo(repo) and repo != DEFAULT_REPO else None
+        return Channel(DEV, branch if isinstance(branch, str) and branch else DEFAULT_BRANCH, repo)
     return Channel(raw["channel"])
 
 
@@ -106,7 +133,10 @@ def save_channel(channel: Channel, path: Optional[Path] = None) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     data = {"channel": channel.channel}
     if channel.channel == DEV:
-        data["branch"] = channel.branch or DEFAULT_BRANCH
+        data["branch"] = channel.ref
+        # Only a non-default repo is written, so older Copycords read the file too.
+        if channel.repo and channel.repo != DEFAULT_REPO:
+            data["repo"] = channel.repo
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     return path
 
@@ -159,8 +189,8 @@ def detect_installer(
     return PIP
 
 
-def git_spec(branch: Optional[str] = None) -> str:
-    return f"copycord @ git+{REPO_URL}@{branch or DEFAULT_BRANCH}"
+def git_spec(branch: Optional[str] = None, repo: Optional[str] = None) -> str:
+    return f"git+https://github.com/{repo or DEFAULT_REPO}@{branch or DEFAULT_BRANCH}"
 
 
 def _quote(arg: str) -> str:
@@ -342,8 +372,10 @@ class Commit(NamedTuple):
     subject: str
 
 
-def fetch_branch_head(branch: str, timeout: float = GITHUB_TIMEOUT) -> Commit:
-    data = _fetch_json(GITHUB_COMMITS_URL.format(branch=branch), timeout)
+def fetch_branch_head(
+    branch: str, timeout: float = GITHUB_TIMEOUT, repo: str = DEFAULT_REPO
+) -> Commit:
+    data = _fetch_json(GITHUB_COMMITS_URL.format(repo=repo, branch=branch), timeout)
     commit = data.get("commit") or {}
     date = (commit.get("committer") or {}).get("date") or ""
     subject = (commit.get("message") or "").splitlines()[0:1]
@@ -361,45 +393,59 @@ def installed_commit() -> Optional[str]:
         return None
 
 
+def _row(key: str, value: str) -> None:
+    ui.kv([(key, value)], width=7)
+
+
 def check(channel: Optional[Channel] = None) -> int:
     channel = load_channel() if channel is None else channel
     current = current_version()
-    print(f"current {current}")
-    print(f"channel {channel.describe()}")
+    out = sys.stdout
+    ui.heading("Copycord update status")
+    _row("current", current)
+    _row("channel", channel.describe())
+    _row("method", detect_installer())
 
     if channel.channel == DEV:
-        branch = channel.branch or DEFAULT_BRANCH
+        ref, repo = channel.ref, channel.repo_name
         try:
-            head = fetch_branch_head(branch)
+            with ui.Spinner(f"Reading {repo}@{ref} from GitHub"):
+                head = fetch_branch_head(ref, repo=repo)
         except Exception as e:
-            print(f"WARN  could not get the head of {branch} from GitHub: {e}")
+            ui.warn(f"could not get the head of {ref} from GitHub", str(e), stream=out)
             return 0
-        print(f"latest  {branch} @ {head.sha[:12]} {head.date} {head.subject}".rstrip())
+        _row("latest", f"{ref} @ {head.sha[:12]} {head.date} {head.subject}".rstrip())
         installed = installed_commit()
         if installed is None:
-            print("installed commit unknown: run `copycord update` to install the branch head")
+            ui.info("installed commit unknown",
+                    f"run {ui.cmd('copycord update')} to install the {ref} head")
         elif installed == head.sha:
-            print("Copycord is up to date")
+            ui.ok("Copycord is up to date")
         else:
-            print(f"installed {installed[:12]}; an update is available: run `copycord update`")
+            ui.box([f"installed {installed[:12]}, {ref} is at {head.sha[:12]}",
+                    f"Run {ui.cmd('copycord update')} to update."],
+                   title="Update available", status="warn")
         return 0
 
     try:
-        release = fetch_latest_release(prerelease=channel.channel == BETA)
+        with ui.Spinner("Checking GitHub releases"):
+            release = fetch_latest_release(prerelease=channel.channel == BETA)
     except ReleaseError as e:
-        print(f"WARN  {e}")
+        ui.warn(str(e), stream=out)
         return 0
     except Exception as e:
-        print(f"WARN  could not get the latest release from GitHub: {e}")
+        ui.warn("could not get the latest release from GitHub", str(e), stream=out)
         return 0
     latest = release.version
-    print(f"latest  {latest} ({release.tag})")
+    _row("latest", f"{latest} ({release.tag})")
     if release.wheel_url is None:
-        print(f"WARN  release {release.tag} has no wheel asset yet")
+        ui.warn(f"release {release.tag} has no wheel asset yet", stream=out)
     if is_newer(latest, current):
-        print("an update is available: run `copycord update`")
+        ui.box([f"{current} -> {latest}",
+                f"Run {ui.cmd('copycord update')} to install it."],
+               title="Update available", status="warn")
     else:
-        print("Copycord is up to date")
+        ui.ok("Copycord is up to date")
     return 0
 
 
@@ -408,41 +454,52 @@ def check(channel: Optional[Channel] = None) -> int:
 # --------------------------------------------------------------------------
 
 
+def _err(text: str, detail: str = "") -> None:
+    ui.fail(text, detail)
+
+
 def update(
     check_only: bool = False,
     channel: Optional[str] = None,
     branch: Optional[str] = None,
     tag: Optional[str] = None,
     no_install: bool = False,
+    repo: Optional[str] = None,
 ) -> int:
     saved = load_channel()
-    if tag and (channel or branch):
-        print("--tag installs one exact version; it cannot be combined with --channel or --branch",
-              file=sys.stderr)
+    if tag and (channel or branch or repo):
+        _err("--tag installs one exact version; it cannot be combined with "
+             "--channel, --repo or --ref/--branch")
         return 2
-    if branch and (channel or saved.channel) != DEV:
-        print("--branch only applies to the dev channel (use --channel dev --branch NAME)",
-              file=sys.stderr)
+    if (branch or repo) and (channel or saved.channel) != DEV:
+        _err("--ref/--branch and --repo only apply to the dev channel "
+             "(use --channel dev --repo OWNER/NAME --ref REF)")
         return 2
-    if channel == DEV or (channel is None and branch):
-        target = Channel(DEV, branch or (saved.branch if saved.channel == DEV else None)
-                         or DEFAULT_BRANCH)
+    if repo and not valid_repo(repo):
+        _err(f"--repo {repo!r} is not OWNER/NAME", "for example Copycord/Copycord")
+        return 2
+    if channel == DEV or (channel is None and (branch or repo)):
+        keep = saved if saved.channel == DEV else Channel(DEV)
+        new_repo = repo or keep.repo
+        target = Channel(DEV, branch or keep.branch or DEFAULT_BRANCH,
+                         None if new_repo == DEFAULT_REPO else new_repo)
     elif channel:
         target = Channel(channel)
     else:
         target = saved
+    switching = bool(channel or branch or repo)
 
     if no_install:
-        if tag or not (channel or branch):
-            print("--no-install only saves a channel; give --channel (and --branch for dev)",
-                  file=sys.stderr)
+        if tag or not switching:
+            _err("--no-install only saves a channel; give --channel "
+                 "(and --repo/--ref for dev)")
             return 2
         try:
             path = save_channel(target)
         except OSError as e:
-            print(f"could not save the update channel: {e}", file=sys.stderr)
+            _err("could not save the update channel", str(e))
             return 1
-        print(f"update channel set to {target.describe()} ({path})")
+        ui.ok(f"update channel set to {target.describe()}", str(path))
         return 0
 
     if check_only:
@@ -453,65 +510,73 @@ def update(
         print(f"Copycord was installed with {kind}; update it with:\n  {manual_hint(kind)}")
         return 1
 
+    ui.heading(f"Updating Copycord ({target.describe() if not tag else 'tag ' + tag})")
     if target.channel == DEV and not tag:
-        spec = git_spec(target.branch)
+        spec = git_spec(target.ref, target.repo)
     else:
         try:
-            if tag:
-                release = fetch_release(tag)
-            else:
-                release = fetch_latest_release(prerelease=target.channel == BETA)
-            spec = release.wheel()
+            with ui.Spinner("Checking GitHub releases"):
+                if tag:
+                    release = fetch_release(tag)
+                else:
+                    release = fetch_latest_release(prerelease=target.channel == BETA)
+                spec = release.wheel()
         except ReleaseError as e:
-            print(f"cannot update: {e}", file=sys.stderr)
+            _err(f"cannot update: {e}")
             return 1
         except Exception as e:
-            print(f"cannot update: could not get the release from GitHub: {e}", file=sys.stderr)
+            _err(f"cannot update: could not get the release from GitHub: {e}")
             return 1
-        print(f"release {release.tag}")
+        ui.ok(f"release {release.tag}")
 
     cmd, hint = install_command(kind, spec)
     if cmd is None:
         print(f"Copycord was installed with {kind}; update it with:\n  {hint}")
         return 1
     if shutil.which(cmd[0]) is None:
-        print(f"{cmd[0]} is not on PATH; update Copycord with:\n  {hint}", file=sys.stderr)
+        _err(f"{cmd[0]} is not on PATH", f"update Copycord with: {hint}")
         return 1
-    if target.channel == DEV and not tag and shutil.which("npm") is None:
-        print(
-            "the dev channel builds the admin UI from source and needs Node.js/npm, "
-            "but npm is not on PATH. Install Node.js (which includes npm) and retry, "
-            "or stay on the stable or beta channel (built with the UI included).",
-            file=sys.stderr,
-        )
-        return 1
+    if target.channel == DEV and not tag:
+        if shutil.which("npm") is None:
+            ui.box(
+                [
+                    "The dev channel builds the admin UI from source and needs",
+                    "Node.js/npm, but npm is not on PATH.",
+                    "Install Node.js (which includes npm) and retry, or stay on",
+                    f"the stable or beta channel: {ui.cmd('copycord update --channel stable')}",
+                ],
+                title="npm not found", status="fail", stream=sys.stderr,
+            )
+            return 1
+        ui.ok("npm found", "the admin UI is built during the install")
 
     # The service state is read before the install replaces the files.
     try:
         state = service.service_state()
     except Exception as e:
-        print(f"WARN  could not read the service state: {e}", file=sys.stderr)
+        ui.warn("could not read the service state", str(e))
         state = None
 
     print(f"$ {hint}")
     result = service.run_cmd(cmd, capture=False)
     if result.returncode != 0:
-        print(f"update failed (exit {result.returncode})", file=sys.stderr)
+        _err(f"update failed (exit {result.returncode})")
         return result.returncode
+    ui.ok("installed", spec)
 
     # --tag is a one-off; a channel switch is saved once the install worked.
-    if not tag and (channel or branch):
+    if not tag and switching:
         try:
             path = save_channel(target)
-            print(f"update channel set to {target.describe()} ({path})")
+            ui.ok(f"update channel set to {target.describe()}", str(path))
         except OSError as e:
-            print(f"WARN  could not save the update channel: {e}", file=sys.stderr)
+            ui.warn("could not save the update channel", str(e))
 
     if state is not None and state.installed and state.running:
         try:
             service.restart_service()
         except service.ServiceError as e:
-            print(f"updated, but restarting the service failed: {e}", file=sys.stderr)
+            _err(f"updated, but restarting the service failed: {e}")
             return 1
-        print("restarted the copycord service")
+        ui.ok("restarted the copycord service")
     return 0

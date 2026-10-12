@@ -16,7 +16,7 @@ import pytest
 from copycord import __main__ as cli
 from copycord import service, update
 
-GIT_SPEC = "copycord @ git+https://github.com/Copycord/Copycord@{}"
+GIT_SPEC = "git+https://github.com/Copycord/Copycord@{}"
 RELEASES = "https://api.github.com/repos/Copycord/Copycord/releases"
 LIST_URL = RELEASES + "?per_page=100"
 

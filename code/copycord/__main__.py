@@ -8,6 +8,7 @@
 # =============================================================================
 
 """
+copycord onboard              guided first-run setup (tokens, command users, port)
 copycord run                  admin, server and client in one process
 copycord version              print the version and the update channel
 copycord doctor               preflight checks (no network)
@@ -18,10 +19,11 @@ copycord config import FILE   load app_config values from a JSON object
 copycord service install [--user] [--data-dir PATH]
                               run Copycord as a systemd/launchd/Scheduled Task service
 copycord service start|stop|status|uninstall [--user]
-copycord update [--check] [--channel stable|beta|dev [--branch NAME]] [--tag VERSION]
-                [--no-install]
+copycord update [--channel stable|beta|dev [--repo OWNER/NAME] [--ref REF]]
+                [--tag VERSION] [--no-install]
                               update (uv tool / pipx) from the saved or given
                               channel and restart a running service
+copycord update status        installed version, channel and latest on it
 """
 
 from __future__ import annotations
@@ -66,16 +68,140 @@ MASK = "********"
 PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
 
 
+# (group, [(command, one-line description)]) for the top-level help.
+COMMAND_GROUPS = (
+    ("Get started", (
+        ("onboard", "Guided first-run setup: tokens, command users, port"),
+        ("run", "Run Copycord (dashboard, server bot and client)"),
+        ("doctor", "Check this machine can run Copycord"),
+    )),
+    ("Settings", (
+        ("config", "Read or write the stored app config (get, set, export, import)"),
+    )),
+    ("Service", (
+        ("service", "Run Copycord as an OS service (install, start, stop, status)"),
+    )),
+    ("Updates", (
+        ("update", "Update Copycord; switch channel with --channel stable|beta|dev"),
+        ("version", "Print the version and the update channel"),
+    )),
+)
+
+EXAMPLES = (
+    ("copycord onboard", "set up Copycord step by step"),
+    ("copycord run", "start Copycord in this terminal"),
+    ("copycord service install", "run it in the background"),
+    ("copycord update status", "see whether an update is available"),
+    ("copycord update --channel beta", "switch to pre-releases"),
+    ("copycord update --channel dev --ref main", "install from git"),
+)
+
+
+def _version() -> str:
+    try:
+        from common.config import CURRENT_VERSION
+
+        return CURRENT_VERSION
+    except Exception:
+        return "unknown"
+
+
+def format_help() -> str:
+    from copycord import ui
+
+    import io
+
+    buf = io.StringIO()
+    out = sys.stdout
+
+    def w(text: str = "") -> None:
+        buf.write(text + "\n")
+
+    if ui.use_color(out):
+        logo = "\n".join(ui.paint(r, "accent", "bold") for r in ui.LOGO)
+        w()
+        w(logo)
+        w(f"  {ui.dim(_version() + '  ' + ui.TAGLINE)}")
+    else:
+        w(f"Copycord {_version()}")
+    w()
+    w(f"{ui.bold('Usage:')} copycord <command> [options]")
+    width = max(len(c) for _, cmds in COMMAND_GROUPS for c, _ in cmds)
+    for group, cmds in COMMAND_GROUPS:
+        w()
+        w(ui.accent(group + ":"))
+        for name, text in cmds:
+            w(f"  {ui.cmd(name.ljust(width))}  {text}")
+    w()
+    w(ui.accent("Examples:"))
+    ex_width = max(len(c) for c, _ in EXAMPLES)
+    for example, text in EXAMPLES:
+        w(f"  {ui.cmd(example.ljust(ex_width))}  {ui.dim(text)}")
+    w()
+    w(ui.accent("Options:"))
+    opt_width = max(width, len("-V, --version"))
+    w(f"  {ui.cmd('-h, --help'.ljust(opt_width))}  Show this help")
+    w(f"  {ui.cmd('-V, --version'.ljust(opt_width))}  Print the version and exit")
+    w()
+    w(ui.dim("Run `copycord <command> --help` for the options of one command."))
+    w(ui.dim("Docs: https://copycord.github.io/Copycord/docs/cli"))
+    return buf.getvalue()
+
+
+class _Parser(argparse.ArgumentParser):
+    def format_help(self) -> str:
+        if self.prog == "copycord":
+            return format_help()
+        return super().format_help()
+
+
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="copycord")
-    sub = parser.add_subparsers(dest="command", required=True)
+    parser = _Parser(prog="copycord")
+    parser.add_argument("-V", "--version", action="version", version=f"copycord {_version()}")
+    sub = parser.add_subparsers(dest="command", required=True, parser_class=argparse.ArgumentParser)
 
     data_dir = argparse.ArgumentParser(add_help=False)
     data_dir.add_argument(
         "--data-dir", metavar="PATH", help="data directory (sets DATA_DIR)"
     )
 
-    sub.add_parser("run", parents=[data_dir], help="run Copycord")
+    onboard = sub.add_parser(
+        "onboard",
+        parents=[data_dir],
+        help="guided first-run setup",
+        description="Guided setup of what Copycord needs: the server bot token, "
+        "the client token, the command users and the dashboard port. "
+        "Values go to the app config in the database.",
+        epilog="examples:\n"
+        "  copycord onboard\n"
+        "  copycord onboard --non-interactive --server-token XXX --client-token YYY\n"
+        "  SERVER_TOKEN=XXX CLIENT_TOKEN=YYY copycord onboard --non-interactive",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    onboard.add_argument(
+        "--non-interactive",
+        action="store_true",
+        help="no prompts: take values from the flags and the environment",
+    )
+    onboard.add_argument("--server-token", metavar="TOKEN",
+                         help="Discord bot token for the clone server (SERVER_TOKEN)")
+    onboard.add_argument("--client-token", metavar="TOKEN",
+                         help="Discord user token that reads the source server (CLIENT_TOKEN)")
+    onboard.add_argument("--command-users", metavar="IDS",
+                         help="comma-separated Discord user IDs allowed to run bot commands")
+    onboard.add_argument("--port", type=int, metavar="PORT",
+                         help="dashboard port to show in the URL (ADMIN_PORT, default 8080)")
+    onboard.add_argument("--force", action="store_true",
+                         help="ask again even for values that are already set")
+
+    sub.add_parser(
+        "run",
+        parents=[data_dir],
+        help="run Copycord",
+        description="Run the dashboard, the server bot and the client in one process. "
+        "On first start in a terminal, with no tokens saved yet, runs `copycord onboard` first.",
+    ).add_argument("--no-onboard", action="store_true",
+                   help="never start the onboarding, even when unconfigured")
     sub.add_parser(
         "version", parents=[data_dir], help="print the Copycord version and update channel"
     )
@@ -125,18 +251,43 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     ):
         ssub.add_parser(name, parents=[user], help=text)
 
-    update = sub.add_parser("update", help="update Copycord")
+    update = sub.add_parser(
+        "update",
+        parents=[data_dir],
+        help="update Copycord",
+        description="Update Copycord from the saved channel (default stable), or "
+        "switch channel. The channel is saved in <data dir>/update.json.",
+        epilog="channels:\n"
+        "  stable  newest GitHub release\n"
+        "  beta    newest GitHub release, pre-releases included\n"
+        "  dev     git install: uv tool install --force git+https://github.com/<repo>@<ref>\n"
+        "          (needs npm to build the admin UI)\n"
+        "\nexamples:\n"
+        "  copycord update status\n"
+        "  copycord update\n"
+        "  copycord update --channel beta\n"
+        "  copycord update --channel dev --ref v4-dev\n"
+        "  copycord update --channel dev --repo you/Copycord --ref 1a2b3c4\n"
+        "  copycord update --tag 4.0.0",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    update.add_argument(
+        "action",
+        nargs="?",
+        choices=("status",),
+        help="status: print the installed version, the channel and the latest on it",
+    )
     update.add_argument(
         "--check",
         action="store_true",
-        help="only print the installed version, the channel and the latest on it",
+        help="same as `copycord update status`",
     )
     target = update.add_mutually_exclusive_group()
     target.add_argument(
         "--channel",
         choices=("stable", "beta", "dev"),
         help="switch to this channel and save it (stable: GitHub releases, "
-        "beta: GitHub pre-releases too, dev: a git branch, needs npm)",
+        "beta: GitHub pre-releases too, dev: a git ref, needs npm)",
     )
     target.add_argument(
         "--tag",
@@ -144,14 +295,21 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="install this exact version once; the saved channel does not change",
     )
     update.add_argument(
+        "--ref",
         "--branch",
-        metavar="NAME",
-        help="dev channel: the git branch to install (default main)",
+        dest="branch",
+        metavar="REF",
+        help="dev channel: the git branch, tag or commit to install (default main)",
+    )
+    update.add_argument(
+        "--repo",
+        metavar="OWNER/NAME",
+        help="dev channel: the GitHub repo to install from (default Copycord/Copycord)",
     )
     update.add_argument(
         "--no-install",
         action="store_true",
-        help="only save --channel/--branch, install nothing (used by the install scripts)",
+        help="only save --channel/--repo/--ref, install nothing (used by the install scripts)",
     )
     return parser.parse_args(argv)
 
@@ -328,10 +486,22 @@ def run_doctor() -> List[Check]:
 
 
 def doctor() -> int:
+    from copycord import ui
+
     checks = run_doctor()
+    if ui.use_color():
+        ui.heading("Copycord doctor")
+    status = {PASS: "ok", WARN: "warn", FAIL: "fail"}
     for c in checks:
-        print(f"{c.status}  {c.name}: {c.reason}")
-    return 1 if any(c.status == FAIL for c in checks) else 0
+        ui.line(status[c.status], c.name, c.reason, stream=sys.stdout)
+    failed = sum(c.status == FAIL for c in checks)
+    if ui.use_color():
+        print()
+        if failed:
+            ui.fail(f"{failed} check(s) failed", stream=sys.stdout)
+        else:
+            ui.ok("ready to run", ui.cmd("copycord run"))
+    return 1 if failed else 0
 
 
 # --------------------------------------------------------------------------
@@ -438,11 +608,21 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.command == "version":
         from common.config import CURRENT_VERSION
+        from copycord import ui
         from copycord.update import load_channel
 
-        print(CURRENT_VERSION)
-        print(f"channel {load_channel().describe()}")
+        if ui.use_color():
+            ui.banner(CURRENT_VERSION)
+            ui.kv([("version", CURRENT_VERSION), ("channel", load_channel().describe())])
+        else:
+            print(CURRENT_VERSION)
+            print(f"channel {load_channel().describe()}")
         return 0
+
+    if args.command == "onboard":
+        from copycord.onboard import onboard
+
+        return onboard(args)
 
     if args.command == "doctor":
         return doctor()
@@ -459,11 +639,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         from copycord.update import update
 
         return update(
-            check_only=args.check,
+            check_only=args.check or args.action == "status",
             channel=args.channel,
             branch=args.branch,
             tag=args.tag,
             no_install=args.no_install,
+            repo=args.repo,
         )
 
     if args.command == "run":
@@ -473,6 +654,13 @@ def main(argv: Optional[List[str]] = None) -> int:
         setup_logging(roles=())
         if not check_removed_options():
             return 1
+
+        if not getattr(args, "no_onboard", False):
+            from copycord.onboard import maybe_onboard_first_run
+
+            rc = maybe_onboard_first_run()
+            if rc is not None:
+                return rc
 
         from copycord import supervisor
 
