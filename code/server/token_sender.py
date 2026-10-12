@@ -14,6 +14,7 @@ import asyncio
 import json
 import random
 import re
+import threading
 import time
 from typing import Callable, Optional
 
@@ -120,6 +121,10 @@ def strip_unusable_emoji(text: str, usable_ids: set) -> str:
 _DISCORD_EPOCH_MS = 1420070400000
 
 
+_nonce_lock = threading.Lock()
+_last_nonce = 0
+
+
 def _message_nonce() -> str:
     """A per-message nonce shaped like the client's.
 
@@ -127,8 +132,16 @@ def _message_nonce() -> str:
     match the optimistic echo it already rendered. It must be unique per
     message, or a resend can be swallowed as a duplicate.
     """
+    global _last_nonce
     ms = int(time.time() * 1000) - _DISCORD_EPOCH_MS
-    return str((ms << 22) | random.getrandbits(22))
+    nonce = (ms << 22) | random.getrandbits(22)
+    # Two sends in the same millisecond can draw the same 22 random bits;
+    # keep the sequence strictly increasing so a nonce never repeats.
+    with _nonce_lock:
+        if nonce <= _last_nonce:
+            nonce = _last_nonce + 1
+        _last_nonce = nonce
+    return str(nonce)
 
 
 _BEFORE_FLAGS = ("message_reference", "allowed_mentions")
