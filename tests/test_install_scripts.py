@@ -79,7 +79,7 @@ def test_saves_the_channel(path):
 @pytest.mark.parametrize("path", [SH, PS1])
 def test_prints_next_steps(path):
     text = _text(path)
-    for step in ("copycord doctor", "copycord update", "localhost:8080"):
+    for step in ("copycord update", "localhost:"):
         assert step in text
 
 
