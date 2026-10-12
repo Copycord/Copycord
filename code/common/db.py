@@ -10,16 +10,80 @@
 
 from datetime import datetime, timezone
 import json
+import logging
+from pathlib import Path
 import sqlite3, threading
 import time
 from typing import Dict, List, Optional
 import uuid
 import secrets
 
+logger = logging.getLogger("common.db")
+
+# app_config row that orders future migrations (PLAN 7.1). A DB without it has
+# never been opened by v4.
+SCHEMA_VERSION_KEY = "schema_version"
+SCHEMA_VERSION = 4
+
+
+def needs_pre_v4_backup(db_path: str) -> bool:
+    """True when db_path is an existing, non-empty DB without a schema_version row."""
+    path = Path(db_path)
+    if not path.is_file() or path.stat().st_size == 0:
+        return False
+    conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        has_config = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_config'"
+        ).fetchone()
+        if not has_config:
+            return True
+        row = conn.execute(
+            "SELECT 1 FROM app_config WHERE key=?", (SCHEMA_VERSION_KEY,)
+        ).fetchone()
+        return row is None
+    finally:
+        conn.close()
+
+
+def backup_pre_v4(db_path: str, backup_dir: Optional[Path] = None) -> Optional[Path]:
+    """
+    Copy a pre-v4 DB to <data dir>/backups/pre-v4-<timestamp>.db before v4
+    first opens it. Returns the copy, or None when no backup was needed.
+    """
+    if not needs_pre_v4_backup(db_path):
+        return None
+    if backup_dir is None:
+        from common.paths import data_dir
+
+        backup_dir = data_dir() / "backups"
+    backup_dir = Path(backup_dir)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    dest = backup_dir / f"pre-v4-{stamp}.db"
+    n = 1
+    while dest.exists():
+        dest = backup_dir / f"pre-v4-{stamp}-{n}.db"
+        n += 1
+    # sqlite backup API rather than a file copy so a leftover WAL is included.
+    src = sqlite3.connect(f"{Path(db_path).resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        out = sqlite3.connect(str(dest))
+        try:
+            src.backup(out)
+        finally:
+            out.close()
+    finally:
+        src.close()
+    logger.info("Backed up %s to %s before the first v4 open", db_path, dest)
+    return dest
+
 
 class DBManager:
     def __init__(self, db_path: str, init_schema: bool = False):
         self.path = db_path
+        if init_schema:
+            backup_pre_v4(self.path)
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
 
@@ -33,6 +97,12 @@ class DBManager:
         self.lock = threading.RLock()
         if init_schema:
             self._init_schema()
+            self._set_schema_version()
+
+    def _set_schema_version(self) -> None:
+        """Record the schema version; written after the pre-v4 backup exists."""
+        if self.get_config(SCHEMA_VERSION_KEY, "") != str(SCHEMA_VERSION):
+            self.set_config(SCHEMA_VERSION_KEY, str(SCHEMA_VERSION))
 
     def _init_schema(self):
         """
