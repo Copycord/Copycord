@@ -11,8 +11,10 @@
 copycord run                  admin, server and client in one process
 copycord --version            print the version and the update channel
 copycord doctor               preflight checks (no network)
-copycord config get KEY       read one app_config value from the DB
-copycord config set KEY VAL   write one app_config value
+copycord config get KEY       read one setting (secrets masked)
+copycord config set KEY VAL   write one setting: env-only keys such as PASSWORD
+                              go to <home>/.env, the rest to the DB app_config
+copycord config unset KEY     remove one setting
 copycord config export [FILE] app_config as JSON (secrets masked on stdout)
 copycord config import FILE   load app_config values from a JSON object
 copycord service install [--user] [--data-dir PATH]
@@ -43,6 +45,8 @@ import sys
 import tempfile
 from pathlib import Path
 from typing import List, Mapping, NamedTuple, Optional
+
+from copycord.envfile import ENV_KEYS
 
 logger = logging.getLogger("copycord")
 
@@ -77,7 +81,7 @@ COMMAND_GROUPS = (
         ("doctor", "Check this machine can run Copycord"),
     )),
     ("Settings", (
-        ("config", "Read or write the stored app config (get, set, export, import)"),
+        ("config", "Read or write settings (get, set, unset, export, import)"),
     )),
     ("Service", (
         ("service", "Run Copycord as an OS service (install, start, stop, status)"),
@@ -202,13 +206,23 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "doctor", parents=[data_dir], help="check this machine can run Copycord"
     )
 
-    config = sub.add_parser("config", help="read or write the stored app config")
+    config = sub.add_parser(
+        "config",
+        help="read or write settings",
+        description="Env-only keys (" + ", ".join(ENV_KEYS) + ", BACKFILL_*, "
+        "FORWARDING_*) live in <home>/.env; every other key is stored in the "
+        "app config in the database.",
+    )
     csub = config.add_subparsers(dest="config_command", required=True)
     get = csub.add_parser("get", parents=[data_dir], help="print one value")
     get.add_argument("key")
+    get.add_argument("--show-secrets", action="store_true",
+                     help="print token/password/secret values unmasked")
     set_ = csub.add_parser("set", parents=[data_dir], help="store one value")
     set_.add_argument("key")
     set_.add_argument("value")
+    unset = csub.add_parser("unset", parents=[data_dir], help="remove one value")
+    unset.add_argument("key")
     export = csub.add_parser(
         "export", parents=[data_dir], help="write all values as JSON"
     )
@@ -555,8 +569,56 @@ def _import_values(raw) -> dict:
     return values
 
 
+def restart_hint() -> str:
+    """How to apply a changed setting: restart Copycord, or its service."""
+    try:
+        from copycord.service import get_service
+
+        installed = get_service().state().installed
+    except Exception:
+        installed = False
+    if installed:
+        return ("restart Copycord to apply: copycord service stop, "
+                "then copycord service start")
+    return "restart Copycord to apply"
+
+
+def _print_value(key: str, value: str, show_secrets: bool) -> None:
+    print(MASK if is_secret(key) and value and not show_secrets else value)
+
+
+def env_config_command(args: argparse.Namespace) -> int:
+    """config get/set/unset for the env-only keys in <home>/.env."""
+    from copycord import envfile
+
+    cmd, key = args.config_command, args.key
+    if cmd == "get":
+        value = envfile.get(key)
+        if value is None:
+            print(f"{key} is not set in {envfile.env_path()}", file=sys.stderr)
+            return 1
+        _print_value(key, value, args.show_secrets)
+        return 0
+    if cmd == "set":
+        path = envfile.set_value(key, args.value)
+        print(f"{key} saved in {path}; {restart_hint()}", file=sys.stderr)
+        return 0
+    if cmd == "unset":
+        path = envfile.env_path()
+        if not envfile.unset(key):
+            print(f"{key} is not set in {path}", file=sys.stderr)
+            return 1
+        print(f"{key} removed from {path}; {restart_hint()}", file=sys.stderr)
+        return 0
+    return 2
+
+
 def config_command(args: argparse.Namespace) -> int:
+    from copycord.envfile import is_env_key
+
     cmd = args.config_command
+    if cmd in ("get", "set", "unset") and is_env_key(args.key):
+        return env_config_command(args)
     db = _open_db(create=cmd in ("set", "import"))
     if db is None:
         return 1
@@ -566,12 +628,20 @@ def config_command(args: argparse.Namespace) -> int:
             if value is None:
                 print(f"{args.key} is not set", file=sys.stderr)
                 return 1
-            print(value)
+            _print_value(args.key, value, args.show_secrets)
             return 0
 
         if cmd == "set":
             db.set_config(args.key, args.value)
-            print(f"{args.key} saved; restart Copycord to apply", file=sys.stderr)
+            print(f"{args.key} saved; {restart_hint()}", file=sys.stderr)
+            return 0
+
+        if cmd == "unset":
+            if db.get_config(args.key, None) is None:
+                print(f"{args.key} is not set", file=sys.stderr)
+                return 1
+            db.delete_config(args.key)
+            print(f"{args.key} removed; {restart_hint()}", file=sys.stderr)
             return 0
 
         if cmd == "export":
@@ -604,8 +674,7 @@ def config_command(args: argparse.Namespace) -> int:
                     continue
                 db.set_config(key, value)
                 imported += 1
-            print(f"imported {imported} keys; restart Copycord to apply",
-                  file=sys.stderr)
+            print(f"imported {imported} keys; {restart_hint()}", file=sys.stderr)
             return 0
     finally:
         db.conn.close()
@@ -839,6 +908,10 @@ def uninstall_command(args: argparse.Namespace) -> int:
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     apply_data_dir(args)
+    # <home>/.env before any role starts; the real environment wins.
+    from copycord import envfile
+
+    envfile.load()
 
     if args.command == "doctor":
         return doctor()

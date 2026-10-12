@@ -204,6 +204,8 @@ def test_config_round_trip_with_masking(data_dir, tmp_path, capsys):
     assert cli.main(["config", "import", str(backup), *od]) == 0
     capsys.readouterr()
     assert cli.main(["config", "get", "SERVER_TOKEN", *od]) == 0
+    assert capsys.readouterr().out.strip() == cli.MASK
+    assert cli.main(["config", "get", "SERVER_TOKEN", "--show-secrets", *od]) == 0
     assert capsys.readouterr().out.strip() == "srv-secret"
     assert cli.main(["config", "export", "--show-secrets", *od]) == 0
     assert json.loads(capsys.readouterr().out) == exported
@@ -220,6 +222,75 @@ def test_config_import_skips_masked_values(data_dir, tmp_path, capsys):
     capsys.readouterr()
     assert cli.main(["config", "get", "SYNC_INTERVAL_SECONDS", *dd]) == 0
     assert capsys.readouterr().out.strip() == "60"
+
+
+def test_config_unset_db_key(data_dir, capsys):
+    dd = ["--data-dir", str(data_dir)]
+    assert cli.main(["config", "set", "COMMAND_USERS", "1,2", *dd]) == 0
+    assert cli.main(["config", "unset", "COMMAND_USERS", *dd]) == 0
+    assert "COMMAND_USERS removed" in capsys.readouterr().err
+    assert cli.main(["config", "get", "COMMAND_USERS", *dd]) == 1
+    assert cli.main(["config", "unset", "COMMAND_USERS", *dd]) == 1
+
+
+def test_config_env_only_keys_go_to_env_file(data_dir, monkeypatch, capsys):
+    from copycord import envfile
+
+    _unset(monkeypatch, "PASSWORD", "ADMIN_PORT")
+    dd = ["--data-dir", str(data_dir)]
+    env = data_dir / ".env"
+    data_dir.mkdir(parents=True)
+    env.write_text("# my notes\nADMIN_PORT=9000\n", encoding="utf-8")
+
+    assert cli.main(["config", "set", "PASSWORD", "it's a #pass", *dd]) == 0
+    assert "restart Copycord to apply" in capsys.readouterr().err
+    assert cli.main(["config", "set", "ADMIN_PORT", "9090", *dd]) == 0
+    text = env.read_text(encoding="utf-8")
+    assert text.startswith("# my notes\nADMIN_PORT=9090\n")
+    assert text.count("ADMIN_PORT") == 1
+    assert not (data_dir / "data.db").exists()
+    assert envfile.get("PASSWORD", env) == "it's a #pass"
+
+    capsys.readouterr()
+    assert cli.main(["config", "get", "PASSWORD", *dd]) == 0
+    assert capsys.readouterr().out.strip() == cli.MASK
+    assert cli.main(["config", "get", "PASSWORD", "--show-secrets", *dd]) == 0
+    assert capsys.readouterr().out.strip() == "it's a #pass"
+    assert cli.main(["config", "get", "ADMIN_PORT", *dd]) == 0
+    assert capsys.readouterr().out.strip() == "9090"
+
+    assert cli.main(["config", "unset", "PASSWORD", *dd]) == 0
+    assert cli.main(["config", "get", "PASSWORD", *dd]) == 1
+    assert cli.main(["config", "unset", "PASSWORD", *dd]) == 1
+    assert "# my notes" in env.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX file modes")
+def test_env_file_is_created_private(data_dir, monkeypatch):
+    _unset(monkeypatch, "PASSWORD")
+    assert cli.main(["config", "set", "PASSWORD", "pw", "--data-dir", str(data_dir)]) == 0
+    assert (data_dir / ".env").stat().st_mode & 0o777 == 0o600
+
+
+def test_env_file_is_loaded_without_overriding(data_dir, monkeypatch):
+    data_dir.mkdir(parents=True)
+    (data_dir / ".env").write_text(
+        "COPYCORD_TEST_FROM_FILE=file\nCOPYCORD_TEST_REAL=file\n", encoding="utf-8"
+    )
+    _unset(monkeypatch, "COPYCORD_TEST_FROM_FILE")
+    monkeypatch.setenv("COPYCORD_TEST_REAL", "real")
+    assert cli.main(["doctor", "--data-dir", str(data_dir)]) in (0, 1)
+    assert os.environ["COPYCORD_TEST_FROM_FILE"] == "file"
+    assert os.environ["COPYCORD_TEST_REAL"] == "real"
+
+
+def test_env_template_lists_every_env_key():
+    from copycord import envfile
+
+    text = envfile.template()
+    for key in envfile.ENV_KEYS:
+        assert f"#{key}=" in text
+    assert all(line == "" or line.startswith("#") for line in text.splitlines())
 
 
 def test_config_import_rejects_bad_json(data_dir, tmp_path):
