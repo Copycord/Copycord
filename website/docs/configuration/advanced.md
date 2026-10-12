@@ -71,6 +71,12 @@ If the active proxy drops or goes down, the client detects it automatically via 
 
 A failed proxy is temporarily suspended so the client doesn't reconnect to it immediately. After the suspend duration expires, the proxy becomes eligible again.
 
+### Timezone
+
+The `X-Discord-Timezone` header sent with every request matches the timezone of the IP the account actually exits through, so it lines up with the proxy (or your own connection when no proxy is used). Copycord looks the timezone up once per proxy, caches it, and looks it up again when an account moves to a different proxy.
+
+If the lookup fails, Copycord logs one warning and uses `America/New_York` until the next successful lookup.
+
 ### Proxy settings
 
 Click the **Settings** button on the Proxy card to configure advanced options:
