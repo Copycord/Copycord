@@ -453,7 +453,7 @@ Test a branch, no release needed:
         }
         if ($channelArgs) {
             if ($dryRun) { Dry "copycord update $($channelArgs -join ' ') --no-install" }
-            else { Run "Saving the update channel ($($channelArgs -join ' '))" $exe ($channelArgs + '--no-install') }
+            else { Run "Saving the update channel ($($channelArgs -join ' '))" $exe (@('update') + $channelArgs + '--no-install') }
         }
 
         # --- verify / onboard -----------------------------------------------
