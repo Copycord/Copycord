@@ -85,14 +85,13 @@ Pass flags after `sh -s --` on Linux and macOS. On Windows, run the script as a 
 | `--beta` | `-Beta` | | Release method: also consider pre-releases. The channel is saved and used by `copycord update`. |
 | `--home <path>` | `-CopycordHome <path>` | `COPYCORD_HOME` | Copycord home: data, `src/` and `node/` (default `~/.copycord`). A custom one is saved in `~/.copycord-home` so the CLI and the service use it. |
 | `--git-dir <path>` | `-GitDir <path>` | | Git method: checkout directory. |
-| `--no-onboard` | `-NoOnboard` | | Skip the `copycord doctor` run at the end. |
-| `--verify` | `-Verify` | | Run `copycord version` and `copycord doctor` after installing and fail if either fails. |
+| `--verify` | `-Verify` | | Run `copycord --version` and `copycord doctor` after installing and fail if either fails. |
 | `--dry-run` | `-DryRun` | | Print the plan and every action without changing anything. |
 | `--verbose` | `-ShowOutput` | | Show the full output of every step instead of a spinner. |
 | `--help` | `-Help` | | Show the options. |
 | | | `NO_COLOR=1` | Plain output. Colors are only used on a terminal. |
 
-The other environment variables (`COPYCORD_CHANNEL`, `COPYCORD_BETA`, `COPYCORD_GIT_DIR`, `COPYCORD_NO_ONBOARD`, `COPYCORD_VERIFY`, `COPYCORD_DRY_RUN`, `COPYCORD_VERBOSE`, `COPYCORD_NODE_VERSION`, `COPYCORD_ALLOW_ROOT`) are rarely needed; most mirror the flags.
+The other environment variables (`COPYCORD_CHANNEL`, `COPYCORD_BETA`, `COPYCORD_GIT_DIR`, `COPYCORD_VERIFY`, `COPYCORD_DRY_RUN`, `COPYCORD_VERBOSE`, `COPYCORD_NODE_VERSION`, `COPYCORD_ALLOW_ROOT`) are rarely needed; most mirror the flags.
 
 Advanced: `--install-method release|git` (alias `--method`), `--git` and `--release` (PowerShell: `-InstallMethod`, `-Git`) force the method instead of inferring it from `--version`. `COPYCORD_INSTALL_METHOD` does the same.
 

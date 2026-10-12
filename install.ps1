@@ -35,7 +35,6 @@ param(
     [switch]$Beta,
     [string]$GitDir = $env:COPYCORD_GIT_DIR,
     [string]$CopycordHome = $env:COPYCORD_HOME,
-    [switch]$NoOnboard,
     [switch]$Verify,
     [switch]$DryRun,
     [switch]$ShowOutput,
@@ -74,8 +73,7 @@ Options:
                               (default: %USERPROFILE%\.copycord)
   -GitDir <path>              git: checkout directory
                               (default: <home>\src)
-  -NoOnboard                  skip the post-install ``copycord doctor`` run
-  -Verify                     after installing, run ``copycord version`` and
+  -Verify                     after installing, run ``copycord --version`` and
                               ``copycord doctor`` and fail if either fails
   -DryRun                     print the plan and the actions, change nothing
   -ShowOutput                 stream the output of every step
@@ -87,7 +85,7 @@ Advanced:
 
 Environment (parameters win):
   COPYCORD_REPO, COPYCORD_VERSION, COPYCORD_CHANNEL=stable|beta,
-  COPYCORD_BETA=1, COPYCORD_GIT_DIR, COPYCORD_HOME, COPYCORD_NO_ONBOARD=1, COPYCORD_VERIFY=1,
+  COPYCORD_BETA=1, COPYCORD_GIT_DIR, COPYCORD_HOME, COPYCORD_VERIFY=1,
   COPYCORD_DRY_RUN=1, COPYCORD_NODE_VERSION, COPYCORD_ALLOW_ROOT=1, NO_COLOR=1
 
 Test a branch, no release needed:
@@ -111,7 +109,6 @@ Test a branch, no release needed:
     if ($channel -notin @('stable', 'beta')) {
         throw "copycord install: COPYCORD_CHANNEL must be stable or beta, not '$channel'"
     }
-    $onboard = -not ($Opts.NoOnboard -or $env:COPYCORD_NO_ONBOARD -eq '1')
     $verify = $Opts.Verify -or $env:COPYCORD_VERIFY -eq '1'
     $dryRun = $Opts.DryRun -or $env:COPYCORD_DRY_RUN -eq '1'
     $showOutput = [bool]$Opts.ShowOutput
@@ -250,14 +247,13 @@ Test a branch, no release needed:
         else { PlanLine 'node' "$(& node -v) at $((Get-Command node).Source)" }
     }
     if ($uv) { PlanLine 'uv' $uv.Source } else { PlanLine 'uv' "not found, will install it from $UvInstaller" }
-    if ($verify) { PlanLine 'verify' 'copycord version and copycord doctor' }
-    if (-not $onboard) { PlanLine 'onboard' 'skipped (-NoOnboard)' }
+    if ($verify) { PlanLine 'verify' 'copycord --version and copycord doctor' }
     if ($dryRun) { PlanLine 'dry run' 'nothing will be changed' }
 
     # uv, install, finishing up; release: find the release; git: fetch, build.
     $script:stepTotal = if ($method -eq 'git') { 5 } else { 4 }
     if ($needNode) { $script:stepTotal++ }
-    if ($verify -or $onboard) { $script:stepTotal++ }
+    if ($verify) { $script:stepTotal++ }
 
     try {
         # --- uv -------------------------------------------------------------
@@ -447,7 +443,7 @@ Test a branch, no release needed:
                 & git -C $gitDir rev-parse -q --verify "refs/remotes/origin/$ref" *> $null
                 $isBranch = $LASTEXITCODE -eq 0
             }
-            if ($isBranch) { $channelArgs = @('--channel', 'dev', '--branch', $ref) }
+            if ($isBranch) { $channelArgs = @('--channel', 'dev', '--ref', $ref) }
             else { Info "$ref is not a branch: the ``copycord update`` channel is left as it is" }
         } else {
             Warn "``copycord update`` follows $DefaultRepo, not $repo; run this installer again to update from the fork"
@@ -457,26 +453,16 @@ Test a branch, no release needed:
             else { Run "Saving the update channel ($($channelArgs -join ' '))" $exe (@('update') + $channelArgs + '--no-install') }
         }
 
-        # --- verify / onboard -----------------------------------------------
+        # --- verify ---------------------------------------------------------
 
         if ($verify) {
             Step 'Verifying'
-            if ($dryRun) { Dry 'copycord version; copycord doctor' }
+            if ($dryRun) { Dry 'copycord --version; copycord doctor' }
             else {
-                Run 'copycord version' $exe @('version')
+                Run 'copycord --version' $exe @('--version')
                 Get-Content $log | ForEach-Object { Out "    $_" }
                 Run 'copycord doctor' $exe @('doctor')
                 Get-Content $log | ForEach-Object { Out "    $_" }
-            }
-        } elseif ($onboard) {
-            Step 'Checking the setup'
-            if ($dryRun) { Dry 'copycord doctor' }
-            else {
-                & $exe doctor *> $log
-                $doctorOk = $LASTEXITCODE -eq 0
-                Get-Content $log | ForEach-Object { Out "    $_" }
-                if ($doctorOk) { Done 'copycord doctor passed' }
-                else { Warn 'copycord doctor reported problems; fix the FAIL lines above, then run it again' }
             }
         }
     } finally {
@@ -499,10 +485,11 @@ Test a branch, no release needed:
             "Home: $homeDir",
             '',
             'Next:',
-            '  copycord           start Copycord',
+            '  copycord run       start Copycord',
             '  copycord update    update it later',
-            "  http://localhost:$port",
-            '                     open the web UI once it runs'
+            '',
+            'Finish the setup in the dashboard once it runs:',
+            "  http://localhost:$port"
         )) {
         Out ("  " + $box.V + ' ') Magenta -NoNewline
         Out ('{0,-52}' -f $text) -NoNewline
@@ -516,6 +503,6 @@ Test a branch, no release needed:
 
 Install-Copycord -Opts @{
     InstallMethod = $InstallMethod; MethodSet = ($PSBoundParameters.ContainsKey('InstallMethod') -or [bool]$env:COPYCORD_INSTALL_METHOD); Git = $Git; Repo = $Repo; Version = $Version; Beta = $Beta
-    GitDir = $GitDir; CopycordHome = $CopycordHome; NoOnboard = $NoOnboard; Verify = $Verify; DryRun = $DryRun
+    GitDir = $GitDir; CopycordHome = $CopycordHome; Verify = $Verify; DryRun = $DryRun
     ShowOutput = $ShowOutput; Help = $Help
 }

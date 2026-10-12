@@ -205,7 +205,7 @@ def _visible_len(text: str) -> int:
 
 def box(lines: Iterable[str], title: str = "", status: str = "info",
         stream: Optional[TextIO] = None) -> None:
-    """A boxed notice, e.g. the dashboard URL at the end of onboarding."""
+    """A boxed notice, e.g. the dashboard URL."""
     stream = sys.stdout if stream is None else stream
     lines = list(lines)
     fancy = use_color(stream) and _unicode(stream)
@@ -264,7 +264,7 @@ class Spinner:
 
 
 # --------------------------------------------------------------------------
-# prompts (onboarding)
+# prompts
 # --------------------------------------------------------------------------
 
 

@@ -1,6 +1,6 @@
 """
 Tests for `copycord update` (code/copycord/update.py): installer detection,
-the install command per installer, --check against faked GitHub releases API
+the install command per installer, update status against faked GitHub releases API
 responses, and restarting the service only when it was running. No network,
 no real uv/pipx.
 """
@@ -93,7 +93,7 @@ def test_install_commands():
 
 
 # --------------------------------------------------------------------------
-# --check
+# update status
 # --------------------------------------------------------------------------
 
 
@@ -114,7 +114,7 @@ def fake_net(monkeypatch):
 
 def test_check_reports_newer_version(monkeypatch, capsys, fake_net):
     monkeypatch.setattr(update, "current_version", lambda: "3.28.0")
-    assert cli.main(["update", "--check"]) == 0
+    assert cli.main(["update", "status"]) == 0
     out = capsys.readouterr().out
     assert "current 3.28.0" in out
     assert "channel stable" in out

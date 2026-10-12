@@ -175,7 +175,7 @@ jobs:
 
   # -----------------------------------------------------------------------
   # 5. Package — wheel with the built frontend, installed into a fresh venv,
-  #    smoke-tested with `copycord version` and `copycord doctor`.
+  #    smoke-tested with `copycord --version` and `copycord doctor`.
   # -----------------------------------------------------------------------
   package:
     name: Wheel build & smoke test
@@ -208,9 +208,9 @@ jobs:
           /tmp/cc-venv/bin/python -m pip install --upgrade pip
           /tmp/cc-venv/bin/python -m pip install dist/*.whl
 
-      - name: copycord version
+      - name: copycord --version
         working-directory: /tmp
-        run: /tmp/cc-venv/bin/copycord version
+        run: /tmp/cc-venv/bin/copycord --version
 
       - name: copycord doctor
         working-directory: /tmp

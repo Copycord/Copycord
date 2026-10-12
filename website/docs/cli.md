@@ -8,9 +8,7 @@ title: CLI Reference
 The [install script](/docs/getting-started/manual-install) installs the `copycord` command. It runs Copycord, checks your setup, reads and writes settings, manages the background service and updates Copycord.
 
 ```
-copycord onboard [--non-interactive] [--server-token T] [--client-token T] [--command-users IDS] [--port PORT] [--force]
-copycord run [--no-onboard] [--data-dir PATH]
-copycord version [--data-dir PATH]
+copycord run [--data-dir PATH]
 copycord doctor [--data-dir PATH]
 copycord config get KEY [--data-dir PATH]
 copycord config set KEY VALUE [--data-dir PATH]
@@ -21,7 +19,7 @@ copycord service start|stop|status|uninstall [--user]
 copycord update [--channel stable|beta|dev] [--repo OWNER/NAME] [--ref REF] [--tag VERSION] [--no-install]
 copycord update status
 copycord uninstall [--purge] [--yes] [--keep-service] [--dry-run] [--data-dir PATH]
-copycord --version
+copycord --version | -V
 ```
 
 Every command has `--help`, for example `copycord service install --help`. `copycord --help` lists the commands by group with examples.
@@ -38,36 +36,6 @@ WARN  frontend: ... is missing, the admin UI will not load
 FAIL  admin port: port 8080 is in use
 ```
 
-## copycord onboard {#copycord-onboard}
-
-A guided first-run setup. It asks for what Copycord needs to start and saves it in the database, the same place the dashboard stores its settings:
-
-| Step | Setting | Required |
-|------|---------|----------|
-| Server bot token | `SERVER_TOKEN`: the bot you added to your clone server | yes |
-| Client token | `CLIENT_TOKEN`: the account that is a member of the source server | yes |
-| Command users | `COMMAND_USERS`: Discord user IDs allowed to run bot commands, comma-separated | no |
-| Dashboard port | shown in the final URL; Copycord listens on `ADMIN_PORT` (default 8080) | no |
-
-Tokens are typed hidden. Values that are already saved are kept when you press Enter; `--force` asks for them again. It ends with a box that shows the dashboard URL (for example **http://localhost:8080**) and the next commands to run.
-
-```bash
-copycord onboard
-```
-
-`copycord run` starts the onboarding by itself on first start, when neither token is saved (or set in the environment) and a terminal is attached. Skip it with `copycord run --no-onboard` or `COPYCORD_NO_ONBOARD=1`. A service never starts it, since it has no terminal.
-
-### Without prompts {#onboard-non-interactive}
-
-`--non-interactive` never asks. It takes the values from the flags, or else from the `SERVER_TOKEN`, `CLIENT_TOKEN`, `COMMAND_USERS` and `ADMIN_PORT` environment variables, and exits with status 1 when a required token is missing. It also runs without prompts when no terminal is attached.
-
-```bash
-copycord onboard --non-interactive --server-token XXX --client-token YYY --command-users 123,456
-SERVER_TOKEN=XXX CLIENT_TOKEN=YYY copycord onboard --non-interactive
-```
-
-See [Discord Setup](/docs/getting-started/discord-setup) for how to get the tokens.
-
 ## The data directory {#data-dir}
 
 Copycord keeps its database (`data.db`), logs, backups and the saved update channel in one data directory (the Copycord home):
@@ -80,7 +48,7 @@ Copycord keeps its database (`data.db`), logs, backups and the saved update chan
 
 This folder is the Copycord home. A git install keeps its checkout in `src/` and its per-user Node in `node/` inside it. Set `COPYCORD_HOME` to use another folder; `--data-dir` and `DATA_DIR` still win over it. If `~/.copycord` does not exist but an older install left a `data.db` in `~/.local/share/copycord` (Linux), `~/Library/Application Support/Copycord` (macOS) or `%LOCALAPPDATA%\Copycord` (Windows), Copycord keeps using that folder and prints a notice. It never moves data by itself; to move, stop Copycord and move the folder to `~/.copycord`.
 
-`--data-dir PATH` uses another folder for that command. It does the same as setting the `DATA_DIR` environment variable. It is accepted by `run`, `version`, `doctor`, every `config` command, `service install` and `uninstall`.
+`--data-dir PATH` uses another folder for that command. It does the same as setting the `DATA_DIR` environment variable. It is accepted by `run`, `doctor`, every `config` command, `service install` and `uninstall`.
 
 ## copycord run {#copycord-run}
 
@@ -91,7 +59,7 @@ copycord run
 copycord run --data-dir ~/copycord-data
 ```
 
-The dashboard is at **http://localhost:8080**. Press **Ctrl+C** to stop. If one part crashes, Copycord restarts that part on its own.
+The dashboard is at **http://localhost:8080**. Open it to finish the setup: the server bot token, the client token and everything else is configured there (see [Discord Setup](/docs/getting-started/discord-setup) for the tokens). Press **Ctrl+C** to stop. If one part crashes, Copycord restarts that part on its own.
 
 Useful environment variables:
 
@@ -106,17 +74,15 @@ Useful environment variables:
 
 The terminal shows the dashboard's log and warnings or errors from the server and client. The full server and client logs go to files in the data directory; see [Logs](/docs/dashboard/system#where-logs-go).
 
-## copycord version {#copycord-version}
+## copycord --version {#copycord-version}
 
-Prints the installed version and the saved [update channel](#update-channels). In a terminal it shows the banner too; piped, it prints two plain lines:
+`copycord --version` (or `-V`) prints the installed version and the saved [update channel](#update-channels). In a terminal it shows the banner too; piped, it prints two plain lines:
 
 ```bash
-$ copycord version | cat
+$ copycord --version | cat
 4.0.0
 channel stable
 ```
-
-`copycord --version` (or `-V`) prints only `copycord 4.0.0`.
 
 ## copycord doctor {#copycord-doctor}
 
@@ -287,9 +253,9 @@ copycord update --channel beta --no-install
 
 | Option | What it does |
 |--------|--------------|
-| `status` | Prints the installed version, the channel, the install method and the newest version on that channel, then exits without installing. Network errors are printed as `WARN`. `--check` does the same. |
+| `status` | Prints the installed version, the channel, the install method and the newest version on that channel, then exits without installing. Network errors are printed as `WARN`. |
 | `--channel stable\|beta\|dev` | Switches to this channel, installs from it and saves it once the install worked |
-| `--ref REF` | Dev channel only: the git branch, tag or commit to install (default `main`). `--branch` is the same option. |
+| `--ref REF` | Dev channel only: the git branch, tag or commit to install (default `main`). |
 | `--repo OWNER/NAME` | Dev channel only: the GitHub repository to install from (default `Copycord/Copycord`), for example a fork |
 | `--tag VERSION` | Installs this exact release (`4.0.0` or `v4.0.0`). One-off: the saved channel does not change. Cannot be combined with `--channel`, `--repo` or `--ref`. |
 | `--no-install` | Only saves `--channel` (and `--repo`, `--ref`), installs nothing. The install scripts use this. |
@@ -301,7 +267,7 @@ After a successful update, a running [service](#copycord-service) is restarted s
 
 ### Update check on start {#update-check}
 
-When `copycord run` starts, and when `copycord version` runs in a terminal, Copycord checks the saved [channel](#update-channels) in a background thread: the newest release for `stable` and `beta`, the branch head against the installed commit for `dev`. If there is something newer it prints one line and nothing else happens:
+When `copycord run` starts, and when `copycord --version` runs in a terminal, Copycord checks the saved [channel](#update-channels) in a background thread: the newest release for `stable` and `beta`, the branch head against the installed commit for `dev`. If there is something newer it prints one line and nothing else happens:
 
 ```
 Update available: v4.0.1 (you have v4.0.0). Run copycord update

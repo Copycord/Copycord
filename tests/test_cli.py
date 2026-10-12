@@ -48,9 +48,18 @@ def _statuses(out):
 
 
 def test_version_prints_current_version(data_dir, capsys):
-    assert cli.main(["version", "--data-dir", str(data_dir)]) == 0
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--version"])
+    assert exc.value.code == 0
     lines = capsys.readouterr().out.strip().splitlines()
     assert lines == [CURRENT_VERSION, "channel stable"]
+
+
+@pytest.mark.parametrize("argv", (["version"], ["update", "--check"], ["update", "--branch", "main"], ["onboard"]))
+def test_removed_commands_and_flags(argv, data_dir, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(argv)
+    assert exc.value.code == 2
 
 
 # --------------------------------------------------------------------------

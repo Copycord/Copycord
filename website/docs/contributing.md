@@ -104,7 +104,7 @@ Every pull request against `main` (and every push to `main`) runs the **Tests** 
 | DB unit tests | `tests/test_db.py` on Python 3.12 and 3.14 |
 | Unit tests | The rest of `tests/` on Python 3.12 and 3.14 |
 | Frontend build | `npm ci` and `npm run build` in `code/admin/frontend` |
-| Wheel build & smoke test | Builds the wheel with the frontend, installs it in a fresh environment and runs `copycord version` and `copycord doctor` |
+| Wheel build & smoke test | Builds the wheel with the frontend, installs it in a fresh environment and runs `copycord --version` and `copycord doctor` |
 
 Other workflows:
 

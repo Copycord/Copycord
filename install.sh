@@ -42,8 +42,6 @@ CHANNEL_SET="${COPYCORD_CHANNEL:+1}"
 COPYCORD_HOME="${COPYCORD_HOME:-$HOME/.copycord}"
 GIT_DIR_PATH="${COPYCORD_GIT_DIR:-}"
 NODE_VERSION="${COPYCORD_NODE_VERSION:-22.12.0}"
-ONBOARD=1
-[ "${COPYCORD_NO_ONBOARD:-0}" = "1" ] && ONBOARD=0
 VERIFY="${COPYCORD_VERIFY:-0}"
 DRY_RUN="${COPYCORD_DRY_RUN:-0}"
 VERBOSE="${COPYCORD_VERBOSE:-0}"
@@ -68,8 +66,7 @@ Options:
   --git-dir, --dir <path>
                          git: checkout directory
                          (default: <home>/src)
-  --no-onboard           skip the post-install \`copycord doctor\` run
-  --verify               after installing, run \`copycord version\` and
+  --verify               after installing, run \`copycord --version\` and
                          \`copycord doctor\` and fail if either fails
   --dry-run              print the plan and the actions, change nothing
   --verbose              stream the output of every step
@@ -83,10 +80,9 @@ Environment (flags win):
   COPYCORD_REPO=owner/name
   COPYCORD_VERSION=<version|ref>        COPYCORD_CHANNEL=stable|beta
   COPYCORD_BETA=1                       COPYCORD_GIT_DIR=<path>
-  COPYCORD_NO_ONBOARD=1                 COPYCORD_VERIFY=1
-  COPYCORD_DRY_RUN=1                    COPYCORD_VERBOSE=1
-  COPYCORD_NODE_VERSION=<x.y.z>         COPYCORD_ALLOW_ROOT=1
-  COPYCORD_HOME=<path>
+  COPYCORD_VERIFY=1                     COPYCORD_DRY_RUN=1
+  COPYCORD_VERBOSE=1                    COPYCORD_NODE_VERSION=<x.y.z>
+  COPYCORD_ALLOW_ROOT=1                 COPYCORD_HOME=<path>
   NO_COLOR=1                            plain output
 
 Examples:
@@ -121,8 +117,6 @@ while [ $# -gt 0 ]; do
         --home=*) COPYCORD_HOME="${1#*=}" ;;
         --git-dir | --dir) need_value "$1" "${2:-}"; GIT_DIR_PATH="$2"; shift ;;
         --git-dir=* | --dir=*) GIT_DIR_PATH="${1#*=}" ;;
-        --no-onboard) ONBOARD=0 ;;
-        --onboard) ONBOARD=1 ;;
         --verify) VERIFY=1 ;;
         --dry-run) DRY_RUN=1 ;;
         --verbose) VERBOSE=1 ;;
@@ -367,14 +361,13 @@ if [ "$need_uv" = "1" ]; then
 else
     plan_line "uv" "$(command -v uv)"
 fi
-[ "$VERIFY" = "1" ] && plan_line "verify" "copycord version and copycord doctor"
-[ "$ONBOARD" = "0" ] && plan_line "onboard" "skipped (--no-onboard)"
+[ "$VERIFY" = "1" ] && plan_line "verify" "copycord --version and copycord doctor"
 [ "$DRY_RUN" = "1" ] && plan_line "dry run" "nothing will be changed"
 
 # uv, install, finishing up; release: find the release; git: fetch, build.
 if [ "$METHOD" = "git" ]; then STEP_TOTAL=5; else STEP_TOTAL=4; fi
 [ "$need_node" = "1" ] && STEP_TOTAL=$((STEP_TOTAL + 1))
-if [ "$VERIFY" = "1" ] || [ "$ONBOARD" = "1" ]; then STEP_TOTAL=$((STEP_TOTAL + 1)); fi
+[ "$VERIFY" = "1" ] && STEP_TOTAL=$((STEP_TOTAL + 1))
 
 # --- uv -----------------------------------------------------------------------
 
@@ -609,7 +602,7 @@ if [ "$METHOD" = "release" ]; then
     fi
 elif [ "$REPO" = "$DEFAULT_REPO" ]; then
     if [ "$DRY_RUN" = "1" ] || git -C "$GIT_DIR_PATH" rev-parse -q --verify "refs/remotes/origin/$REF" >/dev/null; then
-        CHANNEL_ARGS="--channel dev --branch $REF"
+        CHANNEL_ARGS="--channel dev --ref $REF"
     else
         info "$REF is not a branch: the \`copycord update\` channel is left as it is"
     fi
@@ -625,28 +618,17 @@ if [ -n "$CHANNEL_ARGS" ]; then
     fi
 fi
 
-# --- verify / onboard ---------------------------------------------------------------
+# --- verify -----------------------------------------------------------------------
 
 if [ "$VERIFY" = "1" ]; then
     step "Verifying"
     if [ "$DRY_RUN" = "1" ]; then
-        dry "copycord version && copycord doctor"
+        dry "copycord --version && copycord doctor"
     else
-        run "copycord version" "$BIN_DIR/copycord" version
+        run "copycord --version" "$BIN_DIR/copycord" --version
         sed 's/^/    /' "$LOG"
         run "copycord doctor" "$BIN_DIR/copycord" doctor
         sed 's/^/    /' "$LOG"
-    fi
-elif [ "$ONBOARD" = "1" ]; then
-    step "Checking the setup"
-    if [ "$DRY_RUN" = "1" ]; then
-        dry "copycord doctor"
-    elif "$BIN_DIR/copycord" doctor >"$LOG" 2>&1; then
-        sed 's/^/    /' "$LOG"
-        done_line "copycord doctor passed"
-    else
-        sed 's/^/    /' "$LOG"
-        warn "copycord doctor reported problems; fix the FAIL lines above, then run it again"
     fi
 fi
 
@@ -672,10 +654,11 @@ box_line "Copycord $LABEL is installed"
 box_line "Home: $COPYCORD_HOME"
 box_line ""
 box_line "Next:"
-box_line "  copycord           start Copycord"
+box_line "  copycord run       start Copycord"
 box_line "  copycord update    update it later"
+box_line ""
+box_line "Finish the setup in the dashboard once it runs:"
 box_line "  $URL"
-box_line "                     open the web UI once it runs"
 box_rule "$BOX_BL" "$BOX_BR"
 say ""
 say "  ${DIM}Open a new shell first if copycord is not found.$RESET"
