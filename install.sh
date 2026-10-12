@@ -33,6 +33,7 @@ NODE_MIN_MAJOR=20
 # --- options ------------------------------------------------------------------
 
 METHOD="${COPYCORD_INSTALL_METHOD:-release}"
+METHOD_SET="${COPYCORD_INSTALL_METHOD:+1}"
 REPO="${COPYCORD_REPO:-$DEFAULT_REPO}"
 VERSION="${COPYCORD_VERSION:-}"
 CHANNEL="${COPYCORD_CHANNEL:-stable}"
@@ -56,13 +57,10 @@ Usage:
   curl -fsSL https://raw.githubusercontent.com/$DEFAULT_REPO/main/install.sh | sh -s -- [options]
 
 Options:
-  --install-method, --method release|git
-                         install a GitHub release (default) or a git checkout
-  --git, --github        shortcut for --install-method git
-  --release              shortcut for --install-method release
   --repo owner/name      GitHub repository (default: $DEFAULT_REPO)
-  --version <value>      release: a release version, e.g. 4.0.0
-                         git: a branch, tag or commit sha (default: main)
+  --version <value>      a release version (4.0.0, v4.0.0, 4.0.0b1) installs
+                         that release; anything else (a branch, tag or
+                         commit sha) installs from git at that ref
   --beta                 release: newest release, pre-releases included;
                          saved as the \`copycord update\` channel
   --home <path>          Copycord home: data, logs, backups, src/ and node/
@@ -77,8 +75,12 @@ Options:
   --verbose              stream the output of every step
   --help, -h             show this help
 
+Advanced:
+  --install-method release|git (alias --method), --git and --release force the
+  method instead of inferring it from --version; COPYCORD_INSTALL_METHOD does too.
+
 Environment (flags win):
-  COPYCORD_INSTALL_METHOD=release|git   COPYCORD_REPO=owner/name
+  COPYCORD_REPO=owner/name
   COPYCORD_VERSION=<version|ref>        COPYCORD_CHANNEL=stable|beta
   COPYCORD_BETA=1                       COPYCORD_GIT_DIR=<path>
   COPYCORD_NO_ONBOARD=1                 COPYCORD_VERIFY=1
@@ -91,9 +93,9 @@ Examples:
   # newest stable release
   curl -fsSL https://raw.githubusercontent.com/$DEFAULT_REPO/main/install.sh | sh
   # test a branch, no release needed
-  curl -fsSL https://raw.githubusercontent.com/$DEFAULT_REPO/v4-dev/install.sh | sh -s -- --git --version v4-dev
+  curl -fsSL https://raw.githubusercontent.com/$DEFAULT_REPO/v4-dev/install.sh | sh -s -- --version v4-dev
   # a branch of a fork
-  curl -fsSL https://raw.githubusercontent.com/$DEFAULT_REPO/main/install.sh | sh -s -- --git --repo you/Copycord --version my-fix
+  curl -fsSL https://raw.githubusercontent.com/$DEFAULT_REPO/main/install.sh | sh -s -- --repo you/Copycord --version my-fix
 EOF
 }
 
@@ -106,10 +108,10 @@ need_value() {
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --install-method | --method) need_value "$1" "${2:-}"; METHOD="$2"; shift ;;
-        --install-method=* | --method=*) METHOD="${1#*=}" ;;
-        --git | --github) METHOD="git" ;;
-        --release) METHOD="release" ;;
+        --install-method | --method) need_value "$1" "${2:-}"; METHOD="$2"; METHOD_SET=1; shift ;;
+        --install-method=* | --method=*) METHOD="${1#*=}"; METHOD_SET=1 ;;
+        --git | --github) METHOD="git"; METHOD_SET=1 ;;
+        --release) METHOD="release"; METHOD_SET=1 ;;
         --repo) need_value "$1" "${2:-}"; REPO="$2"; shift ;;
         --repo=*) REPO="${1#*=}" ;;
         --version) need_value "$1" "${2:-}"; VERSION="$2"; shift ;;
@@ -276,6 +278,19 @@ json_field() {
 
 # --- checks -------------------------------------------------------------------
 
+# --version alone picks the method: a release version (optional v, then
+# digits.digits.digits and an optional pre-release suffix) is a release,
+# anything else is a git ref. An explicit method wins.
+INFERRED=""
+if [ -z "$METHOD_SET" ] && [ -n "$VERSION" ]; then
+    if printf '%s' "$VERSION" | grep -Eq '^[vV]?[0-9]+\.[0-9]+\.[0-9]+([-.]?(a|b|c|rc|alpha|beta|pre|preview|dev)[.-]?[0-9A-Za-z.]*)?$'; then
+        METHOD="release"
+    else
+        METHOD="git"
+    fi
+    INFERRED=", inferred from --version"
+fi
+
 case "$METHOD" in
     release | git) ;;
     *) printf 'copycord install: --install-method must be release or git, not %s\n' "$METHOD" >&2; exit 2 ;;
@@ -328,7 +343,7 @@ banner
 say "  ${BOLD}Plan$RESET"
 if [ "$METHOD" = "release" ]; then
     plan_line "home" "$COPYCORD_HOME"
-    plan_line "method" "release (GitHub release wheel)"
+    plan_line "method" "release (GitHub release wheel$INFERRED)"
     plan_line "repo" "$REPO"
     if [ -n "$VERSION" ]; then
         plan_line "version" "v$VERSION"
@@ -337,7 +352,7 @@ if [ "$METHOD" = "release" ]; then
     fi
 else
     plan_line "home" "$COPYCORD_HOME"
-    plan_line "method" "git (build from source, no release needed)"
+    plan_line "method" "git (build from source, no release needed$INFERRED)"
     plan_line "repo" "$REPO_URL"
     plan_line "ref" "$REF"
     plan_line "checkout" "$GIT_DIR_PATH"
@@ -408,7 +423,8 @@ install_release() {
     fi
     [ -n "$TAG" ] || die "no $CHANNEL release found on $REPO_URL/releases"
 
-    RELEASE_JSON="$(fetch "$API/tags/$TAG")" || die "no release $TAG on $REPO_URL/releases"
+    RELEASE_JSON="$(fetch "$API/tags/$TAG")" \
+        || die "no release $TAG on $REPO_URL/releases. If $VERSION is a branch, tag or commit, use --version with that name, e.g. --version v4-dev"
     WHEEL_URL="$(printf '%s' "$RELEASE_JSON" | tr ',' '\n' \
         | sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\/copycord-[^"]*\.whl\)".*/\1/p' \
         | head -n 1)"
