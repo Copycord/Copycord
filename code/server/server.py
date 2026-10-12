@@ -49,6 +49,7 @@ from common.selfbot_headers import (
 from common.proxy_pool import get_pool as get_proxy_pool
 from common.websockets import WebsocketManager, AdminBus
 from common.db import DBManager
+from common.paths import data_dir
 from server.rate_limiter import RateLimitManager, ActionType
 from server.token_sender import (
     UserTokenSender,
@@ -84,7 +85,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 DATA_DIR = os.getenv("DATA_DIR")
-LOG_DIR = os.getenv("LOG_DIR") or (DATA_DIR if DATA_DIR else "/data")
+LOG_DIR = os.getenv("LOG_DIR") or (DATA_DIR if DATA_DIR else str(data_dir()))
 os.makedirs(LOG_DIR, exist_ok=True)
 
 LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()

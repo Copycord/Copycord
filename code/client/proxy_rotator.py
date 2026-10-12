@@ -20,9 +20,11 @@ import time
 from pathlib import Path
 from typing import List, Optional, Dict
 
+from common.paths import data_dir
+
 logger = logging.getLogger("client.proxy_rotator")
 
-DATA_DIR = Path(os.getenv("DATA_DIR", "/data"))
+DATA_DIR = data_dir()
 _PROXY_FILE = DATA_DIR / "proxies.txt"
 
 

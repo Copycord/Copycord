@@ -68,6 +68,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from common.config import CURRENT_VERSION
 from common.db import DBManager
+from common.paths import data_dir
 from common import inprocess
 from common.backup_scheduler import BackupConfig, DailySQLiteBackupScheduler
 from common.common_helpers import (
@@ -154,7 +155,7 @@ def _safe(x):
 
 APP_TITLE = "Copycord"
 
-DEFAULT_DATA_DIR = "/data"
+DEFAULT_DATA_DIR = str(data_dir())
 DATA_DIR = Path(os.getenv("DATA_DIR", DEFAULT_DATA_DIR)).resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 

@@ -42,6 +42,7 @@ from selfclient.models import (
     Object as DiscordObject,
     TextChannel,
 )
+from common.paths import data_dir
 from client.message_utils import (
     _resolve_forward,
     _resolve_forward_via_snapshot,
@@ -91,7 +92,7 @@ class ExportMessagesRunner:
         logger: Optional[logging.Logger] = None,
         scan_sleep: float = 0.0,
         send_sleep: float = 2.0,
-        out_root: str = os.path.join(os.getenv("DATA_DIR", "/data"), "exports"),
+        out_root: str = os.path.join(str(data_dir()), "exports"),
         download_concurrency: int = 4,
     ) -> None:
         self.bot = bot
@@ -1164,7 +1165,7 @@ class DmHistoryExporter:
         logger: Optional[logging.Logger] = None,
         send_sleep: float = 2.0,
         do_precache_count: bool = True,
-        out_root: str = os.path.join(os.getenv("DATA_DIR", "/data"), "exports"),
+        out_root: str = os.path.join(str(data_dir()), "exports"),
         save_json: bool = True,
     ) -> None:
         self.bot = bot
@@ -2461,7 +2462,7 @@ class AssetExportRunner:
         ws,
         logger: Optional[logging.Logger] = None,
         *,
-        out_root: str = os.path.join(os.getenv("DATA_DIR", "/data"), "assets"),
+        out_root: str = os.path.join(str(data_dir()), "assets"),
     ):
         self.bot = bot
         self.ws = ws

@@ -38,6 +38,7 @@ from selfclient.events import RawMessageDeleteEvent, RawMessageUpdateEvent
 from common.config import Config, CURRENT_VERSION
 from common.selfbot_headers import refresh_build_info
 from common.db import DBManager
+from common.paths import data_dir
 from client.sitemap import SitemapService
 from client.message_utils import (
     MessageUtils,
@@ -59,7 +60,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 DATA_DIR = os.getenv("DATA_DIR")
-LOG_DIR = os.getenv("LOG_DIR") or (DATA_DIR if DATA_DIR else "/data")
+LOG_DIR = os.getenv("LOG_DIR") or (DATA_DIR if DATA_DIR else str(data_dir()))
 os.makedirs(LOG_DIR, exist_ok=True)
 
 LEVEL_NAME = os.getenv("LOG_LEVEL", "INFO").upper()
@@ -645,7 +646,7 @@ class ClientListener:
                         send_sleep=2.0,
                         do_precache_count=True,
                         out_root=os.path.join(
-                            os.getenv("DATA_DIR", "/data"), "exports"
+                            str(data_dir()), "exports"
                         ),
                         save_json=save_json,
                     )

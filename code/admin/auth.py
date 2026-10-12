@@ -76,7 +76,7 @@ def _load_or_create_secret_key(
 
     Priority:
       1) SECRET_KEY env (advanced users)
-      2) /data/admin_secret.key (auto-persisted)
+      2) <data dir>/secret.key (auto-persisted)
       3) freshly generated (non-persisted if write fails)
     """
     if secret_env:
