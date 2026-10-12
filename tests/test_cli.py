@@ -293,6 +293,17 @@ def test_env_template_lists_every_env_key():
     assert all(line == "" or line.startswith("#") for line in text.splitlines())
 
 
+def test_config_set_fills_the_template_placeholder(tmp_path):
+    from copycord import envfile
+
+    env = tmp_path / ".env"
+    env.write_text(envfile.template(), encoding="utf-8")
+    envfile.set_value("PASSWORD", "pw", env)
+    lines = env.read_text(encoding="utf-8").splitlines()
+    assert "PASSWORD=pw" in lines and "#PASSWORD=" not in lines
+    assert lines[0].startswith("# Copycord settings")
+
+
 def test_config_import_rejects_bad_json(data_dir, tmp_path):
     dd = ["--data-dir", str(data_dir)]
     src = tmp_path / "list.json"

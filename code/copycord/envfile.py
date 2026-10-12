@@ -115,7 +115,12 @@ def set_value(key: str, value: str, path: Optional[Path] = None) -> Path:
             continue
         out.append(line)
     if not done:
-        out.append(new)
+        # Fill the template's commented placeholder, else append.
+        placeholder = f"#{key}="
+        if placeholder in out:
+            out[out.index(placeholder)] = new
+        else:
+            out.append(new)
     _write_lines(path, out)
     return path
 

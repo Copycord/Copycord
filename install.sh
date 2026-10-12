@@ -593,6 +593,55 @@ elif [ -f "$HOME_POINTER" ] && [ "$DRY_RUN" != "1" ]; then
     rm -f "$HOME_POINTER"
 fi
 
+# Settings that are read from the environment only live in <home>/.env, which
+# `copycord` loads at startup. Write a commented template once; never overwrite
+# it. Keep the keys in step with code/copycord/envfile.py (ENV_KEYS).
+ENV_FILE="$COPYCORD_HOME/.env"
+if [ -e "$ENV_FILE" ]; then
+    :
+elif [ "$DRY_RUN" = "1" ]; then
+    dry "write a commented settings template to $ENV_FILE"
+elif mkdir -p "$COPYCORD_HOME" && (umask 077 && cat >"$ENV_FILE" <<'ENVEOF'
+# Copycord settings that are read from the environment only.
+# Everything else is set in the dashboard. Uncomment a line to use it,
+# or run `copycord config set KEY VALUE`, then restart Copycord.
+
+# dashboard login password; no login page when unset
+#PASSWORD=
+
+# signs the dashboard login cookie (default: a key saved in <home>)
+#SECRET_KEY=
+
+# dashboard port (default 8080)
+#ADMIN_PORT=
+
+# time zone for the daily backup, e.g. Europe/Berlin (default UTC)
+#TZ=
+
+# time zone shown in exports (default America/New_York)
+#UI_TZ=
+
+# HUMAN or JSON log lines (default HUMAN)
+#LOG_FORMAT=
+
+# where the daily database backups go (default <home>/backups)
+#BACKUP_DIR=
+
+# time of the daily backup, HH:MM (default 03:17)
+#BACKUP_AT=
+
+# how many daily backups to keep (default 14)
+#BACKUP_RETAIN=
+
+# 1 turns off the update check on start
+#COPYCORD_NO_UPDATE_CHECK=
+ENVEOF
+); then
+    done_line "Wrote the settings template $ENV_FILE"
+else
+    warn "could not write $ENV_FILE; \`copycord config set\` creates it later"
+fi
+
 # The channel file (update.json) is written by `copycord update --no-install`,
 # so its format stays with the CLI.
 CHANNEL_ARGS=""

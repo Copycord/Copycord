@@ -81,6 +81,27 @@ def test_prints_next_steps(path):
     text = _text(path)
     for step in ("copycord update", "localhost:"):
         assert step in text
+    assert "Finish the setup in the dashboard" in text
+    assert "onboard" not in text.lower()
+
+
+@pytest.mark.parametrize("path", [SH, PS1])
+def test_writes_the_env_template_once(path):
+    from copycord import envfile
+
+    text = _text(path)
+    for line in envfile.template().splitlines():
+        if line:
+            assert line.replace("'", "''") in text or line in text
+    assert "Test-Path $envFile" in text or '[ -e "$ENV_FILE" ]' in text
+
+
+@pytest.mark.parametrize("path", [SH, PS1])
+def test_uses_the_trimmed_cli(path):
+    text = _text(path)
+    assert "--version" in text
+    assert "'--ref'" in text or "--ref $REF" in text
+    assert "copycord version" not in text and "--branch" not in text
 
 
 @pytest.mark.parametrize("path", [SH, PS1])
