@@ -68,6 +68,7 @@ const sidebars = {
       type: 'category',
       label: 'Reference',
       items: [
+        'cli',
         'contributing',
       ],
     },
