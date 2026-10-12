@@ -655,11 +655,38 @@ only after Mac's acceptance for that branch passes. Order reflects dependencies.
   upgrade path (`uv tool upgrade`) works; v3 `data.db` picked up.
 - **Depends on:** single-process (the CLI runs the collapsed process), py-bump.
 
+### v4/docs
+- **Scope:** Bring the Docusaurus site (`website/`) and the repo `README.md` in
+  line with everything v4 changed, as the last branch before release:
+  - Getting started: `uv tool install copycord` as the primary install, then
+    `copycord doctor`, `copycord run`, `copycord service install`; Docker as the
+    alternative with the single-service compose (no `ROLE`).
+  - A CLI reference page: `run`, `service {install,start,stop,status,uninstall}`,
+    `config {get,set,import,export}`, `doctor`, `update`, `version`.
+  - Upgrading from v3: replace the three compose services with one and drop
+    `ROLE` (v4 refuses to start while it is set), or stay on a v3 image tag;
+    `data.db` is picked up as is; `install-tools/` is deprecated.
+  - Logs: admin on the terminal, server and client in the web UI tabs
+    (`server.out` / `client.out` in the data dir), warnings from all three on
+    the terminal.
+  - Supported Python 3.12+ (Docker on 3.14); the client no longer depends on
+    discord.py-self.
+  - `contributing.md`: local dev with the single-container `compose.yml` /
+    `docs/contribute/docker-compose.yml`, Titan/CI test notes.
+  - `README.md`: rewrite the install and upgrade sections to match, link the
+    site pages, and drop v3-only instructions.
+- **Files touched:** `website/docs/**`, `website/sidebars.js`, `README.md`,
+  `install-tools/README.md` (deprecation pointer).
+- **Acceptance (Mac):** the site builds (`npm run build` in `website/`, on
+  Titan or CI), every command shown in the docs runs as written, and the README
+  install steps work on a clean machine.
+- **Depends on:** installer (documents its final CLI).
+
 ### Release
 - Merge `v4` -> main, tag v4.0.0. Ship one container image + the published
   package. `CURRENT_VERSION` bump (`config.py:17`).
 
 Dependency order summary:
 `selfclient-core` -> `selfclient-gateway` -> `selfclient-events`; `py-bump` in
-parallel then merged; `single-process` after events+bump; `installer` last; then
+parallel then merged; `single-process` after events+bump; `installer`; `docs` last; then
 `v4` -> main at release.
