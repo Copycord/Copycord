@@ -12,7 +12,7 @@ import threading
 import pytest
 
 from copycord import supervisor as sup_mod
-from copycord.__main__ import parse_args
+from copycord.__main__ import main, parse_args
 from copycord.supervisor import (
     Backoff,
     RoleSupervisor,
@@ -66,7 +66,6 @@ def _fakes(log=None, **crashes):
 
 def _loopback(fakes):
     return build_supervisor(
-        None,
         fakes,
         control_host="127.0.0.1",
         control_ports={"server": 0, "client": 0},
@@ -342,44 +341,14 @@ def test_control_status_while_crash_looping_reports_running():
 
 
 # --------------------------------------------------------------------------
-# --role
+# Single mode
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("role", ["admin", "server", "client"])
-def test_role_selects_one_role(role, monkeypatch):
-    monkeypatch.delenv("CONTROL_PORT", raising=False)
+def test_default_layout(monkeypatch):
     monkeypatch.delenv("CONTROL_PORT_SERVER", raising=False)
     monkeypatch.delenv("CONTROL_PORT_CLIENT", raising=False)
-    fakes = _fakes()
-    sup = build_supervisor(role, {role: fakes[role]})
-
-    assert list(sup.roles) == [role]
-    if role == "admin":
-        assert sup.controls == []
-        assert sup.autostart == ["admin"]
-    else:
-        # Split mode: one control port reachable from the admin container,
-        # role waits for the admin's start command.
-        assert len(sup.controls) == 1
-        ctl = sup.controls[0]
-        assert ctl.role is sup.roles[role]
-        assert ctl.host == "0.0.0.0"
-        assert ctl.port == {"server": 9101, "client": 9102}[role]
-        assert sup.autostart == []
-
-
-def test_role_split_honours_control_port(monkeypatch):
-    monkeypatch.setenv("CONTROL_PORT", "9999")
-    sup = build_supervisor("client", {"client": FakeRole("client")})
-    assert sup.controls[0].port == 9999
-
-
-def test_all_roles_default_layout(monkeypatch):
-    monkeypatch.setenv("CONTROL_PORT", "9999")  # ignored outside split mode
-    monkeypatch.delenv("CONTROL_PORT_SERVER", raising=False)
-    monkeypatch.delenv("CONTROL_PORT_CLIENT", raising=False)
-    sup = build_supervisor(None, _fakes())
+    sup = build_supervisor(_fakes())
     assert list(sup.roles) == ["admin", "server", "client"]
     assert sup.autostart == ["admin"]
     assert {(c.role.name, c.host, c.port) for c in sup.controls} == {
@@ -388,36 +357,28 @@ def test_all_roles_default_layout(monkeypatch):
     }
 
 
-def test_role_selected_runs_only_that_role():
-    async def main():
-        fakes = _fakes()
-        sup = build_supervisor(
-            "server",
-            {"server": fakes["server"]},
-            control_host="127.0.0.1",
-            control_ports={"server": 0},
-            backoff=FAST,
-        )
-        await sup.start()
-        try:
-            port = sup.controls[0].port
-            await _cmd(port, {"cmd": "start"})
-            await _wait_until(lambda: fakes["server"].starts == 1)
-            assert fakes["admin"].starts == 0
-            assert fakes["client"].starts == 0
-        finally:
-            await sup.shutdown()
-
-    asyncio.run(main())
-
-
-def test_parse_args_role():
-    assert parse_args(["run"]).role is None
-    assert parse_args(["run", "--role", "client"]).role == "client"
+def test_parse_args_has_no_role_option():
+    assert parse_args(["run"].copy()).command == "run"
     with pytest.raises(SystemExit):
-        parse_args(["run", "--role", "bogus"])
-    with pytest.raises(ValueError):
-        build_supervisor("bogus", {})
+        parse_args(["run", "--role", "client"])
+
+
+def test_role_env_guard_exits_before_starting(monkeypatch, caplog):
+    started = []
+    monkeypatch.setattr(
+        sup_mod, "run", lambda *a, **k: started.append(1), raising=True
+    )
+    monkeypatch.setenv("ROLE", "server")
+    with caplog.at_level("ERROR", logger="copycord"):
+        assert main(["run"]) != 0
+    assert started == []
+    assert "ROLE option was removed" in caplog.text
+    assert "one container" in caplog.text
+
+
+def test_role_env_guard_trips_on_empty_value(monkeypatch):
+    monkeypatch.setenv("ROLE", "")
+    assert main(["run"]) == 1
 
 
 # --------------------------------------------------------------------------

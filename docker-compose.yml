@@ -1,11 +1,9 @@
-# Admin, server and client in one container (ROLE=all).
-# For the three-container layout see docker-compose.split.yml.
+# Admin, server and client run together in one container.
 services:
   copycord:
     image: ghcr.io/copycord/copycord:v3.28.0
     container_name: copycord
     environment:
-      - ROLE=all
       - PASSWORD=copycord # change or comment out to disable login page
     ports:
       - "8080:8080" # you can change this port if needed (ex: "9090:8080")

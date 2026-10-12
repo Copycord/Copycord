@@ -12,8 +12,8 @@ Single-process supervisor: admin, server and client as asyncio tasks.
 
 Each role is a RoleSupervisor that owns one task, restarts it on crash with
 capped exponential backoff and can be started/stopped on demand. Server and
-client also get a ControlEndpoint speaking the control.py websocket protocol,
-so the admin drives them over the same control ports as in split mode.
+client also get a ControlEndpoint speaking the control websocket protocol
+(common.control_protocol), so the admin drives them over loopback control ports.
 """
 
 from __future__ import annotations
@@ -69,8 +69,7 @@ class RoleSupervisor:
 
     A crash (any exception from the role coroutine) never propagates out of
     the task, so other roles are unaffected. A role that returns on its own is
-    left stopped unless restart_on_exit is set, which matches split mode where
-    control.py does not respawn a child that exited.
+    left stopped unless restart_on_exit is set.
     """
 
     def __init__(
@@ -179,7 +178,7 @@ class RoleSupervisor:
         )
 
     async def handle(self, msg: dict) -> dict:
-        """Same commands and reply shapes as ControlService._handle_ws_message."""
+        """Commands: status, start, stop."""
         cmd = (msg or {}).get("cmd")
         if cmd == "status":
             return self.status()
@@ -191,7 +190,7 @@ class RoleSupervisor:
 
 
 class ControlEndpoint:
-    """Control websocket for one role, answering like control.py does."""
+    """Control websocket for one role, speaking common.control_protocol."""
 
     def __init__(self, role: RoleSupervisor, host: str, port: int):
         self.role = role
@@ -263,8 +262,7 @@ class Supervisor:
 
 def _apply_db_config() -> None:
     """
-    In-process counterpart of ControlService._load_env_for_child: copy the
-    whitelisted DB.app_config keys into os.environ before a role starts.
+    Copy the whitelisted DB.app_config keys into os.environ before a role starts.
     """
     try:
         from common.db import DBManager
@@ -434,19 +432,14 @@ def admin_factory(host: str, port: int, log_level: str) -> RoleFactory:
 # --------------------------------------------------------------------------
 
 
-def _set_runtime_env(split: bool) -> None:
-    """
-    Environment control.py would hand a child, plus loopback addresses for
-    the single-process mode so roles find each other without compose DNS.
-    """
+def _set_runtime_env() -> None:
+    """Data paths plus loopback addresses so roles find each other in-process."""
     data = Path(os.getenv("DATA_DIR", str(CODE_DIR.parent / "data"))).resolve()
     with contextlib.suppress(Exception):
         data.mkdir(parents=True, exist_ok=True)
     # admin.app reads DATA_DIR itself; keep it on the same directory as DB_PATH.
     os.environ.setdefault("DATA_DIR", str(data))
     os.environ.setdefault("DB_PATH", str(data / "data.db"))
-    if split:
-        return
     sport = os.getenv("CONTROL_PORT_SERVER", str(DEFAULT_SERVER_CONTROL_PORT))
     cport = os.getenv("CONTROL_PORT_CLIENT", str(DEFAULT_CLIENT_CONTROL_PORT))
     for key, value in (
@@ -461,16 +454,13 @@ def _set_runtime_env(split: bool) -> None:
         os.environ.setdefault(key, value)
 
 
-def _control_port(role: str, split: bool) -> int:
-    if split and os.getenv("CONTROL_PORT"):
-        return int(os.environ["CONTROL_PORT"])
+def _control_port(role: str) -> int:
     if role == "server":
         return int(os.getenv("CONTROL_PORT_SERVER", DEFAULT_SERVER_CONTROL_PORT))
     return int(os.getenv("CONTROL_PORT_CLIENT", DEFAULT_CLIENT_CONTROL_PORT))
 
 
 def build_supervisor(
-    role: Optional[str] = None,
     factories: Optional[Dict[str, RoleFactory]] = None,
     *,
     control_host: Optional[str] = None,
@@ -479,72 +469,59 @@ def build_supervisor(
     inprocess_transport: Optional[bool] = None,
 ) -> Supervisor:
     """
-    role=None: all three roles in this process; the admin is autostarted and
-    drives server/client through loopback control ports, as it does in split
-    mode. role="admin"|"server"|"client": just that role, the split-mode
-    equivalent of one container (server/client wait for the admin's start).
+    All three roles in this process; the admin is autostarted and drives
+    server/client through loopback control ports.
 
-    In all-roles mode WebsocketManager/AdminBus switch to the in-process
-    transport (common.inprocess); split mode keeps real sockets.
-    inprocess_transport overrides that (tests use fake factories).
+    WebsocketManager/AdminBus switch to the in-process transport
+    (common.inprocess); inprocess_transport overrides that (tests use fake
+    factories).
 
     factories/control_* overrides exist for tests.
     """
-    if role is not None and role not in ROLES:
-        raise ValueError(f"unknown role {role!r}")
-    split = role is not None
-    names = [role] if split else list(ROLES)
-
     real = factories is None
     if inprocess_transport is None:
-        inprocess_transport = real and not split
+        inprocess_transport = real
     if inprocess_transport:
         from common import inprocess
 
         inprocess.enable()
     if real:
-        factories = {}
-        if "admin" in names:
-            factories["admin"] = admin_factory(
+        factories = {
+            "admin": admin_factory(
                 host="0.0.0.0",
                 port=int(os.getenv("ADMIN_PORT", "8080")),
                 log_level=os.getenv("LOG_LEVEL", "info").lower(),
-            )
-        if "server" in names:
-            factories["server"] = server_factory()
-        if "client" in names:
-            factories["client"] = client_factory()
+            ),
+            "server": server_factory(),
+            "client": client_factory(),
+        }
 
     roles: Dict[str, RoleSupervisor] = {}
-    for name in names:
+    for name in ROLES:
         is_admin = name == "admin"
         roles[name] = RoleSupervisor(
             name,
             factories[name],
             backoff=backoff,
             restart_on_exit=is_admin,
-            # Real server/client read their config from os.environ, like a
-            # control.py child does.
+            # Real server/client read their config from os.environ.
             before_start=_apply_db_config if real and not is_admin else None,
         )
 
-    host = control_host or ("0.0.0.0" if split else "127.0.0.1")
+    host = control_host or "127.0.0.1"
     controls = []
-    for name in names:
-        if name == "admin":
-            continue
+    for name in ("server", "client"):
         port = (control_ports or {}).get(name)
         if port is None:
-            port = _control_port(name, split)
+            port = _control_port(name)
         controls.append(ControlEndpoint(roles[name], host, port))
 
-    autostart = ["admin"] if "admin" in roles else []
-    return Supervisor(roles=roles, controls=controls, autostart=autostart)
+    return Supervisor(roles=roles, controls=controls, autostart=["admin"])
 
 
-async def run(role: Optional[str] = None) -> None:
-    _set_runtime_env(split=role is not None)
-    sup = build_supervisor(role)
+async def run() -> None:
+    _set_runtime_env()
+    sup = build_supervisor()
 
     loop = asyncio.get_running_loop()
     stop = asyncio.Event()

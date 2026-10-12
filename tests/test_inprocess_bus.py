@@ -431,19 +431,13 @@ def _fake_factories():
     return {n: _idle for n in ("admin", "server", "client")}
 
 
-def test_build_supervisor_split_role_keeps_sockets(split):
-    build_supervisor("server", factories={"server": _idle}, control_ports={"server": 0})
-    assert inprocess.active() is None
-
-
 def test_build_supervisor_fake_factories_default_off(split):
-    build_supervisor(None, factories=_fake_factories(), control_ports={"server": 0, "client": 0})
+    build_supervisor(factories=_fake_factories(), control_ports={"server": 0, "client": 0})
     assert inprocess.active() is None
 
 
 def test_build_supervisor_enables_inprocess_for_all_roles(split):
     build_supervisor(
-        None,
         factories=_fake_factories(),
         control_ports={"server": 0, "client": 0},
         inprocess_transport=True,

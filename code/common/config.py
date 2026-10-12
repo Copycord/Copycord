@@ -18,11 +18,9 @@ logger = logging.getLogger(__name__)
 CURRENT_VERSION = "v3.28.0"
 
 
-def _peer_host(compose_name: str) -> str:
-    """Default host of another role: loopback under ROLE=all, else its compose service."""
-    if (os.getenv("ROLE") or "").strip().lower() == "all":
-        return "127.0.0.1"
-    return compose_name
+def _peer_host(_compose_name: str) -> str:
+    """Default host of another role: they all share this process, so loopback."""
+    return "127.0.0.1"
 
 
 class Config:

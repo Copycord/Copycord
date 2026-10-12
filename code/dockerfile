@@ -19,7 +19,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_DEFAULT_TIMEOUT=60 \
     LOG_LEVEL=info \
-    ROLE=all \
     ADMIN_PORT=8080 \
     SERVER_PORT=8765 \
     CLIENT_PORT=8766 \
@@ -32,14 +31,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-${TARGETPLATF
     apt-get install -y --no-install-recommends build-essential curl && \
     rm -rf /var/lib/apt/lists/*
 
-# One venv for every role: the client runs on the in-repo selfclient, so
-# nothing installs a second `discord` package and the requirements no longer
-# conflict. /opt/venvs/{admin,server,client} stay as links so ROLE=admin,
-# server and client (split mode) run exactly as before.
-RUN python -m venv /opt/venvs/copycord && \
-    ln -s /opt/venvs/copycord /opt/venvs/admin && \
-    ln -s /opt/venvs/copycord /opt/venvs/server && \
-    ln -s /opt/venvs/copycord /opt/venvs/client
+# One venv for admin, server and client: the client runs on the in-repo
+# selfclient, so nothing installs a second `discord` package and the
+# requirements no longer conflict.
+RUN python -m venv /opt/venvs/copycord
 
 COPY code/admin/requirements.txt  /tmp/req-admin.txt
 COPY code/server/requirements.txt /tmp/req-server.txt
@@ -51,18 +46,12 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked,id=pip-copycord-${
         -r /tmp/req-admin.txt -r /tmp/req-server.txt -r /tmp/req-client.txt \
         websockets python-dotenv
 
-RUN ln -s /opt/venvs/copycord/bin/python  /usr/local/bin/python-admin  && \
-    ln -s /opt/venvs/copycord/bin/python  /usr/local/bin/python-server && \
-    ln -s /opt/venvs/copycord/bin/python  /usr/local/bin/python-client && \
-    ln -s /opt/venvs/copycord/bin/uvicorn /usr/local/bin/uvicorn-admin || true
-
 WORKDIR /app
 COPY code/admin/   ./admin/
 COPY code/server/  ./server/
 COPY code/client/  ./client/
 COPY code/common/  ./common/
 COPY code/selfclient/ ./selfclient/
-COPY code/control/ ./control/
 COPY code/copycord/ ./copycord/
 COPY code/entrypoint.sh /entrypoint.sh
 
