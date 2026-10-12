@@ -10,8 +10,9 @@ The [install script](/docs/getting-started/manual-install) installs the `copycor
 ```
 copycord run [--data-dir PATH]
 copycord doctor [--data-dir PATH]
-copycord config get KEY [--data-dir PATH]
+copycord config get KEY [--show-secrets] [--data-dir PATH]
 copycord config set KEY VALUE [--data-dir PATH]
+copycord config unset KEY [--data-dir PATH]
 copycord config export [FILE] [--show-secrets] [--data-dir PATH]
 copycord config import FILE [--data-dir PATH]
 copycord service install [--user] [--data-dir PATH]
@@ -61,13 +62,13 @@ copycord run --data-dir ~/copycord-data
 
 The dashboard is at **http://localhost:8080**. Open it to finish the setup: the server bot token, the client token and everything else is configured there (see [Discord Setup](/docs/getting-started/discord-setup) for the tokens). Press **Ctrl+C** to stop. If one part crashes, Copycord restarts that part on its own.
 
-Useful environment variables:
+Useful environment variables (on a native install, set them in [`<home>/.env`](#env-file)):
 
 | Variable | Default | What it does |
 |----------|---------|--------------|
 | `PASSWORD` | unset | Dashboard login password; no login page when unset |
 | `ADMIN_PORT` | `8080` | Dashboard port |
-| `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG` |
+| `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG`; also an app config key, which wins once it is saved |
 | `DATA_DIR` | see above | Same as `--data-dir` |
 
 `copycord run` refuses to start while the old v3 `ROLE` variable is set. See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
@@ -111,11 +112,13 @@ In a terminal each check shows a green check, a yellow `!` or a red cross; piped
 
 ## copycord config {#copycord-config}
 
-Reads and writes the settings Copycord stores in its database (the same values the dashboard's Global Configuration card shows, such as `COMMAND_USERS`, `LOG_LEVEL` or `AUTO_START`).
+Reads and writes Copycord's settings. Most live in the database (the same values the dashboard's Global Configuration card shows, such as `COMMAND_USERS`, `LOG_LEVEL` or `AUTO_START`). The few that are read from the environment only, such as `PASSWORD` and `ADMIN_PORT`, live in [`<home>/.env`](#env-file); `get`, `set` and `unset` pick the right place by the key.
 
 ```bash
 copycord config get LOG_LEVEL
 copycord config set LOG_LEVEL DEBUG
+copycord config unset COMMAND_USERS
+copycord config set PASSWORD 'new-pass'   # goes to <home>/.env
 copycord config export                    # print all values, secrets masked
 copycord config export --show-secrets     # print all values, secrets shown
 copycord config export settings.json      # write all values to a file
@@ -124,15 +127,43 @@ copycord config import settings.json
 
 | Command | What it does |
 |---------|--------------|
-| `get KEY` | Prints the value. Exits with status 1 when the key is not set. |
-| `set KEY VALUE` | Stores the value. Creates the database if needed. |
+| `get KEY` | Prints the value. Values of keys containing `TOKEN`, `PASSWORD` or `SECRET` are shown as `********` unless you add `--show-secrets`. Exits with status 1 when the key is not set. |
+| `set KEY VALUE` | Stores the value: an env-only key in `<home>/.env`, any other key in the database (created if needed). |
+| `unset KEY` | Removes the value from the same place. Exits with status 1 when the key is not set. |
 | `export` | Prints every value as JSON. Values of keys containing `TOKEN`, `PASSWORD` or `SECRET` are shown as `********` unless you add `--show-secrets`. |
 | `export FILE` | Writes every value, unmasked, to `FILE` (readable only by you on Linux/macOS). |
 | `import FILE` | Stores every value from a JSON object of key/value pairs (strings or numbers). Masked `********` values are skipped. |
 
-`get` and `export` need an existing database; when there is none they say so (check `--data-dir`). Restart Copycord after `set` or `import` so it picks up the new values.
+`get` and `export` need an existing database for database keys; when there is none they say so (check `--data-dir`). Restart Copycord after `set`, `unset` or `import` so it picks up the new values. On a service install that is `copycord service stop`, then `copycord service start`; the command prints this reminder.
 
-To move your settings to another machine, run `copycord config export settings.json` on the old one and `copycord config import settings.json` on the new one. Treat the file like a password: it contains your tokens.
+To move your settings to another machine, run `copycord config export settings.json` on the old one and `copycord config import settings.json` on the new one. Treat the file like a password: it contains your tokens. `export` and `import` cover the database only; copy `<home>/.env` yourself.
+
+### Settings that live in .env {#env-file}
+
+Some settings are read from the environment only, before the database is open. In Docker you set them in the compose file. On a native install `copycord` loads `<home>/.env` (for example `~/.copycord/.env`, or `.env` in the `--data-dir` folder) when it starts, for `copycord run` and the service alike. Variables already set in the real environment win over the file.
+
+| Key | What it does |
+|-----|--------------|
+| `PASSWORD` | Dashboard login password; no login page when unset. |
+| `SECRET_KEY` | Signs the dashboard login cookie (default: a key saved in <home>). |
+| `ADMIN_PORT` | Dashboard port (default 8080). |
+| `TZ` | Time zone for the daily backup, e.g. Europe/Berlin (default UTC). |
+| `UI_TZ` | Time zone shown in exports (default America/New_York). |
+| `LOG_FORMAT` | HUMAN or JSON log lines (default HUMAN). |
+| `BACKUP_DIR` | Where the daily database backups go (default <home>/backups). |
+| `BACKUP_AT` | Time of the daily backup, HH:MM (default 03:17). |
+| `BACKUP_RETAIN` | How many daily backups to keep (default 14). |
+| `COPYCORD_NO_UPDATE_CHECK` | 1 turns off the update check on start. |
+| `BACKFILL_*`, `FORWARDING_*` | Tuning knobs for backfills and forwarding; leave them unset unless asked to change them. |
+
+The installer writes a commented template of this file on first install and never overwrites it. `copycord config set` writes these keys there (creating the file, readable only by you on Linux and macOS, if needed), updates a key in place and keeps your comments. To change the dashboard password:
+
+```bash
+copycord config set PASSWORD 'new-pass'
+copycord service stop && copycord service start   # or stop and start `copycord run`
+```
+
+`copycord config get PASSWORD` prints `********`; add `--show-secrets` to see it. `copycord config unset PASSWORD` removes it.
 
 ## copycord service {#copycord-service}
 
@@ -188,7 +219,7 @@ Use `--user` with the other `service` commands as well. Without `--user`, `start
 
 ### Environment variables for the service
 
-The service does not see variables you set in your terminal. To give it `PASSWORD`, `ADMIN_PORT` or other variables:
+The service does not see variables you set in your terminal. The simplest way to give it `PASSWORD`, `ADMIN_PORT` or the other env-only settings is [`<home>/.env`](#env-file): `copycord config set PASSWORD 'new-pass'`, then `copycord service stop` and `copycord service start`. You can also set real environment variables, which win over the file:
 
 - **Linux:** run `systemctl --user edit copycord` (or `sudo systemctl edit copycord` for the system service), add the lines below, save, then restart with `copycord service stop` and `copycord service start`.
 

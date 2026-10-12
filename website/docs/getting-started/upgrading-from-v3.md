@@ -106,7 +106,7 @@ Close the Copycord windows (Windows) or press **Ctrl+C** in the terminal running
 
 ### 2. Note your settings
 
-v4 does not read `code/.env`. Open it and note any values you changed, typically `PASSWORD` and `ADMIN_PORT`. In v4 you set them as environment variables (see [Password and port](/docs/getting-started/manual-install#password-and-port)). Tokens, mappings and dashboard settings are stored in the database and need no action.
+v4 does not read `code/.env`. Open it and note any values you changed, typically `PASSWORD` and `ADMIN_PORT`. In v4 you set them in `<home>/.env` with `copycord config set PASSWORD 'new-pass'`, or as environment variables (see [Settings that live in .env](/docs/getting-started/manual-install#env-file)). Tokens, mappings and dashboard settings are stored in the database and need no action.
 
 ### 3. Install v4
 

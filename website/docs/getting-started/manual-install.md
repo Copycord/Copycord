@@ -145,6 +145,8 @@ This starts the dashboard, the server bot and the client in one process. Open th
 
 **http://localhost:8080**
 
+and finish the setup there: the server bot token, the client token and the other settings are all configured in the dashboard. See [Discord Setup](/docs/getting-started/discord-setup) for how to get the tokens.
+
 Press **Ctrl+C** to stop Copycord.
 
 ### Where your data lives
@@ -162,14 +164,24 @@ To use another folder, pass `--data-dir` (or set the `DATA_DIR` environment vari
 copycord run --data-dir ~/copycord-data
 ```
 
-### Password and port
+### Settings that live in .env {#env-file}
 
-The dashboard listens on all network interfaces. Set these environment variables before starting Copycord:
+The dashboard listens on all network interfaces. A few settings, such as the dashboard password and port, are read from the environment only, so the dashboard cannot change them. Copycord loads them from `<home>/.env` (for example `~/.copycord/.env` or `%USERPROFILE%\.copycord\.env`) when it starts, for `copycord run` and the service alike. The installer creates this file on first install as a commented template that lists every such key, and never overwrites it.
 
-| Variable | Default | What it does |
-|----------|---------|--------------|
+| Key | Default | What it does |
+|-----|---------|--------------|
 | `PASSWORD` | unset (no login) | Password for the dashboard login page |
 | `ADMIN_PORT` | `8080` | Port of the dashboard |
+| `TZ` | `UTC` | Time zone of the daily backup |
+
+Set them with `copycord config set`, which writes the file for you, then restart Copycord. To change the dashboard password:
+
+```bash
+copycord config set PASSWORD 'new-pass'
+copycord service stop && copycord service start   # or stop and start `copycord run`
+```
+
+You can also edit the file by hand. Variables set in the real environment win over the file:
 
 ```bash
 # Linux/macOS
@@ -180,6 +192,8 @@ PASSWORD=changeme ADMIN_PORT=9060 copycord run
 # Windows (PowerShell)
 $env:PASSWORD = 'changeme'; $env:ADMIN_PORT = '9060'; copycord run
 ```
+
+The [CLI reference](/docs/cli#env-file) lists every key.
 
 :::warning Set a password on shared networks
 Without `PASSWORD` anyone who can reach the port can open your dashboard and see your tokens. Set a password whenever the machine is reachable from other devices.
