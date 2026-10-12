@@ -1,8 +1,14 @@
 > **Deprecated in Copycord v4.** The launcher, installer and updater in this
-> folder are replaced by the `copycord` package. Install it with
-> `uv tool install copycord` (or `pipx install copycord`), update it with
-> `copycord update`, and run it in the background with
-> `copycord service install`. This folder stays for v3 installs only.
+> folder are replaced by the install scripts, which install the `copycord`
+> command from the latest GitHub release:
+>
+> - Linux/macOS: `curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh`
+> - Windows (PowerShell): `irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1 | iex`
+>
+> Then update with `copycord update` and run it in the background with
+> `copycord service install`. To move an existing v3 install and its `data/`
+> folder, follow [Upgrading from v3](https://copycord.github.io/Copycord/docs/getting-started/upgrading-from-v3).
+> This folder stays for v3 installs only.
 
 # Copycord Standalone (Launcher, Installer & Updater)
 
