@@ -297,6 +297,24 @@ copycord update --channel beta --no-install
 
 After a successful update, a running [service](#copycord-service) is restarted so it uses the new version.
 
+`status` also shows when Copycord last checked for an update and whether auto-update is on.
+
+### Update check on start {#update-check}
+
+When `copycord run` starts, and when `copycord version` runs in a terminal, Copycord checks the saved [channel](#update-channels) in a background thread: the newest release for `stable` and `beta`, the branch head against the installed commit for `dev`. If there is something newer it prints one line and nothing else happens:
+
+```
+Update available: v4.0.1 (you have v4.0.0). Run copycord update
+```
+
+The check never delays or fails startup (it times out after a few seconds and ignores network errors), and its answer is cached for 24 hours in `update-check.json` in the [data directory](#data-dir). It never installs anything.
+
+To turn it off, set the app config `UPDATE_CHECK_ON_START` to `false` (`copycord config set UPDATE_CHECK_ON_START false`) or set `COPYCORD_NO_UPDATE_CHECK=1` in the environment.
+
+### Auto-update {#auto-update}
+
+Off by default. With the app config `AUTO_UPDATE` set to `true` (`copycord config set AUTO_UPDATE true`), a Copycord running as a background [service](#copycord-service) checks every 6 hours and, when an update exists, runs the same steps as `copycord update` and restarts the service. Every check and every update is written to the log. A `copycord run` in a terminal never updates itself; it only prints the hint above. Docker and git checkouts are not updated this way.
+
 ### Update channels {#update-channels}
 
 | Channel | Installs |

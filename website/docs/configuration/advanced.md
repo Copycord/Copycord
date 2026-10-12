@@ -29,6 +29,15 @@ ADMIN_PORT=9060 copycord run
 
 For a background service, see [Environment variables for the service](/docs/cli#environment-variables-for-the-service).
 
+## Update settings
+
+These app config keys are set with `copycord config set KEY VALUE` and apply after a restart. See [Update check on start](/docs/cli#update-check) and [Auto-update](/docs/cli#auto-update).
+
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `UPDATE_CHECK_ON_START` | `true` | Print a one-line hint at start when a newer version exists on the saved channel. `false` turns it off, as does `COPYCORD_NO_UPDATE_CHECK=1`. |
+| `AUTO_UPDATE` | `false` | `true` lets the background service check every 6 hours, update itself and restart. |
+
 ## Proxy support
 
 Copycord routes all client (self bot) traffic through a proxy when enabled — including login, REST API calls, and the gateway WebSocket connection. This means your real IP never touches Discord.
