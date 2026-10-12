@@ -35,42 +35,17 @@ Create a `compose.yml` file in the project root and use it to build and run Copy
 ```yaml
 # Local build
 services:
-  admin:
+  copycord:
     build:
       context: .
-      dockerfile: code/Dockerfile
-    container_name: copycord-admin
+      dockerfile: code/dockerfile
+    container_name: copycord
     environment:
-      - ROLE=admin
       - PASSWORD=12345
     ports:
       - "8080:8080" # you can change this port if needed (ex: "9060:8080")
     volumes:
       - ./data:/data
-
-  server:
-    build:
-      context: .
-      dockerfile: code/Dockerfile
-    container_name: copycord-server
-    environment:
-      - ROLE=server
-    volumes:
-      - ./data:/data
-    depends_on:
-      - admin
-
-  client:
-    build:
-      context: .
-      dockerfile: code/Dockerfile
-    container_name: copycord-client
-    environment:
-      - ROLE=client
-    volumes:
-      - ./data:/data
-    depends_on:
-      - admin
 ```
 
 Then build and start:
@@ -79,7 +54,7 @@ Then build and start:
 docker compose up --build
 ```
 
-This builds all three services from your local source code instead of pulling pre-built images, so any changes you make are reflected immediately on rebuild.
+This builds the single Copycord container (dashboard, server and client together) from your local source code instead of pulling pre-built images, so any changes you make are reflected immediately on rebuild.
 
 ## Project structure
 

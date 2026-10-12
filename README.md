@@ -104,42 +104,24 @@ Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multi
 
 ```yaml
 services:
-  admin:
+  copycord:
     image: ghcr.io/copycord/copycord:v3.28.0
-    container_name: copycord-admin
+    container_name: copycord
     environment:
-      - ROLE=admin
       - PASSWORD=copycord # change or comment out to disable login
     ports:
       - '8080:8080'
     volumes:
       - ./data:/data
     restart: unless-stopped
-
-  server:
-    image: ghcr.io/copycord/copycord:v3.28.0
-    container_name: copycord-server
-    environment:
-      - ROLE=server
-    volumes:
-      - ./data:/data
-    depends_on:
-      - admin
-    restart: unless-stopped
-
-  client:
-    image: ghcr.io/copycord/copycord:v3.28.0
-    container_name: copycord-client
-    environment:
-      - ROLE=client
-    volumes:
-      - ./data:/data
-    depends_on:
-      - admin
-    restart: unless-stopped
 ```
 
 2. Run `docker compose up -d` and open **http://localhost:8080**
+
+Copycord runs as a single container with the dashboard, server and client together.
+
+> [!NOTE]
+> Upgrading from v3? Delete the `server` and `client` services and every `ROLE` line from your compose file. Copycord now refuses to start while `ROLE` is set. To keep the three-container layout, stay on a v3 image tag.
 
 > [!WARNING]
 > Copycord uses self-bot functionality, which is against Discord's Terms of Service and could lead to account suspension or termination. While uncommon, we strongly recommend using an alternate account to minimize risk.

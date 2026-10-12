@@ -47,47 +47,28 @@ copycord/
 
 ### 2. Create docker-compose.yml
 
-Create a file named `docker-compose.yml` with the following content:
+Create a file named `docker-compose.yml` with the following content. Copycord runs as one container with the dashboard, server and client together:
 
 ```yaml
 services:
-  admin:
+  copycord:
     image: ghcr.io/copycord/copycord:latest # Using version tag is recommended
-    container_name: copycord-admin
+    container_name: copycord
     environment:
-      - ROLE=admin
       - PASSWORD=copycord  # change this or remove the line to disable login
     ports:
       - '8080:8080'       # change the left port if 8080 is taken (e.g. "9060:8080")
     volumes:
       - ./data:/data
     restart: unless-stopped
-
-  server:
-    image: ghcr.io/copycord/copycord:latest # Using version tag is recommended
-    container_name: copycord-server
-    environment:
-      - ROLE=server
-    volumes:
-      - ./data:/data
-    depends_on:
-      - admin
-    restart: unless-stopped
-
-  client:
-    image: ghcr.io/copycord/copycord:latest # Using version tag is recommended
-    container_name: copycord-client
-    environment:
-      - ROLE=client
-    volumes:
-      - ./data:/data
-    depends_on:
-      - admin
-    restart: unless-stopped
 ```
 
 :::tip Customizing the password
 Change `PASSWORD=copycord` to your preferred password, or remove the line entirely to disable dashboard authentication.
+:::
+
+:::note Upgrading from v3
+Upgrading from v3? Delete the `server` and `client` services and every `ROLE` line from your compose file. Copycord now refuses to start while `ROLE` is set. To keep the three-container layout, stay on a v3 image tag.
 :::
 
 ### 3. Launch Copycord
@@ -98,7 +79,7 @@ Open a terminal in the folder containing `docker-compose.yml` and run:
 docker compose up -d
 ```
 
-This pulls the Copycord images and starts all three services. The dashboard will be available at:
+This pulls the Copycord image and starts the container. The dashboard will be available at:
 
 **http://localhost:8080**
 
@@ -108,20 +89,14 @@ This pulls the Copycord images and starts all three services. The dashboard will
 docker compose ps
 ```
 
-You should see three containers running: `copycord-admin`, `copycord-server`, and `copycord-client`.
+You should see one container running: `copycord`.
 
 ## Managing Copycord
 
 ### View logs
 
 ```bash
-# All services
 docker compose logs -f
-
-# Specific service
-docker compose logs -f admin
-docker compose logs -f server
-docker compose logs -f client
 ```
 
 ### Stop Copycord
@@ -144,7 +119,7 @@ docker compose up -d
 
 ### Change the dashboard port
 
-Edit `docker-compose.yml` and change the port mapping on the admin service:
+Edit `docker-compose.yml` and change the port mapping on the `copycord` service:
 
 ```yaml
 ports:
