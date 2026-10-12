@@ -10,7 +10,7 @@ Copycord provides a comprehensive set of slash commands for managing your clone 
 ## Before you start
 
 :::important Prerequisites
-1. Your Discord user ID must be in the `COMMAND_USERS` configuration (set via the dashboard or `.env`)
+1. Your Discord user ID must be in the `COMMAND_USERS` configuration (set via the dashboard, `copycord config set COMMAND_USERS <id>`, or the `COMMAND_USERS` environment variable)
 2. Commands must be run in the **clone server**, not the source server
 3. Both the server bot and client bot must be running
 :::

@@ -11,6 +11,10 @@ Copycord automatically backs up your SQLite database daily. You can also trigger
 
 By default, Copycord runs a daily backup at **03:17 UTC**. Backups are saved as compressed `.tar.gz` archives in the data directory.
 
+:::info Backup before the first v4 start
+When Copycord v4 first opens a database created by v3, it also saves a plain copy as `backups/pre-v4-<timestamp>.db` in the data directory. See [Upgrading from v3](/docs/getting-started/upgrading-from-v3#automatic-backup-of-your-database).
+:::
+
 ## Manual backups
 
 To create an immediate backup:
