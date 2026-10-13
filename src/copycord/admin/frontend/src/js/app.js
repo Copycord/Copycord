@@ -651,7 +651,6 @@
       }
     });
 
-    // Wire auto-start toggle to hidden select
     const gcAutoToggle = document.getElementById("gc-autostart-toggle");
     const gcAutoSelect = document.getElementById("COPYCORD_AUTOSTART");
     if (gcAutoToggle && gcAutoSelect) {
@@ -1793,7 +1792,6 @@
         highlightTokenInputsFromErrors([]);
       }
 
-      // Enable invite button if bot client ID is available
       const inviteBtn = document.getElementById("bot-invite-btn");
       if (inviteBtn && data.bot_client_id) {
         inviteBtn.href = `https://discord.com/oauth2/authorize?client_id=${data.bot_client_id}&permissions=8&integration_type=0&scope=bot`;
@@ -1887,14 +1885,12 @@
       .value.trim();
 
     const settings = {};
-    // Hidden selects (message features from sub-modal)
     document
       .querySelectorAll("#mapping-form select[id^='map_']")
       .forEach((sel) => {
         const key = sel.id.replace(/^map_/, "");
         settings[key] = String(sel.value).toLowerCase() === "true";
       });
-    // Toggle checkboxes (main settings)
     document
       .querySelectorAll("#mapping-form input[data-map-toggle]")
       .forEach((cb) => {
@@ -2443,7 +2439,6 @@
         sel.dispatchEvent(new Event("change", { bubbles: true }));
       });
 
-    // Populate toggle checkboxes
     document
       .querySelectorAll("#mapping-form input[data-map-toggle]")
       .forEach((cb) => {
@@ -2460,7 +2455,6 @@
         cb.checked = !!rawVal;
       });
 
-    // Populate string / numeric user-token options.
     {
       const pickSetting = (key) => {
         if (cloneFrom && cloneFrom.settings && key in cloneFrom.settings)
@@ -2546,7 +2540,6 @@
 
   window.openMappingModal = openMappingModal;
 
-  // ─── User Message Sending (per-mapping user tokens) ──────────────────
   let USER_TOKENS_MAPPING_ID = null;
 
   const UT_STRATEGY_DESCS = {
@@ -2557,7 +2550,7 @@
   };
 
   function normalizeStrategy(v) {
-    // "random" was removed — treat any legacy/unknown value as rotate.
+    // "random" was removed; treat any legacy/unknown value as rotate.
     return v === "sticky_author" ? "sticky_author" : "round_robin";
   }
 
@@ -2731,7 +2724,6 @@
         .addEventListener("click", () => removeUserToken(t.id, name));
       list.appendChild(row);
     }
-    // Re-apply any active search filter after rebuilding the list.
     filterUserTokens();
   }
 
@@ -2790,7 +2782,7 @@
         }
       );
     } catch (e) {
-      /* ignore — UI reflects intent; reload on next open */
+      /* ignore; UI reflects intent; reload on next open */
     }
   }
 
@@ -2822,7 +2814,6 @@
     .getElementById("user_tokens_search")
     ?.addEventListener("input", filterUserTokens);
 
-  // ── Bulk add tokens ──
   function setBulkTokenStatus(msg, type) {
     const el = document.getElementById("user-token-bulk-status");
     if (!el) return;
@@ -2932,7 +2923,6 @@
     .querySelector("#user-token-bulk-modal .modal-backdrop")
     ?.addEventListener("click", closeBulkTokenModal);
 
-  // ── Token settings menu (verify / delete all) ──
   function closeUserTokenMenu() {
     const menu = document.getElementById("user-token-settings-menu");
     const btn = document.getElementById("user-token-settings-open");
@@ -2954,7 +2944,6 @@
     .getElementById("user-token-settings-open")
     ?.addEventListener("click", toggleUserTokenMenu);
 
-  // Close the menu on any outside click or Escape.
   document.addEventListener("click", (e) => {
     const wrap = document.querySelector(".user-token-settings");
     if (wrap && !wrap.contains(e.target)) closeUserTokenMenu();
@@ -3024,7 +3013,7 @@
     const cModalEl = document.getElementById("confirm-modal");
     const stillOpen = () => !!cModalEl && cModalEl.classList.contains("show");
 
-    // Open the modal immediately with a loading state — the verification
+    // Open the modal immediately with a loading state; the verification
     // request happens while the popup is already on screen.
     openConfirm({
       title: "Token verification",
@@ -3059,7 +3048,7 @@
       return;
     }
 
-    // The user closed the popup while we were waiting — don't reopen it.
+    // The user closed the popup while we were waiting; don't reopen it.
     if (!stillOpen()) return;
 
     if (!j.ok || !j.total) {
@@ -3149,7 +3138,6 @@
       if (eyeOff) eyeOff.style.display = show ? "" : "none";
     });
 
-  // ─── Message Features Modal ──────────────────────────────────────────
   const msgFeaturesModal = document.getElementById("msg-features-modal");
   const msgFeaturesOpen  = document.getElementById("msg-features-open");
   const msgFeaturesClose = document.getElementById("msg-features-close");
@@ -3160,7 +3148,6 @@
 
   function openMsgFeatures() {
     if (!msgFeaturesModal) return;
-    // Sync toggle state from mapping form hidden values
     for (const toggle of msgFeatureToggles) {
       const key = toggle.dataset.key;
       const formEl = document.getElementById(`map_${key}`);
@@ -3194,7 +3181,6 @@
     const noEveryone = getMsgFeatureState("DISABLE_EVERYONE_MENTIONS");
     const noRoles = getMsgFeatureState("DISABLE_ROLE_MENTIONS");
 
-    // Reply
     if (replyEl) {
       if (getMsgFeatureState("TAG_REPLY_MSG")) {
         replyEl.innerHTML = `<span class="msg-reply-icon">↩</span> In reply to: <a class="msg-reply-link">Copycord is the best!</a>`;
@@ -3203,7 +3189,6 @@
       }
     }
 
-    // Anonymize
     if (usernameEl) usernameEl.textContent = isAnon ? "SwiftFox123" : "Copycord";
     if (avatarEl) {
       if (isAnon) {
@@ -3215,7 +3200,6 @@
       }
     }
 
-    // Message content with mention previews
     if (contentEl) {
       const everyone = noEveryone
         ? ` <span class="msg-mention-plain">@everyone</span>`
@@ -3226,7 +3210,6 @@
       contentEl.innerHTML = `Hey${everyone} check this out${role}`;
     }
 
-    // Footer
     const parts = [];
     if (getMsgFeatureState("APPEND_TIMESTAMP")) parts.push("Oct 15, 2025 3:42 PM");
     if (getMsgFeatureState("APPEND_AUTHOR")) {
@@ -3236,7 +3219,6 @@
     msgFeaturesPreview.innerHTML = parts.length ? parts.join(" · ") : "";
   }
 
-  // Toggle change handler — sync to hidden form field
   for (const toggle of msgFeatureToggles) {
     const input = toggle.querySelector("input");
     if (!input) continue;
@@ -3823,7 +3805,7 @@
         if (kind === "channel") {
           const pid = obj.parent_id ? String(obj.parent_id) : "";
           // A thread hangs off a channel, not a category, so its parent is
-          // never in catMap -- the endpoint sends the name alongside it.
+          // never in catMap; the endpoint sends the name alongside it.
           const parentName = obj.is_thread
             ? obj.parent_name || ""
             : (pid && catMap.get(pid)) || "";
@@ -4765,7 +4747,6 @@
         field.style.display = match ? "" : "none";
       });
 
-      // Hide sections with no matches, auto-expand when searching
       let anyMatchTotal = false;
       document.querySelectorAll("#mapping-form .mapping-settings-section").forEach((section) => {
         const rows = section.querySelectorAll(".mapping-setting-field");
@@ -4776,7 +4757,6 @@
         if (!q) section.open = false;
       });
 
-      // Show/hide no results message
       let noResults = document.getElementById("mapping-no-results");
       if (!noResults) {
         noResults = document.createElement("div");
@@ -5261,7 +5241,7 @@
       const ws = new WebSocket(url);
       let wsReady = false;
 
-      // Ignore replayed history — only process live events after a short delay
+      // Ignore replayed history; only process live events after a short delay
       setTimeout(() => { wsReady = true; }, 1500);
 
       ws.onmessage = (ev) => {
@@ -5503,7 +5483,6 @@
 
     refreshGuildMappings();
 
-    // ─── Client Proxy Rotation ──────────────────────────────────────────────
     const srvProxyCard    = document.getElementById("srv-proxy-card");
     const srvProxyToggle  = document.getElementById("srv-proxy-toggle");
     const srvProxyChips   = document.getElementById("srv-proxy-chips");
@@ -5517,7 +5496,6 @@
     const srvIntervalInput    = document.getElementById("srv-proxy-interval");
     const srvIntervalUnit     = document.getElementById("srv-proxy-interval-unit");
 
-    // ── Proxy chip helpers ──
 
     function getProxyChipValues() {
       if (!srvProxyChips) return [];
@@ -5704,7 +5682,6 @@
       return val * multiplier;
     }
 
-    // ── Input handling ──
 
     if (srvProxyInput) {
       srvProxyInput.addEventListener("keydown", (e) => {
@@ -5716,7 +5693,6 @@
             srvProxyInput.value = "";
           }
         }
-        // Backspace on empty input removes last chip
         if (e.key === "Backspace" && !srvProxyInput.value) {
           const chips = srvProxyChips.querySelectorAll(".srv-proxy-chip-item");
           if (chips.length) {
@@ -5736,14 +5712,12 @@
       });
     }
 
-    // Click on container focuses input
     if (srvProxyChips && srvProxyInput) {
       srvProxyChips.addEventListener("click", (e) => {
         if (e.target === srvProxyChips) srvProxyInput.focus();
       });
     }
 
-    // ── Auto-save (debounced) ──
 
     let _proxySaveTimer = null;
     function scheduleProxySave() {
@@ -5778,7 +5752,6 @@
       }
     }
 
-    // ── Favorite re-check controls ──
 
     const favRecheckToggle   = document.getElementById("srv-proxy-fav-recheck-toggle");
     const favRecheckControls = document.getElementById("srv-proxy-fav-recheck-controls");
@@ -5838,7 +5811,6 @@
     favRecheckInput?.addEventListener("input", scheduleFavRecheckSave);
     favRecheckUnit?.addEventListener("change", scheduleFavRecheckSave);
 
-    // ── Favorite help modal ──
 
     const favHelpBtn   = document.getElementById("srv-proxy-fav-help-btn");
     const favHelpModal = document.getElementById("proxy-fav-help-modal");
@@ -5876,7 +5848,6 @@
       if (ev.key === "Escape") setFavHelpOpen(false);
     });
 
-    // ── API calls ──
 
     async function loadSrvProxies() {
       if (!srvProxyCard) return;
@@ -6068,7 +6039,6 @@
       });
     }
 
-    // ── Proxy test streaming state ──
     let _proxyTestRunning = false;
     let _proxyTestResults = [];
 
@@ -6127,7 +6097,6 @@
       if (payload.type === "stopped") {
         setTestButton("idle");
         hideProxyProgress();
-        // Clear loading state from untested chips
         srvProxyChips.querySelectorAll(".srv-proxy-chip-item.test-loading").forEach(el => {
           el.classList.remove("test-loading");
           const ms = el.querySelector(".srv-proxy-chip-ms");
@@ -6175,7 +6144,6 @@
       }
     }
 
-    // Check if a test is already running on page load
     async function checkProxyTestStatus() {
       try {
         const r = await fetch("/api/server/proxies/test/status");
@@ -6222,7 +6190,6 @@
     }
     if (srvIntervalUnit)    srvIntervalUnit.addEventListener("change", () => scheduleProxySave());
 
-    // Persist open/closed state
     if (srvProxyCard) {
       if (localStorage.getItem("cpc.proxy-card-open") === "1") srvProxyCard.open = true;
       srvProxyCard.addEventListener("toggle", () => {
@@ -6230,7 +6197,6 @@
       });
     }
 
-    // ─── Proxy Settings Modal ──────────────────────────────────────────────
     const psModal     = document.getElementById("proxy-settings-modal");
     const psClose     = document.getElementById("proxy-settings-close");
     const psBtn       = document.getElementById("srv-proxy-settings-btn");
@@ -6268,7 +6234,6 @@
           for (const [key, el] of Object.entries(psFields)) {
             if (el && j.settings[key] !== undefined) el.value = j.settings[key];
           }
-          // Sync slow threshold to test UI
           if (j.settings.PROXY_SLOW_THRESHOLD) {
             SLOW_THRESHOLD_MS = j.settings.PROXY_SLOW_THRESHOLD * 1000;
           }
@@ -6290,7 +6255,6 @@
       for (const [key, el] of Object.entries(psFields)) {
         if (el) settings[key] = parseInt(el.value, 10) || 1;
       }
-      // Sync slow threshold immediately
       if (settings.PROXY_SLOW_THRESHOLD) {
         SLOW_THRESHOLD_MS = settings.PROXY_SLOW_THRESHOLD * 1000;
       }
@@ -6338,7 +6302,6 @@
     checkProxyTestStatus();
     loadProxySettings();
 
-    // ─── Sync Timing Settings ─────────────────────────────────────────────
     const syncStartupDelay = document.getElementById("sync-startup-delay");
     const syncGuildDelay   = document.getElementById("sync-guild-delay");
     const syncRandomize    = document.getElementById("sync-randomize");
@@ -6385,7 +6348,6 @@
       });
     }
 
-    // Persist open/closed state for Global Config and Cloning Config
     ["global-config-card", "guild-config-card"].forEach(id => {
       const card = document.getElementById(id);
       if (!card) return;
@@ -6397,7 +6359,6 @@
       });
     });
 
-    // ─── Notification Settings ──────────────────────────────────────────
     const notifCard       = document.getElementById("notifications-card");
     const notifWebhookUrl = document.getElementById("notif-webhook-url");
     const notifTestBtn    = document.getElementById("notif-test-btn");

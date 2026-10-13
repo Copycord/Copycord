@@ -91,7 +91,6 @@
   const $ = (sel) => advRoot?.querySelector(sel);
   const SHRUG = String.raw`¯\_(ツ)_/¯`;
 
-  // Generic date-time (kept in case it's used elsewhere)
   const fmtWhen = (iso) => {
     if (!iso) return "—";
     try {

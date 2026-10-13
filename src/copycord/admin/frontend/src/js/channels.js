@@ -4297,14 +4297,9 @@
     return tpl.innerHTML;
   }
 
-  /**
-   * openConfirm(options, onConfirm)
-   *
-   * New/optional options:
-   * - html: string  → insert as HTML (sanitized by default)
-   * - bodyNode: Node → insert DOM node
-   * - dangerouslyAllowHtml: boolean → skip sanitizeHtml if true
-   * - bodyIsText: boolean → force treat `body` as plain text
+  /*
+   * openConfirm options: html (inserted sanitized), bodyNode (DOM node),
+   * dangerouslyAllowHtml (skip sanitizing), bodyIsText (treat body as plain text).
    */
   function openConfirm(
     {

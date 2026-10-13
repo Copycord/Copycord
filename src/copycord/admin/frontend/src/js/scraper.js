@@ -403,7 +403,6 @@
     } catch { return []; }
   }
 
-  /* ── Queue helpers ── */
 
   async function getScraperPayload() {
     const proxies = await getProxyLines();
@@ -526,7 +525,6 @@
   startBtn.addEventListener("click", async () => {
     const gid = guildIdIn.value.trim();
 
-    // If no guild ID but there are queued items, just start the queue
     if (!gid && queueItems.length > 0) {
       startBtn.disabled = true;
       const j = await api("/api/scraper/queue/start", { method: "POST" });
@@ -644,7 +642,7 @@
       lastProgress = { current, total, time: now };
     }
     progressText.textContent = message || `${current} found`;
-    // Only show the target (goal) count — don't update with current
+    // Only show the target (goal) count: don't update with current
     if (total && total > 0) {
       memberCountEl.textContent = `${total.toLocaleString()} members`;
     }
@@ -664,10 +662,8 @@
       toast(data.error || "Scrape failed", { type: "error" });
     }
 
-    // If there are more items in the queue, keep running state
     const hasPending = queueItems.some(q => q.status === "pending");
     if (hasPending) {
-      // Reset progress for the next item
       progressFill.style.width = "0%";
       progressText.textContent = "Starting next in queue…";
       progressPct.textContent = "0%";
@@ -682,7 +678,6 @@
       return;
     }
 
-    // No more items — fully exit running state
     exitRunningState();
 
     if (data.success) {
@@ -720,12 +715,10 @@
     queueItems = data.queue || [];
     renderQueue();
 
-    // If the queue is now empty and nothing is running, ensure we exit running state
     if (!data.running && running) {
       exitRunningState();
       setStatus("idle", "Idle");
     }
-    // If something is running and we weren't in running state, enter it
     if (data.running && !running) {
       enterRunningState();
     }
@@ -840,7 +833,6 @@
   async function checkStatus() {
     const j = await api("/api/scraper/status");
 
-    // Restore queue
     if (j.queue && j.queue.length > 0) {
       queueItems = j.queue;
       renderQueue();
