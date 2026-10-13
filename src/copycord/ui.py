@@ -568,7 +568,8 @@ class _Capture:
 
 
 class section:
-    """A titled block of output. On the rail it is a box hanging off it:
+    """A titled block of output. On the rail it is a box hanging off it, as
+    wide as the terminal up to SECTION_MAX:
 
       │
       ◇  Install ──────────╮
@@ -617,8 +618,9 @@ def render_section(title: str, lines: Iterable[str], stream: Optional[TextIO] = 
     rows: List[str] = []
     for x in lines:
         rows.extend(_wrap(x.rstrip(), room))
-    width = max([_visible_len(x) for x in rows] + [len(title) + 2, SECTION_MIN])
-    width = min(width, max(room, len(title) + 2))
+    # Every box is as wide as the terminal (up to SECTION_MAX), so the boxes
+    # of one command line up whatever is in them.
+    width = max(room, len(title) + 2)
     bar = g("bar")
     print(bar, file=stream)
     dash = lambda n: _rail_glyph("rule", stream, n)  # noqa: E731

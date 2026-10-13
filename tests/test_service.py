@@ -745,6 +745,51 @@ def test_cli_status_not_installed(status_svc, capsys):
     )
 
 
+class _Tty:
+    """stdout on a terminal, so the rail is shown."""
+
+    encoding = "utf-8"
+
+    def __init__(self):
+        import io
+
+        self.buf = io.StringIO()
+
+    def write(self, text):
+        return self.buf.write(text)
+
+    def flush(self):
+        pass
+
+    def isatty(self):
+        return True
+
+
+def _on_a_terminal(monkeypatch, columns=78):
+    import sys
+
+    from copycord import ui
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(ui, "_columns", lambda: columns)
+    monkeypatch.setattr(ui, "brand", lambda stream=None: "Copycord v4.0.0 (abcdef1)")
+    out = _Tty()
+    monkeypatch.setattr(sys, "stdout", out)
+    return out
+
+
+def test_cli_status_not_installed_on_a_terminal_is_a_rail(status_svc, monkeypatch):
+    status_svc(installed=False, running=False)
+    out = _on_a_terminal(monkeypatch)
+    assert cli.main(["service", "status"]) == 3
+    lines = out.buf.getvalue().splitlines()
+    assert "Copycord v4.0.0 (abcdef1)" in lines
+    assert "\u250c  Copycord service status" in lines
+    assert any(x.startswith("\u25c7  Copycord service \u2500") for x in lines)
+    assert any("Status  \u2022 not installed" in x for x in lines)
+    assert lines[-1] == "\u2514  Install it with copycord service install"
+
+
 def test_cli_status_json(status_svc, capsys):
     import json
 

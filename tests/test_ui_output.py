@@ -581,6 +581,28 @@ def test_section_ignores_link_codes_in_width(term, monkeypatch):
     assert _osc8(URL) in buf.getvalue()
 
 
+def test_sections_of_one_rail_are_equally_wide(term, monkeypatch):
+    term.setenv("NO_COLOR", "1")
+    buf = TTY()
+    monkeypatch.setattr(sys, "stdout", buf)
+    monkeypatch.setattr(ui, "_columns", lambda: 78)
+    with ui.Rail("Copycord doctor", stream=buf):
+        with ui.section("Install", stream=buf) as sec:
+            ui.line("ok", "Python 3.12 at /usr/lib/python3.12 with every module it needs",
+                    stream=sec.out)
+        with ui.section("Updates", stream=buf) as sec:
+            ui.line("ok", "up to date", stream=sec.out)
+    box = [x for x in buf.getvalue().splitlines() if x.startswith(("\u25c7", "\u2502 ", "\u251c"))]
+    assert {len(x) for x in box} == {78}
+
+
+def test_sections_are_capped_on_a_wide_terminal(term, monkeypatch):
+    term.setenv("NO_COLOR", "1")
+    lines = _section(TTY(), "Updates", [("ok", "up to date")], monkeypatch, columns=200)
+    box = [x for x in lines if x.startswith(("\u25c7", "\u2502 ", "\u251c"))]
+    assert {len(x) for x in box} == {ui.SECTION_MAX}
+
+
 def test_section_ascii_fallback(term, monkeypatch):
     term.setenv("NO_COLOR", "1")
     buf = TTY()

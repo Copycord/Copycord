@@ -850,8 +850,16 @@ def show_status(svc, as_json: bool = False) -> int:
         doc["type"] = kind
         jsonout.emit(doc)
         return 0 if st.running else 3
+    tty = sys.stdout.isatty()
     if not st.installed:
-        _not_installed(svc)
+        if not tty:
+            _not_installed(svc)
+            return 3
+        with ui.Rail("Copycord service status", brand=ui.brand(), heading=False) as rail:
+            with ui.section("Copycord service"):
+                ui.kv([("Status", f"{ui.mark('info')} not installed")], width=len("Status"))
+            ui.gap()
+            rail.close(f"Install it with {ui.cmd('copycord service install')}")
         return 3
     if st.running:
         status = f"{ui.mark('ok')} running"
@@ -867,7 +875,6 @@ def show_status(svc, as_json: bool = False) -> int:
     if logs:
         is_cmd = logs.startswith("journalctl")
         rows.append(("Logs", ui.cmd(logs) if is_cmd else ui.path_link(logs)))
-    tty = sys.stdout.isatty()
     with ui.Rail("Copycord service status", brand=ui.brand() if tty else "",
                  heading=False) as rail:
         with ui.section("Copycord service"):
