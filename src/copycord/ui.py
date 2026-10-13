@@ -177,6 +177,72 @@ def linkify(text: str, stream: Optional[TextIO] = None) -> str:
     return _URL.sub(one, text)
 
 
+_DRIVE = re.compile(r"[A-Za-z]:[\\/]")
+# Where a path in a sentence ends.
+_PATH_END = re.compile(r"[^\s;,'\"`\033]*")
+
+
+def _local(stream: Optional[TextIO] = None) -> bool:
+    """True when a file link would open on this machine: links on, no SSH,
+    no Docker and no --json."""
+    if not hyperlinks(stream):
+        return False
+    env = os.environ
+    if env.get("SSH_CONNECTION") or env.get("SSH_CLIENT") or env.get("SSH_TTY"):
+        return False
+    from copycord import jsonout
+    from copycord.common.paths import in_docker
+
+    return not in_docker() and not jsonout.active()
+
+
+def file_uri(path) -> Optional[str]:
+    """path as a file:// URI with this host's name, as `ls --hyperlink` writes
+    it; file:///C:/... for a Windows path. None when path has no such form."""
+    from urllib.parse import quote
+
+    text = str(path)
+    full = text if _DRIVE.match(text) else os.path.abspath(text)
+    if _DRIVE.match(full):
+        return "file:///" + quote(full.replace("\\", "/"), safe="/:")
+    if full.startswith("/"):
+        import socket
+
+        return f"file://{quote(socket.gethostname())}{quote(full, safe='/')}"
+    return None
+
+
+def path_link(path, stream: Optional[TextIO] = None) -> str:
+    """path as printed, a link that opens it where the terminal supports it
+    and the session is on this machine."""
+    text = str(path)
+    uri = file_uri(text) if _local(stream) else None
+    if uri is None:
+        return text
+    return f"\033]8;;{uri}\033\\{text}\033]8;;\033\\"
+
+
+def link_paths(text: str, roots: Iterable, stream: Optional[TextIO] = None) -> str:
+    """text with every path in or under one of roots made clickable, see path_link()."""
+    roots = sorted({str(r) for r in roots if str(r)}, key=len, reverse=True)
+    if not roots or not any(r in text for r in roots) or not _local(stream):
+        return text
+    pattern = re.compile(
+        "(?:" + "|".join(re.escape(r) for r in roots) + r")(?:[\\/][^\s;,'\"`\033]*)?"
+    )
+
+    def one(m: "re.Match") -> str:
+        path = m.group(0)
+        # A longer name that only starts with a root, e.g. .copycord-old.
+        if _PATH_END.match(text, m.end()).group(0).rstrip(".,;:!?)"):
+            return path
+        trail = len(path) - len(path.rstrip(".,;:!?)"))
+        path, rest = (path[:-trail], path[-trail:]) if trail else (path, "")
+        return path_link(path, stream) + rest
+
+    return pattern.sub(one, text)
+
+
 # --------------------------------------------------------------------------
 # step lines
 # --------------------------------------------------------------------------
