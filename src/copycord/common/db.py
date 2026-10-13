@@ -20,8 +20,7 @@ import secrets
 
 logger = logging.getLogger("common.db")
 
-# app_config row that orders future migrations (PLAN 7.1). A DB without it has
-# never been opened by v4.
+# app_config row that orders future migrations. A DB without it has never been opened by v4.
 SCHEMA_VERSION_KEY = "schema_version"
 SCHEMA_VERSION = 4
 # data-pre-update-<from version>-<UTC timestamp>.db, written by `copycord update`.
@@ -98,11 +97,7 @@ def backup_pre_update(
     backup_dir: Optional[Path] = None,
     retain: int = PRE_UPDATE_RETAIN,
 ) -> Optional[Path]:
-    """
-    Consistent copy of db_path (sqlite online backup) to
-    <backup_dir>/data-pre-update-<from_version>-<UTC timestamp>.db, then keep
-    only the newest `retain` of them. None when there is no DB yet; errors raise.
-    """
+    """Online-backup copy of db_path to <backup_dir>/data-pre-update-<from_version>-<UTC timestamp>.db, keeping the newest `retain`. None when there is no DB yet."""
     path = Path(db_path)
     if not path.is_file() or path.stat().st_size == 0:
         return None
@@ -159,10 +154,7 @@ def needs_pre_v4_backup(db_path: str) -> bool:
 
 
 def backup_pre_v4(db_path: str, backup_dir: Optional[Path] = None) -> Optional[Path]:
-    """
-    Copy a pre-v4 DB to <data dir>/backups/pre-v4-<timestamp>.db before v4
-    first opens it. Returns the copy, or None when no backup was needed.
-    """
+    """Copy a pre-v4 DB to <data dir>/backups/pre-v4-<timestamp>.db before v4 first opens it; None when no backup was needed."""
     if not needs_pre_v4_backup(db_path):
         return None
     if backup_dir is None:
@@ -177,7 +169,7 @@ def backup_pre_v4(db_path: str, backup_dir: Optional[Path] = None) -> Optional[P
     while dest.exists():
         dest = backup_dir / f"pre-v4-{stamp}-{n}.db"
         n += 1
-    # sqlite backup API rather than a file copy so a leftover WAL is included.
+    # sqlite backup API rather than a file copy so a leftover WAL is included
     src = sqlite3.connect(f"{Path(db_path).resolve().as_uri()}?mode=ro", uri=True)
     try:
         out = sqlite3.connect(str(dest))
@@ -194,7 +186,7 @@ def backup_pre_v4(db_path: str, backup_dir: Optional[Path] = None) -> Optional[P
 class DBManager:
     def __init__(self, db_path: str, init_schema: bool = False):
         self.path = db_path
-        # Before anything writes: a newer Copycord's DB is never touched.
+        # before anything writes: a newer Copycord's DB is never touched
         check_schema_version(self.path)
         if init_schema:
             backup_pre_v4(self.path)
@@ -214,10 +206,7 @@ class DBManager:
             self._set_schema_version()
 
     def _set_schema_version(self) -> None:
-        """Record the schema version; written after the pre-v4 backup exists.
-
-        Only ever raises the stored value, never lowers it.
-        """
+        """Record the schema version, written after the pre-v4 backup exists; only ever raises it."""
         raw = self.get_config(SCHEMA_VERSION_KEY, "")
         try:
             stored = int(raw) if raw else None
@@ -228,10 +217,7 @@ class DBManager:
         self.set_config(SCHEMA_VERSION_KEY, str(SCHEMA_VERSION))
 
     def _init_schema(self):
-        """
-        Initializes the database schema by creating necessary tables, adding columns if they
-        do not exist, and setting up triggers for automatic timestamp updates.
-        """
+        """Create tables, add missing columns and set up timestamp triggers."""
         c = self.conn.cursor()
 
         self._ensure_table(
@@ -847,16 +833,12 @@ class DBManager:
                 "original_message_id": "original_message_id",
                 "original_guild_id": "original_guild_id",
                 "original_channel_id": "original_channel_id",
-                # Copy, do not blank. This read "NULL" from when the column was
-                # new, which was harmless only because nothing had rebuilt the
-                # table since; any later rebuild would have wiped the guild off
-                # every mapping, and it is half the primary key.
+                # copy, do not blank: a later rebuild would wipe the guild off every mapping, and it is half the primary key
                 "cloned_guild_id": "cloned_guild_id",
                 "cloned_channel_id": "cloned_channel_id",
                 "cloned_message_id": "cloned_message_id",
                 "webhook_url": "webhook_url",
-                # Absent on older tables; _ensure_table turns an unknown
-                # identifier into NULL, which is the right default here.
+                # absent on older tables; _ensure_table turns an unknown identifier into NULL
                 "sent_token_id": "sent_token_id",
                 "created_at": "created_at",
                 "updated_at": "updated_at",
@@ -1337,10 +1319,7 @@ class DBManager:
             ],
         )
 
-        # Sticky-author identity assignments: which token account currently
-        # "is" a given host author, when it was assigned (drives the TTL), and
-        # which nickname / clone roles the bot applied (so they can be reset on
-        # rotation or cleanup).
+        # sticky-author identity assignments: the token account that "is" a host author, when assigned (TTL), and the nickname/clone roles applied
         self._ensure_table(
             name="mapping_token_identities",
             create_sql_template="""
@@ -1404,9 +1383,7 @@ class DBManager:
         post_sql: list[str] | None = None,
         forbidden_columns: set[str] | None = None,
     ):
-        """
-        Create or rebuild table `name` to match the target schema.
-        """
+        """Create or rebuild table `name` to match the target schema."""
         post_sql = post_sql or []
         forbidden_columns = forbidden_columns or set()
 
@@ -1507,10 +1484,7 @@ class DBManager:
         }
 
     def get_applied_asset_hash(self, cloned_guild_id: int, kind: str) -> str:
-        """
-        Last host asset hash applied to a clone guild's icon/banner/splash/
-        discovery_splash. Empty string when never applied (or cleared).
-        """
+        """Last host asset hash applied to a clone guild's icon/banner/splash/discovery_splash; empty if never applied."""
         row = self.conn.execute(
             "SELECT applied_hash FROM guild_asset_state "
             "WHERE cloned_guild_id=? AND kind=?",
@@ -1531,9 +1505,7 @@ class DBManager:
             )
 
     def get_version(self) -> str:
-        """
-        Retrieves the version information from the settings table in the database.
-        """
+        """Return the version from the settings table."""
         row = self.conn.execute("SELECT version FROM settings WHERE id = 1").fetchone()
         return row[0] if row else ""
 
@@ -1548,9 +1520,7 @@ class DBManager:
             )
 
     def get_notified_version(self) -> str:
-        """
-        Retrieves the notified version from the settings table in the database.
-        """
+        """Return the notified version from the settings table."""
         row = self.conn.execute(
             "SELECT notified_version FROM settings WHERE id = 1"
         ).fetchone()
@@ -1567,9 +1537,7 @@ class DBManager:
             )
 
     def get_all_category_mappings(self) -> List[sqlite3.Row]:
-        """
-        Retrieves all category mappings from the database.
-        """
+        """Return all category mappings."""
         return self.conn.execute("SELECT * FROM category_mappings").fetchall()
 
     def upsert_category_mapping(
@@ -1679,27 +1647,17 @@ class DBManager:
             )
 
     def count_categories(self) -> int:
-        """
-        Counts the total number of categories in the 'category_mappings' table.
-        """
+        """Count rows in 'category_mappings'."""
         return self.conn.execute("SELECT COUNT(*) FROM category_mappings").fetchone()[0]
 
     def get_all_channel_mappings(self) -> List[sqlite3.Row]:
-        """
-        Retrieves all channel mappings from the database.
-        """
+        """Return all channel mappings."""
         return self.conn.execute("SELECT * FROM channel_mappings").fetchall()
 
     def get_channel_mapping_by_clone_id(
         self, cloned_channel_id: int
     ) -> Optional[sqlite3.Row]:
-        """
-        Look up a single channel mapping by the cloned (destination) channel id.
-
-        Returns:
-            sqlite3.Row with columns from `channel_mappings` (e.g., original_channel_id,
-            cloned_channel_id, etc.), or None if not found.
-        """
+        """Look up a channel mapping by the cloned channel id; a sqlite3.Row or None."""
         return self.conn.execute(
             "SELECT * FROM channel_mappings WHERE cloned_channel_id = ? LIMIT 1",
             (cloned_channel_id,),
@@ -1712,9 +1670,7 @@ class DBManager:
     def get_channel_mapping_by_original_id(
         self, original_channel_id: int
     ) -> Optional[sqlite3.Row]:
-        """
-        Look up a single channel mapping by the original (source) channel id.
-        """
+        """Look up a channel mapping by the original channel id."""
         return self.conn.execute(
             "SELECT * FROM channel_mappings WHERE original_channel_id = ? LIMIT 1",
             (original_channel_id,),
@@ -1723,13 +1679,7 @@ class DBManager:
     def resolve_original_from_any_id(
         self, any_channel_id: int
     ) -> tuple[Optional[int], Optional[int], str]:
-        """
-        Accept either a cloned id or an original id.
-
-        Returns:
-            (original_id, cloned_id_or_none, source)
-            where source is 'from_clone' | 'from_original' | 'assumed_original'
-        """
+        """Accept a cloned or original id; returns (original_id, cloned_id_or_none, source) with source 'from_clone' | 'from_original' | 'assumed_original'."""
         row = self.get_channel_mapping_by_clone_id(any_channel_id)
         if row:
             return (
@@ -1750,9 +1700,7 @@ class DBManager:
         return int(any_channel_id), None, "assumed_original"
 
     def get_all_threads(self) -> List[sqlite3.Row]:
-        """
-        Retrieves all rows from the 'threads' table in the database.
-        """
+        """Return all rows from 'threads'."""
         return self.conn.execute("SELECT * FROM threads").fetchall()
 
     def upsert_forum_thread_mapping(
@@ -1799,9 +1747,7 @@ class DBManager:
         self.conn.commit()
 
     def delete_forum_thread_mapping(self, orig_thread_id: int):
-        """
-        Deletes a forum thread mapping from the database.
-        """
+        """Delete a forum thread mapping."""
         self.conn.execute(
             "DELETE FROM threads WHERE original_thread_id = ?",
             (orig_thread_id,),
@@ -1908,9 +1854,7 @@ class DBManager:
             )
 
     def count_channels(self) -> int:
-        """
-        Counts the total number of channels in the 'channel_mappings' table.
-        """
+        """Count rows in 'channel_mappings'."""
         return self.conn.execute("SELECT COUNT(*) FROM channel_mappings").fetchone()[0]
 
     def add_blocked_keyword(
@@ -1920,10 +1864,7 @@ class DBManager:
         original_guild_id: int | None,
         cloned_guild_id: int | None,
     ) -> bool:
-        """
-        Try to add this keyword for (original_guild_id, cloned_guild_id).
-        Returns True if inserted, False if it already existed.
-        """
+        """Add the keyword for the guild pair; False if it already existed."""
         kw_norm = keyword.strip().lower()
         if not kw_norm:
             return False
@@ -1952,10 +1893,7 @@ class DBManager:
         original_guild_id: int | None,
         cloned_guild_id: int | None,
     ) -> bool:
-        """
-        Remove this keyword for (original_guild_id, cloned_guild_id).
-        Returns True if something was deleted.
-        """
+        """Remove the keyword for the guild pair; True if a row was deleted."""
         kw_norm = keyword.strip().lower()
         if not kw_norm:
             return False
@@ -1985,9 +1923,7 @@ class DBManager:
             return cur.rowcount > 0
 
     def get_all_emoji_mappings(self) -> list[sqlite3.Row]:
-        """
-        Retrieves all emoji mappings from the database.
-        """
+        """Return all emoji mappings."""
         return self.conn.execute("SELECT * FROM emoji_mappings").fetchall()
 
     def upsert_emoji_mapping(
@@ -2030,10 +1966,7 @@ class DBManager:
         self.conn.commit()
 
     def get_emoji_mapping(self, original_id: int) -> sqlite3.Row | None:
-        """
-        Returns the row for this original emoji ID, or None if we never
-        cloned that emoji.
-        """
+        """Return the row for this original emoji id, or None if never cloned."""
         return self.conn.execute(
             "SELECT * FROM emoji_mappings WHERE original_emoji_id = ?", (original_id,)
         ).fetchone()
@@ -2057,11 +1990,7 @@ class DBManager:
         return cur.rowcount > 0
 
     def get_announcement_users(self, guild_id: int, keyword: str) -> list[int]:
-        """
-        Users subscribed to this keyword in this guild, plus:
-        - '*' in this guild (all keywords), and
-        - if you support cross-guild global subs: guild_id=0 records.
-        """
+        """Users subscribed to this keyword in this guild, plus '*' subscribers and guild_id=0 global subscriptions."""
         rows = self.conn.execute(
             "SELECT user_id FROM announcement_subscriptions "
             "WHERE (guild_id = ? AND (keyword = ? OR keyword = '*')) "
@@ -2114,10 +2043,7 @@ class DBManager:
         return d
 
     def get_all_announcement_triggers_flat(self) -> list[sqlite3.Row]:
-        """
-        Returns every row in announcement_triggers with no grouping.
-        Columns: guild_id, keyword, filter_user_id, channel_id, last_updated
-        """
+        """Every row in announcement_triggers, ungrouped."""
         return self.conn.execute(
             """
             SELECT guild_id, keyword, filter_user_id, channel_id, last_updated
@@ -2127,10 +2053,7 @@ class DBManager:
         ).fetchall()
 
     def get_all_announcement_subscriptions_flat(self) -> list[sqlite3.Row]:
-        """
-        Returns every row in announcement_subscriptions with no grouping.
-        Columns: guild_id, keyword, user_id, last_updated
-        """
+        """Every row in announcement_subscriptions, ungrouped."""
         return self.conn.execute(
             """
             SELECT guild_id, keyword, user_id, last_updated
@@ -2142,10 +2065,7 @@ class DBManager:
     def get_effective_announcement_triggers(
         self, guild_id: int
     ) -> dict[str, list[tuple[int, int]]]:
-        """
-        Triggers that apply to this guild: rows where guild_id IN (guild_id, 0).
-        Returns {keyword: [(filter_user_id, channel_id), ...]} with duplicates removed.
-        """
+        """Triggers for guild_id and the global 0 scope, as {keyword: [(filter_user_id, channel_id), ...]} without duplicates."""
         rows = self.conn.execute(
             """
             SELECT keyword, filter_user_id, channel_id
@@ -2373,10 +2293,7 @@ class DBManager:
         exclude_categories: list[int],
         exclude_channels: list[int],
     ) -> None:
-        """
-        Overwrite the *global* filters (NULL/NULL scope).
-        Guild-scoped filters remain untouched.
-        """
+        """Overwrite the global (NULL/NULL scope) filters, leaving guild-scoped ones untouched."""
         cur = self.conn.cursor()
 
         cur.execute(
@@ -2418,15 +2335,7 @@ class DBManager:
         original_guild_id: int | None = None,
         cloned_guild_id: int | None = None,
     ) -> None:
-        """
-        Insert a single filter row (no-op if it already exists).
-
-        kind: 'whitelist' | 'exclude'
-        scope: 'category' | 'channel'
-
-        If you pass original_guild_id / cloned_guild_id, this becomes a
-        per-mapping rule. If you omit them, it's global.
-        """
+        """Insert a filter row, no-op if it exists. kind is 'whitelist' | 'exclude', scope 'category' | 'channel'; with guild ids it is a per-mapping rule, otherwise global."""
         with self.lock, self.conn:
             self.conn.execute(
                 """
@@ -2501,10 +2410,7 @@ class DBManager:
         ).fetchone()
 
     def get_all_guilds(self) -> list[dict]:
-        """
-        Returns all guilds as a list of dicts with keys:
-        guild_id, name, icon_url, owner_id, member_count, description, last_seen, last_updated
-        """
+        """Return all guilds as dicts (guild_id, name, icon_url, owner_id, member_count, description, last_seen, last_updated)."""
         with self.lock:
             cur = self.conn.execute(
                 """
@@ -2593,11 +2499,7 @@ class DBManager:
             )
 
     def resolve_original_category_id_by_name(self, name: str) -> int | None:
-        """
-        Resolve an original_category_id using a human name.
-        Prefer current upstream name; fall back to pinned clone name.
-        Case-insensitive exact match.
-        """
+        """Resolve an original_category_id from a name: case-insensitive exact match, current upstream name first, then the pinned clone name."""
         n = name.strip()
         if not n:
             return None
@@ -2628,13 +2530,7 @@ class DBManager:
     def remove_role_block(
         self, original_role_id: int, cloned_guild_id: int | None = None
     ) -> bool:
-        """
-        Remove a block.
-
-        If cloned_guild_id is given, remove only for that clone guild.
-        If None, remove the block for all clones of that original role.
-        Returns True if any rows were removed.
-        """
+        """Remove a block for the clone guild, or for all clones when cloned_guild_id is None. True if any row was removed."""
         with self.lock, self.conn:
             if cloned_guild_id is None:
                 cur = self.conn.execute(
@@ -2651,12 +2547,7 @@ class DBManager:
     def is_role_blocked(
         self, original_role_id: int, cloned_guild_id: int | None = None
     ) -> bool:
-        """
-        Check whether a role is blocked.
-
-        If cloned_guild_id is provided, the check is scoped to that clone guild.
-        If not, it checks for any block for this original role.
-        """
+        """Whether a role is blocked, scoped to the clone guild when given, otherwise any block."""
         if cloned_guild_id is None:
             row = self.conn.execute(
                 "SELECT 1 FROM role_blocks WHERE original_role_id = ?",
@@ -2674,11 +2565,7 @@ class DBManager:
         return bool(row)
 
     def get_blocked_role_ids(self, cloned_guild_id: int | None = None) -> list[int]:
-        """
-        Return blocked original_role_id values.
-
-        If cloned_guild_id is provided, only blocks for that clone are returned.
-        """
+        """Blocked original_role_id values, only for the clone when cloned_guild_id is given."""
         if cloned_guild_id is None:
             rows = self.conn.execute(
                 "SELECT original_role_id FROM role_blocks"
@@ -2691,12 +2578,7 @@ class DBManager:
         return [int(r[0]) for r in rows]
 
     def clear_role_blocks(self, cloned_guild_id: int | None = None) -> int:
-        """
-        Delete entries from the role_blocks table.
-
-        If cloned_guild_id is provided, only entries for that clone guild are removed.
-        Returns number of rows removed.
-        """
+        """Delete role_blocks entries, only for the clone when cloned_guild_id is given. Returns rows removed."""
         with self.lock, self.conn:
             if cloned_guild_id is None:
                 cnt_row = self.conn.execute(
@@ -2776,18 +2658,14 @@ class DBManager:
         ).fetchone()
 
     def get_message_mappings_for_original(self, original_message_id: int):
-        """
-        Return ALL message-mapping rows for this original message id (one per clone).
-        """
+        """All message-mapping rows for this original message id (one per clone)."""
         return self.conn.execute(
             "SELECT * FROM messages WHERE original_message_id = ? ORDER BY cloned_guild_id",
             (int(original_message_id),),
         ).fetchall()
 
     def get_message_mapping_pair(self, original_message_id: int, cloned_guild_id: int):
-        """
-        Return the single mapping row for (original_message_id, cloned_guild_id).
-        """
+        """The mapping row for (original_message_id, cloned_guild_id)."""
         return self.conn.execute(
             "SELECT * FROM messages WHERE original_message_id = ? AND cloned_guild_id = ? LIMIT 1",
             (int(original_message_id), int(cloned_guild_id)),
@@ -2796,10 +2674,7 @@ class DBManager:
     def get_cloned_original_ids_for_channel(
         self, original_channel_id: int, cloned_guild_id: int
     ) -> list[int]:
-        """
-        Return all original_message_id values that have already been cloned
-        for the given original channel into the given clone guild.
-        """
+        """Original message ids already cloned for the original channel into the clone guild."""
         rows = self.conn.execute(
             "SELECT original_message_id FROM messages "
             "WHERE original_channel_id = ? AND cloned_guild_id = ?",
@@ -2812,13 +2687,7 @@ class DBManager:
         older_than_seconds: int = 7 * 24 * 3600,
         skip_pairs: Optional[list[tuple[int, int]]] = None,
     ) -> int:
-        """
-        Delete rows from messages where created_at is older than now - older_than_seconds.
-
-        If skip_pairs is provided, it should be a list of (original_guild_id, cloned_guild_id)
-        pairs for which no rows will be deleted (used for per-mapping DB_CLEANUP_MSG=False).
-        Returns the number of rows deleted.
-        """
+        """Delete messages older than older_than_seconds, except for the (original_guild_id, cloned_guild_id) pairs in skip_pairs (per-mapping DB_CLEANUP_MSG=False). Returns rows deleted."""
         with self.lock, self.conn:
             before = self.conn.total_changes
 
@@ -2860,10 +2729,7 @@ class DBManager:
             return self.conn.total_changes - before
 
     def delete_message_mapping(self, original_message_id: int) -> int:
-        """
-        Delete a single mapping row by original message id.
-        Returns the number of rows deleted (0 or 1).
-        """
+        """Delete a mapping row by original message id; returns rows deleted (0 or 1)."""
         try:
             cur = self.conn.cursor()
             cur.execute(
@@ -3076,9 +2942,7 @@ class DBManager:
         return cur.rowcount
 
     def get_clone_guild_ids(self, original_guild_id: int) -> List[int]:
-        """
-        Given a host/original guild, return all clone guild IDs.
-        """
+        """All clone guild ids for a host guild."""
         with self.lock, self.conn:
             cur = self.conn.execute(
                 "SELECT cloned_guild_id FROM guild_mappings WHERE original_guild_id = ?;",
@@ -3087,9 +2951,7 @@ class DBManager:
             return [row[0] for row in cur.fetchall() if row[0] is not None]
 
     def get_host_guild_ids(self, cloned_guild_id: int) -> List[int]:
-        """
-        Given a clone guild, return all original/host guild IDs.
-        """
+        """All host guild ids for a clone guild."""
         with self.lock, self.conn:
             cur = self.conn.execute(
                 "SELECT original_guild_id FROM guild_mappings WHERE cloned_guild_id = ?;",
@@ -3110,9 +2972,7 @@ class DBManager:
         settings: Optional[Dict] = None,
         overwrite_identity: bool = False,
     ) -> str:
-        """
-        Insert or update a guild mapping row.
-        """
+        """Insert or update a guild mapping row."""
         if not mapping_id:
             mapping_id = uuid.uuid4().hex
 
@@ -3175,10 +3035,7 @@ class DBManager:
         return mapping_id
 
     def delete_guild_mapping(self, mapping_id: str) -> None:
-        """
-        Hard-delete a mapping AND all data tied to that mapping's
-        (original_guild_id, cloned_guild_id) pair across the DB.
-        """
+        """Hard-delete a mapping and all data tied to its (original_guild_id, cloned_guild_id) pair."""
 
         m = self.get_mapping_by_id(mapping_id)
         if not m:
@@ -3359,13 +3216,7 @@ class DBManager:
         return bool(row)
 
     def bulk_fill_guild_ids(self, *, host_guild_id: int, clone_guild_id: int) -> dict:
-        """
-        Backfill original_guild_id and cloned_guild_id for legacy rows.
-        - Uses precise joins where possible (e.g., categories → channels, forums → threads)
-        - Only updates rows where the target column is NULL (or 0)
-        - Bumps last_updated where a change is made
-        Returns a dict of changed-row counts per table.
-        """
+        """Backfill original_guild_id and cloned_guild_id for legacy rows that are NULL (or 0), bumping last_updated. Returns changed-row counts per table."""
         host = int(host_guild_id)
         clone = int(clone_guild_id)
         out = {}
@@ -3643,10 +3494,7 @@ class DBManager:
         return out
 
     def delete_config(self, key: str) -> None:
-        """
-        Remove a key from app_config.
-        Safe to call even if the key doesn't exist.
-        """
+        """Remove a key from app_config; safe if it does not exist."""
         with self.lock, self.conn:
             self.conn.execute(
                 "DELETE FROM app_config WHERE key = ?",
@@ -3655,10 +3503,7 @@ class DBManager:
             self.conn.commit()
 
     def get_mapping_by_id(self, mapping_id: str) -> dict | None:
-        """
-        Return a single guild_mappings row (plus parsed settings) for a mapping_id.
-        Keys match list_guild_mappings() output.
-        """
+        """A guild_mappings row (plus parsed settings) for a mapping_id, with the keys of list_guild_mappings()."""
         row = self.conn.execute(
             """
             SELECT
@@ -3758,10 +3603,7 @@ class DBManager:
         cloned_guild_id: int,
         reason: str | None = None,
     ) -> int:
-        """
-        Abort any 'running' backfill_runs rows for this (source channel, target clone guild)
-        combo only. We do NOT touch runs for other cloned_guild_id values.
-        """
+        """Abort 'running' backfill_runs rows for this source channel and target clone guild only."""
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         cur = self.conn.execute(
             """
@@ -3779,21 +3621,14 @@ class DBManager:
         return cur.rowcount
 
     def get_mapping_by_cloned_guild_id(self, cloned_guild_id: int):
-        """
-        Return the guild_mappings row for a given cloned_guild_id.
-        Expected columns in guild_mappings:
-        mapping_id, original_guild_id, cloned_guild_id, ...
-        """
+        """The guild_mappings row for a cloned_guild_id."""
         return self.conn.execute(
             "SELECT * FROM guild_mappings WHERE cloned_guild_id = ? LIMIT 1",
             (int(cloned_guild_id),),
         ).fetchone()
 
     def get_blocked_keywords_by_origin(self) -> dict[int, list[str]]:
-        """
-        Returns { original_guild_id(int or 0 for global): [ 'word', 'word2', ... ], ... }
-        Rows with original_guild_id NULL are treated as global (key 0).
-        """
+        """{original_guild_id: [words]}; rows with a NULL original_guild_id are global, key 0."""
         rows = self.conn.execute(
             "SELECT original_guild_id, keyword FROM blocked_keywords"
         ).fetchall()
@@ -3807,10 +3642,7 @@ class DBManager:
         return out
 
     def get_blocked_keywords_for_origin(self, original_guild_id: int) -> list[str]:
-        """
-        All keywords that apply to this origin guild, plus any global NULL/NULL ones.
-        Deduped, lowercased, sorted.
-        """
+        """Keywords for this origin guild plus global NULL/NULL ones; deduped, lowercased, sorted."""
         rows = self.conn.execute(
             """
             SELECT keyword
@@ -3833,10 +3665,7 @@ class DBManager:
         original_guild_id: int | None,
         cloned_guild_id: int | None,
     ) -> tuple[bool, str]:
-        """
-        Toggle this keyword for the given mapping.
-        Returns (changed: bool, action: 'added'|'removed'|'none')
-        """
+        """Toggle the keyword for the mapping. Returns (changed, action) with action 'added' | 'removed' | 'none'."""
         if self.add_blocked_keyword(
             keyword,
             original_guild_id=original_guild_id,
@@ -3854,20 +3683,7 @@ class DBManager:
         return False, "none"
 
     def get_filters_for_mapping(self, mapping_id: str) -> dict:
-        """
-        Return all filter data for a mapping:
-        {
-            "whitelist": {
-                "category": [catId, ...],
-                "channel": [chanId, ...],
-            },
-            "exclude": {
-                "category": [catId, ...],
-                "channel": [chanId, ...],
-            },
-            "blocked_words": ["foo", "bar", ...],
-        }
-        """
+        """Return {"whitelist": {"category": [...], "channel": [...]}, "exclude": {...same...}, "blocked_words": [...]} for a mapping."""
         mapping_row = self.get_mapping_by_id(mapping_id)
         if not mapping_row:
             return {
@@ -4006,11 +3822,7 @@ class DBManager:
         mapping_id: str,
         words: list[str],
     ) -> None:
-        """
-        Overwrite the blocked_keywords list for this mapping_id
-        (original_guild_id + cloned_guild_id pair)
-        with the provided words list.
-        """
+        """Overwrite the blocked_keywords list for the mapping with `words`."""
 
         if not mapping_id:
             return
@@ -4191,9 +4003,7 @@ class DBManager:
     def get_thread_mapping_pair(
         self, original_thread_id: int, cloned_guild_id: int
     ) -> sqlite3.Row | None:
-        """
-        Return the single row for (original_thread_id, cloned_guild_id).
-        """
+        """The row for (original_thread_id, cloned_guild_id)."""
         return self.conn.execute(
             "SELECT * FROM threads WHERE original_thread_id = ? AND cloned_guild_id = ? LIMIT 1",
             (int(original_thread_id), int(cloned_guild_id)),
@@ -4229,11 +4039,7 @@ class DBManager:
         ).fetchone()
 
     def get_cloned_emoji_ids(self, cloned_guild_id: int) -> set[int]:
-        """Emoji ids that actually live in this clone guild.
-
-        A member can use their own guild's static emoji without Nitro, so this
-        is the set a non-Nitro account may keep in a message.
-        """
+        """Emoji ids that live in this clone guild; a non-Nitro account may keep these in a message."""
         rows = self.conn.execute(
             "SELECT cloned_emoji_id FROM emoji_mappings "
             "WHERE cloned_guild_id = ? AND cloned_emoji_id IS NOT NULL",
@@ -4328,10 +4134,7 @@ class DBManager:
     def get_category_mapping_for_clone(
         self, original_category_id: int, cloned_guild_id: int
     ) -> Optional[sqlite3.Row]:
-        """
-        Return the row from category_mappings for this (original_category_id, cloned_guild_id),
-        or None if not mapped for this clone.
-        """
+        """The category_mappings row for (original_category_id, cloned_guild_id), or None."""
         with self.lock, self.conn:
             return self.conn.execute(
                 """
@@ -4346,9 +4149,7 @@ class DBManager:
     def iter_child_channel_mappings_for_clone_category(
         self, original_category_id: int, cloned_guild_id: int
     ) -> list[sqlite3.Row]:
-        """
-        All channel_mappings in THIS clone whose original parent is the given category.
-        """
+        """All channel_mappings in this clone whose original parent is the given category."""
         with self.lock, self.conn:
             rows = self.conn.execute(
                 """
@@ -4363,10 +4164,7 @@ class DBManager:
     def delete_channel_mapping_for_clone(
         self, original_channel_id: int, cloned_guild_id: int
     ) -> Optional[int]:
-        """
-        Delete the mapping row for (original_channel_id, cloned_guild_id).
-        Returns the cloned_channel_id if one existed (so caller can delete it in Discord).
-        """
+        """Delete the mapping for (original_channel_id, cloned_guild_id); returns the cloned_channel_id if one existed."""
         with self.lock, self.conn:
             row = self.conn.execute(
                 """
@@ -4392,11 +4190,7 @@ class DBManager:
     def reparent_children_to_root_for_clone(
         self, original_category_id: int, cloned_guild_id: int
     ) -> int:
-        """
-        Set cloned_parent_category_id = NULL for all channels under the given category
-        but only inside THIS cloned guild.
-        Returns the number of rows affected.
-        """
+        """Set cloned_parent_category_id to NULL for channels under the category in this clone only. Returns rows affected."""
         with self.lock, self.conn:
             cur = self.conn.execute(
                 """
@@ -4411,11 +4205,7 @@ class DBManager:
     def delete_category_mapping_pair(
         self, original_category_id: int, cloned_guild_id: int
     ) -> dict:
-        """
-        Delete exactly one category mapping pair for THIS clone.
-        Returns {'original_category_id': ..., 'cloned_category_id': ...} with cloned id (or None).
-        Does NOT touch children (callers decide whether to delete or reparent children).
-        """
+        """Delete one category mapping pair for this clone and return {'original_category_id', 'cloned_category_id'}; children are left to the caller."""
         with self.lock, self.conn:
             row = self.conn.execute(
                 """
@@ -4458,9 +4248,7 @@ class DBManager:
         return int(row[0]) if row and row[0] is not None else None
 
     def get_original_guild_id_for_channel(self, original_channel_id: int) -> int | None:
-        """
-        Resolve the original_guild_id for a given original_channel_id.
-        """
+        """The original_guild_id for an original_channel_id."""
         row = self.conn.execute(
             "SELECT original_guild_id FROM channel_mappings WHERE original_channel_id=? LIMIT 1",
             (int(original_channel_id),),
@@ -4472,12 +4260,7 @@ class DBManager:
         mapping_id: str,
         original_role_ids: list[int],
     ) -> int:
-        """
-        Replace the set of blocked roles for a single mapping's clone guild.
-
-        original_role_ids should be the *original* role IDs (host guild).
-        Returns the number of blocked roles after the update.
-        """
+        """Replace the blocked roles (original role ids) for a mapping's clone guild. Returns the count after the update."""
         m = self.get_mapping_by_id(mapping_id)
         if not m:
             return 0
@@ -4508,13 +4291,7 @@ class DBManager:
         return len(ids)
 
     def get_user_filters_for_mapping(self, mapping_id: str) -> dict[str, list[int]]:
-        """
-        Return user filters for a mapping:
-        {
-            "whitelist": [user_id, user_id, ...],
-            "blacklist": [user_id, user_id, ...],
-        }
-        """
+        """Return {"whitelist": [user_id, ...], "blacklist": [user_id, ...]} for a mapping."""
         mapping_row = self.get_mapping_by_id(mapping_id)
         if not mapping_row:
             return {"whitelist": [], "blacklist": []}
@@ -4555,9 +4332,7 @@ class DBManager:
         whitelist_users: list[int],
         blacklist_users: list[int],
     ) -> None:
-        """
-        Replace user filters for a mapping.
-        """
+        """Replace user filters for a mapping."""
         m = self.get_mapping_by_id(mapping_id)
         if not m:
             return
@@ -4609,15 +4384,7 @@ class DBManager:
         original_guild_id: int,
         cloned_guild_id: int,
     ) -> tuple[bool, str | None]:
-        """
-        Check if a user is filtered for message cloning.
-        Returns (is_filtered: bool, reason: str | None)
-
-        Logic:
-        - If whitelist exists and user NOT in it -> filtered
-        - If user in blacklist -> filtered
-        - Otherwise -> not filtered
-        """
+        """Returns (is_filtered, reason). Filtered if a whitelist exists and the user is not in it, or the user is in the blacklist."""
         whitelist_count = self.conn.execute(
             """
             SELECT COUNT(*) FROM user_filters
@@ -4671,11 +4438,7 @@ class DBManager:
         cloned_role_id: int,
         cloned_channel_id: int | None = None,
     ) -> bool:
-        """
-        Add a role mention configuration.
-
-        Returns True if a new config was created, False if it already existed.
-        """
+        """Add a role mention configuration; True if newly created, False if it existed."""
         cfg_id = secrets.token_hex(4)
 
         with self.lock, self.conn:
@@ -4702,9 +4465,7 @@ class DBManager:
         cloned_role_id: int,
         cloned_channel_id: int | None = None,
     ) -> bool:
-        """
-        Remove a role mention configuration.
-        """
+        """Remove a role mention configuration."""
         with self.lock, self.conn:
             cur = self.conn.execute(
                 """
@@ -4733,9 +4494,7 @@ class DBManager:
         cloned_guild_id: int,
         role_mention_id: str,
     ) -> bool:
-        """
-        Remove a role mention configuration by its short ID.
-        """
+        """Remove a role mention configuration by its short ID."""
         with self.lock, self.conn:
             cur = self.conn.execute(
                 """
@@ -4758,10 +4517,7 @@ class DBManager:
         cloned_guild_id: int,
         cloned_channel_id: int | None = None,
     ) -> list[int]:
-        """
-        Get role mentions for a specific channel or globally in a clone guild.
-
-        """
+        """Role mentions for a channel, or globally in a clone guild."""
         if cloned_channel_id is None:
 
             rows = self.conn.execute(
@@ -4798,9 +4554,7 @@ class DBManager:
         original_guild_id: int,
         cloned_guild_id: int,
     ) -> list[dict]:
-        """
-        List all role mention configurations for a mapping.
-        """
+        """All role mention configurations for a mapping."""
         rows = self.conn.execute(
             """
             SELECT role_mention_id, cloned_channel_id, cloned_role_id, added_at
@@ -4832,10 +4586,7 @@ class DBManager:
         webhook_name: str,
         webhook_avatar_url: str | None = None,
     ) -> None:
-        """
-        Set custom webhook name and avatar for a cloned channel.
-        All messages sent to this channel will use this identity.
-        """
+        """Set the custom webhook name and avatar used for all messages to a cloned channel."""
         with self.lock, self.conn:
             self.conn.execute(
                 """
@@ -4860,10 +4611,7 @@ class DBManager:
         cloned_channel_id: int,
         cloned_guild_id: int,
     ) -> dict | None:
-        """
-        Get custom webhook profile for a cloned channel.
-        Returns dict with 'webhook_name' and 'webhook_avatar_url', or None.
-        """
+        """Custom webhook profile for a cloned channel as a dict with 'webhook_name' and 'webhook_avatar_url', or None."""
         row = self.conn.execute(
             """
             SELECT webhook_name, webhook_avatar_url, created_at, last_updated
@@ -4890,10 +4638,7 @@ class DBManager:
         cloned_channel_id: int,
         cloned_guild_id: int,
     ) -> bool:
-        """
-        Delete custom webhook profile for a cloned channel.
-        Returns True if a row was deleted.
-        """
+        """Delete a cloned channel's webhook profile; True if a row was deleted."""
         with self.lock, self.conn:
             cur = self.conn.execute(
                 """
@@ -4909,9 +4654,7 @@ class DBManager:
         self,
         cloned_guild_id: int,
     ) -> list[dict]:
-        """
-        List all channel webhook profiles for a clone guild.
-        """
+        """All channel webhook profiles for a clone guild."""
         rows = self.conn.execute(
             """
             SELECT 
@@ -4941,11 +4684,7 @@ class DBManager:
         ]
 
     def update_mapping_status(self, mapping_id: str, status: str) -> None:
-        """
-        Update the status for a guild mapping.
-
-        Status is normalized to 'active' or 'paused'.
-        """
+        """Update a mapping's status, normalized to 'active' or 'paused'."""
         status_norm = "paused" if str(status).lower() == "paused" else "active"
         with self.lock, self.conn:
             self.conn.execute(
@@ -4963,13 +4702,7 @@ class DBManager:
         original_guild_id: int,
         cloned_guild_id: int,
     ) -> None:
-        """
-        Wipe all per-(original_guild_id, cloned_guild_id) state across
-        the DB, but keep the guild_mappings row itself.
-
-        Used when repointing an existing mapping to a new clone guild
-        so we don't leave stale rows for the old pair.
-        """
+        """Wipe all per-pair state for (original_guild_id, cloned_guild_id) but keep the guild_mappings row; used when repointing a mapping."""
         ogid = int(original_guild_id or 0)
         cgid = int(cloned_guild_id or 0)
         if not ogid and not cgid:
@@ -5014,13 +4747,7 @@ class DBManager:
                     pass
 
     def cleanup_stale_mapping_pairs(self) -> dict[str, int]:
-        """
-        At boot: scan for any per-(original_guild_id, cloned_guild_id) state
-        that no longer has a row in guild_mappings and wipe it using
-        clear_mapping_pair_state().
-
-        Returns a small stats dict for logging.
-        """
+        """At boot, wipe per-pair state with no guild_mappings row via clear_mapping_pair_state(). Returns a stats dict."""
         with self.lock:
 
             try:
@@ -5128,11 +4855,7 @@ class DBManager:
         source_text: str,
         replacement_text: str,
     ) -> bool:
-        """
-        Insert or update a word/phrase rewrite for a specific mapping.
-
-        Returns True if an existing row was updated, False if it was newly inserted.
-        """
+        """Insert or update a word/phrase rewrite for a mapping. True if an existing row was updated."""
         source_text = (source_text or "").strip()
         replacement_text = replacement_text or ""
         if not source_text:
@@ -5183,9 +4906,7 @@ class DBManager:
         cloned_guild_id: int,
         rewrite_id: int,
     ) -> bool:
-        """
-        Delete a single rewrite rule for this mapping, keyed by numeric ID.
-        """
+        """Delete a rewrite rule for this mapping by numeric ID."""
         with self.lock, self.conn:
             cur = self.conn.execute(
                 """
@@ -5205,9 +4926,7 @@ class DBManager:
         original_guild_id: int,
         cloned_guild_id: int,
     ) -> list[dict]:
-        """
-        All rewrites for a given mapping, oldest first.
-        """
+        """All rewrites for a mapping, oldest first."""
         cur = self.conn.execute(
             """
             SELECT
@@ -5230,9 +4949,7 @@ class DBManager:
         return [dict(zip(cols, r)) for r in rows]
 
     def get_all_mapping_rewrites(self) -> list[dict]:
-        """
-        Flat list of all rewrites; used by the server to build its cache.
-        """
+        """Flat list of all rewrites, used by the server to build its cache."""
         cur = self.conn.execute(
             """
             SELECT
@@ -5248,9 +4965,7 @@ class DBManager:
         return [dict(zip(cols, r)) for r in rows]
 
     def list_message_forwarding_rules(self, guild_id: str | None = None) -> list[dict]:
-        """
-        List stored message forwarding rules, optionally scoped to a guild_id.
-        """
+        """Stored message forwarding rules, optionally scoped to a guild_id."""
         with self.lock:
             cur = self.conn.cursor()
             if guild_id:
@@ -5333,9 +5048,7 @@ class DBManager:
         config: dict | None = None,
         filters: dict | None = None,
     ) -> str:
-        """
-        Insert or update a message forwarding rule.
-        """
+        """Insert or update a message forwarding rule."""
         nid = (rule_id or "").strip() or uuid.uuid4().hex
         cfg_js = json.dumps(config or {}, ensure_ascii=False)
         flt_js = json.dumps(filters or {}, ensure_ascii=False)
@@ -5402,10 +5115,7 @@ class DBManager:
         part_total: int = 1,
         event_id: Optional[str] = None,
     ) -> str:
-        """
-        Record a single forwarding send event (minimal details).
-        Returns the event_id.
-        """
+        """Record a forwarding send event. Returns the event_id."""
         eid = event_id or uuid.uuid4().hex
         with self.lock, self.conn:
             self.conn.execute(
@@ -5443,28 +5153,19 @@ class DBManager:
         return row is not None
 
     def count_forwarded_messages(self) -> int:
-        """
-        Total number of forwarded messages recorded (each sent payload counted once).
-        """
+        """Total forwarded messages recorded (each sent payload counted once)."""
         row = self.conn.execute("SELECT COUNT(*) FROM forwarding_events").fetchone()
         return int(row[0] if row and row[0] is not None else 0)
 
     def count_forwarded_by_provider(self) -> dict:
-        """
-        Count forwarded messages grouped by provider.
-        """
+        """Count forwarded messages by provider."""
         rows = self.conn.execute(
             "SELECT provider, COUNT(*) AS cnt FROM forwarding_events GROUP BY provider"
         ).fetchall()
         return {str(r["provider"]): int(r["cnt"]) for r in rows}
 
     def count_forwarded_by_rule(self, include_null: bool = False) -> dict:
-        """
-        Count forwarded messages grouped by rule_id.
-
-        - By default, excludes NULL/empty rule_id.
-        - When include_null=True, groups missing rule_id under the empty string "".
-        """
+        """Count forwarded messages by rule_id; NULL/empty rule_ids are excluded unless include_null, which groups them under ""."""
         if include_null:
             rows = self.conn.execute(
                 """
@@ -5492,11 +5193,7 @@ class DBManager:
         return [dict(row) for row in cur.fetchall()]
 
     def list_backup_tokens(self) -> list[dict]:
-        """
-        Return backup tokens for the Admin UI.
-
-        Note: Includes token_value so the API layer can mask it.
-        """
+        """Backup tokens for the Admin UI, including token_value so the API layer can mask it."""
         cur = self.conn.execute(
             """
             SELECT token_id, token_value, note, added_at, last_used
@@ -5612,7 +5309,7 @@ class DBManager:
             )
             self.conn.commit()
 
-    # ── mapping_user_tokens CRUD ─────────────────────────────────────
+    # mapping_user_tokens CRUD
 
     def add_mapping_token(
         self,
@@ -5668,11 +5365,7 @@ class DBManager:
             return dict(row) if row else None
 
     def get_enabled_mapping_tokens(self, mapping_id: str) -> list[dict]:
-        """Return {token_id, token_value, username, user_id} for each enabled token.
-
-        ``user_id`` is required by the identity manager to resolve the token
-        account's member object in the clone guild.
-        """
+        """Return {token_id, token_value, username, user_id} for each enabled token; user_id resolves the account's member in the clone guild."""
         with self.lock:
             cur = self.conn.execute(
                 """
@@ -5727,7 +5420,7 @@ class DBManager:
             )
             self.conn.commit()
 
-    # ── mapping_token_identities CRUD ────────────────────────────────
+    # mapping_token_identities CRUD
 
     def upsert_token_identity(
         self,
@@ -5826,7 +5519,7 @@ class DBManager:
             self.conn.commit()
             return cur.rowcount
 
-    # ── event_logs CRUD ──────────────────────────────────────────────
+    # event_logs CRUD
 
     def add_event_log(
         self,
