@@ -465,6 +465,8 @@ def check(channel: Optional[Channel] = None) -> int:
         # On the rail the rows are a section; off it they print as they come.
         with ui.section("Copycord") if rail.active else contextlib.nullcontext():
             verdict = _status_rows(channel)
+        if rail.active:
+            ui.gap()
         if verdict is not None:
             verdict()
     return 0

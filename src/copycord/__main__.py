@@ -2209,6 +2209,7 @@ def backup_command(args: argparse.Namespace) -> int:
         return 0
     tty = sys.stdout.isatty()
     with ui.Rail("Back up the database", brand=brand() if tty else "", heading=False):
+        ui.gap(blank=False)
         archive, error = run()
         if error:
             ui.fail(*error)

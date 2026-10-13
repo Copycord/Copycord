@@ -621,7 +621,7 @@ def test_check_on_a_terminal_is_a_rail(data_dir, fake_net, no_install, monkeypat
     box = [x for x in lines if x.startswith(("\u25c7", "\u2502 ", "\u251c"))]
     assert {len(x) for x in box} == {78}
     assert any("current  4.0.0" in x for x in box)
-    assert lines[-2:] == ["\u2713  Copycord is up to date", "\u2514"]
+    assert lines[-3:] == ["\u2502", "\u2713  Copycord is up to date", "\u2514"]
 
 
 def test_check_beta_considers_prereleases(data_dir, fake_net, no_install, capsys):

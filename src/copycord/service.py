@@ -989,6 +989,7 @@ def service_command(args) -> int:
     rail = (ui.Rail(title, brand=ui.brand() if tty else "", heading=False)
             if title else contextlib.nullcontext())
     with rail:
+        ui.gap(blank=False)
         return _service_action(svc, action, args, target)
 
 
