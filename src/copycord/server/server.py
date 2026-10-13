@@ -13380,7 +13380,7 @@ class ServerReceiver:
 
     def run(self):
         """Start the server and manage the event loop."""
-        logger.info("[✨] Starting Copycord Server %s", CURRENT_VERSION)
+        logger.info("Starting Copycord Server %s", CURRENT_VERSION)
         loop = asyncio.get_event_loop()
 
         for sig in (signal.SIGTERM, signal.SIGINT):

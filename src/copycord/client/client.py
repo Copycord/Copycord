@@ -2881,7 +2881,7 @@ class ClientListener:
 
     def run(self):
         """Run the Copycord client."""
-        logger.info("[✨] Starting Copycord Client %s", CURRENT_VERSION)
+        logger.info("Starting Copycord Client %s", CURRENT_VERSION)
         if self.proxy_rotator.enabled:
             self.proxy_rotator.next()
         loop = asyncio.get_event_loop()

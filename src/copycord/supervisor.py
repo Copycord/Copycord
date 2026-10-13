@@ -154,7 +154,7 @@ class RoleSupervisor:
                 try:
                     self._before_start()
                 except Exception:
-                    logger.exception("[%s] pre-start hook failed", self.name)
+                    logger.exception("%s role pre-start hook failed", self.name)
             self.runs += 1
             began = time.monotonic()
             try:
@@ -168,15 +168,15 @@ class RoleSupervisor:
                 )
             else:
                 if not self.restart_on_exit:
-                    logger.info("[%s] role exited", self.name)
+                    logger.info("%s role exited", self.name)
                     return
-                logger.warning("[%s] role exited unexpectedly", self.name)
+                logger.warning("%s role exited unexpectedly", self.name)
 
             if time.monotonic() - began >= self.backoff.reset_after:
                 delays = self.backoff.delays()
             delay = next(delays)
             self.restart_delays.append(delay)
-            logger.info("[%s] restarting in %.1fs", self.name, delay)
+            logger.info("%s role restarting in %.1fs", self.name, delay)
             await self._sleep(delay)
 
     def start(self) -> dict:
@@ -187,7 +187,7 @@ class RoleSupervisor:
         )
         self._started_wall = time.time()
         self._started_mono = time.monotonic()
-        logger.info("[%s] started", self.name)
+        logger.info("%s role started", self.name)
         return {"ok": True, "status": "started", "pid": os.getpid()}
 
     async def stop(self) -> dict:
@@ -207,9 +207,9 @@ class RoleSupervisor:
                 "[%s] did not stop within %.0fs", self.name, self.stop_timeout
             )
         except Exception:
-            logger.debug("[%s] error while stopping", self.name, exc_info=True)
+            logger.debug("%s role error while stopping", self.name, exc_info=True)
         self._clear()
-        logger.info("[%s] stopped", self.name)
+        logger.info("%s role stopped", self.name)
         return {"ok": True, "status": "stopped", "code": None}
 
     def _clear(self) -> None:
@@ -273,7 +273,7 @@ class ControlEndpoint:
         if self.port == 0:
             self.port = self._server.sockets[0].getsockname()[1]
         logger.info(
-            "[%s] control listening on %s:%d", self.role.name, self.host, self.port
+            "%s control listening on %s:%d", self.role.name, self.host, self.port
         )
 
     async def close(self) -> None:
@@ -311,7 +311,7 @@ class Supervisor:
             try:
                 await self.roles[name].stop()
             except Exception:
-                logger.exception("[%s] stop failed", name)
+                logger.exception("%s role stop failed", name)
         for ctl in self.controls:
             await ctl.close()
 
@@ -603,7 +603,7 @@ async def run() -> None:
     _set_runtime_env()
     setup_logging()
     # The role banners are INFO on role threads, so only this one reaches the console.
-    logger.info("[✨] Starting Copycord %s", CURRENT_VERSION)
+    logger.info("Starting Copycord %s", CURRENT_VERSION)
     sup = build_supervisor()
 
     loop = asyncio.get_running_loop()
