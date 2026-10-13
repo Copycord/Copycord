@@ -36,7 +36,7 @@ _LAUNCHERS = {"copycord.exe", "copycordw.exe"}
 
 _PS_QUERY = (
     "Get-CimInstance Win32_Process | "
-    "Select-Object ProcessId,ParentProcessId,Name,ExecutablePath | "
+    "Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine | "
     "ConvertTo-Json -Compress"
 )
 
@@ -113,6 +113,15 @@ def scan(rows: list, me: int, prefix: str):
     return mine, None
 
 
+def _program(command_line: Optional[str]) -> Optional[str]:
+    """The program a command line starts with."""
+    text = (command_line or "").strip()
+    if text.startswith('"'):
+        end = text.find('"', 1)
+        return text[1:end] if end > 0 else None
+    return text.split(" ", 1)[0] or None
+
+
 def service_leftovers(rows: list, me: int, prefix: str,
                       launcher_dir: Optional[str] = None) -> List[int]:
     """Pids of this install's Copycord that the service started and that are
@@ -123,7 +132,8 @@ def service_leftovers(rows: list, me: int, prefix: str,
 
     def ours(r) -> bool:
         path = r.get("ExecutablePath")
-        if _under(path, prefix):
+        # The venv's python.exe runs the base interpreter with its own command line.
+        if _under(path, prefix) or _under(_program(r.get("CommandLine")), prefix):
             return True
         if folder is None or (r.get("Name") or "").lower() not in _LAUNCHERS or not path:
             return False

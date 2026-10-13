@@ -1127,6 +1127,9 @@ def test_service_leftovers_finds_what_the_task_started():
         proc(42, 41, "pythonw.exe", PREFIX + r"\Scripts\pythonw.exe"),
         # Left behind by schtasks /End: its launcher is gone.
         proc(45, 44, "python.exe", PREFIX + r"\Scripts\python.exe"),
+        # The base interpreter the venv's pythonw.exe started, left behind too.
+        dict(proc(46, 43, "pythonw.exe", r"C:\Users\u\AppData\Roaming\uv\python\pythonw.exe"),
+             CommandLine=f'"{PREFIX}\\Scripts\\pythonw.exe" "{BIN}\\copycordw.exe" run'),
         # copycord run in a terminal and another install: not the service.
         proc(50, 1, "cmd.exe"),
         proc(51, 50, "copycord.exe", BIN + r"\copycord.exe"),
@@ -1134,11 +1137,17 @@ def test_service_leftovers_finds_what_the_task_started():
         proc(60, 40, "copycord.exe", r"D:\other\bin\copycord.exe"),
         proc(61, 60, "python.exe", r"D:\other\tools\copycord\Scripts\python.exe"),
     ]
-    assert winupdate.service_leftovers(rows, 30, PREFIX, BIN) == [41, 42, 45]
+    assert winupdate.service_leftovers(rows, 30, PREFIX, BIN) == [41, 42, 45, 46]
     # This command and its launcher are never in the list.
     assert winupdate.service_leftovers([LAUNCHER, ME], 30, PREFIX, BIN) == []
     # Without the launcher folder only the environment's processes count.
-    assert winupdate.service_leftovers(rows, 30, PREFIX) == [42, 45]
+    assert winupdate.service_leftovers(rows, 30, PREFIX) == [42, 45, 46]
+
+
+def test_program_of_a_command_line():
+    assert winupdate._program(r'"C:\a b\pythonw.exe" "x.exe" run') == r"C:\a b\pythonw.exe"
+    assert winupdate._program(r"C:\py\python.exe -m copycord") == r"C:\py\python.exe"
+    assert winupdate._program(None) is None
 
 
 def test_scan_counts_the_windowless_launcher_as_copycord():
