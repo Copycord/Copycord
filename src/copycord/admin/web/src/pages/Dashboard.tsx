@@ -25,6 +25,7 @@ export interface DashboardProps {
 
 export function Dashboard({ WebSocketImpl, EventSourceImpl }: DashboardProps = {}) {
   const [logs, setLogs] = useState<LogStream | null>(null);
+  const [running, setRunning] = useState(false);
 
   return (
     <div className="flex flex-col gap-4">
@@ -32,9 +33,9 @@ export function Dashboard({ WebSocketImpl, EventSourceImpl }: DashboardProps = {
       <h1 className="sr-only">Configuration</h1>
       <UpdateNotice />
       <PromoCards />
-      <BotsPanel onViewLogs={setLogs} WebSocketImpl={WebSocketImpl} />
+      <BotsPanel onViewLogs={setLogs} onRunningChange={setRunning} WebSocketImpl={WebSocketImpl} />
       <GlobalConfigSection />
-      <MappingsSection />
+      <MappingsSection locked={running} />
       <NotificationsSection />
       <SyncSettingsSection />
       <ProxySection />

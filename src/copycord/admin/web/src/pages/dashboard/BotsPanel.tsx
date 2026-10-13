@@ -33,11 +33,13 @@ const CELL = "border-t border-border px-2 py-2 align-middle";
 
 export interface BotsPanelProps {
   onViewLogs: (which: LogStream) => void;
+  /** Fires with whether any bot is running, so the mapping cards can lock. */
+  onRunningChange?: (running: boolean) => void;
   /** For tests. */
   WebSocketImpl?: UseWsOptions["WebSocketImpl"];
 }
 
-export function BotsPanel({ onViewLogs, WebSocketImpl }: BotsPanelProps) {
+export function BotsPanel({ onViewLogs, onRunningChange, WebSocketImpl }: BotsPanelProps) {
   const notify = useNotify();
   const [statuses, setStatuses] = useState<BotStatuses>(EMPTY_STATUSES);
   const [busy, setBusy] = useState(false);
@@ -73,6 +75,10 @@ export function BotsPanel({ onViewLogs, WebSocketImpl }: BotsPanelProps) {
   );
 
   const running = anyRunning(statuses);
+
+  useEffect(() => {
+    onRunningChange?.(running);
+  }, [running, onRunningChange]);
 
   useEffect(() => {
     if (!running) return;
