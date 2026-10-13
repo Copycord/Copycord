@@ -8,7 +8,7 @@ import TabItem from '@theme/TabItem';
 
 # Docker Install
 
-Docker runs Copycord in a single container with everything it needs. Use it if you already run your apps with Docker; otherwise the [one-command installer](/docs/getting-started/quick-start) is simpler.
+Docker runs Copycord with everything it needs. Use it if you already run your apps with Docker; otherwise the [one-command installer](/docs/getting-started/quick-start) is simpler.
 
 ## Install Docker
 

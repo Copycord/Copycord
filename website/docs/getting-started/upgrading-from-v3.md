@@ -5,7 +5,7 @@ title: Upgrading from v3
 
 # Upgrading from v3
 
-Copycord v4 runs the dashboard (admin), the server bot and the client in **one process**. Docker users run one container instead of three, and non-Docker users install with the [one-command installer](/docs/getting-started/quick-start) instead of the v3 launcher. Your database is kept: v4 opens the same `data.db` and takes a backup of it first.
+Copycord v4 runs the dashboard (admin), the server bot and the client together as one app. Docker users run one container instead of three, and non-Docker users install with the [one-command installer](/docs/getting-started/quick-start) instead of the v3 launcher. Your database is kept: v4 opens the same `data.db` and takes a backup of it first.
 
 ## What changes
 

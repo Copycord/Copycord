@@ -122,7 +122,7 @@ MESSAGE_RETENTION_DAYS=30
 
 ## Internal ports
 
-The dashboard, server bot and client run in one process and talk to each other inside it, so there are no WebSocket URLs to configure. Only the dashboard port (`ADMIN_PORT`, default `8080`) needs to be reachable.
+The dashboard, server bot and client talk to each other directly, so there are no WebSocket URLs to configure. Only the dashboard port (`ADMIN_PORT`, default `8080`) needs to be reachable.
 
 Copycord also listens on two control ports on `127.0.0.1` only: `9101` (server) and `9102` (client). If another program already uses one of them, move them with environment variables:
 

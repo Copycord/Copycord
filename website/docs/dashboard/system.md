@@ -26,7 +26,7 @@ Logs stream in real time. Each log viewer has its own **Clear logs** button to w
 
 ### Where logs go {#where-logs-go}
 
-Copycord runs the dashboard (admin), the server bot and the client in one process. Their logs go to three places:
+Copycord runs the dashboard (admin), the server bot and the client together. Their logs go to three places:
 
 | Where | What you see |
 |-------|--------------|

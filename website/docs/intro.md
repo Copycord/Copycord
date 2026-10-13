@@ -10,7 +10,7 @@ title: What is Copycord?
 
 ## How it works
 
-Copycord runs as a single process (or a single Docker container) with three parts that work together:
+Copycord has three parts that work together:
 
 | Part | Role | What it does |
 |---------|------|-------------|

@@ -54,7 +54,7 @@ This folder is the Copycord home. A git install keeps its checkout in `src/` and
 
 ## copycord run {#copycord-run}
 
-Starts Copycord: the dashboard, the server bot and the client, in one process.
+Starts Copycord: the dashboard, the server bot and the client.
 
 ```bash
 copycord run

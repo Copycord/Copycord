@@ -93,7 +93,7 @@ Open a new terminal so it picks up the updated `PATH`, then try again.
 copycord run
 ```
 
-This starts the dashboard, the server bot and the client in one process. Leave the terminal open; **Ctrl+C** stops it.
+This starts the dashboard, the server bot and the client. Leave the terminal open; **Ctrl+C** stops it.
 
 ### 3. Log in to the dashboard
 

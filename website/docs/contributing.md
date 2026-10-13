@@ -115,7 +115,7 @@ copycord/
 ├── src/
 │   └── copycord/        # The one installed package
 │       ├── __main__.py  # CLI: run, version, doctor, config
-│       ├── supervisor.py # Runs admin, server and client in one process
+│       ├── supervisor.py # Starts and supervises admin, server and client
 │       ├── service.py   # copycord service (systemd, launchd, Scheduled Task)
 │       ├── update.py    # copycord update and update channels
 │       ├── logging_setup.py # Terminal and server.out/client.out logging
