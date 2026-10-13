@@ -62,8 +62,9 @@ Options:
   --home <path>          Copycord home: data, logs, backups, src/ and node/
                          (default: ~/.copycord)
   --git-dir, --dir <path>
-                         git: checkout directory
-                         (default: <home>/src)
+                         git: a folder the installer owns; its files are
+                         replaced on each install, so never point it at
+                         your own clone (default: <home>/src)
   --verify               after installing, run copycord --version and
                          copycord doctor and fail if either fails
   --dry-run              print the plan and the actions, change nothing
@@ -610,6 +611,8 @@ checkout_ref() {
     else
         git clone --filter=blob:none --no-checkout "$REPO_URL.git" "$GIT_DIR_PATH" || return 1
     fi
+    # Marks the checkout as the installer's own (see owned_checkout).
+    : >"$GIT_DIR_PATH/.git/$GIT_MARKER" || return 1
     git -C "$GIT_DIR_PATH" fetch --force --prune --tags origin || return 1
     if git -C "$GIT_DIR_PATH" rev-parse -q --verify "refs/remotes/origin/$REF^{commit}" >/dev/null; then
         target="refs/remotes/origin/$REF"
@@ -626,6 +629,18 @@ checkout_ref() {
     git -C "$GIT_DIR_PATH" clean -fdx -e src/copycord/admin/frontend/node_modules
 }
 
+GIT_MARKER="copycord-installer"
+
+owned_checkout() {
+    # A checkout the installer may reset and clean: one it created, or a clean
+    # Copycord checkout whose origin is $REPO_URL (from an older installer).
+    [ -f "$GIT_DIR_PATH/.git/$GIT_MARKER" ] && return 0
+    origin="$(git -C "$GIT_DIR_PATH" remote get-url origin 2>/dev/null)" || return 1
+    case "$origin" in "$REPO_URL" | "$REPO_URL.git" | "$REPO_URL/" | "$REPO_URL.git/") ;; *) return 1 ;; esac
+    [ -f "$GIT_DIR_PATH/src/copycord/__init__.py" ] || return 1
+    [ -z "$(git -C "$GIT_DIR_PATH" status --porcelain 2>/dev/null)" ]
+}
+
 build_frontend() {
     rm -rf "$GIT_DIR_PATH/src/copycord/admin/frontend/dist" || return 1
     (cd "$GIT_DIR_PATH/src/copycord/admin/frontend" && npm ci --no-audit --no-fund && npm run build)
@@ -637,6 +652,11 @@ install_git() {
     if [ -e "$GIT_DIR_PATH" ] && [ ! -d "$GIT_DIR_PATH/.git" ] \
         && [ -n "$(ls -A "$GIT_DIR_PATH" 2>/dev/null)" ]; then
         die "$GIT_DIR_PATH exists and is not a git checkout; move it or pass --git-dir"
+    fi
+    # The install replaces every file in the checkout, so a folder the
+    # installer did not make (your own clone, say) is never touched.
+    if [ -e "$GIT_DIR_PATH/.git" ] && ! owned_checkout; then
+        die "$GIT_DIR_PATH is a git folder the installer did not create, or it has changes. The install would overwrite its files, so nothing was changed. Pass --git-dir with an empty or new folder."
     fi
 
     if [ "$need_node" = "1" ]; then
