@@ -528,3 +528,108 @@ def test_spinner_on_the_rail_lines_up_with_the_marks(term):
         spin = ui.Spinner("Installing", stream=buf)
         spin._started = 10.0
         assert _plain(io.StringIO(spin.render("⠋", 10.5))) == "\r⠋  Installing"
+
+
+# --------------------------------------------------------------------------
+# section boxes
+# --------------------------------------------------------------------------
+
+
+def _section(buf, title, rows, monkeypatch, columns=80):
+    monkeypatch.setattr(sys, "stdout", buf)
+    monkeypatch.setattr(ui, "_columns", lambda: columns)
+    with ui.Rail("Copycord doctor", stream=buf):
+        with ui.section(title, stream=buf) as sec:
+            for status, text in rows:
+                ui.line(status, text, stream=sec.out)
+    return buf.getvalue().splitlines()
+
+
+def test_section_box_on_the_rail(term, monkeypatch):
+    term.setenv("NO_COLOR", "1")
+    lines = _section(TTY(), "Install", [("ok", "Python 3.12"), ("warn", "No backup yet")],
+                     monkeypatch)
+    start = lines.index("┌  Copycord doctor")
+    box = lines[start + 1:-1]
+    assert box[0] == "│"
+    assert box[1].startswith("◇  Install ─") and box[1].endswith("╮")
+    assert box[-1].startswith("├─") and box[-1].endswith("╯")
+    assert "│  ✓ Python 3.12" in box[3] and box[3].endswith("  │")
+    assert "│  ! No backup yet" in box[4]
+    # Every row of the box is as wide as its top edge.
+    assert len({len(x) for x in box[1:]}) == 1
+    assert lines[-1] == "└"
+
+
+def test_section_wraps_to_the_terminal(term, monkeypatch):
+    term.setenv("NO_COLOR", "1")
+    text = "word " * 30
+    lines = _section(TTY(), "Settings", [("info", text.strip())], monkeypatch, columns=50)
+    box = [x for x in lines if x.startswith(("◇", "│ ", "├"))]
+    assert max(len(x) for x in box) <= 50
+    assert len({len(x) for x in box}) == 1
+    assert sum("word" in x for x in box) > 1
+
+
+def test_section_ignores_link_codes_in_width(term, monkeypatch):
+    term.setenv("WT_SESSION", "c0ffee")
+    buf = TTY()
+    lines = _section(buf, "Links", [("info", f"see {URL}")], monkeypatch)
+    plain = [ui._ANSI.sub("", x) for x in lines]
+    box = [x for x in plain if x.startswith(("◇", "│ ", "├"))]
+    assert len({len(x) for x in box}) == 1
+    assert _osc8(URL) in buf.getvalue()
+
+
+def test_section_ascii_fallback(term, monkeypatch):
+    term.setenv("NO_COLOR", "1")
+    buf = TTY()
+    buf.encoding = "ascii"
+    lines = _section(buf, "Install", [("ok", "Python 3.12")], monkeypatch)
+    assert any(x.startswith("o  Install -") and x.endswith("+") for x in lines)
+    assert any(x.startswith("+-") for x in lines)
+    assert all(x.isascii() for x in lines)
+
+
+def test_section_off_the_rail_is_a_heading(term, monkeypatch):
+    buf = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buf)
+    with ui.Rail("Copycord doctor", stream=buf, heading=False):
+        with ui.section("Install", stream=buf) as sec:
+            ui.line("ok", "Python 3.12", stream=sec.out)
+    assert buf.getvalue() == "\nInstall\n✓ Python 3.12\n"
+
+
+def test_section_glyphs_are_single_width():
+    for name in ("join", "rule", "corner", "foot"):
+        assert unicodedata.east_asian_width(ui._RAIL[name][1]) in ("N", "Na", "A")
+    for frame in ui.Spinner.RAIL_FRAMES:
+        assert unicodedata.east_asian_width(frame) in ("N", "Na", "A")
+
+
+def test_brand_line(term):
+    term.setenv("NO_COLOR", "1")
+    out = TTY()
+    assert ui.brand_line("4.0.0", "abcdef123456", out) == (
+        "Copycord v4.0.0 (abcdef1) · Ultimate Discord server mirroring and utility toolkit")
+
+
+def test_doctor_on_a_terminal_is_a_rail_of_sections(term, monkeypatch):
+    from copycord import __main__ as cli
+
+    term.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(ui, "_columns", lambda: 80)
+    buf = TTY()
+    monkeypatch.setattr(sys, "stdout", buf)
+    monkeypatch.setattr(cli, "brand", lambda: "Copycord v4.0.0 (abcdef1)")
+    monkeypatch.setattr(cli, "run_doctor", lambda: [
+        ("Install", [cli.Check(cli.PASS, "Python 3.12")]),
+        ("Settings", [cli.Check(cli.FAIL, "Dashboard password", "not set")]),
+    ])
+    assert cli.doctor() == 1
+    out = buf.getvalue()
+    assert "Copycord v4.0.0 (abcdef1)" in out
+    assert "┌  Copycord doctor" in out
+    for title in ("Install", "Settings", "Needs your attention"):
+        assert re.search(rf"^◇  {title} ─+╮$", out, re.M)
+    assert out.rstrip().splitlines()[-1] == "└  ✗ 0 warnings, 1 problem"

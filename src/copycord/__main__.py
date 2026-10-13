@@ -173,6 +173,19 @@ def _version() -> str:
         return "unknown"
 
 
+def brand() -> str:
+    """The header line of a rail command, see ui.brand_line()."""
+    from copycord import ui
+
+    try:
+        from copycord.update import installed_commit
+
+        commit = installed_commit() or ""
+    except Exception:
+        commit = ""
+    return ui.brand_line(_version(), commit)
+
+
 def format_help() -> str:
     from copycord import ui
 
@@ -1466,11 +1479,22 @@ def _print_attention(checks: List[Check], notes: Optional[dict] = None, fix: boo
     )
 
 
-def _print_summary(checks: List[Check], fixable: int = 0) -> None:
+def _print_summary(checks: List[Check], fixable: int = 0, rail=None) -> None:
     """Print the summary line and, if something is fixable, the --fix hint."""
     from copycord import ui
 
     summary = doctor_summary(checks)
+    if rail is not None and rail.active:
+        if fixable:
+            ui.gap()
+            ui.note(ui.dim("Run ") + ui.cmd("copycord doctor --fix")
+                    + ui.dim(f" to fix {fixable} of them."))
+        status = ("fail" if any(c.status == FAIL for c in checks)
+                  else "warn" if summary != "All good" else "ok")
+        tail = f"  {ui.dim('start it with ' + ui.cmd('copycord run'))}" if status == "ok" else ""
+        ui.gap()
+        rail.close(f"{ui.mark(status, sys.stdout)} {summary}{tail}")
+        return
     print()
     if any(c.status == FAIL for c in checks):
         ui.fail(summary, stream=sys.stdout)
@@ -1486,11 +1510,25 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
-def _print_fix_summary(checks: List[Check], applied: int) -> None:
+def _print_fix_summary(checks: List[Check], applied: int, rail=None) -> None:
     """--fix: what was fixed and what is left."""
     from copycord import ui
 
     left = [c for c in checks if c.status in (WARN, FAIL)]
+    if rail is not None and rail.active:
+        ui.gap()
+        if applied:
+            ui.ok(f"Fixed {_plural(applied, 'issue')}", stream=sys.stdout)
+            ui.gap()
+        if not left:
+            rail.close(f"{ui.mark('ok', sys.stdout)} Everything looks good  "
+                       f"{ui.dim('start it with ' + ui.cmd('copycord run'))}")
+            return
+        things = _plural(len(left), "thing")
+        status = "fail" if any(c.status == FAIL for c in left) else "warn"
+        rail.close(f"{ui.mark(status, sys.stdout)} {things} "
+                   f"{'needs' if len(left) == 1 else 'need'} your attention")
+        return
     print()
     if applied:
         ui.ok(f"Fixed {_plural(applied, 'issue')}", stream=sys.stdout)
@@ -1647,17 +1685,19 @@ def doctor(verbose: bool = False, fix: bool = False, brief: bool = False,
     if brief:
         _print_brief(checks, notes, fixed)
         return 1 if any(c.status == FAIL for c in checks) else 0
-    if ui.use_color():
-        ui.heading("Copycord doctor")
-    for title, rows in sections:
-        ui.heading(title)
-        _print_checks(rows, verbose, {i: v for (t, i), v in done.items() if t == title},
-                      notes, failed)
-    _print_attention(checks, notes, fix)
-    if fix:
-        _print_fix_summary(checks, len(fixed))
-    else:
-        _print_summary(checks, sum(c.status in (WARN, FAIL) and c.fix in FIXES for c in checks))
+    tty = sys.stdout.isatty()
+    with ui.Rail("Copycord doctor", brand=brand() if tty else "",
+                 heading=ui.use_color()) as rail:
+        for title, rows in sections:
+            with ui.section(title):
+                _print_checks(rows, verbose, {i: v for (t, i), v in done.items() if t == title},
+                              notes, failed)
+        _print_attention(checks, notes, fix)
+        if fix:
+            _print_fix_summary(checks, len(fixed), rail)
+        else:
+            _print_summary(checks, sum(c.status in (WARN, FAIL) and c.fix in FIXES
+                                       for c in checks), rail)
     return 1 if any(c.status == FAIL for c in checks) else 0
 
 

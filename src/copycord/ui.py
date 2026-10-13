@@ -23,6 +23,7 @@ from __future__ import annotations
 import itertools
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -294,9 +295,9 @@ def attention(items: Iterable[tuple], stream: Optional[TextIO] = None) -> None:
     items = list(items)
     if not items:
         return
-    heading("Needs your attention", stream)
-    for status, text, hint in items:
-        line(status, text, hint, stream)
+    with section("Needs your attention", stream) as sec:
+        for status, text, hint in items:
+            line(status, text, hint, sec.out)
 
 
 def kv(rows: Iterable[tuple], stream: Optional[TextIO] = None, width: int = 0) -> None:
@@ -371,6 +372,10 @@ _RAIL = {
     "ask": ("accent", "◆", "*"),
     "done": ("green", "◇", "o"),
     "end": ("gray", "└", "+"),
+    "join": ("gray", "├", "+"),
+    "rule": ("gray", "─", "-"),
+    "corner": ("gray", "╮", "+"),
+    "foot": ("gray", "╯", "+"),
 }
 
 _rail: Optional["Rail"] = None
@@ -391,11 +396,15 @@ def on_rail(stream: Optional[TextIO] = None) -> bool:
     return _rail is not None and _rail.active and _tty(stream)
 
 
-def _rail_glyph(name: str, stream: TextIO) -> str:
+def _rail_symbol(name: str, stream: TextIO) -> str:
     # One set for the whole rail, so it never mixes box glyphs and ASCII.
     fancy = _encodable("".join(symbol for _, symbol, _ in _RAIL.values()), stream)
-    color, symbol, ascii_symbol = _RAIL[name]
-    return paint(symbol if fancy else ascii_symbol, color, stream=stream)
+    _, symbol, ascii_symbol = _RAIL[name]
+    return symbol if fancy else ascii_symbol
+
+
+def _rail_glyph(name: str, stream: TextIO, count: int = 1) -> str:
+    return paint(_rail_symbol(name, stream) * count, _RAIL[name][0], stream=stream)
 
 
 def note(text: str = "", stream: Optional[TextIO] = None) -> None:
@@ -427,9 +436,14 @@ class Rail:
     closes it on the way out. Off a terminal, or under --json, title is a plain
     heading and the output keeps its usual layout."""
 
-    def __init__(self, title: str, stream: Optional[TextIO] = None):
+    def __init__(self, title: str, stream: Optional[TextIO] = None, brand: str = "",
+                 heading: bool = True):
         self.title = title
         self.stream = sys.stdout if stream is None else stream
+        # The header line above the rail, see brand_line(); only on the rail.
+        self.brand = brand
+        # Off the rail, whether title is printed as a heading.
+        self.heading = heading
         self.active = False
         self._closed = False
         self._outer: Optional["Rail"] = None
@@ -442,8 +456,10 @@ class Rail:
         self._outer, _rail = _rail, self
         if self.active:
             s = self.stream
+            if self.brand:
+                print(f"\n{self.brand}", file=s)
             print(f"\n{_rail_glyph('start', s)}  {accent(self.title, s)}", file=s)
-        else:
+        elif self.heading:
             heading(self.title, self.stream)
         return self
 
@@ -470,6 +486,136 @@ class Rail:
             self.close()
         finally:
             _rail = self._outer
+
+
+def brand_line(version: str, commit: str = "", stream: Optional[TextIO] = None) -> str:
+    """The header of a rail command: "Copycord v4.0.0 (abc1234) · tagline"."""
+    stream = sys.stdout if stream is None else stream
+    version = version if version[:1] in ("v", "u") else f"v{version}"
+    sha = f" {dim('(' + commit[:7] + ')', stream)}" if commit else ""
+    return f"{accent('Copycord', stream)} {version}{sha}{dim(dot(stream) + TAGLINE, stream)}"
+
+
+# A section box is at least this wide inside and at most this wide overall.
+SECTION_MIN = 20
+SECTION_MAX = 100
+_SGR = re.compile(r"\033\[[0-9;]*m")
+
+
+def _columns() -> int:
+    return shutil.get_terminal_size((80, 24)).columns
+
+
+def _wrap(text: str, width: int, indent: str = "  ") -> List[str]:
+    """text in lines of at most width visible columns, broken at spaces; the
+    color open at a break is closed and opened again on the next line. A word
+    longer than width stays whole."""
+    if _visible_len(text) <= width:
+        return [text]
+    rows: List[str] = []
+    cur, size, style = "", 0, ""
+    for word in text.split(" "):
+        n = _visible_len(word)
+        if cur and size + 1 + n > width:
+            rows.append(cur + (RESET if style else ""))
+            cur, size = indent + style, len(indent)
+            joiner = ""
+        else:
+            joiner = " " if cur else ""
+        cur += joiner + word
+        size += len(joiner) + n
+        for code in _SGR.findall(word):
+            style = "" if code in (RESET, "\033[m") else code
+    rows.append(cur)
+    return rows
+
+
+class _Capture:
+    """Stands in for the terminal while a section collects its lines."""
+
+    def __init__(self, real: TextIO):
+        self.encoding = getattr(real, "encoding", None) or "utf-8"
+        self.parts: List[str] = []
+
+    def write(self, text: str) -> int:
+        self.parts.append(text)
+        return len(text)
+
+    def flush(self) -> None:
+        pass
+
+    def isatty(self) -> bool:
+        return True
+
+    def lines(self) -> List[str]:
+        text = "".join(self.parts).strip("\n")
+        return text.split("\n") if text else []
+
+
+class section:
+    """A titled block of output. On the rail it is a box hanging off it:
+
+      │
+      ◇  Install ──────────╮
+      │                    │
+      │  ✓ Python 3.12     │
+      │                    │
+      ├────────────────────╯
+
+    Everything printed to stdout inside it lands in the box. Off the rail the
+    title is a plain heading and the lines print as they come."""
+
+    def __init__(self, title: str, stream: Optional[TextIO] = None):
+        self.title = title
+        self.stream = sys.stdout if stream is None else stream
+        self.boxed = False
+        # Where the lines of the section go: the box while boxed, else stream.
+        self.out = self.stream
+        self._capture: Optional[_Capture] = None
+        self._saved: Optional[TextIO] = None
+
+    def __enter__(self) -> "section":
+        global _rail
+        self.boxed = on_rail(self.stream)
+        if not self.boxed:
+            heading(self.title, self.stream)
+            return self
+        self._capture = self.out = _Capture(self.stream)
+        self._saved, sys.stdout = sys.stdout, self._capture
+        # Inside the box the lines keep their flat layout.
+        self._rail, _rail = _rail, None
+        return self
+
+    def __exit__(self, *exc) -> None:
+        global _rail
+        if not self.boxed:
+            return
+        sys.stdout, _rail = self._saved, self._rail
+        render_section(self.title, self._capture.lines(), self.stream)
+
+
+def render_section(title: str, lines: Iterable[str], stream: Optional[TextIO] = None) -> None:
+    """Print a section box (see section) with lines in it."""
+    stream = sys.stdout if stream is None else stream
+    g = lambda name: _rail_glyph(name, stream)  # noqa: E731
+    room = max(SECTION_MIN, min(_columns(), SECTION_MAX) - 6)
+    rows: List[str] = []
+    for x in lines:
+        rows.extend(_wrap(x.rstrip(), room))
+    width = max([_visible_len(x) for x in rows] + [len(title) + 2, SECTION_MIN])
+    width = min(width, max(room, len(title) + 2))
+    bar = g("bar")
+    print(bar, file=stream)
+    dash = lambda n: _rail_glyph("rule", stream, n)  # noqa: E731
+    print(f"{g('done')}  {accent(title, stream)} {dash(width + 1 - len(title))}{g('corner')}",
+          file=stream)
+    blank = f"{bar}{' ' * (width + 4)}{bar}"
+    print(blank, file=stream)
+    for x in rows:
+        pad = " " * max(0, width - _visible_len(x))
+        print(f"{bar}  {x}{pad}  {bar}", file=stream)
+    print(blank, file=stream)
+    print(f"{g('join')}{dash(width + 4)}{g('foot')}", file=stream)
 
 
 # --------------------------------------------------------------------------
@@ -499,6 +645,7 @@ class Spinner:
     also shows that Copycord is busy."""
 
     FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
+    RAIL_FRAMES = "◒◐◓◑"
     ELAPSED_AFTER = 3.0
     BUSY = "\033]9;4;3;0\033\\"
     IDLE = "\033]9;4;0;0\033\\"
@@ -520,7 +667,8 @@ class Spinner:
         return f"\r{paint(frame, 'accent', stream=self.stream)}{gap}{self.text}{tail}"
 
     def _spin(self) -> None:
-        for frame in itertools.cycle(self.FRAMES):
+        frames = self.RAIL_FRAMES if on_rail(self.stream) else self.FRAMES
+        for frame in itertools.cycle(frames):
             if self._stop.is_set():
                 break
             self.stream.write(self.render(frame, time.monotonic()))
