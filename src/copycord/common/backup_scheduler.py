@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import sqlite3
 import tarfile
 import tempfile
@@ -20,6 +21,65 @@ from datetime import datetime, timezone, time as dtime, timedelta
 from pathlib import Path
 from typing import Awaitable, Callable, Iterable, Optional
 from zoneinfo import ZoneInfo
+
+# Written next to the archives when a backup fails its check; the next good backup removes it.
+CHECK_FAILED = ".last-backup-failed.json"
+
+
+class BackupCheckError(RuntimeError):
+    """The copy of the database failed PRAGMA integrity_check; no archive was kept."""
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(
+            f"the copy of the database failed its integrity check ({reason}); "
+            "no backup was kept"
+        )
+
+
+def integrity_problems(db_path: Path) -> list:
+    """What PRAGMA integrity_check reports for db_path; [] when it is sound.
+
+    integrity_check rather than quick_check: it also checks that every index
+    matches its table. It runs on the private copy in a worker thread, once a
+    day or on request, so its extra time on a large database costs nothing.
+    """
+    try:
+        conn = sqlite3.connect(f"{Path(db_path).resolve().as_uri()}?mode=ro", uri=True)
+        try:
+            rows = [str(r[0]) for r in conn.execute("PRAGMA integrity_check(20)")]
+        finally:
+            conn.close()
+    except sqlite3.Error as e:
+        return [str(e) or type(e).__name__]
+    return [] if rows == ["ok"] else rows
+
+
+def record_check_failure(backup_dir: Path, reason: str) -> None:
+    """Note a failed check for `copycord doctor`."""
+    now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+    (Path(backup_dir) / CHECK_FAILED).write_text(
+        json.dumps({"at": now_iso, "reason": reason}) + "\n", encoding="utf-8"
+    )
+
+
+def clear_check_failure(backup_dir: Path) -> None:
+    with contextlib.suppress(OSError):
+        (Path(backup_dir) / CHECK_FAILED).unlink()
+
+
+def last_check_failure(backup_dir: Path) -> Optional[dict]:
+    """{"at", "reason", "mtime"} of the last failed check, or None."""
+    path = Path(backup_dir) / CHECK_FAILED
+    try:
+        mtime = path.stat().st_mtime
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        data = {}
+    return {"at": str(data.get("at") or ""), "reason": str(data.get("reason") or ""),
+            "mtime": mtime}
 
 
 def record_backup_stats(set_config: Callable[[str, str], None], archive_path: Path) -> None:
@@ -154,6 +214,8 @@ class DailySQLiteBackupScheduler:
                             "on_complete failed after scheduled backup: %s", e
                         )
 
+            except BackupCheckError:
+                pass  # _backup_once has logged it
             except Exception as e:
                 self._exception("DB backup failed: %s", e)
 
@@ -261,6 +323,16 @@ class DailySQLiteBackupScheduler:
                 src.close()
             self._dbg("snapshot completed in %.2fs", time.monotonic() - snap_t0)
 
+            check_t0 = time.monotonic()
+            problems = await asyncio.to_thread(integrity_problems, tmp_db_path)
+            if problems:
+                reason = "; ".join(problems[:3])
+                self._warn("backup failed its integrity check, no archive kept: %s", reason)
+                with contextlib.suppress(OSError):
+                    record_check_failure(self.cfg.backup_dir, reason)
+                raise BackupCheckError(reason)
+            self._dbg("integrity check passed in %.2fs", time.monotonic() - check_t0)
+
             def _write_archive_once() -> None:
                 self._dbg("opening tar for write: %s", tmp_tgz)
                 with tarfile.open(tmp_tgz, "w:gz") as tar:
@@ -293,6 +365,7 @@ class DailySQLiteBackupScheduler:
                     )
                 tmp_db_path.unlink(missing_ok=True)
 
+        clear_check_failure(self.cfg.backup_dir)
         self._prune_old_archives()
 
         self._info(

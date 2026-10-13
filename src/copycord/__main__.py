@@ -887,9 +887,10 @@ def check_backups(
     db: Optional[Path] = None,
     now: Optional[float] = None,
 ) -> Check:
-    """The newest daily (*.tar.gz) or pre-update (*.db) backup."""
+    """The newest daily (*.tar.gz) or pre-update (*.db) backup, or a newer one that failed its check."""
     import time
 
+    from copycord.common.backup_scheduler import last_check_failure
     from copycord.common.db import backups_dir
     from copycord.common.paths import db_path
 
@@ -906,6 +907,13 @@ def check_backups(
                     except OSError:
                         pass
     hint = "the daily backup runs at BACKUP_AT (03:17 by default) while Copycord is running"
+    failed = last_check_failure(backup_dir)
+    if failed and (not times or failed["mtime"] >= max(times)):
+        reason = ("the copy of the database did not pass the SQLite integrity check, so it "
+                  "was not kept; older backups are untouched")
+        if failed["reason"]:
+            reason += f" ({failed['reason']})"
+        return Check(WARN, "last backup failed its check", reason, str(backup_dir), "backup")
     if not times:
         # A new install, or one too young to have had its first daily backup.
         try:
