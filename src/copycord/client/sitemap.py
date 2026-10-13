@@ -29,8 +29,7 @@ from copycord.selfclient.models import (
 
 
 def _is_voice(ch: Any) -> bool:
-    # selfclient's StageChannel subclasses VoiceChannel; discord.py's did not,
-    # and stage channels are serialized separately (they carry a topic).
+    # StageChannel subclasses VoiceChannel here; stage channels are serialized separately (they carry a topic)
     return isinstance(ch, VoiceChannel) and not isinstance(ch, StageChannel)
 
 
@@ -46,9 +45,9 @@ class SitemapService:
         self._dirty_lock = asyncio.Lock()
         self._send_lock = asyncio.Lock()
 
-        # ── Smart queue ──
-        self._queue: deque[int] = deque()    # ordered guild IDs to process
-        self._queue_set: Set[int] = set()    # fast lookup for dedup
+        # queue
+        self._queue: deque[int] = deque()    # guild IDs in order
+        self._queue_set: Set[int] = set()    # dedup lookup
         self._queue_lock = asyncio.Lock()
         self._queue_task: Optional[asyncio.Task] = None
         self._startup_delay: int = 15        # seconds before first sync
@@ -130,11 +129,7 @@ class SitemapService:
                 yield g
 
     def enqueue(self, guild_id: int) -> None:
-        """Add a guild to the processing queue with deduplication.
-
-        If the guild is already queued, it keeps its position (the newer
-        data will be fetched when we get to it). If not, it's appended.
-        """
+        """Queue a guild; one already queued keeps its position."""
         gid = int(guild_id)
         mapped = set(self._mapped_original_ids())
         if gid not in mapped:
@@ -299,7 +294,7 @@ class SitemapService:
                         g.name, clone_id, e,
                     )
 
-            # Delay between guilds if more in queue
+            # delay between guilds
             if self._queue:
                 await asyncio.sleep(self._inter_guild_delay)
 
@@ -333,10 +328,7 @@ class SitemapService:
         origin_guild_id: int,
         cloned_guild_id: int | None,
     ) -> Dict[str, object]:
-        """
-        Build filter view for a specific (origin, clone) mapping.
-        Merges global rows + origin-only rows + (origin,clone) rows with proper precedence.
-        """
+        """Build the filter view for one (origin, clone) mapping, merging global, origin-only and pair rows by precedence."""
         f = self.db.get_filters(
             original_guild_id=int(origin_guild_id),
             cloned_guild_id=(
@@ -371,13 +363,7 @@ class SitemapService:
         origin_ids: list[int],
         max_concurrency: int = 10,
     ) -> None:
-        """
-        Build/send sitemap for just the given original guild ids.
-        Fans out to each configured clone for the origin (legacy-compatible).
-
-        Uses a limited async concurrency so that many mappings can be sent quickly
-        without blocking on each other.
-        """
+        """Build and send sitemaps for the given original guild ids, fanning out to each clone with limited concurrency."""
         if not origin_ids:
             return
 
@@ -444,10 +430,7 @@ class SitemapService:
             await asyncio.gather(*tasks)
 
     async def send_for_mapping_id(self, mapping_id: str) -> None:
-        """
-        Build and send a sitemap for exactly one mapping row
-        (original_guild_id + cloned_guild_id) identified by mapping_id.
-        """
+        """Build and send a sitemap for the one mapping row identified by mapping_id."""
         mapping_id = (mapping_id or "").strip()
         if not mapping_id:
             self.logger.warning("[sitemap] send_for_mapping_id called with empty id")
@@ -584,9 +567,7 @@ class SitemapService:
                 return default
 
         def _serialize_forum_default_reaction(forum) -> Optional[Dict[str, object]]:
-            """
-            Serialize the default reaction emoji on a ForumChannel (if present).
-            """
+            """Serialize the default reaction emoji of a ForumChannel, if present."""
             try:
                 em = getattr(forum, "default_reaction_emoji", None)
             except Exception:
@@ -613,9 +594,7 @@ class SitemapService:
             }
 
         def _serialize_forum_tags(forum) -> List[Dict[str, object]]:
-            """
-            Serialize available forum tags into a simple JSON-friendly structure.
-            """
+            """Serialize available forum tags to JSON-friendly dicts."""
             tags = []
             try:
                 available = list(getattr(forum, "available_tags", []) or [])
@@ -653,10 +632,7 @@ class SitemapService:
             return tags
 
         def _serialize_video_quality(ch):
-            """
-            Normalize VideoQualityMode → 'auto' / 'full' / None
-            so it can safely go into JSON.
-            """
+            """Normalize VideoQualityMode to 'auto' / 'full' / None."""
             vqm = getattr(ch, "video_quality_mode", None)
             if not vqm:
                 return None
@@ -684,10 +660,7 @@ class SitemapService:
             return str(u) if u else ""
 
         def _asset_str(obj, attr_name: str) -> Optional[str]:
-            """
-            Safely stringify a guild Asset-style attribute (icon, banner, splash, etc.).
-            Returns None if not present.
-            """
+            """Stringify an Asset-style attribute (icon, banner, ...); None if absent."""
             try:
                 asset = getattr(obj, attr_name, None)
             except Exception:
@@ -755,8 +728,7 @@ class SitemapService:
         except Exception:
             widget_channel_id = None
 
-        # Fetch the roles fresh for the newer role "colors" object
-        # (gradient/holographic styles); Role.colors is the raw dict.
+        # fetch roles fresh for the newer role "colors" object (gradient/holographic); Role.colors is the raw dict
         raw_role_colors: Dict[int, Dict[str, object]] = {}
         try:
             fetched_roles = await self.bot.fetch_roles(guild)
@@ -1043,7 +1015,7 @@ class SitemapService:
             except (TypeError, ValueError):
                 continue
 
-            # Skip threads that don't belong to this guild
+            # skip threads from other guilds
             try:
                 row_gid = row["original_guild_id"]
             except (KeyError, IndexError):
@@ -1177,11 +1149,7 @@ class SitemapService:
         }
 
     def reload_filters_and_resend(self, guild_id: int | None):
-        """
-        Called when config filter sets were reloaded from DB.
-        Rebuild and resend the sitemap so the server sees the new scope.
-        If guild_id is provided, only mark that guild dirty.
-        """
+        """Rebuild and resend the sitemap after the filter sets were reloaded; with guild_id, only that guild."""
         self.schedule_sync(guild_id, delay=0.2)
 
     def _is_filtered_out_view(
@@ -1191,16 +1159,10 @@ class SitemapService:
         view: Dict[str, object],
         thread_id: int | None = None,
     ) -> bool:
-        """
-        Return True if this channel/category should be filtered out (hidden),
-        using the *per-origin-guild* filter view rather than the old global config.
-        This is the same logic we use when trimming the sitemap.
+        """True if the channel/category/thread is filtered out by the per-origin-guild view.
 
-        ``thread_id`` is the thread's own id, judged alongside its parent so a
-        single noisy thread can be dropped without losing the channel it lives
-        in, or kept while the rest of that channel is filtered away. A thread
-        inherits its parent's verdict when it is not named itself, which is
-        what makes excluding a whole channel still cover its threads.
+        A thread is judged on its own id alongside its parent, and inherits the
+        parent's verdict when not named itself.
         """
         include_category_ids = view["include_category_ids"]
         include_channel_ids = view["include_channel_ids"]
@@ -1220,12 +1182,11 @@ class SitemapService:
         if wl_on and not (wl_ch or wl_cat or wl_th):
             return True
 
-        # Naming the thread itself is the most specific instruction there is,
-        # so it beats an allowed parent.
+        # naming the thread itself is the most specific rule, so it beats an allowed parent
         if ex_th and not wl_th:
             return True
 
-        # An explicitly included thread survives its parent being excluded.
+        # an explicitly included thread survives its parent being excluded
         if ex_ch and not (wl_ch or wl_th):
             return True
 
@@ -1260,16 +1221,12 @@ class SitemapService:
     ) -> bool:
         """True when no clone of this guild wants this channel or thread.
 
-        Filters are stored per mapping, and a guild-scoped lookup cannot see
-        those rows at all -- so asking at guild scope silently answered "keep
-        everything". Ask each mapping instead, and only drop the message when
-        every one of them has filtered it out; the client sends one payload per
-        source message, so if any clone still wants it, it has to go.
+        Filters are stored per mapping, so each mapping is asked; a message is
+        dropped only if all of them filter it out.
         """
         clone_ids = self._clone_ids_for_origin(origin_guild_id)
         if not clone_ids:
-            # Unmapped guild: fall back to the guild-level view, which is
-            # where genuinely global filter rows live.
+            # unmapped guild: use the guild-level view, where global filter rows live
             return self._is_filtered_out_view(
                 channel_id,
                 category_id,
@@ -1286,10 +1243,7 @@ class SitemapService:
         return True
 
     def in_scope_channel(self, ch, cloned_guild_id: int | None = None) -> bool:
-        """
-        True if this channel/category/thread should be visible for its ORIGIN guild
-        *and* (optionally) a specific clone mapping when cloned_guild_id is provided.
-        """
+        """True if the channel/category/thread is visible for its origin guild and, if given, the clone mapping."""
         try:
             g = getattr(ch, "guild", None)
             if g is None and isinstance(ch, Thread):
@@ -1377,16 +1331,10 @@ class SitemapService:
     def in_scope_thread(
         self, thr: Thread, cloned_guild_id: int | None = None
     ) -> bool:
-        """
-        True if this thread is allowed for its origin guild, using per-mapping
-        filters when a clone is specified.
+        """True if the thread is allowed for its origin guild, using per-mapping filters when a clone is given.
 
-        The thread's own id is judged alongside its parent, so a single thread
-        can be filtered out without losing the channel it lives in. This is the
-        gate every message in a thread passes through -- a forum post that is
-        filtered out of the sitemap never gets created, but a text-channel
-        thread is made on demand from the message itself, so without this check
-        it is created and forwarded regardless.
+        Gate for every threaded message: a text-channel thread is created on
+        demand from the message, so without this it would bypass filters.
         """
         try:
             parent = getattr(thr, "parent", None)
@@ -1500,17 +1448,7 @@ class SitemapService:
     def _filter_sitemap(
         self, sitemap: Dict[str, Any], view: Dict[str, object]
     ) -> Dict[str, Any]:
-        """
-        Apply whitelist / blacklist rules (now guild-scoped) to a sitemap dict.
-
-        view = {
-            "include_category_ids": set[int],
-            "include_channel_ids": set[int],
-            "excluded_category_ids": set[int],
-            "excluded_channel_ids": set[int],
-            "whitelist_enabled": bool,
-        }
-        """
+        """Apply whitelist/blacklist rules from the filter view to a sitemap dict."""
 
         include_category_ids: Set[int] = view["include_category_ids"]
         include_channel_ids: Set[int] = view["include_channel_ids"]
