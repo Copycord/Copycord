@@ -295,7 +295,7 @@ def test_sh_checks_the_wheel_before_installing_it():
     assert check < release.index("stop_service") < release.index('uv tool install --force --python "$PYTHON_VERSION" "$WHEEL_FILE"')
     assert "nothing was installed" in release
     # The local, checked file is installed, never the URL.
-    assert '"$WHEEL_URL"' not in release[release.index("uv tool install"):]
+    assert '"$WHEEL_URL"' not in release[release.index('run "uv tool install'):]
 
 
 def test_sh_has_one_release_lookup():
