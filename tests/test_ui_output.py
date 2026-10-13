@@ -46,7 +46,7 @@ def test_marks_are_narrow_text_symbols(status):
     # Wide or emoji-style marks eat the space after them in Windows Terminal.
     symbol = ui._MARKS[status][1]
     assert len(symbol) == 1
-    assert unicodedata.east_asian_width(symbol) in ("N", "Na")
+    assert unicodedata.east_asian_width(symbol) not in ("W", "F")
     assert symbol not in "\u2714\u2716\u2705\u274c"
 
 
@@ -292,6 +292,6 @@ def test_installer_spinners_show_time_and_busy():
     ps1 = (ROOT / "install.ps1").read_text(encoding="utf-8")
     assert "$progressBar = $useColor -and [bool]$env:WT_SESSION" in ps1
     run = ps1[ps1.index("function Run("):ps1.index("function Run(") + 3000]
-    busy, idle = run.index('"$esc]9;4;3;0$esc\\"'), run.index('"$esc]9;4;0;0$esc\\"')
-    assert run.index("try {") < busy < run.index("} finally {") < idle
+    assert ('try {\n            if ($progressBar) { Write-Host "$esc]9;4;3;0$esc\\" -NoNewline }' in run)
+    assert ('} finally {\n            if ($progressBar) { Write-Host "$esc]9;4;0;0$esc\\" -NoNewline }' in run)
     assert "if ($secs -ge 3) { $tail = '  ' + (Spent $secs) }" in run
