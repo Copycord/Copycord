@@ -576,6 +576,40 @@ def confirm_downgrade(current: str, target: str, yes: bool = False) -> int:
     return 0
 
 
+def nothing_new(target: Channel) -> Tuple[bool, Optional[Release]]:
+    """(True, ...) when the install already matches the newest of target; prints why.
+
+    Also returns the release it fetched, so the install does not ask GitHub twice.
+    """
+    current = current_version()
+    if target.channel == DEV:
+        installed = installed_commit()
+        if installed is None:
+            return False, None
+        try:
+            with ui.Spinner(f"Reading {target.repo_name}@{target.ref} from GitHub"):
+                head = fetch_branch_head(target.ref, repo=target.repo_name)
+        except Exception as e:
+            ui.warn(f"could not get the head of {target.ref} from GitHub; installing anyway", str(e))
+            return False, None
+        if head.sha != installed:
+            return False, None
+        ui.ok(f"Copycord is up to date ({current}, {installed[:7]})")
+        return True, None
+    # A git install on a release channel is replaced by the release.
+    if git_source() is not None:
+        return False, None
+    try:
+        with ui.Spinner("Checking GitHub releases"):
+            release = fetch_latest_release(prerelease=target.channel == BETA)
+    except Exception:
+        return False, None  # the install below reports it
+    if is_newer(release.version, current) or is_older(release.version, current):
+        return False, release
+    ui.ok(f"Copycord is up to date ({current})")
+    return True, release
+
+
 def update(
     check_only: bool = False,
     channel: Optional[str] = None,
@@ -586,8 +620,12 @@ def update(
     no_backup: bool = False,
     yes: bool = False,
     reinstall: bool = False,
+    force: bool = False,
 ) -> int:
-    """Run an update; reinstall=True reinstalls the running version, for doctor --fix."""
+    """Run an update; reinstall=True reinstalls the running version, for doctor --fix.
+
+    With nothing new on the saved channel it changes nothing, unless force.
+    """
     saved = load_channel()
     source = git_source() if reinstall else None
     if reinstall:
@@ -636,6 +674,11 @@ def update(
     if kind in (DOCKER, SOURCE):
         print(f"Copycord was installed with {kind}; update it with:\n  {manual_hint(kind)}")
         return 1
+    release = None
+    if not (tag or reinstall or force or target != saved):
+        done, release = nothing_new(target)
+        if done:
+            return 0
     # Windows cannot replace the files of a running Copycord, so they are moved
     # aside first (see winupdate); another running Copycord blocks the update.
     windows = sys.platform == "win32" and kind in (UV_TOOL, PIPX)
@@ -652,7 +695,6 @@ def update(
         ui.heading(f"Reinstalling Copycord ({label})")
     else:
         ui.heading(f"Updating Copycord ({target.describe() if not tag else 'tag ' + tag})")
-    release = None
     git = source is not None or (target.channel == DEV and not tag)
     if source is not None:
         spec = source.spec()
@@ -661,9 +703,9 @@ def update(
     else:
         try:
             with ui.Spinner("Checking GitHub releases"):
-                if tag:
+                if release is None and tag:
                     release = fetch_release(tag)
-                else:
+                elif release is None:
                     release = fetch_latest_release(prerelease=target.channel == BETA)
                 spec = release.wheel()
         except ReleaseError as e:
