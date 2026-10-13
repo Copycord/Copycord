@@ -1,9 +1,4 @@
-"""
-Tests for the downgrade guard (src/copycord/common/db.py): a DB with a newer
-schema_version is refused and never written, schema_version is never lowered,
-`copycord run` and `copycord doctor` report it, and `copycord update` backs up
-the DB before it installs (src/copycord/update.py).
-"""
+"""Tests for the downgrade guard: a newer schema_version is refused, and update backs up first."""
 import os
 import re
 import sqlite3

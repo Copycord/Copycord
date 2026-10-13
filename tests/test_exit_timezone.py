@@ -1,7 +1,4 @@
-"""
-Unit tests for the exit-IP timezone resolver. The HTTP call is faked; nothing
-here touches the network.
-"""
+"""Unit tests for the exit-IP timezone resolver. The HTTP call is faked."""
 
 import asyncio
 

@@ -1,11 +1,4 @@
-"""
-Tests for the update channels of `copycord update` (src/copycord/update.py):
-the saved channel in <data dir>/update.json, release resolution from faked
-GitHub releases API responses (stable skips pre-releases, beta includes them,
-drafts ignored, missing wheel asset, network failure), the install command
-per installer, --tag, --no-install, the npm requirement of the dev channel
-and update status. No network, no real uv/pipx/npm.
-"""
+"""Tests for the update channels of `copycord update`. No network, no real uv/pipx/npm."""
 import io
 import json
 import os
@@ -180,8 +173,7 @@ def test_uv_pip_hint():
 
 @pytest.fixture()
 def fake_net(monkeypatch):
-    """urlopen serving responses[url] (the releases list and the tags of
-    RELEASE_LIST by default); an Exception value is raised."""
+    """urlopen serving responses[url]; an Exception value is raised."""
     responses, seen = {LIST_URL: RELEASE_LIST}, []
     for r in RELEASE_LIST:
         if not r["draft"]:
@@ -269,7 +261,7 @@ def test_dev_channel_with_branch(env, data_dir, fake_net):
     assert cli.main(["update", "--ref", "main"]) == 0
     assert rec.calls[-1][-1] == GIT_SPEC.format("main")
     assert _saved(data_dir) == {"channel": "dev", "branch": "main"}
-    assert seen == []  # dev never asks the releases API
+    assert seen == []
 
 
 def test_dev_channel_defaults_to_main(env, data_dir):
@@ -439,7 +431,7 @@ def test_tag_and_branch_are_exclusive(env, capsys):
 def test_branch_needs_dev_channel(env, capsys):
     rec, _, _ = env
     assert cli.main(["update", "--channel", "beta", "--ref", "main"]) == 2
-    assert cli.main(["update", "--ref", "main"]) == 2  # saved channel is stable
+    assert cli.main(["update", "--ref", "main"]) == 2
     assert rec.calls == []
     assert "dev channel" in capsys.readouterr().err
 

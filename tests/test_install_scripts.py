@@ -1,9 +1,4 @@
-"""
-Static checks of the install scripts at the repo root (install.sh,
-install.ps1): they exist, fail loudly, resolve releases from the GitHub
-releases API, honour the COPYCORD_* variables and never touch Docker.
-Nothing is executed and there is no network.
-"""
+"""Static checks of install.sh and install.ps1. Nothing is executed."""
 import re
 from pathlib import Path
 
@@ -182,7 +177,6 @@ def test_sh_repairs_with_the_doctor_after_an_upgrade_only():
     # Before the install replaces anything, after the settings and the channel.
     assert text.index("UPGRADE=0") < text.index("install_release()")
     assert text.index("<<ENVEOF") < text.index(call) > text.index("--no-install\n")
-    # Its exit status never fails the install.
     assert "| sed 's/^/    /' || true" in text[text.index(call):].splitlines()[0]
 
 
@@ -196,7 +190,6 @@ def test_ps1_repairs_with_the_doctor_after_an_upgrade_only():
         assert probe in detect
     assert text.index("$upgrade = ") < text.index("Step 'Finishing up'")
     assert text.index("$envTemplate") < text.index(call) > text.index("'--no-install'")
-    # stderr lines are output, not errors, and the exit status is ignored.
     block = text[text.index(call) - 300:text.index(call) + 300]
     assert "$ErrorActionPreference = 'Continue'" in block
     assert "$global:LASTEXITCODE = 0" in block

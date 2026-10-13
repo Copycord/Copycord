@@ -1,13 +1,6 @@
-"""
-client.forwarding, client.sitemap and client.export_runners on selfclient objects.
+"""client.forwarding, client.sitemap and client.export_runners on selfclient objects.
 
-All three used to import discord.py-self for type hints, isinstance checks,
-enums and exceptions, and called methods that lived on its channel and guild
-objects (history, archived_threads, fetch_stickers, the private
-guild._state.http.get_roles). They now take selfclient.models wrappers built
-straight from gateway payloads, and anything a wrapper does not carry goes
-through selfclient.Client. These tests feed canned payloads through the real
-code paths, with fake bots standing in for Client; nothing touches the network.
+Canned payloads go through the real code paths with fake bots for Client. No network.
 """
 import logging
 
@@ -213,7 +206,6 @@ class TestForwardingOnSelfclientMessages:
         assert attrs["channel_name"] == "chat"
         assert attrs["author_id"] == AUTHOR
         assert attrs["author_name"] == "Boss"
-        # A Member author: @everyone first, then roles lowest to highest.
         assert attrs["role_ids"] == [GUILD, MOD_ROLE, VIP_ROLE]
         assert attrs["is_bot"] is False
         assert attrs["is_system"] is False
@@ -273,7 +265,6 @@ class TestForwardingOnSelfclientMessages:
 
         async def rules_for(gid):
             assert gid == GUILD
-            # Role filters see the Member author's roles off the wrapper.
             return [rule("r1", VIP_ROLE), rule("r2", 999)]
 
         async def dispatch(r, attrs):
@@ -448,7 +439,6 @@ class TestSitemapClassification:
             "applied_tag_ids": [TAG],
         }
         assert threads[CHAT_THREAD]["archived"] is True
-        # The unknown thread went to Client.fetch_channel, which refused.
         assert 399999999999999999 not in threads
         assert ("fetch_channel", 399999999999999999) in svc.bot.calls
 
@@ -460,7 +450,6 @@ class TestSitemapClassification:
 
         assert ("fetch_stickers", GUILD) in svc.bot.calls
         assert ("fetch_roles", GUILD) in svc.bot.calls
-        # Standard stickers are dropped; only the guild's own stay.
         assert [s["id"] for s in sm["stickers"]] == [GUILD_STICKER]
         assert sm["stickers"][0]["format_type"] == 1
 
@@ -477,7 +466,7 @@ class TestSitemapClassification:
         assert roles[VIP_ROLE]["colors"] is None
         assert [r["id"] for r in sm["roles"]] == [GUILD, MOD_ROLE, VIP_ROLE]
 
-        assert sm["guild"]["owner_id"] is None  # owner not in the member cache
+        assert sm["guild"]["owner_id"] is None
         assert sm["guild"]["preferred_locale"] == "en-US"
         assert sm["guild"]["system_channel_id"] == CHAT
         assert sm["community"] == {
@@ -497,12 +486,9 @@ class TestSitemapClassification:
         }
         svc._build_filter_view_for_guild = lambda gid: excluded
 
-        # The category itself is judged as a category.
         assert svc.in_scope_channel(guild.get_channel(CATEGORY)) is False
-        # A thread is judged by its parent's category.
         assert svc.in_scope_channel(guild.get_channel(POST)) is False
         assert svc.in_scope_thread(guild.get_channel(CHAT_THREAD)) is False
-        # A channel outside the category is untouched.
         assert svc.in_scope_channel(guild.get_channel(LOOSE)) is True
 
     def test_role_change_is_relevant_on_role_wrappers(self, guild):
@@ -583,7 +569,6 @@ class TestExportRunnersOnClient:
 
         got = [t.id async for t in eng._iter_all_threads(chat)]
 
-        # Active (cached) thread first, then each archived list, deduplicated.
         assert got == [CHAT_THREAD, 310000000000000001, 310000000000000002]
         assert [(c, kw["private"], kw["joined"], kw["raise_on_error"]) for c, kw in bot.archived_calls] == [
             (CHAT, False, False, True),

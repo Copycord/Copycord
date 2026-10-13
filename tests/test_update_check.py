@@ -1,7 +1,4 @@
-"""
-Tests for the update check on start and the auto-update
-(src/copycord/update_check.py). The network is mocked.
-"""
+"""Tests for the update check on start and the auto-update. The network is mocked."""
 import sqlite3
 import time
 

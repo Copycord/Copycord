@@ -1,9 +1,4 @@
-"""
-Tests for the supervisor (src/copycord/supervisor.py).
-
-Fake roles only: no Discord, no uvicorn, network limited to loopback
-control websockets on ephemeral ports.
-"""
+"""Tests for the supervisor. Fake roles only; network is limited to loopback control sockets."""
 import asyncio
 import json
 import logging
@@ -221,7 +216,6 @@ def test_shutdown_order_client_server_admin():
 
         async def drive():
             await _wait_until(lambda: fakes["admin"].starts == 1)
-            # Admin starts server and client over their control ports.
             ports = {c.role.name: c.port for c in sup.controls}
             assert (await _cmd(ports["server"], {"cmd": "start"}))["status"] == "started"
             assert (await _cmd(ports["client"], {"cmd": "start"}))["status"] == "started"
@@ -298,7 +292,6 @@ def test_control_protocol_start_stop_status():
             assert r["status"] == "already-running"
             assert fakes["server"].starts == 1
 
-            # Client untouched by server commands.
             assert fakes["client"].starts == 0
 
             r = await _cmd(port, {"cmd": "stop"})
@@ -316,7 +309,6 @@ def test_control_protocol_start_stop_status():
                 "ok": False,
                 "error": "unknown-cmd",
             }
-            # Admin process is unaffected by role start/stop.
             assert sup.roles["admin"].is_running()
         finally:
             await sup.shutdown()
@@ -450,7 +442,6 @@ def test_threaded_role_crash_is_restarted():
             and _BlockingRole.instances[1].thread
         )
         assert rs.crashes == 1
-        # Crashed instance got a best-effort _shutdown to release resources.
         assert _BlockingRole.instances[0].shutdown_called
         assert rs.is_running()
         await rs.stop()

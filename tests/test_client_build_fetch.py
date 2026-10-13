@@ -1,14 +1,6 @@
-"""
-Pinning the client's Discord build number before it logs in.
+"""Pinning the client's Discord build number before login.
 
-discord.py-self resolved this itself, single-shot, through whichever proxy it
-was constructed with. Any failure fell through to FALLBACK_BUILD_NUMBER --
-9999, a build Discord has never shipped -- so one slow proxy at startup made
-the whole session identify as something that cannot exist. The client now
-resolves it with retries and pins it into selfclient.fingerprint, which every
-REST header and the gateway IDENTIFY are built from.
-
-These drive the real resolver.
+A slow proxy used to leave the session on a fallback build that never existed.
 """
 import pytest
 
@@ -87,8 +79,7 @@ class TestItPinsTheLiveBuild:
 
     @pytest.mark.asyncio
     async def test_the_browser_version_comes_from_the_same_build(self, monkeypatch):
-        # One source for the build and the browser version means they cannot
-        # disagree.
+        # One source for the build and the browser version, so they cannot disagree.
         self, _ = _listener(monkeypatch)
         await self._resolve_client_build()
         build = fingerprint.get_build_info()
@@ -99,7 +90,7 @@ class TestItPinsTheLiveBuild:
 class TestItRetriesAcrossProxies:
     @pytest.mark.asyncio
     async def test_it_rotates_and_retries_on_failure(self, monkeypatch):
-        # The reported bug: a single slow proxy poisoned the whole session.
+        # A single slow proxy used to poison the whole session.
         rot = _Rotator()
         self, calls = _listener(
             monkeypatch,
@@ -120,15 +111,13 @@ class TestItRetriesAcrossProxies:
 
     @pytest.mark.asyncio
     async def test_failure_is_not_fatal(self, monkeypatch):
-        # A False return means the library falls back exactly as it did
-        # before, which is worse but still connects. It must never raise.
+        # A False return falls back as before and must never raise.
         self, _ = _listener(monkeypatch, results=[OSError("x")] * 5)
         assert await self._resolve_client_build() is False
 
     @pytest.mark.asyncio
     async def test_it_still_retries_without_a_proxy_pool(self, monkeypatch):
-        # Direct connections get the retries too; the transient failure the
-        # retry covers is not exclusively a proxy problem.
+        # Direct connections get the retries too.
         self, calls = _listener(
             monkeypatch,
             rotator=_Rotator(enabled=False),
@@ -150,9 +139,7 @@ class TestItRetriesAcrossProxies:
 
     @pytest.mark.asyncio
     async def test_an_implausible_build_is_refused(self, monkeypatch):
-        # A number below the sanity floor is treated as a failed fetch rather
-        # than applied: otherwise a bad scrape is indistinguishable from a good
-        # one and we would pin garbage with full confidence.
+        # A number below the sanity floor counts as a failed fetch, not a pin.
         low = dict(BUILD, client_build_number=9999)
         self, calls = _listener(monkeypatch, results=[low, low, BUILD])
         assert await self._resolve_client_build() is True
@@ -163,8 +150,7 @@ class TestItRetriesAcrossProxies:
 class TestItSurvivesAReconnect:
     @pytest.mark.asyncio
     async def test_the_pin_outlives_a_fresh_client(self, monkeypatch):
-        # A restart builds a new Client; the pin lives in the shared
-        # fingerprint, not on the Client, so the new one identifies with it.
+        # The pin lives in the shared fingerprint, so a new Client after a restart uses it.
         self, _ = _listener(monkeypatch)
         await self._resolve_client_build()
         self.bot = Client(proxy=None, refresh_build=False)
@@ -174,7 +160,6 @@ class TestItSurvivesAReconnect:
 
     @pytest.mark.asyncio
     async def test_no_third_party_call_is_made(self, monkeypatch):
-        # Pinning is a local set_build_info: no properties API is called.
         self, calls = _listener(monkeypatch)
         await self._resolve_client_build()
         assert calls == [1]

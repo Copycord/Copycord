@@ -1,12 +1,6 @@
-"""
-client.message_utils and client.helpers on selfclient objects.
+"""client.message_utils and client.helpers on selfclient objects.
 
-Both modules used to type against discord.py-self and catch its exceptions.
-They now take selfclient.models wrappers built straight from gateway payloads,
-so these tests feed them a Message made from a canned MESSAGE_CREATE and check
-that serialize/extract read back the same shapes, and that dm_member_by_id
-maps selfclient's Forbidden/NotFound to False. Fake bots stand in for
-selfclient.Client; nothing touches the network.
+Fake bots stand in for selfclient.Client. No network.
 """
 import json
 
@@ -197,8 +191,7 @@ class TestSerialize:
         assert MessageUtils(FakeBot(guild)).serialize(msg)["author"]["avatar_url"] is None
 
     def test_content_mentions_humanized(self, guild, message):
-        # A mentioned Member shows its nick; a bare User its username, not
-        # its global name, as with discord.py-self's User.
+        # A mentioned Member shows its nick; a bare User its username, not its global name.
         data = MessageUtils(FakeBot(guild)).serialize(message)
 
         assert data["content"] == "hi @Pal and @stranger"

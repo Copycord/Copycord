@@ -1,10 +1,7 @@
-"""
-selfclient.gateway: handshake, heartbeat, resume, close codes, op 37, zlib-stream.
+"""selfclient.gateway: handshake, heartbeat, resume, close codes, op 37, zlib-stream.
 
-Driven against a fake websocket that replays canned frames and records what the
-client sends, injected through GatewayClient's ``connector`` so nothing here
-touches the network. Heartbeat intervals are tens of milliseconds so the
-heartbeat and zombie paths run in real time without slowing the suite.
+A fake websocket replays canned frames through the connector. Heartbeat
+intervals are tens of milliseconds so those paths run in real time.
 """
 import asyncio
 import json
@@ -271,7 +268,7 @@ class TestHeartbeat:
 
     @pytest.mark.asyncio
     async def test_zombie_reconnects_when_no_ack(self, no_jitter):
-        first = FakeWS([hello(20)])  # never acks
+        first = FakeWS([hello(20)])
         second = FakeWS([hello()])
         client, dialer = make_client(first, second)
         task = asyncio.create_task(client.run(refresh_build=False))
@@ -476,7 +473,6 @@ class TestSubscriptionFrames:
             assert frame["op"] == 37
             for gid, features in frame["d"]["subscriptions"].items():
                 seen.append(gid)
-                # never split per guild: both flags in the one frame it is in
                 assert features["typing"] is True
                 assert features["threads"] is True
                 assert features["activities"] is True
@@ -490,7 +486,6 @@ class TestSubscriptionFrames:
 
     def test_batches_are_packed(self):
         frames = build_subscription_frames(_snowflakes(1000))
-        # Each frame but the last is full: adding the next guild would overflow.
         for frame, nxt in zip(frames, frames[1:]):
             subs = dict(frame["d"]["subscriptions"])
             extra = next(iter(nxt["d"]["subscriptions"]))
@@ -561,7 +556,6 @@ class TestZlibStream:
         inflater = ZlibStreamInflater()
         assert json.loads(inflater.feed(frame_a)) == a
         assert json.loads(inflater.feed(frame_b)) == b
-        # The second message only inflates with the first one's dictionary.
         with pytest.raises(zlib.error):
             ZlibStreamInflater().feed(frame_b)
 

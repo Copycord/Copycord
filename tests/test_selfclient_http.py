@@ -1,10 +1,6 @@
-"""
-selfclient.http: rate limits, paginators and per-method headers.
+"""selfclient.http: rate limits, paginators and per-method headers.
 
-Driven against a fake AsyncSession that replays canned responses, so nothing
-here touches the network. The clock and sleep are injected: sleeping advances
-the fake clock, so a bucket wait is observable as exactly one recorded sleep
-of the expected length.
+A fake AsyncSession replays canned responses and sleeping advances a fake clock.
 """
 import json as _json
 
@@ -19,7 +15,7 @@ GUILD = "999999999999999999"
 
 
 class _Headers(dict):
-    """Case-insensitive header lookup, like curl_cffi's."""
+    """Case-insensitive header lookup."""
 
     def get(self, name, default=None):
         for key, value in self.items():
@@ -122,7 +118,6 @@ class TestRateLimited:
         assert info.value.retry_after == 1.0
         assert info.value.status == 429
         assert len(session.calls) == 3
-        # One wait before each retry, none after the last refusal.
         assert clock.sleeps == [1.0, 1.0]
 
     @pytest.mark.asyncio
@@ -169,11 +164,9 @@ class TestBucketPacing:
         )
         path = f"/channels/{CHANNEL}/messages"
         await client.get(path)
-        # The response that emptied the bucket is returned without waiting.
         assert clock.sleeps == []
         await client.get(path)
         assert clock.sleeps == [1.5]
-        # Bucket refilled: no further wait.
         await client.get(path)
         assert clock.sleeps == [1.5]
 
@@ -287,8 +280,8 @@ class TestRequests:
 class TestMessagesPaginator:
     @pytest.mark.asyncio
     async def test_pages_backwards_newest_first_until_a_short_page(self):
-        page1 = _msgs(1300, MESSAGE_PAGE)  # 1300..1201
-        page2 = _msgs(1200, 50)  # 1200..1151, short: last page
+        page1 = _msgs(1300, MESSAGE_PAGE)
+        page2 = _msgs(1200, 50)
         client, session, _ = _client([FakeResponse(200, page1), FakeResponse(200, page2)])
 
         got = [m["id"] async for m in client.messages(CHANNEL)]
@@ -306,7 +299,6 @@ class TestMessagesPaginator:
 
         assert got == [str(i) for i in range(1300, 1250, -1)]
         assert "1250" not in got
-        # The floor was reached inside the first page: no second request.
         assert len(session.calls) == 1
 
     @pytest.mark.asyncio

@@ -1,11 +1,6 @@
-"""
-Tests for the in-process transport (src/copycord/common/inprocess.py) behind
-WebsocketManager and AdminBus.
+"""Tests for the in-process transport behind WebsocketManager and AdminBus.
 
-Each role gets its own event loop on its own thread, as ThreadedRole runs
-server and client, so every delivery here crosses a thread boundary. No
-sockets are opened except where split mode is checked, and those calls are
-faked.
+Each role runs on its own loop and thread, so every delivery crosses threads.
 """
 import asyncio
 import json
@@ -132,7 +127,6 @@ def test_request_crosses_loops_on_different_threads(reg, loops):
     assert seen["thread"] == "srv-loop"
     assert seen["caller"] == "cli-loop"
     assert seen["loop"] is srv.loop
-    # Same message shape the socket server hands its handler.
     assert seen["msg"] == {"type": "ping", "data": {"n": 1}, "rid": "r-1"}
 
 
@@ -212,7 +206,6 @@ def test_send_is_fire_and_forget_across_threads(reg, loops):
     thread, msg = got[0]
     assert thread == "srv-loop"
     assert msg["type"] == "message" and msg["data"] == {"id": 7} and msg["rid"]
-    # The sender's dict is not shared with the receiving thread.
     assert "rid" not in payload
 
 
@@ -332,7 +325,6 @@ def test_subscribe_receives_published_events_across_three_threads(reg, loops):
     sub_bus = AdminBus("server", admin_ws_url=ADMIN_URL)
     srv.spawn(sub_bus.subscribe(ADMIN_URL, on_event))
     _wait_for(lambda: len(hub.sinks) == 1)
-    # Replay on attach, as /ws/out does.
     _wait_for(lambda: len(events) == 1)
 
     cli.run(AdminBus("client", admin_ws_url=ADMIN_URL).publish("log", {"text": "hi"}))

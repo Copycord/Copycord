@@ -1,13 +1,7 @@
-"""
-src/copycord/client/client.py on selfclient: handler wiring and the restart lifecycle.
+"""client.py on selfclient: handler wiring and the restart lifecycle.
 
-ClientListener builds a selfclient.Client with every ``on_*`` handler
-registered by name. These build that Client the way the listener does, run it
-on a fake gateway and feed it canned raw dispatches, so each gateway event is
-checked to reach the matching listener method with the argument types the
-handler bodies read. The listener is made with ``__new__`` (no config, DB or
-sockets) and its handlers are swapped for recorders on a subclass, so what is
-under test is the wiring, not the handler bodies.
+The listener is built with __new__ and its handlers swapped for recorders,
+so each gateway event is checked to reach the matching method. No network.
 """
 import asyncio
 import types

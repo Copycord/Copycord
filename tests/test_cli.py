@@ -1,7 +1,4 @@
-"""
-Tests for the copycord CLI (src/copycord/__main__.py) and the data-dir
-resolution (src/copycord/common/paths.py). No network.
-"""
+"""Tests for the copycord CLI and the data-dir resolution. No network."""
 import json
 import os
 import socket
@@ -345,10 +342,8 @@ def test_doctor_all_good(doctor_env, capsys):
     assert "INFO  database created on first run" in lines
     assert "INFO  no backups yet" in lines
     assert any(line.startswith("PASS  Copycord v") and ", channel stable" in line for line in lines)
-    # No ROLE line and no paths when nothing is wrong.
     assert "ROLE" not in out
     assert str(data_dir.resolve()) not in out
-    # Read-only checks: nothing created next to the .env.
     assert os.listdir(data_dir) == [".env"]
 
 
@@ -384,7 +379,6 @@ def test_doctor_default_password_warns(doctor_env, monkeypatch, capsys):
         f"WARN  the default password is still set: change PASSWORD in {env}, "
         "then run `copycord restart`"
     )
-    # No fix is offered for the password.
     assert out.splitlines()[-1] == "1 warning, 0 problems"
 
 
@@ -444,14 +438,11 @@ def test_check_backups(tmp_path):
 
     now = time.time()
     backups, db = tmp_path / "backups", tmp_path / "data.db"
-    # Fresh install: no DB, no backups.
     assert cli.check_backups(backups, db, now).status == cli.INFO
 
     backups.mkdir()
     db.write_bytes(b"")
-    # A new backups folder with nothing in it yet is still a new install.
     assert cli.check_backups(backups, db, now).status == cli.INFO
-    # Three days on and still nothing: a warning.
     none = cli.check_backups(backups, db, now + 3 * 86400)
     assert (none.status, none.name) == (cli.WARN, "no backups yet")
 
@@ -675,7 +666,6 @@ def test_doctor_fix_recreates_the_env_file(doctor_env, capsys):
 def test_doctor_fix_applies_the_automatic_fixes_without_asking(doctor_env, monkeypatch, capsys):
     (doctor_env / ".env").unlink()
     _stale_backup(doctor_env)
-    # A terminal: still no question for an automatic fix.
     asked = _answers(monkeypatch)
     assert _fix(doctor_env) == 0
     assert asked == []
@@ -981,7 +971,6 @@ def test_doctor_fix_rechecks_after_the_fixes(doctor_env, monkeypatch, capsys):
     assert len(runs) == 2
     lines = out.splitlines()
     assert lines.index("Fixes") < lines.index("Re-check")
-    # The first pass's summary, then the re-check's.
     assert lines[lines.index("Fixes") - 2] == "1 warning, 0 problems"
     assert lines[-1] == "All good"
 
@@ -1028,7 +1017,6 @@ def test_config_round_trip_with_masking(data_dir, tmp_path, capsys):
     assert cli.main(["config", "get", "COMMAND_USERS", *dd]) == 0
     assert capsys.readouterr().out.strip() == "1,2"
 
-    # stdout export masks tokens, passwords and secrets.
     assert cli.main(["config", "export", *dd]) == 0
     shown = json.loads(capsys.readouterr().out)
     assert shown["SERVER_TOKEN"] == cli.MASK
@@ -1040,14 +1028,12 @@ def test_config_round_trip_with_masking(data_dir, tmp_path, capsys):
     out = capsys.readouterr().out
     assert json.loads(out)["SERVER_TOKEN"] == "srv-secret"
 
-    # A file export keeps the real values (it is the backup) and prints none.
     backup = tmp_path / "backup.json"
     assert cli.main(["config", "export", str(backup), *dd]) == 0
     assert "srv-secret" not in capsys.readouterr().out
     exported = json.loads(backup.read_text())
     assert exported["SERVER_TOKEN"] == "srv-secret"
 
-    # Import into a fresh data dir and read the values back.
     other = tmp_path / "other"
     od = ["--data-dir", str(other)]
     assert cli.main(["config", "import", str(backup), *od]) == 0
@@ -1155,7 +1141,6 @@ def test_env_template_sets_every_default(tmp_path):
     active = [x for x in lines if x and not x.startswith("#")]
     assert active == [f"{k}={v}" for k, v in expected.items()]
     for key in expected:
-        # A one-line description above each key.
         above = lines[lines.index(f"{key}={expected[key]}") - 1]
         assert above.startswith("# ") and len(above) > 4
     # Copycord saves its own SECRET_KEY; the template says so instead of setting one.
@@ -1195,7 +1180,6 @@ def test_env_template_defaults_match_the_code(tmp_path, monkeypatch):
         reads = re.findall(rf'os\.getenv\("{key}"\) or "([^"]*)"', sources)
         assert reads, key
         assert set(reads) == {envfile.ENV_DEFAULTS[key]}, key
-        # No read that keeps an empty value instead of the default.
         assert not re.search(rf'os\.getenv\("{key}", ', sources), key
     assert 'os.getenv("BACKUP_DIR") or str(DATA_DIR / "backups")' in sources
 
@@ -1221,7 +1205,6 @@ def test_config_set_updates_the_template_lines_in_place(tmp_path):
         assert lines.index(new) == before.index(old)
     assert [x for x in lines if x.startswith("#")] == [x for x in before if x.startswith("#")]
 
-    # SECRET_KEY has no line in the template; set appends one.
     envfile.set_value("SECRET_KEY", "s3cret", env)
     assert env.read_text(encoding="utf-8").splitlines()[-1] == "SECRET_KEY=s3cret"
 
