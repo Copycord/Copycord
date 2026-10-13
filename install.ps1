@@ -437,6 +437,25 @@ Test a branch, no release needed:
             if ((Test-Path $gitDir) -and -not (Test-Path (Join-Path $gitDir '.git')) -and (Get-ChildItem $gitDir -Force | Select-Object -First 1)) {
                 Fail "$gitDir exists and is not a git checkout; move it or pass -GitDir"
             }
+            # The installer resets and cleans the checkout, so it only touches one it
+            # made (marked in .git) or a clean Copycord checkout of $repoUrl.
+            $gitMarker = Join-Path $gitDir '.git\copycord-installer'
+            if ((Test-Path (Join-Path $gitDir '.git')) -and -not (Test-Path $gitMarker)) {
+                $prevPreference = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                try {
+                    $origin = "$(& git -C $gitDir remote get-url origin 2>$null)".Trim()
+                    $changes = @(& git -C $gitDir status --porcelain --untracked-files=no 2>$null)
+                    $statusOk = $LASTEXITCODE -eq 0
+                } finally { $ErrorActionPreference = $prevPreference }
+                $want = "$repoUrl" -replace '\.git$', ''
+                if (($origin -replace '\.git$', '' -replace '/$', '') -ne $want) {
+                    Fail "$gitDir is a git checkout of $(if ($origin) { $origin } else { 'something else' }), not $repoUrl. The installer would reset it and delete files in it, so it stops here. Pass -GitDir with a new folder."
+                }
+                if (-not $statusOk -or $changes.Count -gt 0) {
+                    Fail "$gitDir has changes that are not committed. The installer would reset it and lose them, so it stops here. Commit or move them, or pass -GitDir with a new folder."
+                }
+            }
 
             if ($needNode) {
                 Step "Installing Node $NodeVersion"
@@ -482,6 +501,8 @@ Test a branch, no release needed:
                 } else {
                     Run "Cloning $repoUrl" 'git' @('clone', '--filter=blob:none', '--no-checkout', "$repoUrl.git", $gitDir)
                 }
+                # Marks the checkout as the installer's, so a later run may reset it.
+                if (-not (Test-Path $gitMarker)) { [IO.File]::WriteAllText($gitMarker, "made by the Copycord installer`n") }
                 Run 'Fetching' 'git' @('-C', $gitDir, 'fetch', '--force', '--prune', '--tags', 'origin')
                 & git -C $gitDir rev-parse -q --verify "refs/remotes/origin/$ref^{commit}" *> $null
                 if ($LASTEXITCODE -eq 0) { $target = "refs/remotes/origin/$ref" }
