@@ -1657,7 +1657,7 @@ def test_restart_restarts_a_running_service(monkeypatch, capsys):
     restarts = _service_state(monkeypatch, True, True)
     assert cli.main(["restart"]) == 0
     assert restarts == [1]
-    assert "restarted the copycord service" in capsys.readouterr().out
+    assert "✓ Copycord restarted" in capsys.readouterr().out
 
 
 def test_restart_without_a_service_says_to_rerun_in_the_terminal(monkeypatch, capsys):
@@ -1679,7 +1679,7 @@ def test_restart_a_stopped_service_points_at_service_start(monkeypatch, capsys):
 def test_restart_reports_a_failed_restart(monkeypatch, capsys):
     _service_state(monkeypatch, True, True, restart_error="needs root")
     assert cli.main(["restart"]) == 1
-    assert "copycord restart: needs root" in capsys.readouterr().err
+    assert "✗ Could not restart Copycord  needs root" in capsys.readouterr().err
 
 
 def test_help_lists_restart(capsys):

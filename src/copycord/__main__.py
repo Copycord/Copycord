@@ -71,7 +71,7 @@ COMMAND_GROUPS = (
         ("config", "Read or write settings (get, set, unset, export, import)"),
     )),
     ("Service", (
-        ("service", "Run Copycord as an OS service (install, start, stop, status)"),
+        ("service", "Run Copycord in the background (install, status, start, stop, restart, uninstall)"),
     )),
     ("Backups", (
         ("backup", "Back up the database now"),
@@ -120,6 +120,8 @@ COMMAND_EXAMPLES = {
         ("copycord service install --system", "Linux: a system-wide service (as root)"),
         ("copycord service status", "is it installed and running?"),
         ("copycord service stop", "stop it"),
+        ("copycord service start", "start it again"),
+        ("copycord service uninstall", "stop and remove the service; your data is kept"),
     ),
     "copycord backup": (
         ("copycord backup", "back up the database and secret.key now"),
@@ -542,13 +544,18 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     ssub.add_parser(
         "install", parents=[user, data_dir], help="install, enable and start the service"
     )
+    ssub.add_parser("status", parents=[user, json_flag],
+                    help="show whether the service is installed and running")
     for name, text in (
         ("start", "start the service"),
         ("stop", "stop the service"),
-        ("status", "print whether the service is installed and running"),
-        ("uninstall", "stop and remove the service"),
+        ("restart", "restart the service to apply changed settings"),
     ):
         ssub.add_parser(name, parents=[user], help=text)
+    svc_uninst = ssub.add_parser("uninstall", parents=[user],
+                                 help="stop and remove the service; your data is kept")
+    svc_uninst.add_argument("--yes", "-y", action="store_true",
+                            help="skip the question (needed without a terminal)")
 
     sub.add_parser(
         "backup",
@@ -662,7 +669,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     args.json = bool(getattr(args, "json", False) or args.top_json)
     if args.json and not json_supported(args):
         parser.error("--json works with --version, doctor, backup, update status, "
-                     "config get and config export")
+                     "service status, config get and config export")
     return args
 
 
@@ -674,6 +681,8 @@ def json_supported(args: argparse.Namespace) -> bool:
         return args.config_command in ("get", "export")
     if args.command == "update":
         return args.action == "status"
+    if args.command == "service":
+        return args.service_command == "status"
     return False
 
 
@@ -1701,33 +1710,33 @@ def restart_hint() -> str:
     return "apply it with: copycord restart"
 
 
-NOT_A_SERVICE = (
-    "Copycord is not running as a service. Stop it in its terminal (Ctrl+C) "
-    "and run copycord run again; <home>/.env is read on every start."
-)
-
-
 def restart_command() -> int:
     """Restart the OS service when it is installed and running."""
-    from copycord import service
+    from copycord import service, ui
 
     try:
         state = service.service_state()
     except Exception as e:
-        print(f"copycord restart: could not read the service state: {e}", file=sys.stderr)
+        ui.fail("Could not read the service state", str(e))
         state = None
     if state is None or not state.installed:
-        print(NOT_A_SERVICE)
+        ui.info("Copycord is not running as a service",
+                f"stop it in its terminal (Ctrl+C) and run {ui.cmd('copycord run')} again; "
+                "<home>/.env is read on every start")
         return 1
     if not state.running:
-        print(f"{state.line()}; start it with: copycord service start")
+        ui.warn("The Copycord service is stopped", stream=sys.stdout)
+        print(f"  Start it with {ui.cmd('copycord service start')}; it reads the new settings.")
         return 1
     try:
-        service.restart_service()
+        with ui.Spinner("Restarting Copycord"):
+            service.restart_service()
     except service.ServiceError as e:
-        print(f"copycord restart: {e}", file=sys.stderr)
+        ui.fail("Could not restart Copycord", str(e))
+        print(f"  Check {ui.cmd('copycord doctor', stream=sys.stderr)} for what is wrong.",
+              file=sys.stderr)
         return 1
-    print(f"restarted the copycord service ({state.where})")
+    ui.ok("Copycord restarted", "it now uses the changed settings")
     return 0
 
 

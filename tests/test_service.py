@@ -82,8 +82,9 @@ def test_user_install_writes_unit_and_enables(tmp_path, fake_run, system_dir, mo
         ["loginctl", "show-user", "mac", "-p", "Linger"],
         ["loginctl", "enable-linger", "mac"],
     ]
-    assert notes[0] == "created user service copycord.service (starts at boot)"
-    assert not any("sudo" in n for n in notes)
+    assert notes[0] == ("ok", "Created the service for your account", str(unit))
+    assert notes[1] == ("ok", "Enabled it, so it starts at boot", "")
+    assert not any("sudo" in n[2] for n in notes)
     assert not system_dir.exists()
 
 
@@ -93,7 +94,7 @@ def test_user_install_with_linger_already_on(tmp_path, monkeypatch, system_dir):
     monkeypatch.setattr(service, "run_cmd", fake)
     notes = service.SystemdService(True, home=tmp_path).install(EXE, tmp_path / "d")
     assert ["loginctl", "enable-linger", "mac"] not in fake.calls
-    assert notes[0] == "created user service copycord.service (starts at boot)"
+    assert notes[1] == ("ok", "Enabled it, so it starts at boot", "")
 
 
 def test_user_install_when_linger_cannot_be_turned_on(tmp_path, monkeypatch, system_dir):
@@ -104,10 +105,11 @@ def test_user_install_when_linger_cannot_be_turned_on(tmp_path, monkeypatch, sys
     })
     monkeypatch.setattr(service, "run_cmd", fake)
     notes = service.SystemdService(True, home=tmp_path).install(EXE, tmp_path / "d")
-    assert notes[0] == "created user service copycord.service (starts when you log in)"
-    attention = [n for n in notes if n.startswith("needs your attention:")]
+    assert notes[1] == ("ok", "Enabled it, so it starts when you log in", "")
+    attention = [n for n in notes if n[0] == "warn"]
     assert len(attention) == 1
-    assert attention[0].endswith("run: sudo loginctl enable-linger mac")
+    assert attention[0][1] == "Starts only when you log in"
+    assert attention[0][2].endswith("run: sudo loginctl enable-linger mac")
 
 
 def test_linger_enabled_reads_loginctl(monkeypatch):
@@ -146,8 +148,9 @@ def test_system_install_as_root(tmp_path, fake_run, system_dir, monkeypatch):
         ["systemctl", "daemon-reload"],
         ["systemctl", "enable", "--now", "copycord.service"],
     ]
-    assert not any("enable-linger" in n for n in notes)
-    assert notes[0] == "created system service copycord.service (starts at boot)"
+    assert not any("enable-linger" in n[2] for n in notes)
+    assert notes[0][:2] == ("ok", "Created the system service")
+    assert notes[1] == ("ok", "Enabled it, so it starts at boot", "")
 
 
 def test_systemd_install_reports_systemctl_failure(tmp_path, monkeypatch, system_dir):
@@ -663,16 +666,206 @@ def test_port_free_sees_a_listening_socket():
 # --------------------------------------------------------------------------
 
 
-def test_cli_status_prints_one_line(monkeypatch, capsys):
-    class Svc:
-        def state(self):
-            return service.State(True, False, "test unit")
+class StatusSvc:
+    """A service for the CLI tests: records actions, state from flags."""
 
-    monkeypatch.setattr(service, "get_service", lambda *a, **k: Svc())
+    kind = "service for your account"
+    logs = "journalctl --user -u copycord -f"
+
+    def __init__(self, installed=True, running=True, start_runs=True):
+        self.installed, self.running, self.start_runs = installed, running, start_runs
+        self.file = Path("/home/u/.config/systemd/user/copycord.service")
+        self.where = f"systemd user unit {self.file}"
+        self.done = []
+
+    def state(self):
+        return service.State(self.installed, self.running, self.where)
+
+    def started(self):
+        return "Tue 2026-10-13 09:12:03 BST"
+
+    def start(self):
+        self.done.append("start")
+        self.running = self.start_runs
+
+    def stop(self):
+        self.done.append("stop")
+        self.running = False
+
+    def restart(self):
+        self.done.append("restart")
+
+    def uninstall(self):
+        self.done.append("uninstall")
+        self.installed = self.running = False
+        return []
+
+
+@pytest.fixture()
+def status_svc(monkeypatch):
+    def make(**kw):
+        svc = StatusSvc(**kw)
+        monkeypatch.setattr(service, "get_service", lambda *a, **k: svc)
+        monkeypatch.setattr(service, "both_installed", lambda: False)
+        monkeypatch.setattr(service, "linger_enabled", lambda name=None: True)
+        return svc
+    return make
+
+
+def test_cli_status_running(status_svc, capsys):
+    status_svc()
+    assert cli.main(["service", "status"]) == 0
+    out = capsys.readouterr().out
+    lines = [x.rstrip() for x in out.strip().splitlines()]
+    assert lines[0] == "Copycord service"
+    assert lines[1] == "  Status   ✓ running"
+    assert lines[2] == "  Type     service for your account"
+    assert lines[3] == "  File     /home/u/.config/systemd/user/copycord.service"
+    assert lines[4] == "  Started  Tue 2026-10-13 09:12:03 BST"
+    assert lines[5] == "  Logs     journalctl --user -u copycord -f"
+    assert lines[-1].startswith("Stop it with copycord service stop, or open the dashboard at http://localhost:")
+    assert "copycord service:" not in out and "(" not in out
+
+
+def test_cli_status_stopped(status_svc, capsys):
+    status_svc(running=False)
     assert cli.main(["service", "status"]) == 3
     out = capsys.readouterr().out
-    assert out.strip() == "copycord service: installed, not running (test unit)"
-    assert len(out.strip().splitlines()) == 1
+    assert "  Status   ! stopped" in out
+    assert "Started" not in out
+    assert out.strip().splitlines()[-1] == "Start it with copycord service start"
+
+
+def test_cli_status_not_installed(status_svc, capsys):
+    status_svc(installed=False, running=False)
+    assert cli.main(["service", "status"]) == 3
+    out = capsys.readouterr().out
+    assert out.strip() == (
+        "• The Copycord service is not installed  install it with copycord service install"
+    )
+
+
+def test_cli_status_json(status_svc, capsys):
+    import json
+
+    status_svc()
+    assert cli.main(["service", "status", "--json"]) == 0
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == {
+        "installed": True,
+        "running": True,
+        "type": "service for your account",
+        "file": "/home/u/.config/systemd/user/copycord.service",
+        "started": "Tue 2026-10-13 09:12:03 BST",
+        "logs": "journalctl --user -u copycord -f",
+    }
+
+
+def test_cli_status_json_for_a_user_unit_says_when_it_starts(tmp_path, monkeypatch, capsys):
+    import json
+
+    svc = service.SystemdService(True, home=tmp_path)
+    svc.unit_path.parent.mkdir(parents=True)
+    svc.unit_path.write_text("x")
+    monkeypatch.setattr(service, "get_service", lambda *a, **k: svc)
+    monkeypatch.setattr(service, "both_installed", lambda: False)
+    monkeypatch.setattr(service, "run_cmd", FakeRun({
+        ("systemctl", "--user", "is-active"): (3, ""),
+        ("loginctl", "show-user"): (0, "Linger=no\n"),
+    }))
+    assert cli.main(["service", "status", "--json"]) == 3
+    doc = json.loads(capsys.readouterr().out)
+    assert doc["running"] is False
+    assert doc["type"] == "service for your account, starts when you log in"
+    assert doc["started"] is None
+
+
+def test_cli_stop_confirms(status_svc, capsys):
+    svc = status_svc()
+    assert cli.main(["service", "stop"]) == 0
+    assert svc.done == ["stop"]
+    out = capsys.readouterr().out
+    assert out.strip() == "✓ Copycord stopped  start it again with copycord service start"
+
+
+def test_cli_start_confirms_with_the_dashboard(status_svc, capsys):
+    svc = status_svc(running=False)
+    assert cli.main(["service", "start"]) == 0
+    assert svc.done == ["start"]
+    assert capsys.readouterr().out.startswith("✓ Copycord started  http://localhost:")
+
+
+def test_cli_start_that_does_not_stay_up_warns(status_svc, capsys):
+    status_svc(running=False, start_runs=False)
+    assert cli.main(["service", "start"]) == 0
+    assert "! Copycord started but is not running yet" in capsys.readouterr().err
+
+
+def test_cli_restart_subcommand(status_svc, capsys):
+    svc = status_svc()
+    assert cli.main(["service", "restart"]) == 0
+    assert svc.done == ["restart"]
+    assert "✓ Copycord restarted" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("action", ["start", "stop", "restart"])
+def test_cli_actions_without_a_service_point_at_install(status_svc, capsys, action):
+    svc = status_svc(installed=False, running=False)
+    assert cli.main(["service", action]) == 1
+    assert svc.done == []
+    assert "• The Copycord service is not installed  install it with copycord service install" in (
+        capsys.readouterr().out)
+
+
+def test_cli_uninstall_with_yes(status_svc, capsys):
+    svc = status_svc()
+    assert cli.main(["service", "uninstall", "--yes"]) == 0
+    assert svc.done == ["uninstall"]
+    out = capsys.readouterr().out
+    assert "✓ Stopped Copycord" in out
+    assert "✓ Removed the service  /home/u/.config/systemd/user/copycord.service" in out
+    assert "• Your data is kept" in out
+
+
+def test_cli_uninstall_without_a_terminal_needs_yes(status_svc, monkeypatch, capsys):
+    from copycord import ui
+
+    svc = status_svc()
+    monkeypatch.setattr(ui, "is_interactive", lambda: False)
+    assert cli.main(["service", "uninstall"]) == 1
+    assert svc.done == []
+    assert "rerun with --yes" in capsys.readouterr().err
+
+
+def test_cli_uninstall_asks_first(status_svc, monkeypatch, capsys):
+    from copycord import ui
+
+    svc = status_svc()
+    asked = []
+    monkeypatch.setattr(ui, "is_interactive", lambda: True)
+    monkeypatch.setattr(ui, "confirm", lambda q, default=True: asked.append(q) or False)
+    assert cli.main(["service", "uninstall"]) == 1
+    assert svc.done == []
+    assert "Your data is kept" in asked[0]
+    monkeypatch.setattr(ui, "confirm", lambda q, default=True: True)
+    assert cli.main(["service", "uninstall"]) == 0
+    assert svc.done == ["uninstall"]
+
+
+def test_cli_service_without_a_subcommand_lists_them_all(capsys):
+    with pytest.raises(SystemExit) as e:
+        cli.main(["service"])
+    assert e.value.code == 0
+    out = capsys.readouterr().out
+    for name in ("install", "status", "start", "stop", "restart", "uninstall"):
+        assert f"\n  {name} " in out
+    assert "copycord service uninstall" in out
+
+
+def test_overview_names_service_uninstall(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    assert "uninstall)" in capsys.readouterr().out
 
 
 def test_cli_install_passes_data_dir_and_command(tmp_path, monkeypatch, capsys):
@@ -681,7 +874,7 @@ def test_cli_install_passes_data_dir_and_command(tmp_path, monkeypatch, capsys):
     class Svc:
         def install(self, command, data_dir):
             seen["command"], seen["data_dir"] = command, data_dir
-            return ["ok"]
+            return [("ok", "Created the service", "")]
 
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "before"))
     monkeypatch.setattr(service, "get_service", lambda *a, **k: Svc())
@@ -703,7 +896,8 @@ class FakeSystemd:
     def install(self, command, data_dir):
         if not self.user and not service.is_root():
             raise service.ServiceError("the system service needs root. Leave out --system")
-        return [f"created {self.scope} service copycord.service (starts at boot)"]
+        what = "service for your account" if self.user else "system service"
+        return [("ok", f"Created the {what}", "/x/copycord.service")]
 
 
 @pytest.fixture()
@@ -722,7 +916,9 @@ def test_cli_install_as_a_normal_user_makes_a_user_service(linux_install, monkey
     assert cli.main(["service", "install"]) == 0
     assert linux_install == [True]
     out = capsys.readouterr().out
-    assert "created user service copycord.service (starts at boot)" in out
+    assert "✓ Created the service for your account  /x/copycord.service" in out
+    assert "Dashboard: http://localhost:" in out
+    assert "Manage it with copycord service status | stop | start | restart | uninstall" in out
     assert "sudo" not in out
 
 
@@ -730,7 +926,7 @@ def test_cli_install_as_root_makes_a_system_service(linux_install, monkeypatch, 
     monkeypatch.setattr(service, "is_root", lambda: True)
     assert cli.main(["service", "install"]) == 0
     assert linux_install == [False]
-    assert "created system service" in capsys.readouterr().out
+    assert "Created the system service" in capsys.readouterr().out
     assert cli.main(["service", "install", "--user"]) == 0
     assert linux_install == [False, True]
 
@@ -740,7 +936,8 @@ def test_cli_install_system_as_a_normal_user_fails_clearly(linux_install, monkey
     assert cli.main(["service", "install", "--system"]) == 1
     assert linux_install == [False]
     err = capsys.readouterr().err
-    assert "copycord service install: the system service needs root. Leave out --system" in err
+    assert "✗ Could not install the service  the system service needs root. Leave out --system" in err
+    assert "copycord doctor" in err
 
 
 def test_cli_user_and_system_are_exclusive(capsys):
@@ -760,7 +957,8 @@ def test_cli_says_which_unit_when_both_exist(monkeypatch, capsys):
     monkeypatch.setattr(service, "both_installed", lambda: True)
     assert cli.main(["service", "status"]) == 0
     err = capsys.readouterr().err
-    assert "both installed; using the user service" in err
+    assert "both installed" in err
+    assert "using the user service" in err
     assert cli.main(["service", "status", "--system"]) == 0
     assert seen[-1] == ((False,), {"system": True})
     assert capsys.readouterr().err == ""
@@ -768,12 +966,16 @@ def test_cli_says_which_unit_when_both_exist(monkeypatch, capsys):
 
 def test_cli_service_error_is_reported(monkeypatch, capsys):
     class Svc:
+        def state(self):
+            return service.State(True, False, "test unit")
+
         def start(self):
             raise service.ServiceError("needs root")
 
     monkeypatch.setattr(service, "get_service", lambda *a, **k: Svc())
     assert cli.main(["service", "start"]) == 1
-    assert "needs root" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "✗ Could not start Copycord  needs root" in err
 
 
 def test_copycord_command_prefers_running_console_script(tmp_path, monkeypatch):

@@ -220,15 +220,16 @@ class SystemdService:
         _check(run_cmd(self._systemctl("daemon-reload")), "daemon-reload")
         _check(run_cmd(self._systemctl("enable", "--now", UNIT_NAME)), "enable")
         at_boot = not self.user or ensure_linger()
-        when = "starts at boot" if at_boot else "starts when you log in"
-        notes = [
-            f"created {self.scope} service {UNIT_NAME} ({when})",
-            f"unit file: {self.unit_path}",
-            f"enabled and started {UNIT_NAME}",
+        what = "service for your account" if self.user else "system service"
+        steps = [
+            ("ok", f"Created the {what}", str(self.unit_path)),
+            ("ok", "Enabled it, so it starts at boot" if at_boot
+             else "Enabled it, so it starts when you log in", ""),
+            ("ok", "Started Copycord", ""),
         ]
         if not at_boot:
-            notes.append(f"needs your attention: {linger_hint()}")
-        return notes
+            steps.append(("warn", "Starts only when you log in", linger_hint()))
+        return steps
 
     def start(self) -> None:
         self._need_root()
@@ -241,6 +242,26 @@ class SystemdService:
     def restart(self) -> None:
         self._need_root()
         _check(run_cmd(self._systemctl("restart", UNIT_NAME)), "restart")
+
+    @property
+    def kind(self) -> str:
+        if not self.user:
+            return "system service, starts at boot"
+        return "service for your account"
+
+    @property
+    def file(self) -> Optional[Path]:
+        return self.unit_path
+
+    @property
+    def logs(self) -> str:
+        return "journalctl --user -u copycord -f" if self.user else "journalctl -u copycord -f"
+
+    def started(self) -> Optional[str]:
+        """When the running unit started, as systemd prints it; None when unknown."""
+        res = run_cmd(self._systemctl("show", "-p", "ActiveEnterTimestamp", "--value", UNIT_NAME))
+        value = (res.stdout or "").strip() if res.returncode == 0 else ""
+        return value or None
 
     def state(self) -> State:
         installed = self.unit_path.exists()
@@ -314,9 +335,9 @@ class LaunchdService:
             "launchctl bootstrap",
         )
         return [
-            f"wrote {self.plist_path}",
-            "loaded and started com.copycord (it starts again at every login)",
-            f"output goes to {data_dir / 'copycord.out.log'} and copycord.err.log",
+            ("ok", "Created the launchd agent", str(self.plist_path)),
+            ("ok", "Started Copycord, and it starts again at every login", ""),
+            ("info", "Output goes to", str(data_dir / "copycord.out.log")),
         ]
 
     def _need_plist(self) -> None:
@@ -349,6 +370,19 @@ class LaunchdService:
             )
         else:
             self.start()
+
+    kind = "launchd agent, starts when you log in"
+
+    @property
+    def file(self) -> Optional[Path]:
+        return self.plist_path
+
+    @property
+    def logs(self) -> str:
+        return str(_logs_dir())
+
+    def started(self) -> Optional[str]:
+        return None
 
     def state(self) -> State:
         installed = self.plist_path.exists()
@@ -584,8 +618,9 @@ class ScheduledTaskService:
                 pass
         _check(run_cmd(["schtasks", "/Run", "/TN", self.name]), "schtasks /Run")
         return [
-            f'created scheduled task "{self.name}" (runs at logon, restarts on failure)',
-            "started it now",
+            ("ok", f'Created the scheduled task "{self.name}"',
+             "runs when you log in, restarts on failure"),
+            ("ok", "Started Copycord", ""),
         ]
 
     def start(self) -> None:
@@ -639,6 +674,16 @@ class ScheduledTaskService:
             "Close any other Copycord, or run copycord doctor to check the port, "
             "then run copycord service start"
         )
+
+    kind = "scheduled task, starts when you log in"
+    file = None
+
+    @property
+    def logs(self) -> str:
+        return str(_logs_dir())
+
+    def started(self) -> Optional[str]:
+        return None
 
     def state(self) -> State:
         res = self._query()
@@ -745,7 +790,155 @@ def install_data_dir(user: bool, env=None, platform: Optional[str] = None) -> Pa
     return data_dir(env)
 
 
+def _logs_dir() -> Path:
+    from copycord.common.paths import logs_dir
+
+    return logs_dir()
+
+
+def dashboard_url() -> str:
+    from copycord.__main__ import admin_port
+
+    return f"http://localhost:{admin_port()}"
+
+
+ACTIONS = "status | stop | start | restart | uninstall"
+
+
+def _manage_hint() -> None:
+    from copycord import ui
+
+    print(f"Manage it with {ui.cmd('copycord service')} {ACTIONS}")
+
+
+def _not_installed(svc) -> None:
+    from copycord import ui
+
+    ui.info("The Copycord service is not installed",
+            f"install it with {ui.cmd('copycord service install')}")
+
+
+def status_doc(svc, st: State, started: Optional[str]) -> dict:
+    file = getattr(svc, "file", None)
+    return {
+        "installed": st.installed,
+        "running": st.running,
+        "type": getattr(svc, "kind", ""),
+        "file": str(file) if file else None,
+        "started": started,
+        "logs": getattr(svc, "logs", None),
+    }
+
+
+def show_status(svc, as_json: bool = False) -> int:
+    from copycord import jsonout, ui
+
+    st = svc.state()
+    started = svc.started() if st.running and hasattr(svc, "started") else None
+    kind = getattr(svc, "kind", "")
+    if st.installed and isinstance(svc, SystemdService) and svc.user:
+        boot = linger_enabled() is not False
+        kind += ", starts at boot" if boot else ", starts when you log in"
+    if as_json:
+        doc = status_doc(svc, st, started)
+        doc["type"] = kind
+        jsonout.emit(doc)
+        return 0 if st.running else 3
+    if not st.installed:
+        _not_installed(svc)
+        return 3
+    if st.running:
+        status = f"{ui.mark('ok')} running"
+    else:
+        status = f"{ui.mark('warn', sys.stdout)} stopped"
+    rows = [("Status", status), ("Type", kind)]
+    file = getattr(svc, "file", None)
+    if file:
+        rows.append(("File", ui.path_link(file)))
+    if started:
+        rows.append(("Started", started))
+    logs = getattr(svc, "logs", None)
+    if logs:
+        is_cmd = logs.startswith("journalctl")
+        rows.append(("Logs", ui.cmd(logs) if is_cmd else ui.path_link(logs)))
+    ui.heading("Copycord service")
+    ui.kv(rows)
+    print()
+    if st.running:
+        print(f"Stop it with {ui.cmd('copycord service stop')}, "
+              f"or open the dashboard at {ui.link(dashboard_url())}")
+    else:
+        print(f"Start it with {ui.cmd('copycord service start')}")
+    return 0 if st.running else 3
+
+
+def _act(svc, action: str) -> int:
+    """start, stop or restart, with a spinner and one confirmation line."""
+    from copycord import ui
+
+    if not svc.state().installed:
+        _not_installed(svc)
+        return 1
+    doing = {"start": "Starting", "stop": "Stopping", "restart": "Restarting"}[action]
+    with ui.Spinner(f"{doing} Copycord"):
+        getattr(svc, action)()
+        running = svc.state().running
+    if action == "stop":
+        if running:
+            ui.warn("Copycord is still running",
+                    f"check {ui.cmd('copycord service status', stream=sys.stderr)} in a moment")
+            return 1
+        ui.ok("Copycord stopped", f"start it again with {ui.cmd('copycord service start')}")
+        return 0
+    done = "started" if action == "start" else "restarted"
+    if not running:
+        ui.warn(f"Copycord {done} but is not running yet",
+                f"check {ui.cmd('copycord service status', stream=sys.stderr)} in a moment")
+        return 0
+    ui.ok(f"Copycord {done}", ui.link(dashboard_url()))
+    return 0
+
+
+def _uninstall(svc, yes: bool) -> int:
+    from copycord import ui
+    from copycord.common.paths import home_dir
+
+    if not svc.state().installed:
+        _not_installed(svc)
+        return 0
+    if not yes:
+        if not ui.is_interactive():
+            ui.fail("Removing the service needs a confirmation",
+                    "no terminal to ask in; rerun with --yes")
+            return 1
+        if not ui.confirm("Stop and remove the Copycord service? Your data is kept.",
+                          default=False):
+            ui.info("Nothing changed")
+            return 1
+    file = getattr(svc, "file", None)
+    with ui.Spinner("Removing the service"):
+        svc.uninstall()
+    ui.ok("Stopped Copycord")
+    ui.ok("Removed the service", str(file) if file else svc.where)
+    ui.info("Your data is kept", str(home_dir()))
+    print(f"Run it in this terminal with {ui.cmd('copycord run')}, "
+          f"or install the service again with {ui.cmd('copycord service install')}")
+    return 0
+
+
+FAILED = {
+    "install": "Could not install the service",
+    "start": "Could not start Copycord",
+    "stop": "Could not stop Copycord",
+    "restart": "Could not restart Copycord",
+    "status": "Could not read the service state",
+    "uninstall": "Could not remove the service",
+}
+
+
 def service_command(args) -> int:
+    from copycord import ui
+
     action = args.service_command
     user = bool(getattr(args, "user", False))
     system = bool(getattr(args, "system", False))
@@ -756,34 +949,31 @@ def service_command(args) -> int:
     if action == "install":
         target = install_data_dir(getattr(svc, "user", user))
     elif not (user or system) and both_installed():
-        print(
-            f"a user service and a system service are both installed; using the "
-            f"{svc.scope} service ({svc.unit_path}). Add --user or --system to choose.",
-            file=sys.stderr,
+        ui.warn(
+            "A service for your account and a system service are both installed",
+            f"using the {svc.scope} service ({svc.unit_path}); add --user or --system to choose",
         )
     try:
         if action == "install":
-            for note in svc.install(copycord_command(), target):
-                print(note)
-            print(f"data dir: {target}")
+            with ui.Spinner("Installing the service"):
+                steps = svc.install(copycord_command(), target)
+            for status, text, detail in steps:
+                ui.line(status, text, detail,
+                        sys.stderr if status in ("warn", "fail") else sys.stdout)
+            ui.info("Data", str(target))
+            print()
+            print(f"Dashboard: {ui.link(dashboard_url())}")
+            _manage_hint()
             return 0
-        if action == "start":
-            svc.start()
-            print(svc.state().line())
-            return 0
-        if action == "stop":
-            svc.stop()
-            print(svc.state().line())
-            return 0
+        if action in ("start", "stop", "restart"):
+            return _act(svc, action)
         if action == "status":
-            st = svc.state()
-            print(st.line())
-            return 0 if st.running else 3
+            return show_status(svc, as_json=bool(getattr(args, "json", False)))
         if action == "uninstall":
-            for note in svc.uninstall():
-                print(note)
-            return 0
+            return _uninstall(svc, bool(getattr(args, "yes", False)))
     except ServiceError as e:
-        print(f"copycord service {action}: {e}", file=sys.stderr)
+        ui.fail(FAILED.get(action, f"copycord service {action} failed"), str(e))
+        print(f"  Check {ui.cmd('copycord doctor', stream=sys.stderr)} for what is wrong.",
+              file=sys.stderr)
         return 1
     return 2
