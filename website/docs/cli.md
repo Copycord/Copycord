@@ -33,7 +33,7 @@ Copycord v4.0.0
 Usage: copycord <command> [options]
 
 Get started:
-  run        Run Copycord (dashboard, server bot and client)
+  run        Run Copycord
   restart    Restart the Copycord service to apply changed settings
   doctor     Check this machine can run Copycord
 
