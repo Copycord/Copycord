@@ -211,6 +211,26 @@ def test_backup_archive_is_owner_only(data_dir):
     assert archive.stat().st_mode & 0o777 == 0o600
 
 
+class _Tty(io.StringIO):
+    encoding = "utf-8"
+
+    def isatty(self):
+        return True
+
+
+def test_backup_on_a_terminal_is_a_rail(data_dir, monkeypatch):
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(cli, "brand", lambda: "Copycord v4.0.0 (abcdef1)")
+    out = _Tty()
+    monkeypatch.setattr(sys, "stdout", out)
+    assert cli.main(["backup"]) == 0
+    lines = out.getvalue().splitlines()
+    assert "Copycord v4.0.0 (abcdef1)" in lines
+    assert "\u250c  Back up the database" in lines
+    assert any(x.startswith("\u2713  Database backed up  ") for x in lines)
+    assert lines[-1] == "\u2514"
+
+
 def test_backup_json(data_dir, capsys):
     assert cli.main(["backup", "--json"]) == 0
     captured = capsys.readouterr()

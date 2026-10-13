@@ -2207,11 +2207,13 @@ def backup_command(args: argparse.Namespace) -> int:
             "includes_key": KEY_FILE in archive_names(archive),
         })
         return 0
-    archive, error = run()
-    if error:
-        ui.fail(*error)
-        return 1
-    ui.ok("Database backed up", str(archive))
+    tty = sys.stdout.isatty()
+    with ui.Rail("Back up the database", brand=brand() if tty else "", heading=False):
+        archive, error = run()
+        if error:
+            ui.fail(*error)
+            return 1
+        ui.ok("Database backed up", str(archive))
     return 0
 
 
@@ -2288,7 +2290,7 @@ def restore_command(args: argparse.Namespace) -> int:
     if why:
         ui.fail("Copycord is running; stop it before restoring", why)
         return 1
-    with ui.Rail("Restore a backup") as rail:
+    with ui.Rail("Restore a backup", brand=brand() if sys.stdout.isatty() else "") as rail:
         return _restore_steps(args, rail)
 
 
