@@ -33,16 +33,7 @@ def record_backup_stats(set_config: Callable[[str, str], None], archive_path: Pa
 
 @dataclass
 class BackupConfig:
-    """
-    Configuration for the SQLite backup scheduler.
-
-    - db_path: path to the live SQLite DB (e.g., /data/data.db)
-    - backup_dir: directory to store archives (e.g., /data/backups)
-    - retain: number of archives (*.tar.gz) to keep (by newest mtime)
-    - run_at: "HH:MM" 24h clock, local to `timezone` (used if interval_minutes is None)
-    - timezone: IANA TZ name (e.g., "UTC", "America/New_York")
-    - interval_minutes: if set (e.g. 60), run every N minutes instead of once daily
-    """
+    """Settings for the SQLite backup scheduler; run_at is HH:MM in ``timezone`` unless interval_minutes is set."""
 
     db_path: Path
     backup_dir: Path
@@ -53,20 +44,7 @@ class BackupConfig:
 
 
 class DailySQLiteBackupScheduler:
-    """
-    Creates compressed SQLite snapshot archives in:
-        <backup_dir>/<YYYY-MM-DD>_<HH-MM-SS>[ -NN ].tar.gz
-    (contains a single file named 'data.db')
-
-    Supports:
-      - Daily run at `run_at` (default), OR
-      - Repeating runs every `interval_minutes` (multiple times per day)
-
-    Robust behavior:
-      - (Re)creates backup_dir if missing
-      - Retries archive write once if backup_dir vanished mid-write
-      - Prunes by count (`retain`) using newest mtime first
-    """
+    """Writes timestamped tar.gz snapshots of the SQLite DB daily or every N minutes and prunes to ``retain``."""
 
     def __init__(
         self,
@@ -242,9 +220,7 @@ class DailySQLiteBackupScheduler:
         return datetime.now(self._tz) if self._tz else datetime.now(timezone.utc).replace(tzinfo=None)
 
     def _unique_archive_path(self, when: datetime) -> Path:
-        """
-        Build a unique archive path like:
-        """
+        """Return an unused archive path, adding a numeric suffix on collision."""
         stamp = when.strftime("%Y-%m-%d_%H-%M-%S")
         base = f"{stamp}.tar.gz"
         candidate = self.cfg.backup_dir / base
