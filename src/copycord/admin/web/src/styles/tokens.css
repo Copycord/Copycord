@@ -1,0 +1,62 @@
+/* Tailwind entry and design tokens, taken from the custom properties in
+   frontend/src/main.css so the SPA matches the current dashboard. */
+@import "tailwindcss";
+
+@theme {
+  --color-page: #120a22;
+  --color-bg2: #2a273f;
+  --color-bg-2: #141224;
+  --color-bg-3: #19172c;
+  --color-card: #1b1030aa;
+  --color-card-solid: #1b1030;
+  --color-text: #f6f2ff;
+  --color-text-1: #e7e7f4;
+  --color-text-2: #b8b8cc;
+  --color-muted: #c8b8e8;
+  --color-border: #2c1d4a;
+  --color-line-1: rgba(255, 255, 255, 0.08);
+  --color-line-2: rgba(255, 255, 255, 0.14);
+  --color-primary: #8b5cf6;
+  --color-primary-600: #7c3aed;
+  --color-primary-700: #6d28d9;
+  --color-accent: #a78bfa;
+  --color-brand-ghost: rgba(139, 92, 246, 0.18);
+  --color-brand-ghost-2: rgba(139, 92, 246, 0.32);
+  --color-danger: #ef4444;
+  --color-good: #10b981;
+  --color-custom-ink: #facc15;
+  --color-progress: #22c55e;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
+    "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  --radius-rail: 4px;
+  --radius-control: 12px;
+  --radius-panel: 16px;
+  --radius-card: 18px;
+
+  --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.25);
+  --shadow-soft: 0 4px 12px rgba(0, 0, 0, 0.2);
+  --shadow-accent: 0 4px 16px rgba(167, 139, 250, 0.2);
+  --shadow-danger: 0 4px 16px rgba(239, 68, 68, 0.35);
+
+  --spacing-header: 60px;
+  --spacing-footer: 48px;
+  --spacing-page: 28px;
+  --spacing-control: 34px;
+  --spacing-menu-btn: 36px;
+}
+
+@layer base {
+  html,
+  body {
+    min-height: 100%;
+    background: var(--color-page);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+  }
+  a {
+    color: var(--color-accent);
+  }
+}
