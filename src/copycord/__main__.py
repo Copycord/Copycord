@@ -818,10 +818,14 @@ def check_backups(
                         pass
     hint = "the daily backup runs at BACKUP_AT (03:17 by default) while Copycord is running"
     if not times:
+        # A new install: no DB yet, or the backups folder (made on the first
+        # start, empty since) is younger than the backup interval allows.
         try:
-            fresh = not db.exists() or now - db.stat().st_mtime < BACKUP_MAX_AGE
-            # The DB is written all the time; its creation shows a new install best.
-            fresh = fresh or now - db.stat().st_ctime < BACKUP_MAX_AGE
+            fresh = (
+                not db.exists()
+                or not backup_dir.is_dir()
+                or now - backup_dir.stat().st_ctime < BACKUP_MAX_AGE
+            )
         except OSError:
             fresh = True
         if fresh:

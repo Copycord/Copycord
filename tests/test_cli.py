@@ -287,6 +287,13 @@ def test_check_backups(tmp_path):
     assert cli.check_backups(backups, db, now).status == cli.INFO
 
     backups.mkdir()
+    db.write_bytes(b"")
+    # A new backups folder with nothing in it yet is still a new install.
+    assert cli.check_backups(backups, db, now).status == cli.INFO
+    # Three days on and still nothing: a warning.
+    none = cli.check_backups(backups, db, now + 3 * 86400)
+    assert (none.status, none.name) == (cli.WARN, "no backups yet")
+
     old = backups / "20260101-031700.tar.gz"
     old.write_bytes(b"x")
     os.utime(old, (now - 3 * 86400, now - 3 * 86400))
