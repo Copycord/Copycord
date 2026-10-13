@@ -8,20 +8,9 @@
 # =============================================================================
 
 """
-Hatch build hook: ship the built frontend.
-
-src/copycord/admin/frontend/dist (npm run build) lands in the wheel as
-copycord/admin/static,
-next to the tracked logo, the same place the Docker image copies it to. When
-dist is missing (a git install, `copycord update --channel dev`), the hook
-builds it first with `npm ci && npm run build`. When the frontend source is
-there but npm is not, or the build fails, the build stops with an error rather
-than ship a wheel without the admin UI. COPYCORD_SKIP_FRONTEND=1 builds without
-it anyway (only a warning; `copycord doctor` reports the missing assets).
-
-The wheel also gets copycord/_build.json with the commit it was built from
-(COPYCORD_BUILD_COMMIT, else GITHUB_SHA, else `git rev-parse HEAD`), so
-`copycord --version` can show it for release installs too.
+Hatch build hook: puts the built admin frontend in the wheel as
+copycord/admin/static, building it with npm when dist is missing, and
+writes copycord/_build.json with the source commit.
 """
 
 from __future__ import annotations
@@ -85,11 +74,7 @@ class FrontendBuildHook(BuildHookInterface):
         build_data["force_include"][str(out)] = "copycord/_build.json"
 
     def build_frontend(self) -> None:
-        """npm ci && npm run build in src/copycord/admin/frontend.
-
-        Raises when the source is there but npm is missing or the build fails,
-        unless COPYCORD_SKIP_FRONTEND=1 (then it only warns).
-        """
+        """Run npm ci and npm run build; fails unless COPYCORD_SKIP_FRONTEND=1."""
         frontend = Path(self.root) / FRONTEND
         if not (frontend / "package.json").is_file():
             return

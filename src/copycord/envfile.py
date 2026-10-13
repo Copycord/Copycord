@@ -8,14 +8,9 @@
 # =============================================================================
 
 """
-<Copycord home>/.env: settings that are read from the environment only.
-
-Most settings live in the app config (the database, edited in the dashboard).
-A few are read with os.getenv before the database is open, or never go
-through it (PASSWORD, ADMIN_PORT, TZ, ...). A native install has no compose
-file to set them in, so `copycord` loads <home>/.env at startup without
-overriding variables already set in the real environment, and
-`copycord config set` writes these keys there.
+<home>/.env: the settings read from the environment rather than the database
+(PASSWORD, ADMIN_PORT, TZ, ...). Loaded at startup without overriding the
+real environment.
 """
 
 from __future__ import annotations
@@ -27,7 +22,6 @@ from typing import Dict, List, Optional
 
 FILENAME = ".env"
 
-# Env-only keys and a one-line description each.
 ENV_KEYS: Dict[str, str] = {
     "PASSWORD": "dashboard login password; change it from the default (empty: no login page)",
     "SECRET_KEY": "signs the dashboard login cookie (default: a key saved in <home>/secret.key)",
@@ -41,11 +35,9 @@ ENV_KEYS: Dict[str, str] = {
     "COPYCORD_NO_UPDATE_CHECK": "1 turns off the update check on start; 0 keeps it on",
 }
 
-# The dashboard password a new install starts with.
 DEFAULT_PASSWORD = "copycord"
 
-# The defaults the code uses, which the template writes as live values.
-# BACKUP_DIR defaults to <home>/backups (see template).
+# BACKUP_DIR defaults to <home>/backups, filled in by template().
 ENV_DEFAULTS: Dict[str, str] = {
     "PASSWORD": DEFAULT_PASSWORD,
     "ADMIN_PORT": "8080",
@@ -58,16 +50,13 @@ ENV_DEFAULTS: Dict[str, str] = {
     "COPYCORD_NO_UPDATE_CHECK": "0",
 }
 
-# LOG_LEVEL is in the template so the first log lines follow it, but it is an
-# app config key: `copycord config` and the dashboard keep it in the database.
+# LOG_LEVEL is an app config key; it is in the template so early log lines follow it.
 LOG_LEVEL_TEXT = "DEBUG or INFO; the dashboard's log level wins once it is saved"
 
-# Copycord saves its own SECRET_KEY, so the template leaves it out and says so.
 SECRET_KEY_TEXT = (
     "SECRET_KEY is left out: Copycord keeps its own key in <home>/secret.key"
 )
 
-# The keys the template lists, in order.
 TEMPLATE_KEYS = (
     "PASSWORD",
     "SECRET_KEY",
@@ -82,7 +71,7 @@ TEMPLATE_KEYS = (
     "COPYCORD_NO_UPDATE_CHECK",
 )
 
-# Tuning knobs read with os.getenv; set them only when asked to.
+# Tuning knobs read with os.getenv; not in the template.
 ENV_PREFIXES = ("BACKFILL_", "FORWARDING_")
 
 _LINE = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=")
@@ -156,7 +145,6 @@ def set_value(key: str, value: str, path: Optional[Path] = None) -> Path:
             continue
         out.append(line)
     if not done:
-        # Fill the template's commented placeholder, else append.
         placeholder = next(
             (i for i, line in enumerate(out) if line.startswith(f"#{key}=")), None
         )
@@ -180,8 +168,7 @@ def unset(key: str, path: Optional[Path] = None) -> bool:
 
 
 def template(home: Optional[Path] = None) -> str:
-    """The <home>/.env the installer writes on first install: every key set
-    to its default, with a one-line description above it."""
+    """The default <home>/.env written on first install."""
     home = env_path().parent if home is None else Path(home)
     defaults = {**ENV_DEFAULTS, "BACKUP_DIR": str(home / "backups")}
     lines = [
@@ -201,8 +188,7 @@ def template(home: Optional[Path] = None) -> str:
 
 
 def write_template(path: Optional[Path] = None) -> Path:
-    """Write template() to a missing <home>/.env (0600), as the installer
-    does; FileExistsError when the file is there, it is never overwritten."""
+    """Write template() to a new <home>/.env; raises FileExistsError if it exists."""
     path = env_path() if path is None else path
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

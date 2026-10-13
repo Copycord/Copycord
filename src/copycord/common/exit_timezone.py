@@ -7,16 +7,11 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-"""IANA timezone of the IP an account exits through.
+"""
+IANA timezone of the IP an account exits through, for X-Discord-Timezone.
 
-``X-Discord-Timezone`` should match the network the account really uses, so
-the zone is looked up once per exit (each proxy URL, plus one for direct) and
-cached. Header builders are synchronous, so they read the cache through
-``timezone_for(token)``; the async call sites that already know which proxy a
-token uses call ``note_token_proxy`` to resolve and register it.
-
-Any lookup failure falls back to ``FALLBACK_TIMEZONE`` with one warning per
-exit. A failed lookup is retried after ``RETRY_AFTER`` seconds, not per request.
+Looked up once per exit (each proxy, plus direct) and cached. A failed lookup
+uses FALLBACK_TIMEZONE and is retried after RETRY_AFTER seconds.
 """
 
 from __future__ import annotations
@@ -79,10 +74,7 @@ async def _fetch_json(proxy: Optional[str], timeout: float) -> dict:
 async def resolve_timezone(
     proxy: Optional[str] = None, timeout: float = LOOKUP_TIMEOUT
 ) -> Optional[str]:
-    """Timezone of the IP ``proxy`` (or the direct connection) exits through.
-
-    Returns None on any failure or when the answer is not a real IANA zone.
-    """
+    """Timezone of the exit IP for proxy (or direct); None on any failure."""
     try:
         data = await _fetch_json(proxy, timeout)
         return _valid_zone(data.get("timezone"))
@@ -119,10 +111,7 @@ async def ensure_timezone(proxy: Optional[str] = None) -> str:
 
 
 async def note_token_proxy(token: str, proxy: Optional[str]) -> str:
-    """Record the exit ``token`` uses now (resolving its zone) and return it.
-
-    Call again whenever the token's proxy changes; a new proxy re-resolves.
-    """
+    """Record which proxy token uses, resolving its zone; call again when it changes."""
     zone = await ensure_timezone(proxy)
     _TOKEN_EXIT[token] = proxy or None
     return zone

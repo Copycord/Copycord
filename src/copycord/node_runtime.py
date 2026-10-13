@@ -1,12 +1,9 @@
 """
-Node.js for builds from source (`copycord update --channel dev`).
+Node.js for builds from source, which compile the admin UI with npm.
 
-The dev channel installs Copycord from git, and that build compiles the admin
-UI with npm. ensure_npm() returns a directory with npm in it: npm already on
-PATH, else a per-user Node under <Copycord home>/node/, else the official Node
-build downloaded from nodejs.org, checked against SHASUMS256.txt and unpacked
-there. install.sh and install.ps1 use the same location, name and version, so
-a Node one of them downloaded is reused by the other.
+Uses npm on PATH, else a per-user Node under <home>/node/, downloading and
+verifying the official build when needed. The installers use the same
+location and version.
 """
 from __future__ import annotations
 
@@ -60,10 +57,7 @@ def node_home(env: Optional[Mapping[str, str]] = None) -> Path:
 
 
 def platform_name(sys_platform: Optional[str] = None, machine: Optional[str] = None) -> str:
-    """Node's name for this platform (linux-x64, darwin-arm64, win-x64, ...).
-
-    Raises NodeError when Node has no official build for it.
-    """
+    """Node's platform name (linux-x64, win-x64, ...); NodeError if unsupported."""
     sys_platform = sys.platform if sys_platform is None else sys_platform
     machine = platform.machine() if machine is None else machine
     os_name = _OS.get(sys_platform)
@@ -119,7 +113,7 @@ def _unpack(archive: Path, dest: Path) -> None:
 
 
 def download_node(version: str, plat: str, home: Path) -> Path:
-    """Download, verify and unpack node-v<version>-<plat> into home; its bin dir."""
+    """Download, verify and unpack Node into home; returns its bin dir."""
     name = dist_name(version, plat)
     exts = [".zip"] if plat.startswith("win-") else [".tar.xz", ".tar.gz"]
     base = f"{NODE_DIST}/v{version}"
@@ -164,8 +158,7 @@ def download_node(version: str, plat: str, home: Path) -> Path:
 
 
 def find_npm(env: Optional[Mapping[str, str]] = None) -> Optional[Path]:
-    """A directory with npm in it (PATH, or a Node downloaded before); None
-    when there is none. Downloads nothing."""
+    """The directory holding npm, or None; never downloads."""
     found = shutil.which("npm")
     if found:
         return Path(found).parent
@@ -175,10 +168,7 @@ def find_npm(env: Optional[Mapping[str, str]] = None) -> Optional[Path]:
 
 
 def ensure_npm(env: Optional[Mapping[str, str]] = None) -> Path:
-    """A directory with npm in it, downloading Node when there is none.
-
-    Raises NodeError with an install-Node hint when that fails.
-    """
+    """The directory holding npm, downloading Node if needed."""
     found = shutil.which("npm")
     if found:
         ui.ok("npm found", found)
