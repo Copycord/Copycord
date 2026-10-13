@@ -22,7 +22,7 @@ copycord service install [--user] [--data-dir PATH]
                               run Copycord as a systemd/launchd/Scheduled Task service
 copycord service start|stop|status|uninstall [--user]
 copycord update [--channel stable|beta|dev [--repo OWNER/NAME] [--ref REF]]
-                [--tag VERSION] [--no-install]
+                [--tag VERSION] [--no-install] [--no-backup]
                               update (uv tool / pipx) from the saved or given
                               channel and restart a running service
 copycord update status        installed version, channel and latest on it
@@ -324,6 +324,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "--no-install",
         action="store_true",
         help="only save --channel/--repo/--ref, install nothing (used by the install scripts)",
+    )
+    update.add_argument(
+        "--no-backup",
+        action="store_true",
+        help="skip the database backup made before every update",
     )
 
     uninst = sub.add_parser(
@@ -1022,6 +1027,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             tag=args.tag,
             no_install=args.no_install,
             repo=args.repo,
+            no_backup=args.no_backup,
         )
 
     if args.command == "run":

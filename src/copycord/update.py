@@ -22,6 +22,12 @@ copycord update status              print the installed version, the saved
 copycord update --channel beta --no-install
                                       only save the channel (the install
                                       scripts use this)
+copycord update --no-backup           skip the pre-update database backup
+
+Every update that installs first copies data.db with the sqlite3 online
+backup API to <backups>/data-pre-update-<from version>-<UTC timestamp>.db
+(BACKUP_DIR, default <data dir>/backups); the newest 5 are kept, apart from
+the daily backups. A failed backup aborts the update.
 
 stable  newest GitHub release that is not a draft or a pre-release
 beta    newest GitHub release that is not a draft, pre-releases included
@@ -505,6 +511,35 @@ def _err(text: str, detail: str = "") -> None:
     ui.fail(text, detail)
 
 
+def backup_database(skip: bool = False) -> bool:
+    """Pre-update copy of the database; False (after saying why) when it failed."""
+    from copycord.common.db import backup_pre_update
+    from copycord.common.paths import db_path
+
+    if skip:
+        ui.warn("database backup skipped (--no-backup)")
+        return True
+    path = db_path()
+    try:
+        dest = backup_pre_update(str(path), current_version())
+    except Exception as e:
+        ui.box(
+            [
+                f"Could not back up {path} before updating:",
+                str(e),
+                "Nothing was installed. Fix the cause, or update without a",
+                f"backup: {ui.cmd('copycord update --no-backup', stream=sys.stderr)}",
+            ],
+            title="Database backup failed", status="fail", stream=sys.stderr,
+        )
+        return False
+    if dest is None:
+        ui.info("no database yet, nothing to back up", str(path))
+    else:
+        ui.ok("backed up the database", str(dest))
+    return True
+
+
 def update(
     check_only: bool = False,
     channel: Optional[str] = None,
@@ -512,6 +547,7 @@ def update(
     tag: Optional[str] = None,
     no_install: bool = False,
     repo: Optional[str] = None,
+    no_backup: bool = False,
 ) -> int:
     saved = load_channel()
     if tag and (channel or branch or repo):
@@ -582,6 +618,8 @@ def update(
         return 1
     if shutil.which(cmd[0]) is None:
         _err(f"{cmd[0]} is not on PATH", f"update Copycord with: {hint}")
+        return 1
+    if not backup_database(no_backup):
         return 1
     # A dev update builds from git, and that build compiles the admin UI with
     # npm; Node is downloaded into the Copycord home when there is none.
