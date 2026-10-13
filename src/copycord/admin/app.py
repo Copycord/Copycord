@@ -28,15 +28,15 @@ import logging
 from typing import Dict, List, Set, Literal, Optional, Any, Union
 from copycord.admin.auth import init_admin_auth
 from copycord.admin.security import authorize_websocket, safe_child
-from copycord.admin.logging_setup import (
-    LOGGER,
+from copycord.logging_setup import (
     get_logger,
-    configure_app_logging,
     req_id_var,
     route_var,
     client_var,
     REDACT_KEYS,
 )
+
+LOGGER = get_logger("copycord")
 from copycord.admin.standalone_scraper import StandaloneScraper, ScraperConfig, ScraperResult
 from copycord.admin.notifications import notify, send_webhook, EVENTS as NOTIFICATION_EVENTS
 from fastapi import (

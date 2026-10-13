@@ -362,8 +362,8 @@ def test_role_env_guard_exits_before_starting(monkeypatch, caplog):
         sup_mod, "run", lambda *a, **k: started.append(1), raising=True
     )
     monkeypatch.setenv("ROLE", "server")
-    # admin.logging_setup turns propagation off on the "copycord" logger once
-    # any earlier test has imported the admin app, which hides it from caplog.
+    # Guard against an earlier test leaving propagation off on "copycord",
+    # which would hide the record from caplog.
     monkeypatch.setattr(logging.getLogger("copycord"), "propagate", True)
     with caplog.at_level("ERROR", logger="copycord"):
         assert main(["run"]) != 0

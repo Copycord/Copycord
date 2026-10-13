@@ -24,9 +24,11 @@ from fastapi.templating import Jinja2Templates
 from starlette.middleware.base import BaseHTTPMiddleware
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
-from copycord.admin.logging_setup import LOGGER
+from copycord.logging_setup import get_logger
 from copycord.common.config import CURRENT_VERSION
 from copycord.common.private_file import write_private_file
+
+LOGGER = get_logger("copycord")
 
 ADMIN_COOKIE_NAME = "cc_admin"
 SESSION_MAX_AGE = 60 * 60 * 12

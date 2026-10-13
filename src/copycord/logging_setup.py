@@ -11,13 +11,17 @@
 Process-wide logging for `copycord run`.
 
 The console shows every record tagged by role, with server and client records
-only at WARNING and above. Server and client records also go to
+only at WARNING and above. Every logger (admin app, backup scheduler, roles)
+goes through this one setup; LOG_FORMAT=JSON swaps the console formatter, and
+SERVER_TOKEN / CLIENT_TOKEN values are redacted everywhere. Server and client records also go to
 <home>/logs/<role>.out (<DATA_DIR>/<role>.out in Docker), which the admin
 log tabs read.
 """
 
 from __future__ import annotations
 
+import contextvars
+import json
 import logging
 import os
 import threading
@@ -90,12 +94,145 @@ class ConsoleRoleFilter(logging.Filter):
         return True
 
 
+REDACT_KEYS = {"SERVER_TOKEN", "CLIENT_TOKEN"}
+REDACTED = "***REDACTED***"
+
+# Request context the admin app sets per request or websocket.
+req_id_var = contextvars.ContextVar("req_id", default="-")
+route_var = contextvars.ContextVar("route", default="-")
+client_var = contextvars.ContextVar("client", default="-")
+
+# Fields callers pass through `extra=` (or get_logger) that the formatters show.
+EXTRA_KEYS = (
+    "conn_id", "socket_id", "channel_id", "guild_id",
+    "events_sent", "forwarded", "heartbeats", "took_ms",
+)
+
+
+def _redact_value(val):
+    try:
+        s = str(val)
+        for k in REDACT_KEYS:
+            envv = os.getenv(k)
+            if envv and envv in s:
+                s = s.replace(envv, REDACTED)
+        return s
+    except Exception:
+        return "<unprintable>"
+
+
+def _redact_obj(obj):
+    if isinstance(obj, dict):
+        return {k: (REDACTED if str(k) in REDACT_KEYS and v else v) for k, v in obj.items()}
+    return obj
+
+
+def _redact_arg(a):
+    if isinstance(a, dict):
+        return _redact_obj(a)
+    if isinstance(a, str):
+        return _redact_value(a)
+    return a
+
+
+class RedactFilter(logging.Filter):
+    """Adds the request context to the record and redacts tokens in msg and args."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.req_id = req_id_var.get()
+        record.scope = route_var.get()
+        record.client = client_var.get()
+        try:
+            if isinstance(record.args, dict):
+                record.args = {k: _redact_arg(v) for k, v in record.args.items()}
+            elif isinstance(record.args, (tuple, list)):
+                new = [_redact_arg(a) for a in record.args]
+                record.args = tuple(new) if isinstance(record.args, tuple) else new
+            if isinstance(record.msg, str):
+                record.msg = _redact_value(record.msg)
+        except Exception:
+            pass
+        return True
+
+
+def _context(record: logging.LogRecord) -> Dict[str, object]:
+    """Request context and extras that are actually set on the record."""
+    out: Dict[str, object] = {}
+    for k in ("req_id", "scope", "client"):
+        v = getattr(record, k, "-")
+        if v not in (None, "", "-"):
+            out[k] = v
+    for k in EXTRA_KEYS:
+        v = getattr(record, k, None)
+        if v not in (None, "", []):
+            out[k] = v
+    return out
+
+
 class ConsoleFormatter(logging.Formatter):
-    """Console format with the [role] tag derived from the thread name."""
+    """Console format with the [role] tag derived from the thread name.
+
+    Extras passed by the caller follow the message; the request context is
+    added only at DEBUG, where it helps tie lines together.
+    """
 
     def format(self, record: logging.LogRecord) -> str:
         record.role_tag = f"[{thread_role(record.threadName)}]"
-        return super().format(record)
+        line = super().format(record)
+        ctx = _context(record)
+        if record.levelno > logging.DEBUG:
+            for k in ("req_id", "scope", "client"):
+                ctx.pop(k, None)
+        if not ctx:
+            return line
+        head, sep, tail = line.partition("\n")
+        extras = " ".join(f"{k}={v}" for k, v in ctx.items())
+        return f"{head} | {extras}{sep}{tail}"
+
+
+class JSONFormatter(logging.Formatter):
+    """One JSON object per line (LOG_FORMAT=JSON), same local timestamp as the console."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        base: Dict[str, object] = {
+            "time": self.formatTime(record, DATEFMT),
+            "lvl": record.levelname,
+            "role": thread_role(record.threadName),
+            "logger": record.name,
+            "msg": record.getMessage(),
+        }
+        base.update(_context(record))
+        if record.exc_info:
+            base["exc"] = self.formatException(record.exc_info)
+        return json.dumps(base, separators=(",", ":"), default=str)
+
+
+def json_mode() -> bool:
+    return os.getenv("LOG_FORMAT", "HUMAN").strip().upper() == "JSON"
+
+
+class ContextAdapter(logging.LoggerAdapter):
+    """Adds fixed extras (socket_id, conn_id, ...) to every record."""
+
+    def process(self, msg, kwargs):
+        extra = kwargs.setdefault("extra", {})
+        for k, v in self.extra.items():
+            extra.setdefault(k, v)
+        return msg, kwargs
+
+
+def get_logger(name: str = "copycord", **ctx) -> ContextAdapter:
+    return ContextAdapter(logging.getLogger(name), dict(ctx))
+
+
+def _quiet_libraries(level: int) -> None:
+    # websockets logs "server listening on ..." at INFO for every control port,
+    # repeating the supervisor's own line; uvicorn has its own access log.
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+    logging.getLogger("websockets").setLevel(
+        logging.DEBUG if level <= logging.DEBUG else logging.WARNING
+    )
 
 
 class TruncateSafeRotatingFileHandler(RotatingFileHandler):
@@ -141,11 +278,17 @@ def setup_logging(
     if root.level == logging.NOTSET or root.level > level:
         root.setLevel(level)
 
+    _quiet_libraries(level)
+
     if not has_console_handler(root):
         ch = mark_console(_console_handler(directory, max_bytes, backup_count))
-        ch.setFormatter(ConsoleFormatter(CONSOLE_FORMAT, datefmt=DATEFMT))
+        if json_mode():
+            ch.setFormatter(JSONFormatter())
+        else:
+            ch.setFormatter(ConsoleFormatter(CONSOLE_FORMAT, datefmt=DATEFMT))
         ch.setLevel(level)
         ch.addFilter(ConsoleRoleFilter())
+        ch.addFilter(RedactFilter())
         root.addHandler(ch)
 
     directory = Path(directory) if directory is not None else logs_dir()
@@ -179,6 +322,7 @@ def setup_logging(
         fh.setFormatter(formatter)
         fh.setLevel(level)
         fh.addFilter(ThreadRoleFilter(role))
+        fh.addFilter(RedactFilter())
         root.addHandler(fh)
         handlers[role] = fh
     return handlers
