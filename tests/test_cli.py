@@ -646,6 +646,9 @@ def test_doctor_links_the_paths_in_the_home(doctor_env, monkeypatch):
     link = _local_links(monkeypatch)
     monkeypatch.setenv("PASSWORD", "copycord")
     monkeypatch.setattr(sys, "stdout", _Terminal())
+    # A terminal wide enough that no line in the section boxes wraps.
+    monkeypatch.setattr(ui, "SECTION_MAX", 1000)
+    monkeypatch.setattr(ui, "_columns", lambda: 1000)
     assert cli.main(["doctor", "--verbose", "--data-dir", str(doctor_env)]) == 0
     out = sys.stdout.getvalue()
     env = (doctor_env / ".env").resolve()
