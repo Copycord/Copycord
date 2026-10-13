@@ -727,7 +727,7 @@ def update(
         _err(f"update failed (exit {result.returncode})", f"reinstall with: {hint}")
         tail = (log.read_text(encoding="utf-8", errors="replace").splitlines()
                 if log.is_file() else [])[-20:]
-        tail = [t for t in tail if not t.startswith(("launchers: ", "moved aside: "))]
+        tail = [t for t in tail if not t.startswith(("launchers: ", "moved aside: ", "could not move"))]
         for line in tail:
             print(f"  {line}", file=sys.stderr)
         ui.info("full log", str(log), stream=sys.stderr)
@@ -775,6 +775,7 @@ def _install(cmd, hint, env, windows, launchers, restart, text):
 
     log = log_path()
     moved: list = []
+    failed: list = []
     if windows:
         from copycord.common.paths import data_dir
 
@@ -784,7 +785,7 @@ def _install(cmd, hint, env, windows, launchers, restart, text):
             except service.ServiceError:
                 pass
         winupdate.clean_old(data_dir(), launchers)
-        moved = winupdate.move_aside(sys.prefix, launchers, data_dir())
+        moved = winupdate.move_aside(sys.prefix, launchers, data_dir(), failed)
     with ui.Spinner(text) as spin:
         if not spin.active:
             ui.info(text)
@@ -795,6 +796,7 @@ def _install(cmd, hint, env, windows, launchers, restart, text):
     if windows and result.returncode != 0:
         winupdate.restore(moved)
     aside = "".join(f"moved aside: {src} -> {dest}\n" for src, dest in moved)
+    aside += "".join(f"could not move aside: {f}\n" for f in failed)
     try:
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text(f"launchers: {launchers}\n{aside}$ {hint}\n"
