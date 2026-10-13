@@ -148,6 +148,10 @@ copycord update status             # only show what is installed and what is ava
 
 `copycord run` prints a one-line hint, at most once a day, when an update is out. A running service is restarted after an update. With `copycord config set AUTO_UPDATE true`, a Copycord running as a service updates itself. See [`copycord update`](/docs/cli#copycord-update).
 
+### Downgrading and backups {#downgrade}
+
+Every `copycord update`, upgrade or downgrade, first copies the database to `data-pre-update-<version>-<UTC timestamp>.db` in the backups directory (`<data dir>/backups` unless `BACKUP_DIR` is set) and keeps the newest 5. A failed backup stops the update; `--no-backup` skips it. Copycord refuses to start on a database from a newer version and tells you to `copycord update` back or restore one of those backups, so a downgrade never changes your data. See [Downgrading and backups](/docs/cli#downgrade).
+
 ## Uninstall
 
 ```bash title="Terminal"

@@ -372,11 +372,25 @@ copycord update --channel beta --no-install
 | `--repo OWNER/NAME` | Dev channel only: the GitHub repository to install from (default `Copycord/Copycord`), for example a fork |
 | `--tag VERSION` | Installs this exact release (`4.0.0` or `v4.0.0`). One-off: the saved channel does not change. Cannot be combined with `--channel`, `--repo` or `--ref`. |
 | `--no-install` | Only saves `--channel` (and `--repo`, `--ref`), installs nothing. The install scripts use this. |
+| `--no-backup` | Skips the [database backup](#downgrade) made before the install |
 | `--data-dir PATH` | Reads and saves the channel in this data directory |
 
 After a successful update, a running [service](#copycord-service) is restarted so it uses the new version.
 
 `status` also shows when Copycord last checked for an update and whether auto-update is on.
+
+### Downgrading and backups {#downgrade}
+
+Before it installs anything, every `copycord update` (any channel, `--tag`, dev refs, upgrades and downgrades alike) copies the database with SQLite's online backup to `data-pre-update-<version>-<UTC timestamp>.db` in the backups directory (`BACKUP_DIR`, by default `backups` in the [data directory](#data-dir)), for example `data-pre-update-4.0.0-20261012T091500Z.db`. It prints the path. The newest 5 are kept; the daily backups have their own retention. With no database yet it says so and goes on. If the backup fails, the update stops and nothing is installed; `--no-backup` skips the backup.
+
+Copycord refuses to start on a database written by a newer version (a higher `schema_version`), so an older version never changes it. `copycord run` prints:
+
+```
+This database was created by a newer Copycord (schema 5, this version supports 4).
+Run copycord update to go back to a newer version, or restore a backup from <backups dir>.
+```
+
+and exits with status 1, naming the newest pre-update backup when there is one. `copycord doctor` reports it as `FAIL`. To go back to an older version for good, stop Copycord and copy the matching `data-pre-update-*.db` over `data.db`.
 
 ### Update check on start {#update-check}
 
