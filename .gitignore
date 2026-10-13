@@ -13,4 +13,5 @@ code/admin/data/
 website/node_modules/
 website/build/
 website/.docusaurus/
-website/.cache-loader/.claude/
+website/.cache-loader/
+.claude/
