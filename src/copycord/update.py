@@ -723,9 +723,11 @@ def update(
     text = f"Installing Copycord {what}" + (" and building the admin UI" if git else "")
     result, log = _install(cmd, hint, cmd_env, windows, launchers, restart, text + "...")
     if result.returncode != 0:
+        sys.stdout.flush()
         _err(f"update failed (exit {result.returncode})", f"reinstall with: {hint}")
         tail = (log.read_text(encoding="utf-8", errors="replace").splitlines()
                 if log.is_file() else [])[-20:]
+        tail = [t for t in tail if not t.startswith(("launchers: ", "moved aside: "))]
         for line in tail:
             print(f"  {line}", file=sys.stderr)
         ui.info("full log", str(log), stream=sys.stderr)
@@ -786,13 +788,17 @@ def _install(cmd, hint, env, windows, launchers, restart, text):
     with ui.Spinner(text) as spin:
         if not spin.active:
             ui.info(text)
-        result = service.run_cmd(cmd, capture=True, env=env)
+        if env is None:
+            result = service.run_cmd(cmd, capture=True)
+        else:
+            result = service.run_cmd(cmd, capture=True, env=env)
     if windows and result.returncode != 0:
         winupdate.restore(moved)
+    aside = "".join(f"moved aside: {src} -> {dest}\n" for src, dest in moved)
     try:
         log.parent.mkdir(parents=True, exist_ok=True)
-        log.write_text(f"$ {hint}\n{result.stdout or ''}{result.stderr or ''}",
-                       encoding="utf-8")
+        log.write_text(f"launchers: {launchers}\n{aside}$ {hint}\n"
+                       f"{result.stdout or ''}{result.stderr or ''}", encoding="utf-8")
     except OSError:
         pass
     return result, log
