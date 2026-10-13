@@ -109,7 +109,7 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1 | iex
 ```
 
-The installer sets up everything Copycord needs.
+The installer sets up everything Copycord needs. Run again, it stops when that version is already installed; `--force` (`-Force` on Windows) reinstalls.
 
 ### Start
 
