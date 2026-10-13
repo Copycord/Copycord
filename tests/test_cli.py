@@ -377,13 +377,13 @@ class _Terminal(io.StringIO):
         return True
 
 
-@pytest.fixture()
-def uninstall_tty(uninstall_env, monkeypatch):
-    """uninstall_env with stdout and stderr on a terminal, so the rail is shown."""
+def _terminal(monkeypatch):
+    """Put stdout and stderr on a terminal, so the rail is shown. Called in the
+    test itself: pytest puts its own streams back after the fixtures ran."""
     out, err = _Terminal(), _Terminal()
     monkeypatch.setattr(sys, "stdout", out)
     monkeypatch.setattr(sys, "stderr", err)
-    return uninstall_env, out, err
+    return out, err
 
 
 def _removed_program(dry_run, purge, removed, kept, *a):
@@ -393,8 +393,8 @@ def _removed_program(dry_run, purge, removed, kept, *a):
     return True
 
 
-def test_uninstall_on_a_terminal_runs_on_the_rail(uninstall_tty, monkeypatch):
-    data, out, _err = uninstall_tty
+def test_uninstall_on_a_terminal_runs_on_the_rail(uninstall_env, monkeypatch):
+    data, (out, _err) = uninstall_env, _terminal(monkeypatch)
     monkeypatch.setattr(cli, "_uninstall_program", _removed_program)
     asked = _answers(monkeypatch, "")
     assert cli.main(["uninstall"]) == 0
@@ -416,8 +416,8 @@ def test_uninstall_on_a_terminal_runs_on_the_rail(uninstall_tty, monkeypatch):
     ]
 
 
-def test_uninstall_cancel_on_a_terminal_closes_the_rail(uninstall_tty, monkeypatch):
-    data, out, err = uninstall_tty
+def test_uninstall_cancel_on_a_terminal_closes_the_rail(uninstall_env, monkeypatch):
+    data, (out, err) = uninstall_env, _terminal(monkeypatch)
     monkeypatch.setattr(cli, "_uninstall_service", lambda *a: pytest.fail("ran after cancel"))
     _answers(monkeypatch, "3")
     assert cli.main(["uninstall"]) == 1
