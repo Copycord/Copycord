@@ -1,5 +1,5 @@
 """
-Tests for the update channels of `copycord update` (code/copycord/update.py):
+Tests for the update channels of `copycord update` (src/copycord/update.py):
 the saved channel in <data dir>/update.json, release resolution from faked
 GitHub releases API responses (stable skips pre-releases, beta includes them,
 drafts ignored, missing wheel asset, network failure), the install command

@@ -1,5 +1,5 @@
 """
-code/client/client.py on selfclient: handler wiring and the restart lifecycle.
+src/copycord/client/client.py on selfclient: handler wiring and the restart lifecycle.
 
 ClientListener builds a selfclient.Client with every ``on_*`` handler
 registered by name. These build that Client the way the listener does, run it
@@ -14,14 +14,14 @@ import types
 
 import pytest
 
-import client.client as cc
-from selfclient import Client
-from selfclient.events import (
+import copycord.client.client as cc
+from copycord.selfclient import Client
+from copycord.selfclient.events import (
     CLIENT_HANDLERS,
     RawMessageDeleteEvent,
     RawMessageUpdateEvent,
 )
-from selfclient.models import (
+from copycord.selfclient.models import (
     ForumChannel,
     Message,
     Role,

@@ -64,7 +64,7 @@ v4 has no `ROLE` variable and no separate `admin`, `server` and `client` service
 The Docker build compiles the frontend for you. To check frontend changes on their own:
 
 ```bash
-cd code/admin/frontend
+cd src/copycord/admin/frontend
 npm ci
 npm run build
 ```
@@ -75,17 +75,18 @@ Install the test dependencies (in a virtual environment of your choice) and run 
 
 ```bash
 pip install pytest pytest-asyncio -r tests/requirements-test.txt
-PYTHONPATH=code python -m pytest tests/ -v
+COPYCORD_SKIP_FRONTEND=1 pip install -e .
+python -m pytest tests/ -v
 ```
 
-Run a single file while you work, for example `PYTHONPATH=code python -m pytest tests/test_cli.py -v`.
+Run a single file while you work, for example `python -m pytest tests/test_cli.py -v`.
 
 Lint and syntax checks, as CI runs them:
 
 ```bash
 pip install ruff
-ruff check code/
-find code/ -name '*.py' -print0 | xargs -0 python -m py_compile
+ruff check src/
+find src/ -name '*.py' -print0 | xargs -0 python -m py_compile
 ```
 
 ## Continuous integration
@@ -94,10 +95,10 @@ Every pull request against `main` (and every push to `main`) runs the **Tests** 
 
 | Job | What it checks |
 |-----|----------------|
-| Lint & syntax check | `ruff check code/` and `py_compile` on every Python file |
+| Lint & syntax check | `ruff check src/` and `py_compile` on every Python file |
 | DB unit tests | `tests/test_db.py` on Python 3.12 and 3.14 |
 | Unit tests | The rest of `tests/` on Python 3.12 and 3.14 |
-| Frontend build | `npm ci` and `npm run build` in `code/admin/frontend` |
+| Frontend build | `npm ci` and `npm run build` in `src/copycord/admin/frontend` |
 | Wheel build & smoke test | Builds the wheel with the frontend, installs it in a fresh environment and runs `copycord --version` and `copycord doctor` |
 
 Other workflows:
@@ -111,36 +112,36 @@ Other workflows:
 
 ```
 copycord/
-├── code/
-│   ├── copycord/        # The `copycord` command
-│   │   ├── __main__.py  # CLI: run, version, doctor, config
-│   │   ├── supervisor.py # Runs admin, server and client in one process
-│   │   ├── service.py   # copycord service (systemd, launchd, Scheduled Task)
-│   │   ├── update.py    # copycord update and update channels
-│   │   └── logging_setup.py # Terminal and server.out/client.out logging
-│   ├── admin/           # FastAPI web dashboard
-│   │   ├── app.py       # Main FastAPI application
-│   │   ├── auth.py      # Authentication
-│   │   ├── frontend/    # Vite frontend source
-│   │   ├── templates/   # Jinja2 HTML templates
-│   │   └── static/      # Built frontend assets
-│   ├── server/          # Discord bot (py-cord)
-│   │   ├── server.py    # Core sync engine
-│   │   ├── commands.py  # Slash commands
-│   │   ├── backfill.py  # History import
-│   │   ├── roles.py     # Role management
-│   │   ├── emojis.py    # Emoji cloning
-│   │   └── stickers.py  # Sticker cloning
-│   ├── client/          # Self-bot client
-│   │   ├── client.py    # Main client
-│   │   ├── forwarding.py # External forwarding
-│   │   └── sitemap.py   # Guild structure mapping
-│   ├── selfclient/      # Copycord's own user-account Discord library (gateway, HTTP, models)
-│   ├── common/          # Shared code
-│   │   ├── config.py    # Configuration management
-│   │   ├── db.py        # SQLite database manager
-│   │   ├── paths.py     # Data directory per OS
-│   │   └── websockets.py # Communication between the parts
+├── src/
+│   └── copycord/        # The one installed package
+│       ├── __main__.py  # CLI: run, version, doctor, config
+│       ├── supervisor.py # Runs admin, server and client in one process
+│       ├── service.py   # copycord service (systemd, launchd, Scheduled Task)
+│       ├── update.py    # copycord update and update channels
+│       ├── logging_setup.py # Terminal and server.out/client.out logging
+│       ├── admin/           # FastAPI web dashboard
+│       │   ├── app.py       # Main FastAPI application
+│       │   ├── auth.py      # Authentication
+│       │   ├── frontend/    # Vite frontend source
+│       │   ├── templates/   # Jinja2 HTML templates
+│       │   └── static/      # Built frontend assets
+│       ├── server/          # Discord bot (py-cord)
+│       │   ├── server.py    # Core sync engine
+│       │   ├── commands.py  # Slash commands
+│       │   ├── backfill.py  # History import
+│       │   ├── roles.py     # Role management
+│       │   ├── emojis.py    # Emoji cloning
+│       │   └── stickers.py  # Sticker cloning
+│       ├── client/          # Self-bot client
+│       │   ├── client.py    # Main client
+│       │   ├── forwarding.py # External forwarding
+│       │   └── sitemap.py   # Guild structure mapping
+│       ├── selfclient/      # Copycord's own user-account Discord library (gateway, HTTP, models)
+│       └── common/          # Shared code
+│           ├── config.py    # Configuration management
+│           ├── db.py        # SQLite database manager
+│           ├── paths.py     # Data directory per OS
+│           └── websockets.py # Communication between the parts
 ├── tests/               # pytest suite
 ├── install.sh           # Install script for Linux and macOS
 ├── install.ps1          # Install script for Windows

@@ -1,6 +1,6 @@
 """
-Tests for the copycord CLI (code/copycord/__main__.py) and the data-dir
-resolution (code/common/paths.py). No network.
+Tests for the copycord CLI (src/copycord/__main__.py) and the data-dir
+resolution (src/copycord/common/paths.py). No network.
 """
 import json
 import os
@@ -10,8 +10,8 @@ from pathlib import Path
 
 import pytest
 
-from common import paths
-from common.config import CURRENT_VERSION
+from copycord.common import paths
+from copycord.common.config import CURRENT_VERSION
 from copycord import __main__ as cli
 
 
@@ -135,7 +135,7 @@ def test_check_data_dir(tmp_path):
 
 
 def test_check_db(tmp_path):
-    from common.db import DBManager
+    from copycord.common.db import DBManager
 
     assert cli.check_db(tmp_path / "missing.db").status == cli.PASS
 
@@ -337,10 +337,10 @@ def test_env_template_defaults_match_the_code(tmp_path, monkeypatch):
 
     import re
 
-    root = Path(__file__).resolve().parents[1] / "code"
+    root = Path(__file__).resolve().parents[1] / "src" / "copycord"
     sources = "\n".join(
         (root / f).read_text(encoding="utf-8")
-        for f in ("admin/app.py", "copycord/supervisor.py", "client/export_runners.py")
+        for f in ("admin/app.py", "supervisor.py", "client/export_runners.py")
     )
     for key in ("ADMIN_PORT", "TZ", "UI_TZ", "BACKUP_AT", "BACKUP_RETAIN"):
         reads = re.findall(rf'os\.getenv\("{key}"\) or "([^"]*)"', sources)

@@ -31,10 +31,10 @@ jobs:
         env:
           TAG: ${{ github.event.release.tag_name }}
         run: |
-          current=$(sed -n 's/^CURRENT_VERSION = "\(.*\)"/\1/p' code/common/config.py)
+          current=$(sed -n 's/^CURRENT_VERSION = "\(.*\)"/\1/p' src/copycord/common/config.py)
           echo "tag $TAG, CURRENT_VERSION $current"
           if [ "${current#v}" != "${TAG#v}" ]; then
-            echo "::error::CURRENT_VERSION in code/common/config.py is '$current' but the release tag is '$TAG'; bump CURRENT_VERSION and tag again"
+            echo "::error::CURRENT_VERSION in src/copycord/common/config.py is '$current' but the release tag is '$TAG'; bump CURRENT_VERSION and tag again"
             exit 1
           fi
 
@@ -42,10 +42,10 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: code/admin/frontend/package-lock.json
+          cache-dependency-path: src/copycord/admin/frontend/package-lock.json
 
       - name: Build frontend
-        working-directory: code/admin/frontend
+        working-directory: src/copycord/admin/frontend
         run: |
           npm ci
           npm run build
@@ -66,8 +66,8 @@ jobs:
           import sys, zipfile
           wheel = sys.argv[1]
           names = zipfile.ZipFile(wheel).namelist()
-          if "admin/static/assets/main.js" not in names:
-              sys.exit(f"{wheel} has no admin/static/assets/main.js (frontend missing)")
+          if "copycord/admin/static/assets/main.js" not in names:
+              sys.exit(f"{wheel} has no copycord/admin/static/assets/main.js (frontend missing)")
           meta = [n for n in names if n.endswith(".dist-info/METADATA")]
           text = zipfile.ZipFile(wheel).read(meta[0]).decode()
           found = next(line.split(":", 1)[1].strip() for line in text.splitlines()

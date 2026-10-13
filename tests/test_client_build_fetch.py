@@ -12,8 +12,8 @@ These drive the real resolver.
 """
 import pytest
 
-import client.client as cc  # noqa: E402
-from selfclient import Client, fingerprint
+import copycord.client.client as cc  # noqa: E402
+from copycord.selfclient import Client, fingerprint
 
 BUILD = {
     "release_channel": "stable",

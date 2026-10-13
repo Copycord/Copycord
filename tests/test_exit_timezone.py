@@ -7,8 +7,8 @@ import asyncio
 
 import pytest
 
-from common import exit_timezone as et
-from common import selfbot_headers as sh
+from copycord.common import exit_timezone as et
+from copycord.common import selfbot_headers as sh
 
 PROXY_A = "http://user:secret@10.0.0.1:8000"
 PROXY_B = "http://user:secret@10.0.0.2:8000"

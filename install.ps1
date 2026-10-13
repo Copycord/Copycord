@@ -370,13 +370,13 @@ Test a branch, no release needed:
                     }
                 }
                 Run "Checking out $ref" 'git' @('-C', $gitDir, 'checkout', '--force', '--detach', $target)
-                Run 'Cleaning the checkout' 'git' @('-C', $gitDir, 'clean', '-fdx', '-e', 'code/admin/frontend/node_modules')
+                Run 'Cleaning the checkout' 'git' @('-C', $gitDir, 'clean', '-fdx', '-e', 'src/copycord/admin/frontend/node_modules')
                 $sha = (& git -C $gitDir rev-parse --short HEAD).Trim()
                 Done "$ref at $sha"
             }
 
             Step 'Building the admin frontend'
-            $frontend = Join-Path $gitDir 'code\admin\frontend'
+            $frontend = Join-Path $gitDir 'src\copycord\admin\frontend'
             if ($dryRun) {
                 Dry "cd $frontend; npm ci; npm run build"
             } else {
@@ -435,7 +435,7 @@ Test a branch, no release needed:
         # Settings that are read from the environment only live in <home>\.env,
         # which copycord loads at every start. Make sure it exists: write it once
         # with every key set to its default; never overwrite it. Keep it in step
-        # with envfile.template() in code/copycord/envfile.py.
+        # with envfile.template() in src/copycord/envfile.py.
         $envFile = Join-Path $homeDir '.env'
         if (-not (Test-Path $envFile)) {
             if ($dryRun) { Dry "write the settings file $envFile" }

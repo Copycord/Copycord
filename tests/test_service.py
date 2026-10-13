@@ -1,5 +1,5 @@
 """
-Tests for `copycord service` (code/copycord/service.py): unit, plist and task
+Tests for `copycord service` (src/copycord/service.py): unit, plist and task
 XML generation and the command sequence per OS. run_cmd is faked; nothing
 calls systemctl, launchctl or schtasks.
 """

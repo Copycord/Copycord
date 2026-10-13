@@ -13,9 +13,9 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
-from selfclient import gateway as sc_gateway
-from selfclient.errors import ConnectionClosed, LoginFailure
-from selfclient.gateway import (
+from copycord.selfclient import gateway as sc_gateway
+from copycord.selfclient.errors import ConnectionClosed, LoginFailure
+from copycord.selfclient.gateway import (
     CAPABILITIES,
     MAX_SUBSCRIPTION_PAYLOAD,
     RESUME_CLOSE_CODE,

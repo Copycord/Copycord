@@ -17,19 +17,19 @@ COPYCORD_SKIP_FRONTEND=1 pip install -e .   # runtime dependencies from pyprojec
 **All tests:**
 
 ```bash
-PYTHONPATH=code pytest tests/ -v
+python -m pytest tests/ -v
 ```
 
 **DB unit tests only:**
 
 ```bash
-PYTHONPATH=code pytest tests/test_db.py -v
+python -m pytest tests/test_db.py -v
 ```
 
 **API endpoint tests only:**
 
 ```bash
-PYTHONPATH=code pytest tests/test_api.py -v
+python -m pytest tests/test_api.py -v
 ```
 
 ## Linting
@@ -43,13 +43,13 @@ pip install ruff
 Run the linter:
 
 ```bash
-ruff check code/
+ruff check src/
 ```
 
 Syntax check all Python files:
 
 ```bash
-find code/ -name '*.py' -print0 | xargs -0 python -m py_compile
+find src/ -name '*.py' -print0 | xargs -0 python -m py_compile
 ```
 
 ## What the tests cover
@@ -84,7 +84,7 @@ Tests the FastAPI admin endpoints using `httpx.AsyncClient`. WebSocket control c
 - **Lint & syntax check** — ruff + py_compile on all Python files
 - **DB unit tests** — pytest `test_db.py`
 - **API endpoint tests** — pytest `test_api.py`
-- **Frontend build** — `npm ci && npm run build` in `code/admin/frontend/`
+- **Frontend build** — `npm ci && npm run build` in `src/copycord/admin/frontend/`
 
 ### `docker-build-test.yml` — Manual trigger
 

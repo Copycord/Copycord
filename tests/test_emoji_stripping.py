@@ -8,7 +8,7 @@ them instead, but only the ones the account genuinely cannot use.
 import logging
 import pytest
 
-from server.token_sender import (
+from copycord.server.token_sender import (
     SEND_OK,
     UserTokenSender,
     strip_unusable_emoji,

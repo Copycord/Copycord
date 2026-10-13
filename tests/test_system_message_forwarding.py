@@ -9,10 +9,10 @@ off. They now have a filter of their own and carry their rendered text.
 The tests call the real filter and the real attribute builder.
 """
 
-from selfclient.enums import MessageType
-from selfclient.models import Message
+from copycord.selfclient.enums import MessageType
+from copycord.selfclient.models import Message
 
-from client.forwarding import ForwardingFilters, ForwardingManager
+from copycord.client.forwarding import ForwardingFilters, ForwardingManager
 
 CHANNEL = 4001
 GUILD = 5001
@@ -186,7 +186,7 @@ class TestOtherFiltersStillApplyToSystemMessages:
 class TestNormalizerKeepsTheKey:
     def test_the_admin_layer_round_trips_the_flag(self):
 
-        from admin.app import _normalize_forwarding_rule_filters as norm
+        from copycord.admin.app import _normalize_forwarding_rule_filters as norm
 
         assert norm({"include_system": "on"})["include_system"] is True
         assert norm({"include_system": True})["include_system"] is True

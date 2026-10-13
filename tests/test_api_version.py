@@ -12,9 +12,9 @@ code to the same version the library and the browser both use.
 import pathlib
 import re
 
-CODE = pathlib.Path(__file__).resolve().parent.parent / "code"
+CODE = pathlib.Path(__file__).resolve().parent.parent / "src" / "copycord"
 
-# discord.com/api/vN in any Python source under code/.
+# discord.com/api/vN in any Python source under src/copycord/.
 _API_VERSION_RE = re.compile(r"discord\.com/api/v(\d+)")
 # The gateway carries its version as a query parameter instead.
 _GATEWAY_VERSION_RE = re.compile(r"gateway\.discord\.gg/\?v=(\d+)")

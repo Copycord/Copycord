@@ -494,13 +494,13 @@ checkout_ref() {
         target="FETCH_HEAD"
     fi
     git -C "$GIT_DIR_PATH" checkout --force --detach "$target" || return 1
-    git -C "$GIT_DIR_PATH" clean -fdx -e code/admin/frontend/node_modules
+    git -C "$GIT_DIR_PATH" clean -fdx -e src/copycord/admin/frontend/node_modules
 }
 
 build_frontend() {
     # A fresh dist for this ref; hatch_build.py then ships it in the wheel.
-    rm -rf "$GIT_DIR_PATH/code/admin/frontend/dist" || return 1
-    (cd "$GIT_DIR_PATH/code/admin/frontend" && npm ci --no-audit --no-fund && npm run build)
+    rm -rf "$GIT_DIR_PATH/src/copycord/admin/frontend/dist" || return 1
+    (cd "$GIT_DIR_PATH/src/copycord/admin/frontend" && npm ci --no-audit --no-fund && npm run build)
 }
 
 install_git() {
@@ -537,7 +537,7 @@ install_git() {
 
     step "Building the admin frontend"
     if [ "$DRY_RUN" = "1" ]; then
-        dry "cd $GIT_DIR_PATH/code/admin/frontend && npm ci && npm run build"
+        dry "cd $GIT_DIR_PATH/src/copycord/admin/frontend && npm ci && npm run build"
     else
         run "npm ci && npm run build" build_frontend
     fi
@@ -596,7 +596,7 @@ fi
 # Settings that are read from the environment only live in <home>/.env, which
 # `copycord` loads at every start. Make sure it exists: write it once with
 # every key set to its default; never overwrite it. Keep it in step with
-# envfile.template() in code/copycord/envfile.py.
+# envfile.template() in src/copycord/envfile.py.
 ENV_FILE="$COPYCORD_HOME/.env"
 if [ -e "$ENV_FILE" ]; then
     :

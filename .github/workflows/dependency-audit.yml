@@ -69,7 +69,7 @@ jobs:
 
       - name: Install & audit
         id: npm-audit
-        working-directory: code/admin/frontend
+        working-directory: src/copycord/admin/frontend
         run: |
           npm ci
           npm audit --omit=dev 2>&1 | tee /tmp/npm-audit.txt

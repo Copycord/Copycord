@@ -34,38 +34,26 @@ Homepage = "https://github.com/Copycord/Copycord"
 [project.scripts]
 copycord = "copycord.__main__:main"
 
-# Single source: CURRENT_VERSION in code/common/config.py ("v3.28.0" -> 3.28.0).
+# Single source: CURRENT_VERSION in src/copycord/common/config.py ("v3.28.0" -> 3.28.0).
 [tool.hatch.version]
-path = "code/common/config.py"
+path = "src/copycord/common/config.py"
 pattern = 'CURRENT_VERSION = "v?(?P<version>[^"]+)"'
 
 [tool.hatch.build.targets.wheel]
-# Kept as top-level packages (admin, server, client, ...): the supported install
-# is isolated (uv tool / pipx), so these names live in Copycord's own venv.
-packages = [
-    "code/admin",
-    "code/server",
-    "code/client",
-    "code/common",
-    "code/selfclient",
-    "code/copycord",
-]
+# One top-level package, copycord; admin, server, client, common and selfclient
+# are its subpackages.
+packages = ["src/copycord"]
 exclude = [
     "**/__pycache__",
     "**/*.pyc",
     "**/tests",
-    "code/admin/frontend",
-    "code/admin/data",
+    "src/copycord/admin/frontend",
+    "src/copycord/admin/data",
 ]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "/code/admin",
-    "/code/server",
-    "/code/client",
-    "/code/common",
-    "/code/selfclient",
-    "/code/copycord",
+    "/src/copycord",
     "/hatch_build.py",
     "/README.md",
     "/LICENSE",
@@ -73,10 +61,10 @@ include = [
 exclude = [
     "**/__pycache__",
     "**/*.pyc",
-    "code/admin/frontend/node_modules",
-    "code/admin/data",
+    "src/copycord/admin/frontend/node_modules",
+    "src/copycord/admin/data",
 ]
 
-# Adds the built frontend (code/admin/frontend/dist) when present; see hatch_build.py.
+# Adds the built frontend (src/copycord/admin/frontend/dist) when present; see hatch_build.py.
 [tool.hatch.build.hooks.custom]
 path = "hatch_build.py"

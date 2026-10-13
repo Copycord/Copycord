@@ -11,10 +11,10 @@ import contextlib
 
 import pytest
 
-from selfclient import Client
-from selfclient.client import _TrackedSocket
-from selfclient.errors import NotFound
-from selfclient.models import (
+from copycord.selfclient import Client
+from copycord.selfclient.client import _TrackedSocket
+from copycord.selfclient.errors import NotFound
+from copycord.selfclient.models import (
     DMChannel,
     Guild,
     Member,

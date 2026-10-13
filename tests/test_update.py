@@ -1,5 +1,5 @@
 """
-Tests for `copycord update` (code/copycord/update.py): installer detection,
+Tests for `copycord update` (src/copycord/update.py): installer detection,
 the install command per installer, update status against faked GitHub releases API
 responses, and restarting the service only when it was running. No network,
 no real uv/pipx.

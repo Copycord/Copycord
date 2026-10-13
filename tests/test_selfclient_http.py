@@ -10,9 +10,9 @@ import json as _json
 
 import pytest
 
-from selfclient import http as sc_http
-from selfclient.errors import Forbidden, NotFound, RateLimited
-from selfclient.http import HTTPClient, MESSAGE_PAGE, _route_key
+from copycord.selfclient import http as sc_http
+from copycord.selfclient.errors import Forbidden, NotFound, RateLimited
+from copycord.selfclient.http import HTTPClient, MESSAGE_PAGE, _route_key
 
 CHANNEL = "111111111111111111"
 GUILD = "999999999999999999"

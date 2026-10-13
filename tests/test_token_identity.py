@@ -10,8 +10,8 @@ import types
 
 import pytest
 
-from server import token_identity
-from server.token_identity import TokenIdentityManager
+from copycord.server import token_identity
+from copycord.server.token_identity import TokenIdentityManager
 
 
 def _ident(author_id, token_id, assigned_at):

@@ -7,7 +7,7 @@ avatar URL is what makes "has it changed?" free.
 """
 import pytest
 
-from server.token_avatar import (
+from copycord.server.token_avatar import (
     avatar_hash_from_url,
     to_data_uri,
 )
@@ -81,7 +81,7 @@ class _Session:
 class TestFetchAvatar:
     @pytest.mark.asyncio
     async def test_returns_bytes_and_type(self):
-        from server.token_avatar import fetch_avatar
+        from copycord.server.token_avatar import fetch_avatar
 
         got = await fetch_avatar(_Session(_Resp(200, b"\x89PNG rest")), URL)
         assert got is not None
@@ -91,26 +91,26 @@ class TestFetchAvatar:
 
     @pytest.mark.asyncio
     async def test_detects_a_gif(self):
-        from server.token_avatar import fetch_avatar
+        from copycord.server.token_avatar import fetch_avatar
 
         got = await fetch_avatar(_Session(_Resp(200, b"GIF89a rest")), URL)
         assert got[1] == "image/gif"
 
     @pytest.mark.asyncio
     async def test_a_bad_response_is_not_an_avatar(self):
-        from server.token_avatar import fetch_avatar
+        from copycord.server.token_avatar import fetch_avatar
 
         assert await fetch_avatar(_Session(_Resp(404)), URL) is None
 
     @pytest.mark.asyncio
     async def test_empty_body_is_rejected(self):
-        from server.token_avatar import fetch_avatar
+        from copycord.server.token_avatar import fetch_avatar
 
         assert await fetch_avatar(_Session(_Resp(200, b"")), URL) is None
 
     @pytest.mark.asyncio
     async def test_oversized_image_is_rejected(self):
-        from server.token_avatar import MAX_AVATAR_BYTES, fetch_avatar
+        from copycord.server.token_avatar import MAX_AVATAR_BYTES, fetch_avatar
 
         huge = b"\x89PNG" + b"x" * MAX_AVATAR_BYTES
         assert await fetch_avatar(_Session(_Resp(200, huge)), URL) is None
@@ -122,8 +122,8 @@ import logging  # noqa: E402
 import os  # noqa: E402
 import tempfile  # noqa: E402
 
-from common.db import DBManager  # noqa: E402
-from server.token_identity import TokenIdentityManager  # noqa: E402
+from copycord.common.db import DBManager  # noqa: E402
+from copycord.server.token_identity import TokenIdentityManager  # noqa: E402
 
 H2 = "b" * 32
 URL2 = f"https://cdn.discordapp.com/avatars/429748829756325889/{H2}.png"
@@ -144,8 +144,7 @@ def _db():
 
 
 def _manager(db, *, succeed=True):
-    import server.token_identity as ti
-
+    import copycord.server.token_identity as ti
     m = TokenIdentityManager(
         bot=None, db=db, logger=logging.getLogger("test"), session_provider=lambda: None
     )

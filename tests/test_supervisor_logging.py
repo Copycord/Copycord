@@ -1,5 +1,5 @@
 """
-Tests for single-process logging (code/copycord/logging_setup.py).
+Tests for single-process logging (src/copycord/logging_setup.py).
 """
 import asyncio
 import io
@@ -8,7 +8,7 @@ import threading
 
 import pytest
 
-from common.config import CURRENT_VERSION
+from copycord.common.config import CURRENT_VERSION
 from copycord import logging_setup as ls
 from copycord import supervisor
 

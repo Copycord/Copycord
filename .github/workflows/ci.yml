@@ -37,11 +37,11 @@ jobs:
         run: pip install ruff
 
       - name: Ruff lint
-        run: ruff check code/ 2>&1 | tee /tmp/ruff.txt
+        run: ruff check src/ 2>&1 | tee /tmp/ruff.txt
 
       - name: Python syntax check (py_compile)
         run: |
-          find code/ -name '*.py' -print0 \
+          find src/ -name '*.py' -print0 \
             | xargs -0 python -m py_compile 2>&1 | tee /tmp/pycompile.txt
 
       - name: Job summary
@@ -93,7 +93,7 @@ jobs:
 
       - name: Run DB tests
         env:
-          PYTHONPATH: code
+          PYTHONPATH: src
         run: python -m pytest tests/test_db.py -v 2>&1 | tee /tmp/db-tests.txt
 
       - name: Job summary
@@ -130,8 +130,6 @@ jobs:
           COPYCORD_SKIP_FRONTEND=1 pip install -e .
 
       - name: Run unit tests
-        env:
-          PYTHONPATH: code
         run: python -m pytest tests/ --ignore=tests/test_db.py -v 2>&1 | tee /tmp/tests.txt
 
       - name: Job summary
@@ -156,10 +154,10 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: code/admin/frontend/package-lock.json
+          cache-dependency-path: src/copycord/admin/frontend/package-lock.json
 
       - name: Install & build frontend
-        working-directory: code/admin/frontend
+        working-directory: src/copycord/admin/frontend
         run: |
           npm ci
           npm run build 2>&1 | tee /tmp/frontend-build.txt
@@ -187,10 +185,10 @@ jobs:
         with:
           node-version: "20"
           cache: npm
-          cache-dependency-path: code/admin/frontend/package-lock.json
+          cache-dependency-path: src/copycord/admin/frontend/package-lock.json
 
       - name: Build frontend
-        working-directory: code/admin/frontend
+        working-directory: src/copycord/admin/frontend
         run: |
           npm ci
           npm run build

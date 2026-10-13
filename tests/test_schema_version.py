@@ -1,12 +1,12 @@
 """
 Tests for the app_config schema_version row and the one-time pre-v4 backup
-(code/common/db.py, PLAN 7.1).
+(src/copycord/common/db.py, PLAN 7.1).
 """
 import sqlite3
 
 import pytest
 
-from common.db import (
+from copycord.common.db import (
     SCHEMA_VERSION,
     SCHEMA_VERSION_KEY,
     DBManager,

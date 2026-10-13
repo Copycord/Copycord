@@ -12,7 +12,7 @@ import json
 import aiohttp
 import pytest
 
-from common import selfbot_headers as sh
+from copycord.common import selfbot_headers as sh
 
 
 @pytest.fixture(autouse=True)

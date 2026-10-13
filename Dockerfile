@@ -3,10 +3,10 @@
 FROM node:20-slim AS webbuild
 WORKDIR /frontend
 
-COPY code/admin/frontend/package*.json ./
+COPY src/copycord/admin/frontend/package*.json ./
 RUN --mount=type=cache,target=/root/.npm,sharing=locked,id=npm-${TARGETPLATFORM} npm ci
 
-COPY code/admin/frontend/ .
+COPY src/copycord/admin/frontend/ .
 RUN --mount=type=cache,target=/root/.npm,sharing=locked,id=npm-${TARGETPLATFORM} npm run build
 
 
@@ -41,13 +41,8 @@ RUN python -m venv /opt/venvs/copycord
 # picks it up and ships it as admin/static.
 WORKDIR /src
 COPY pyproject.toml hatch_build.py README.md LICENSE ./
-COPY code/admin/   ./code/admin/
-COPY code/server/  ./code/server/
-COPY code/client/  ./code/client/
-COPY code/common/  ./code/common/
-COPY code/selfclient/ ./code/selfclient/
-COPY code/copycord/ ./code/copycord/
-COPY --from=webbuild /frontend/dist/ ./code/admin/frontend/dist/
+COPY src/ ./src/
+COPY --from=webbuild /frontend/dist/ ./src/copycord/admin/frontend/dist/
 
 RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked,id=pip-copycord-${TARGETPLATFORM} \
     /opt/venvs/copycord/bin/pip install --upgrade pip \

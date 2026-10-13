@@ -13,17 +13,17 @@ import logging
 
 import pytest
 
-from client.export_runners import (
+from copycord.client.export_runners import (
     BackfillEngine,
     DmHistoryExporter,
     _archived_threads,
     _has_archived_threads,
 )
-from client.forwarding import ForwardingFilters, ForwardingManager, ForwardingRule
-from client.sitemap import SitemapService
-from selfclient.errors import Forbidden
-from selfclient.http import HTTPClient
-from selfclient.models import (
+from copycord.client.forwarding import ForwardingFilters, ForwardingManager, ForwardingRule
+from copycord.client.sitemap import SitemapService
+from copycord.selfclient.errors import Forbidden
+from copycord.selfclient.http import HTTPClient
+from copycord.selfclient.models import (
     CategoryChannel,
     DMChannel,
     ForumChannel,
@@ -327,7 +327,7 @@ class _SitemapBot:
 
     async def fetch_stickers(self, guild):
         self.calls.append(("fetch_stickers", guild.id))
-        from selfclient.models import Sticker
+        from copycord.selfclient.models import Sticker
 
         return [
             Sticker({"id": str(GUILD_STICKER), "name": "wave", "format_type": 1, "type": 2}),

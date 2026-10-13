@@ -10,7 +10,8 @@
 """
 Hatch build hook: ship the built frontend.
 
-code/admin/frontend/dist (npm run build) lands in the wheel as admin/static,
+src/copycord/admin/frontend/dist (npm run build) lands in the wheel as
+copycord/admin/static,
 next to the tracked logo, the same place the Docker image copies it to. When
 dist is missing (a git install, `copycord update --channel dev`), the hook
 builds it first with `npm ci && npm run build`. When the frontend source is
@@ -28,7 +29,7 @@ from pathlib import Path
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
-FRONTEND = Path("code") / "admin" / "frontend"
+FRONTEND = Path("src") / "copycord" / "admin" / "frontend"
 DIST = FRONTEND / "dist"
 SKIP_ENV = "COPYCORD_SKIP_FRONTEND"
 
@@ -41,7 +42,7 @@ class FrontendBuildHook(BuildHookInterface):
     PLUGIN_NAME = "custom"
 
     def initialize(self, version: str, build_data: dict) -> None:
-        # Editable installs serve code/admin/static straight from the checkout.
+        # Editable installs serve src/copycord/admin/static straight from the checkout.
         if self.target_name == "wheel" and version == "editable":
             return
         dist = Path(self.root) / DIST
@@ -50,14 +51,14 @@ class FrontendBuildHook(BuildHookInterface):
         if not _has_files(dist):
             self.app.display_warning(
                 f"{DIST} not found: building without the admin frontend "
-                "(run `npm run build` in code/admin/frontend; `copycord doctor` will warn)"
+                "(run `npm run build` in src/copycord/admin/frontend; `copycord doctor` will warn)"
             )
             return
-        target = "admin/static" if self.target_name == "wheel" else DIST.as_posix()
+        target = "copycord/admin/static" if self.target_name == "wheel" else DIST.as_posix()
         build_data["force_include"][str(dist)] = target
 
     def build_frontend(self) -> None:
-        """npm ci && npm run build in code/admin/frontend.
+        """npm ci && npm run build in src/copycord/admin/frontend.
 
         Raises when the source is there but npm is missing or the build fails,
         unless COPYCORD_SKIP_FRONTEND=1 (then it only warns).

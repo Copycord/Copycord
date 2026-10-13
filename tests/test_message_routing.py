@@ -3,7 +3,7 @@ Tests for host-message routing: which messages must go via webhook rather than
 a user token (bot/webhook-authored messages and rich embeds).
 """
 
-from server.helpers import host_message_needs_webhook
+from copycord.server.helpers import host_message_needs_webhook
 
 
 def test_plain_user_message_uses_token():

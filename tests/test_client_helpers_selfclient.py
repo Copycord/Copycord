@@ -12,13 +12,13 @@ import json
 
 import pytest
 
-import client.helpers as helpers
-import client.message_utils as message_utils
-from client.helpers import dm_member_by_id, dump_message_debug
-from client.message_utils import MessageUtils, _resolve_forward
-from selfclient import errors
-from selfclient.errors import Forbidden, NotFound
-from selfclient.models import Guild, Member, Message, User
+import copycord.client.helpers as helpers
+import copycord.client.message_utils as message_utils
+from copycord.client.helpers import dm_member_by_id, dump_message_debug
+from copycord.client.message_utils import MessageUtils, _resolve_forward
+from copycord.selfclient import errors
+from copycord.selfclient.errors import Forbidden, NotFound
+from copycord.selfclient.models import Guild, Member, Message, User
 
 GUILD = 200000000000000001
 CHAT = 300000000000000001

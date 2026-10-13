@@ -13,11 +13,11 @@ venv/
 *.old
 
 # Node / Frontend
-code/admin/frontend/node_modules/
-code/admin/frontend/.vite/
-code/admin/frontend/.cache/
-code/admin/frontend/dist/       
-code/admin/static/assets/ 
+src/copycord/admin/frontend/node_modules/
+src/copycord/admin/frontend/.vite/
+src/copycord/admin/frontend/.cache/
+src/copycord/admin/frontend/dist/       
+src/copycord/admin/static/assets/ 
 
 # Project-specific
 /data

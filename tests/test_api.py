@@ -5,7 +5,6 @@ These tests use httpx AsyncClient to exercise endpoints that don't
 require live Discord connections. WebSocket control commands are mocked.
 """
 import os
-import sys
 import tempfile
 from unittest.mock import AsyncMock
 
@@ -17,12 +16,8 @@ os.environ["DATA_DIR"] = _tmpdir
 os.environ["DB_PATH"] = os.path.join(_tmpdir, "test.db")
 os.environ["LOG_LEVEL"] = "WARNING"
 
-CODE_DIR = os.path.join(os.path.dirname(__file__), "..", "code")
-if CODE_DIR not in sys.path:
-    sys.path.insert(0, os.path.abspath(CODE_DIR))
-
 # Import the app — this triggers module-level init (DB, schema, etc.)
-from admin.app import app, db  # noqa: E402
+from copycord.admin.app import app, db  # noqa: E402
 
 from httpx import AsyncClient, ASGITransport
 
@@ -37,8 +32,7 @@ def client():
 @pytest.fixture(autouse=True)
 def _mock_ws(monkeypatch):
     """Ensure all WebSocket control commands return a safe mock."""
-    import admin.app as app_mod
-
+    import copycord.admin.app as app_mod
     mock = AsyncMock(return_value={"ok": True, "running": False, "status": "stopped"})
     monkeypatch.setattr(app_mod, "_ws_cmd", mock)
 
@@ -273,8 +267,7 @@ class TestMappingUserTokensAPI:
 
     @pytest.mark.asyncio
     async def test_add_validates_and_masks(self, client, monkeypatch):
-        import admin.app as app_mod
-
+        import copycord.admin.app as app_mod
         monkeypatch.setattr(
             app_mod, "_selfbot_in_guild", AsyncMock(return_value=True)
         )
@@ -306,8 +299,7 @@ class TestMappingUserTokensAPI:
 
     @pytest.mark.asyncio
     async def test_add_rejects_account_not_in_clone(self, client, monkeypatch):
-        import admin.app as app_mod
-
+        import copycord.admin.app as app_mod
         monkeypatch.setattr(
             app_mod, "_selfbot_in_guild", AsyncMock(return_value=False)
         )
@@ -338,8 +330,7 @@ class TestMappingUserTokensAPI:
 
     @pytest.mark.asyncio
     async def test_toggle_and_delete(self, client, monkeypatch):
-        import admin.app as app_mod
-
+        import copycord.admin.app as app_mod
         monkeypatch.setattr(
             app_mod, "_selfbot_in_guild", AsyncMock(return_value=True)
         )
@@ -379,8 +370,7 @@ class TestMappingUserTokensAPI:
 
     @pytest.mark.asyncio
     async def test_bulk_add_dedupes_and_adds(self, client, monkeypatch):
-        import admin.app as app_mod
-
+        import copycord.admin.app as app_mod
         monkeypatch.setattr(
             app_mod, "_selfbot_in_guild", AsyncMock(return_value=True)
         )
@@ -406,8 +396,7 @@ class TestMappingUserTokensAPI:
 
     @pytest.mark.asyncio
     async def test_bulk_add_marks_invalid(self, client, monkeypatch):
-        import admin.app as app_mod
-
+        import copycord.admin.app as app_mod
         async def fake_in_guild(token, gid):
             return token == "goodtoken1"
 
@@ -426,8 +415,7 @@ class TestMappingUserTokensAPI:
         assert statuses == ["added", "invalid"]
 
     async def _add_tokens(self, client, monkeypatch, mid, tokens):
-        import admin.app as app_mod
-
+        import copycord.admin.app as app_mod
         monkeypatch.setattr(
             app_mod, "_selfbot_in_guild", AsyncMock(return_value=True)
         )
@@ -444,8 +432,7 @@ class TestMappingUserTokensAPI:
 
     @pytest.mark.asyncio
     async def test_verify_reports_working_and_broken(self, client, monkeypatch):
-        import admin.app as app_mod
-
+        import copycord.admin.app as app_mod
         mid = self._make_mapping()
         await self._add_tokens(
             client, monkeypatch, mid, ["goodtoken1", "badtoken22"]

@@ -13,7 +13,7 @@ pytest.importorskip(
     "discord", reason="client module needs a discord library present"
 )
 
-from client.sitemap import SitemapService  # noqa: E402
+from copycord.client.sitemap import SitemapService  # noqa: E402
 
 # Unbound: the rule reads only its arguments, so no instance is needed.
 _filtered = SitemapService._is_filtered_out_view

@@ -14,7 +14,7 @@ import time
 
 import pytest
 
-from common.proxy_pool import ProxyPool
+from copycord.common.proxy_pool import ProxyPool
 
 PROXIES = [f"http://u{i}:p{i}@host:8080" for i in range(4)]
 

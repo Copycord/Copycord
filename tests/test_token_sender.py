@@ -14,7 +14,7 @@ import pytest
 
 from curl_cffi.requests.exceptions import RequestException as CurlRequestException
 
-from server.token_sender import (
+from copycord.server.token_sender import (
     UserTokenSender,
     SEND_OK,
     SEND_DEAD,
@@ -1160,7 +1160,7 @@ class TestMessagePayload:
     """
 
     def test_keys_and_order_match_the_capture(self):
-        from server.token_sender import message_payload
+        from copycord.server.token_sender import message_payload
 
         p = message_payload("hi")
         assert list(p.keys()) == [
@@ -1176,7 +1176,7 @@ class TestMessagePayload:
         assert p["flags"] == 0
 
     def test_nonce_is_a_snowflake_string(self):
-        from server.token_sender import message_payload
+        from copycord.server.token_sender import message_payload
 
         nonce = message_payload("hi")["nonce"]
 
@@ -1184,14 +1184,14 @@ class TestMessagePayload:
         assert 18 <= len(nonce) <= 19
 
     def test_nonce_is_unique_per_message(self):
-        from server.token_sender import message_payload
+        from copycord.server.token_sender import message_payload
 
         assert len({message_payload("x")["nonce"] for _ in range(500)}) == 500
 
     def test_nonce_decodes_to_now(self):
         import time
 
-        from server.token_sender import message_payload
+        from copycord.server.token_sender import message_payload
 
         nonce = int(message_payload("hi")["nonce"])
         stamped_ms = (nonce >> 22) + 1420070400000
@@ -1202,7 +1202,7 @@ class TestReplyPayload:
     """A reply body, from a captured desktop-client reply 2026-08-21."""
 
     def _built(self):
-        from server.token_sender import _reply_bits, message_payload
+        from copycord.server.token_sender import _reply_bits, message_payload
 
         return message_payload(
             "lol",
@@ -1228,7 +1228,7 @@ class TestReplyPayload:
         ]
 
     def test_guild_reply_reference_matches_the_capture(self):
-        from server.token_sender import _reply_bits
+        from copycord.server.token_sender import _reply_bits
 
         ref = _reply_bits(
             {
@@ -1245,7 +1245,7 @@ class TestReplyPayload:
         assert list(ref) == ["guild_id", "channel_id", "message_id"]
 
     def test_dm_reply_reference_omits_the_guild(self):
-        from server.token_sender import _reply_bits
+        from copycord.server.token_sender import _reply_bits
 
         ref = _reply_bits(
             {
@@ -1270,7 +1270,7 @@ class TestReplyPayload:
         }
 
     def test_a_plain_message_is_unaffected(self):
-        from server.token_sender import message_payload
+        from copycord.server.token_sender import message_payload
 
         assert list(message_payload("hi").keys()) == [
             "mobile_network_type",
@@ -1289,7 +1289,7 @@ class TestBodyKeyOrder:
     """
 
     def test_reply_fields_come_before_flags(self):
-        from server.token_sender import _reply_bits, message_payload
+        from copycord.server.token_sender import _reply_bits, message_payload
 
         p = message_payload(
             "lol", _reply_bits({"guild_id": 1, "channel_id": 2, "message_id": 3})
@@ -1305,7 +1305,7 @@ class TestBodyKeyOrder:
         ]
 
     def test_sticker_ids_come_after_flags(self):
-        from server.token_sender import message_payload
+        from copycord.server.token_sender import message_payload
 
         p = message_payload("sticker", {"sticker_ids": ["819128604311027752"]})
         assert list(p) == [
@@ -1318,7 +1318,7 @@ class TestBodyKeyOrder:
         ]
 
     def test_attachments_come_after_flags(self):
-        from server.token_sender import message_payload
+        from copycord.server.token_sender import message_payload
 
         p = message_payload("lol", {"attachments": [{"id": "0"}]})
         assert list(p) == [

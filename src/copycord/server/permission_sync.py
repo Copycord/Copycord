@@ -1,0 +1,560 @@
+# =============================================================================
+#  Copycord
+#  Copyright (C) 2026 github.com/Copycord
+#
+#  This source code is released under the GNU Affero General Public License
+#  version 3.0. A copy of the license is available at:
+#  https://www.gnu.org/licenses/agpl-3.0.en.html
+# =============================================================================
+
+from __future__ import annotations
+import asyncio
+import inspect
+from fnmatch import fnmatch as _fnmatch
+from typing import Dict, List, Optional, Tuple, Any
+import discord
+from discord.channel import CategoryChannel, TextChannel
+from copycord.server import logctx
+
+
+def _channel_name_blacklisted(name: str, patterns: list[str]) -> bool:
+    if not patterns or not name:
+        return False
+    name_lower = name.lower()
+    for p in patterns:
+        if "*" in p or "?" in p:
+            if _fnmatch(name_lower, p):
+                return True
+        else:
+            if p in name_lower:
+                return True
+    return False
+
+
+class ChannelPermissionSync:
+    """
+    Permission applier for category & channel role overwrites using cloned roles.
+    """
+
+    def __init__(
+        self,
+        *,
+        config,
+        db,
+        bot: discord.Client | discord.AutoShardedClient,
+        clone_guild_id: int | None = None,
+        cat_map: Dict[int, dict] | None = None,
+        chan_map: Dict[int, dict] | None = None,
+        logger=None,
+        ratelimit=None,
+        rate_limiter_action=None,
+        emit_event_log=None,
+    ) -> None:
+        self.config = config
+        self.db = db
+        self.bot = bot
+
+        self.clone_guild_id = int(clone_guild_id or 0)
+
+        self.cat_map = cat_map or {}
+        self.chan_map = chan_map or {}
+
+        self.log = logger
+        self.ratelimit = ratelimit
+        self.rate_limiter_action = rate_limiter_action
+        self._emit_event_log = emit_event_log
+
+    def _log(self, level: str, msg: str, *args) -> None:
+        """
+        Permission-sync logger that prefixes with the current sync context.
+        """
+        prefix = logctx.format_prefix()
+        base = self.log
+        if base is None:
+            import logging
+
+            base = logging.getLogger("server.perm-sync")
+
+        line = prefix + msg
+        if level == "info":
+            base.info(line, *args)
+        elif level == "warning":
+            base.warning(line, *args)
+        elif level == "error":
+            base.error(line, *args)
+        elif level == "debug":
+            base.debug(line, *args)
+        else:
+            base.log(20, line, *args)
+
+    def schedule_after_role_sync(
+        self,
+        roles_manager,
+        roles_handle_or_none,
+        guild: discord.Guild,
+        sitemap: dict,
+        *,
+        task_name: str = "perm_sync_after_roles",
+        await_timeout: float = 120.0,
+    ) -> None:
+        if guild is None:
+            return
+
+        src_everyone_id: Optional[int] = None
+        try:
+            for r in sitemap.get("roles", []) or []:
+                if r.get("everyone"):
+                    src_everyone_id = int(r["id"])
+                    break
+        except Exception:
+            src_everyone_id = None
+
+        async def _runner():
+            try:
+                if self.bot.is_closed():
+                    return
+                await self._await_roles_done(
+                    roles_manager, roles_handle_or_none, await_timeout
+                )
+                if self.bot.is_closed():
+                    return
+                parts = await self._sync_permissions(guild, sitemap, src_everyone_id)
+                if parts:
+                    summary = "; ".join(parts)
+                    self._log(
+                        "info",
+                        "[🔐] Channel permission sync complete: %s",
+                        summary,
+                    )
+                    return f"Permissions: {summary}"
+                else:
+                    self._log(
+                        "info",
+                        "[🔐] Channel permission sync complete: no changes needed",
+                    )
+                    return ""
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                self._log(
+                    "warning",
+                    "[perm-sync] Background sync failed: %s",
+                    e,
+                )
+
+        return asyncio.create_task(_runner(), name=task_name)
+
+    async def _await_roles_done(self, roles_manager, handle, timeout: float) -> None:
+        try:
+            if inspect.isawaitable(handle):
+                await asyncio.wait_for(handle, timeout=timeout)
+                return
+        except Exception:
+            pass
+
+        wai = getattr(roles_manager, "wait_until_idle", None)
+        if callable(wai):
+            try:
+                await asyncio.wait_for(wai(), timeout=timeout)
+                return
+            except Exception:
+                pass
+
+        evt = getattr(roles_manager, "sync_done_event", None)
+        if isinstance(evt, asyncio.Event):
+            try:
+                await asyncio.wait_for(evt.wait(), timeout=timeout)
+                return
+            except Exception:
+                pass
+
+        await asyncio.sleep(2.0)
+
+    def _reload_maps_from_db_for_clone(
+        self, clone_gid: int
+    ) -> Tuple[Dict[int, dict], Dict[int, dict]]:
+        """
+        Build and return fresh (cat_map, chan_map) *for this clone guild only*.
+
+        We DO NOT mutate self.cat_map / self.chan_map anymore because multiple
+        guilds can sync at the same time.
+        """
+        try:
+            cat_map = {
+                int(rd["original_category_id"]): rd
+                for rd in (dict(r) for r in self.db.get_all_category_mappings())
+                if int(rd.get("cloned_guild_id") or 0) == int(clone_gid)
+            }
+            chan_map = {
+                int(rd["original_channel_id"]): rd
+                for rd in (dict(r) for r in self.db.get_all_channel_mappings())
+                if int(rd.get("cloned_guild_id") or 0) == int(clone_gid)
+            }
+            return cat_map, chan_map
+        except Exception as e:
+            self._log(
+                "warning",
+                "[perm-sync] failed to reload maps from DB: %s",
+                e,
+            )
+
+            return {}, {}
+
+    async def _sync_permissions(
+        self,
+        guild: discord.Guild,
+        sitemap: dict,
+        src_everyone_id: Optional[int],
+    ) -> List[str]:
+        cat_map, chan_map = self._reload_maps_from_db_for_clone(int(guild.id))
+
+        host_guild_id = int((sitemap.get("guild") or {}).get("id") or 0)
+        try:
+            _bl_patterns = self.db.get_channel_name_blacklist_for_mapping(
+                host_guild_id, int(guild.id)
+            )
+            _bl_patterns = [p.lower() for p in _bl_patterns if p]
+        except Exception:
+            _bl_patterns = []
+
+        changed_cat = 0
+        changed_ch = 0
+
+        for cat in sitemap.get("categories", []) or []:
+            row = cat_map.get(int(cat["id"]))
+            if not row:
+                self._log(
+                    "debug",
+                    "[perm-sync] skip category %s: no cat_map",
+                    cat.get("id"),
+                )
+                continue
+
+            cc = guild.get_channel(int(row.get("cloned_category_id") or 0))
+            if isinstance(cc, CategoryChannel):
+                if await self._apply_overwrites_to_channel(
+                    cc, cat.get("overwrites", []), src_everyone_id
+                ):
+                    changed_cat += 1
+
+            for ch in cat.get("channels", []) or []:
+                if _channel_name_blacklisted(ch.get("name", ""), _bl_patterns):
+                    continue
+                crow = chan_map.get(int(ch["id"]))
+                if not crow:
+                    self._log(
+                        "debug",
+                        "[perm-sync] skip channel %s: no chan_map (excluded or not cloned)",
+                        ch.get("id"),
+                    )
+                    continue
+
+                cch = guild.get_channel(int(crow.get("cloned_channel_id") or 0))
+                if isinstance(cch, TextChannel):
+                    if await self._apply_overwrites_to_channel(
+                        cch, ch.get("overwrites", []), src_everyone_id
+                    ):
+                        changed_ch += 1
+
+        for ch in sitemap.get("standalone_channels", []) or []:
+            if _channel_name_blacklisted(ch.get("name", ""), _bl_patterns):
+                continue
+            crow = chan_map.get(int(ch["id"]))
+            if not crow:
+                self._log(
+                    "debug",
+                    "[perm-sync] skip channel %s: no chan_map (standalone)",
+                    ch.get("id"),
+                )
+                continue
+
+            cch = guild.get_channel(int(crow.get("cloned_channel_id") or 0))
+            if isinstance(cch, TextChannel):
+                if await self._apply_overwrites_to_channel(
+                    cch, ch.get("overwrites", []), src_everyone_id
+                ):
+                    changed_ch += 1
+
+        for cat in sitemap.get("categories", []) or []:
+            for ch in cat.get("channels", []) or []:
+                ch_type = ch.get("type")
+
+                if ch_type not in (2, 13):
+                    continue
+
+                if _channel_name_blacklisted(ch.get("name", ""), _bl_patterns):
+                    continue
+                crow = chan_map.get(int(ch["id"]))
+                if not crow:
+                    self._log(
+                        "debug",
+                        "[perm-sync] skip voice/stage channel %s: no chan_map",
+                        ch.get("id"),
+                    )
+                    continue
+
+                cch = guild.get_channel(int(crow.get("cloned_channel_id") or 0))
+                if cch and isinstance(
+                    cch, (discord.VoiceChannel, discord.StageChannel)
+                ):
+                    if await self._apply_overwrites_to_channel(
+                        cch, ch.get("overwrites", []), src_everyone_id
+                    ):
+                        changed_ch += 1
+
+        for ch in sitemap.get("standalone_channels", []) or []:
+            ch_type = ch.get("type")
+            if ch_type not in (2, 13):
+                continue
+
+            crow = chan_map.get(int(ch["id"]))
+            if not crow:
+                self._log(
+                    "debug",
+                    "[perm-sync] skip voice/stage channel %s: no chan_map (standalone)",
+                    ch.get("id"),
+                )
+                continue
+
+            cch = guild.get_channel(int(crow.get("cloned_channel_id") or 0))
+            if cch and isinstance(cch, (discord.VoiceChannel, discord.StageChannel)):
+                if await self._apply_overwrites_to_channel(
+                    cch, ch.get("overwrites", []), src_everyone_id
+                ):
+                    changed_ch += 1
+
+        for fm in sitemap.get("forums", []) or []:
+            if _channel_name_blacklisted(fm.get("name", ""), _bl_patterns):
+                continue
+            fm_id = int(fm["id"])
+            crow = chan_map.get(fm_id)
+            if not crow:
+                self._log(
+                    "debug",
+                    "[perm-sync] skip forum %s: no chan_map",
+                    fm.get("id"),
+                )
+                continue
+
+            cch = guild.get_channel(int(crow.get("cloned_channel_id") or 0))
+            if cch is None:
+                self._log(
+                    "debug",
+                    "[perm-sync] skip forum %s: cloned channel not found",
+                    fm.get("id"),
+                )
+                continue
+
+            ch_type_name = getattr(getattr(cch, "type", None), "name", "")
+            if ch_type_name != "forum":
+                self._log(
+                    "debug",
+                    "[perm-sync] skip forum %s: cloned channel is not a forum (%r)",
+                    fm.get("id"),
+                    type(cch),
+                )
+                continue
+
+            if await self._apply_overwrites_to_channel(
+                cch, fm.get("overwrites", []), src_everyone_id
+            ):
+                changed_ch += 1
+
+        parts: List[str] = []
+        if changed_cat:
+            parts.append(f"{changed_cat} categories updated")
+        if changed_ch:
+            parts.append(f"{changed_ch} channels updated")
+
+        return parts
+
+    @staticmethod
+    def _extract_cloned_role_id(row: Any) -> Optional[int]:
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            for k in ("cloned_role_id", "clone_role_id", "target_role_id", "cloned_id"):
+                if k in row and row[k]:
+                    try:
+                        return int(row[k])
+                    except Exception:
+                        pass
+        for attr in ("cloned_role_id", "clone_role_id", "target_role_id", "cloned_id"):
+            if hasattr(row, attr):
+                try:
+                    val = getattr(row, attr)
+                    if val:
+                        return int(val)
+                except Exception:
+                    pass
+        try:
+            val = row["cloned_role_id"]
+            if val:
+                return int(val)
+        except Exception:
+            pass
+        return None
+
+    def _raw_role_bits_map_from_channel(
+        self, ch: discord.abc.GuildChannel
+    ) -> Dict[int, Tuple[int, int]]:
+        """
+        Exact ROLE-overwrite map using raw allow/deny ints when available.
+        Ignores member overwrites. Keys are role IDs (including @everyone).
+        """
+        out: Dict[int, Tuple[int, int]] = {}
+
+        raw = (
+            getattr(ch, "permission_overwrites", None)
+            or getattr(ch, "_permission_overwrites", None)
+            or getattr(ch, "_overwrites", None)
+        )
+        try:
+            for ow in raw or []:
+                t = getattr(ow, "type", None)
+                if t in (0, "role", "ROLE"):
+                    rid = int(getattr(ow, "id"))
+                    a = int(getattr(ow, "allow", 0))
+                    d = int(getattr(ow, "deny", 0))
+                    out[rid] = (a, d)
+        except Exception:
+            pass
+
+        return out
+
+    @staticmethod
+    def _normalize_role_map(
+        role_map: Dict[int, Tuple[int, int]],
+    ) -> Dict[int, Tuple[int, int]]:
+        """Drop fully-neutral (0/0) entries so '/' means 'no overwrite'."""
+        return {rid: (a, d) for rid, (a, d) in role_map.items() if (a | d) != 0}
+
+    async def _apply_overwrites_to_channel(
+        self,
+        ch: discord.abc.GuildChannel,
+        role_items: List[dict],
+        src_everyone_id: Optional[int],
+    ) -> bool:
+        if not role_items or self.bot.is_closed():
+            return False
+
+        guild = ch.guild
+
+        desired_role_map: Dict[int, Tuple[int, int]] = {}
+
+        for item in role_items:
+            if item.get("type") != "role":
+                continue
+            orig_role_id = int(item.get("id") or 0)
+            if not orig_role_id:
+                continue
+
+            if src_everyone_id is not None and orig_role_id == src_everyone_id:
+                clone_role_id = int(guild.default_role.id)
+            else:
+                row = self.db.get_role_mapping_for_clone(
+                    orig_role_id, cloned_guild_id=int(guild.id)
+                )
+                clone_role_id = self._extract_cloned_role_id(row) or 0
+                if not clone_role_id:
+                    self._log(
+                        "debug",
+                        "[perm-sync] #%s skip role %s: no cloned mapping",
+                        getattr(ch, "id", "?"),
+                        orig_role_id,
+                    )
+                    continue
+
+            allow_bits = int(item.get("allow_bits", 0))
+            deny_bits = int(item.get("deny_bits", 0))
+
+            if (allow_bits | deny_bits) == 0:
+                continue
+
+            desired_role_map[clone_role_id] = (allow_bits, deny_bits)
+
+        if not desired_role_map:
+
+            current = self._normalize_role_map(self._raw_role_bits_map_from_channel(ch))
+            if not current:
+                self._log(
+                    "debug",
+                    "[perm-sync] #%s equal: no role overwrites desired or present",
+                    getattr(ch, "id", "?"),
+                )
+
+                return False
+
+        else:
+
+            current = self._normalize_role_map(self._raw_role_bits_map_from_channel(ch))
+            if current == desired_role_map:
+                self._log(
+                    "debug",
+                    "[perm-sync] #%s equal: role overwrites already match",
+                    getattr(ch, "id", "?"),
+                )
+                return False
+
+        member_payload: List[dict] = []
+        try:
+            for tgt, ow in getattr(ch, "overwrites", {}).items():
+                if isinstance(tgt, discord.Member):
+                    a, d = ow.pair()
+                    member_payload.append(
+                        {
+                            "id": str(int(tgt.id)),
+                            "type": 1,
+                            "allow": str(int(getattr(a, "value", a))),
+                            "deny": str(int(getattr(d, "value", d))),
+                        }
+                    )
+        except Exception:
+            pass
+
+        payload_overwrites: List[dict] = list(member_payload)
+        for rid, (a_bits, d_bits) in desired_role_map.items():
+            payload_overwrites.append(
+                {
+                    "id": str(int(rid)),
+                    "type": 0,
+                    "allow": str(int(a_bits)),
+                    "deny": str(int(d_bits)),
+                }
+            )
+
+        try:
+            await ch._state.http.edit_channel(
+                ch.id,
+                permission_overwrites=payload_overwrites,
+                reason=f"Copycord perm sync (task {logctx.sync_display_id.get() or '?'})",
+            )
+            self._log(
+                "info",
+                "[🔐] Applied permissions on #%s (%s) (roles=%d)",
+                getattr(ch, "id", "?"),
+                getattr(ch, "name", "?"),
+                len(desired_role_map),
+            )
+            if self._emit_event_log:
+                try:
+                    await self._emit_event_log(
+                        "permissions_synced",
+                        f"Applied permissions on '#{getattr(ch, 'name', ch.id)}' ({len(desired_role_map)} roles)",
+                        guild_id=guild.id,
+                        guild_name=getattr(guild, "name", None),
+                        channel_id=ch.id,
+                        channel_name=getattr(ch, "name", None),
+                        extra={"clone_channel_id": int(ch.id)},
+                    )
+                except Exception:
+                    pass
+            return True
+        except Exception as e:
+            self._log(
+                "warning",
+                "[perm-sync] Failed to apply permissions on #%s: %s",
+                getattr(ch, "id", "?"),
+                e,
+            )
+            return False

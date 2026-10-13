@@ -1,5 +1,5 @@
 """
-Tests for the in-process transport (code/common/inprocess.py) behind
+Tests for the in-process transport (src/copycord/common/inprocess.py) behind
 WebsocketManager and AdminBus.
 
 Each role gets its own event loop on its own thread, as ThreadedRole runs
@@ -14,9 +14,9 @@ import time
 
 import pytest
 
-from common import inprocess
-from common import websockets as ws_mod
-from common.websockets import AdminBus, WebsocketManager
+from copycord.common import inprocess
+from copycord.common import websockets as ws_mod
+from copycord.common.websockets import AdminBus, WebsocketManager
 from copycord.supervisor import build_supervisor
 
 

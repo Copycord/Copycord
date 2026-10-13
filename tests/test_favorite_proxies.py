@@ -13,7 +13,7 @@ import types
 
 import pytest
 
-from client.proxy_rotator import ProxyRotator
+from copycord.client.proxy_rotator import ProxyRotator
 
 A = "http://a.example:8080"
 B = "http://b.example:8080"
@@ -122,8 +122,8 @@ class TestFallbackDetection:
         assert r.healthy_favorites() == [C]
 
 
-import client.client as cc  # noqa: E402
-from selfclient import Client  # noqa: E402
+import copycord.client.client as cc  # noqa: E402
+from copycord.selfclient import Client  # noqa: E402
 
 
 class _FakeWS:

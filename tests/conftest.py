@@ -2,14 +2,8 @@
 Shared fixtures for Copycord tests.
 """
 import os
-import sys
 import tempfile
 import pytest
-
-# Add the code/ directory to sys.path so `from common.db import DBManager` works
-CODE_DIR = os.path.join(os.path.dirname(__file__), "..", "code")
-if CODE_DIR not in sys.path:
-    sys.path.insert(0, os.path.abspath(CODE_DIR))
 
 # Modules such as admin.app create the data dir at import time; point it at a
 # session temp dir before any test imports them (never /data or C:\data).
@@ -26,7 +20,7 @@ def tmp_db_path(tmp_path):
 @pytest.fixture()
 def db(tmp_db_path):
     """Create a fresh DBManager with schema initialized."""
-    from common.db import DBManager
+    from copycord.common.db import DBManager
     return DBManager(tmp_db_path, init_schema=True)
 
 
@@ -54,7 +48,7 @@ def pytest_sessionfinish(session, exitstatus):
 def _no_exit_ip_lookup(request, monkeypatch):
     """The exit-IP timezone lookup never reaches ipinfo.io from a test; it
     fails (so the fallback zone applies) unless a test fakes _fetch_json."""
-    from common import exit_timezone
+    from copycord.common import exit_timezone
 
     async def _offline(proxy, timeout):
         raise OSError("network disabled in tests")

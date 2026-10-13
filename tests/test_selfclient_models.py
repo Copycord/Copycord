@@ -5,12 +5,12 @@ permissions_for follows discord.py's algorithm: owner and administrator get
 everything, @everyone's permissions OR the member's roles, then channel
 overwrites in the order @everyone, roles (denies then allows, combined), member.
 The wrapper tests check that a raw gateway payload reads back through the same
-attribute names code/client uses on discord.py-self objects.
+attribute names src/copycord/client uses on discord.py-self objects.
 """
 import pytest
 
-from selfclient.enums import ChannelType, MessageType, StickerFormatType, VideoQualityMode
-from selfclient.models import (
+from copycord.selfclient.enums import ChannelType, MessageType, StickerFormatType, VideoQualityMode
+from copycord.selfclient.models import (
     CategoryChannel,
     ForumChannel,
     Guild,
@@ -461,6 +461,6 @@ class TestSmallWrappers:
      (15, ForumChannel), (11, Thread), (12, Thread)],
 )
 def test_channel_factory_picks_class_by_type(ctype, cls):
-    from selfclient.models import channel_from_dict
+    from copycord.selfclient.models import channel_from_dict
 
     assert type(channel_from_dict({"id": "1", "type": ctype}, None)) is cls

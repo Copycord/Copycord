@@ -10,7 +10,7 @@ told that this was one.
 """
 import pytest
 
-import client.client as cc  # noqa: E402
+import copycord.client.client as cc  # noqa: E402
 
 _is_proxy_error = cc.ClientListener._is_proxy_error
 
@@ -136,18 +136,18 @@ class TestMaskedProxiesAreDistinguishable:
     )
 
     def test_two_sessions_on_one_host_look_different(self):
-        from client.proxy_rotator import _mask_proxy_url
+        from copycord.client.proxy_rotator import _mask_proxy_url
 
         assert _mask_proxy_url(self.A) != _mask_proxy_url(self.B)
 
     def test_the_same_proxy_always_looks_the_same(self):
         # Otherwise a log cannot be read as "back on the one from earlier".
-        from client.proxy_rotator import _mask_proxy_url
+        from copycord.client.proxy_rotator import _mask_proxy_url
 
         assert _mask_proxy_url(self.A) == _mask_proxy_url(self.A)
 
     def test_no_credentials_reach_the_log(self):
-        from client.proxy_rotator import _mask_proxy_url
+        from copycord.client.proxy_rotator import _mask_proxy_url
 
         out = _mask_proxy_url(self.A)
         assert "pH4sVLL1oZpRHPGQ" not in out
@@ -155,7 +155,7 @@ class TestMaskedProxiesAreDistinguishable:
         assert "eu-1.nodeproxies.xyz:8080" in out
 
     def test_a_proxy_without_credentials_still_gets_a_marker(self):
-        from client.proxy_rotator import _mask_proxy_url
+        from copycord.client.proxy_rotator import _mask_proxy_url
 
         out = _mask_proxy_url("http://1.2.3.4:8080")
         assert "1.2.3.4:8080" in out

@@ -9,7 +9,7 @@ import logging
 
 import pytest
 
-from server.token_sender import SEND_OK, SEND_UNDELIVERABLE, UserTokenSender
+from copycord.server.token_sender import SEND_OK, SEND_UNDELIVERABLE, UserTokenSender
 
 FILES = [("image.png", b"x" * 7671, "image/png")]
 
