@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router";
 import { App } from "./App";
 import { ToastProvider } from "./components/Toast";
+import { ConfirmProvider } from "./components/ui/ConfirmDialog";
 import "./styles/tokens.css";
 
 const root = document.getElementById("root");
@@ -12,7 +13,9 @@ createRoot(root).render(
   <StrictMode>
     <BrowserRouter basename="/app">
       <ToastProvider>
-        <App />
+        <ConfirmProvider>
+          <App />
+        </ConfirmProvider>
       </ToastProvider>
     </BrowserRouter>
   </StrictMode>,
