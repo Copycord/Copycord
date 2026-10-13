@@ -167,7 +167,7 @@ Checks that this machine can run Copycord and that it is set up, in five groups.
 ```bash
 copycord doctor
 copycord doctor --verbose
-copycord doctor --fix          # fix what it can, then check again
+copycord doctor --fix          # fix what it can, then show the report
 copycord doctor --fix --brief  # the same, printing only the result
 copycord doctor --data-dir ~/copycord/data
 ```
@@ -175,7 +175,7 @@ copycord doctor --data-dir ~/copycord/data
 | Group | Checks |
 |-------|--------|
 | Install | The version, commit and update channel; Python is 3.12 to 3.14; the web UI files are installed; the required packages (`curl_cffi`, `py-cord`, `fastapi`, `uvicorn`) import, as one `dependencies OK` line that names only the missing ones |
-| Settings | `<home>/.env` exists; `PASSWORD` is not still the default `copycord`; `SERVER_TOKEN` and `CLIENT_TOKEN` are set (token values are never printed); a `FAIL` when the removed `ROLE` variable is still set |
+| Settings | `<home>/.env` exists; `PASSWORD` is not still the default `copycord`; a `FAIL` when the removed `ROLE` variable is still set |
 | Data | The Copycord home exists and is writable; `data.db` opens and its schema is one this Copycord supports (a fresh install says it is created on first run); the last backup in the backups folder is under 2 days old |
 | Running | `ADMIN_PORT` (default 8080) is free, or in use by Copycord itself; whether the OS service is installed and running |
 | Updates | The update check, cached for 24 hours. A network error is only reported, never a failure |
@@ -192,7 +192,6 @@ PASS  dependencies OK
 Settings
 PASS  .env found
 WARN  the default password is still set: change PASSWORD in /home/you/.copycord/.env, then run `copycord restart`
-WARN  SERVER_TOKEN and CLIENT_TOKEN not set yet: finish setup at http://localhost:8080
 
 Data
 PASS  home writable
@@ -208,12 +207,11 @@ PASS  up to date
 
 Needs your attention
 WARN  the default password is still set: change PASSWORD in /home/you/.copycord/.env, then run `copycord restart`
-WARN  SERVER_TOKEN and CLIENT_TOKEN not set yet: finish setup at http://localhost:8080
 
-2 warnings, 0 problems
+1 warning, 0 problems
 ```
 
-In a terminal each line shows a green check, a yellow `!`, a red cross or a blue dot; piped, each line starts with `PASS`, `WARN`, `FAIL` or `INFO`. The report ends with a **Needs your attention** section that lists each warning and problem once with what to do (a yellow `!` for a warning, a red one for a problem in a terminal), then a last line: `All good`, or the number of warnings and problems. The command exits with status 1 when any check fails and 0 otherwise (warnings included), so it can be used in scripts. When `copycord doctor --fix` can repair some of the warnings and problems, a last line says how many.
+In a terminal each line shows a green check, a yellow `!`, a red cross or a blue dot; piped, each line starts with `PASS`, `WARN`, `FAIL` or `INFO`. The report ends with a **Needs your attention** section that lists each warning and problem once with what to do (a yellow `!` for a warning, a red one for a problem in a terminal), then a last line: `All good`, or the number of warnings and problems. A warning that `--fix` can repair says so there, for example `` WARN  .env not found: run `copycord doctor --fix` to create it with the default settings ``, while its line in the group shows the path. The command exits with status 1 when any check fails and 0 otherwise (warnings included), so it can be used in scripts. When `copycord doctor --fix` can repair some of the warnings and problems, a last line says how many.
 
 :::tip Port in use
 `WARN  port 8080 in use` means another program has the port: set `ADMIN_PORT` to a free one, or let `copycord doctor --fix` pick the next free port. When Copycord itself is listening (as a service, or `copycord run` in another terminal) the line says `port 8080 in use by Copycord` instead.
@@ -221,7 +219,9 @@ In a terminal each line shows a green check, a yellow `!`, a red cross or a blue
 
 ### Fixing problems {#doctor-fix}
 
-`copycord doctor --fix` prints the report once, then applies every automatic fix directly, without asking, and lists each one it applied under **Fixed** (there is no Fixed section when nothing was fixed). The guided fix needs your input, so it asks only when there is a terminal; without one (in a script or a pipe) it is skipped, and its entry in Needs your attention says to run `copycord doctor --fix` in a terminal. When something was fixed it checks again quietly, so **Needs your attention** and the last line show what is still wrong after the fixes.
+`copycord doctor --fix` applies the fixes first, then prints the report once, as things are after the fixes. Every automatic fix runs directly, without asking. The guided fix needs your input, so it asks before the report, and only when there is a terminal; without one (in a script or a pipe) it is skipped, and its entry in Needs your attention says to run `copycord doctor --fix` in a terminal.
+
+A check that was fixed shows on its own line as fixed, for example `PASS  .env created with the default settings: /home/you/.copycord/.env (fixed)`. A fix that did not work shows on the check's line as a failure with the reason. **Needs your attention** lists what is left, and the report ends with `Fixed 1 issue` (when something was fixed), then `1 thing needs your attention` or `Everything looks good`.
 
 `--brief` prints only the result: a line for each fix applied, a line for each failed check, and `All checks passed` or the number of warnings and problems. The installers use it.
 
@@ -237,7 +237,6 @@ In a terminal each line shows a green check, a yellow `!`, a red cross or a blue
 Some things are never changed for you; they stay in Needs your attention with what to do:
 
 - **The dashboard password:** `--fix` never changes it or asks for one. While it is still the default `copycord`, change `PASSWORD` in `<home>/.env`, then run `copycord restart`.
-- **Discord tokens:** enter them in the dashboard at `http://localhost:8080`.
 - **A database from a newer Copycord:** run `copycord update` to go back to a newer version, or restore a backup.
 - **`ROLE` is set:** remove it from your compose file.
 
@@ -253,9 +252,8 @@ PASS  web UI included
 PASS  dependencies OK
 
 Settings
-WARN  .env not found: /home/you/.copycord/.env is missing, so every setting is at its default; `copycord doctor --fix` writes it with the defaults; /home/you/.copycord/.env
-INFO  no dashboard password: the dashboard has no login page
-WARN  SERVER_TOKEN and CLIENT_TOKEN not set yet: finish setup at http://localhost:8080
+PASS  .env created with the default settings: /home/you/.copycord/.env (fixed)
+WARN  the default password is still set: change PASSWORD in /home/you/.copycord/.env, then run `copycord restart`
 
 Data
 PASS  home writable
@@ -269,14 +267,11 @@ INFO  service not installed: `copycord service install` runs Copycord in the bac
 Updates
 PASS  up to date
 
-Fixed
-PASS  recreated .env with the default settings: /home/you/.copycord/.env
-
 Needs your attention
 WARN  the default password is still set: change PASSWORD in /home/you/.copycord/.env, then run `copycord restart`
-WARN  SERVER_TOKEN and CLIENT_TOKEN not set yet: finish setup at http://localhost:8080
 
-2 warnings, 0 problems
+PASS  Fixed 1 issue
+WARN  1 thing needs your attention
 ```
 
 The recreated `.env` sets the default password `copycord`, so it is listed after the fix. Change `PASSWORD` in `<home>/.env`, then run `copycord restart`.
