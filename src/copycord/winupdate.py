@@ -79,9 +79,21 @@ def scan(rows: list, me: int, prefix: str):
         mine.append(pid)
         pid = r.get("ParentProcessId")
 
+    # A launcher of another install (another folder) does not lock these files.
+    dirs = {ntpath.normcase(ntpath.dirname(p)) for p in
+            (by_pid[i].get("ExecutablePath") for i in mine if i != me)
+            if p and not _under(p, prefix)}
+
+    def blocks(r) -> bool:
+        path = r.get("ExecutablePath")
+        if _under(path, prefix):
+            return True
+        return is_copycord(r) and (not dirs or not path
+                                   or ntpath.normcase(ntpath.dirname(path)) in dirs)
+
     for r in rows:
         pid = r.get("ProcessId")
-        if pid in seen or not is_copycord(r):
+        if pid in seen or not blocks(r):
             continue
         top, hops = r, 0
         while hops < 50:
