@@ -1,6 +1,7 @@
 import { Route, Routes } from "react-router";
 import { Layout } from "./components/Layout";
 import { Kit } from "./pages/Kit";
+import { Logs } from "./pages/Logs";
 import { Placeholder } from "./pages/Placeholder";
 
 // Paths are relative to the router basename /app.
@@ -22,7 +23,11 @@ export function App() {
           p.path === "/" ? (
             <Route key={p.path} index element={<Placeholder title={p.title} legacyHref={p.legacy} />} />
           ) : (
-            <Route key={p.path} path={p.path} element={<Placeholder title={p.title} legacyHref={p.legacy} />} />
+            <Route
+              key={p.path}
+              path={p.path}
+              element={p.path === "/logs" ? <Logs /> : <Placeholder title={p.title} legacyHref={p.legacy} />}
+            />
           ),
         )}
         <Route path="/_kit" element={<Kit />} />
