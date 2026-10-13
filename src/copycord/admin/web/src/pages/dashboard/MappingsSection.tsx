@@ -17,6 +17,7 @@ import {
   statusToast,
   toggleMappingStatus,
 } from "./mappings/model";
+import { MappingModalHost } from "./mappings/modal/MappingModalHost";
 import { openFilters, openMappingModal } from "./mappings/openers";
 
 export interface MappingsSectionProps {
@@ -145,6 +146,7 @@ export function MappingsSection({ locked = false }: MappingsSectionProps = {}) {
           />
         ))}
       </div>
+      <MappingModalHost onSaved={refresh} />
     </details>
   );
 }
