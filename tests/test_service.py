@@ -64,6 +64,29 @@ def test_systemd_system_unit_targets_multi_user_and_runs_as_sudo_user():
     assert "User=mac" in unit
 
 
+HARDENING = ("NoNewPrivileges=yes", "RestrictSUIDSGID=yes", "LockPersonality=yes")
+SYSTEM_ONLY = ("PrivateTmp=yes", "ProtectSystem=strict", "ReadWritePaths=")
+
+
+def test_systemd_system_unit_is_sandboxed(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "home" / "data"))
+    unit = service.systemd_unit(EXE, tmp_path / "home" / "data", user=False, run_as="mac")
+    lines = unit.splitlines()
+    for line in HARDENING + SYSTEM_ONLY[:2]:
+        assert line in lines
+    rw = next(x for x in lines if x.startswith("ReadWritePaths="))
+    assert str(tmp_path / "home" / "data") in rw
+    assert "/.local" in rw and "/.cache" in rw
+
+
+def test_systemd_user_unit_skips_options_that_need_root():
+    unit = service.systemd_unit(EXE, PurePosixPath("/d"), user=True)
+    for line in HARDENING:
+        assert line in unit.splitlines()
+    for option in SYSTEM_ONLY:
+        assert option not in unit
+
+
 def test_systemd_quote_escapes_specifiers():
     assert service._systemd_quote("/a/100%") == '"/a/100%%"'
     assert service._systemd_quote("/plain") == "/plain"
@@ -268,8 +291,9 @@ def test_launchd_plist_contents(tmp_path):
     assert plist["ProgramArguments"] == [*EXE, "run", "--data-dir", str(data)]
     assert plist["RunAtLoad"] is True
     assert plist["KeepAlive"] == {"SuccessfulExit": False}
-    assert plist["StandardOutPath"] == str(data / "copycord.out.log")
-    assert plist["StandardErrorPath"] == str(data / "copycord.err.log")
+    # The rotating files in <home>/logs keep the log; launchd's own files never rotate.
+    assert plist["StandardOutPath"] == "/dev/null"
+    assert plist["StandardErrorPath"] == "/dev/null"
 
 
 def test_launchd_install_and_lifecycle(tmp_path, monkeypatch):
@@ -649,7 +673,21 @@ def test_busy_ports_reads_the_configured_ports(monkeypatch):
     monkeypatch.setattr(service, "port_free", lambda host, port: seen.append((host, port)) or port != 9200)
     env = {"CONTROL_PORT_SERVER": "9200", "ADMIN_PORT": "8181"}
     assert service.busy_ports(env) == [9200]
-    assert seen == [("127.0.0.1", 9200), ("127.0.0.1", 9102), ("0.0.0.0", 8181)]
+    assert seen == [("127.0.0.1", 9200), ("127.0.0.1", 9102), ("127.0.0.1", 8181)]
+    seen.clear()
+    service.busy_ports({**env, "DASHBOARD_HOST": "0.0.0.0"})
+    assert seen[-1] == ("0.0.0.0", 8181)
+
+
+def test_dashboard_url_shows_localhost_unless_one_address_is_set(monkeypatch):
+    monkeypatch.delenv("ADMIN_PORT", raising=False)
+    for listen, url in ((None, "http://localhost:8080"), ("0.0.0.0", "http://localhost:8080"),
+                        ("192.168.1.20", "http://192.168.1.20:8080")):
+        if listen is None:
+            monkeypatch.delenv("DASHBOARD_HOST", raising=False)
+        else:
+            monkeypatch.setenv("DASHBOARD_HOST", listen)
+        assert service.dashboard_url() == url
 
 
 def test_port_free_sees_a_listening_socket():

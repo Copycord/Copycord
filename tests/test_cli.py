@@ -27,7 +27,8 @@ def data_dir(tmp_path, monkeypatch):
     """A temp data dir; --data-dir writes os.environ, so DATA_DIR is restored."""
     d = tmp_path / "data"
     monkeypatch.setenv("DATA_DIR", str(d))
-    _unset(monkeypatch, "DB_PATH", "ROLE", "BACKUP_DIR", "PASSWORD", "SERVER_TOKEN", "CLIENT_TOKEN")
+    _unset(monkeypatch, "DB_PATH", "ROLE", "BACKUP_DIR", "PASSWORD", "SERVER_TOKEN", "CLIENT_TOKEN",
+           "DASHBOARD_HOST", "COPYCORD_ALLOW_INSECURE_DASHBOARD")
     # No network and no real OS service in the doctor tests.
     monkeypatch.setenv("COPYCORD_NO_UPDATE_CHECK", "1")
     monkeypatch.setattr(cli, "service_state", lambda: None)
@@ -1242,6 +1243,54 @@ def test_doctor_flags_a_service_in_a_console_window(doctor_env, monkeypatch, cap
     assert "run it without a window" in out
 
 
+@pytest.mark.parametrize("password", [None, "copycord"])
+def test_run_refuses_a_network_dashboard_with_a_weak_password(data_dir, monkeypatch, capsys, password):
+    from copycord import supervisor
+
+    started = []
+
+    async def fake_run():
+        started.append(True)
+
+    monkeypatch.setattr(supervisor, "run", fake_run)
+    monkeypatch.setenv("DASHBOARD_HOST", "0.0.0.0")
+    if password:
+        monkeypatch.setenv("PASSWORD", password)
+    assert cli.main(["run"]) == 1
+    assert started == []
+    out = capsys.readouterr()
+    text = out.out + out.err
+    assert "DASHBOARD_HOST=0.0.0.0" in text
+    assert "PASSWORD" in text and "this computer only" in text
+
+    monkeypatch.setenv("COPYCORD_ALLOW_INSECURE_DASHBOARD", "1")
+    assert cli.main(["run"]) == 0
+    assert started == [True]
+
+
+def test_run_allows_a_network_dashboard_with_a_real_password(data_dir, monkeypatch):
+    from copycord import supervisor
+
+    async def fake_run():
+        return None
+
+    monkeypatch.setattr(supervisor, "run", fake_run)
+    monkeypatch.setenv("DASHBOARD_HOST", "0.0.0.0")
+    monkeypatch.setenv("PASSWORD", "a-real-one")
+    assert cli.main(["run"]) == 0
+    # The default address is local, so even no password starts.
+    monkeypatch.delenv("DASHBOARD_HOST")
+    monkeypatch.delenv("PASSWORD")
+    assert cli.main(["run"]) == 0
+
+
+def test_doctor_fails_a_network_dashboard_with_the_default_password():
+    env = {"DASHBOARD_HOST": "0.0.0.0", "PASSWORD": "copycord"}
+    assert cli.check_password(env).status == cli.FAIL
+    assert cli.check_password({**env, "COPYCORD_ALLOW_INSECURE_DASHBOARD": "1"}).status == cli.WARN
+    assert cli.check_password({"PASSWORD": "copycord"}).status == cli.WARN
+
+
 def test_run_with_a_busy_port_prints_one_line(data_dir, monkeypatch, capsys):
     from copycord import supervisor
 
@@ -1660,7 +1709,11 @@ def test_env_template_sets_every_default(tmp_path):
     # BACKUP_DIR is left to the code default, <home>/data/backups, shown commented out.
     assert f"#BACKUP_DIR={home.resolve() / 'data' / 'backups'}" in lines
     assert "copycord restart" in text
-    assert set(envfile.ENV_KEYS) - {"SECRET_KEY", "BACKUP_DIR"} <= set(expected)
+    # The dashboard stays on this computer unless DASHBOARD_HOST is uncommented.
+    assert "#DASHBOARD_HOST=127.0.0.1" in lines
+    at = lines.index("#DASHBOARD_HOST=127.0.0.1")
+    assert "0.0.0.0" in "\n".join(lines[at - 2:at])
+    assert set(envfile.ENV_KEYS) - {"SECRET_KEY", "BACKUP_DIR", "DASHBOARD_HOST"} <= set(expected)
 
     env = tmp_path / ".env"
     env.write_text(text, encoding="utf-8")

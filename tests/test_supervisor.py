@@ -537,6 +537,30 @@ def test_real_supervisor_waits_for_the_admin_port(monkeypatch):
     monkeypatch.setattr(sup_mod, "admin_factory", lambda **k: FakeRole("admin"))
     monkeypatch.setattr(sup_mod, "server_factory", lambda: FakeRole("server"))
     monkeypatch.setattr(sup_mod, "client_factory", lambda: FakeRole("client"))
+    monkeypatch.delenv("DASHBOARD_HOST", raising=False)
     sup = build_supervisor(inprocess_transport=False)
-    assert sup.ports == [("0.0.0.0", 8181)]
+    assert sup.ports == [("127.0.0.1", 8181)]
     assert build_supervisor(_fakes()).ports == []
+    monkeypatch.setenv("DASHBOARD_HOST", "0.0.0.0")
+    assert build_supervisor(inprocess_transport=False).ports == [("0.0.0.0", 8181)]
+
+
+@pytest.mark.parametrize("listen, agents", [
+    (None, "127.0.0.1"),
+    ("0.0.0.0", "127.0.0.1"),
+    ("::", "127.0.0.1"),
+    ("192.168.1.20", "192.168.1.20"),
+])
+def test_roles_reach_the_dashboard_over_loopback_unless_it_listens_on_one_address(
+    monkeypatch, tmp_path, listen, agents
+):
+    # _set_runtime_env fills in many keys; keep them out of the other tests.
+    monkeypatch.setattr(os, "environ", dict(os.environ))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.delenv("ADMIN_HOST", raising=False)
+    if listen is None:
+        monkeypatch.delenv("DASHBOARD_HOST", raising=False)
+    else:
+        monkeypatch.setenv("DASHBOARD_HOST", listen)
+    sup_mod._set_runtime_env()
+    assert os.environ["ADMIN_HOST"] == agents
