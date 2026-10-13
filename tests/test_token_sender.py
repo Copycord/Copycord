@@ -249,7 +249,7 @@ async def test_links_only_skips_upload(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_forced_token_id_is_tried_first(monkeypatch):
-    """When the identity manager pre-selects a token, that account posts —
+    """When the identity manager pre-selects a token, that account posts , 
     regardless of the strategy ordering."""
 
     class _DB:
@@ -544,7 +544,7 @@ async def test_pace_shows_typing_for_the_delay():
 @pytest.mark.asyncio
 async def test_send_serializes_typing_then_send_per_channel():
     """Regression: with typing + delay, queued messages to one channel take
-    strict turns — typing → send → typing → send. A message's typing must never
+    strict turns, typing → send → typing → send. A message's typing must never
     fire before the previous message is sent (which would clear the indicator)."""
     import asyncio as _a
 

@@ -1,10 +1,6 @@
 """
 Filtering an individual thread or forum post.
 
-The sitemap already honoured a thread's own id, but the message path judged a
-thread purely by its parent channel, so adding a thread id to the block list
-trimmed it from the sitemap and then forwarded its messages anyway.
-
 These call the real rule rather than a copy of it.
 """
 import pytest
@@ -115,7 +111,7 @@ class _Parent:
 
 
 class _Thread:
-    """Enough of discord.Thread for the scope checks."""
+    """Enough of a Thread for the scope checks."""
 
     def __init__(self, tid, parent):
         self.id = tid
@@ -127,7 +123,7 @@ class TestInScopeThread:
 
     A forum post filtered out of the sitemap is simply never created, so it
     looked like thread filtering worked. A text-channel thread is created on
-    demand from the message, so it needs this check to be thread-aware — it
+    demand from the message, so it needs this check to be thread-aware, it
     was not, and those messages were forwarded regardless.
     """
 
@@ -138,7 +134,7 @@ class TestInScopeThread:
         svc.logger = logging.getLogger("test")
         # A guild with no mappings, so the guild-level view below is what gets
         # consulted. Without a real db here the new per-mapping lookup raises
-        # into in_scope_thread's catch-all, which returns True -- so every
+        # into in_scope_thread's catch-all, which returns True, so every
         # "stays in scope" case would pass without testing anything.
         svc.db = _FakeDB([], {})
         svc._build_filter_view_for_guild = lambda gid: view
@@ -201,7 +197,7 @@ class TestFiltersAreEvaluatedPerMapping:
     """The root cause behind thread filters appearing to do nothing.
 
     should_ignore() has no clone context, so scope was resolved at guild
-    scope — a lookup that structurally cannot see mapping-scoped filter rows
+    scope, a lookup that structurally cannot see mapping-scoped filter rows
     and therefore always answered "keep everything". Channel filters only
     looked like they worked because a filtered channel is never cloned, so its
     messages had nowhere to land. A text-channel thread is created on demand

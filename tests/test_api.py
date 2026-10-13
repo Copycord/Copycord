@@ -10,13 +10,13 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-# Set environment before any app imports
+# Environment must be set before the app is imported.
 _tmpdir = tempfile.mkdtemp()
 os.environ["DATA_DIR"] = _tmpdir
 os.environ["DB_PATH"] = os.path.join(_tmpdir, "test.db")
 os.environ["LOG_LEVEL"] = "WARNING"
 
-# Import the app — this triggers module-level init (DB, schema, etc.)
+# Importing the app runs its module-level init (DB, schema).
 from copycord.admin.app import app, db  # noqa: E402
 
 from httpx import AsyncClient, ASGITransport
