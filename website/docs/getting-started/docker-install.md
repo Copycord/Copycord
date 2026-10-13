@@ -69,7 +69,7 @@ services:
 ```
 
 :::tip Customizing the password
-Put your own password after `PASSWORD=`. The container listens on every network (`DASHBOARD_HOST=0.0.0.0`), so Copycord will not start while the password is empty or `copycord`. If another layer already protects the dashboard, `COPYCORD_ALLOW_INSECURE_DASHBOARD=1` skips this check.
+Put your own password after `PASSWORD=`. The container listens on every network (`DASHBOARD_HOST=0.0.0.0`), so Copycord will not start while the password is empty or still `copycord`. If another layer already protects the dashboard, `COPYCORD_ALLOW_INSECURE_DASHBOARD=1` skips this check.
 :::
 
 :::note Upgrading from v3

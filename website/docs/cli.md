@@ -209,7 +209,7 @@ Useful environment variables (on a native install, set them in [`<home>/.env`](#
 
 | Variable | Default | What it does |
 |----------|---------|--------------|
-| `PASSWORD` | a random password (set by the installer) | Dashboard login password; no login page when unset |
+| `PASSWORD` | a random password (set by the installer) | Dashboard password; always required |
 | `ADMIN_PORT` | `8080` | Dashboard port |
 | `DASHBOARD_HOST` | `127.0.0.1` | Where the dashboard listens. The default is this computer only; `0.0.0.0` opens it to your network (see [Dashboard address](#dashboard-address)) |
 | `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG`; also an app config key, which wins once it is saved |
@@ -225,7 +225,7 @@ When the dashboard port or one of the internal ports (`9101` and `9102`) is in u
 
 The dashboard listens on `127.0.0.1`, so only this computer can open it, at `http://localhost:8080`. To open it from other devices, set `DASHBOARD_HOST=0.0.0.0` (every network) or one IP address of this computer in [`<home>/.env`](#env-file), then run `copycord restart`. The Docker image sets `0.0.0.0` already.
 
-With any address other than `127.0.0.1`, `copycord run` refuses to start while `PASSWORD` is empty or still `copycord`, and `copycord doctor` shows it as a failure. Fix it by setting your own `PASSWORD`, or by removing `DASHBOARD_HOST` so the dashboard stays on this computer. If something else already protects the dashboard (a reverse proxy with its own login, for example), `COPYCORD_ALLOW_INSECURE_DASHBOARD=1` skips the check.
+With any address other than `127.0.0.1`, `copycord run` refuses to start while `PASSWORD` is still `copycord`, and `copycord doctor` shows it as a failure. Fix it by setting your own `PASSWORD`, or by setting `DASHBOARD_HOST=127.0.0.1` so the dashboard stays on this computer. If something else already protects the dashboard (a reverse proxy with its own login, for example), `COPYCORD_ALLOW_INSECURE_DASHBOARD=1` skips the check.
 
 ## copycord --version {#copycord-version}
 
@@ -431,49 +431,44 @@ Some settings are read from the environment only, before the database is open. I
 
 With `COPYCORD_HOME` or `--data-dir` it is `.env` in that folder. `copycord` reads the file on every start, for `copycord run` and the service alike, so a restart applies your changes. Variables already set in the real environment win over the file.
 
-The installer makes sure the file exists: on first install it runs `copycord config init`, which writes the file with every key set to its default and a one-line description above it, and prints its path. It never overwrites an existing file, and on Linux and macOS only your user can read it. `BACKUP_DIR` is shown commented out, so the backups go to the default folder, `backups` in the [data directory](#data-dir). On Linux, for a user named `alice`:
+The installer makes sure the file exists: on first install it runs `copycord config init`, which writes the file with every key set to its default, a random password and a one-line description above each key, and prints its path. It never overwrites an existing file, and on Linux and macOS only your user can read it. `BACKUP_DIR` is the default folder, `backups` in the [data directory](#data-dir). On Linux, for a user named `alice`:
 
 ```ini
-# Copycord settings that are read from the environment only.
-# Everything else is set in the dashboard. Each value below is the default.
-# Edit one here or run `copycord config set KEY VALUE`, then run
-# `copycord restart` to apply it.
+# Copycord settings. Everything else is in the dashboard.
+# After a change, run: copycord restart
 
-# dashboard login password; change it from the default (empty: no login page)
-PASSWORD=copycord
+# Dashboard password
+PASSWORD=k7Qe2Vd9sLmP0aZr4TwXbg
 
-# SECRET_KEY is left out: Copycord keeps its own key in <home>/data/secret.key
-
-# dashboard port
+# Dashboard port
 ADMIN_PORT=8080
 
-# the dashboard is on this computer only (127.0.0.1); remove the # and use 0.0.0.0
-# to open it to your network, after setting your own PASSWORD
-#DASHBOARD_HOST=127.0.0.1
+# Who can open the dashboard: 127.0.0.1 = this computer, 0.0.0.0 = your network
+DASHBOARD_HOST=127.0.0.1
 
-# time zone for scheduled backups and export timestamps, e.g. America/New_York
+# Time zone for backups and exports
 TZ=UTC
 
-# DEBUG or INFO; the dashboard's log level wins once it is saved
+# Log detail: INFO or DEBUG
 LOG_LEVEL=INFO
 
-# HUMAN or JSON log lines
+# Log style: HUMAN or JSON
 LOG_FORMAT=HUMAN
 
-# where the daily database backups go; remove the # to use another folder
-#BACKUP_DIR=/home/alice/.copycord/data/backups
+# Backup folder
+BACKUP_DIR=/home/alice/.copycord/data/backups
 
-# time of the daily backup, HH:MM
+# Daily backup time (HH:MM)
 BACKUP_AT=03:17
 
-# how many daily backups to keep
+# Backups to keep
 BACKUP_RETAIN=14
 
-# 1 turns off the update check on start; 0 keeps it on
+# Skip the update check: 1 = yes, 0 = no
 COPYCORD_NO_UPDATE_CHECK=0
 ```
 
-An empty value, such as `TZ=`, means the default, except for `PASSWORD`: an empty password turns the login page off.
+An empty value, such as `TZ=`, means the default. The dashboard always asks for the password. If `PASSWORD` is empty or missing, `copycord run` makes a random one, saves it in this file and shows it once. In Docker, Copycord does not start until you set `PASSWORD`.
 
 :::note The dashboard password
 `copycord config init`, which the installers run, writes a random `PASSWORD` into a new file, and the installer shows it once. `copycord config get PASSWORD --show-secrets` prints it again. A file written by `copycord doctor --fix` has the old default `copycord`; change it.
@@ -498,7 +493,7 @@ copycord restart
 
 | Key | Default | What it does |
 |-----|---------|--------------|
-| `PASSWORD` | a random password in the file (`copycord` when `doctor --fix` wrote it) | Dashboard login password; no login page when empty or unset. |
+| `PASSWORD` | a random password in the file | Dashboard password; always required. |
 | `SECRET_KEY` | a key saved in `<data dir>/secret.key` | Signs the dashboard login cookie. Not in the file; add it only to use a key of your own. |
 | `ADMIN_PORT` | `8080` | Dashboard port. |
 | `DASHBOARD_HOST` | `127.0.0.1` | Where the dashboard listens. Commented out in the file, so only this computer can open it. See [Dashboard address](#dashboard-address). |
@@ -511,7 +506,7 @@ copycord restart
 | `COPYCORD_NO_UPDATE_CHECK` | `0` | `1` turns off the update check on start; `0` keeps it on. |
 | `BACKFILL_*`, `FORWARDING_*` | | Tuning knobs for backfills and forwarding; leave them unset unless asked to change them. |
 
-`copycord config set` writes these keys to the file (creating it, readable only by you on Linux and macOS, if needed), updates a key's line in place (or a line you commented out) and keeps your comments. `copycord config get PASSWORD` prints `********`; add `--show-secrets` to see it. `copycord config unset PASSWORD` removes the line, which turns the login page off.
+`copycord config set` writes these keys to the file (creating it, readable only by you on Linux and macOS, if needed), updates a key's line in place (or a line you commented out) and keeps your comments. `copycord config get PASSWORD` prints `********`; add `--show-secrets` to see it. After `copycord config unset PASSWORD`, the next start makes a new random password.
 
 ## copycord restart {#copycord-restart}
 

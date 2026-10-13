@@ -45,7 +45,7 @@ services:
       - ./data:/data
 ```
 
-Add an `environment:` entry with `- PASSWORD=...` if you want a login page. Then build and start:
+Add an `environment:` entry with `- PASSWORD=...`; the container does not start without one. Then build and start:
 
 ```bash
 docker compose -f docker-compose.dev.yml up --build
