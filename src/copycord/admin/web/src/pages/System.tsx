@@ -5,7 +5,7 @@
 
 import { useLayoutEffect, useRef, useState } from "react";
 import type { ChangeEvent, MouseEvent } from "react";
-import { Button, Card, cx } from "../components/ui";
+import { Card, cx } from "../components/ui";
 import { useApi } from "../hooks/useApi";
 import type { BackupInfo } from "../types/system";
 import {
@@ -16,12 +16,17 @@ import {
   restoreExisting,
   restoreUpload,
 } from "./system/backupApi";
-import { GhostRedButton, LinkButton } from "./system/buttons";
+import { GhostButton, LinkButton } from "./system/buttons";
 import { archiveLabel, fmtBackupWhen, fmtBytes, NO_VALUE, SHRUG } from "./system/format";
 import { useNotify, useSafeConfirm } from "./system/providers";
 
 /** The archive list scrolls once it has more rows than this. */
 export const VISIBLE_ROWS = 5;
+
+// Narrow screens let the columns size to their content and stack the row buttons.
+const HEAD = "px-1.5 py-2.5 font-semibold text-accent md:px-2";
+const CELL = "border-b border-border px-1.5 py-2.5 md:px-2";
+const ROW_BUTTON = "max-md:min-h-[34px] max-md:px-3";
 
 const INTERACTIVE = 'a,button,input,select,textarea,label,[role="button"],[contenteditable]';
 
@@ -210,9 +215,9 @@ export function System() {
 
         <div id="adv-collapse-panel" className="mt-1.5">
           <div className="flex flex-wrap gap-2" hidden={!open}>
-            <Button id="adv-backup-now" variant="ghost" loading={backingUp} onClick={() => void onBackupNow()}>
+            <GhostButton id="adv-backup-now" compact loading={backingUp} onClick={() => void onBackupNow()}>
               Backup now
-            </Button>
+            </GhostButton>
             <LinkButton
               id="adv-download-latest"
               href={latest ? downloadUrl(latest.name) : undefined}
@@ -221,14 +226,9 @@ export function System() {
             >
               Download latest
             </LinkButton>
-            <Button
-              id="adv-restore-upload"
-              variant="ghost"
-              loading={uploading}
-              onClick={() => fileRef.current?.click()}
-            >
+            <GhostButton id="adv-restore-upload" loading={uploading} onClick={() => fileRef.current?.click()}>
               Restore
-            </Button>
+            </GhostButton>
             <input
               ref={fileRef}
               id="adv-restore-file"
@@ -248,14 +248,14 @@ export function System() {
             <table
               ref={tableRef}
               id="adv-archives"
-              className="mt-2 w-full min-w-[600px] table-fixed border-separate border-spacing-0 text-left"
+              className="mt-2 w-full border-separate border-spacing-0 text-left md:table-fixed"
             >
               <thead hidden={!open}>
                 <tr>
-                  <th scope="col" className="px-2 py-2.5 font-bold">Name</th>
-                  <th scope="col" className="px-2 py-2.5 font-bold">Size</th>
-                  <th scope="col" className="px-2 py-2.5 font-bold">Time</th>
-                  <th scope="col" className="px-2 py-2.5 pr-4 text-right">
+                  <th scope="col" className={HEAD}>Name</th>
+                  <th scope="col" className={HEAD}>Size</th>
+                  <th scope="col" className={HEAD}>Time</th>
+                  <th scope="col" className={cx(HEAD, "pr-4 text-right md:w-[330px]")}>
                     <span className="sr-only">Actions</span>
                   </th>
                 </tr>
@@ -265,34 +265,38 @@ export function System() {
                   const busy = rowBusy?.name === a.name ? rowBusy.action : null;
                   return (
                     <tr key={a.name} data-archive={a.name}>
-                      <td className="border-b border-border px-2 py-2.5">
+                      <td className={CELL}>
                         <code title={a.name} className="font-mono text-[13px] break-all">
                           {archiveLabel(a.name)}
                         </code>
                       </td>
-                      <td className="border-b border-border px-2 py-2.5">{fmtBytes(a.size)}</td>
-                      <td className="border-b border-border px-2 py-2.5">{fmtBackupWhen(a.mtime)}</td>
-                      <td className="border-b border-border px-2 py-2.5 pr-4 text-right whitespace-nowrap">
-                        <span className="inline-flex gap-2">
-                          <LinkButton href={downloadUrl(a.name)} download>
+                      <td className={CELL}>{fmtBytes(a.size)}</td>
+                      <td className={CELL}>{fmtBackupWhen(a.mtime)}</td>
+                      <td className={cx(CELL, "pr-4 text-right")}>
+                        <span className="inline-flex flex-col items-end gap-2 md:flex-row md:whitespace-nowrap">
+                          <LinkButton href={downloadUrl(a.name)} download className={ROW_BUTTON}>
                             Download
                           </LinkButton>
-                          <Button
-                            variant="ghost"
+                          <GhostButton
+                            compact
+                            className={ROW_BUTTON}
                             data-restore={a.name}
                             loading={busy === "restore"}
                             disabled={busy !== null}
                             onClick={() => void onRestoreExisting(a.name)}
                           >
                             Restore
-                          </Button>
-                          <GhostRedButton
+                          </GhostButton>
+                          <GhostButton
+                            compact
+                            danger
+                            className={ROW_BUTTON}
                             data-delete={a.name}
                             disabled={busy !== null}
                             onClick={() => void onDelete(a.name)}
                           >
                             {busy === "delete" ? "Deleting…" : "Delete"}
-                          </GhostRedButton>
+                          </GhostButton>
                         </span>
                       </td>
                     </tr>
