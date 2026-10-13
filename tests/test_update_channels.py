@@ -1005,6 +1005,16 @@ def test_scan_reports_a_copycord_started_from_a_shell():
     assert winupdate.scan(rows, 30, PREFIX)[1] in (51, 52)
 
 
+def test_scan_ignores_a_copycord_of_another_install():
+    rows = [
+        SHELL, LAUNCHER, ME,
+        proc(60, 1, "cmd.exe"),
+        proc(61, 60, "copycord.exe", r"D:\other\bin\copycord.exe"),
+        proc(62, 61, "python.exe", r"D:\other\tools\copycord\Scripts\python.exe"),
+    ]
+    assert winupdate.scan(rows, 30, PREFIX) == ([30, 20], None)
+
+
 def test_running_without_powershell_does_not_block(monkeypatch):
     def boom(*a, **k):
         raise OSError("no powershell")
