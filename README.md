@@ -95,10 +95,10 @@ Copycord is the ultimate Discord server mirroring tool. Effortlessly clone multi
 
 ### Prerequisites
 
-- Linux, macOS or Windows (with the install script), or [Docker](https://www.docker.com/products/docker-desktop)
+- Linux, macOS or Windows
 - A Discord Bot Token + a Discord User Token ([how to get them](https://copycord.github.io/Copycord/docs/getting-started/discord-setup))
 
-### Install script
+### Install (recommended)
 
 The install script installs Copycord from the latest GitHub release. It installs [uv](https://docs.astral.sh/uv/) if needed, which provides Python; there is nothing else to set up.
 
@@ -123,11 +123,11 @@ copycord service install --user   # or run it in the background as a service (Li
 
 Change the default password in `~/.copycord/.env` (`%USERPROFILE%\.copycord\.env` on Windows) or with `copycord config set PASSWORD 'new-pass'`, then run `copycord restart`. Update later with `copycord update`; `copycord doctor` checks the setup.
 
-Testers can build a branch: add `sh -s -- --version v4-dev` (Windows: run `$env:COPYCORD_VERSION='v4-dev'` before the `irm` line).
-
 See the [Quick Start](https://copycord.github.io/Copycord/docs/getting-started/quick-start), [Install Options](https://copycord.github.io/Copycord/docs/getting-started/manual-install) and the [CLI reference](https://copycord.github.io/Copycord/docs/cli).
 
-### Docker
+### Docker (advanced)
+
+For users who already run their apps in containers.
 
 1. Create a folder with this `docker-compose.yml`:
 

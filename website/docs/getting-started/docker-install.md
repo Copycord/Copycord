@@ -1,6 +1,6 @@
 ---
 sidebar_position: 6
-title: Docker Install
+title: Docker (advanced)
 ---
 
 import Tabs from '@theme/Tabs';

@@ -37,9 +37,9 @@ irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1 | iex
 ```
 
 </TabItem>
-<TabItem value="docker" label="Docker">
+<TabItem value="docker" label="Docker (advanced)">
 
-Docker is the alternative if you already run your apps in containers. See [Docker Install](/docs/getting-started/docker-install).
+The install script above is the recommended way. Docker is for advanced users who already run their apps in containers. See [Docker Install](/docs/getting-started/docker-install).
 
 </TabItem>
 </Tabs>
