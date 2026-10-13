@@ -8,30 +8,8 @@
 # =============================================================================
 
 """
-copycord run                  start the dashboard, server bot and client
-copycord restart              restart the OS service so it re-reads <home>/.env
-copycord --version            print the version and the update channel
-copycord doctor [--verbose]   grouped health checks: install, settings, data,
-                              running and updates (exit 1 on a problem)
-copycord doctor --fix         run the checks, apply every automatic fix, ask for
-                              a free port in a terminal, then check again
-copycord config get KEY       read one setting (secrets masked)
-copycord config set KEY VAL   write one setting: env-only keys such as PASSWORD
-                              go to <home>/.env, the rest to the DB app_config
-copycord config unset KEY     remove one setting
-copycord config export [FILE] app_config as JSON (secrets masked on stdout)
-copycord config import FILE   load app_config values from a JSON object
-copycord service install [--user] [--data-dir PATH]
-                              run Copycord as a systemd/launchd/Scheduled Task service
-copycord service start|stop|status|uninstall [--user]
-copycord update [--channel stable|beta|dev [--repo OWNER/NAME] [--ref REF]]
-                [--tag VERSION] [--no-install] [--no-backup] [--yes]
-                              update (uv tool / pipx) from the saved or given
-                              channel and restart a running service
-copycord update status        installed version, channel and latest on it
-copycord uninstall [--purge|--keep-data] [--yes] [--keep-service] [--dry-run]
-                              remove the service and the program; asks
-                              whether to delete the data directory too
+The copycord command line: run, restart, doctor, config, service, update and
+uninstall.
 """
 
 from __future__ import annotations
@@ -61,10 +39,9 @@ ROLE_REMOVED_MESSAGE = (
 )
 
 MIN_PYTHON = (3, 12)
-# First Python release Copycord is not tested on (pyproject requires-python).
+# First Python release Copycord is not tested on.
 MAX_PYTHON = (3, 15)
 DEFAULT_ADMIN_PORT = 8080
-# The admin listens on all interfaces (supervisor.build_supervisor).
 ADMIN_BIND_HOST = "0.0.0.0"
 # Module name -> distribution that must provide it.
 REQUIRED_IMPORTS = (
@@ -78,12 +55,11 @@ SECRET_MARKERS = ("TOKEN", "PASSWORD", "SECRET")
 MASK = "********"
 
 PASS, WARN, FAIL, INFO = "PASS", "WARN", "FAIL", "INFO"
-# A backup older than this is a doctor warning.
 BACKUP_MAX_AGE = 2 * 24 * 3600
 DOCS_URL = "https://copycord.github.io/Copycord/docs/cli"
 
 
-# (group, [(command, one-line description)]) for the top-level help.
+# (group, [(command, description)]) for the top-level help.
 COMMAND_GROUPS = (
     ("Get started", (
         ("run", "Run Copycord (dashboard, server bot and client)"),
@@ -154,8 +130,7 @@ COMMAND_EXAMPLES = {
     ),
 }
 
-# prog -> (section title, option dests, examples): options left out of the
-# regular list and printed last, with their own examples.
+# prog -> (section title, option dests, examples) for options printed last.
 COMMAND_ADVANCED = {
     "copycord update": ("Advanced (channels and git installs)", ("channel", "branch", "repo", "no_install"), (
         ("copycord update --channel beta", "switch to pre-releases"),
@@ -222,7 +197,6 @@ def _sentence(text: str) -> str:
 
 
 def _invocation(action: argparse.Action) -> str:
-    """`--channel stable|beta|dev`, `-y, --yes`, `--data-dir PATH`."""
     flags = ", ".join(sorted(action.option_strings, key=len))
     if action.nargs == 0:
         return flags
@@ -232,7 +206,7 @@ def _invocation(action: argparse.Action) -> str:
 
 
 def format_command_help(parser: argparse.ArgumentParser) -> str:
-    """`copycord <command> --help` in the style of the top-level overview."""
+    """Help for `copycord <command> --help`, styled like the overview."""
     import io
     import textwrap
 
@@ -344,7 +318,7 @@ class _Parser(argparse.ArgumentParser):
         return super().format_help()
 
     def error(self, message: str) -> NoReturn:
-        """Top level: a styled one-liner plus a pointer to the help, not argparse's usage dump."""
+        """Print a short error and a pointer to the help instead of argparse's usage."""
         if self.prog != "copycord":
             super().error(message)
         from copycord import ui
@@ -363,8 +337,7 @@ class _SubParser(argparse.ArgumentParser):
         return format_command_help(self)
 
     def error(self, message: str) -> NoReturn:
-        """A command group without its subcommand shows the group's help; other
-        mistakes get a styled one-liner and a pointer to the help."""
+        """Show a group's help when its subcommand is missing, else a short error."""
         if message.startswith("the following arguments are required:") and message.endswith("_command"):
             sys.stdout.write(self.format_help())
             self.exit(0)
@@ -376,7 +349,6 @@ class _SubParser(argparse.ArgumentParser):
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     if not (sys.argv[1:] if argv is None else argv):
-        # Bare `copycord`: the styled overview, not an argparse error.
         sys.stdout.write(format_help())
         raise SystemExit(0)
     parser = _Parser(prog="copycord")
@@ -552,7 +524,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
 
 def check_removed_options() -> bool:
-    """False (after logging why) when the removed ROLE variable is still set."""
+    """False when the removed ROLE variable is still set."""
     if "ROLE" in os.environ:
         logger.error(ROLE_REMOVED_MESSAGE)
         return False
@@ -574,9 +546,9 @@ def apply_data_dir(args: argparse.Namespace) -> None:
 class Check(NamedTuple):
     status: str
     name: str
-    # Why it is not OK and what to do; shown for every status.
+    # Why it is not OK and what to do.
     reason: str = ""
-    # The file or folder checked; shown on WARN/FAIL or with --verbose.
+    # Shown on WARN/FAIL or with --verbose.
     path: str = ""
     # Key into FIXES when `copycord doctor --fix` can repair it.
     fix: str = ""
@@ -615,7 +587,7 @@ def check_python(version_info=None) -> Check:
 
 
 def admin_static_dir() -> Optional[Path]:
-    """admin/static of the importable admin package, without importing copycord.admin.app."""
+    """The admin static dir, found without importing copycord.admin.app."""
     try:
         spec = importlib.util.find_spec("copycord.admin")
     except (ImportError, ValueError):
@@ -657,7 +629,7 @@ def check_import(module: str, dist: str) -> Check:
 
 
 def check_dependencies(imports=None) -> Check:
-    """One line for every REQUIRED_IMPORTS; names only the broken ones."""
+    """One check for all REQUIRED_IMPORTS, naming only the broken ones."""
     imports = REQUIRED_IMPORTS if imports is None else imports
     bad = [c for c in (check_import(m, d) for m, d in imports) if c.status != PASS]
     if not bad:
@@ -704,7 +676,7 @@ def check_password(env: Optional[Mapping[str, str]] = None) -> Check:
     env = os.environ if env is None else env
     value = env.get("PASSWORD")
     if value == DEFAULT_PASSWORD:
-        # No fix: `doctor --fix` never changes the password.
+        # doctor --fix never changes the password.
         return Check(
             WARN,
             "the default password is still set",
@@ -726,8 +698,7 @@ def admin_port(env: Optional[Mapping[str, str]] = None) -> int:
 
 
 def check_tokens(env: Optional[Mapping[str, str]] = None) -> Check:
-    """SERVER_TOKEN / CLIENT_TOKEN as the app reads them: the DB app config,
-    then the environment. The values are never printed."""
+    """The bot tokens as the app reads them: app config, then the environment."""
     from copycord.update_check import config_value
 
     env = os.environ if env is None else env
@@ -841,8 +812,7 @@ def check_backups(
                         pass
     hint = "the daily backup runs at BACKUP_AT (03:17 by default) while Copycord is running"
     if not times:
-        # A new install: no DB yet, or the backups folder (made on the first
-        # start, empty since) is younger than the backup interval allows.
+        # A new install, or one too young to have had its first daily backup.
         try:
             fresh = (
                 not db.exists()
@@ -864,7 +834,7 @@ def check_backups(
 
 
 def copycord_on_port(port: int, timeout: float = 1.0) -> bool:
-    """True when the Copycord dashboard answers on 127.0.0.1:port."""
+    """True when the dashboard answers on 127.0.0.1:port."""
     import urllib.error
     import urllib.request
 
@@ -894,8 +864,7 @@ def check_admin_port(
     except ValueError:
         return Check(FAIL, f"ADMIN_PORT={raw!r} is not a valid port")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        # Same as uvicorn: lingering TIME_WAIT sockets do not count as in use.
-        # (On Windows SO_REUSEADDR would allow sharing a live port, so skip it.)
+        # Like uvicorn, ignore TIME_WAIT sockets; on Windows SO_REUSEADDR would share a live port.
         if sys.platform != "win32":
             s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
@@ -939,7 +908,7 @@ def check_service(state) -> Check:
 
 
 def check_updates(timeout: float = 2.0) -> Check:
-    """The cached update check; a network error is INFO, never a failure."""
+    """The cached update check; a network error is only INFO."""
     from copycord import update_check
 
     try:
@@ -955,7 +924,7 @@ def check_updates(timeout: float = 2.0) -> Check:
 
 
 def run_doctor() -> List[tuple]:
-    """[(section, [Check])] in the order the doctor prints them."""
+    """[(section, [Check])] in print order."""
     from copycord.common.paths import data_dir, db_path
 
     settings = [check_env_file(), check_password(), check_tokens()]
@@ -988,12 +957,11 @@ def doctor_summary(checks: List[Check]) -> str:
 
 
 class FixError(Exception):
-    """A fix that cannot be applied; the message says why."""
+    """A fix that cannot be applied."""
 
 
 def _env_owned(key: str) -> None:
-    """FixError when KEY comes from the real environment, where a value written
-    to <home>/.env would not apply (the real environment wins)."""
+    """FixError when KEY is set in the real environment, which overrides <home>/.env."""
     from copycord import envfile
 
     if key in os.environ and envfile.get(key) != os.environ[key]:
@@ -1010,7 +978,7 @@ def fix_home(checks: List[Check]) -> str:
 
 
 def fix_env_file(checks: List[Check]) -> str:
-    """The installer's .env, from the same envfile.template()."""
+    """Write the default <home>/.env."""
     from copycord import envfile
 
     path = envfile.write_template()
@@ -1019,7 +987,7 @@ def fix_env_file(checks: List[Check]) -> str:
 
 
 def fix_backup(checks: List[Check]) -> str:
-    """A daily-style backup now, with the scheduler the dashboard uses."""
+    """Run a daily backup now."""
     from copycord.common.backup_scheduler import (
         BackupConfig,
         DailySQLiteBackupScheduler,
@@ -1054,13 +1022,12 @@ def fix_backup(checks: List[Check]) -> str:
         finally:
             conn.close()
     except sqlite3.Error:
-        # No app_config table yet: the dashboard has no backup stats to show.
         pass
     return str(archive)
 
 
 def _can_reinstall(checks: List[Check]) -> None:
-    """FixError when `copycord update` cannot reinstall this Copycord."""
+    """FixError when `copycord update` cannot reinstall this install."""
     from copycord import update
 
     kind = update.detect_installer()
@@ -1070,7 +1037,7 @@ def _can_reinstall(checks: List[Check]) -> None:
         raise FixError(f"Copycord was installed with {kind}; reinstall it the same way")
     if os.environ.get("COPYCORD_SKIP_FRONTEND") and all(c.name == "web UI missing" for c in checks):
         raise FixError("COPYCORD_SKIP_FRONTEND is set, so a reinstall would leave the web UI out too")
-    # A git reinstall builds the web UI, which needs npm.
+    # A git reinstall builds the admin UI, which needs npm.
     git = update.git_source() is not None or update.load_channel().channel == update.DEV
     if git and not os.environ.get("COPYCORD_SKIP_FRONTEND"):
         from copycord import node_runtime
@@ -1084,15 +1051,13 @@ NPM_MISSING = ("reinstalling needs npm to build the web UI, and npm is not insta
 
 
 def fix_reinstall(checks: List[Check]) -> str:
-    """The running version again: a git install from its git URL and commit,
-    else from the saved channel and ref."""
+    """Reinstall the running version."""
     from copycord import update
 
     _can_reinstall(checks)
     rc = update.update(reinstall=True)
     if rc:
         raise FixError(f"the reinstall failed (exit {rc}); see the output above")
-    # The re-check imports what the reinstall put back.
     importlib.invalidate_caches()
     return f"v{update.current_version()}"
 
@@ -1145,10 +1110,9 @@ class Fix(NamedTuple):
     apply: object
     # Printed with the apply() result once it worked.
     done: str
-    # Guided fixes only (they need input): (checks) -> the y/N question,
-    # asked in a terminal; may raise FixError when it cannot be done.
+    # Guided fixes only: (checks) -> the y/N question; may raise FixError.
     question: object = None
-    # Without a terminal: "run `copycord doctor --fix` in a terminal to <skipped>".
+    # Completes "run `copycord doctor --fix` in a terminal to ..." when there is no terminal.
     skipped: str = ""
 
     @property
@@ -1161,8 +1125,7 @@ def _port_question(checks):
             f"Set ADMIN_PORT to {_port_plan()}?")
 
 
-# In the order they run: the home before the files in it, a reinstall and
-# the settings before the service starts.
+# Run in this order: the home before its files, reinstall and settings before the service.
 FIXES = {
     "home": Fix(fix_home, "created the Copycord home"),
     "env_file": Fix(fix_env_file, "recreated .env with the default settings"),
@@ -1175,8 +1138,7 @@ FIXES = {
 
 
 def apply_fixes(checks: List[Check]) -> int:
-    """Apply FIXES for the flagged checks: the automatic ones directly, the
-    guided ones after a y/N in a terminal; the number applied."""
+    """Apply the fixes for flagged checks; returns how many were applied."""
     from copycord import ui
 
     interactive = ui.is_interactive()
@@ -1224,7 +1186,7 @@ def _print_checks(rows: List[Check], verbose: bool) -> None:
 
 
 def _print_summary(checks: List[Check], fixable: int = 0) -> None:
-    """The summary line, then a pointer to `copycord doctor --fix` when FIXABLE."""
+    """Print the summary line and, if something is fixable, the --fix hint."""
     from copycord import ui
 
     summary = doctor_summary(checks)
@@ -1245,7 +1207,7 @@ def doctor(verbose: bool = False, fix: bool = False) -> int:
     from copycord import ui
 
     if fix:
-        # The fixes also write to stderr and run uv; keep the order when piped.
+        # Fixes write to stderr and run uv; flush so piped output stays in order.
         try:
             sys.stdout.reconfigure(line_buffering=True)
         except (AttributeError, ValueError):
@@ -1300,7 +1262,7 @@ def masked(values: Mapping[str, str]) -> dict:
 
 
 def _open_db(create: bool):
-    """DBManager on the configured DB; None (after saying why) when it is missing."""
+    """DBManager on the configured DB; None when it is missing."""
     from copycord.common.db import DBManager
     from copycord.common.paths import db_path
 
@@ -1481,7 +1443,7 @@ def purge_refusal(path: Path) -> Optional[str]:
 
 
 def _forget_saved_home(removed: list) -> None:
-    """Drop the home pointer the installer saved for a custom --home."""
+    """Remove the ~/.copycord-home pointer saved for a custom --home."""
     from copycord.common.paths import HOME_POINTER
 
     pointer = Path.home() / HOME_POINTER
@@ -1558,8 +1520,7 @@ def _uninstall_program(dry_run: bool, purge: bool, removed: list, kept: list) ->
         removed.append("copycord program")
         return ok
     if sys.platform == "win32":
-        # Windows cannot delete the running copycord.exe, so the uninstall runs
-        # in a detached shell once this process has exited.
+        # Windows cannot delete the running copycord.exe; finish in a detached shell after exit.
         import subprocess
 
         text = " ".join(commands[0])
@@ -1725,7 +1686,7 @@ def schema_too_new_message(err) -> None:
 
 
 def schema_guard() -> bool:
-    """False (after saying why) when the DB was written by a newer Copycord."""
+    """False when the DB was written by a newer Copycord."""
     from copycord.common.db import SchemaTooNewError, check_schema_version
     from copycord.common.paths import db_path
 
@@ -1740,7 +1701,6 @@ def schema_guard() -> bool:
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     apply_data_dir(args)
-    # <home>/.env before any role starts; the real environment wins.
     from copycord import envfile
 
     envfile.load()
@@ -1783,7 +1743,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         setup_logging(roles=())
         if not check_removed_options():
             return 1
-        # Before any role starts, so the dashboard never comes up half-way.
         if not schema_guard():
             return 1
 
