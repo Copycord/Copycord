@@ -132,7 +132,7 @@ COMMAND_EXAMPLES = {
 
 # prog -> (section title, option dests, examples) for options printed last.
 COMMAND_ADVANCED = {
-    "copycord update": ("Advanced (channels and git installs)", ("channel", "branch", "repo", "no_install"), (
+    "copycord update": ("Advanced (channels and git installs)", ("channel", "branch", "repo", "no_install", "force"), (
         ("copycord update --channel beta", "switch to pre-releases"),
         ("copycord update --channel stable", "back to releases"),
         ("copycord update --channel dev --ref v4-dev", "install a git branch"),
@@ -499,6 +499,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "-y",
         action="store_true",
         help="install an older version without asking (needed with no terminal)",
+    )
+    update.add_argument(
+        "--force",
+        action="store_true",
+        help="reinstall even when up to date",
     )
 
     uninst = sub.add_parser(
@@ -1746,6 +1751,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             repo=args.repo,
             no_backup=args.no_backup,
             yes=args.yes,
+            force=args.force,
         )
 
     if args.command == "run":
