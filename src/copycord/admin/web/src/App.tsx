@@ -5,6 +5,7 @@ import { Dashboard } from "./pages/Dashboard";
 import { Guilds } from "./pages/Guilds";
 import { Forwarding } from "./pages/Forwarding";
 import { Scraper } from "./pages/Scraper";
+import { Channels } from "./pages/Channels";
 import { Kit } from "./pages/Kit";
 import { Logs } from "./pages/Logs";
 import { Placeholder } from "./pages/Placeholder";
@@ -27,6 +28,7 @@ const PAGE_ELEMENTS: Partial<Record<(typeof PAGES)[number]["path"], ReactNode>> 
   "/guilds": <Guilds />,
   "/forwarding": <Forwarding />,
   "/scraper": <Scraper />,
+  "/channels": <Channels />,
   "/system": <System />,
   "/logs": <Logs />,
 };
