@@ -28,6 +28,7 @@ import logging
 from dotenv import load_dotenv
 from typing import Dict, List, Set, Literal, Optional, Any, Union
 from copycord.admin.auth import init_admin_auth
+from copycord.admin.security import safe_child
 from copycord.admin.logging_setup import (
     LOGGER,
     get_logger,
@@ -2374,7 +2375,9 @@ async def backup_info():
 
 @app.get("/api/backup/download/{name}")
 async def backup_download(name: str):
-    p = BACKUP_DIR / name
+    p = safe_child(BACKUP_DIR, name)
+    if p is None:
+        return PlainTextResponse("invalid name", status_code=400)
     if not p.exists() or not p.is_file():
         return PlainTextResponse("not found", status_code=404)
     return FileResponse(str(p), filename=name, media_type="application/gzip")
@@ -2385,7 +2388,9 @@ async def backup_delete(name: str = Form(...)):
     """
     Permanently delete a backup archive from BACKUP_DIR.
     """
-    p = BACKUP_DIR / name
+    p = safe_child(BACKUP_DIR, name)
+    if p is None:
+        return PlainTextResponse("invalid name", status_code=400)
     if not p.exists() or not p.is_file():
         return PlainTextResponse("not found", status_code=404)
     try:
@@ -2413,7 +2418,9 @@ async def backup_restore(
     if source == "existing":
         if not name:
             return PlainTextResponse("name required", status_code=400)
-        arc = BACKUP_DIR / name
+        arc = safe_child(BACKUP_DIR, name)
+        if arc is None:
+            return PlainTextResponse("invalid name", status_code=400)
         if not arc.exists():
             return PlainTextResponse("archive not found", status_code=404)
     else:
@@ -5411,11 +5418,9 @@ async def api_scraper_scrapes_list():
 async def api_scraper_scrape_download(filepath: str):
     """Download a saved scrape file. Accepts guild_id/filename or just filename."""
 
-    parts = Path(filepath).parts
-    if len(parts) > 2 or ".." in filepath:
+    fp = safe_child(DATA_DIR / "scrapes", filepath, max_depth=2)
+    if fp is None:
         raise HTTPException(400, detail="Invalid path")
-
-    fp = DATA_DIR / "scrapes" / filepath
     if not fp.is_file():
         raise HTTPException(404, detail="File not found")
 
@@ -5429,11 +5434,9 @@ async def api_scraper_scrape_download(filepath: str):
 @app.delete("/api/scraper/scrapes/{filepath:path}", response_class=JSONResponse)
 async def api_scraper_scrape_delete(filepath: str):
     """Delete a saved scrape file. Accepts guild_id/filename or just filename."""
-    parts = Path(filepath).parts
-    if len(parts) > 2 or ".." in filepath:
+    fp = safe_child(DATA_DIR / "scrapes", filepath, max_depth=2)
+    if fp is None:
         raise HTTPException(400, detail="Invalid path")
-
-    fp = DATA_DIR / "scrapes" / filepath
     if not fp.is_file():
         raise HTTPException(404, detail="File not found")
 
