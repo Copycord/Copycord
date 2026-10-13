@@ -184,7 +184,7 @@ export function Forwarding({ openRuleEditor = openRuleEditorStub }: ForwardingPr
                         "placeholder:text-text-2 outline-none focus:border-primary",
                       )}
                     />
-                    <div id="forwarding-count" role="status" aria-live="polite" className="mt-2 mb-3 opacity-60">
+                    <div id="forwarding-count" role="status" aria-live="polite" className="mt-2 mb-3 whitespace-nowrap opacity-60">
                       <span>Total Forwarded:</span> <span id="fwdTotalCount">{totalLabel}</span>
                     </div>
                   </div>
