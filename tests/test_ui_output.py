@@ -2,6 +2,7 @@
 
 import io
 import re
+import sys
 import unicodedata
 from pathlib import Path
 
@@ -12,7 +13,10 @@ from copycord import ui
 ROOT = Path(__file__).resolve().parents[1]
 URL = "https://copycord.github.io/Copycord/docs/cli"
 TERMINAL_VARS = ("NO_COLOR", "FORCE_COLOR", "TERM", "WT_SESSION", "TERM_PROGRAM", "TERM_PROGRAM_VERSION",
-                 "KITTY_WINDOW_ID", "WEZTERM_PANE", "VTE_VERSION", "TMUX", "STY")
+                 "KITTY_WINDOW_ID", "WEZTERM_PANE", "VTE_VERSION", "TMUX", "STY",
+                 "SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")
+HOME = "/home/me/.copycord"
+WIN_HOME = "C:\\Users\\Me\\.copycord"
 
 
 class TTY(io.StringIO):
@@ -32,8 +36,21 @@ def term(monkeypatch):
     return monkeypatch
 
 
-def _osc8(url):
-    return f"\033]8;;{url}\033\\{url}\033]8;;\033\\"
+def _osc8(url, text=None):
+    return f"\033]8;;{url}\033\\{text or url}\033]8;;\033\\"
+
+
+@pytest.fixture()
+def local(term):
+    """Windows Terminal on this machine: not over SSH, not in Docker."""
+    import socket
+
+    from copycord.common import paths
+
+    term.setenv("WT_SESSION", "c0ffee")
+    term.setattr(paths, "in_docker", lambda: False)
+    term.setattr(socket, "gethostname", lambda: "box")
+    return term
 
 
 # --------------------------------------------------------------------------
@@ -196,6 +213,84 @@ def test_help_docs_link(term, monkeypatch):
     term.delenv("WT_SESSION")
     assert f"Docs: {cli.DOCS_URL}" in ui._ANSI.sub("", cli.format_help())
     assert "\033]8" not in cli.format_help()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX path")
+def test_path_link_on_a_local_terminal(local):
+    assert ui.path_link(HOME, TTY()) == _osc8(f"file://box{HOME}", HOME)
+    assert ui.path_link(Path(HOME), TTY()) == _osc8(f"file://box{HOME}", HOME)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX path")
+def test_path_link_percent_encodes_the_uri_not_the_text(local):
+    path = "/home/me/My Data/\u00fc#1"
+    assert ui.path_link(path, TTY()) == _osc8("file://box/home/me/My%20Data/%C3%BC%231", path)
+
+
+def test_path_link_windows_form(local):
+    assert ui.file_uri(WIN_HOME) == "file:///C:/Users/Me/.copycord"
+    assert ui.file_uri("D:\\Copy Cord\\.env") == "file:///D:/Copy%20Cord/.env"
+    assert ui.path_link(WIN_HOME, TTY()) == _osc8("file:///C:/Users/Me/.copycord", WIN_HOME)
+
+
+@pytest.mark.parametrize("name", ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"])
+def test_path_link_off_over_ssh(local, name):
+    local.setenv(name, "10.0.0.2 52000 10.0.0.1 22")
+    assert ui.path_link(WIN_HOME, TTY()) == WIN_HOME
+    # The folder is on the other machine; web links still open anywhere.
+    assert ui.link(URL, TTY()) == _osc8(URL)
+
+
+def test_path_link_off_in_docker(local):
+    from copycord.common import paths
+
+    local.setattr(paths, "in_docker", lambda: True)
+    assert ui.path_link(WIN_HOME, TTY()) == WIN_HOME
+
+
+def test_path_link_off_under_json(local):
+    from copycord import jsonout
+
+    local.setattr(jsonout, "active", lambda: True)
+    assert ui.path_link(WIN_HOME, TTY()) == WIN_HOME
+
+
+def test_path_link_off_when_not_a_terminal(local):
+    local.setenv("FORCE_COLOR", "1")
+    assert ui.path_link(WIN_HOME, io.StringIO()) == WIN_HOME
+    local.delenv("WT_SESSION")
+    assert ui.path_link(WIN_HOME, TTY()) == WIN_HOME
+
+
+def test_link_paths_links_what_is_under_a_root(local):
+    env = f"{WIN_HOME}\\.env"
+    text = f"change PASSWORD in {env}, then run copycord restart"
+    out = ui.link_paths(text, [WIN_HOME], TTY())
+    assert out == f"change PASSWORD in {_osc8(ui.file_uri(env), env)}, then run copycord restart"
+    assert ui._ANSI.sub("", out) == text
+    assert ui.link_paths(f"in {WIN_HOME}.", [WIN_HOME], TTY()) == f"in {ui.path_link(WIN_HOME, TTY())}."
+    data = f"{WIN_HOME}\\data"
+    out = ui.link_paths(f"Permission denied: '{data}'", [WIN_HOME], TTY())
+    assert out == f"Permission denied: '{ui.path_link(data, TTY())}'"
+
+
+def test_link_paths_leaves_other_paths(local):
+    for text in (f"{WIN_HOME}-old\\.env", f"{WIN_HOME}.bak", "C:\\Windows\\System32", "no path"):
+        assert ui.link_paths(text, [WIN_HOME], TTY()) == text
+    assert ui.link_paths(f"in {WIN_HOME}", [], TTY()) == f"in {WIN_HOME}"
+
+
+def test_link_paths_plain_without_link_support(term):
+    text = f"change PASSWORD in {WIN_HOME}\\.env"
+    assert ui.link_paths(text, [WIN_HOME], TTY()) == text
+
+
+def test_box_width_ignores_path_link_codes(local):
+    buf = TTY()
+    ui.box(["Home:", ui.path_link(WIN_HOME, buf)], title="Copycord", stream=buf)
+    rows = [ui._ANSI.sub("", x) for x in buf.getvalue().splitlines()]
+    assert len({len(x) for x in rows}) == 1
+    assert "file:///C:/Users/Me/.copycord" in buf.getvalue()
 
 
 def test_installers_link_the_dashboard():

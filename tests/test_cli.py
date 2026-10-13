@@ -108,6 +108,31 @@ def test_overview_shows_the_home(data_dir, monkeypatch, tmp_path, capsys):
     assert f"Home: {tmp_path / 'cc-home'}\n" in capsys.readouterr().out
 
 
+def _local_links(monkeypatch):
+    """Windows Terminal on this machine, so paths print as file:// links."""
+    from copycord import ui
+
+    _unset(monkeypatch, "NO_COLOR", "FORCE_COLOR", "TERM", "TMUX", "STY",
+           "SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")
+    monkeypatch.setenv("WT_SESSION", "c0ffee")
+    monkeypatch.setattr(paths, "in_docker", lambda: False)
+    return lambda path: f"\033]8;;{ui.file_uri(path)}\033\\{path}\033]8;;\033\\"
+
+
+def test_overview_links_the_home(data_dir, monkeypatch, tmp_path):
+    from copycord import ui
+
+    link = _local_links(monkeypatch)
+    home = tmp_path / "cc-home"
+    monkeypatch.setenv("COPYCORD_HOME", str(home))
+    monkeypatch.setattr(sys, "stdout", _Terminal())
+    with pytest.raises(SystemExit):
+        cli.main([])
+    out = sys.stdout.getvalue()
+    assert f" {link(home)}\n" in out
+    assert f"  Home: {home}\n" in ui._ANSI.sub("", out)
+
+
 def test_overview_shows_only_what_a_regular_user_needs(data_dir, capsys):
     with pytest.raises(SystemExit):
         cli.main([])
@@ -416,6 +441,20 @@ def test_uninstall_on_a_terminal_runs_on_the_rail(uninstall_env, monkeypatch):
     ]
 
 
+def test_uninstall_on_a_terminal_links_the_data(uninstall_env, monkeypatch):
+    from copycord import ui
+
+    data, link = uninstall_env, _local_links(monkeypatch)
+    out, _err = _terminal(monkeypatch)
+    _answers(monkeypatch, "")
+    assert cli.main(["uninstall"]) == 0
+    assert f"Your data is in {link(data)}" in out.getvalue()
+    assert f"Your data is still in {link(data)}" in out.getvalue()
+    plain = ui._ANSI.sub("", out.getvalue()).splitlines()
+    assert f"\u25c6  Your data is in {data}" in plain
+    assert plain[-1] == f"\u2514  Your data is still in {data}"
+
+
 def test_uninstall_cancel_on_a_terminal_closes_the_rail(uninstall_env, monkeypatch):
     data, (out, err) = uninstall_env, _terminal(monkeypatch)
     monkeypatch.setattr(cli, "_uninstall_service", lambda *a: pytest.fail("ran after cancel"))
@@ -597,6 +636,32 @@ def test_doctor_default_password_warns(doctor_env, monkeypatch, capsys):
         "then run copycord restart"
     )
     assert out.splitlines()[-1] == "! 1 warning, 0 problems"
+
+
+def test_doctor_links_the_paths_in_the_home(doctor_env, monkeypatch):
+    from copycord import ui
+
+    link = _local_links(monkeypatch)
+    monkeypatch.setenv("PASSWORD", "copycord")
+    monkeypatch.setattr(sys, "stdout", _Terminal())
+    assert cli.main(["doctor", "--verbose", "--data-dir", str(doctor_env)]) == 0
+    out = sys.stdout.getvalue()
+    env = (doctor_env / ".env").resolve()
+    assert f"change PASSWORD in {link(env)}, " in out
+    assert link(doctor_env.resolve()) in out
+    plain = ui._ANSI.sub("", out)
+    assert f"! the default password is still set  change PASSWORD in {env}, " in plain
+    assert f"\u2713 home writable  {doctor_env.resolve()}\n" in plain
+
+
+def test_doctor_json_has_no_links(doctor_env, monkeypatch):
+    _local_links(monkeypatch)
+    monkeypatch.setenv("PASSWORD", "copycord")
+    out, err = _terminal(monkeypatch)
+    assert cli.main(["doctor", "--json", "--data-dir", str(doctor_env)]) == 0
+    assert "\033" not in out.getvalue() and "\033" not in err.getvalue()
+    hint = [c["hint"] for c in json.loads(out.getvalue())["checks"] if c["text"].startswith("the default")]
+    assert hint == [f"change PASSWORD in {(doctor_env / '.env').resolve()}, then run copycord restart"]
 
 
 def test_doctor_does_not_check_the_tokens(doctor_env, monkeypatch, capsys):
