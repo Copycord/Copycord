@@ -295,3 +295,141 @@ def test_installer_spinners_show_time_and_busy():
     assert ('try {\n            if ($progressBar) { Write-Host "$esc]9;4;3;0$esc\\" -NoNewline }' in run)
     assert ('} finally {\n            if ($progressBar) { Write-Host "$esc]9;4;0;0$esc\\" -NoNewline }' in run)
     assert "if ($secs -ge 3) { $tail = '  ' + (Spent $secs) }" in run
+
+
+# --------------------------------------------------------------------------
+# step rail
+# --------------------------------------------------------------------------
+
+
+class AsciiTTY(TTY):
+    """A terminal whose encoding has no box glyphs."""
+
+    encoding = "ascii"
+
+
+class Pipe(io.StringIO):
+    """A redirected stream: not a terminal."""
+
+    encoding = "utf-8"
+
+
+def _plain(buf):
+    return re.sub(r"\033\[[0-9;]*m", "", buf.getvalue())
+
+
+def _flow(buf):
+    """A small uninstall-like flow on buf."""
+    with ui.Rail("Uninstall Copycord", stream=buf) as rail:
+        ui.note("Removes the Copycord program.", buf)
+        ui.gap(buf)
+        ui.ok("removed the copycord program", "uv tool uninstall copycord", stream=buf)
+        ui.gap(buf, blank=False)
+        rail.close("  Your data is still in /d")
+
+
+@pytest.mark.parametrize("name", sorted(ui._RAIL))
+def test_rail_glyphs_are_narrow_text_symbols(name):
+    _, symbol, ascii_symbol = ui._RAIL[name]
+    assert len(symbol) == 1 and len(ascii_symbol) == 1 and ascii_symbol.isascii()
+    assert unicodedata.east_asian_width(symbol) not in ("W", "F")
+
+
+def test_rail_on_a_terminal(term):
+    buf = TTY()
+    _flow(buf)
+    assert _plain(buf).splitlines() == [
+        "",
+        "┌  Uninstall Copycord",
+        "│  Removes the Copycord program.",
+        "│",
+        "✓  removed the copycord program  uv tool uninstall copycord",
+        "│",
+        "└  Your data is still in /d",
+    ]
+    assert ui._rail is None
+
+
+def test_rail_falls_back_to_ascii_together(term):
+    buf = AsciiTTY()
+    _flow(buf)
+    assert _plain(buf).splitlines() == [
+        "",
+        "+  Uninstall Copycord",
+        "|  Removes the Copycord program.",
+        "|",
+        "+  removed the copycord program  uv tool uninstall copycord",
+        "|",
+        "+  Your data is still in /d",
+    ]
+
+
+def test_rail_off_without_a_terminal_keeps_the_plain_layout(term):
+    buf = Pipe()
+    _flow(buf)
+    assert buf.getvalue().splitlines() == [
+        "",
+        "Uninstall Copycord",
+        "Removes the Copycord program.",
+        "",
+        "✓ removed the copycord program  uv tool uninstall copycord",
+        "  Your data is still in /d",
+    ]
+
+
+def test_rail_off_under_json(term):
+    from copycord import jsonout
+
+    buf = TTY()
+    with jsonout.human_to_stderr():
+        _flow(buf)
+    assert "│" not in buf.getvalue() and "┌" not in buf.getvalue()
+    assert "✓ removed the copycord program" in buf.getvalue()
+
+
+def test_rail_closes_on_an_error(term):
+    buf = TTY()
+    with pytest.raises(RuntimeError):
+        with ui.Rail("Updating Copycord", stream=buf):
+            ui.fail("update failed", stream=buf)
+            raise RuntimeError("boom")
+    assert _plain(buf).splitlines()[-2:] == ["✗  update failed", "└"]
+    assert ui._rail is None and not ui.on_rail(buf)
+
+
+def test_rail_lines_on_another_terminal_stream(term):
+    out, err = TTY(), TTY()
+    with ui.Rail("Uninstall Copycord", stream=out):
+        ui.warn("uninstall cancelled", "nothing was changed", stream=err)
+        ui.warn("not a terminal", stream=Pipe())
+    assert _plain(err) == "!  uninstall cancelled  nothing was changed\n"
+
+
+def test_box_on_the_rail(term):
+    buf = TTY()
+    with ui.Rail("Updating Copycord", stream=buf):
+        ui.box(["3.28.0 -> 4.0.0"], title="Update available", stream=buf)
+        ui.box(["Could not back up"], title="Database backup failed", status="fail", stream=buf)
+    assert _plain(buf).splitlines()[2:6] == [
+        "◇  Update available",
+        "│  3.28.0 -> 4.0.0",
+        "✗  Database backup failed",
+        "│  Could not back up",
+    ]
+
+
+def test_gap_finishes_a_prompt_line_left_open(term, monkeypatch):
+    buf = TTY()
+    with ui.Rail("Uninstall Copycord", stream=buf):
+        monkeypatch.setattr(ui, "_open_prompt", True)
+        ui.gap(buf)
+    assert _plain(buf).endswith("Uninstall Copycord\n\n│\n└\n")
+    assert ui._open_prompt is False
+
+
+def test_spinner_on_the_rail_lines_up_with_the_marks(term):
+    buf = TTY()
+    with ui.Rail("Updating Copycord", stream=buf):
+        spin = ui.Spinner("Installing", stream=buf)
+        spin._started = 10.0
+        assert _plain(io.StringIO(spin.render("⠋", 10.5))) == "\r⠋  Installing"

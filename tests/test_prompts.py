@@ -1,5 +1,6 @@
 """The arrow-key prompts in copycord.ui and their typed fallback."""
 
+import io
 import re
 import sys
 
@@ -188,3 +189,90 @@ def test_raw_mode_failure_means_fallback(monkeypatch):
     monkeypatch.setattr(ui, "raw_keys_available", lambda: True)
     monkeypatch.setattr("builtins.input", lambda *_: "n")
     assert ui.confirm("q") is False
+
+
+# --------------------------------------------------------------------------
+# prompts on the step rail
+# --------------------------------------------------------------------------
+
+
+class TTY(io.StringIO):
+    encoding = "utf-8"
+
+    def isatty(self):
+        return True
+
+
+@pytest.fixture()
+def tty_out(monkeypatch):
+    """sys.stdout is a UTF-8 terminal, so a rail opened on it is shown."""
+    out = TTY()
+    monkeypatch.setattr(sys, "stdout", out)
+    return out
+
+
+def _rail_screen(out):
+    return _ANSI.sub("", out.getvalue())
+
+
+def test_choose_on_the_rail(keys, tty_out):
+    keys["keys"] = ["down", "enter"]
+    with ui.Rail("Uninstall Copycord"):
+        assert ui.choose("Your data is in /x", OPTIONS) == 1
+    out = _rail_screen(tty_out)
+    assert ("◆  Your data is in /x\n│  ❯ Keep my data\n│    Delete everything\n"
+            "│    Cancel\n│    ↑/↓ to move, Enter to select") in out
+    assert out.endswith("◇  Your data is in /x\n│  Delete everything\n└\n")
+
+
+def test_confirm_on_the_rail(keys, tty_out):
+    keys["keys"] = ["enter"]
+    with ui.Rail("Updating Copycord"):
+        assert ui.confirm("Update Copycord now?") is True
+    out = _rail_screen(tty_out)
+    assert "◆  Update Copycord now?\n│  ❯ Yes / No" in out
+    assert out.endswith("◇  Update Copycord now?\n│  Yes\n└\n")
+
+
+def test_cancel_on_the_rail(keys, tty_out):
+    keys["keys"] = ["esc"]
+    with pytest.raises(KeyboardInterrupt):
+        with ui.Rail("Uninstall Copycord"):
+            ui.choose("Your data is in /x", OPTIONS)
+    assert _rail_screen(tty_out).endswith("✗  Your data is in /x\n│  cancelled\n└\n")
+
+
+def test_prompts_off_the_rail_are_unchanged(keys, tty_out):
+    keys["keys"] = ["enter"]
+    assert ui.confirm("Update Copycord now?") is True
+    out = _rail_screen(tty_out)
+    assert "? Update Copycord now?  ❯ Yes / No" in out
+    assert out.endswith("✓ Update Copycord now? Yes\n")
+
+
+def test_typed_prompts_on_the_rail(monkeypatch, tty_out):
+    monkeypatch.setattr(ui, "raw_keys_available", lambda: False)
+    asked = []
+    answers = iter(["3", ""])
+    monkeypatch.setattr("builtins.input", lambda prompt="": asked.append(_ANSI.sub("", prompt)) or next(answers))
+    with ui.Rail("Uninstall Copycord"):
+        assert ui.choose("Your data is in /x", OPTIONS) == 2
+        assert ui.confirm("Update Copycord now?") is True
+    out = _rail_screen(tty_out)
+    assert ("◆  Your data is in /x\n│  1) Keep my data (default)\n│  2) Delete everything\n"
+            "│  3) Cancel\n") in out
+    assert asked == ["│  Enter 1, 2 or 3 [1] ", "◆  Update Copycord now? (Y/n) "]
+
+
+def test_rail_prompts_fall_back_to_ascii(keys, monkeypatch):
+    class AsciiTTY(TTY):
+        encoding = "ascii"
+
+    out = AsciiTTY()
+    monkeypatch.setattr(sys, "stdout", out)
+    keys["keys"] = ["enter"]
+    with ui.Rail("Uninstall Copycord"):
+        ui.choose("Your data is in /x", OPTIONS)
+    screen = _rail_screen(out)
+    assert "*  Your data is in /x\n|  > Keep my data\n|    Delete everything" in screen
+    assert screen.endswith("o  Your data is in /x\n|  Keep my data\n+\n")

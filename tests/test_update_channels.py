@@ -1144,6 +1144,29 @@ def test_update_shows_the_versions_and_no_changes_nothing(current, tty, monkeypa
     assert "Update cancelled, nothing was changed" in out
 
 
+def test_update_on_a_terminal_asks_on_the_rail(current, tty, monkeypatch):
+    class Terminal(io.StringIO):
+        encoding = "utf-8"
+
+        def isatty(self):
+            return True
+
+    rec, backups, _, _ = current
+    monkeypatch.setattr(update, "current_version", lambda: "3.28.0")
+    monkeypatch.setenv("NO_COLOR", "1")
+    out = Terminal()
+    monkeypatch.setattr(update.sys, "stdout", out)
+    tty["answers"] = ["n"]
+    assert cli.main(["update"]) == 0
+    assert rec.calls == [] and backups == []
+    assert tty["asked"] == ["◆  Update Copycord now? (Y/n) "]
+    lines = out.getvalue().splitlines()
+    assert lines[1].startswith("┌  Updating Copycord")
+    at = lines.index("◇  Update available")
+    assert lines[at - 1] == "│" and lines[at + 1] == "│  3.28.0 -> 4.0.0"
+    assert lines[-3:] == ["│", "│  Update cancelled, nothing was changed", "└"]
+
+
 @pytest.mark.parametrize("answer", ["", "y", "yes"])
 def test_update_installs_when_the_answer_is_yes(current, tty, monkeypatch, answer):
     rec, backups, _, _ = current

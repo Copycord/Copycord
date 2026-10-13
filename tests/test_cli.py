@@ -1,4 +1,5 @@
 """Tests for the copycord CLI and the data-dir resolution. No network."""
+import io
 import json
 import os
 import socket
@@ -367,6 +368,71 @@ def test_uninstall_keep_data_does_not_ask(uninstall_env, monkeypatch, capsys):
     assert len(asked) == 1
     out = capsys.readouterr().out
     assert "1) Keep my data" in out and "Delete everything" not in out
+
+
+class _Terminal(io.StringIO):
+    encoding = "utf-8"
+
+    def isatty(self):
+        return True
+
+
+@pytest.fixture()
+def uninstall_tty(uninstall_env, monkeypatch):
+    """uninstall_env with stdout and stderr on a terminal, so the rail is shown."""
+    out, err = _Terminal(), _Terminal()
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    return uninstall_env, out, err
+
+
+def _removed_program(dry_run, purge, removed, kept, *a):
+    from copycord import ui
+
+    ui.ok("removed the copycord program")
+    return True
+
+
+def test_uninstall_on_a_terminal_runs_on_the_rail(uninstall_tty, monkeypatch):
+    data, out, _err = uninstall_tty
+    monkeypatch.setattr(cli, "_uninstall_program", _removed_program)
+    asked = _answers(monkeypatch, "")
+    assert cli.main(["uninstall"]) == 0
+    assert asked == ["│  Enter 1, 2 or 3 [1] "]
+    assert out.getvalue().splitlines() == [
+        "",
+        "┌  Uninstall Copycord",
+        "│  Removes the Copycord program and its background service.",
+        "│",
+        f"◆  Your data is in {data}",
+        "│  1) Keep my data (default)",
+        "│  2) Delete everything (database, logs, backups, settings)",
+        "│  3) Cancel",
+        "│",
+        "✓  removed the copycord program",
+        "│",
+        "✓  Copycord uninstalled",
+        f"└  Your data is still in {data}",
+    ]
+
+
+def test_uninstall_cancel_on_a_terminal_closes_the_rail(uninstall_tty, monkeypatch):
+    data, out, err = uninstall_tty
+    monkeypatch.setattr(cli, "_uninstall_service", lambda *a: pytest.fail("ran after cancel"))
+    _answers(monkeypatch, "3")
+    assert cli.main(["uninstall"]) == 1
+    assert (data / "data.db").exists()
+    assert out.getvalue().splitlines()[-3:] == ["│  3) Cancel", "│", "└"]
+    assert err.getvalue() == "!  uninstall cancelled  nothing was changed\n"
+
+
+def test_uninstall_without_a_terminal_has_no_rail(uninstall_env, capsys):
+    assert cli.main(["uninstall", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("\nUninstall Copycord (dry run, nothing changes)\n"
+                          "Removes the Copycord program and its background service.\n\n")
+    assert not any(glyph in out for glyph in "┌│◆◇└")
+    assert out.endswith(f" Dry run: nothing changed\n  Your data is still in {uninstall_env}\n")
 
 
 def test_uninstall_purge_and_keep_data_conflict(uninstall_env, capsys):
