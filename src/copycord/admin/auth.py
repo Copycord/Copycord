@@ -25,6 +25,7 @@ from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
 
 from copycord.admin.logging_setup import LOGGER
 from copycord.common.config import CURRENT_VERSION
+from copycord.common.private_file import write_private_file
 
 ADMIN_COOKIE_NAME = "cc_admin"
 SESSION_MAX_AGE = 60 * 60 * 12
@@ -164,7 +165,11 @@ def _load_or_create_secret_key(
     secret_env: str,
     filename: str = "secret.key",
 ) -> str:
-    """Load the key for signing session cookies: SECRET_KEY env, then <data dir>/secret.key, else a generated key (not persisted if the write fails)."""
+    """Load the key for signing session cookies: SECRET_KEY env, then <data dir>/secret.key, else a generated key (not persisted if the write fails).
+
+    A secret.key that exists but cannot be read raises instead of being
+    replaced, since a new key would silently sign everyone out.
+    """
     if secret_env:
         return secret_env
 
@@ -173,16 +178,18 @@ def _load_or_create_secret_key(
     if secret_file.exists():
         try:
             key = secret_file.read_text(encoding="utf-8").strip()
-            if key:
-                return key
-        except Exception:
-            LOGGER.warning(
-                "Failed reading %s; regenerating", secret_file, exc_info=True
-            )
+        except Exception as e:
+            raise RuntimeError(
+                f"Cannot read the login key file {secret_file}: {e}. "
+                "Fix its permissions or delete it to create a new one "
+                "(deleting it signs everyone out)."
+            ) from e
+        if key:
+            return key
 
     key = secrets.token_urlsafe(32)
     try:
-        secret_file.write_text(key, encoding="utf-8")
+        write_private_file(secret_file, key)
     except Exception:
 
         LOGGER.warning(
