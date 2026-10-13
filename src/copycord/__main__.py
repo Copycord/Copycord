@@ -501,6 +501,18 @@ def check_db(path: Path) -> Check:
             conn.close()
     except sqlite3.Error as e:
         return Check(FAIL, "database", f"{path} does not open: {e}")
+    from copycord.common.db import SCHEMA_VERSION, stored_schema_version
+
+    try:
+        stored = stored_schema_version(str(path))
+    except sqlite3.Error:
+        stored = None
+    if stored is not None and stored > SCHEMA_VERSION:
+        return Check(
+            FAIL, "database",
+            f"{path} has schema {stored}, newer than this Copycord supports "
+            f"({SCHEMA_VERSION}); run copycord update to go back to a newer version",
+        )
     if "app_config" not in tables:
         return Check(
             WARN, "database", f"{path} opens but has no app_config table yet"
@@ -940,6 +952,41 @@ def uninstall_command(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def schema_too_new_message(err) -> None:
+    """The refusal `copycord run` prints for a DB written by a newer Copycord."""
+    from copycord import ui
+    from copycord.common.db import backups_dir, pre_update_backups
+
+    where = backups_dir()
+    lines = [
+        f"This database was created by a newer Copycord (schema {err.stored}, "
+        f"this version supports {err.supported}).",
+        f"Run {ui.cmd('copycord update', stream=sys.stderr)} to go back to a newer "
+        f"version, or restore a backup from {where}.",
+        f"Database: {err.db_path}",
+    ]
+    try:
+        newest = pre_update_backups(where)
+    except OSError:
+        newest = []
+    if newest:
+        lines.append(f"Newest pre-update backup: {newest[0]}")
+    ui.box(lines, title="Database is newer than Copycord", status="fail", stream=sys.stderr)
+
+
+def schema_guard() -> bool:
+    """False (after saying why) when the DB was written by a newer Copycord."""
+    from copycord.common.db import SchemaTooNewError, check_schema_version
+    from copycord.common.paths import db_path
+
+    try:
+        check_schema_version(str(db_path()))
+    except SchemaTooNewError as e:
+        schema_too_new_message(e)
+        return False
+    return True
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     apply_data_dir(args)
@@ -984,14 +1031,21 @@ def main(argv: Optional[List[str]] = None) -> int:
         setup_logging(roles=())
         if not check_removed_options():
             return 1
+        # Before any role starts, so the dashboard never comes up half-way.
+        if not schema_guard():
+            return 1
 
         from copycord import supervisor, update_check
+        from copycord.common.db import SchemaTooNewError
 
         update_check.start()
         try:
             asyncio.run(supervisor.run())
         except KeyboardInterrupt:
             pass
+        except SchemaTooNewError as e:
+            schema_too_new_message(e)
+            return 1
         return 0
     return 2
 
