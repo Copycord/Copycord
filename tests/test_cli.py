@@ -1228,7 +1228,7 @@ def test_main_without_console_streams(data_dir, monkeypatch):
         def state(self):
             return service.State(True, True, "task")
 
-    monkeypatch.setattr(service, "get_service", lambda user=False: Svc())
+    monkeypatch.setattr(service, "get_service", lambda *a, **k: Svc())
     monkeypatch.setattr(logging_setup, "WINDOWLESS", False)
     for name in ("stdin", "stdout", "stderr"):
         monkeypatch.setattr(sys, name, None)
