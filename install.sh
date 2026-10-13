@@ -915,21 +915,60 @@ fi
 
 # --- done -------------------------------------------------------------------------
 
-box_line() { printf '  %s%s%s %-52s %s%s%s\n' "$ACCENT" "$BOX_V" "$RESET" "$1" "$ACCENT" "$BOX_V" "$RESET"; }
-box_item() { printf '  %s%s%s %s!%s %-50s %s%s%s\n' "$ACCENT" "$BOX_V" "$RESET" "$YELLOW$BOLD" "$RESET" "$1" "$ACCENT" "$BOX_V" "$RESET"; }
-# box_link URL: a box row with the URL, clickable where the terminal supports it.
-box_link() {
-    row="$(printf '%-52s' "    $1")"
-    if [ "$HYPERLINKS" = "1" ]; then
-        row="${row%%"$1"*}$ESC]8;;$1$ESC\\$1$ESC]8;;$ESC\\${row#*"$1"}"
-    fi
-    printf '  %s%s%s %s %s%s%s\n' "$ACCENT" "$BOX_V" "$RESET" "$row" "$ACCENT" "$BOX_V" "$RESET"
+# The box rows are collected first so the box can be as wide as its longest row.
+BOX_NL='
+'
+BOX_ROWS=""
+box_add() { BOX_ROWS="$BOX_ROWS$1$2$BOX_NL"; }
+box_line() { box_add L "$1"; }
+box_item() { box_add I "$1"; }
+box_link() { box_add K "$1"; }
+# box_fill N CHAR: sets FILL to CHAR repeated N times.
+box_fill() {
+    FILL=""
+    fill_n=$1
+    while [ "$fill_n" -gt 0 ]; do FILL="$FILL$2"; fill_n=$((fill_n - 1)); done
 }
 box_rule() {
-    i=0
-    rule=""
-    while [ $i -lt 54 ]; do rule="$rule$BOX_H"; i=$((i + 1)); done
-    printf '  %s%s%s%s%s\n' "$ACCENT" "$1" "$rule" "$2" "$RESET"
+    box_fill $((BOX_W + 2)) "$BOX_H"
+    printf '  %s%s%s%s%s\n' "$ACCENT" "$1" "$FILL" "$2" "$RESET"
+}
+# box_flush: draws the top rule, every collected row at the width of the longest, the bottom rule.
+box_flush() {
+    BOX_W=52
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        text="${row#?}"
+        case "$row" in
+            I*) len=$((${#text} + 2)) ;;
+            K*) len=$((${#text} + 4)) ;;
+            *) len=${#text} ;;
+        esac
+        [ "$len" -le "$BOX_W" ] || BOX_W=$len
+    done <<EOF_ROWS
+$BOX_ROWS
+EOF_ROWS
+    box_rule "$BOX_TL" "$BOX_TR"
+    while IFS= read -r row; do
+        [ -n "$row" ] || continue
+        text="${row#?}"
+        mark=""
+        case "$row" in
+            I*) len=$((${#text} + 2)); mark="$YELLOW$BOLD!$RESET " ;;
+            K*) len=$((${#text} + 4)); text="    $text" ;;
+            *) len=${#text} ;;
+        esac
+        box_fill $((BOX_W - len)) " "
+        body="$text$FILL"
+        if [ "$HYPERLINKS" = "1" ] && [ "${row%"${row#?}"}" = "K" ]; then
+            url="${row#?}"
+            body="${text%%"$url"*}$ESC]8;;$url$ESC\\$url$ESC]8;;$ESC\\${text#*"$url"}$FILL"
+        fi
+        printf '  %s%s%s %s%s %s%s%s\n' "$ACCENT" "$BOX_V" "$RESET" "$mark" "$body" "$ACCENT" "$BOX_V" "$RESET"
+    done <<EOF_ROWS
+$BOX_ROWS
+EOF_ROWS
+    box_rule "$BOX_BL" "$BOX_BR"
 }
 
 say ""
@@ -945,7 +984,6 @@ HOST="$(env_value DASHBOARD_HOST)"
 case "$HOST" in "" | 0.0.0.0 | :: | "[::]" | 127.0.0.1 | localhost) HOST="localhost" ;; esac
 case "$HOST" in *:*) case "$HOST" in \[*) ;; *) HOST="[$HOST]" ;; esac ;; esac
 URL="http://$HOST:$PORT"
-box_rule "$BOX_TL" "$BOX_TR"
 box_line "Copycord $LABEL is installed"
 box_line "Home: $COPYCORD_HOME"
 box_line "Settings: $ENV_FILE"
@@ -959,15 +997,15 @@ box_line "Needs your attention:"
 box_item "Finish the setup in the dashboard once it runs:"
 box_link "$URL"
 if [ -n "$NEW_PASSWORD" ]; then
-    box_item "Your dashboard password (shown only this once):"
+    box_item "Your dashboard password (shown once):"
     box_line "    $NEW_PASSWORD"
-    box_line "    it is saved as PASSWORD in the settings file above"
+    box_line "    saved as PASSWORD in the settings file"
 elif grep -qx 'PASSWORD=copycord' "$ENV_FILE" 2>/dev/null; then
     box_item "Change the default dashboard password:"
     box_line "    edit PASSWORD in the settings file above,"
     box_line "    then run: copycord restart"
 fi
-box_rule "$BOX_BL" "$BOX_BR"
+box_flush
 say ""
 say "  ${DIM}Open a new shell first if copycord is not found.$RESET"
 say ""

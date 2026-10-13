@@ -22,7 +22,7 @@ def test_final_box_reads_the_password_back_once():
     box = _final_box(_text())
     assert "PASSWORD=copycord" not in _text()
     assert "EnvValue 'PASSWORD'" in box
-    assert box.count("password: $password") == 1
+    assert box.count('BoxLine "    $password"') == 1
     assert "config get $Key --show-secrets --json" in _text()
 
 

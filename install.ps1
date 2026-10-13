@@ -786,23 +786,26 @@ Test a branch, no release needed:
         Out ''
         return
     }
-    function BoxLine([string]$Text) {
+    # The rows are collected first so the box can be as wide as its longest row.
+    $rows = [System.Collections.Generic.List[object]]::new()
+    function BoxLine([string]$Text) { $rows.Add(@('L', $Text)) }
+    function BoxLink([string]$Url) { $rows.Add(@('K', $Url)) }
+    function BoxItem([string]$Text) { $rows.Add(@('I', $Text)) }
+    function BoxRow($Row, [int]$Width) {
+        $kind = $Row[0]
+        $text = $Row[1]
         Out ("  " + $box.V + ' ') Magenta -NoNewline
-        Out ('{0,-52}' -f $Text) -NoNewline
-        Out (' ' + $box.V) Magenta
-    }
-    function BoxLink([string]$Url) {
-        # A box row with the URL, clickable where the terminal supports it.
-        $row = '{0,-52}' -f "    $Url"
-        if ($hyperlinks) { $row = $row.Replace($Url, "$esc]8;;$Url$esc\$Url$esc]8;;$esc\") }
-        Out ("  " + $box.V + ' ') Magenta -NoNewline
-        Out $row -NoNewline
-        Out (' ' + $box.V) Magenta
-    }
-    function BoxItem([string]$Text) {
-        Out ("  " + $box.V + ' ') Magenta -NoNewline
-        Out '! ' Yellow -NoNewline
-        Out ('{0,-50}' -f $Text) -NoNewline
+        if ($kind -eq 'I') {
+            Out '! ' Yellow -NoNewline
+            Out ($text.PadRight($Width - 2)) -NoNewline
+        } elseif ($kind -eq 'K') {
+            # The URL is clickable where the terminal supports it; the escapes are not padded.
+            $shown = ("    $text").PadRight($Width)
+            if ($hyperlinks) { $shown = $shown.Replace($text, "$esc]8;;$text$esc\$text$esc]8;;$esc\") }
+            Out $shown -NoNewline
+        } else {
+            Out ($text.PadRight($Width)) -NoNewline
+        }
         Out (' ' + $box.V) Magenta
     }
     function EnvValue([string]$Key) {
@@ -827,8 +830,6 @@ Test a branch, no release needed:
     if (-not $dashHost -or $dashHost -in @('127.0.0.1', '0.0.0.0', '::', '::1')) { $dashHost = 'localhost' }
     elseif ($dashHost -match ':') { $dashHost = "[$dashHost]" }
     $password = EnvValue 'PASSWORD'
-    $rule = [string]$box.H * 54
-    Out ("  " + $box.TL + $rule + $box.TR) Magenta
     foreach ($text in @(
             "Copycord $label is installed",
             "Home: $homeDir",
@@ -844,10 +845,20 @@ Test a branch, no release needed:
     BoxItem 'Finish the setup in the dashboard once it runs:'
     BoxLink "http://${dashHost}:$port"
     if ($password) {
-        BoxLine "    password: $password"
-        BoxLine '    (PASSWORD in the settings file above)'
+        BoxItem 'Your dashboard password (shown once):'
+        BoxLine "    $password"
+        BoxLine '    saved as PASSWORD in the settings file'
     }
 
+    $width = 52
+    foreach ($row in $rows) {
+        $len = $row[1].Length
+        if ($row[0] -eq 'I') { $len += 2 } elseif ($row[0] -eq 'K') { $len += 4 }
+        if ($len -gt $width) { $width = $len }
+    }
+    $rule = [string]$box.H * ($width + 2)
+    Out ("  " + $box.TL + $rule + $box.TR) Magenta
+    foreach ($row in $rows) { BoxRow $row $width }
     Out ("  " + $box.BL + $rule + $box.BR) Magenta
     Out ''
     Out '  Open a new terminal first if copycord is not found.' DarkGray

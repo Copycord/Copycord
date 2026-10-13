@@ -114,7 +114,7 @@ def test_success_box_names_the_env_file_and_what_needs_attention(path):
     assert "Finish the setup in the dashboard once it runs:" in box
     if path == PS1:
         # The password read back from the settings file is shown in the box.
-        assert 'BoxLine "    password: $password"' in box
+        assert 'BoxLine "    $password"' in box
         return
     # Only while the default password is still set.
     assert "PASSWORD=copycord" in box[:box.index("Change the default dashboard password:")]
@@ -245,7 +245,7 @@ def test_sh_shows_the_new_password_and_the_saved_address():
     assert '"$BIN_DIR/copycord" config get "$@"' in _sh_function(text, "env_value")
     box = text[text.index("Needs your attention:"):]
     assert box.count("$NEW_PASSWORD") == 2
-    assert "shown only this once" in box
+    assert "shown once" in box
     # ADMIN_PORT and DASHBOARD_HOST come from .env; localhost unless a host is set.
     assert 'PORT="$(env_value ADMIN_PORT)"' in text
     assert 'HOST="$(env_value DASHBOARD_HOST)"' in text
