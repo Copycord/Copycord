@@ -3,7 +3,7 @@
 // run when Auto-clear is on, as the log half of the old scraper.js.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Button, Card, Input } from "../../components/ui";
+import { Button, Card, cx, Input } from "../../components/ui";
 import { connectSse } from "../../lib/sse";
 import type { ScraperLogEvent } from "../../types/scraper";
 import { clearLogFile, LOG_STREAM_URL } from "./scraperApi";
@@ -124,11 +124,11 @@ export function ScraperLogsCard({ signal, EventSourceImpl }: ScraperLogsCardProp
 
   return (
     <Card id="sc-log-card" aria-label="Scraper Logs" className="sc-log-card">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h3 className={TITLE}>Scraper Logs</h3>
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="flex items-center justify-between gap-3">
+        <h3 className={cx(TITLE, "shrink-0")}>Scraper Logs</h3>
+        <div className="flex min-w-0 items-center gap-2">
           <label
-            className="inline-flex cursor-pointer items-center gap-2 text-[13px] text-text-1"
+            className="inline-flex shrink-0 cursor-pointer items-center gap-2 text-[13px] text-text-1"
             title="Automatically clear logs after each scrape completes"
           >
             <input
@@ -140,25 +140,26 @@ export function ScraperLogsCard({ signal, EventSourceImpl }: ScraperLogsCardProp
             />
             <span>Auto-clear</span>
           </label>
-          <Input
-            id="sc-log-search"
-            type="text"
-            aria-label="Search logs"
-            placeholder={"Search logs…"}
-            className="w-40"
-            value={search}
-            onChange={(e) => {
-              stick.current = true;
-              setSearch(e.target.value);
-            }}
-            onKeyDown={(e) => {
-              if (e.key !== "Escape") return;
-              e.preventDefault();
-              setSearch("");
-              setQuery("");
-            }}
-          />
-          <Button id="sc-log-clear" size="sm" variant="ghost" onClick={onClear}>
+          <div className="w-40 min-w-0 shrink">
+            <Input
+              id="sc-log-search"
+              type="text"
+              aria-label="Search logs"
+              placeholder={"Search logs…"}
+              value={search}
+              onChange={(e) => {
+                stick.current = true;
+                setSearch(e.target.value);
+              }}
+              onKeyDown={(e) => {
+                if (e.key !== "Escape") return;
+                e.preventDefault();
+                setSearch("");
+                setQuery("");
+              }}
+            />
+          </div>
+          <Button id="sc-log-clear" size="sm" variant="ghost" className="shrink-0" onClick={onClear}>
             Clear
           </Button>
         </div>

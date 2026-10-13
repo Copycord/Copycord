@@ -410,7 +410,8 @@ test.describe("scraper", () => {
     await expect(page.locator("#sc-opt-avatar")).toBeChecked();
     await expect(page.locator("#sc-opt-roles")).not.toBeChecked();
     await expect(page.locator("#sc-opt-bio")).not.toBeChecked();
-    await page.locator("#sc-opt-roles").check();
+    // The old page draws its own box over a hidden input, so the label is what takes the click.
+    await page.locator("label:has(#sc-opt-roles)").click();
     await expect(page.locator("#sc-opt-roles")).toBeChecked();
 
     // No tokens in the e2e home, so the server answers without calling Discord.

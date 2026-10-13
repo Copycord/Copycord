@@ -73,7 +73,7 @@ export function PastScrapesCard({ data, reload, notify, confirm }: PastScrapesCa
         <div
           id="sc-scrapes-empty"
           hidden={all.length > 0}
-          className="flex flex-col items-center gap-1 rounded-panel border border-dashed border-border px-6 py-8 text-center"
+          className="flex flex-col items-center gap-1 px-6 py-8 text-center"
         >
           <p className="m-0 font-semibold text-text-1">No saved scrapes yet</p>
           <small className="text-text-2">Completed scrapes are automatically saved here</small>
