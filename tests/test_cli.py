@@ -211,7 +211,8 @@ def test_doctor_role_set_fails(doctor_env, monkeypatch, capsys):
     out = capsys.readouterr().out
     role = _line(out, "ROLE is set")
     assert role.startswith("FAIL")
-    assert "v4 removed the ROLE option" in role and "one container" not in role
+    assert role.startswith("FAIL  ROLE is set: Copycord v4 removed the ROLE option.")
+    assert "one container" not in role
     assert out.splitlines()[-1] == "0 warnings, 1 problem"
 
 
@@ -398,7 +399,7 @@ def test_check_updates_never_fails(data_dir, monkeypatch):
     result = update_check.Result(True, "4.0.0", "4.1.0", 0.0)
     monkeypatch.setattr(update_check, "check_cached", lambda **_: result)
     check = cli.check_updates()
-    assert check.status == cli.INFO and check.name == "Update available: v4.1.0 (you have v4.0.0)"
+    assert check.status == cli.INFO and check.name == "update available: v4.1.0 (you have v4.0.0)"
 
     monkeypatch.setattr(update_check, "check_cached", lambda **_: result._replace(available=False))
     assert cli.check_updates().status == cli.PASS

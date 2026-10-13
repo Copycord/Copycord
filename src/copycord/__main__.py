@@ -654,7 +654,7 @@ def check_dependencies(imports=None) -> Check:
 def check_role(env: Optional[Mapping[str, str]] = None) -> Check:
     env = os.environ if env is None else env
     if "ROLE" in env:
-        return Check(FAIL, "ROLE is set", ROLE_REMOVED_MESSAGE)
+        return Check(FAIL, "ROLE is set", ROLE_REMOVED_MESSAGE.split("ROLE is set, but ", 1)[-1])
     return Check(PASS, "ROLE not set")
 
 
@@ -921,8 +921,8 @@ def check_updates(timeout: float = 2.0) -> Check:
     except Exception as e:
         return Check(INFO, "could not check for updates", str(e).splitlines()[0][:120] if str(e) else type(e).__name__)
     if result.available:
-        return Check(INFO, update_check.hint_text(result).split(". Run")[0],
-                     "install it with `copycord update`")
+        text = update_check.hint_text(result).split(". Run")[0]
+        return Check(INFO, text[:1].lower() + text[1:], "install it with `copycord update`")
     return Check(PASS, "up to date")
 
 
