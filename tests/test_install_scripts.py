@@ -142,7 +142,8 @@ def test_only_a_dry_run_prints_the_plan(path):
     text = _text(path)
     guard = 'if [ "$DRY_RUN" = "1" ]; then' if path == SH else "if ($dryRun) {"
     close = "fi" if path == SH else "}"
-    for call in ("Plan", "plan_line \"home\"" if path == SH else "PlanLine 'home'"):
+    calls = ('Plan$RESET', 'plan_line "home"') if path == SH else ("'  Plan'", "PlanLine 'home'")
+    for call in calls:
         assert _guarded_by(text, call, guard, close)
 
 

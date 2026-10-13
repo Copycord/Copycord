@@ -50,9 +50,9 @@ Then run `copycord run`, open **http://localhost:8080** and log in with the pass
 
 ### 1. Install Copycord
 
-Run the command for your system from above. The installer prints a short plan, then runs numbered steps:
+Run the command for your system from above. The installer runs numbered steps:
 
-![The Copycord installer in a terminal: the plan, four steps with check marks and the success box](/img/install-script.svg)
+![The Copycord installer in a terminal: the banner, four steps with check marks and the success box](/img/install-script.svg)
 
 1. **Preparing uv:** installs [uv](https://docs.astral.sh/uv/) if it is missing. uv provides Python 3.12.
 2. **Finding the release:** the newest stable [GitHub release](https://github.com/Copycord/Copycord/releases).

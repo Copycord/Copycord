@@ -35,15 +35,15 @@ The installer is not used with Docker. See [Docker Install](/docs/getting-starte
 </TabItem>
 </Tabs>
 
-It prints a plan, then runs numbered steps:
+It prints the banner, then runs numbered steps:
 
 1. **Preparing uv:** installs [uv](https://docs.astral.sh/uv/) when it is not on your `PATH`. uv provides Python 3.12 and Copycord's dependencies.
 2. **Finding the release:** the newest stable release, or the one you asked for.
 3. **Installing Copycord:** `uv tool install --force` with the release wheel, a per-user install with no sudo.
 4. **Finishing up:** adds uv's tool directory to your `PATH` when needed (`uv tool update-shell`), writes [`.env`](/docs/getting-started/configuration) in the Copycord home if it does not exist yet, and saves the update channel when you chose one.
-5. **Repairing (upgrades and reinstalls only):** when Copycord or its home was already there, runs [`copycord doctor --fix`](/docs/cli#doctor-fix) to apply the automatic repairs, such as starting a stopped service or taking an overdue backup. Anything it cannot fix is listed; it never fails the install. A first install skips this step.
+5. **Repairing (upgrades and reinstalls only):** when Copycord or its home was already there, runs [`copycord doctor --fix --brief`](/docs/cli#doctor-fix) to apply the automatic repairs, such as starting a stopped service or taking an overdue backup. It prints a line for each repair, any failed check and `All checks passed` or the number of warnings; it never fails the install. A first install skips this step.
 
-It ends with a box that shows the settings file, the default password `copycord`, the next commands (`copycord run`, `copycord restart`, `copycord update`) and `http://localhost:8080`. It does not start Copycord and does not touch Docker. It refuses to run as root: Copycord installs for your user.
+It ends with a box that shows the settings file, the next commands (`copycord run`, `copycord restart`, `copycord update`) and a **Needs your attention** list: change the default password `copycord` (while it is still set) and finish the setup in the dashboard at `http://localhost:8080`. It does not start Copycord and does not touch Docker. It refuses to run as root: Copycord installs for your user.
 
 ## Flags
 
