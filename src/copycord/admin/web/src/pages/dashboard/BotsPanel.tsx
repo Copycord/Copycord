@@ -42,10 +42,15 @@ export function BotsPanel({ onViewLogs, WebSocketImpl }: BotsPanelProps) {
   const [statuses, setStatuses] = useState<BotStatuses>(EMPTY_STATUSES);
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState<Record<BotRole, boolean>>({ server: false, client: false });
+  // When each row's uptime was reported, so it counts up between reports like the old page.
+  const [stamps, setStamps] = useState<Record<BotRole, number>>({ server: 0, client: 0 });
+  const [now, setNow] = useState(() => Date.now());
 
   const refresh = useCallback(async () => {
     try {
       setStatuses(statusesFrom(await api.get<StatusResponse>(STATUS_URL)));
+      setStamps({ server: Date.now(), client: Date.now() });
+      setNow(Date.now());
     } catch {
       // The table keeps its last state; the websocket fills it in.
     }
@@ -59,12 +64,21 @@ export function BotsPanel({ onViewLogs, WebSocketImpl }: BotsPanelProps) {
     "/ws/ui",
     (msg) => {
       const update = statusFromWs(msg);
-      if (update) setStatuses((s) => ({ ...s, [update.role]: update.status }));
+      if (!update) return;
+      setStatuses((s) => ({ ...s, [update.role]: update.status }));
+      setStamps((t) => ({ ...t, [update.role]: Date.now() }));
+      setNow(Date.now());
     },
     { WebSocketImpl },
   );
 
   const running = anyRunning(statuses);
+
+  useEffect(() => {
+    if (!running) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [running]);
 
   const toggle = async () => {
     setBusy(true);
@@ -107,7 +121,9 @@ export function BotsPanel({ onViewLogs, WebSocketImpl }: BotsPanelProps) {
                     </span>
                   </td>
                   <td id={`${role}-uptime`} className={cx(CELL, "whitespace-nowrap")}>
-                    {s.running && s.uptime_sec != null ? formatUptime(s.uptime_sec) : ""}
+                    {s.running && s.uptime_sec != null
+                      ? formatUptime(s.uptime_sec + Math.max(0, Math.floor((now - stamps[role]) / 1000)))
+                      : ""}
                   </td>
                   <td className={cx(CELL, "max-w-0")}>
                     <span

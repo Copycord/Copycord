@@ -5,6 +5,7 @@ import { BASE_PATH, E2E_DIR, LOGIN_PATH, NOT_FOUND_PATH, PAGES, pageUrl, type Pa
 import { FWD_CREATE_BTN, MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, expectOpen, modal, settle } from "../lib/ui.ts";
 import { stubClientGuilds } from "../lib/seed.ts";
 import { DETAILS, FIRST, dialog as guildDialog, guildAction, guildCard, stubGuilds } from "./guilds-fixtures.ts";
+import { LOG_LINES, stubLogStream, stubRunning, stubVersion } from "./dashboard-fixtures.ts";
 
 // E2E_SHOTS_DIR=baseline/new captures the SPA into a separate folder for scripts/compare.ts.
 const OUT = path.resolve(E2E_DIR, process.env.E2E_SHOTS_DIR ?? "baseline/old");
@@ -45,6 +46,21 @@ const GUILD_SHOTS: Array<{ name: string; fullPage: boolean; open: (page: Page) =
   { name: "guilds-export", fullPage: false, open: async (p) => {
     await guildAction(p, FIRST.id, "Export messages");
     await expect(guildDialog(p, "Export messages")).toBeVisible();
+  } },
+];
+
+// The bots panel with stubbed running bots and the log modal with a stubbed stream (items 13, 14).
+const DASHBOARD_SHOTS: Array<{ name: string; stub: (page: Page) => Promise<void>; open: (page: Page) => Promise<void> }> = [
+  { name: "dashboard-bots-running", stub: stubRunning, open: async () => undefined },
+  { name: "dashboard-log-modal", stub: stubLogStream, open: async (p) => {
+    await p.locator('[data-log="server"]').click();
+    await expect(p.locator("#log-body")).toContainText(LOG_LINES[2]);
+  } },
+  { name: "dashboard-log-search", stub: stubLogStream, open: async (p) => {
+    await p.locator('[data-log="server"]').click();
+    await expect(p.locator("#log-body")).toContainText(LOG_LINES[2]);
+    await p.locator("#log-search-input").fill("beta");
+    await expect(p.locator("#log-body")).not.toContainText(LOG_LINES[0]);
   } },
 ];
 
@@ -98,6 +114,18 @@ for (const vp of VIEWPORTS) {
         await g.open(page);
         await page.waitForTimeout(400);
         await page.screenshot({ path: path.join(OUT, `${g.name}-${vp.name}.png`), fullPage: g.fullPage });
+      });
+    }
+
+    for (const d of DASHBOARD_SHOTS) {
+      test(`${d.name}`, async ({ page }) => {
+        await stubVersion(page, false);
+        await d.stub(page);
+        await page.goto(pageUrl("dashboard"));
+        await settle(page);
+        await d.open(page);
+        await page.waitForTimeout(400);
+        await page.screenshot({ path: path.join(OUT, `${d.name}-${vp.name}.png`) });
       });
     }
 

@@ -5,6 +5,7 @@ import { BASE_PATH, CSRF_HEADERS, LOGIN_PATH, NOT_FOUND_PATH, PAGES, PASSWORD, p
 import { SEED, stubClientGuilds } from "../lib/seed.ts";
 import { FWD_CREATE_BTN, MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, closeX, expectClosed, expectOpen, modal, settle } from "../lib/ui.ts";
 import { DETAILS, FIRST, GUILDS, LAST, dialog as guildDialog, guildAction, guildCard, stubGuilds } from "./guilds-fixtures.ts";
+import { LOG_LINES, stubLogStream, stubRunning, stubVersion } from "./dashboard-fixtures.ts";
 
 async function open(page: Page, name: PageName): Promise<void> {
   const errors: string[] = [];
@@ -86,7 +87,80 @@ test("12 not found page links home", async ({ page }) => {
 });
 
 test.describe("dashboard", () => {
+  test("8 update notice shows only when /version reports a newer release", async ({ page }) => {
+    await stubVersion(page, true);
+    await open(page, "dashboard");
+    await expect(page.locator("#update-notice")).toBeVisible();
+    await expect(page.locator("#update-notice")).toHaveText(/New Update Available/);
+    await page.unrouteAll();
+    await stubVersion(page, false);
+    await open(page, "dashboard");
+    await expect(page.locator("#update-notice")).toBeHidden();
+  });
+
+  test("13 bots panel shows stopped bots with Start", async ({ page }) => {
+    await open(page, "dashboard");
+    await expect(page.locator("#toggle-btn")).toHaveText(/^\s*Start\s*$/);
+    await expect(page.locator("#toggle-form")).toHaveAttribute("action", /\/start$/);
+    for (const role of ["server", "client"]) await expect(page.locator(`#${role}-state`)).toHaveText(/stopped/);
+  });
+
+  test("13 running bots show uptime and Stop posts /stop with CSRF", async ({ page }) => {
+    await stubRunning(page);
+    const posts: Array<{ method: string; csrf: string | null }> = [];
+    await page.route("**/stop", (route) => {
+      posts.push({ method: route.request().method(), csrf: route.request().headers()["x-copycord-csrf"] ?? null });
+      return route.fulfill({ status: 200, body: "ok" });
+    });
+    await open(page, "dashboard");
+    await expect(page.locator("#toggle-btn")).toHaveText(/^\s*Stop\s*$/);
+    await expect(page.locator("#toggle-form")).toHaveAttribute("action", /\/stop$/);
+    await expect(page.locator("#server-state")).toHaveText(/running/);
+    await expect(page.locator("#client-uptime")).toHaveText(/^1h 1m \d+s$/);
+    await expect(page.locator("#client-status")).toHaveText("e2e syncing");
+    await expect(page.locator("#server-status")).toHaveText("");
+    await page.locator("#toggle-btn").click();
+    await expect.poll(() => posts.length).toBe(1);
+    expect(posts[0]).toEqual({ method: "POST", csrf: "1" });
+  });
+
+  test("14 log modal tails the stream, searches, clears with CSRF and closes", async ({ page }) => {
+    await stubLogStream(page);
+    const clears: Array<string | null> = [];
+    await page.route("**/logs/clear/server", (route) => {
+      clears.push(route.request().headers()["x-copycord-csrf"] ?? null);
+      return route.fulfill({ status: 200, body: "ok" });
+    });
+    await open(page, "dashboard");
+    const shown = page.locator("#log-modal.show");
+    const body = page.locator("#log-body");
+
+    await page.locator('[data-log="server"]').click();
+    await expect(shown).toHaveCount(1);
+    for (const line of LOG_LINES) await expect(body).toContainText(line);
+
+    await page.locator("#log-search-input").fill("BETA");
+    await expect(body).toContainText(LOG_LINES[1]);
+    await expect(body).not.toContainText(LOG_LINES[0]);
+    await page.locator("#log-search-input").fill("");
+    await expect(body).toContainText(LOG_LINES[0]);
+
+    await page.locator("#log-clear-btn").click();
+    await page.locator('button:has-text("Clear logs"):not(#log-clear-btn)').filter({ visible: true }).click();
+    await expect.poll(() => clears).toEqual(["1"]);
+    await expect(body).not.toContainText(LOG_LINES[0]);
+
+    await page.locator("#log-close").click();
+    await expect(shown).toHaveCount(0);
+
+    await page.locator('[data-log="client"]').click();
+    await expect(shown).toHaveCount(1);
+    await page.keyboard.press("Escape");
+    await expect(shown).toHaveCount(0);
+  });
+
   test("15 config form loads with save and cancel", async ({ page }) => {
+    test.skip(!!BASE_PATH, "lane 14 ports the global configuration card");
     await open(page, "dashboard");
     await expect(page.locator("#cfg-form")).toBeAttached();
     await expect(page.locator("#cfg-save-btn")).toBeAttached();
@@ -94,6 +168,7 @@ test.describe("dashboard", () => {
   });
 
   test("17 backup tokens modal opens and closes", async ({ page }) => {
+    test.skip(!!BASE_PATH, "lane 14 ports backup tokens");
     await open(page, "dashboard");
     const m = modal(page, "backup-token-modal");
     await page.locator("#backupTokensBtn").click();
@@ -103,6 +178,7 @@ test.describe("dashboard", () => {
   });
 
   test("18 seeded mapping card is listed and search filters it", async ({ page }) => {
+    test.skip(!!BASE_PATH, "lane 15 ports the mapping cards");
     await open(page, "dashboard");
     const list = page.locator("#guild-mapping-list");
     await expect(list).toContainText(SEED.mappingName);
@@ -113,6 +189,7 @@ test.describe("dashboard", () => {
   });
 
   test("19 mapping settings modal opens with the seeded guild IDs and closes", async ({ page }) => {
+    test.skip(!!BASE_PATH, "lane 16 ports the mapping modal");
     await open(page, "dashboard");
     await page.locator(MAPPING_EDIT_BTN).first().click();
     const m = modal(page, "mapping-modal");
@@ -124,6 +201,7 @@ test.describe("dashboard", () => {
   });
 
   test("22 filters modal opens and closes", async ({ page }) => {
+    test.skip(!!BASE_PATH, "lane 18 ports the filters modal");
     await open(page, "dashboard");
     await page.locator(MAPPING_FILTERS_BTN).first().click();
     const m = modal(page, "filters-modal");
@@ -142,6 +220,7 @@ test.describe("dashboard", () => {
   });
 
   test("27 proxy settings and favorites help modals open and close", async ({ page }) => {
+    test.skip(!!BASE_PATH, "lane 21 ports the proxy panel");
     await open(page, "dashboard");
     for (const [btn, id] of [["#srv-proxy-settings-btn", "proxy-settings-modal"], ["#srv-proxy-fav-help-btn", "proxy-fav-help-modal"]] as const) {
       const m = modal(page, id);
