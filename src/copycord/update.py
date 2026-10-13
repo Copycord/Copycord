@@ -25,7 +25,7 @@ import urllib.request
 from pathlib import Path
 from typing import NamedTuple, Optional, Tuple
 
-from copycord import node_runtime, service, ui
+from copycord import node_runtime, service, ui, winupdate
 
 DEFAULT_REPO = "Copycord/Copycord"
 REPO_URL = f"https://github.com/{DEFAULT_REPO}"
@@ -114,16 +114,20 @@ def load_channel(path: Optional[Path] = None) -> Channel:
     return Channel(raw["channel"])
 
 
-def save_channel(channel: Channel, path: Optional[Path] = None) -> Path:
-    path = settings_path() if path is None else path
-    path.parent.mkdir(parents=True, exist_ok=True)
+def channel_text(channel: Channel) -> str:
     data = {"channel": channel.channel}
     if channel.channel == DEV:
         data["branch"] = channel.ref
         # Only a non-default repo is written, so older versions can still read the file.
         if channel.repo and channel.repo != DEFAULT_REPO:
             data["repo"] = channel.repo
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    return json.dumps(data, indent=2) + "\n"
+
+
+def save_channel(channel: Channel, path: Optional[Path] = None) -> Path:
+    path = settings_path() if path is None else path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(channel_text(channel), encoding="utf-8")
     return path
 
 
@@ -632,6 +636,16 @@ def update(
     if kind in (DOCKER, SOURCE):
         print(f"Copycord was installed with {kind}; update it with:\n  {manual_hint(kind)}")
         return 1
+    # Windows cannot replace the files of a running Copycord, so the install
+    # runs after this process exits; another running Copycord blocks it.
+    handoff = sys.platform == "win32" and kind in (UV_TOOL, PIPX)
+    own_pids: list = []
+    if handoff:
+        own_pids, other = winupdate.running()
+        if other is not None:
+            _err("Copycord is running in another window "
+                 f"(process {other}); stop it first, then run this again")
+            return 1
 
     if reinstall:
         label = "v" + tag if tag else target.describe() if target.channel == DEV else "git"
@@ -699,6 +713,16 @@ def update(
     except Exception as e:
         ui.warn("could not read the service state", str(e))
         state = None
+
+    if handoff:
+        save = not tag and switching
+        return winupdate.handoff(
+            own_pids, cmd, hint, spec, cmd_env,
+            restart=bool(state is not None and state.installed and state.running),
+            channel_json=channel_text(target) if save else None,
+            channel_path=settings_path() if save else None,
+            channel_label=target.describe(),
+        )
 
     print(f"$ {hint}")
     if cmd_env is None:
