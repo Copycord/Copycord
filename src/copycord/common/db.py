@@ -10,6 +10,7 @@
 
 import contextlib
 from datetime import datetime, timezone
+import functools
 import json
 import logging
 from pathlib import Path
@@ -182,6 +183,17 @@ def backup_pre_v4(db_path: str, backup_dir: Optional[Path] = None) -> Optional[P
         src.close()
     logger.info("Backed up %s to %s before the first v4 open", db_path, dest)
     return dest
+
+
+def _in_tx(method):
+    """Run a DBManager method inside self._tx()."""
+
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._tx():
+            return method(self, *args, **kwargs)
+
+    return wrapper
 
 
 class DBManager:
@@ -1736,6 +1748,7 @@ class DBManager:
         """Return all rows from 'threads'."""
         return self.conn.execute("SELECT * FROM threads").fetchall()
 
+    @_in_tx
     def upsert_forum_thread_mapping(
         self,
         orig_thread_id: int,
@@ -1779,6 +1792,7 @@ class DBManager:
         )
         self.conn.commit()
 
+    @_in_tx
     def delete_forum_thread_mapping(self, orig_thread_id: int):
         """Delete a forum thread mapping."""
         self.conn.execute(
@@ -1787,6 +1801,7 @@ class DBManager:
         )
         self.conn.commit()
 
+    @_in_tx
     def upsert_channel_mapping(
         self,
         original_channel_id: int,
@@ -1959,6 +1974,7 @@ class DBManager:
         """Return all emoji mappings."""
         return self.conn.execute("SELECT * FROM emoji_mappings").fetchall()
 
+    @_in_tx
     def upsert_emoji_mapping(
         self,
         orig_id: int,
@@ -2004,6 +2020,7 @@ class DBManager:
             "SELECT * FROM emoji_mappings WHERE original_emoji_id = ?", (original_id,)
         ).fetchone()
 
+    @_in_tx
     def add_announcement_user(self, guild_id: int, keyword: str, user_id: int) -> bool:
         cur = self.conn.execute(
             "INSERT OR IGNORE INTO announcement_subscriptions(guild_id, keyword, user_id) VALUES (?, ?, ?)",
@@ -2012,6 +2029,7 @@ class DBManager:
         self.conn.commit()
         return cur.rowcount > 0
 
+    @_in_tx
     def remove_announcement_user(
         self, guild_id: int, keyword: str, user_id: int
     ) -> bool:
@@ -2032,6 +2050,7 @@ class DBManager:
         ).fetchall()
         return [r["user_id"] for r in rows]
 
+    @_in_tx
     def add_announcement_trigger(
         self, guild_id: int, keyword: str, filter_user_id: int = 0, channel_id: int = 0
     ) -> bool:
@@ -2050,6 +2069,7 @@ class DBManager:
         ).fetchall()
         return [r["keyword"] for r in rows]
 
+    @_in_tx
     def remove_announcement_trigger(
         self, guild_id: int, keyword: str, filter_user_id: int = 0, channel_id: int = 0
     ) -> bool:
@@ -2115,6 +2135,7 @@ class DBManager:
             )
         return {k: list(v) for k, v in out.items()}
 
+    @_in_tx
     def add_onjoin_subscription(self, guild_id: int, user_id: int) -> bool:
         cur = self.conn.execute(
             "INSERT OR IGNORE INTO join_dm_subscriptions(guild_id, user_id) VALUES (?, ?)",
@@ -2123,6 +2144,7 @@ class DBManager:
         self.conn.commit()
         return cur.rowcount > 0
 
+    @_in_tx
     def remove_onjoin_subscription(self, guild_id: int, user_id: int) -> bool:
         cur = self.conn.execute(
             "DELETE FROM join_dm_subscriptions WHERE guild_id = ? AND user_id = ?",
@@ -2161,6 +2183,7 @@ class DBManager:
             (original_id,),
         ).fetchone()
 
+    @_in_tx
     def upsert_sticker_mapping(
         self,
         orig_id: int,
@@ -2200,6 +2223,7 @@ class DBManager:
         )
         self.conn.commit()
 
+    @_in_tx
     def delete_sticker_mapping(self, orig_id: int):
         self.conn.execute(
             "DELETE FROM sticker_mappings WHERE original_sticker_id = ?", (orig_id,)
@@ -2209,6 +2233,7 @@ class DBManager:
     def get_all_role_mappings(self) -> List[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM role_mappings").fetchall()
 
+    @_in_tx
     def upsert_role_mapping(
         self,
         orig_id: int,
@@ -2248,6 +2273,7 @@ class DBManager:
         )
         self.conn.commit()
 
+    @_in_tx
     def delete_role_mapping(self, orig_id: int):
         self.conn.execute(
             "DELETE FROM role_mappings WHERE original_role_id = ?", (orig_id,)
@@ -2319,6 +2345,7 @@ class DBManager:
 
         return out
 
+    @_in_tx
     def replace_filters(
         self,
         whitelist_categories: list[int],
@@ -2761,6 +2788,7 @@ class DBManager:
 
             return self.conn.total_changes - before
 
+    @_in_tx
     def delete_message_mapping(self, original_message_id: int) -> int:
         """Delete a mapping row by original message id; returns rows deleted (0 or 1)."""
         try:
@@ -2862,6 +2890,7 @@ class DBManager:
             self.conn.commit()
         return run_id
 
+    @_in_tx
     def backfill_set_clone(self, run_id: str, clone_channel_id: int | None):
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         self.conn.execute(
@@ -2870,6 +2899,7 @@ class DBManager:
         )
         self.conn.commit()
 
+    @_in_tx
     def backfill_update_checkpoint(
         self,
         run_id: str,
@@ -2898,6 +2928,7 @@ class DBManager:
         self.conn.execute(sql, (*vals, run_id))
         self.conn.commit()
 
+    @_in_tx
     def backfill_mark_done(self, run_id: str):
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         self.conn.execute(
@@ -2906,6 +2937,7 @@ class DBManager:
         )
         self.conn.commit()
 
+    @_in_tx
     def backfill_mark_failed(self, run_id: str, error: str | None):
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         self.conn.execute(
@@ -2914,6 +2946,7 @@ class DBManager:
         )
         self.conn.commit()
 
+    @_in_tx
     def backfill_abandon_running_on_boot(self):
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         self.conn.execute(
@@ -2954,6 +2987,7 @@ class DBManager:
         cols = [c[0] for c in cur.description]
         return dict(zip(cols, row))
 
+    @_in_tx
     def backfill_mark_aborted(self, run_id: str, reason: str | None = None) -> None:
         now = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
         self.conn.execute(
@@ -2962,6 +2996,7 @@ class DBManager:
         )
         self.conn.commit()
 
+    @_in_tx
     def backfill_abort_running_for_channel(
         self, original_channel_id: int, reason: str | None = None
     ) -> int:
@@ -3630,6 +3665,7 @@ class DBManager:
         cols = [c[0] for c in cur.description]
         return dict(zip(cols, row))
 
+    @_in_tx
     def backfill_abort_running_for_channel_in_clone(
         self,
         original_channel_id: int,
@@ -4092,6 +4128,7 @@ class DBManager:
             (int(original_id),),
         ).fetchall()
 
+    @_in_tx
     def delete_emoji_mapping_for_clone(
         self, original_id: int, cloned_guild_id: int
     ) -> None:
@@ -4101,6 +4138,7 @@ class DBManager:
         )
         self.conn.commit()
 
+    @_in_tx
     def delete_emoji_mapping(self, original_id: int) -> None:
         self.conn.execute(
             "DELETE FROM emoji_mappings WHERE original_emoji_id = ?",
@@ -4120,6 +4158,7 @@ class DBManager:
             (int(original_id),),
         ).fetchall()
 
+    @_in_tx
     def delete_sticker_mapping_for_clone(
         self, original_id: int, cloned_guild_id: int
     ) -> None:
@@ -4147,6 +4186,7 @@ class DBManager:
             (int(original_id),),
         ).fetchall()
 
+    @_in_tx
     def delete_role_mapping_for_clone(
         self, original_id: int, cloned_guild_id: int
     ) -> None:
@@ -5236,6 +5276,7 @@ class DBManager:
         )
         return [dict(row) for row in cur.fetchall()]
 
+    @_in_tx
     def add_scraper_token(self, token_value: str, label: str = None) -> str:
         """Add a new scraper token and return its token_id."""
         token_id = str(uuid.uuid4())
@@ -5278,6 +5319,7 @@ class DBManager:
             row = cur.fetchone()
             return dict(row) if row else None
 
+    @_in_tx
     def update_scraper_token(
         self,
         token_id: str,
@@ -5319,6 +5361,7 @@ class DBManager:
             self.conn.commit()
         return True
 
+    @_in_tx
     def delete_scraper_token(self, token_id: str) -> bool:
         """Delete a scraper token."""
         with self.lock:
@@ -5328,6 +5371,7 @@ class DBManager:
             self.conn.commit()
             return cur.rowcount > 0
 
+    @_in_tx
     def increment_scraper_token_usage(self, token_id: str) -> None:
         """Increment usage counter and update last_used timestamp."""
         with self.lock:
@@ -5344,6 +5388,7 @@ class DBManager:
 
     # mapping_user_tokens CRUD
 
+    @_in_tx
     def add_mapping_token(
         self,
         mapping_id: str,
@@ -5411,6 +5456,7 @@ class DBManager:
             )
             return [dict(row) for row in cur.fetchall() if row["token_value"]]
 
+    @_in_tx
     def set_mapping_token_enabled(self, token_id: str, enabled: bool) -> bool:
         """Enable or disable a single mapping user token."""
         with self.lock:
@@ -5421,6 +5467,7 @@ class DBManager:
             self.conn.commit()
             return cur.rowcount > 0
 
+    @_in_tx
     def delete_mapping_token(self, token_id: str) -> bool:
         """Detach a user token from a mapping."""
         with self.lock:
@@ -5430,6 +5477,7 @@ class DBManager:
             self.conn.commit()
             return cur.rowcount > 0
 
+    @_in_tx
     def delete_all_mapping_tokens(self, mapping_id: str) -> int:
         """Detach every user token from a mapping. Returns the number removed."""
         with self.lock:
@@ -5439,6 +5487,7 @@ class DBManager:
             self.conn.commit()
             return cur.rowcount
 
+    @_in_tx
     def increment_mapping_token_usage(self, token_id: str) -> None:
         """Increment usage counter and update last_used timestamp for a token."""
         with self.lock:
@@ -5455,6 +5504,7 @@ class DBManager:
 
     # mapping_token_identities CRUD
 
+    @_in_tx
     def upsert_token_identity(
         self,
         *,
@@ -5532,6 +5582,7 @@ class DBManager:
             ).fetchall()
             return [self._row_to_identity(r) for r in rows]
 
+    @_in_tx
     def delete_token_identity(self, mapping_id: str, author_id: str) -> bool:
         """Remove a single identity assignment."""
         with self.lock:
@@ -5542,6 +5593,7 @@ class DBManager:
             self.conn.commit()
             return cur.rowcount > 0
 
+    @_in_tx
     def clear_token_identities(self, mapping_id: str) -> int:
         """Remove all identity assignments for a mapping. Returns count removed."""
         with self.lock:
@@ -5554,6 +5606,7 @@ class DBManager:
 
     # event_logs CRUD
 
+    @_in_tx
     def add_event_log(
         self,
         event_type: str,
@@ -5664,6 +5717,7 @@ class DBManager:
             ).fetchall()
         return [r[0] for r in rows]
 
+    @_in_tx
     def delete_event_log(self, log_id: str) -> bool:
         """Delete a single event log entry."""
         with self.lock:
@@ -5673,6 +5727,7 @@ class DBManager:
             self.conn.commit()
             return cur.rowcount > 0
 
+    @_in_tx
     def delete_event_logs_bulk(self, log_ids: List[str]) -> int:
         """Delete multiple event log entries. Returns count deleted."""
         if not log_ids:
@@ -5686,6 +5741,7 @@ class DBManager:
             self.conn.commit()
             return cur.rowcount
 
+    @_in_tx
     def clear_event_logs(self) -> int:
         """Delete all event log entries. Returns count deleted."""
         with self.lock:
