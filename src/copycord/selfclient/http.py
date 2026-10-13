@@ -9,33 +9,9 @@
 
 """User-token REST over curl_cffi.
 
-Ported from wizard/core/history.py, which has been walking guild history on a
-user token in production: same transport, same cursor discipline, same
-rate-limit handling, same log hygiene. What is added here is the write side
-(POST/PATCH/PUT/DELETE) Copycord needs for opening DMs and sending messages.
-
-The transport rule is wizard's: **any request carrying a user token goes
-through curl_cffi impersonating the browser the headers claim to be**, never
-aiohttp, because aiohttp's TLS handshake identifies itself as Python however
-browser-shaped the headers are.
-
-Headers come from fingerprint.build_headers (common/selfbot_headers), with one
-per-method adjustment that header builder does not make: the CORS rule. A
-browser puts ``Origin`` only on requests whose method is not GET/HEAD, and
-``Content-Type`` only when there is a body. An Origin on a same-origin GET is a
-header no browser would have produced (wizard/core/headers.py:447-451).
-
-Cursor discipline, as wizard documents it (discord.py 2.5.2's):
-
-  * messages page backwards on ``before`` = the id of the last (oldest) entry
-    of the page just read, and stop on a short page;
-  * archived threads page on ``before`` too, but the cursor is the last
-    thread's ``thread_metadata.archive_timestamp`` for the public and private
-    lists and its ``id`` for the joined list, and the stop signal is
-    ``has_more`` rather than a short page.
-
-Every response is the decoded JSON as plain dicts/lists. Wrapping into models
-is the caller's choice.
+User-token requests go through curl_cffi impersonating the browser the headers
+describe, never aiohttp, whose TLS handshake identifies itself as Python.
+Responses are returned as decoded JSON.
 """
 
 from __future__ import annotations
@@ -69,21 +45,16 @@ log = logging.getLogger("selfclient.http")
 
 API_BASE = f"https://discord.com/api/v{API_VERSION}"
 
-# Get Channel Messages caps at 100 per call.
 MESSAGE_PAGE = 100
-# The archived thread lists take a limit too; the API will not serve fewer
-# than two.
+# The archived thread lists will not serve a limit below two.
 THREAD_PAGE = 100
 
 REQUEST_TIMEOUT = 30
 
-# A 429 on a long walk is expected rather than exceptional, so this keeps
-# going. The ceiling only stops a route refusing for another reason spinning.
 MAX_RETRIES = 5
 FALLBACK_RETRY_AFTER = 1.0
 
-# Courtesy pacing between pages. Not the rate limiter (the bucket headers are)
-# but it keeps a full-guild walk from being the only thing the process does.
+# Pause between pages, on top of the bucket pacing.
 PAGE_DELAY = 0.2
 
 ERROR_BODY_CHARS = 400
@@ -96,12 +67,10 @@ _SECRET_HEADERS = frozenset(
     {"set-cookie", "cookie", "authorization", "proxy-authorization", "x-super-properties"}
 )
 
-# Refusals that are facts about the source guild rather than this client
-# (Missing Access, Missing Permissions). INFO, or a fifty-channel guild
-# buries everything else.
+# Missing Access and Missing Permissions: routine on a source guild, logged at INFO.
 _ROUTINE_CODES = frozenset({50001, 50013})
 
-# Refusals that are facts about the account, said once in full per run.
+# Account-level refusals, explained once per run.
 _ACCOUNT_CODES = {
     40002: (
         "The account behind the token is not fully verified: Discord wants both "
@@ -111,10 +80,10 @@ _ACCOUNT_CODES = {
     ),
 }
 
+# Browsers send Origin only on non-GET/HEAD requests.
 _METHODS_WITHOUT_ORIGIN = frozenset({"GET", "HEAD"})
 
-# Snowflakes that are the "major parameter" of a route keep their own bucket;
-# every other id in the path is collapsed so the bucket key matches Discord's.
+# Major-parameter ids keep their own bucket; other ids collapse, as Discord's do.
 _MAJOR_RE = re.compile(r"(?<!channels/)(?<!guilds/)(?<!webhooks/)\b\d{15,21}\b")
 
 
@@ -124,7 +93,7 @@ def snowflake_at(milliseconds: float) -> int:
 
 
 def message_nonce() -> str:
-    """A per-message nonce shaped like the client's (a snowflake for now)."""
+    """A snowflake-shaped message nonce, like the web client's."""
     ms = int(time.time() * 1000) - DISCORD_EPOCH
     return str((ms << 22) | random.getrandbits(22))
 
@@ -143,7 +112,7 @@ def _cursor_id(value: Any) -> Optional[str]:
 
 
 # ---------------------------------------------------------------------------
-# response reading and logging (wizard/core/history.py)
+# response reading and logging
 # ---------------------------------------------------------------------------
 
 
@@ -187,11 +156,7 @@ def _looks_like_html(resp: Any) -> bool:
 
 
 def _safe_headers(resp: Any) -> str:
-    """Every response header, credential-bearing ones redacted by name.
-
-    Redacted entries keep their length: "the cookie came back and was 214
-    bytes" is diagnostic and the bytes are not.
-    """
+    """Every response header, with credentials redacted to their length."""
     parts = []
     try:
         items = list(resp.headers.items())
@@ -238,11 +203,7 @@ def _retry_after(resp: Any) -> float:
 class HTTPClient:
     """REST on one user token, through one curl_cffi session.
 
-    ``session`` may be passed in (a pre-primed one from
-    fingerprint.get_tls_session, or a fake in tests); otherwise one is created
-    on first use impersonating the same target the headers describe. ``proxy``
-    is the exit every request goes out through; keep it equal to the gateway's
-    so REST and socket come from one IP.
+    Keep ``proxy`` equal to the gateway's so REST and socket share one IP.
     """
 
     def __init__(
@@ -292,7 +253,7 @@ class HTTPClient:
         self.proxy = proxy or None
 
     def reset_diagnostics(self) -> None:
-        """Re-arm the say-it-once account diagnoses (start of a new run)."""
+        """Let the once-per-run account diagnoses log again."""
         self._explained.clear()
 
     async def close(self) -> None:
@@ -306,12 +267,7 @@ class HTTPClient:
     # -- headers -----------------------------------------------------------
 
     def referer(self, channel_id: Any, guild_id: Any = None) -> Optional[str]:
-        """The channel page a browser would be on to make this request.
-
-        Without a guild id the honest answer is None (falls back to the
-        builder's ``@me`` default): guessing @me for a guild channel would
-        swap one wrong Referer for another.
-        """
+        """The channel page a browser would be on, or None without a guild id."""
         gid = guild_id or self.guild_id
         if not gid:
             return None
@@ -354,13 +310,7 @@ class HTTPClient:
             await self._sleep(wait)
 
     def _record_bucket(self, route: str, resp: Any) -> None:
-        """Remember when this route's bucket reopens, from X-RateLimit-*.
-
-        X-RateLimit-Remaining is the requests left in the bucket and
-        -Reset-After the seconds until it refills. Only an empty bucket is
-        recorded; the next request on any route sharing it waits it out first,
-        which is how a long walk mostly avoids provoking the 429.
-        """
+        """Remember when this route's bucket reopens, if it is now empty."""
         bucket = _header(resp, "X-RateLimit-Bucket") or route
         self._route_buckets[route] = bucket
         if _header(resp, "X-RateLimit-Remaining") != "0":
@@ -376,7 +326,7 @@ class HTTPClient:
     # -- failure logging ---------------------------------------------------
 
     def _log_failure(self, method: str, path: str, resp: Any, *, quiet: bool) -> None:
-        """One line naming the likely culprit, the full evidence at debug."""
+        """Log one line naming the likely cause, and the full response at debug."""
         status = getattr(resp, "status_code", 0)
         body = _decode(resp)
         code = body.get("code") if isinstance(body, dict) else None
@@ -423,7 +373,7 @@ class HTTPClient:
             where, status, _full_body(resp), _safe_headers(resp),
         )
 
-    # -- the one request path ----------------------------------------------
+    # -- requests ----------------------------------------------------------
 
     async def request(
         self,
@@ -436,12 +386,7 @@ class HTTPClient:
         headers: Optional[Dict[str, Any]] = None,
         quiet_refusal: bool = False,
     ) -> Any:
-        """One REST call. Returns the decoded body (None for 204).
-
-        Raises Forbidden/NotFound/HTTPException on a refusal, RateLimited when
-        still 429 after ``max_retries``, HTTPException(status 0) when the call
-        never landed or a 2xx body is not JSON.
-        """
+        """One REST call. Returns the decoded body, or None for an empty one."""
         method = method.upper()
         url = f"{API_BASE}{path}"
         # curl_cffi builds the query string itself and wants strings for it.
@@ -482,11 +427,8 @@ class HTTPClient:
                 is_global = bool(isinstance(last_body, dict) and last_body.get("global")) or (
                     _header(resp, "X-RateLimit-Global") == "true"
                 )
-                # The body's retry_after is authoritative and replaces whatever
-                # the bucket headers said; the wait itself happens in
-                # _wait_for_bucket at the top of the next attempt, so a 429
-                # costs exactly one sleep and concurrent callers on the same
-                # bucket (or every caller, when global) wait it out too.
+                # The body's retry_after overrides the bucket headers. The wait
+                # happens in _wait_for_bucket, so other callers on it wait too.
                 reopen = self._clock() + last_retry_after
                 if is_global:
                     self._global_reset = reopen
@@ -545,13 +487,8 @@ class HTTPClient:
     ) -> AsyncIterator[Dict[str, Any]]:
         """Yield a channel's or thread's messages, newest first.
 
-        ``after_id`` is a floor rather than a cursor: the walk still pages
-        backwards on ``before`` and stops the moment it reaches a message that
-        old, so a "last 30 days" run on a three-year channel costs a few pages.
-
-        Ends quietly on a channel that cannot be read unless
-        ``raise_on_error``: one 403 out of fifty channels is a permissions fact
-        about the source guild, not a reason to abandon the walk.
+        ``after_id`` is a floor, not a cursor: paging stops once it is reached.
+        A refusal ends the walk quietly unless ``raise_on_error``.
         """
         cursor = _cursor_id(before)
         floor = int(getattr(after_id, "id", after_id)) if after_id is not None else None
@@ -583,8 +520,7 @@ class HTTPClient:
                     if remaining <= 0:
                         return
 
-            # Short page: exhausted. Newest first, so the last entry is the
-            # oldest and is the next `before`.
+            # A short page is the end; otherwise the oldest entry is the next `before`.
             if len(page) < page_size:
                 return
             cursor = str(page[-1].get("id") or "")
@@ -604,10 +540,6 @@ class HTTPClient:
     ) -> AsyncIterator[Dict[str, Any]]:
         """Yield a channel's messages oldest first, starting just after ``after_id``.
 
-        Pages forward on Discord's ``after`` cursor, so a bounded walk such as
-        "the next 100 after X" costs one call instead of reading everything
-        above X and keeping the tail. That is discord.py's oldest_first walk;
-        with no ``after_id`` it starts at the beginning of the channel.
         ``before_id`` is an exclusive ceiling.
         """
         cursor = int(getattr(after_id, "id", after_id) or 0)
@@ -661,11 +593,9 @@ class HTTPClient:
     ) -> AsyncIterator[Dict[str, Any]]:
         """Yield a channel's archived threads, newest archive first.
 
-        Three lists because Discord has three. Public needs only
-        READ_MESSAGE_HISTORY. Private also needs MANAGE_THREADS and 403s for a
-        plain member far more often than not, so its refusal is logged at
-        debug; ``joined`` is the answer to that, the private threads the
-        account is actually in. Forum posts come out of these same lists.
+        The private list needs MANAGE_THREADS and usually 403s, so its refusal
+        logs at debug; ``joined`` lists the private threads the account is in.
+        The cursor is archive_timestamp, except the joined list pages on id.
         """
         if joined:
             path = f"/channels/{channel_id}/users/@me/threads/archived/private"
@@ -707,8 +637,7 @@ class HTTPClient:
                     if remaining <= 0:
                         return
 
-            # has_more is the stop signal: these lists honour the limit loosely
-            # and a full page can still be the last one.
+            # These lists honour the limit loosely, so stop on has_more, not page size.
             if not payload.get("has_more"):
                 return
 
@@ -746,9 +675,7 @@ class HTTPClient:
         return await self.get(f"/channels/{channel_id}")
 
     async def get_message(self, channel_id: Any, message_id: Any, *, guild_id: Any = None) -> Optional[Dict[str, Any]]:
-        """One message by id. User accounts read it the way the web client
-        does, as a one-entry ``around`` window, since the single-message route
-        is bot-only."""
+        """One message by id, via an ``around`` window (the single-message route is bot-only)."""
         page = await self.get(
             f"/channels/{channel_id}/messages",
             params={"limit": 1, "around": str(message_id)},
@@ -784,12 +711,7 @@ class HTTPClient:
     async def start_private_message(
         self, user_id: Any, *, context_location: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Open (or fetch) the DM channel with a user: POST /users/@me/channels.
-
-        ``context_location`` sets X-Context-Properties when the caller knows
-        which UI surface a browser would have opened it from; there is no
-        captured value for this route yet, so none is invented by default.
-        """
+        """Open or fetch the DM channel with a user."""
         headers = (
             {"X-Context-Properties": context_properties(context_location)}
             if context_location
@@ -827,7 +749,6 @@ class HTTPClient:
             f"/channels/{channel_id}/messages",
             json=payload,
             referer=channel_referer(channel_id, gid),
-            # What server/token_sender.py sends on every message post.
             headers={"X-Context-Properties": context_properties("chat_input")},
         )
 
@@ -843,7 +764,7 @@ class HTTPClient:
 
 
 def rate_limit_state(http: HTTPClient) -> Tuple[Dict[str, str], Dict[str, float], float]:
-    """(route->bucket, bucket->reset, global reset), for diagnostics/tests."""
+    """(route->bucket, bucket->reset, global reset), for diagnostics and tests."""
     return dict(http._route_buckets), dict(http._bucket_reset), http._global_reset
 
 
