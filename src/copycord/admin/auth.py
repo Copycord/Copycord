@@ -9,8 +9,11 @@
 
 from __future__ import annotations
 
+import hmac
+import math
 import os
 import secrets
+import time
 from pathlib import Path
 from typing import Optional, Dict
 from dotenv import load_dotenv
@@ -62,6 +65,103 @@ def _client_ip(request: Request) -> str:
         pass
 
     return "unknown"
+
+
+def _limiter_key(request: Request) -> str:
+    """Socket peer address for the login limiter.
+
+    Forwarding headers are not read here: any client can set them. Uvicorn
+    already replaces the peer with X-Forwarded-For when the connection comes
+    from a proxy listed in FORWARDED_ALLOW_IPS (default 127.0.0.1), so a local
+    reverse proxy still gets per-client limits; behind any other proxy all
+    clients share the proxy's address.
+    """
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def password_matches(given: str, expected: str) -> bool:
+    """Constant-time compare of the submitted and configured passwords."""
+    return hmac.compare_digest(
+        (given or "").encode("utf-8"), (expected or "").encode("utf-8")
+    )
+
+
+class LoginLimiter:
+    """In-memory failed-login limiter keyed by client address.
+
+    After max_failures failures in a row the key is locked for base_delay
+    seconds, doubling with each further failure up to max_delay. A success
+    clears the key; so does a quiet window with no failures and no lock.
+    """
+
+    def __init__(
+        self,
+        max_failures: int = 5,
+        window: float = 300.0,
+        base_delay: float = 30.0,
+        max_delay: float = 900.0,
+        max_keys: int = 10000,
+        clock=time.monotonic,
+    ) -> None:
+        self.max_failures = max_failures
+        self.window = window
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.max_keys = max_keys
+        self._clock = clock
+        # key -> [failures, last_failure, locked_until]
+        self._state: Dict[str, list] = {}
+
+    def _expired(self, entry: list, now: float) -> bool:
+        return now >= entry[2] and now - entry[1] > self.window
+
+    def retry_after(self, key: str) -> int:
+        """Seconds until key may try again; 0 when it is not locked."""
+        entry = self._state.get(key)
+        if not entry:
+            return 0
+        now = self._clock()
+        if self._expired(entry, now):
+            del self._state[key]
+            return 0
+        return max(0, math.ceil(entry[2] - now))
+
+    def failure(self, key: str) -> int:
+        """Record a failed attempt; returns the lock length in seconds (0 if none)."""
+        now = self._clock()
+        entry = self._state.get(key)
+        if entry is None or self._expired(entry, now):
+            if len(self._state) >= self.max_keys:
+                self._prune(now)
+            entry = [0, now, 0.0]
+            self._state[key] = entry
+        entry[0] += 1
+        entry[1] = now
+        over = entry[0] - self.max_failures
+        if over < 0:
+            return 0
+        delay = min(self.max_delay, self.base_delay * (2 ** min(over, 32)))
+        entry[2] = now + delay
+        return math.ceil(delay)
+
+    def success(self, key: str) -> None:
+        self._state.pop(key, None)
+
+    def reset(self) -> None:
+        self._state.clear()
+
+    def _prune(self, now: float) -> None:
+        for k in [k for k, e in self._state.items() if self._expired(e, now)]:
+            del self._state[k]
+        if len(self._state) >= self.max_keys:
+            oldest = sorted(self._state, key=lambda k: self._state[k][1])
+            for k in oldest[: len(self._state) - self.max_keys + 1]:
+                del self._state[k]
+
+
+LOGIN_LIMITER = LoginLimiter()
 
 
 def _load_or_create_secret_key(
@@ -155,6 +255,18 @@ def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) ->
 
     app.add_middleware(PasswordGuardMiddleware)
 
+    def _too_many(request: Request, wait: int):
+        return templates.TemplateResponse(
+            "login.html",
+            {
+                "request": request,
+                "version": CURRENT_VERSION,
+                "error": f"Too many failed attempts. Try again in {wait} seconds.",
+            },
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            headers={"Retry-After": str(wait)},
+        )
+
     @app.get("/login", response_class=HTMLResponse)
     async def login_page(request: Request):
 
@@ -187,7 +299,16 @@ def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) ->
         if not ADMIN_PASSWORD:
             return RedirectResponse("/", status_code=status.HTTP_302_FOUND)
 
-        if password == ADMIN_PASSWORD:
+        key = _limiter_key(request)
+        wait = LOGIN_LIMITER.retry_after(key)
+        if wait:
+            LOGGER.warning(
+                "Admin login THROTTLED from %s (%ss left)", _client_ip(request), wait
+            )
+            return _too_many(request, wait)
+
+        if password_matches(password, ADMIN_PASSWORD):
+            LOGIN_LIMITER.success(key)
 
             LOGGER.info(
                 "Admin login SUCCESS from %s",
@@ -212,6 +333,10 @@ def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) ->
             "Admin login FAILED from %s",
             _client_ip(request),
         )
+
+        wait = LOGIN_LIMITER.failure(key)
+        if wait:
+            return _too_many(request, wait)
 
         return templates.TemplateResponse(
             "login.html",

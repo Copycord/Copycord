@@ -304,3 +304,106 @@ class TestInternalClientHeaders:
     def test_no_token_no_kwargs(self, monkeypatch):
         monkeypatch.delenv(INTERNAL_TOKEN_ENV, raising=False)
         assert internal_connect_kwargs() == {}
+
+
+# ---------------------------------------------------------------------------
+# Login brute-force limit
+# ---------------------------------------------------------------------------
+
+
+class FakeClock:
+    def __init__(self):
+        self.now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.fixture()
+def clock(monkeypatch):
+    c = FakeClock()
+    monkeypatch.setattr(auth, "LOGIN_LIMITER", auth.LoginLimiter(clock=c))
+    return c
+
+
+def _login(tc, pw, **headers):
+    return tc.post(
+        "/login",
+        data={"password": pw},
+        headers={"origin": ORIGIN, **headers},
+        follow_redirects=False,
+    )
+
+
+class TestLoginLimit:
+
+    def test_success_sets_cookie(self, tc, password, clock):
+        resp = _login(tc, "pw")
+        assert resp.status_code == 302
+        assert auth.ADMIN_COOKIE_NAME in resp.cookies
+
+    def test_locked_after_five_failures(self, tc, password, clock):
+        for _ in range(4):
+            assert _login(tc, "nope").status_code == 401
+        resp = _login(tc, "nope")
+        assert resp.status_code == 429
+        assert resp.headers["retry-after"] == "30"
+        # The right password does not get through while locked.
+        resp = _login(tc, "pw")
+        assert resp.status_code == 429
+        assert auth.ADMIN_COOKIE_NAME not in resp.cookies
+
+    def test_forwarded_headers_do_not_reset_the_key(self, tc, password, clock):
+        for i in range(5):
+            _login(tc, "nope", **{"x-forwarded-for": f"10.0.0.{i}"})
+        resp = _login(tc, "pw", **{"x-forwarded-for": "10.9.9.9", "x-real-ip": "10.9.9.9"})
+        assert resp.status_code == 429
+
+    def test_unlocks_after_delay_and_success_resets(self, tc, password, clock):
+        for _ in range(5):
+            _login(tc, "nope")
+        clock.now += 31
+        assert _login(tc, "pw").status_code == 302
+        # The counter was cleared: four more failures are plain 401s.
+        for _ in range(4):
+            assert _login(tc, "nope").status_code == 401
+
+    def test_compare_digest_used(self, tc, password, clock, monkeypatch):
+        calls = []
+        real = auth.hmac.compare_digest
+
+        def spy(a, b):
+            calls.append((a, b))
+            return real(a, b)
+
+        monkeypatch.setattr(auth.hmac, "compare_digest", spy)
+        assert _login(tc, "pw").status_code == 302
+        assert calls == [(b"pw", b"pw")]
+
+
+class TestLoginLimiter:
+
+    def test_exponential_backoff_capped(self):
+        c = FakeClock()
+        lim = auth.LoginLimiter(clock=c, base_delay=30, max_delay=200)
+        delays = [lim.failure("a") for _ in range(9)]
+        assert delays == [0, 0, 0, 0, 30, 60, 120, 200, 200]
+        assert lim.retry_after("a") == 200
+        assert lim.retry_after("b") == 0
+
+    def test_quiet_window_resets(self):
+        c = FakeClock()
+        lim = auth.LoginLimiter(clock=c, window=300)
+        for _ in range(4):
+            lim.failure("a")
+        c.now += 301
+        assert lim.failure("a") == 0
+
+    def test_key_cap(self):
+        c = FakeClock()
+        lim = auth.LoginLimiter(clock=c, max_keys=3)
+        for k in "abcd":
+            c.now += 1
+            lim.failure(k)
+        assert len(lim._state) == 3
+        assert "a" not in lim._state
