@@ -544,6 +544,8 @@ copycord update --tag 4.0.0            # install exactly this release, once
 
 After a successful update, a running [service](#copycord-service) is restarted so it uses the new version.
 
+On Windows, a program's files cannot be replaced while it runs, so the install itself starts once `copycord update` exits: it stops the service if it is running, installs, starts the service again and prints the result in the same window. The output is also saved to `logs/update.log` in the [data directory](#data-dir). The backup, version checks and questions above still happen first. If Copycord is running in another window (for example `copycord run`), `copycord update` stops with `Copycord is running in another window (process N); stop it first, then run this again` and changes nothing. `copycord doctor --fix` reinstalls the same way.
+
 `status` also shows when Copycord last checked for an update and whether auto-update is on.
 
 ### Downgrading and backups {#downgrade}
