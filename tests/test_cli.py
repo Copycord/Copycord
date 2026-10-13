@@ -68,6 +68,31 @@ def test_version_prints_short_commit_of_a_git_install(data_dir, capsys, monkeypa
     assert lines == [f"{CURRENT_VERSION} (7cf4866)", "channel stable"]
 
 
+def test_bare_copycord_prints_the_overview(data_dir, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main([])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert "Usage: copycord <command>" in out and "Examples:" in out
+
+
+def test_unknown_command_is_one_styled_line(data_dir, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["frobnicate"])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "unknown command 'frobnicate'" in err and "copycord --help" in err
+    assert "usage:" not in err
+
+
+@pytest.mark.parametrize("group", ("service", "config"))
+def test_command_group_without_subcommand_prints_its_help(group, data_dir, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main([group])
+    assert exc.value.code == 0
+    assert f"usage: copycord {group}" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize("argv", (["version"], ["update", "--check"], ["update", "--branch", "main"], ["onboard"]))
 def test_removed_commands_and_flags(argv, data_dir, capsys):
     with pytest.raises(SystemExit) as exc:

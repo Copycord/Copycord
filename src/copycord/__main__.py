@@ -45,7 +45,7 @@ import sqlite3
 import sys
 import tempfile
 from pathlib import Path
-from typing import List, Mapping, NamedTuple, Optional
+from typing import List, Mapping, NamedTuple, NoReturn, Optional
 
 from copycord.envfile import ENV_KEYS
 
@@ -190,12 +190,43 @@ class _Parser(argparse.ArgumentParser):
             return format_help()
         return super().format_help()
 
+    def error(self, message: str) -> NoReturn:
+        """Top level: a styled one-liner plus a pointer to the help, not argparse's usage dump."""
+        if self.prog != "copycord":
+            super().error(message)
+        from copycord import ui
+
+        if "invalid choice" in message:
+            bad = message.split("invalid choice: ", 1)[-1].split(" ", 1)[0].strip("'\"")
+            text = f"unknown command '{bad}'"
+        else:
+            text = message
+        ui.fail(text, f"run {ui.cmd('copycord --help', stream=sys.stderr)} to see the commands", stream=sys.stderr)
+        self.exit(2)
+
+
+class _SubParser(argparse.ArgumentParser):
+    def error(self, message: str) -> NoReturn:
+        """A command group without its subcommand shows the group's help; other
+        mistakes get a styled one-liner and a pointer to the help."""
+        if message.startswith("the following arguments are required:") and message.endswith("_command"):
+            sys.stdout.write(self.format_help())
+            self.exit(0)
+        from copycord import ui
+
+        ui.fail(message, f"run {ui.cmd(self.prog + ' --help', stream=sys.stderr)} for the options", stream=sys.stderr)
+        self.exit(2)
+
 
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    if not (sys.argv[1:] if argv is None else argv):
+        # Bare `copycord`: the styled overview, not an argparse error.
+        sys.stdout.write(format_help())
+        raise SystemExit(0)
     parser = _Parser(prog="copycord")
     parser.add_argument("-V", "--version", action=_VersionAction, nargs=0,
                         help="print the version and the update channel")
-    sub = parser.add_subparsers(dest="command", required=True, parser_class=argparse.ArgumentParser)
+    sub = parser.add_subparsers(dest="command", required=True, parser_class=_SubParser)
 
     data_dir = argparse.ArgumentParser(add_help=False)
     data_dir.add_argument(
