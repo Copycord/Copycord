@@ -833,6 +833,18 @@ def test_cli_stop_confirms(status_svc, capsys):
     assert out.strip() == "✓ Copycord stopped  start it again with copycord service start"
 
 
+def test_cli_stop_on_a_terminal_is_a_rail(status_svc, monkeypatch):
+    svc = status_svc()
+    out = _on_a_terminal(monkeypatch)
+    assert cli.main(["service", "stop"]) == 0
+    assert svc.done == ["stop"]
+    lines = out.buf.getvalue().splitlines()
+    assert "Copycord v4.0.0 (abcdef1)" in lines
+    assert "\u250c  Stop Copycord" in lines
+    assert "\u2713  Copycord stopped  start it again with copycord service start" in lines
+    assert lines[-1] == "\u2514"
+
+
 def test_cli_start_confirms_with_the_dashboard(status_svc, capsys):
     svc = status_svc(running=False)
     assert cli.main(["service", "start"]) == 0

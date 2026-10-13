@@ -15,6 +15,7 @@ Windows.
 
 from __future__ import annotations
 
+import contextlib
 import ntpath
 import os
 import plistlib
@@ -945,6 +946,16 @@ def _uninstall(svc, yes: bool) -> int:
     return 0
 
 
+# On a terminal these actions open a rail with this title.
+RAIL_TITLES = {
+    "install": "Install the Copycord service",
+    "start": "Start Copycord",
+    "stop": "Stop Copycord",
+    "restart": "Restart Copycord",
+    "uninstall": "Remove the Copycord service",
+}
+
+
 FAILED = {
     "install": "Could not install the service",
     "start": "Could not start Copycord",
@@ -965,6 +976,7 @@ def service_command(args) -> int:
         svc = SystemdService(user or not (system or is_root()))
     else:
         svc = get_service(user, system=system)
+    target = None
     if action == "install":
         target = install_data_dir(getattr(svc, "user", user))
     elif not (user or system) and both_installed():
@@ -972,6 +984,17 @@ def service_command(args) -> int:
             "A service for your account and a system service are both installed",
             f"using the {svc.scope} service ({svc.unit_path}); add --user or --system to choose",
         )
+    title = RAIL_TITLES.get(action)
+    tty = sys.stdout.isatty()
+    rail = (ui.Rail(title, brand=ui.brand() if tty else "", heading=False)
+            if title else contextlib.nullcontext())
+    with rail:
+        return _service_action(svc, action, args, target)
+
+
+def _service_action(svc, action: str, args, target: Optional[Path]) -> int:
+    from copycord import ui
+
     try:
         if action == "install":
             with ui.Spinner("Installing the service"):
@@ -980,7 +1003,10 @@ def service_command(args) -> int:
                 ui.line(status, text, detail,
                         sys.stderr if status in ("warn", "fail") else sys.stdout)
             ui.info("Data", str(target))
-            print()
+            if ui.on_rail():
+                ui.gap()
+            else:
+                print()
             print(f"Dashboard: {ui.link(dashboard_url())}")
             _manage_hint()
             return 0
