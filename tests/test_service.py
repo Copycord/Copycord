@@ -1,8 +1,4 @@
-"""
-Tests for `copycord service` (src/copycord/service.py): unit, plist and task
-XML generation and the command sequence per OS. run_cmd is faked; nothing
-calls systemctl, launchctl or schtasks.
-"""
+"""Tests for `copycord service`: unit, plist and task XML and the commands per OS."""
 import plistlib
 import subprocess
 from pathlib import Path, PurePosixPath
@@ -123,7 +119,7 @@ def test_systemd_state_start_stop_uninstall(tmp_path, system_dir, monkeypatch):
     fake = FakeRun()
     monkeypatch.setattr(service, "run_cmd", fake)
     assert svc.state() == service.State(False, False, svc.where)
-    assert fake.calls == []  # no systemctl when the unit file is missing
+    assert fake.calls == []
 
     svc.install(EXE, tmp_path / "d")
     fake.calls.clear()
@@ -203,7 +199,7 @@ def test_launchd_plist_contents(tmp_path):
 
 
 def test_launchd_install_and_lifecycle(tmp_path, monkeypatch):
-    fake = FakeRun({("launchctl", "print"): (113, "")})  # not loaded yet
+    fake = FakeRun({("launchctl", "print"): (113, "")})
     monkeypatch.setattr(service, "run_cmd", fake)
     svc = service.LaunchdService(home=tmp_path, uid=501)
     svc.install(EXE, tmp_path / "data")
@@ -301,7 +297,6 @@ def test_scheduled_task_install_and_lifecycle(tmp_path, monkeypatch):
     assert [c[:2] for c in calls] == [["schtasks", "/Create"], ["schtasks", "/Run"]]
     assert calls[0][-1] == "/F"
     assert "<UserId>PC\\mac</UserId>" in written["xml"]
-    # The temp XML is removed after /Create.
     assert not Path(calls[0][calls[0].index("/XML") + 1]).exists()
 
     assert svc.state() == service.State(True, True, svc.where)

@@ -1,9 +1,4 @@
-"""
-Tests for `copycord update` (src/copycord/update.py): installer detection,
-the install command per installer, update status against faked GitHub releases API
-responses, and restarting the service only when it was running. No network,
-no real uv/pipx.
-"""
+"""Tests for `copycord update`: installer detection, status and service restart. No network."""
 import subprocess
 import urllib.error
 
@@ -155,7 +150,6 @@ def test_is_older():
     assert update.is_older("4.0.0b1", "4.0.0")
     assert not update.is_older("4.0.0", "4.0.0")
     assert not update.is_older("4.0.1", "4.0.0")
-    # Something that is not a version is never older.
     assert not update.is_older("main", "4.0.0")
     assert not update.is_older("4.0.0", "abc123")
 

@@ -1,9 +1,6 @@
-"""
-selfclient.client: Client lifecycle, event dispatch, caches and REST helpers.
+"""selfclient.client: lifecycle, event dispatch, caches and REST helpers.
 
-The gateway is a fake that hands its ``on_dispatch`` handler canned raw
-dispatches, and the HTTPClient is a fake returning canned payloads, so nothing
-here touches the network. Handlers are scheduled as tasks, as in discord.py,
+Gateway and HTTPClient are fakes with canned data. Handlers run as tasks,
 so each test drains the client's pending tasks before asserting.
 """
 import asyncio
@@ -518,7 +515,6 @@ class TestMessageCache:
             )
             cached = client.state._get_message(MSG)
             assert cached.content == "edited"
-            # A partial update is filled from the cached copy.
             assert cached.author.id == FRIEND
 
             await gw.feed("MESSAGE_DELETE", {"id": str(MSG), "channel_id": str(GENERAL), "guild_id": str(GUILD)})
@@ -696,7 +692,6 @@ class TestRest:
             assert isinstance(channel, TextChannel)
             assert channel.name == "fetched"
             assert channel.guild is client.get_guild(GUILD)
-            # Not cached, as in discord.py.
             assert client.get_channel(NEW_CHANNEL) is None
 
     @pytest.mark.asyncio
@@ -764,7 +759,6 @@ class TestRest:
             dm = client.state._get_private_channel_by_user(STRANGER)
             assert isinstance(dm, DMChannel)
 
-            # The second send reuses the cached DM.
             await client.send_dm(STRANGER, "again")
             opens = [c for c in fake_http.calls if c[0] == "start_private_message"]
             assert len(opens) == 1

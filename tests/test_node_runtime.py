@@ -1,9 +1,4 @@
-"""
-Tests for copycord.node_runtime: npm on PATH is reused, a Node already in
-<Copycord home>/node is reused, otherwise the official build is downloaded,
-checked against SHASUMS256.txt and unpacked there. The network is faked with
-tiny archives; nothing is downloaded.
-"""
+"""Tests for copycord.node_runtime. The network is faked with tiny archives."""
 import hashlib
 import io
 import re
@@ -97,9 +92,7 @@ def test_download_verify_unpack(home, net):
     assert result == home / "node" / name / "bin"
     assert (result / "npm").read_bytes().startswith(b"#!/bin/sh")
     assert seen == [f"{BASE}/SHASUMS256.txt", f"{BASE}/{name}.tar.xz"]
-    # No download leftovers next to the unpacked Node.
     assert [p.name for p in (home / "node").iterdir()] == [name]
-    # The next run reuses it.
     assert node_runtime.ensure_npm() == result
     assert len(seen) == 2
 

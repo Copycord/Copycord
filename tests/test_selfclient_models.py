@@ -1,11 +1,7 @@
-"""
-selfclient.models: permissions_for() and the raw-dict wrappers.
+"""selfclient.models: permissions_for() and the raw-dict wrappers.
 
-permissions_for follows discord.py's algorithm: owner and administrator get
-everything, @everyone's permissions OR the member's roles, then channel
-overwrites in the order @everyone, roles (denies then allows, combined), member.
-The wrapper tests check that a raw gateway payload reads back through the same
-attribute names src/copycord/client uses on discord.py-self objects.
+permissions_for follows the usual Discord order: owner and administrator first,
+then @everyone, role grants, then channel overwrites.
 """
 import pytest
 
@@ -163,7 +159,6 @@ class TestPermissionsFor:
         assert channel.permissions_for(make_member(guild, roles=[MOD])).view_channel
         plain = channel.permissions_for(make_member(guild))
         assert not plain.view_channel
-        # A channel you cannot see grants nothing in it.
         assert not plain.read_message_history
         assert not plain.send_messages
 
@@ -181,7 +176,6 @@ class TestPermissionsFor:
         guild = make_guild([overwrite(HELPER, 0, deny=("send_messages",))])
         perms = guild.get_channel(TEXT).permissions_for(make_member(guild, roles=[HELPER]))
         assert not perms.send_messages
-        # Losing send_messages takes the send-dependent bits with it.
         assert not perms.embed_links
         assert perms.view_channel
 
@@ -193,7 +187,6 @@ class TestPermissionsFor:
             ]
         )
         assert not guild.get_channel(TEXT).permissions_for(make_member(guild, roles=[MOD])).send_messages
-        # Somebody else with the same role is unaffected.
         other = make_member(guild, roles=[MOD], user_id=OTHER_ID)
         assert guild.get_channel(TEXT).permissions_for(other).send_messages
 

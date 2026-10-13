@@ -1,6 +1,4 @@
-"""
-Shared fixtures for Copycord tests.
-"""
+"""Shared fixtures for Copycord tests."""
 import os
 import tempfile
 import pytest
@@ -13,13 +11,11 @@ os.environ["DATA_DIR"] = _SESSION_DATA_DIR
 
 @pytest.fixture()
 def tmp_db_path(tmp_path):
-    """Return a temporary database file path."""
     return str(tmp_path / "test.db")
 
 
 @pytest.fixture()
 def db(tmp_db_path):
-    """Create a fresh DBManager with schema initialized."""
     from copycord.common.db import DBManager
     return DBManager(tmp_db_path, init_schema=True)
 

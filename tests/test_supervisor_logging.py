@@ -1,6 +1,4 @@
-"""
-Tests for the supervisor's logging (src/copycord/logging_setup.py).
-"""
+"""Tests for the supervisor's logging."""
 import asyncio
 import io
 import logging

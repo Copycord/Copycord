@@ -1,7 +1,4 @@
-"""
-Tests for the app_config schema_version row and the one-time pre-v4 backup
-(src/copycord/common/db.py, PLAN 7.1).
-"""
+"""Tests for the app_config schema_version row and the one-time pre-v4 backup."""
 import sqlite3
 
 import pytest
@@ -64,10 +61,8 @@ def test_v3_db_is_backed_up_once_before_first_v4_open(data_dir):
         rows = dict(conn.execute("SELECT key, value FROM app_config").fetchall())
     finally:
         conn.close()
-    # The backup is the untouched v3 DB.
     assert rows == {"COMMAND_USERS": "1,2"}
 
-    # Later opens find schema_version and do not back up again.
     assert not needs_pre_v4_backup(str(path))
     DBManager(str(path), init_schema=True).conn.close()
     assert _backups(data_dir) == backups
