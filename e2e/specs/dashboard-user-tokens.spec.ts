@@ -285,7 +285,7 @@ test.describe("21 user tokens block", () => {
     await expect.poll(() => stub.calls.includes("PATCH /t1")).toBe(true);
     expect(stub.bodies.find((b) => "enabled" in b)).toEqual({ enabled: false });
     await rows(page).nth(1).locator(".user-token-remove").click();
-    const removeBtn = page.locator(CONFIRM).getByRole("button", { name: "Remove", exact: true });
+    const removeBtn = page.locator(CONFIRM).filter({ hasText: "Remove bob?" }).getByRole("button", { name: "Remove", exact: true });
     await removeBtn.waitFor({ timeout: 2000 }).then(() => removeBtn.click(), () => undefined);
     await expect.poll(() => stub.calls.includes("DELETE /t2")).toBe(true);
     await expect(rows(page)).toHaveCount(1);
