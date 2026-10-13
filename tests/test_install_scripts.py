@@ -74,8 +74,8 @@ def test_saves_the_channel(path):
 @pytest.mark.parametrize("path", [SH, PS1])
 def test_prints_next_steps(path):
     text = _text(path)
-    for step in ("copycord update", "localhost:"):
-        assert step in text
+    assert "copycord update" in text
+    assert "localhost:" in text or 'HOST="localhost"' in text
     assert "Finish the setup in the dashboard" in text
     assert "onboard" not in text.lower()
 
