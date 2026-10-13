@@ -9,10 +9,7 @@
 
 """Exceptions raised by selfclient.
 
-The names and attributes mirror the discord.py-self ones src/copycord/client already
-catches (``LoginFailure``, ``ConnectionClosed.code``, ``HTTPException.status``,
-``.text``, ``.code``, ``Forbidden``, ``NotFound``, ``RateLimited.retry_after``),
-so swapping the import is the only change a call site needs.
+Names and attributes match discord.py-self's, so callers catch them the same way.
 """
 
 from __future__ import annotations
@@ -45,11 +42,7 @@ class ConnectionClosed(SelfClientException):
 
 
 class HTTPException(SelfClientException):
-    """A REST call came back with a non-2xx status.
-
-    ``json`` is the decoded body when it was JSON (Discord's error object), and
-    ``code``/``text`` are lifted out of it the way discord.py exposes them.
-    """
+    """A REST call came back with a non-2xx status."""
 
     def __init__(
         self,
@@ -97,10 +90,7 @@ class DiscordServerError(HTTPException):
 
 
 class RateLimited(HTTPException):
-    """Still 429 after the retry budget ran out.
-
-    Always has ``retry_after`` (seconds), taken from the 429 body.
-    """
+    """Still 429 after the retry budget ran out."""
 
     def __init__(
         self,

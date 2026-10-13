@@ -9,11 +9,8 @@
 
 """Discord enum values and gateway constants.
 
-The model enums are IntEnums so the reads src/copycord/client already does keep
-working unchanged: ``ch.type.value``, ``ch.type == ChannelType.forum``,
-``getattr(MessageType, "reply", None)``, ``vqm.name.lower()``, and plain int
-comparison against a raw payload's ``type``. Member names are discord.py's so
-attribute lookups by name resolve to the same thing they did before.
+The model enums are IntEnums with discord.py's member names, so they compare
+equal to raw payload ints and lookups by name keep working.
 """
 
 from __future__ import annotations
@@ -32,11 +29,7 @@ class _Enum(IntEnum):
 
     @classmethod
     def try_value(cls: Type[E], value: Any) -> Any:
-        """The member for ``value``, or ``value`` unchanged if it is unknown.
-
-        Discord adds types faster than any client ships them, and an unknown
-        type must not turn a whole payload into an exception.
-        """
+        """The member for ``value``, or ``value`` unchanged if it is unknown."""
         try:
             return cls(int(value))
         except (TypeError, ValueError):
@@ -190,16 +183,15 @@ class CloseCode:
     DISALLOWED_INTENTS = 4014
 
 
-# Close codes no reconnect can fix (wizard/core/gateway.py close handling).
+# Close codes no reconnect can fix.
 FATAL_CLOSE_CODES = frozenset({4004, 4010, 4011, 4012, 4013, 4014})
 
 
 class Capabilities:
     """IDENTIFY ``capabilities`` bits.
 
-    Only the bits whose meaning is settled are named. ``WEB`` is the value the
-    web client sends; ``DEFAULT`` is that minus CHANNEL_OBFUSCATION, so READY
-    carries real channel names instead of ``___hidden___``.
+    ``WEB`` is what the web client sends. ``DEFAULT`` drops CHANNEL_OBFUSCATION
+    so READY carries real channel names instead of ``___hidden___``.
     """
 
     LAZY_USER_NOTES = 1 << 0

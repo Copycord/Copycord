@@ -7,17 +7,10 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-"""selfclient: Copycord's own user-account Discord client.
+"""Copycord's user-account Discord client.
 
-Replaces discord.py-self for the client role (docs/v4/PLAN.md section 3). No
-``discord`` import anywhere in this package.
-
-So far: errors, enums, model wrappers over raw payloads, the curl_cffi REST
-client with rate-limit pacing and paginators, the fingerprint re-export, the
-raw-websockets gateway (HELLO/IDENTIFY/RESUME, heartbeat, op 37 subscriptions,
-zlib-stream, reconnect), the event dispatch table, the cache state and
-``Client``, which ties them together. Nothing in src/copycord/client uses this package
-yet.
+Replaces discord.py-self for the client role. Nothing in this package imports
+``discord``.
 """
 
 from . import client, enums, errors, events, fingerprint, gateway, http, models, state

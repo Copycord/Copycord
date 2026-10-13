@@ -7,20 +7,10 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-"""The selfclient home of the header / super-properties / TLS builder.
+"""Re-export of copycord.common.selfbot_headers for selfclient code.
 
-A re-export of common/selfbot_headers, not a copy: that module stays the one
-fingerprint definition in the process (the server's user-token REST and the
-admin scraper import it directly), and this name is where selfclient code
-reaches it. Nothing here changes its behaviour.
-
-The import is absolute (``copycord.common.selfbot_headers``), like every
-other import between copycord's subpackages.
-
-Module-level state that selfbot_headers rebinds (the shared build) is read
-through its functions (get_build_info / set_build_info), never re-exported as
-a value, so a refresh is always visible here. ``selfbot_headers`` itself is
-exported for anything that needs the module object.
+The shared build info is read through get_build_info / set_build_info rather
+than re-exported as a value, so a refresh is always visible here.
 """
 
 from __future__ import annotations
