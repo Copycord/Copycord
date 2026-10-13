@@ -43,6 +43,7 @@ CHANNEL_SET="${COPYCORD_CHANNEL:+1}"
 [ "${COPYCORD_BETA:-0}" = "1" ] && CHANNEL="beta" && CHANNEL_SET=1
 COPYCORD_HOME="${COPYCORD_HOME:-$HOME/.copycord}"
 GIT_DIR_PATH="${COPYCORD_GIT_DIR:-}"
+# Keep in step with NODE_VERSION in src/copycord/node_runtime.py.
 NODE_VERSION="${COPYCORD_NODE_VERSION:-22.12.0}"
 VERIFY="${COPYCORD_VERIFY:-0}"
 DRY_RUN="${COPYCORD_DRY_RUN:-0}"
@@ -516,7 +517,12 @@ install_git() {
     if [ "$need_node" = "1" ]; then
         step "Installing Node $NODE_VERSION"
         node_name="$(node_platform)" || exit 1
-        if [ "$DRY_RUN" = "1" ]; then
+        if [ -x "$NODE_HOME/$node_name/bin/npm" ]; then
+            # Already there, from an earlier install or `copycord update --channel dev`.
+            PATH="$NODE_HOME/$node_name/bin:$PATH"
+            export PATH
+            done_line "reusing $NODE_HOME/$node_name"
+        elif [ "$DRY_RUN" = "1" ]; then
             dry "download $NODE_DIST/v$NODE_VERSION/$node_name.tar.gz, check its sha256, unpack into $NODE_HOME"
         else
             TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/copycord-node.XXXXXX")"

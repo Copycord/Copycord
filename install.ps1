@@ -52,6 +52,7 @@ function Install-Copycord {
     $UvInstaller = 'https://astral.sh/uv/install.ps1'
     $NodeDist = 'https://nodejs.org/dist'
     $NodeMinMajor = 20
+    # Keep in step with NODE_VERSION in src/copycord/node_runtime.py.
     $NodeVersion = if ($env:COPYCORD_NODE_VERSION) { $env:COPYCORD_NODE_VERSION } else { '22.12.0' }
     $Headers = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'copycord-install' }
 
@@ -322,7 +323,11 @@ Test a branch, no release needed:
                 Step "Installing Node $NodeVersion"
                 $arch = switch ($env:PROCESSOR_ARCHITECTURE) { 'AMD64' { 'x64' } 'ARM64' { 'arm64' } default { Fail "no Node build for $env:PROCESSOR_ARCHITECTURE; install Node $NodeMinMajor+ yourself" } }
                 $nodeName = "node-v$NodeVersion-win-$arch"
-                if ($dryRun) {
+                if (Test-Path (Join-Path (Join-Path $nodeHome $nodeName) 'npm.cmd')) {
+                    # Already there, from an earlier install or `copycord update --channel dev`.
+                    $env:Path = "$(Join-Path $nodeHome $nodeName);$env:Path"
+                    Done "reusing $(Join-Path $nodeHome $nodeName)"
+                } elseif ($dryRun) {
                     Dry "download $NodeDist/v$NodeVersion/$nodeName.zip, check its sha256, unpack into $nodeHome"
                 } else {
                     # The official zip, checked against SHASUMS256.txt; no admin rights needed.
