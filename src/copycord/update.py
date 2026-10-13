@@ -45,6 +45,10 @@ dev     git install of a branch, tag or commit (--ref, default main) of a
 
 update.json is {"channel": ...}; dev adds "branch" (the ref) and, when it is
 not the default, "repo". Files without "repo" read as Copycord/Copycord.
+With no update.json, a `git+https://github.com/...` install (PEP 610
+direct_url.json vcs_info) reads as dev at the ref it was installed from;
+anything else reads as stable. A reinstall (doctor --fix) of a git install
+always builds the installed commit from the same git URL, never a release.
 
 stable, beta and --tag install the wheel asset of the release by its URL.
 """
@@ -126,14 +130,21 @@ def settings_path() -> Path:
 
 
 def load_channel(path: Optional[Path] = None) -> Channel:
-    """The saved channel; Channel(stable) when nothing (valid) is saved."""
-    path = settings_path() if path is None else path
+    """The saved channel. When nothing (valid) is saved: dev at the installed
+    ref for a `git+https://github.com/...` install, else Channel(stable)."""
+    fallback = Channel(DEFAULT_CHANNEL)
+    if path is None:
+        path = settings_path()
+        source = git_source()
+        if source is not None and source.repo:
+            fallback = Channel(DEV, source.ref or DEFAULT_BRANCH,
+                               None if source.repo == DEFAULT_REPO else source.repo)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return Channel(DEFAULT_CHANNEL)
+        return fallback
     if not isinstance(raw, dict) or raw.get("channel") not in CHANNELS:
-        return Channel(DEFAULT_CHANNEL)
+        return fallback
     if raw["channel"] == DEV:
         branch = raw.get("branch")
         repo = raw.get("repo")
@@ -418,6 +429,42 @@ def build_commit() -> Optional[str]:
     return commit if re.fullmatch(r"[0-9a-f]{40}", commit) else None
 
 
+class GitSource(NamedTuple):
+    url: str  # the git URL, without git+ and @ref
+    ref: Optional[str]  # requested_revision: the branch, tag or commit asked for
+    commit: Optional[str]  # commit_id: the commit that was installed
+
+    @property
+    def repo(self) -> Optional[str]:
+        """OWNER/NAME for a GitHub URL; None for other hosts."""
+        m = re.match(r"^https://github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", self.url)
+        return m.group(1) if m and valid_repo(m.group(1)) else None
+
+    def spec(self) -> str:
+        """The installed commit again (else the requested ref) from the same URL."""
+        rev = self.commit or self.ref
+        return f"git+{self.url}@{rev}" if rev else f"git+{self.url}"
+
+
+def git_source() -> Optional[GitSource]:
+    """Where a `git+https://...` install came from (PEP 610 direct_url.json
+    vcs_info); None for wheels, folders and checkouts."""
+    from importlib import metadata
+
+    try:
+        raw = metadata.distribution("copycord").read_text("direct_url.json")
+        info = json.loads(raw) if raw else {}
+    except Exception:
+        return None
+    vcs = info.get("vcs_info") if isinstance(info, dict) else None
+    url = info.get("url") if isinstance(info, dict) else None
+    if not isinstance(vcs, dict) or vcs.get("vcs") != "git" or not isinstance(url, str) or not url:
+        return None
+    ref, commit = vcs.get("requested_revision"), vcs.get("commit_id")
+    return GitSource(url, ref if isinstance(ref, str) and ref else None,
+                     commit if isinstance(commit, str) and commit else None)
+
+
 def installed_commit() -> Optional[str]:
     """Commit of a git install; None otherwise.
 
@@ -592,13 +639,14 @@ def update(
     yes: bool = False,
     reinstall: bool = False,
 ) -> int:
-    """reinstall: install the running version again from the saved channel
-    (a dev ref from git, else the release of this exact version); used by
-    `copycord doctor --fix`."""
+    """reinstall: install the running version again: a git install from its
+    git URL and commit, else from the saved channel (a dev ref from git, else
+    the release of this exact version); used by `copycord doctor --fix`."""
     saved = load_channel()
+    source = git_source() if reinstall else None
     if reinstall:
         channel = branch = repo = None
-        tag = None if saved.channel == DEV else current_version()
+        tag = None if saved.channel == DEV or source else current_version()
         yes = True
     if tag and (channel or branch or repo):
         _err("--tag installs one exact version; it cannot be combined with "
@@ -644,11 +692,15 @@ def update(
         return 1
 
     if reinstall:
-        ui.heading(f"Reinstalling Copycord ({target.describe() if not tag else 'v' + tag})")
+        label = "v" + tag if tag else target.describe() if target.channel == DEV else "git"
+        ui.heading(f"Reinstalling Copycord ({label})")
     else:
         ui.heading(f"Updating Copycord ({target.describe() if not tag else 'tag ' + tag})")
     release = None
-    if target.channel == DEV and not tag:
+    git = source is not None or (target.channel == DEV and not tag)
+    if source is not None:
+        spec = source.spec()
+    elif target.channel == DEV and not tag:
         spec = git_spec(target.ref, target.repo)
     else:
         try:
@@ -684,7 +736,7 @@ def update(
     # npm; Node is downloaded into the Copycord home when there is none.
     # Release updates install a wheel and never touch Node.
     cmd_env = None
-    if target.channel == DEV and not tag:
+    if git:
         try:
             npm_dir = node_runtime.ensure_npm()
         except node_runtime.NodeError as e:

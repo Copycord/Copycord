@@ -163,6 +163,17 @@ def download_node(version: str, plat: str, home: Path) -> Path:
     return bin_dir(target, plat)
 
 
+def find_npm(env: Optional[Mapping[str, str]] = None) -> Optional[Path]:
+    """A directory with npm in it (PATH, or a Node downloaded before); None
+    when there is none. Downloads nothing."""
+    found = shutil.which("npm")
+    if found:
+        return Path(found).parent
+    plat = platform_name()
+    existing = bin_dir(node_home(env) / dist_name(node_version(env), plat), plat)
+    return existing if _has_npm(existing, plat) else None
+
+
 def ensure_npm(env: Optional[Mapping[str, str]] = None) -> Path:
     """A directory with npm in it, downloading Node when there is none.
 

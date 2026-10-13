@@ -1070,10 +1070,22 @@ def _can_reinstall(checks: List[Check]) -> None:
         raise FixError(f"Copycord was installed with {kind}; reinstall it the same way")
     if os.environ.get("COPYCORD_SKIP_FRONTEND") and all(c.name == "web UI missing" for c in checks):
         raise FixError("COPYCORD_SKIP_FRONTEND is set, so a reinstall would leave the web UI out too")
+    # A git reinstall builds the web UI, which needs npm.
+    git = update.git_source() is not None or update.load_channel().channel == update.DEV
+    if git and not os.environ.get("COPYCORD_SKIP_FRONTEND"):
+        from copycord import node_runtime
+
+        if node_runtime.find_npm() is None:
+            raise FixError(NPM_MISSING)
+
+
+NPM_MISSING = ("reinstalling needs npm to build the web UI, and npm is not installed; "
+               "install Node.js from https://nodejs.org, then run copycord doctor --fix again")
 
 
 def fix_reinstall(checks: List[Check]) -> str:
-    """The running version again, from the saved channel and ref."""
+    """The running version again: a git install from its git URL and commit,
+    else from the saved channel and ref."""
     from copycord import update
 
     _can_reinstall(checks)
