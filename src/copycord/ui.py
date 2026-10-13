@@ -44,7 +44,7 @@ LOGO = (
     " \\___\\___/ .__/\\_, \\__\\___/_| \\__,_|",
     "         |_|   |__/                 ",
 )
-TAGLINE = "Mirror Discord servers, self-hosted."
+TAGLINE = "Ultimate Discord Mirror Tool by xMacJ"
 
 
 def use_color(stream: Optional[TextIO] = None) -> bool:
