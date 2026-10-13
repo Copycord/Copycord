@@ -29,12 +29,16 @@ TRAVERSAL_NAMES = [
 
 
 @pytest.fixture()
-def client():
+def client(monkeypatch):
+    from copycord.admin import auth
+
+    monkeypatch.setattr(auth, "ADMIN_PASSWORD", "pw")
     transport = ASGITransport(app=app)
     return AsyncClient(
         transport=transport,
         base_url="http://test",
         headers={"Origin": "http://test", "X-Copycord-CSRF": "1"},
+        cookies={auth.ADMIN_COOKIE_NAME: auth.make_session_token()},
     )
 
 
