@@ -32,12 +32,24 @@ SESSION_MAX_AGE = 60 * 60 * 12
 
 
 ADMIN_PASSWORD: str = ""
+# Socket peers whose CF-Connecting-IP / X-Real-IP / X-Forwarded-For are believed.
+TRUSTED_PROXIES: frozenset[str] = frozenset()
 _session_signer: URLSafeTimedSerializer | None = None
 
 
+def _parse_trusted_proxies(raw: str) -> frozenset[str]:
+    return frozenset(p.strip() for p in (raw or "").split(",") if p.strip())
+
+
 def _client_ip(request: Request) -> str:
-    """Best-effort client IP for logging, honoring reverse proxy and Cloudflare headers."""
+    """Client IP for logging: the socket peer, or the forwarded client when the
+    peer is listed in TRUSTED_PROXIES. Uvicorn has already applied
+    --forwarded-allow-ips to the peer address."""
     try:
+        peer = request.client.host if request.client else ""
+        if not peer or peer not in TRUSTED_PROXIES:
+            return peer or "unknown"
+
         hdrs = request.headers
 
         cf_ip = hdrs.get("cf-connecting-ip")
@@ -54,8 +66,7 @@ def _client_ip(request: Request) -> str:
             if first:
                 return first
 
-        if request.client:
-            return request.client.host
+        return peer
 
     except Exception:
         pass
@@ -247,9 +258,10 @@ class PasswordGuardMiddleware(BaseHTTPMiddleware):
 
 def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) -> None:
     """Set up admin login: read PASSWORD and SECRET_KEY, add PasswordGuardMiddleware, CSRFMiddleware and the /login routes."""
-    global ADMIN_PASSWORD, _session_signer
+    global ADMIN_PASSWORD, TRUSTED_PROXIES, _session_signer
 
     ADMIN_PASSWORD = os.getenv("PASSWORD", "").strip()
+    TRUSTED_PROXIES = _parse_trusted_proxies(os.getenv("TRUSTED_PROXIES", ""))
     secret_env = os.getenv("SECRET_KEY", "").strip()
 
     secret_key = _load_or_create_secret_key(data_dir, secret_env)
