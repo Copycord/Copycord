@@ -95,7 +95,7 @@ const config = {
           {
             title: 'Docs',
             items: [
-              { label: 'Getting Started', to: '/docs/getting-started/prerequisites' },
+              { label: 'Getting Started', to: '/docs/getting-started/quick-start' },
               { label: 'Dashboard', to: '/docs/dashboard/overview' },
               { label: 'Commands', to: '/docs/commands/overview' },
               { label: 'Configuration', to: '/docs/configuration/cloning-options' },
