@@ -506,10 +506,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         parents=[data_dir],
         help="remove Copycord from this machine",
         description="Stop and remove the OS service, remove the copycord program "
-        "(uv tool or pipx) and the saved update channel. It then asks whether to "
-        "delete your data too: the Copycord home (~/.copycord or COPYCORD_HOME: "
-        "database, logs, backups, settings, src, node). Without a terminal the data "
-        "is kept unless --purge is given.",
+        "(uv tool or pipx) and the saved update channel. It asks one question: keep "
+        "your data, delete it too (the Copycord home, ~/.copycord or COPYCORD_HOME: "
+        "database, logs, backups, settings, src, node), or cancel. Without a terminal "
+        "the data is kept unless --purge is given.",
     )
     data_choice = uninst.add_mutually_exclusive_group()
     data_choice.add_argument("--purge", action="store_true",
@@ -518,7 +518,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     data_choice.add_argument("--keep-data", action="store_true",
                              help="keep the Copycord home without asking")
     uninst.add_argument("--yes", "-y", action="store_true",
-                        help="skip the confirmation prompts (needed without a terminal)")
+                        help="skip the question (needed without a terminal)")
     uninst.add_argument("--keep-service", action="store_true",
                         help="leave the OS service installed")
     uninst.add_argument("--dry-run", action="store_true",
@@ -1460,11 +1460,6 @@ def config_command(args: argparse.Namespace) -> int:
 # uninstall
 # --------------------------------------------------------------------------
 
-INSTALL_SCRIPT = (
-    "curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh"
-)
-
-
 def purge_refusal(path: Path) -> Optional[str]:
     """Why the Copycord home must not be deleted; None when it may."""
     if not str(path).strip() or str(path) == ".":
@@ -1606,45 +1601,29 @@ def uninstall_command(args: argparse.Namespace) -> int:
         )
         return 1
 
-    if ui.use_color():
-        ui.banner(_version())
     ui.heading("Uninstall Copycord" + (" (dry run, nothing changes)" if dry_run else ""))
-    if not args.keep_service:
-        ui.line("step", "stop and remove the OS service")
-    if purge:
-        ui.line("step", "delete the Copycord home, including src and node", str(target))
-    ui.line("step", "remove the copycord program and its update channel")
-    if purge is None:
-        ui.line("step", "ask whether to delete your data too", str(target))
+    print("Removes the Copycord program and its background service.")
     print()
 
     if not yes and not dry_run:
+        keep, delete = "Keep my data", "Delete everything (database, logs, backups, settings)"
+        options = [keep, delete] if purge is None else [delete if purge else keep]
         try:
-            if not ui.confirm("Uninstall Copycord?", default=False):
-                ui.warn("uninstall cancelled", "nothing was changed")
-                return 1
-            if purge is None:
-                purge = ui.confirm(
-                    "Also delete your Copycord data (database, logs, backups, settings) "
-                    f"in {target}? This cannot be undone.",
-                    default=False,
-                )
-                if purge:
-                    why = purge_refusal(target)
-                    if why:
-                        ui.fail("refusing to delete the Copycord home", why)
-                        return 1
-                else:
-                    ui.info("keeping your data", str(target))
-            if purge:
-                typed = ui.ask(f"Type DELETE to remove {target} and everything in it")
-                if typed != "DELETE":
-                    ui.warn("uninstall cancelled", "DELETE was not typed; nothing was changed")
-                    return 1
+            picked = options + ["Cancel"]
+            choice = picked[ui.choose(f"Your data is in {target}", picked)]
         except (KeyboardInterrupt, EOFError):
+            choice = "Cancel"
             print()
+        if choice == "Cancel":
             ui.warn("uninstall cancelled", "nothing was changed")
-            return 130
+            return 1
+        purge = choice == delete
+        if purge:
+            why = purge_refusal(target)
+            if why:
+                ui.fail("refusing to delete the Copycord home", why)
+                return 1
+        print()
 
     removed: list = []
     kept: list = []
@@ -1682,19 +1661,15 @@ def uninstall_command(args: argparse.Namespace) -> int:
 
     ok = _uninstall_program(dry_run, purge, removed, kept) and ok
 
-    lines = [ui.bold("Would remove" if dry_run else "Removed")]
-    lines += [f"  {x}" for x in removed or ["nothing"]]
-    lines += ["", ui.bold("Kept")]
-    lines += [f"  {x}" for x in kept or ["nothing"]]
-    lines += ["", ui.bold("Reinstall"), f"  {ui.cmd(INSTALL_SCRIPT)}"]
-    if dry_run:
-        title, status = "Dry run: nothing changed", "info"
-    elif ok:
-        title, status = "Copycord uninstalled", "ok"
-    else:
-        title, status = "Uninstall incomplete", "warn"
     print()
-    ui.box(lines, title=title, status=status)
+    if dry_run:
+        ui.info("Dry run: nothing changed")
+    elif ok:
+        ui.ok("Copycord uninstalled")
+    else:
+        ui.warn("Uninstall incomplete", "see the messages above", stream=sys.stdout)
+    if not purge and target.exists():
+        print(f"  Your data is still in {target}")
     return 0 if ok else 1
 
 

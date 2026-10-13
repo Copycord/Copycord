@@ -21,7 +21,7 @@ import os
 import sys
 import threading
 import time
-from typing import Iterable, Optional, TextIO
+from typing import Iterable, List, Optional, TextIO
 
 RESET = "\033[0m"
 _CODES = {
@@ -290,6 +290,19 @@ def ask(question: str, default: str = "", secret: bool = False) -> str:
     else:
         value = input(prompt)
     return value.strip() or default
+
+
+def choose(question: str, options: List[str], default: int = 0) -> int:
+    """A numbered choice; returns the picked index. Enter picks the default."""
+    print(f"{paint('?', 'accent', 'bold')} {bold(question)}")
+    for i, option in enumerate(options, 1):
+        tail = f" {dim('(default)')}" if i - 1 == default else ""
+        print(f"  {accent(str(i))}) {option}{tail}")
+    numbers = ", ".join(str(i) for i in range(1, len(options)))
+    while True:
+        raw = ask(f"Enter {numbers} or {len(options)}", default=str(default + 1))
+        if raw.isdigit() and 1 <= int(raw) <= len(options):
+            return int(raw) - 1
 
 
 def confirm(question: str, default: bool = True) -> bool:
