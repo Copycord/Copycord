@@ -313,6 +313,36 @@ Test a branch, no release needed:
         $script:wasRunning = $true
     }
 
+    function ReleaseKey([string]$Tag) {
+        # A sort key for a release tag: 4.1.0 > 4.1.0rc1 > 4.1.0b2 > 4.1.0a1; '' when it is no version.
+        if ($Tag -notmatch '^v?(\d+)\.(\d+)\.(\d+)(?:[-.]?(a|alpha|b|beta|c|rc|pre|preview)[.-]?(\d*))?$') { return '' }
+        $rank = switch ($Matches[4]) { { $_ -in @('a', 'alpha') } { 0 } { $_ -in @('b', 'beta') } { 1 } { $_ -in @('c', 'rc', 'pre', 'preview') } { 2 } default { 3 } }
+        $num = if ($Matches[5]) { [int]$Matches[5] } else { 0 }
+        return '{0:D6}{1:D6}{2:D6}{3}{4:D6}' -f [int]$Matches[1], [int]$Matches[2], [int]$Matches[3], $rank, $num
+    }
+
+    function FindRelease {
+        # The release this run installs: -Version, else the highest stable version
+        # (/latest), or for beta the highest version of any release that is not a draft.
+        # GitHub lists releases by date, not by version, so the list is sorted here.
+        $hdr = $Headers.Clone()
+        if ($env:GITHUB_TOKEN) { $hdr['Authorization'] = "Bearer $env:GITHUB_TOKEN" }
+        try {
+            if ($version) { return Invoke-RestMethod -Uri "$api/tags/v$version" -Headers $hdr -TimeoutSec 30 }
+            if ($channel -ne 'beta') { return Invoke-RestMethod -Uri "$api/latest" -Headers $hdr -TimeoutSec 30 }
+            $list = @(Invoke-RestMethod -Uri "${api}?per_page=100" -Headers $hdr -TimeoutSec 30)
+        } catch {
+            $status = $null
+            try { $status = [int]$_.Exception.Response.StatusCode } catch { $status = $null }
+            $why = if ($status -eq 404) { 'not found (HTTP 404)' }
+                elseif ($status -in @(403, 429)) { "GitHub refused the request (HTTP $status, likely its hourly limit; set GITHUB_TOKEN to raise it)" }
+                elseif ($status) { "HTTP $status" } else { $_.Exception.Message }
+            throw "could not get the release from ${api}: $why"
+        }
+        return $list | Where-Object { -not $_.draft -and (ReleaseKey $_.tag_name) } |
+            Sort-Object -Property @{ Expression = { ReleaseKey $_.tag_name } } -Descending | Select-Object -First 1
+    }
+
     function AlreadyInstalled {
         # The installed label when it is what this run would install, else $null.
         # Any doubt (no network, unknown output) means install.
@@ -351,13 +381,9 @@ Test a branch, no release needed:
             $want = $version
         } else {
             if ($channelSet -and $chan -ne $channel) { return $null }
-            if ($channel -eq 'beta') {
-                $list = Invoke-RestMethod -Uri "${api}?per_page=30" -Headers $Headers -TimeoutSec 30
-                $want = ($list | Where-Object { -not $_.draft } | Select-Object -First 1).tag_name
-            } else {
-                $want = (Invoke-RestMethod -Uri "$api/latest" -Headers $Headers -TimeoutSec 30).tag_name
-            }
-            if (-not $want) { return $null }
+            $found = FindRelease
+            if (-not $found) { return $null }
+            $want = $found.tag_name
             $want = "$want".TrimStart('v')
         }
         if ($haveVersion.TrimStart('v') -ne $want) { return $null }
@@ -440,18 +466,9 @@ Test a branch, no release needed:
                 if ($upgrade) { StopRunning }
                 Dry "uv tool install --force --python $PythonVersion <copycord wheel of $label>"
             } else {
-                try {
-                    if ($version) {
-                        $release = Invoke-RestMethod -Uri "$api/tags/v$version" -Headers $Headers -TimeoutSec 30
-                    } elseif ($channel -eq 'beta') {
-                        $list = Invoke-RestMethod -Uri "${api}?per_page=30" -Headers $Headers -TimeoutSec 30
-                        $release = $list | Where-Object { -not $_.draft } | Select-Object -First 1
-                    } else {
-                        $release = Invoke-RestMethod -Uri "$api/latest" -Headers $Headers -TimeoutSec 30
-                    }
-                } catch {
+                try { $release = FindRelease } catch {
                     $hint = if ($version) { " If $version is a branch, tag or commit, use -Version with that name, e.g. -Version v4-dev." } else { '' }
-                    Fail "could not get the release from ${api}: $($_.Exception.Message)$hint"
+                    Fail "$($_.Exception.Message)$hint"
                 }
                 if (-not $release) { Fail "no $channel release found on $repoUrl/releases" }
                 $tag = $release.tag_name
