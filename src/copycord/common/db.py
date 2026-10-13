@@ -24,6 +24,118 @@ logger = logging.getLogger("common.db")
 # never been opened by v4.
 SCHEMA_VERSION_KEY = "schema_version"
 SCHEMA_VERSION = 4
+# data-pre-update-<from version>-<UTC timestamp>.db, written by `copycord update`.
+PRE_UPDATE_PREFIX = "data-pre-update-"
+PRE_UPDATE_RETAIN = 5
+
+
+class SchemaTooNewError(RuntimeError):
+    """The DB was written by a newer Copycord than this one."""
+
+    def __init__(self, db_path: str, stored: int, supported: int = SCHEMA_VERSION):
+        self.db_path = db_path
+        self.stored = stored
+        self.supported = supported
+        super().__init__(
+            f"{db_path} has schema {stored}, this Copycord supports {supported}"
+        )
+
+
+def stored_schema_version(db_path: str) -> Optional[int]:
+    """schema_version of db_path read-only; None when the DB or the row is missing."""
+    path = Path(db_path)
+    if not path.is_file() or path.stat().st_size == 0:
+        return None
+    conn = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        if not conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_config'"
+        ).fetchone():
+            return None
+        row = conn.execute(
+            "SELECT value FROM app_config WHERE key=?", (SCHEMA_VERSION_KEY,)
+        ).fetchone()
+    finally:
+        conn.close()
+    try:
+        return int(row[0]) if row else None
+    except (TypeError, ValueError):
+        return None
+
+
+def check_schema_version(db_path: str) -> None:
+    """Raise SchemaTooNewError when db_path was written by a newer schema."""
+    stored = stored_schema_version(db_path)
+    if stored is not None and stored > SCHEMA_VERSION:
+        raise SchemaTooNewError(str(db_path), stored)
+
+
+def backups_dir() -> Path:
+    """BACKUP_DIR if set, else <data dir>/backups (where the daily backups go)."""
+    import os
+
+    raw = os.environ.get("BACKUP_DIR")
+    if raw:
+        return Path(raw).expanduser().resolve()
+    from copycord.common.paths import data_dir
+
+    return data_dir() / "backups"
+
+
+def pre_update_backups(backup_dir: Optional[Path] = None) -> List[Path]:
+    """Pre-update backups in backup_dir, newest first."""
+    d = backups_dir() if backup_dir is None else Path(backup_dir)
+    if not d.is_dir():
+        return []
+    return sorted(
+        d.glob(f"{PRE_UPDATE_PREFIX}*.db"), key=lambda p: p.stat().st_mtime, reverse=True
+    )
+
+
+def backup_pre_update(
+    db_path: str,
+    from_version: str,
+    backup_dir: Optional[Path] = None,
+    retain: int = PRE_UPDATE_RETAIN,
+) -> Optional[Path]:
+    """
+    Consistent copy of db_path (sqlite online backup) to
+    <backup_dir>/data-pre-update-<from_version>-<UTC timestamp>.db, then keep
+    only the newest `retain` of them. None when there is no DB yet; errors raise.
+    """
+    path = Path(db_path)
+    if not path.is_file() or path.stat().st_size == 0:
+        return None
+    backup_dir = backups_dir() if backup_dir is None else Path(backup_dir)
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    safe = "".join(c if c.isalnum() or c in ".+_" else "_" for c in from_version) or "unknown"
+    base = f"{PRE_UPDATE_PREFIX}{safe}-{stamp}"
+    dest = backup_dir / f"{base}.db"
+    n = 1
+    while dest.exists():
+        dest = backup_dir / f"{base}-{n}.db"
+        n += 1
+    tmp = dest.with_name(f".{dest.name}.tmp")
+    src = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        out = sqlite3.connect(str(tmp))
+        try:
+            src.backup(out)
+        finally:
+            out.close()
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+    finally:
+        src.close()
+    tmp.replace(dest)
+    for old in pre_update_backups(backup_dir)[retain:]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return dest
 
 
 def needs_pre_v4_backup(db_path: str) -> bool:
@@ -82,6 +194,8 @@ def backup_pre_v4(db_path: str, backup_dir: Optional[Path] = None) -> Optional[P
 class DBManager:
     def __init__(self, db_path: str, init_schema: bool = False):
         self.path = db_path
+        # Before anything writes: a newer Copycord's DB is never touched.
+        check_schema_version(self.path)
         if init_schema:
             backup_pre_v4(self.path)
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
@@ -100,9 +214,18 @@ class DBManager:
             self._set_schema_version()
 
     def _set_schema_version(self) -> None:
-        """Record the schema version; written after the pre-v4 backup exists."""
-        if self.get_config(SCHEMA_VERSION_KEY, "") != str(SCHEMA_VERSION):
-            self.set_config(SCHEMA_VERSION_KEY, str(SCHEMA_VERSION))
+        """Record the schema version; written after the pre-v4 backup exists.
+
+        Only ever raises the stored value, never lowers it.
+        """
+        raw = self.get_config(SCHEMA_VERSION_KEY, "")
+        try:
+            stored = int(raw) if raw else None
+        except ValueError:
+            stored = None
+        if stored is not None and stored >= SCHEMA_VERSION:
+            return
+        self.set_config(SCHEMA_VERSION_KEY, str(SCHEMA_VERSION))
 
     def _init_schema(self):
         """
