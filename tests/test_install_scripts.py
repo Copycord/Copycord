@@ -223,3 +223,64 @@ def test_the_check_comes_before_any_install_step(path):
     check = text.index("is already installed")
     assert check < text.index("Preparing uv")
     assert check < text.index("uv tool install --force")
+
+
+def _sh_function(text, name):
+    start = text.index(f"\n{name}() {{\n")
+    return text[start:text.index("\n}\n", start)]
+
+
+def test_sh_shows_the_new_password_and_the_saved_address():
+    text = _text(SH)
+    # Read back only when config init just made the file, and shown once in the box.
+    init = text.index('"$BIN_DIR/copycord" config init')
+    assert 'NEW_PASSWORD="$(env_value PASSWORD --show-secrets)"' in text[init:init + 300]
+    assert 'NEW_PASSWORD=""' in text[:init]
+    assert '"$BIN_DIR/copycord" config get "$@"' in _sh_function(text, "env_value")
+    box = text[text.index("Needs your attention:"):]
+    assert box.count("$NEW_PASSWORD") == 2
+    assert "shown only this once" in box
+    # ADMIN_PORT and DASHBOARD_HOST come from .env; localhost unless a host is set.
+    assert 'PORT="$(env_value ADMIN_PORT)"' in text
+    assert 'HOST="$(env_value DASHBOARD_HOST)"' in text
+    assert 'URL="http://$HOST:$PORT"' in text
+    assert "localhost:${ADMIN_PORT" not in text
+    assert text.index('URL="http://$HOST:$PORT"') > text.index('"$DRY_RUN" = "1" ]; then\n    say "  ${YELLOW}${BOLD}Dry run complete')
+
+
+def test_sh_never_cleans_a_git_dir_it_did_not_create():
+    text = _text(SH)
+    owned = _sh_function(text, "owned_checkout")
+    assert '"$GIT_DIR_PATH/.git/$GIT_MARKER"' in owned
+    assert "remote get-url origin" in owned and '"$REPO_URL.git"' in owned
+    assert "status --porcelain" in owned
+    checkout = _sh_function(text, "checkout_ref")
+    assert ': >"$GIT_DIR_PATH/.git/$GIT_MARKER"' in checkout
+    assert checkout.index("$GIT_MARKER") < checkout.index("clean -fdx")
+    install = _sh_function(text, "install_git")
+    guard = install.index("! owned_checkout")
+    assert "nothing was changed" in install[guard:guard + 400]
+    # Before anything is downloaded or checked out, dry run included.
+    assert guard < install.index("Installing Node") < install.index("run \"Checking out $REF\" checkout_ref")
+    assert "never point it at" in text[:text.index("--verify ")]
+
+
+def test_sh_stops_the_service_around_the_install():
+    text = _text(SH)
+    stop = _sh_function(text, "stop_service")
+    assert 'service status --json' in stop and 'service stop' in stop
+    assert '[ "$UPGRADE" = "1" ]' in stop
+    assert "service start" in _sh_function(text, "restart_service")
+    # Stopped right before each uv install, started after the repair.
+    for install in ('run "uv tool install copycord $TAG"', 'run "uv tool install copycord from $GIT_DIR_PATH"'):
+        at = text.index(install)
+        assert "stop_service" in text[at - 200:at]
+    assert text.index("\nrestart_service\n") > text.index("doctor --fix --brief </dev/null")
+    # A failed install starts it again.
+    assert '"$SERVICE_EXE" service start' in _sh_function(text, "cleanup")
+
+
+def test_sh_upgrade_detection_checks_the_data_folder():
+    text = _text(SH)
+    detect = text[text.index("UPGRADE=0"):text.index("UPGRADE=1")]
+    assert '"$COPYCORD_HOME/data/data.db"' in detect

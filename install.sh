@@ -376,7 +376,8 @@ command -v uv >/dev/null 2>&1 || need_uv=1
 # An upgrade or reinstall ends with `copycord doctor --fix`.
 UPGRADE=0
 if command -v copycord >/dev/null 2>&1 || [ -x "$HOME/.local/bin/copycord" ] \
-    || [ -e "$COPYCORD_HOME/.env" ] || [ -e "$COPYCORD_HOME/data.db" ]; then
+    || [ -e "$COPYCORD_HOME/.env" ] || [ -e "$COPYCORD_HOME/data/data.db" ] \
+    || [ -e "$COPYCORD_HOME/data.db" ]; then
     UPGRADE=1
 fi
 
