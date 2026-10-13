@@ -619,6 +619,26 @@ Test a branch, no release needed:
             }
         }
 
+        # The settings file, the key and the data folder hold the password and the
+        # tokens: only this user may open them, even in a home like D:\copycord.
+        $dataDir = Join-Path $homeDir 'data'
+        if ($dryRun) { Dry "allow only $($identity.Name) to open $envFile, $dataDir and secret.key" }
+        else {
+            New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+            $locked = @()
+            foreach ($item in @($envFile, $dataDir, (Join-Path $dataDir 'secret.key'), (Join-Path $homeDir 'secret.key'))) {
+                if (-not (Test-Path $item)) { continue }
+                $grant = if (Test-Path $item -PathType Container) { "$($identity.Name):(OI)(CI)F" } else { "$($identity.Name):F" }
+                $prevPreference = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                try { & icacls $item /inheritance:r /grant:r $grant *> $null; $ok = $LASTEXITCODE -eq 0 }
+                catch { $ok = $false } finally { $ErrorActionPreference = $prevPreference }
+                if ($ok) { $locked += $item } else { Warn "could not limit who can open $item; it keeps the access of its folder" }
+            }
+            $global:LASTEXITCODE = 0
+            if ($locked) { Done "Only you can open the settings file and the data folder" }
+        }
+
         # The CLI writes update.json, so its format lives in one place.
         $channelArgs = @()
         if ($method -eq 'release') {
