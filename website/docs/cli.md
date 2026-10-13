@@ -910,6 +910,16 @@ To turn it off, set the app config `UPDATE_CHECK_ON_START` to `false` (`copycord
 
 Off by default. With the app config `AUTO_UPDATE` set to `true` (`copycord config set AUTO_UPDATE true`), a Copycord running as a background [service](#copycord-service) checks every 6 hours and, when an update exists, runs the same steps as `copycord update` and restarts the service. Every check and every update is written to the log. A `copycord run` in a terminal never updates itself; it only prints the hint above. Docker and git checkouts are not updated this way.
 
+Auto-update only follows the `stable` channel. To let it install `beta` and `dev` updates too, run `copycord config set AUTO_UPDATE_ALL_CHANNELS true`. `copycord update` by hand works on every channel either way.
+
+Each auto-update is checked, and undone if it does not work:
+
+1. Before installing, Copycord writes down the version it runs now and where it came from in `update-previous.json` in the [data directory](#data-dir), and backs up the database as usual. If it cannot tell how to install the current version again, it does not update.
+2. After installing, it runs the new `copycord --version` and `copycord doctor --brief`. The doctor result only counts if the doctor passed before the update.
+3. After the service restarts, it waits up to 60 seconds for the dashboard to answer (on the `DASHBOARD_HOST` and `ADMIN_PORT` you set).
+
+If any step fails, Copycord installs the previous version again, restarts, and writes an error to the log that names both versions. If the new version had already changed the database to a newer format, the backup from before the update is put back. It tries this once. After that, auto-update stays off until you run `copycord update` yourself, so a bad update is never installed again and again.
+
 ### Advanced: channels and git installs {#update-advanced}
 
 Most installs stay on the default `stable` channel. These options switch to pre-releases or install Copycord from git; `copycord update --help` lists them under **Advanced**.

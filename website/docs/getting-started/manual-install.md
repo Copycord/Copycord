@@ -156,7 +156,7 @@ copycord update --channel beta     # switch to beta (or stable, dev) and update
 copycord update status             # only show what is installed and what is available
 ```
 
-`copycord run` prints a one-line hint, at most once a day, when an update is out. A running service is restarted after an update. With `copycord config set AUTO_UPDATE true`, a Copycord running as a service updates itself. See [`copycord update`](/docs/cli#copycord-update).
+`copycord run` prints a one-line hint, at most once a day, when an update is out. A running service is restarted after an update. With `copycord config set AUTO_UPDATE true`, a Copycord running as a service updates itself on the stable channel, and goes back to the previous version if the new one does not start. See [`copycord update`](/docs/cli#copycord-update).
 
 ### Downgrading and backups {#downgrade}
 

@@ -38,7 +38,8 @@ These app config keys are set with `copycord config set KEY VALUE` and apply aft
 | Key | Default | What it does |
 |-----|---------|--------------|
 | `UPDATE_CHECK_ON_START` | `true` | Print a one-line hint at start when a newer version exists on the saved channel. `false` turns it off, as does `COPYCORD_NO_UPDATE_CHECK=1`. |
-| `AUTO_UPDATE` | `false` | `true` lets the background service check every 6 hours, update itself and restart. |
+| `AUTO_UPDATE` | `false` | `true` lets the background service check every 6 hours, update itself and restart. A new version that does not start is replaced by the previous one. |
+| `AUTO_UPDATE_ALL_CHANNELS` | `false` | `true` lets auto-update follow the `beta` and `dev` channels too. Without it, only `stable` updates itself. |
 
 ## Proxy support
 

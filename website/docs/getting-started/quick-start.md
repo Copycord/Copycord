@@ -153,7 +153,7 @@ Check it with `copycord service status`. See [`copycord service`](/docs/cli#copy
 
 ## What happens next
 
-- **Updates.** Once a day, `copycord run` prints a one-line hint when a new release is out. Run `copycord update` to install it; a running service is restarted for you. `copycord update --channel beta` (or `stable`, `dev`) switches channels, and `copycord config set AUTO_UPDATE true` lets the service update itself. See [`copycord update`](/docs/cli#copycord-update).
+- **Updates.** Once a day, `copycord run` prints a one-line hint when a new release is out. Run `copycord update` to install it; a running service is restarted for you. `copycord update --channel beta` (or `stable`, `dev`) switches channels, and `copycord config set AUTO_UPDATE true` lets the service update itself on the stable channel, going back to the previous version if the new one does not start. See [`copycord update`](/docs/cli#copycord-update).
 - **Settings.** Edit `.env` or run `copycord config set KEY VALUE`, then `copycord restart`. See [Configuration file (.env)](/docs/getting-started/configuration).
 - **Your first clone.** Continue with [First Run](/docs/getting-started/first-run), then [backfill history](/docs/dashboard/backfill) and [filters](/docs/dashboard/filters).
 
