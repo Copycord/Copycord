@@ -524,3 +524,48 @@ class TestVersion:
     async def test_version_returns_200(self, client):
         resp = await client.get("/version")
         assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Role logs: <home>/logs, and the old data dir location for one release
+# ---------------------------------------------------------------------------
+
+class TestRoleLogLocations:
+
+    @pytest.fixture()
+    def places(self, monkeypatch, tmp_path):
+        import copycord.admin.app as app_mod
+        new, old = tmp_path / "logs", tmp_path / "old"
+        new.mkdir()
+        old.mkdir()
+        monkeypatch.setattr(
+            app_mod, "out_candidates", lambda name: [new / name, old / name]
+        )
+        return new, old
+
+    @pytest.mark.asyncio
+    async def test_reads_old_location(self, client, places):
+        _new, old = places
+        (old / "server.out").write_text("old line\n", encoding="utf-8")
+        resp = await client.get("/logs/server")
+        assert resp.status_code == 200
+        assert "old line" in resp.text
+
+    @pytest.mark.asyncio
+    async def test_new_location_wins(self, client, places):
+        new, old = places
+        (old / "client.out").write_text("old line\n", encoding="utf-8")
+        (new / "client.out").write_text("new line\n", encoding="utf-8")
+        resp = await client.get("/logs/client")
+        assert resp.status_code == 200
+        assert "new line" in resp.text
+
+    @pytest.mark.asyncio
+    async def test_clear_empties_both(self, client, places):
+        new, old = places
+        (old / "server.out").write_text("old\n", encoding="utf-8")
+        (new / "server.out").write_text("new\n", encoding="utf-8")
+        resp = await client.post("/logs/clear/server")
+        assert resp.status_code == 200
+        assert (old / "server.out").read_text() == ""
+        assert (new / "server.out").read_text() == ""

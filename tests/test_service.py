@@ -171,10 +171,10 @@ def test_install_data_dir_uses_sudo_users_home(monkeypatch, tmp_path):
     )
     env = {"SUDO_USER": "mac"}
     got = service.install_data_dir(False, env=env, platform="linux")
-    assert got == (tmp_path / "home-mac" / ".copycord").resolve()
+    assert got == (tmp_path / "home-mac" / ".copycord" / "data").resolve()
     env = {"SUDO_USER": "mac", "COPYCORD_HOME": str(tmp_path / "ch")}
     assert service.install_data_dir(False, env=env, platform="linux") == (
-        tmp_path / "ch"
+        tmp_path / "ch" / "data"
     ).resolve()
     env = {"SUDO_USER": "mac", "DATA_DIR": str(tmp_path / "explicit")}
     assert service.install_data_dir(False, env=env, platform="linux") == (

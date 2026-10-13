@@ -1459,13 +1459,13 @@ def native(monkeypatch, tmp_path):
 def test_default_is_copycord_home_everywhere(native, monkeypatch, platform):
     monkeypatch.setattr(sys, "platform", platform)
     _unset(monkeypatch, "COPYCORD_HOME")
-    assert paths.data_dir() == (native / ".copycord").resolve()
+    assert paths.data_dir() == (native / ".copycord" / "data").resolve()
     assert paths.db_path() == paths.data_dir() / "data.db"
 
 
 def test_copycord_home_env_overrides(native, monkeypatch, tmp_path):
     monkeypatch.setenv("COPYCORD_HOME", str(tmp_path / "ch"))
-    assert paths.data_dir() == (tmp_path / "ch").resolve()
+    assert paths.data_dir() == (tmp_path / "ch" / "data").resolve()
 
 
 def test_data_dir_beats_copycord_home(native, monkeypatch, tmp_path):
@@ -1484,9 +1484,9 @@ def test_saved_home_pointer(native, monkeypatch, tmp_path):
     _unset(monkeypatch, "COPYCORD_HOME")
     native.mkdir(parents=True)
     (native / ".copycord-home").write_text(str(tmp_path / "saved") + "\n")
-    assert paths.data_dir() == (tmp_path / "saved").resolve()
+    assert paths.data_dir() == (tmp_path / "saved" / "data").resolve()
     monkeypatch.setenv("COPYCORD_HOME", str(tmp_path / "ch"))
-    assert paths.data_dir() == (tmp_path / "ch").resolve()
+    assert paths.data_dir() == (tmp_path / "ch" / "data").resolve()
 
 
 @pytest.mark.parametrize(
@@ -1508,7 +1508,7 @@ def test_legacy_dir_used_when_home_missing(native, monkeypatch, capsys, platform
     paths.data_dir()
     assert capsys.readouterr().err == ""
     (native / ".copycord").mkdir()
-    assert paths.data_dir() == (native / ".copycord").resolve()
+    assert paths.data_dir() == (native / ".copycord" / "data").resolve()
 
 
 def test_legacy_dir_windows(native, monkeypatch, tmp_path):
@@ -1525,12 +1525,12 @@ def test_legacy_dir_without_db_is_ignored(native, monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     _unset(monkeypatch, "COPYCORD_HOME")
     (native / ".local" / "share" / "copycord").mkdir(parents=True)
-    assert paths.data_dir() == (native / ".copycord").resolve()
+    assert paths.data_dir() == (native / ".copycord" / "data").resolve()
 
 
 def test_default_windows_without_localappdata(native, monkeypatch):
     monkeypatch.setattr(sys, "platform", "win32")
-    expected = native / ".copycord"
+    expected = native / ".copycord" / "data"
     assert paths.data_dir() == expected.resolve()
 
 
@@ -1565,4 +1565,202 @@ def test_supervisor_and_logging_agree(native, monkeypatch):
     from copycord import logging_setup
 
     monkeypatch.setattr(sys, "platform", "linux")
-    assert logging_setup.logs_dir() == paths.data_dir()
+    assert logging_setup.logs_dir() == (native / ".copycord" / "logs").resolve()
+    assert paths.data_dir() == (native / ".copycord" / "data").resolve()
+
+
+# --------------------------------------------------------------------------
+# <home>/data and <home>/logs layout, and moving the old flat home
+# --------------------------------------------------------------------------
+
+
+def _make_db(path: Path) -> None:
+    import sqlite3
+
+    conn = sqlite3.connect(str(path))
+    with conn:
+        conn.execute("CREATE TABLE t (x)")
+        conn.execute("INSERT INTO t VALUES (1)")
+    conn.close()
+
+
+@pytest.fixture()
+def flat_home(native):
+    """A native home in the old layout: everything loose in ~/.copycord."""
+    home = native / ".copycord"
+    home.mkdir(parents=True)
+    _make_db(home / "data.db")
+    (home / "secret.key").write_text("k")
+    (home / "update.json").write_text("{}")
+    (home / "update-check.json").write_text("{}")
+    (home / "server.out").write_text("s")
+    (home / "client.out").write_text("c")
+    (home / ".env").write_text("PASSWORD=x\n")
+    (home / "src").mkdir()
+    (home / "logs").mkdir()
+    (home / "logs" / "update.log").write_text("u")
+    return home
+
+
+def test_native_layout_helpers(native):
+    home = (native / ".copycord").resolve()
+    assert paths.home_dir() == home
+    assert paths.data_dir() == home / "data"
+    assert paths.logs_dir() == home / "logs"
+    assert paths.out_dir() == home / "logs"
+    assert paths.out_candidates("server.out") == [
+        home / "logs" / "server.out", home / "data" / "server.out", home / "server.out",
+    ]
+
+
+def test_docker_layout_is_flat(native, monkeypatch):
+    monkeypatch.setattr(paths, "in_docker", lambda: True)
+    data = Path("/data").resolve()
+    assert paths.home_dir() == data
+    assert paths.out_dir() == data
+    assert paths.logs_dir() == data / "logs"
+
+
+def test_custom_data_dir_is_flat(native, monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "dd"))
+    dd = (tmp_path / "dd").resolve()
+    assert paths.data_dir() == dd
+    assert paths.home_dir() == dd
+    assert paths.out_dir() == dd
+
+
+def test_service_data_dir_keeps_home(native, monkeypatch):
+    home = (native / ".copycord").resolve()
+    monkeypatch.setenv("DATA_DIR", str(home / "data"))
+    assert paths.home_dir() == home
+    assert paths.out_dir() == home / "logs"
+
+
+def test_env_file_stays_in_home(native):
+    from copycord import envfile
+
+    assert envfile.env_path() == (native / ".copycord" / ".env").resolve()
+
+
+def test_old_layout_keeps_working_before_the_move(flat_home):
+    assert paths.data_dir() == flat_home.resolve()
+    assert paths.out_dir() == flat_home.resolve()
+    assert paths.needs_migration()
+
+
+def test_migration_backs_up_then_moves(flat_home, monkeypatch):
+    from copycord.common import db as dbmod
+
+    order = []
+    real = dbmod.backup_pre_update
+
+    def spy(*a, **k):
+        assert (flat_home / "data.db").is_file()
+        order.append("backup")
+        return real(*a, **k)
+
+    monkeypatch.setattr(dbmod, "backup_pre_update", spy)
+    lines = []
+    line = paths.migrate_layout(log=lines.append)
+    assert order == ["backup"]
+    assert lines == [line] and "Moved Copycord data" in line
+    data, logs = flat_home / "data", flat_home / "logs"
+    for name in ("data.db", "secret.key", "update.json", "update-check.json"):
+        assert (data / name).is_file() and not (flat_home / name).exists()
+    assert list((data / "backups").glob("data-pre-update-layout-*.db"))
+    assert (logs / "server.out").read_text() == "s"
+    assert (logs / "client.out").read_text() == "c"
+    assert (logs / "update.log").read_text() == "u"
+    assert (flat_home / ".env").is_file() and (flat_home / "src").is_dir()
+    assert paths.data_dir() == data.resolve()
+    assert not paths.needs_migration()
+    assert paths.migrate_layout() is None
+
+
+def test_migration_skips_when_data_db_exists(flat_home):
+    (flat_home / "data").mkdir()
+    _make_db(flat_home / "data" / "data.db")
+    assert not paths.needs_migration()
+    assert paths.migrate_layout() is None
+    assert (flat_home / "data.db").is_file()
+    assert (flat_home / "secret.key").read_text() == "k"
+
+
+def test_migration_never_overwrites(flat_home):
+    (flat_home / "data").mkdir()
+    (flat_home / "data" / "secret.key").write_text("new")
+    line = paths.migrate_layout()
+    assert "secret.key" in line
+    assert (flat_home / "data" / "secret.key").read_text() == "new"
+    assert (flat_home / "secret.key").read_text() == "k"
+    assert (flat_home / "data" / "data.db").is_file()
+
+
+def test_migration_does_nothing_in_docker(flat_home, monkeypatch):
+    monkeypatch.setattr(paths, "in_docker", lambda: True)
+    assert not paths.needs_migration()
+    assert paths.migrate_layout() is None
+    assert (flat_home / "data.db").is_file()
+    assert not (flat_home / "data").exists()
+
+
+def test_migration_skips_custom_data_dir(flat_home, monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "dd"))
+    assert paths.migrate_layout() is None
+    assert (flat_home / "data.db").is_file()
+
+
+def test_migration_follows_old_service_data_dir(flat_home, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(flat_home))
+    env = dict(os.environ)
+    assert paths.migrate_layout(env) is not None
+    assert env["DATA_DIR"] == str((flat_home / "data").resolve())
+
+
+def test_migration_failure_restores_old_layout(flat_home, monkeypatch):
+    real = os.rename
+    calls = []
+
+    def flaky(src, dest):
+        calls.append(src)
+        if len(calls) == 3:
+            raise OSError("disk says no")
+        return real(src, dest)
+
+    monkeypatch.setattr(paths.os, "rename", flaky)
+    with pytest.raises(OSError):
+        paths.migrate_layout()
+    monkeypatch.setattr(paths.os, "rename", real)
+    assert (flat_home / "data.db").is_file()
+    assert (flat_home / "secret.key").read_text() == "k"
+    assert (flat_home / "server.out").is_file()
+    assert not (flat_home / "data" / "data.db").exists()
+    assert paths.data_dir() == flat_home.resolve()
+
+
+def test_migrate_on_start_logs_and_survives_failure(flat_home, monkeypatch, caplog):
+    import logging
+
+    monkeypatch.setattr(paths, "migrate_layout", lambda **k: (_ for _ in ()).throw(OSError("x")))
+    with caplog.at_level(logging.INFO):
+        cli.migrate_on_start()
+    assert "still using the old layout" in caplog.text
+    assert (flat_home / "data.db").is_file()
+
+
+def test_doctor_flags_and_fixes_layout(flat_home, monkeypatch):
+    monkeypatch.setattr(cli, "service_state", lambda: None)
+    check = cli.check_layout()
+    assert check.status == cli.WARN and check.fix == "layout"
+    assert "Moved Copycord data" in cli.fix_layout([check])
+    assert cli.check_layout().status == cli.PASS
+    assert (flat_home / "data" / "data.db").is_file()
+
+
+def test_doctor_layout_fix_refuses_while_running(flat_home, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(cli, "service_state", lambda: SimpleNamespace(running=True))
+    with pytest.raises(cli.FixError):
+        cli.fix_layout([])
+    assert (flat_home / "data.db").is_file()
