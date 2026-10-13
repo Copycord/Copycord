@@ -680,7 +680,15 @@ if [ "$UPGRADE" = "1" ]; then
     if [ "$DRY_RUN" = "1" ]; then
         dry "copycord doctor --fix --brief"
     else
-        "$BIN_DIR/copycord" doctor --fix --brief </dev/null 2>&1 | sed 's/^/  /' || true
+        # Plain output, restyled with the installer's marks.
+        NO_COLOR=1 "$BIN_DIR/copycord" doctor --fix --brief </dev/null 2>&1 | while IFS= read -r line; do
+            case "$line" in
+                "PASS  "*) done_line "${line#PASS  }" ;;
+                "WARN  "*) printf '  %s%s%s %s\n' "$YELLOW" "$WARN_MARK" "$RESET" "${line#WARN  }" ;;
+                "FAIL  "*) printf '  %s%s%s %s\n' "$RED" "$FAIL_MARK" "$RESET" "${line#FAIL  }" ;;
+                *) say "    $line" ;;
+            esac
+        done || true
     fi
 fi
 

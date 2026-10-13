@@ -126,11 +126,24 @@ def test_writes_the_env_template_once(path):
 
 
 @pytest.mark.parametrize("path", [SH, PS1])
-def test_success_box_names_the_env_file_and_default_password(path):
+def test_success_box_names_the_env_file_and_what_needs_attention(path):
     text = _text(path)
     assert "Settings: $ENV_FILE" in text or "Settings: $envFile" in text
-    assert "Default dashboard password: copycord" in text
-    assert "copycord restart" in text
+    assert "Default dashboard password: copycord" not in text
+    box = text[text.index("Needs your attention:"):]
+    # Only while the default password is still set.
+    assert "PASSWORD=copycord" in box[:box.index("Change the default dashboard password:")]
+    assert "then run: copycord restart" in box
+    assert "Finish the setup in the dashboard once it runs:" in box
+
+
+@pytest.mark.parametrize("path", [SH, PS1])
+def test_only_a_dry_run_prints_the_plan(path):
+    text = _text(path)
+    guard = 'if [ "$DRY_RUN" = "1" ]; then' if path == SH else "if ($dryRun) {"
+    close = "fi" if path == SH else "}"
+    for call in ("Plan", "plan_line \"home\"" if path == SH else "PlanLine 'home'"):
+        assert _guarded_by(text, call, guard, close)
 
 
 @pytest.mark.parametrize("path", [SH, PS1])
@@ -166,7 +179,7 @@ def _guarded_by(text, call, guard, close):
 
 def test_sh_repairs_with_the_doctor_after_an_upgrade_only():
     text = _text(SH)
-    call = '"$BIN_DIR/copycord" doctor --fix </dev/null'
+    call = 'NO_COLOR=1 "$BIN_DIR/copycord" doctor --fix --brief </dev/null'
     assert call in text
     assert _guarded_by(text, call, 'if [ "$UPGRADE" = "1" ]; then', "fi")
     # An existing program or home makes it an upgrade; a first install has neither.
@@ -177,12 +190,13 @@ def test_sh_repairs_with_the_doctor_after_an_upgrade_only():
     # Before the install replaces anything, after the settings and the channel.
     assert text.index("UPGRADE=0") < text.index("install_release()")
     assert text.index("<<ENVEOF") < text.index(call) > text.index("--no-install\n")
-    assert "| sed 's/^/    /' || true" in text[text.index(call):].splitlines()[0]
+    assert "| while IFS= read -r line; do" in text[text.index(call):].splitlines()[0]
+    assert "done || true" in text[text.index(call):]
 
 
 def test_ps1_repairs_with_the_doctor_after_an_upgrade_only():
     text = _text(PS1)
-    call = "& $exe doctor --fix 2>&1"
+    call = "& $exe doctor --fix --brief 2>&1"
     assert call in text
     assert _guarded_by(text, call, "if ($upgrade) {", "}")
     detect = text[text.index("$upgrade = "):text.index("PlanLine 'repair'")]
@@ -190,7 +204,8 @@ def test_ps1_repairs_with_the_doctor_after_an_upgrade_only():
         assert probe in detect
     assert text.index("$upgrade = ") < text.index("Step 'Finishing up'")
     assert text.index("$envTemplate") < text.index(call) > text.index("'--no-install'")
-    block = text[text.index(call) - 300:text.index(call) + 300]
+    block = text[text.index(call) - 300:text.index(call) + 900]
+    assert "$env:NO_COLOR = '1'" in block
     assert "$ErrorActionPreference = 'Continue'" in block
     assert "$global:LASTEXITCODE = 0" in block
 

@@ -230,25 +230,28 @@ Test a branch, no release needed:
     ) | ForEach-Object { Out $_ Magenta }
     Out '           |_|   |__/' Magenta -NoNewline; Out '   installer' DarkGray
     Out ''
-    Out '  Plan'
-    if ($method -eq 'release') {
-        PlanLine 'home' $homeDir
-        PlanLine 'method' "release (GitHub release wheel$inferred)"
-        PlanLine 'repo' $repo
-        if ($version) { PlanLine 'version' "v$version" } else { PlanLine 'channel' "$channel (newest release)" }
-    } else {
-        PlanLine 'home' $homeDir
-        PlanLine 'method' "git (build from source, no release needed$inferred)"
-        PlanLine 'repo' $repoUrl
-        PlanLine 'ref' $ref
-        PlanLine 'checkout' $gitDir
-        if ($needNode) { PlanLine 'node' "Node $NodeVersion into $nodeHome (per user)" }
-        else { PlanLine 'node' "$(& node -v) at $((Get-Command node).Source)" }
+    # Only a dry run prints the plan.
+    if ($dryRun) {
+        Out '  Plan'
+        if ($method -eq 'release') {
+            PlanLine 'home' $homeDir
+            PlanLine 'method' "release (GitHub release wheel$inferred)"
+            PlanLine 'repo' $repo
+            if ($version) { PlanLine 'version' "v$version" } else { PlanLine 'channel' "$channel (newest release)" }
+        } else {
+            PlanLine 'home' $homeDir
+            PlanLine 'method' "git (build from source, no release needed$inferred)"
+            PlanLine 'repo' $repoUrl
+            PlanLine 'ref' $ref
+            PlanLine 'checkout' $gitDir
+            if ($needNode) { PlanLine 'node' "Node $NodeVersion into $nodeHome (per user)" }
+            else { PlanLine 'node' "$(& node -v) at $((Get-Command node).Source)" }
+        }
+        if ($uv) { PlanLine 'uv' $uv.Source } else { PlanLine 'uv' "not found, will install it from $UvInstaller" }
+        if ($upgrade) { PlanLine 'repair' 'copycord doctor --fix (an upgrade or reinstall)' }
+        if ($verify) { PlanLine 'verify' 'copycord --version and copycord doctor' }
+        PlanLine 'dry run' 'nothing will be changed'
     }
-    if ($uv) { PlanLine 'uv' $uv.Source } else { PlanLine 'uv' "not found, will install it from $UvInstaller" }
-    if ($upgrade) { PlanLine 'repair' 'copycord doctor --fix (an upgrade or reinstall)' }
-    if ($verify) { PlanLine 'verify' 'copycord --version and copycord doctor' }
-    if ($dryRun) { PlanLine 'dry run' 'nothing will be changed' }
 
     $script:stepTotal = if ($method -eq 'git') { 5 } else { 4 }
     if ($needNode) { $script:stepTotal++ }
@@ -507,13 +510,26 @@ Test a branch, no release needed:
         # Piped, the doctor never prompts. Its exit status does not fail the install.
         if ($upgrade) {
             Step 'Repairing (copycord doctor --fix)'
-            if ($dryRun) { Dry 'copycord doctor --fix' }
+            if ($dryRun) { Dry 'copycord doctor --fix --brief' }
             else {
                 # Windows PowerShell turns stderr lines into errors under 'Stop'.
                 $prevPreference = $ErrorActionPreference
+                $prevNoColor = $env:NO_COLOR
                 $ErrorActionPreference = 'Continue'
-                try { & $exe doctor --fix 2>&1 | ForEach-Object { Out "    $_" } }
-                finally { $ErrorActionPreference = $prevPreference }
+                # Plain output, restyled with the installer's marks.
+                $env:NO_COLOR = '1'
+                try {
+                    & $exe doctor --fix --brief 2>&1 | ForEach-Object {
+                        $line = "$_"
+                        if ($line.StartsWith('PASS  ')) { Done $line.Substring(6) }
+                        elseif ($line.StartsWith('WARN  ')) { Warn $line.Substring(6) }
+                        elseif ($line.StartsWith('FAIL  ')) { Out "  $failMark " Red -NoNewline; Out $line.Substring(6) }
+                        else { Out "    $line" }
+                    }
+                } finally {
+                    $ErrorActionPreference = $prevPreference
+                    $env:NO_COLOR = $prevNoColor
+                }
                 $global:LASTEXITCODE = 0
             }
         }
@@ -542,6 +558,17 @@ Test a branch, no release needed:
         Out ''
         return
     }
+    function BoxLine([string]$Text) {
+        Out ("  " + $box.V + ' ') Magenta -NoNewline
+        Out ('{0,-52}' -f $Text) -NoNewline
+        Out (' ' + $box.V) Magenta
+    }
+    function BoxItem([string]$Text) {
+        Out ("  " + $box.V + ' ') Magenta -NoNewline
+        Out '! ' Yellow -NoNewline
+        Out ('{0,-50}' -f $Text) -NoNewline
+        Out (' ' + $box.V) Magenta
+    }
     $port = if ($env:ADMIN_PORT) { $env:ADMIN_PORT } else { '8080' }
     $rule = [string]$box.H * 54
     Out ("  " + $box.TL + $rule + $box.TR) Magenta
@@ -550,21 +577,22 @@ Test a branch, no release needed:
             "Home: $homeDir",
             "Settings: $envFile",
             '',
-            'Default dashboard password: copycord',
-            '  edit it in that file, then: copycord restart',
-            '',
             'Next:',
             '  copycord run       start Copycord',
             '  copycord restart   apply a changed setting',
             '  copycord update    update it later',
             '',
-            'Finish the setup in the dashboard once it runs:',
-            "  http://localhost:$port"
-        )) {
-        Out ("  " + $box.V + ' ') Magenta -NoNewline
-        Out ('{0,-52}' -f $text) -NoNewline
-        Out (' ' + $box.V) Magenta
+            'Needs your attention:'
+        )) { BoxLine $text }
+    $envText = if (Test-Path $envFile) { Get-Content $envFile } else { @() }
+    if ($envText -contains 'PASSWORD=copycord') {
+        BoxItem 'Change the default dashboard password:'
+        BoxLine '    edit PASSWORD in the settings file above,'
+        BoxLine '    then run: copycord restart'
     }
+    BoxItem 'Finish the setup in the dashboard once it runs:'
+    BoxLine "    http://localhost:$port"
+
     Out ("  " + $box.BL + $rule + $box.BR) Magenta
     Out ''
     Out '  Open a new terminal first if copycord is not found.' DarkGray
