@@ -355,4 +355,4 @@ def test_config_export_json(data_dir, tmp_path, capsys):
     doc, err = _doc(capsys)
     assert doc == {"file": str(out), "keys": len(plain)}
     assert json.loads(out.read_text())["SERVER_TOKEN"] == "srv-secret"
-    assert "exported" in err
+    assert "Exported" in err
