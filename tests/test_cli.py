@@ -1742,7 +1742,11 @@ def test_env_template_defaults_match_the_code(tmp_path, monkeypatch):
         (root / f).read_text(encoding="utf-8")
         for f in ("admin/app.py", "supervisor.py", "client/export_runners.py")
     )
-    for key in ("ADMIN_PORT", "BACKUP_AT", "BACKUP_RETAIN"):
+    from copycord.common import ports
+
+    assert str(ports.DEFAULT_ADMIN_PORT) == envfile.ENV_DEFAULTS["ADMIN_PORT"]
+    assert not re.search(r'os\.getenv\("ADMIN_PORT"\) or "', sources)
+    for key in ("BACKUP_AT", "BACKUP_RETAIN"):
         reads = re.findall(rf'os\.getenv\("{key}"\) or "([^"]*)"', sources)
         assert reads, key
         assert set(reads) == {envfile.ENV_DEFAULTS[key]}, key
