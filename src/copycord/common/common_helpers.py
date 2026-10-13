@@ -20,15 +20,9 @@ def resolve_mapping_settings(
     cloned_guild_id: int | None = None,
     mapping_id: int | None = None,
 ) -> dict:
-    """
-    Precedence:
-      1) mapping_id
-      2) (original_guild_id, cloned_guild_id) pair
-      3) original_guild_id
-      4) cloned_guild_id
-      5) defaults
+    """Resolve effective settings: mapping_id, then the guild pair, then either guild id, then defaults.
 
-    If ENABLE_CLONING is False: drop ALL clone/sync/delete/edit/mirror features.
+    When ENABLE_CLONING is off, all clone/delete/edit/mirror features are disabled.
     """
     eff = dict(config.default_mapping_settings())
 
@@ -125,12 +119,7 @@ def is_discord_webhook_url(url: str) -> bool:
 
 
 def coerce_url_list(value) -> list[str]:
-    """Normalize a URL value into a clean, de-duplicated list of strings.
-
-    Accepts a comma/whitespace-separated string, or a list/tuple/set.
-    Trims each entry, drops empties, and removes duplicates while
-    preserving first-seen order. Does NOT validate URL format.
-    """
+    """Normalize a URL value (comma/space string or list) to a de-duplicated list, keeping order."""
     if isinstance(value, str):
         tokens = re.split(r"[,\s]+", value.strip())
     elif isinstance(value, (list, tuple, set)):
@@ -150,11 +139,7 @@ def coerce_url_list(value) -> list[str]:
 
 
 def discord_urls_from_config(config: dict) -> list[str]:
-    """Extract the webhook URL list from a Discord forwarding rule config.
-
-    Prefers `config["urls"]`; falls back to legacy single `config["url"]`.
-    Returns a cleaned list (no validity filtering).
-    """
+    """Return the webhook URLs from a forwarding rule config, falling back to the legacy single ``url``."""
     config = config or {}
     urls = coerce_url_list(config.get("urls"))
     if not urls:
