@@ -1727,6 +1727,15 @@ async def health():
     return "ok" if ok else PlainTextResponse("control not reachable", status_code=500)
 
 
+@app.get("/api/config", response_class=JSONResponse)
+async def api_config():
+    """The saved global config values the dashboard form shows, same source as GET /."""
+    env = _read_env()
+    values = {k: env.get(k, "") for k in ALLOWED_ENV}
+    values["LOG_LEVEL"] = (values["LOG_LEVEL"] or "INFO").upper()
+    return JSONResponse(values)
+
+
 @app.post("/save")
 async def save(request: Request):
     form = await request.form()

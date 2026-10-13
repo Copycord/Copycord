@@ -12,6 +12,7 @@ import type {
   TokenValidation,
 } from "../../../types/dashboard-config";
 
+export const CONFIG_URL = "/api/config";
 export const SAVE_URL = "/save";
 export const VALIDATE_URL = "/api/validate-tokens";
 export const BACKUP_URL = "/api/backup-tokens";
@@ -52,31 +53,19 @@ export const PROMO_LINKS = {
 export const parseIdList = (csv: string): string[] => splitChips(csv, "ids");
 export const idsToCsv = (ids: readonly string[]): string => ids.join(",");
 
-/**
- * The server renders the saved values into the old page and has no JSON
- * endpoint for them, so read them from that markup.
- */
-export function parseConfigHtml(html: string): GlobalConfig {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  const val = (id: string) => doc.getElementById(id)?.getAttribute("value") ?? "";
-  const level = (
-    doc.querySelector<HTMLOptionElement>("#LOG_LEVEL option[selected]")?.value ?? "INFO"
-  ).toUpperCase();
-  const auto = (
-    doc.querySelector<HTMLOptionElement>("#COPYCORD_AUTOSTART option[selected]")?.value ?? "false"
-  ).toLowerCase();
-  return {
-    SERVER_TOKEN: val("SERVER_TOKEN"),
-    CLIENT_TOKEN: val("CLIENT_TOKEN"),
-    COMMAND_USERS: parseIdList(val("COMMAND_USERS")),
-    COPYCORD_AUTOSTART: auto === "true",
-    LOG_LEVEL: level === "DEBUG" ? "DEBUG" : "INFO",
-    LOG_MAX_SIZE_MB: doc.getElementById("LOG_MAX_SIZE_MB") ? val("LOG_MAX_SIZE_MB") : EMPTY_CONFIG.LOG_MAX_SIZE_MB,
-  };
-}
+/** GET /api/config: the saved values as the server stores them (strings). */
+type ConfigResponse = Partial<Record<keyof GlobalConfig, string>>;
 
 export async function loadConfig(): Promise<GlobalConfig> {
-  return parseConfigHtml(await api.get<string>("/"));
+  const r = await api.get<ConfigResponse>(CONFIG_URL);
+  return {
+    SERVER_TOKEN: r.SERVER_TOKEN ?? "",
+    CLIENT_TOKEN: r.CLIENT_TOKEN ?? "",
+    COMMAND_USERS: parseIdList(r.COMMAND_USERS ?? ""),
+    COPYCORD_AUTOSTART: (r.COPYCORD_AUTOSTART ?? "").toLowerCase() === "true",
+    LOG_LEVEL: (r.LOG_LEVEL ?? "").toUpperCase() === "DEBUG" ? "DEBUG" : "INFO",
+    LOG_MAX_SIZE_MB: r.LOG_MAX_SIZE_MB ?? EMPTY_CONFIG.LOG_MAX_SIZE_MB,
+  };
 }
 
 /** The form body the old #cfg-form posted. */

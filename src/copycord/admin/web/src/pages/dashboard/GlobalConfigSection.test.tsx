@@ -12,19 +12,10 @@ import {
   buildSaveForm,
   inviteUrl,
   isDirty,
+  loadConfig,
   missingTokens,
-  parseConfigHtml,
   tokensFromErrors,
 } from "./config/model";
-
-const PAGE = `<html><body><form id="cfg-form">
-<input type="password" id="SERVER_TOKEN" name="SERVER_TOKEN" value="srv-tok">
-<input type="password" id="CLIENT_TOKEN" name="CLIENT_TOKEN" value="cli-tok">
-<input type="hidden" name="COMMAND_USERS" id="COMMAND_USERS" value="111,222">
-<select id="COPYCORD_AUTOSTART" name="COPYCORD_AUTOSTART"><option value="false">false</option><option value="true" selected>true</option></select>
-<select id="LOG_LEVEL" name="LOG_LEVEL"><option value="INFO">INFO</option><option value="DEBUG" selected>DEBUG</option></select>
-<input type="number" id="LOG_MAX_SIZE_MB" name="LOG_MAX_SIZE_MB" value="25">
-</form></body></html>`;
 
 const CONFIG: GlobalConfig = {
   SERVER_TOKEN: "srv-tok",
@@ -53,7 +44,15 @@ const callsTo = (m: ReturnType<typeof server>, url: string) =>
   m.mock.calls.filter(([u]) => String(u) === url).map(([, init]) => init ?? {});
 
 const baseRoutes = (): Record<string, Handler> => ({
-  "/": () => new Response(PAGE, { status: 200, headers: { "content-type": "text/html" } }),
+  "/api/config": () =>
+    json({
+      SERVER_TOKEN: "srv-tok",
+      CLIENT_TOKEN: "cli-tok",
+      COMMAND_USERS: "111,222",
+      COPYCORD_AUTOSTART: "true",
+      LOG_LEVEL: "DEBUG",
+      LOG_MAX_SIZE_MB: "25",
+    }),
   "/api/validate-tokens": () => json({ ok: true, has_tokens: true, errors: [], bot_client_id: "42" }),
   "/api/status": () => json({ server: { running: false }, client: { running: false } }),
 });
@@ -71,9 +70,11 @@ function renderSection() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("config model", () => {
-  it("reads the saved values from the old page markup", () => {
-    expect(parseConfigHtml(PAGE)).toEqual(CONFIG);
-    expect(parseConfigHtml("<html></html>")).toEqual({
+  it("reads the saved values from GET /api/config", async () => {
+    server(baseRoutes());
+    expect(await loadConfig()).toEqual(CONFIG);
+    server({ "/api/config": () => json({}) });
+    expect(await loadConfig()).toEqual({
       SERVER_TOKEN: "",
       CLIENT_TOKEN: "",
       COMMAND_USERS: [],
