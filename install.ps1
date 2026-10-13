@@ -553,54 +553,22 @@ Test a branch, no release needed:
             }
         } elseif ((Test-Path $homePointer) -and -not $dryRun) { Remove-Item -Force $homePointer }
 
-        # Write <home>\.env once, never overwriting it.
-        # Keep in step with envfile.template() in src/copycord/envfile.py.
+        # Write <home>\.env once, never overwriting it. The installed CLI writes it
+        # (copycord config init), so the default settings live in one place.
         $envFile = Join-Path $homeDir '.env'
         if (-not (Test-Path $envFile)) {
-            if ($dryRun) { Dry "write the settings file $envFile" }
+            if ($dryRun) { Dry "write the settings file $envFile (copycord config init)" }
             else {
-                $backupDir = Join-Path $homeDir 'backups'
-                $envTemplate = @(
-            '# Copycord settings that are read from the environment only.',
-            '# Everything else is set in the dashboard. Each value below is the default.',
-            '# Edit one here or run `copycord config set KEY VALUE`, then run',
-            '# `copycord restart` to apply it.',
-            '',
-            '# dashboard login password; change it from the default (empty: no login page)',
-            'PASSWORD=copycord',
-            '',
-            '# SECRET_KEY is left out: Copycord keeps its own key in <home>/secret.key',
-            '',
-            '# dashboard port',
-            'ADMIN_PORT=8080',
-            '',
-            '# time zone for the daily backup, e.g. Europe/Berlin',
-            'TZ=UTC',
-            '',
-            '# time zone shown in exports',
-            'UI_TZ=America/New_York',
-            '',
-            '# DEBUG or INFO; the dashboard''s log level wins once it is saved',
-            'LOG_LEVEL=INFO',
-            '',
-            '# HUMAN or JSON log lines',
-            'LOG_FORMAT=HUMAN',
-            '',
-            '# where the daily database backups go',
-            "BACKUP_DIR=$backupDir",
-            '',
-            '# time of the daily backup, HH:MM',
-            'BACKUP_AT=03:17',
-            '',
-            '# how many daily backups to keep',
-            'BACKUP_RETAIN=14',
-            '',
-            '# 1 turns off the update check on start; 0 keeps it on',
-            'COPYCORD_NO_UPDATE_CHECK=0'
-                ) -join "`n"
-                New-Item -ItemType Directory -Force -Path $homeDir | Out-Null
-                [IO.File]::WriteAllText($envFile, $envTemplate + "`n", (New-Object Text.UTF8Encoding $false))
-                Done "Wrote the settings file $envFile"
+                # Windows PowerShell turns stderr lines into errors under 'Stop'.
+                $prevPreference = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                try { $wrote = & $exe config init 2>> "$log.err" } finally { $ErrorActionPreference = $prevPreference }
+                if ($LASTEXITCODE -eq 0 -and $wrote) {
+                    $envFile = ([string]@($wrote)[-1]).Trim()
+                    Done "Wrote the settings file $envFile"
+                } else {
+                    Warn "could not write $envFile; copycord config set creates it later"
+                }
             }
         }
 

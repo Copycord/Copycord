@@ -80,49 +80,27 @@ def test_prints_next_steps(path):
     assert "onboard" not in text.lower()
 
 
-HOME_DIR = "/home/someone/.copycord"
-BACKUP_DIR = str(Path(HOME_DIR) / "backups")
-
-
-def _sh_env_template():
-    text = _text(SH)
-    start = text.index("<<ENVEOF\n") + len("<<ENVEOF\n")
-    body = text[start:text.index("\nENVEOF\n", start)]
-    # An unquoted heredoc: $COPYCORD_HOME expands, \` is a literal backtick.
-    assert "$(" not in body and body.replace("\\`", "").count("`") == 0
-    return body.replace("\\`", "`").replace("$COPYCORD_HOME/backups", BACKUP_DIR)
-
-
-def _ps1_env_template():
-    text = _text(PS1)
-    assert "$backupDir = Join-Path $homeDir 'backups'" in text
-    start = text.index("$envTemplate = @(\n") + len("$envTemplate = @(\n")
-    body = text[start:text.index(") -join", start)]
-    items = re.findall(r"""^\s*(?:'((?:[^']|'')*)'|"([^"`$]*\$backupDir)"),?$""", body, re.M)
-    assert len(items) == len(body.strip().splitlines())
-    return "\n".join(
-        single.replace("''", "'") if single or not double
-        else double.replace("$backupDir", BACKUP_DIR)
-        for single, double in items
-    )
-
-
-@pytest.mark.parametrize("read", [_sh_env_template, _ps1_env_template])
-def test_env_template_matches_envfile(read):
-    from copycord import envfile
-
-    assert read() == envfile.template(HOME_DIR).rstrip("\n")
-    lines = read().splitlines()
-    for line in ("PASSWORD=copycord", "ADMIN_PORT=8080", "COPYCORD_NO_UPDATE_CHECK=0",
-                 f"BACKUP_DIR={BACKUP_DIR}"):
-        assert line in lines
-    assert not any(x.startswith("#") and "=" in x.split()[0] for x in lines)
+@pytest.mark.parametrize("path", [SH, PS1])
+def test_env_template_is_not_in_the_installer(path):
+    text = _text(path)
+    # The installed CLI writes .env; the only PASSWORD line left is the box check.
+    assert "ENVEOF" not in text and "$envTemplate" not in text
+    assert text.count("PASSWORD=copycord") == 1
+    assert "BACKUP_DIR" not in text
+    assert "Keep in step with envfile" not in text
 
 
 @pytest.mark.parametrize("path", [SH, PS1])
-def test_writes_the_env_template_once(path):
+def test_writes_the_env_template_once_with_the_cli(path):
     text = _text(path)
     assert "Test-Path $envFile" in text or '[ -e "$ENV_FILE" ]' in text
+    if path == SH:
+        assert '"$BIN_DIR/copycord" config init' in text
+    else:
+        assert "& $exe config init" in text
+    # After the CLI is installed, before the box that reads the file.
+    assert text.index("config init") > text.index("uv tool dir --bin")
+    assert text.index("config init") < text.index("Needs your attention:")
 
 
 @pytest.mark.parametrize("path", [SH, PS1])

@@ -1570,6 +1570,50 @@ def test_env_file_is_created_private(data_dir, monkeypatch):
     assert (data_dir / ".env").stat().st_mode & 0o777 == 0o600
 
 
+def test_config_init_writes_the_template_once(data_dir, capsys):
+    from copycord import envfile
+
+    dd = ["--data-dir", str(data_dir)]
+    env = data_dir / ".env"
+    assert cli.main(["config", "init", *dd]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == f"{env.resolve()}\n"
+    assert "Settings file created" in captured.err
+    assert env.read_text(encoding="utf-8") == envfile.template(env.resolve().parent)
+    assert "PASSWORD=copycord" in env.read_text(encoding="utf-8").splitlines()
+    if sys.platform != "win32":
+        assert env.stat().st_mode & 0o777 == 0o600
+
+    # An existing file is never overwritten.
+    env.write_text("PASSWORD=mine\n", encoding="utf-8")
+    assert cli.main(["config", "init", *dd]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == f"{env.resolve()}\n"
+    assert "Settings file already exists" in captured.err
+    assert env.read_text(encoding="utf-8") == "PASSWORD=mine\n"
+
+
+def test_config_init_follows_copycord_home(tmp_path, monkeypatch, capsys):
+    home = tmp_path / "cc-home"
+    monkeypatch.setenv("COPYCORD_HOME", str(home))
+    _unset(monkeypatch, "DATA_DIR", "DB_PATH", "BACKUP_DIR", "PASSWORD")
+    assert cli.main(["config", "init"]) == 0
+    assert capsys.readouterr().out == f"{(home / '.env').resolve()}\n"
+    assert (home / ".env").is_file() and not (home / "data" / ".env").exists()
+
+
+def test_config_init_reports_a_write_error(data_dir, monkeypatch, capsys):
+    from copycord import envfile
+
+    def deny(path=None):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(envfile, "write_template", deny)
+    assert cli.main(["config", "init", "--data-dir", str(data_dir)]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == "" and "Could not write" in captured.err
+
+
 def test_env_file_is_loaded_without_overriding(data_dir, monkeypatch):
     data_dir.mkdir(parents=True)
     (data_dir / ".env").write_text(

@@ -68,7 +68,7 @@ COMMAND_GROUPS = (
         ("doctor", "Check this machine can run Copycord"),
     )),
     ("Settings", (
-        ("config", "Read or write settings (get, set, unset, export, import)"),
+        ("config", "Read or write settings (get, set, unset, export, import, init)"),
     )),
     ("Service", (
         ("service", "Run Copycord in the background (install, status, start, stop, restart, uninstall)"),
@@ -531,6 +531,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "import", parents=[data_dir], help="store values from a JSON object"
     )
     imp.add_argument("file")
+    csub.add_parser(
+        "init", parents=[data_dir],
+        help="write the default <home>/.env if it is missing and print its path",
+    )
 
     user = argparse.ArgumentParser(add_help=False)
     scope = user.add_mutually_exclusive_group()
@@ -1799,6 +1803,24 @@ def _print_value(key: str, value: Optional[str], show_secrets: bool,
     jsonout.emit(doc)
 
 
+def env_init_command() -> int:
+    """Write the default <home>/.env when it is missing; an existing file is kept.
+    The path goes to stdout so the installers can show it."""
+    from copycord import envfile, ui
+
+    path = envfile.env_path()
+    try:
+        envfile.write_template(path)
+        ui.ok("Settings file created", str(path), stream=sys.stderr)
+    except FileExistsError:
+        ui.ok("Settings file already exists", str(path), stream=sys.stderr)
+    except OSError as e:
+        ui.fail(f"Could not write {path}", str(e))
+        return 1
+    print(path)
+    return 0
+
+
 def env_config_command(args: argparse.Namespace) -> int:
     """config get/set/unset for the env-only keys in <home>/.env."""
     from copycord import envfile, ui
@@ -1854,6 +1876,8 @@ def _config_steps(args: argparse.Namespace) -> int:
     from copycord.envfile import is_env_key
 
     cmd = args.config_command
+    if cmd == "init":
+        return env_init_command()
     if cmd in ("get", "set", "unset") and is_env_key(args.key):
         return env_config_command(args)
     as_json = args.json
