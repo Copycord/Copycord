@@ -221,6 +221,8 @@ def env(data_dir, fake_net, monkeypatch):
         service, "service_state", lambda: service.State(False, False, "test")
     )
     monkeypatch.setattr(update, "installed_version", lambda: ("4.0.0", "abcdef1234567"))
+    # The up-to-date check has its own tests below; here every update installs.
+    monkeypatch.setattr(update, "nothing_new", lambda target: (False, None))
     return rec, on_path, restarts
 
 
@@ -670,6 +672,105 @@ def test_check_dev_github_failure_is_a_warning(data_dir, fake_net, no_install, c
     assert cli.main(["update", "status"]) == 0
     out = capsys.readouterr().out
     assert "WARN" in out and "Network is unreachable" in out
+
+
+# --------------------------------------------------------------------------
+# copycord update when already up to date
+# --------------------------------------------------------------------------
+
+REAL_NOTHING_NEW = update.nothing_new
+HEAD_URL = "https://api.github.com/repos/Copycord/Copycord/commits/{}"
+
+
+@pytest.fixture()
+def current(env, fake_net, monkeypatch):
+    """env with the real up-to-date check, a wheel install and recorded backups."""
+    monkeypatch.setattr(update, "nothing_new", REAL_NOTHING_NEW)
+    monkeypatch.setattr(update, "git_source", lambda: None)
+    monkeypatch.setattr(update, "installed_commit", lambda: None)
+    backups = []
+    monkeypatch.setattr(update, "backup_database", lambda skip=False: backups.append(1) or True)
+    responses, seen = fake_net
+    responses[HEAD_URL.format("v4-dev")] = GITHUB_HEAD
+    return env[0], backups, responses, seen
+
+
+def _on_dev_head(monkeypatch, sha=GITHUB_HEAD["sha"]):
+    monkeypatch.setattr(update, "installed_commit", lambda: sha)
+    update.save_channel(update.Channel("dev", "v4-dev"))
+
+
+def test_dev_at_the_branch_head_is_up_to_date(current, monkeypatch, capsys):
+    rec, backups, _, seen = current
+    _on_dev_head(monkeypatch)
+    assert cli.main(["update"]) == 0
+    assert rec.calls == [] and backups == []
+    assert seen == [(HEAD_URL.format("v4-dev"), 5.0)]
+    out = capsys.readouterr().out
+    assert "Copycord is up to date (4.0.0, 0123456)" in out
+    assert "Updating" not in out
+
+
+def test_dev_with_a_new_commit_installs(current, monkeypatch):
+    rec, backups, _, _ = current
+    _on_dev_head(monkeypatch, "f" * 40)
+    assert cli.main(["update"]) == 0
+    assert rec.calls == [uv(GIT_SPEC.format("v4-dev"))] and backups == [1]
+
+
+def test_stable_at_the_latest_release_is_up_to_date(current, capsys):
+    rec, backups, _, seen = current
+    assert cli.main(["update"]) == 0
+    assert rec.calls == [] and backups == []
+    assert seen == [(LIST_URL, 5.0)]
+    assert "Copycord is up to date (4.0.0)" in capsys.readouterr().out
+
+
+def test_stable_with_a_newer_release_installs_and_asks_github_once(current, monkeypatch):
+    rec, _, _, seen = current
+    monkeypatch.setattr(update, "current_version", lambda: "3.28.0")
+    assert cli.main(["update"]) == 0
+    assert rec.calls == [uv(wheel_url("v4.0.0"))]
+    assert seen == [(LIST_URL, 5.0)]
+
+
+@pytest.mark.parametrize("argv", [
+    ["update", "--ref", "main"],
+    ["update", "--channel", "beta"],
+    ["update", "--channel", "stable"],
+])
+def test_a_channel_switch_installs_even_when_up_to_date(current, monkeypatch, argv):
+    rec, backups, _, _ = current
+    _on_dev_head(monkeypatch)
+    assert cli.main(argv) == 0
+    assert len(rec.calls) == 1 and backups == [1]
+
+
+def test_reinstall_installs_even_when_up_to_date(current, monkeypatch):
+    rec, _, _, _ = current
+    _on_dev_head(monkeypatch)
+    assert update.update(reinstall=True) == 0
+    assert rec.calls == [["uv", "tool", "install", "--reinstall", "--force", "--python", "3.12",
+                          GIT_SPEC.format("v4-dev")]]
+
+
+def test_github_failure_in_the_check_installs_anyway(current, monkeypatch, capsys):
+    rec, _, responses, _ = current
+    _on_dev_head(monkeypatch)
+    responses[HEAD_URL.format("v4-dev")] = OSError("Network is unreachable")
+    assert cli.main(["update"]) == 0
+    assert rec.calls == [uv(GIT_SPEC.format("v4-dev"))]
+    err = capsys.readouterr().err
+    assert "WARN" in err and "Network is unreachable" in err
+
+
+@pytest.mark.parametrize("dev", [True, False])
+def test_force_installs_even_when_up_to_date(current, monkeypatch, dev):
+    rec, backups, _, _ = current
+    if dev:
+        _on_dev_head(monkeypatch)
+    assert cli.main(["update", "--force"]) == 0
+    assert len(rec.calls) == 1 and backups == [1]
 
 
 # --------------------------------------------------------------------------

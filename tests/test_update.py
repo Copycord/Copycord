@@ -236,3 +236,13 @@ def test_update_tool_missing_from_path(monkeypatch, capsys, fake_net):
     monkeypatch.setattr(service, "run_cmd", lambda *a, **k: pytest.fail("ran a command"))
     assert update.update() == 1
     assert f"uv tool install --force --python 3.12 {WHEEL}" in capsys.readouterr().err
+
+
+def test_update_on_the_latest_release_installs_nothing(uv_tool, monkeypatch, capsys):
+    rec, restarts = uv_tool
+    monkeypatch.setattr(update, "current_version", lambda: "4.0.0")
+    monkeypatch.setattr(update, "git_source", lambda: None)
+    monkeypatch.setattr(update, "backup_database", lambda skip=False: pytest.fail("backed up"))
+    assert cli.main(["update"]) == 0
+    assert rec.calls == [] and restarts == []
+    assert "Copycord is up to date (4.0.0)" in capsys.readouterr().out
