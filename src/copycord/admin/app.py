@@ -25,7 +25,6 @@ import tarfile, tempfile, shutil
 import re
 import time
 import logging
-from dotenv import load_dotenv
 from typing import Dict, List, Set, Literal, Optional, Any, Union
 from copycord.admin.auth import init_admin_auth
 from copycord.admin.security import authorize_websocket, safe_child
@@ -93,10 +92,6 @@ from datetime import datetime, timezone
 import aiohttp
 
 BASE_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = BASE_DIR.parent
-
-
-load_dotenv(PROJECT_ROOT / ".env")
 
 
 GITHUB_REPO = os.getenv("GITHUB_REPO", "Copycord/Copycord")
