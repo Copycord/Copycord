@@ -199,10 +199,118 @@ test.describe("scraper", () => {
 });
 
 test.describe("system", () => {
+  // Restore and delete only touch the throwaway e2e home that global-setup starts.
+  async function archiveNames(page: Page): Promise<string[]> {
+    const r = await page.request.get("/api/backup/info");
+    expect(r.ok()).toBeTruthy();
+    return ((await r.json()) as { archives: { name: string }[] }).archives.map((a) => a.name);
+  }
+
+  async function makeBackup(page: Page): Promise<string> {
+    const r = await page.request.post("/admin/backup-now", { headers: CSRF_HEADERS });
+    expect(r.ok()).toBeTruthy();
+    return ((await r.json()) as { file: string }).file;
+  }
+
+  async function expandDatabase(page: Page): Promise<void> {
+    await open(page, "system");
+    await page.locator("#adv-collapse-btn").click();
+    await expect(page.locator("#adv-backup-now")).toBeVisible();
+  }
+
   test("50 database card with backup now and info", async ({ page }) => {
     await open(page, "system");
     await expect(page.locator("#adv-backup-now")).toBeAttached();
     expect((await page.request.get("/api/backup/info")).ok()).toBeTruthy();
+  });
+
+  test("50 collapse toggle shows and hides the backup actions", async ({ page }) => {
+    await open(page, "system");
+    const btn = page.locator("#adv-collapse-btn");
+    await expect(btn).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("#adv-backup-now")).toBeHidden();
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-expanded", "true");
+    for (const id of ["adv-backup-now", "adv-download-latest", "adv-archives"]) {
+      await expect(page.locator(`#${id}`), id).toBeVisible();
+    }
+    await expect(page.locator("#adv-restore-file")).toHaveAttribute("accept", ".gz");
+    await btn.click();
+    await expect(btn).toHaveAttribute("aria-expanded", "false");
+    await expect(page.locator("#adv-backup-now")).toBeHidden();
+  });
+
+  test("50 backup now lists the archive with working download links", async ({ page }) => {
+    await expandDatabase(page);
+    const before = await archiveNames(page);
+    const reply = page.waitForResponse((r) => r.url().endsWith("/admin/backup-now") && r.request().method() === "POST");
+    await page.locator("#adv-backup-now").click();
+    const { ok, file } = (await (await reply).json()) as { ok: boolean; file: string };
+    expect(ok).toBe(true);
+    expect(before).not.toContain(file);
+
+    const del = page.locator(`#adv-archives [data-delete="${file}"]`);
+    await expect(del).toBeVisible();
+    const href = `/api/backup/download/${encodeURIComponent(file)}`;
+    await expect(page.locator("#adv-download-latest")).toHaveAttribute("href", href);
+    const row = page.locator("#adv-archives tbody tr", { has: del });
+    await expect(row.getByRole("link", { name: "Download" })).toHaveAttribute("href", href);
+    const dl = await page.request.get(href);
+    expect(dl.ok()).toBeTruthy();
+    expect(dl.headers()["content-type"]).toContain("gzip");
+  });
+
+  test("50 restore by upload asks first, cancel sends nothing, confirm restores", async ({ page }) => {
+    const file = await makeBackup(page);
+    const archive = await (await page.request.get(`/api/backup/download/${encodeURIComponent(file)}`)).body();
+    const upload = { name: "e2e-restore.tar.gz", mimeType: "application/gzip", buffer: archive };
+    await expandDatabase(page);
+    const restores: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().endsWith("/api/backup/restore")) restores.push(r.method());
+    });
+    const input = page.locator("#adv-restore-file");
+
+    await input.setInputFiles(upload);
+    const dialog = page.getByRole("dialog", { name: "Restore database?" });
+    await expect(dialog).toContainText("e2e-restore.tar.gz");
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog).toBeHidden();
+    expect(restores).toEqual([]);
+
+    await input.setInputFiles(upload);
+    await expect(dialog).toBeVisible();
+    const reply = page.waitForResponse((r) => r.url().endsWith("/api/backup/restore"));
+    await dialog.getByRole("button", { name: "Restore" }).click();
+    const r = await reply;
+    expect(r.status()).toBe(200);
+    expect(((await r.json()) as { ok: boolean }).ok).toBe(true);
+    expect(restores).toEqual(["POST"]);
+    // The archive was taken after seeding, so the seeded forwarding rule survives the restore.
+    expect(await (await page.request.get("/api/forwarding")).text()).toContain(SEED.ruleLabel);
+  });
+
+  test("50 delete asks first and removes the archive", async ({ page }) => {
+    const file = await makeBackup(page);
+    await expandDatabase(page);
+    const del = page.locator(`#adv-archives [data-delete="${file}"]`);
+    const dialog = page.getByRole("dialog", { name: "Delete backup?" });
+
+    await del.click();
+    await expect(dialog).toContainText(file);
+    await dialog.getByRole("button", { name: "Cancel" }).click();
+    await expect(dialog).toBeHidden();
+    await expect(del).toBeVisible();
+    expect(await archiveNames(page)).toContain(file);
+
+    await del.click();
+    const reply = page.waitForResponse((r) => r.url().endsWith("/api/backup/delete"));
+    await dialog.getByRole("button", { name: "Delete" }).click();
+    const r = await reply;
+    expect(r.status()).toBe(200);
+    expect(r.request().postData() ?? "").toContain(file);
+    await expect(del).toHaveCount(0);
+    expect(await archiveNames(page)).not.toContain(file);
   });
 });
 
