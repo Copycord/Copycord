@@ -175,26 +175,6 @@ def unset(key: str, path: Optional[Path] = None) -> bool:
     return True
 
 
-def comment_out(key: str, example: str, path: Optional[Path] = None) -> bool:
-    """Turn the KEY line into the commented example #KEY=example; False when
-    KEY was not set in the file."""
-    path = env_path() if path is None else path
-    lines = _read_lines(path)
-    out = []
-    done = False
-    for line in lines:
-        m = _LINE.match(line)
-        if m and m.group(1) == key:
-            if not done:
-                out.append(f"#{key}={example}")
-                done = True
-            continue
-        out.append(line)
-    if done:
-        _write_lines(path, out)
-    return done
-
-
 def template(home: Optional[Path] = None) -> str:
     """The default <home>/.env written on first install."""
     home = env_path().parent if home is None else Path(home)

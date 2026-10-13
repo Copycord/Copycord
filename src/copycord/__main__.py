@@ -893,18 +893,13 @@ def check_data_dir(path: Path) -> Check:
 
 def check_layout() -> Check:
     """WARN while a native home still has data.db or secret.key loose in it."""
-    from copycord.common.paths import copycord_home, needs_migration, old_backup_dir
+    from copycord.common.paths import copycord_home, needs_migration
 
     if needs_migration():
         home = copycord_home().resolve()
         return Check(WARN, "data files loose in the home",
                      "Copycord moves them into data and logs folders on its next start",
                      str(home), "layout")
-    old = old_backup_dir()
-    if old is not None:
-        return Check(WARN, "backups outside the data folder",
-                     "Copycord moves them into the data folder on its next start",
-                     str(old), "layout")
     return Check(PASS, "data folder layout")
 
 
@@ -1187,14 +1182,13 @@ def fix_home(checks: List[Check]) -> str:
 
 def fix_layout(checks: List[Check]) -> str:
     """Move the old flat home into <home>/data and <home>/logs."""
-    from copycord.common.paths import data_dir, migrate_backup_dir, migrate_layout
+    from copycord.common.paths import data_dir, migrate_layout
 
     state = service_state()
     if state and state.running:
         raise FixError("Copycord is running; stop it first (copycord service stop)")
     try:
         line = migrate_layout()
-        line = migrate_backup_dir() or line
     except OSError as e:
         raise FixError(f"could not move the files, nothing changed: {e}")
     return line or str(data_dir())
@@ -2532,7 +2526,7 @@ def port_busy_message(port: int) -> None:
 
 def migrate_on_start() -> None:
     """Move an old flat native home into data and logs folders; on failure keep it."""
-    from copycord.common.paths import migrate_backup_dir, migrate_layout
+    from copycord.common.paths import migrate_layout
 
     log = logging.getLogger("copycord.layout")
     try:
@@ -2540,11 +2534,6 @@ def migrate_on_start() -> None:
     except Exception as e:
         log.warning("Could not move the data into the data folder, still using the old "
                     "layout: %s", e)
-    try:
-        migrate_backup_dir(log=log.info)
-    except Exception as e:
-        log.warning("Could not move the backups into the data folder, still using "
-                    "BACKUP_DIR: %s", e)
 
 
 def windowless_streams() -> None:
