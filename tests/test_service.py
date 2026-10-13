@@ -79,16 +79,58 @@ def test_user_install_writes_unit_and_enables(tmp_path, fake_run, system_dir, mo
     assert fake_run.calls == [
         ["systemctl", "--user", "daemon-reload"],
         ["systemctl", "--user", "enable", "--now", "copycord.service"],
+        ["loginctl", "show-user", "mac", "-p", "Linger"],
+        ["loginctl", "enable-linger", "mac"],
     ]
-    assert any("loginctl enable-linger mac" in n for n in notes)
+    assert notes[0] == "created user service copycord.service (starts at boot)"
+    assert not any("sudo" in n for n in notes)
     assert not system_dir.exists()
+
+
+def test_user_install_with_linger_already_on(tmp_path, monkeypatch, system_dir):
+    monkeypatch.setenv("USER", "mac")
+    fake = FakeRun({("loginctl", "show-user"): (0, "Linger=yes\n")})
+    monkeypatch.setattr(service, "run_cmd", fake)
+    notes = service.SystemdService(True, home=tmp_path).install(EXE, tmp_path / "d")
+    assert ["loginctl", "enable-linger", "mac"] not in fake.calls
+    assert notes[0] == "created user service copycord.service (starts at boot)"
+
+
+def test_user_install_when_linger_cannot_be_turned_on(tmp_path, monkeypatch, system_dir):
+    monkeypatch.setenv("USER", "mac")
+    fake = FakeRun({
+        ("loginctl", "show-user"): (0, "Linger=no\n"),
+        ("loginctl", "enable-linger"): (1, ""),
+    })
+    monkeypatch.setattr(service, "run_cmd", fake)
+    notes = service.SystemdService(True, home=tmp_path).install(EXE, tmp_path / "d")
+    assert notes[0] == "created user service copycord.service (starts when you log in)"
+    attention = [n for n in notes if n.startswith("needs your attention:")]
+    assert len(attention) == 1
+    assert attention[0].endswith("run: sudo loginctl enable-linger mac")
+
+
+def test_linger_enabled_reads_loginctl(monkeypatch):
+    for answer, want in (((0, "Linger=yes\n"), True), ((0, "Linger=no\n"), False),
+                         ((1, ""), False), ((127, ""), None)):
+        monkeypatch.setattr(service, "run_cmd", FakeRun({("loginctl",): answer}))
+        assert service.linger_enabled("mac") is want
+
+
+def test_install_without_systemd_keeps_the_systemctl_error(tmp_path, monkeypatch, system_dir):
+    fake = FakeRun({("systemctl",): (1, "System has not been booted with systemd")})
+    monkeypatch.setattr(service, "run_cmd", fake)
+    with pytest.raises(service.ServiceError, match="daemon-reload failed"):
+        service.SystemdService(True, home=tmp_path).install(EXE, tmp_path / "d")
+    assert not any(c[0] == "loginctl" for c in fake.calls)
 
 
 def test_system_install_needs_root(tmp_path, fake_run, system_dir, monkeypatch):
     monkeypatch.setattr(service, "is_root", lambda: False)
     svc = service.SystemdService(False, home=tmp_path)
-    with pytest.raises(service.ServiceError, match="needs root"):
+    with pytest.raises(service.ServiceError, match="needs root") as exc:
         svc.install(EXE, tmp_path / "data")
+    assert "Leave out --system" in str(exc.value)
     assert fake_run.calls == []
     assert not (system_dir / "copycord.service").exists()
 
@@ -105,6 +147,7 @@ def test_system_install_as_root(tmp_path, fake_run, system_dir, monkeypatch):
         ["systemctl", "enable", "--now", "copycord.service"],
     ]
     assert not any("enable-linger" in n for n in notes)
+    assert notes[0] == "created system service copycord.service (starts at boot)"
 
 
 def test_systemd_install_reports_systemctl_failure(tmp_path, monkeypatch, system_dir):
@@ -150,16 +193,44 @@ def test_systemd_state_start_stop_uninstall(tmp_path, system_dir, monkeypatch):
     ]
 
 
-def test_get_service_prefers_existing_user_unit(tmp_path, system_dir):
+def test_get_service_defaults_to_the_user_unit_unless_root(tmp_path, system_dir, monkeypatch):
+    monkeypatch.setattr(service, "is_root", lambda: False)
+    assert service.get_service(platform="linux", home=tmp_path).user is True
+    monkeypatch.setattr(service, "is_root", lambda: True)
     assert service.get_service(platform="linux", home=tmp_path).user is False
+    assert service.get_service(True, platform="linux", home=tmp_path).user is True
+    assert service.get_service(platform="linux", home=tmp_path, system=True).user is False
+
+
+def test_get_service_finds_the_installed_unit(tmp_path, system_dir, monkeypatch):
+    monkeypatch.setattr(service, "is_root", lambda: True)
     user_unit = tmp_path / ".config" / "systemd" / "user" / "copycord.service"
     user_unit.parent.mkdir(parents=True)
     user_unit.write_text("x")
     assert service.get_service(platform="linux", home=tmp_path).user is True
+    user_unit.unlink()
+    monkeypatch.setattr(service, "is_root", lambda: False)
     system_dir.mkdir()
     (system_dir / "copycord.service").write_text("x")
     assert service.get_service(platform="linux", home=tmp_path).user is False
-    assert service.get_service(True, platform="linux", home=tmp_path).user is True
+    assert not service.both_installed(home=tmp_path, platform="linux")
+    user_unit.write_text("x")
+    assert service.both_installed(home=tmp_path, platform="linux")
+    assert service.get_service(platform="linux", home=tmp_path).user is True
+    monkeypatch.setattr(service, "is_root", lambda: True)
+    assert service.get_service(platform="linux", home=tmp_path).user is False
+
+
+def test_user_linger_only_for_an_installed_user_unit(tmp_path, monkeypatch):
+    svc = service.SystemdService(True, home=tmp_path)
+    monkeypatch.setattr(service, "get_service", lambda **k: svc)
+    monkeypatch.setattr(service, "run_cmd", FakeRun({("loginctl",): (0, "Linger=no")}))
+    assert service.user_linger(platform="linux") is None
+    svc.unit_path.parent.mkdir(parents=True)
+    svc.unit_path.write_text("x")
+    assert service.user_linger(platform="linux") is False
+    monkeypatch.setattr(service, "get_service", lambda **k: service.SystemdService(False))
+    assert service.user_linger(platform="linux") is None
 
 
 def test_install_data_dir_uses_sudo_users_home(monkeypatch, tmp_path):
@@ -597,7 +668,7 @@ def test_cli_status_prints_one_line(monkeypatch, capsys):
         def state(self):
             return service.State(True, False, "test unit")
 
-    monkeypatch.setattr(service, "get_service", lambda user=False: Svc())
+    monkeypatch.setattr(service, "get_service", lambda *a, **k: Svc())
     assert cli.main(["service", "status"]) == 3
     out = capsys.readouterr().out
     assert out.strip() == "copycord service: installed, not running (test unit)"
@@ -613,7 +684,7 @@ def test_cli_install_passes_data_dir_and_command(tmp_path, monkeypatch, capsys):
             return ["ok"]
 
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "before"))
-    monkeypatch.setattr(service, "get_service", lambda user=False: Svc())
+    monkeypatch.setattr(service, "get_service", lambda *a, **k: Svc())
     monkeypatch.setattr(service, "SystemdService", lambda user: Svc())
     monkeypatch.setattr(service, "copycord_command", lambda: EXE)
     target = tmp_path / "svc-data"
@@ -621,12 +692,86 @@ def test_cli_install_passes_data_dir_and_command(tmp_path, monkeypatch, capsys):
     assert seen == {"command": EXE, "data_dir": target.resolve()}
 
 
+class FakeSystemd:
+    made = []
+
+    def __init__(self, user, home=None):
+        self.user = user
+        self.scope = "user" if user else "system"
+        FakeSystemd.made.append(user)
+
+    def install(self, command, data_dir):
+        if not self.user and not service.is_root():
+            raise service.ServiceError("the system service needs root. Leave out --system")
+        return [f"created {self.scope} service copycord.service (starts at boot)"]
+
+
+@pytest.fixture()
+def linux_install(tmp_path, monkeypatch):
+    FakeSystemd.made = []
+    monkeypatch.setattr(service.sys, "platform", "linux")
+    monkeypatch.setattr(service, "SystemdService", FakeSystemd)
+    monkeypatch.setattr(service, "copycord_command", lambda: EXE)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("SUDO_USER", raising=False)
+    return FakeSystemd.made
+
+
+def test_cli_install_as_a_normal_user_makes_a_user_service(linux_install, monkeypatch, capsys):
+    monkeypatch.setattr(service, "is_root", lambda: False)
+    assert cli.main(["service", "install"]) == 0
+    assert linux_install == [True]
+    out = capsys.readouterr().out
+    assert "created user service copycord.service (starts at boot)" in out
+    assert "sudo" not in out
+
+
+def test_cli_install_as_root_makes_a_system_service(linux_install, monkeypatch, capsys):
+    monkeypatch.setattr(service, "is_root", lambda: True)
+    assert cli.main(["service", "install"]) == 0
+    assert linux_install == [False]
+    assert "created system service" in capsys.readouterr().out
+    assert cli.main(["service", "install", "--user"]) == 0
+    assert linux_install == [False, True]
+
+
+def test_cli_install_system_as_a_normal_user_fails_clearly(linux_install, monkeypatch, capsys):
+    monkeypatch.setattr(service, "is_root", lambda: False)
+    assert cli.main(["service", "install", "--system"]) == 1
+    assert linux_install == [False]
+    err = capsys.readouterr().err
+    assert "copycord service install: the system service needs root. Leave out --system" in err
+
+
+def test_cli_user_and_system_are_exclusive(capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["service", "status", "--user", "--system"])
+
+
+def test_cli_says_which_unit_when_both_exist(monkeypatch, capsys):
+    class Svc:
+        scope, unit_path = "user", "/home/u/.config/systemd/user/copycord.service"
+
+        def state(self):
+            return service.State(True, True, "test unit")
+
+    seen = []
+    monkeypatch.setattr(service, "get_service", lambda *a, **k: seen.append((a, k)) or Svc())
+    monkeypatch.setattr(service, "both_installed", lambda: True)
+    assert cli.main(["service", "status"]) == 0
+    err = capsys.readouterr().err
+    assert "both installed; using the user service" in err
+    assert cli.main(["service", "status", "--system"]) == 0
+    assert seen[-1] == ((False,), {"system": True})
+    assert capsys.readouterr().err == ""
+
+
 def test_cli_service_error_is_reported(monkeypatch, capsys):
     class Svc:
         def start(self):
             raise service.ServiceError("needs root")
 
-    monkeypatch.setattr(service, "get_service", lambda user=False: Svc())
+    monkeypatch.setattr(service, "get_service", lambda *a, **k: Svc())
     assert cli.main(["service", "start"]) == 1
     assert "needs root" in capsys.readouterr().err
 

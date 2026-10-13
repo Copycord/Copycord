@@ -3,6 +3,7 @@ import io
 import json
 import os
 import socket
+import subprocess
 import sys
 from pathlib import Path
 
@@ -30,6 +31,7 @@ def data_dir(tmp_path, monkeypatch):
     # No network and no real OS service in the doctor tests.
     monkeypatch.setenv("COPYCORD_NO_UPDATE_CHECK", "1")
     monkeypatch.setattr(cli, "service_state", lambda: None)
+    monkeypatch.setattr(cli, "service_linger", lambda: None)
     return d
 
 
@@ -810,6 +812,11 @@ def test_check_service():
     console = cli.check_service(State(True, True, "x"), r"C:\bin\copycord.exe")
     assert console.status == cli.WARN and console.fix == "service_window"
     assert console.name == "service runs in a console window"
+    assert cli.check_service(State(True, True, "x"), linger=True).status == cli.PASS
+    lingerless = cli.check_service(State(True, True, "x"), linger=False)
+    assert lingerless.status == cli.WARN and lingerless.fix == "linger"
+    assert lingerless.name == "service starts only when you log in"
+    assert "sudo loginctl enable-linger" in lingerless.reason
 
 
 def test_check_updates_never_fails(data_dir, monkeypatch):
@@ -1160,6 +1167,33 @@ def test_doctor_fix_rewrites_a_service_in_a_console_window(doctor_env, monkeypat
     out = capsys.readouterr().out
     assert '✓ service runs without a window  scheduled task "Copycord" (fixed)' in out
     assert state["console"] is None
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_doctor_fix_turns_linger_on(doctor_env, monkeypatch, capsys, enabled):
+    from copycord import service
+
+    monkeypatch.setenv("USER", "mac")
+    linger = {"on": False}
+    calls = []
+
+    def run(cmd, capture=True):
+        calls.append(list(cmd))
+        linger["on"] = linger["on"] or enabled
+        return subprocess.CompletedProcess(list(cmd), 0 if enabled else 1, "", "")
+
+    monkeypatch.setattr(service, "run_cmd", run)
+    monkeypatch.setattr(cli, "service_state",
+                        lambda: service.State(True, True, "systemd user unit /x/copycord.service"))
+    monkeypatch.setattr(cli, "service_linger", lambda: linger["on"])
+    _fix(doctor_env)
+    out = capsys.readouterr().out
+    assert calls == [["loginctl", "enable-linger", "mac"]]
+    if enabled:
+        assert "✓ service starts at boot  linger on for mac (fixed)" in out
+    else:
+        assert "could not fix it: to start Copycord at boot" in out
+        assert "sudo loginctl enable-linger mac" in out
 
 
 def test_doctor_flags_a_service_in_a_console_window(doctor_env, monkeypatch, capsys):
