@@ -108,6 +108,18 @@ def test_version_on_a_terminal_is_a_header_line(data_dir, monkeypatch):
     assert out.getvalue().splitlines() == [f"Copycord {version} (7cf4866) \u00b7 stable channel"]
 
 
+def test_subcommand_error_on_a_terminal_has_no_raw_prefix(data_dir, monkeypatch):
+    monkeypatch.setenv("NO_COLOR", "1")
+    _, err = _terminal(monkeypatch)
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["update", "--channel", "nope"])
+    assert exc.value.code == 2
+    text = err.getvalue()
+    assert "copycord update: error" not in text and "usage:" not in text
+    assert "\u2717 argument --channel: invalid choice" in text
+    assert "  Run copycord update --help to see its options." in text
+
+
 def test_bare_copycord_prints_the_overview(data_dir, capsys):
     with pytest.raises(SystemExit) as exc:
         cli.main([])

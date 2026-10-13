@@ -379,9 +379,17 @@ class _Parser(argparse.ArgumentParser):
 
     def error(self, message: str) -> NoReturn:
         """Print a short error and a pointer to the help instead of argparse's usage."""
-        if self.prog != "copycord":
-            super().error(message)
         from copycord import ui
+
+        if self.prog != "copycord":
+            if not sys.stderr.isatty():
+                super().error(message)
+            # On a terminal a subcommand error reads like the others, without
+            # argparse's usage block and "copycord <cmd>: error:" prefix.
+            ui.fail(message, stream=sys.stderr)
+            hint = f"Run {ui.cmd(self.prog + ' --help', stream=sys.stderr)} to see its options."
+            print(f"  {hint}", file=sys.stderr)
+            self.exit(2)
 
         if "invalid choice" in message:
             bad = message.split("invalid choice: ", 1)[-1].split(" ", 1)[0].strip("'\",")
@@ -2597,6 +2605,9 @@ def run_command(argv: Optional[List[str]] = None) -> int:
         from copycord import supervisor, update_check
         from copycord.common.db import SchemaTooNewError
 
+        if sys.stdout.isatty():
+            # The header line above the log, as on the other commands.
+            print(f"\n{brand()}\n")
         update_check.start()
         try:
             asyncio.run(supervisor.run())

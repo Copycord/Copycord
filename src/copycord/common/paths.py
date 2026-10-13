@@ -97,11 +97,18 @@ def platform_data_dir(
         if (old / "data.db").is_file():
             if str(old) not in _notified:
                 _notified.add(str(old))
-                print(
-                    f"copycord: using the old data directory {old}; to move to "
-                    f"{target.parent}, stop Copycord and move that directory there",
-                    file=sys.stderr,
-                )
+                if sys.stderr.isatty():
+                    from copycord import ui
+
+                    ui.warn(f"using the old data directory {old}",
+                            f"to move to {target.parent}, stop Copycord and move that "
+                            "directory there")
+                else:
+                    print(
+                        f"copycord: using the old data directory {old}; to move to "
+                        f"{target.parent}, stop Copycord and move that directory there",
+                        file=sys.stderr,
+                    )
             return old
     return target
 
