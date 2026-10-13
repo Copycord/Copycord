@@ -173,12 +173,7 @@ class ChannelPermissionSync:
     def _reload_maps_from_db_for_clone(
         self, clone_gid: int
     ) -> Tuple[Dict[int, dict], Dict[int, dict]]:
-        """
-        Build and return fresh (cat_map, chan_map) *for this clone guild only*.
-
-        We DO NOT mutate self.cat_map / self.chan_map anymore because multiple
-        guilds can sync at the same time.
-        """
+        """Build fresh (cat_map, chan_map) for this clone guild only; shared maps are not mutated."""
         try:
             cat_map = {
                 int(rd["original_category_id"]): rd
@@ -398,10 +393,7 @@ class ChannelPermissionSync:
     def _raw_role_bits_map_from_channel(
         self, ch: discord.abc.GuildChannel
     ) -> Dict[int, Tuple[int, int]]:
-        """
-        Exact ROLE-overwrite map using raw allow/deny ints when available.
-        Ignores member overwrites. Keys are role IDs (including @everyone).
-        """
+        """Role-overwrite map from raw allow/deny ints. Member overwrites are ignored."""
         out: Dict[int, Tuple[int, int]] = {}
 
         raw = (

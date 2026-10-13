@@ -137,11 +137,10 @@ class RateLimitManager:
         return lim
 
     def set_proxy_bypass(self, on: bool) -> None:
-        """When *on*, ``acquire`` / ``acquire_for_guild`` become no-ops.
+        """When on, acquire and acquire_for_guild become no-ops.
 
-        This is used during structure sync while proxies are active so that
-        requests are not throttled — each proxy uses a different IP, so the
-        per-IP rate limits imposed by Discord don't apply.
+        Used during structure sync while proxies are active: each proxy has its own IP,
+        so Discord's per-IP limits do not apply.
         """
         self._proxy_bypass = bool(on)
 

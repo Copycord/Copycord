@@ -50,11 +50,7 @@ MAX_AVATAR_BYTES = 10 * 1024 * 1024
 
 
 def avatar_hash_from_url(url: Optional[str]) -> Optional[str]:
-    """The hash Discord embeds in an avatar URL, without downloading it.
-
-    This is what makes "has it changed?" free: the hash is already in the URL
-    the message arrived with, so an unchanged avatar costs nothing.
-    """
+    """The hash Discord embeds in an avatar URL, without downloading it."""
     if not url:
         return None
     m = _AVATAR_HASH_RE.search(str(url))
@@ -101,12 +97,7 @@ _ZLIB_SUFFIX = b"\x00\x00\xff\xff"
 
 
 async def _identify_payload(token: str) -> dict:
-    """The IDENTIFY the web client sends.
-
-    ``properties`` is the gateway's own shape, not the REST one, but both come
-    from a single fingerprint: a socket claiming a different device than the
-    requests it accompanies contradicts itself inside one session.
-    """
+    """The IDENTIFY payload the web client sends, built from the same fingerprint as the REST headers."""
     props = gateway_properties(token)
     return {
         "op": _OP_IDENTIFY,
@@ -131,11 +122,8 @@ async def _identify_payload(token: str) -> dict:
 class GatewaySession:
     """A gateway connection held only as long as one action needs it.
 
-    Deliberately not a full client: no RESUME, no event handling, no
-    reconnection. A profile edit should happen the way a real one does, with
-    the account actually online. Holding thousands of these open would
-    exhaust the proxy pool, since a lease is exclusive and a live socket
-    never returns it.
+    No RESUME, event handling or reconnection. A lease is exclusive and a live
+    socket never returns it, so many of these would exhaust the proxy pool.
     """
 
     def __init__(self, token: str, logger, *, use_proxy: bool = False):
@@ -160,8 +148,7 @@ class GatewaySession:
     async def connect(self) -> bool:
         """Open the socket and identify. True once READY has arrived.
 
-        Sets ``fatal`` when Discord's close code says this token is finished,
-        so a caller can tell "try again later" from "never going to work".
+        Sets fatal when the close code says this token is finished.
         """
         session = await get_tls_session(self._token, use_proxy=self._use_proxy)
         try:
@@ -266,8 +253,7 @@ class GatewaySession:
     async def _heartbeat_loop(self, interval: float) -> None:
         """Keep the session alive while we hold it.
 
-        The first beat is jittered the way the client does it, so a fleet
-        reconnecting together does not then beat in lockstep forever.
+        The first beat is jittered so a fleet reconnecting together does not beat in lockstep.
         """
         try:
             import random
@@ -307,12 +293,7 @@ async def set_avatar(
     logger,
     use_proxy: bool = False,
 ) -> bool:
-    """Point one account's profile picture at ``avatar_url``.
-
-    Downloads the image, opens a gateway session, PATCHes /users/@me, then
-    closes the session. Returns True only if Discord accepted the change, so
-    the caller can decide whether to record the hash as mirrored.
-    """
+    """Point one account's profile picture at avatar_url. True only if Discord accepted it."""
     ref = _token_log_id(token)
 
     fetched = await fetch_avatar(http_session, avatar_url)

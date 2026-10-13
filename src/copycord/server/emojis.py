@@ -61,11 +61,7 @@ class EmojiManager:
                 pass
 
     def _log(self, level: str, msg: str, *args):
-        """
-        Emit a log line with the current sync context prefix injected.
-        Example final line:
-        [✉️][CC-Testing-Client] Sync task khp6n [😊] [CloneGuild] Created emoji party_parrot
-        """
+        """Emit a log line with the current sync context prefix."""
         prefix = logctx.format_prefix()
         full = prefix + msg
 
@@ -86,11 +82,7 @@ class EmojiManager:
         self.session = session
 
     def _get_lock_for_clone(self, clone_gid: int) -> asyncio.Lock:
-        """
-        Return (and cache) the lock for this clone guild.
-        We serialize emoji writes per clone guild, but different clone guilds
-        can sync in parallel.
-        """
+        """Return (and cache) the lock for this clone guild. Different clone guilds sync in parallel."""
         if clone_gid not in self._locks:
             self._locks[clone_gid] = asyncio.Lock()
         return self._locks[clone_gid]
@@ -225,10 +217,7 @@ class EmojiManager:
     async def _sync(
         self, guild, emojis, host_guild_id: Optional[int]
     ) -> tuple[int, int, int]:
-        """
-        Mirror host custom emojis → clone guild, handling deletions, renames, and creations
-        with static/animated limits and size shrinking.
-        """
+        """Mirror host custom emojis to the clone guild: deletions, renames and creations."""
         deleted = renamed = created = 0
         skipped_limit_static = skipped_limit_animated = size_failed = 0
 

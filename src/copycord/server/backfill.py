@@ -57,11 +57,7 @@ class BackfillManager:
     def _cleanup_meta_payload(
         self, cid: int, *, st_override: dict | None = None
     ) -> dict:
-        """
-        Build the common metadata block for cleanup-related WS messages:
-        mapping_id, original_guild_id, cloned_guild_id, clone_channel_id
-        — all coerced to strings.
-        """
+        """Common metadata for cleanup WS messages, all ids coerced to strings."""
         st = st_override or self._progress.get(int(cid)) or {}
 
         def _to_str(val):
@@ -383,9 +379,7 @@ class BackfillManager:
             st["temps_deferred"] = True
 
     def is_backfilling(self, original_id: int) -> bool:
-        """
-        Checks if the given original ID is currently being backfilled.
-        """
+        """True if the given original ID is currently being backfilled."""
         return int(original_id) in self._flags
 
     def register_sink(
@@ -902,10 +896,7 @@ class BackfillManager:
         return status in (429, 500, 502, 503, 504)
 
     def _retry_after_seconds_from_exc(self, e: Exception) -> float | None:
-        """
-        Try to extract a server-provided delay from the exception.
-        Prefers Retry-After / X-RateLimit-Reset-After header, then JSON body.retry_after.
-        """
+        """Extract a server-provided delay from the exception: Retry-After header first, then body retry_after."""
         resp = getattr(e, "response", None)
 
         if resp is not None:
@@ -933,12 +924,7 @@ class BackfillManager:
     async def _api_with_retry(
         self, *, what: str, call, action=None, base: float = 0.75, cap: float = 60.0
     ) -> any:
-        """
-        Indefinitely retry a coroutine factory `call` until it succeeds or we're shutting down.
-        - Honors rate-limit hints from Discord when available.
-        - Exponential backoff with jitter otherwise.
-        - Optionally acquires your RateLimitManager `action` before each attempt.
-        """
+        """Retry call until it succeeds or we shut down, honoring Discord's hints, else exponential backoff with jitter."""
         attempt = 0
         while True:
             if getattr(self, "_shutting_down", False):
@@ -1151,11 +1137,7 @@ class BackfillManager:
             return [], []
 
     async def _list_temp_webhook_urls(self, clone_channel_id: int) -> list[str]:
-        """
-        Return temp webhook URLs for rotation. Prefer the backfill sink cache.
-        If cache is empty, fall back to: all webhooks in channel created by THIS bot and != primary.
-        (No name checks – temps may mirror the primary's name.)
-        """
+        """Return temp webhook URLs for rotation, from the backfill sink cache or else this bot's non-primary webhooks in the channel."""
         try:
             sink_key = self._by_clone.get(clone_channel_id)
             if sink_key is not None:
@@ -1264,10 +1246,7 @@ class BackfillManager:
         created_ids: list[int] | None = None,
         dry_run: bool = False,
     ) -> dict:
-        """
-        Delete ONLY temp webhooks created during this backfill run (or the IDs explicitly provided).
-        Returns: {"deleted": int}
-        """
+        """Delete only temp webhooks created during this backfill run (or the given IDs). Returns {'deleted': int}."""
         stats = {"deleted": 0}
         try:
 
@@ -1371,13 +1350,10 @@ class BackfillManager:
         only_ours: bool = True,
         dry_run: bool = False,
     ) -> dict:
-        """
-        Delete any webhooks in clone channels that are NOT the mapped primary webhook.
-        - only_ours=True: only delete webhooks created by this bot (safer default)
-        - channel_ids: limit to specific clone channel ids; default = all clones in chan_map
-        - dry_run=True: log what would be deleted, but don't delete
+        """Delete webhooks in clone channels that are not the mapped primary.
 
-        Returns: {"channels_checked": int, "deleted": int, "skipped_no_primary": int, "skipped_missing_channel": int}
+        only_ours limits it to webhooks this bot created; channel_ids limits the channels;
+        dry_run only logs. Returns counts of channels checked, deleted and skipped.
         """
         stats = {
             "channels_checked": 0,

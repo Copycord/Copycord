@@ -40,7 +40,7 @@ class TokenIdentityManager:
         self._avatar_skip: set[str] = set()
 
     def mark_token_bad(self, token_id) -> None:
-        """Bench a token for the rest of this session — Discord revoked it."""
+        """Bench a token for the rest of this session; Discord revoked it."""
         if token_id is None:
             return
         tid = str(token_id)
@@ -345,11 +345,7 @@ class TokenIdentityManager:
         return ok
 
     async def reset_mapping(self, mapping_id) -> None:
-        """Clear every applied nickname/role for a mapping and drop its state.
-
-        Used when the feature is turned off for a mapping (or the mapping is
-        being removed). Best-effort — permission failures are ignored.
-        """
+        """Clear every applied nickname/role for a mapping and drop its state. Permission failures are ignored."""
         mapping_id = str(mapping_id)
         async with self._lock_for(mapping_id):
             try:
@@ -471,14 +467,9 @@ class TokenIdentityManager:
     ) -> None:
         """Return a token account to a clean slate when its identity changes.
 
-        Called when an author rotates to a different token (the previous token
-        must be cleared) or when the feature is disabled. When we mirrored a
-        nickname onto the account we clear it; when we mirrored roles onto it we
-        strip **every** role the bot is able to remove — not just the ones we
-        recorded — so nothing lingers on the previous identity even if the exact
-        applied-role list was lost or another author had used the account. Roles
-        are only touched when we had actually applied roles, so a nickname-only
-        mapping never strips roles the account legitimately holds.
+        A mirrored nickname is cleared. When roles were mirrored, every role the bot can
+        remove is stripped, since the recorded list may be lost or another author may have
+        used the account. Roles are left alone when none were applied.
         """
 
         if applied_nick is not None and member.nick:
