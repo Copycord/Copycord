@@ -20,6 +20,7 @@ with a line down the left on a terminal and changes nothing elsewhere.
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 import os
 import re
@@ -546,26 +547,79 @@ def _wrap(text: str, width: int, indent: str = "  ") -> List[str]:
     return rows
 
 
-class _Capture:
-    """Stands in for the terminal while a section collects its lines."""
+class _Box:
+    """A section box printed a piece at a time: the title, then each row as
+    soon as its line ends, then the bottom edge."""
 
-    def __init__(self, real: TextIO):
-        self.encoding = getattr(real, "encoding", None) or "utf-8"
-        self.parts: List[str] = []
+    def __init__(self, title: str, stream: TextIO):
+        self.title = title
+        self.stream = stream
+        self.room = max(SECTION_MIN, min(_columns(), SECTION_MAX) - 6)
+        # Every box is as wide as the terminal (up to SECTION_MAX), so the boxes
+        # of one command line up whatever is in them.
+        self.width = max(self.room, len(title) + 2)
+        self.bar = _rail_glyph("bar", stream)
+
+    def top(self) -> None:
+        s, w = self.stream, self.width
+        print(self.bar, file=s)
+        print(f"{_rail_glyph('done', s)}  {accent(self.title, s)} "
+              f"{_rail_glyph('rule', s, w + 1 - len(self.title))}{_rail_glyph('corner', s)}",
+              file=s)
+        print(f"{self.bar}{' ' * (w + 4)}{self.bar}", file=s)
+
+    def row(self, text: str) -> None:
+        for x in _wrap(text.rstrip(), self.room):
+            pad = " " * max(0, self.width - _visible_len(x))
+            print(f"{self.bar}  {x}{pad}  {self.bar}", file=self.stream)
+
+    def bottom(self) -> None:
+        s, w = self.stream, self.width
+        print(f"{self.bar}{' ' * (w + 4)}{self.bar}", file=s)
+        print(f"{_rail_glyph('join', s)}{_rail_glyph('rule', s, w + 4)}{_rail_glyph('foot', s)}",
+              file=s)
+        s.flush()
+
+
+class _BoxLines:
+    """Stands in for the terminal inside a section box: each line printed
+    becomes a row of the box as soon as it ends. Blank lines at the start and
+    at the end of the section are left out."""
+
+    def __init__(self, box: _Box):
+        self.encoding = getattr(box.stream, "encoding", None) or "utf-8"
+        self.box = box
+        self._line = ""
+        self._started = False
+        self._blanks = 0
 
     def write(self, text: str) -> int:
-        self.parts.append(text)
+        *done, self._line = (self._line + text).split("\n")
+        for x in done:
+            self._add(x)
         return len(text)
 
+    def _add(self, text: str) -> None:
+        if not text:
+            # Shown only once a line with text comes after it.
+            self._blanks += self._started
+            return
+        for _ in range(self._blanks):
+            self.box.row("")
+        self._started, self._blanks = True, 0
+        self.box.row(text)
+        self.box.stream.flush()
+
+    def close(self) -> None:
+        if self._line:
+            self._add(self._line)
+            self._line = ""
+
     def flush(self) -> None:
-        pass
+        self.box.stream.flush()
 
     def isatty(self) -> bool:
         return True
-
-    def lines(self) -> List[str]:
-        text = "".join(self.parts).strip("\n")
-        return text.split("\n") if text else []
 
 
 class section:
@@ -579,8 +633,9 @@ class section:
       │                    │
       ├────────────────────╯
 
-    Everything printed to stdout inside it lands in the box. Off the rail the
-    title is a plain heading and the lines print as they come."""
+    Everything printed to stdout inside it lands in the box, one row as each
+    line ends. Off the rail the title is a plain heading and the lines print
+    as they come."""
 
     def __init__(self, title: str, stream: Optional[TextIO] = None):
         self.title = title
@@ -588,7 +643,7 @@ class section:
         self.boxed = False
         # Where the lines of the section go: the box while boxed, else stream.
         self.out = self.stream
-        self._capture: Optional[_Capture] = None
+        self._lines: Optional[_BoxLines] = None
         self._saved: Optional[TextIO] = None
 
     def __enter__(self) -> "section":
@@ -597,8 +652,10 @@ class section:
         if not self.boxed:
             heading(self.title, self.stream)
             return self
-        self._capture = self.out = _Capture(self.stream)
-        self._saved, sys.stdout = sys.stdout, self._capture
+        box = _Box(self.title, self.stream)
+        box.top()
+        self._lines = self.out = _BoxLines(box)
+        self._saved, sys.stdout = sys.stdout, self._lines
         # Inside the box the lines keep their flat layout.
         self._rail, _rail = _rail, None
         return self
@@ -608,32 +665,24 @@ class section:
         if not self.boxed:
             return
         sys.stdout, _rail = self._saved, self._rail
-        render_section(self.title, self._capture.lines(), self.stream)
+        self._lines.close()
+        self._lines.box.bottom()
+
+    def spinner(self, text: str):
+        """A Spinner for text on the next row of the box; nothing off the rail."""
+        if not self.boxed or not text:
+            return contextlib.nullcontext()
+        return Spinner(text, self.stream, prefix=f"{self._lines.box.bar}  ")
 
 
 def render_section(title: str, lines: Iterable[str], stream: Optional[TextIO] = None) -> None:
     """Print a section box (see section) with lines in it."""
     stream = sys.stdout if stream is None else stream
-    g = lambda name: _rail_glyph(name, stream)  # noqa: E731
-    room = max(SECTION_MIN, min(_columns(), SECTION_MAX) - 6)
-    rows: List[str] = []
+    box = _Box(title, stream)
+    box.top()
     for x in lines:
-        rows.extend(_wrap(x.rstrip(), room))
-    # Every box is as wide as the terminal (up to SECTION_MAX), so the boxes
-    # of one command line up whatever is in them.
-    width = max(room, len(title) + 2)
-    bar = g("bar")
-    print(bar, file=stream)
-    dash = lambda n: _rail_glyph("rule", stream, n)  # noqa: E731
-    print(f"{g('done')}  {accent(title, stream)} {dash(width + 1 - len(title))}{g('corner')}",
-          file=stream)
-    blank = f"{bar}{' ' * (width + 4)}{bar}"
-    print(blank, file=stream)
-    for x in rows:
-        pad = " " * max(0, width - _visible_len(x))
-        print(f"{bar}  {x}{pad}  {bar}", file=stream)
-    print(blank, file=stream)
-    print(f"{g('join')}{dash(width + 4)}{g('foot')}", file=stream)
+        box.row(x)
+    box.bottom()
 
 
 # --------------------------------------------------------------------------
@@ -668,9 +717,11 @@ class Spinner:
     BUSY = "\033]9;4;3;0\033\\"
     IDLE = "\033]9;4;0;0\033\\"
 
-    def __init__(self, text: str, stream: Optional[TextIO] = None):
+    def __init__(self, text: str, stream: Optional[TextIO] = None, prefix: str = ""):
         self.text = text
         self.stream = sys.stderr if stream is None else stream
+        # Drawn before the spinner, e.g. the left edge of a section box.
+        self.prefix = prefix
         self.active = use_color(self.stream) and _unicode(self.stream)
         self.progress = self.active and _taskbar_progress(self.stream)
         self._started = 0.0
@@ -682,7 +733,7 @@ class Spinner:
         spent = now - self._started
         tail = f"  {dim(_elapsed(spent), self.stream)}" if spent >= self.ELAPSED_AFTER else ""
         gap = "  " if on_rail(self.stream) else " "
-        return f"\r{paint(frame, 'accent', stream=self.stream)}{gap}{self.text}{tail}"
+        return f"\r{self.prefix}{paint(frame, 'accent', stream=self.stream)}{gap}{self.text}{tail}"
 
     def _spin(self) -> None:
         frames = self.RAIL_FRAMES if on_rail(self.stream) else self.FRAMES

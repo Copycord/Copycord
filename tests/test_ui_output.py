@@ -644,9 +644,10 @@ def test_doctor_on_a_terminal_is_a_rail_of_sections(term, monkeypatch):
     buf = TTY()
     monkeypatch.setattr(sys, "stdout", buf)
     monkeypatch.setattr(cli, "brand", lambda: "Copycord v4.0.0 (abcdef1)")
-    monkeypatch.setattr(cli, "run_doctor", lambda: [
-        ("Install", [cli.Check(cli.PASS, "Python 3.12")]),
-        ("Settings", [cli.Check(cli.FAIL, "Dashboard password", "not set")]),
+    monkeypatch.setattr(cli, "doctor_steps", lambda: [
+        ("Install", [("Checking Python", lambda: [cli.Check(cli.PASS, "Python 3.12")])]),
+        ("Settings", [("Checking the settings",
+                       lambda: [cli.Check(cli.FAIL, "Dashboard password", "not set")])]),
     ])
     assert cli.doctor() == 1
     out = buf.getvalue()

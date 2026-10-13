@@ -27,10 +27,10 @@ def data_dir(tmp_path, monkeypatch):
 def boom(data_dir, monkeypatch):
     """doctor raises an error nobody expects."""
 
-    def run_doctor():
+    def doctor_steps():
         raise RuntimeError("boom\nsecond line")
 
-    monkeypatch.setattr(cli, "run_doctor", run_doctor)
+    monkeypatch.setattr(cli, "doctor_steps", doctor_steps)
     return data_dir
 
 
@@ -60,7 +60,7 @@ def test_verbose_also_prints_the_traceback(argv, boom, capsys):
     assert cli.main(argv) == 1
     err = capsys.readouterr().err
     assert "Traceback (most recent call last)" in err
-    assert "in run_doctor" in err
+    assert "in doctor_steps" in err
     assert err.splitlines()[-3] == "Copycord hit an unexpected error: RuntimeError: boom"
 
 
@@ -75,7 +75,7 @@ def test_keyboard_interrupt_is_not_a_crash(data_dir, monkeypatch):
     def interrupted():
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(cli, "run_doctor", interrupted)
+    monkeypatch.setattr(cli, "doctor_steps", interrupted)
     with pytest.raises(KeyboardInterrupt):
         cli.main(["doctor"])
     assert _logs(data_dir) == []
@@ -85,7 +85,7 @@ def test_system_exit_passes_through(data_dir, monkeypatch):
     def leave():
         raise SystemExit(3)
 
-    monkeypatch.setattr(cli, "run_doctor", leave)
+    monkeypatch.setattr(cli, "doctor_steps", leave)
     with pytest.raises(SystemExit) as exc:
         cli.main(["doctor"])
     assert exc.value.code == 3

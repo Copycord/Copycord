@@ -1277,27 +1277,50 @@ def check_updates(timeout: float = 2.0) -> Check:
     return Check(PASS, "up to date")
 
 
-def run_doctor() -> List[tuple]:
-    """[(section, [Check])] in print order."""
+def doctor_steps() -> List[tuple]:
+    """[(section, [(what it checks, step)])] in print order; nothing runs until
+    a step is called, and each step returns its [Check] rows."""
     from copycord.common.paths import data_dir, db_path
 
-    settings = [check_env_file(), check_password()]
-    role = check_role()
-    if role.status == FAIL:
-        settings.insert(0, role)
-    state = service_state()
-    return [
-        ("Install", [check_version(), check_python(), check_frontend(), check_dependencies()]),
-        ("Settings", settings),
-        ("Data", [check_data_dir(data_dir()), check_layout(), check_db(db_path()),
-                  check_backups()]),
-        ("Running", [
+    def settings() -> List[Check]:
+        rows = [check_env_file(), check_password()]
+        role = check_role()
+        if role.status == FAIL:
+            rows.insert(0, role)
+        return rows
+
+    def running() -> List[Check]:
+        state = service_state()
+        installed = bool(state and state.installed)
+        return [
             check_admin_port(service_running=bool(state and state.running)),
-            check_service(state, service_console() if state and state.installed else None,
-                          service_linger() if state and state.installed else None),
+            check_service(state, service_console() if installed else None,
+                          service_linger() if installed else None),
+        ]
+
+    return [
+        ("Install", [
+            ("Checking the version", lambda: [check_version()]),
+            ("Checking Python", lambda: [check_python()]),
+            ("Checking the web UI", lambda: [check_frontend()]),
+            ("Checking the dependencies", lambda: [check_dependencies()]),
         ]),
-        ("Updates", [check_updates()]),
+        ("Settings", [("Checking the settings", settings)]),
+        ("Data", [
+            ("Checking the home folder", lambda: [check_data_dir(data_dir())]),
+            ("Checking the data folder", lambda: [check_layout()]),
+            ("Checking the database", lambda: [check_db(db_path())]),
+            ("Checking the backups", lambda: [check_backups()]),
+        ]),
+        ("Running", [("Checking the dashboard port and the service", running)]),
+        ("Updates", [("Checking for updates", lambda: [check_updates()])]),
     ]
+
+
+def run_doctor() -> List[tuple]:
+    """[(section, [Check])] in print order."""
+    return [(title, [c for _, step in steps for c in step()])
+            for title, steps in doctor_steps()]
 
 
 def doctor_summary(checks: List[Check]) -> str:
@@ -1846,31 +1869,44 @@ def doctor(verbose: bool = False, fix: bool = False, brief: bool = False,
 
     if as_json:
         return doctor_json(fix)
-    if fix:
-        # Fixes write to stderr and run uv; line-buffer so piped output stays in order.
-        try:
-            sys.stdout.reconfigure(line_buffering=True)
-        except (AttributeError, ValueError):
-            pass
-    run = run_doctor_fixes(fix)
-    sections, checks = run.sections, run.checks
-    notes, fixed, failed, done = run.notes, run.fixed, run.failed, run.done
-    if run.stopped:
-        print()
-        ui.warn("fixes stopped",
-                f"{_plural(len(fixed), 'fix')} applied before that" if fixed else "",
-                stream=sys.stdout)
-        return 130
-    if brief:
-        _print_brief(checks, notes, fixed)
-        return 1 if any(c.status == FAIL for c in checks) else 0
+    # Line-buffer so piped output shows each row as its check finishes, and
+    # stays in order with the fixes, which write to stderr and run uv.
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except (AttributeError, ValueError):
+        pass
+    if fix or brief:
+        # The fixes run before the report, so every check runs first.
+        run = run_doctor_fixes(fix)
+        if run.stopped:
+            print()
+            ui.warn("fixes stopped",
+                    f"{_plural(len(run.fixed), 'fix')} applied before that" if run.fixed else "",
+                    stream=sys.stdout)
+            return 130
+        if brief:
+            _print_brief(run.checks, run.notes, run.fixed)
+            return 1 if any(c.status == FAIL for c in run.checks) else 0
+        sections = [(title, [("", lambda rows=rows: rows)]) for title, rows in run.sections]
+    else:
+        # Each check runs when its row is due, so the report shows as it goes.
+        run = DoctorRun([], {}, {}, set(), {})
+        sections = doctor_steps()
+    notes, fixed, failed = run.notes, run.fixed, run.failed
+    checks: List[Check] = []
     tty = sys.stdout.isatty()
     with ui.Rail("Copycord doctor", brand=brand() if tty else "",
                  heading=ui.use_color()) as rail:
-        for title, rows in sections:
-            with ui.section(title):
-                _print_checks(rows, verbose, {i: v for (t, i), v in done.items() if t == title},
-                              notes, failed)
+        for title, steps in sections:
+            with ui.section(title) as sec:
+                start = len(checks)
+                for what, step in steps:
+                    with sec.spinner(what):
+                        rows = step()
+                    first = len(checks) - start
+                    done = {i - first: v for (t, i), v in run.done.items() if t == title}
+                    _print_checks(rows, verbose, done, notes, failed)
+                    checks += rows
         _print_attention(checks, notes, fix)
         if fix:
             _print_fix_summary(checks, len(fixed), rail)
