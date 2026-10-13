@@ -1,5 +1,6 @@
 import "./main.css";
 
+import "./js/csrf.js";
 import "./js/status-gate.js";
 import "./js/app.js";
 import "./js/channels.js";

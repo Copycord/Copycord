@@ -244,7 +244,7 @@ class PasswordGuardMiddleware(BaseHTTPMiddleware):
 
 
 def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) -> None:
-    """Set up admin login: read PASSWORD and SECRET_KEY, add PasswordGuardMiddleware and the /login routes."""
+    """Set up admin login: read PASSWORD and SECRET_KEY, add PasswordGuardMiddleware, CSRFMiddleware and the /login routes."""
     global ADMIN_PASSWORD, _session_signer
 
     ADMIN_PASSWORD = os.getenv("PASSWORD", "").strip()
@@ -254,6 +254,10 @@ def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) ->
     _session_signer = URLSafeTimedSerializer(secret_key, salt="copycord-admin")
 
     app.add_middleware(PasswordGuardMiddleware)
+    # Added last so it runs first; security imports this module.
+    from copycord.admin.security import CSRFMiddleware
+
+    app.add_middleware(CSRFMiddleware)
 
     def _too_many(request: Request, wait: int):
         return templates.TemplateResponse(

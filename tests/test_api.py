@@ -24,9 +24,13 @@ from httpx import AsyncClient, ASGITransport
 
 @pytest.fixture()
 def client():
-    """Provide an httpx AsyncClient against the test app."""
+    """Provide an httpx AsyncClient against the test app, sending what the dashboard sends."""
     transport = ASGITransport(app=app)
-    return AsyncClient(transport=transport, base_url="http://test")
+    return AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Origin": "http://test", "X-Copycord-CSRF": "1"},
+    )
 
 
 @pytest.fixture(autouse=True)

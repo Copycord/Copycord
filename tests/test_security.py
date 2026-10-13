@@ -1,6 +1,6 @@
 """
-Security tests for the admin app: path traversal in file routes and
-websocket authentication.
+Security tests for the admin app: path traversal in file routes,
+websocket authentication, the login limit and CSRF checks.
 """
 from unittest.mock import AsyncMock
 
@@ -31,7 +31,11 @@ TRAVERSAL_NAMES = [
 @pytest.fixture()
 def client():
     transport = ASGITransport(app=app)
-    return AsyncClient(transport=transport, base_url="http://test")
+    return AsyncClient(
+        transport=transport,
+        base_url="http://test",
+        headers={"Origin": "http://test", "X-Copycord-CSRF": "1"},
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -407,3 +411,89 @@ class TestLoginLimiter:
             lim.failure(k)
         assert len(lim._state) == 3
         assert "a" not in lim._state
+
+
+# ---------------------------------------------------------------------------
+# CSRF
+# ---------------------------------------------------------------------------
+
+from copycord.admin.security import CSRF_HEADER  # noqa: E402
+
+EVENT = {"event_type": "csrf-test", "details": ""}
+
+
+def _post(tc, headers, path="/api/event-logs"):
+    return tc.post(path, json=EVENT, headers=headers, follow_redirects=False)
+
+
+class TestCSRF:
+
+    @pytest.mark.parametrize(
+        "origin", ["http://evil.example", "http://testserver.evil.example", "null"]
+    )
+    def test_cross_origin_rejected(self, tc, no_password, origin):
+        resp = _post(tc, {"origin": origin, CSRF_HEADER: "1"})
+        assert resp.status_code == 403
+
+    def test_cross_origin_rejected_with_session(self, tc, password):
+        headers = {"origin": "http://evil.example", CSRF_HEADER: "1", "cookie": _session_cookie()}
+        assert _post(tc, headers).status_code == 403
+
+    def test_missing_header_rejected(self, tc, no_password):
+        assert _post(tc, {"origin": ORIGIN}).status_code == 403
+
+    def test_wrong_header_value_rejected(self, tc, no_password):
+        assert _post(tc, {"origin": ORIGIN, CSRF_HEADER: "0"}).status_code == 403
+
+    def test_no_origin_or_referer_rejected(self, tc, no_password):
+        assert _post(tc, {CSRF_HEADER: "1"}).status_code == 403
+
+    @pytest.mark.parametrize("method", ["put", "patch", "delete"])
+    def test_other_methods_checked(self, tc, no_password, method):
+        resp = tc.request(method.upper(), "/api/event-logs/x", headers={"origin": "http://evil.example"})
+        assert resp.status_code == 403
+
+    def test_same_origin_with_header_accepted(self, tc, no_password):
+        resp = _post(tc, {"origin": ORIGIN, CSRF_HEADER: "1"})
+        assert resp.status_code == 200
+
+    def test_same_origin_with_header_and_session_accepted(self, tc, password):
+        headers = {"origin": ORIGIN, CSRF_HEADER: "1", "cookie": _session_cookie()}
+        assert _post(tc, headers).status_code == 200
+
+    def test_referer_fallback(self, tc, no_password):
+        ok = _post(tc, {"referer": f"{ORIGIN}/channels", CSRF_HEADER: "1"})
+        assert ok.status_code == 200
+        bad = _post(tc, {"referer": "http://evil.example/x", CSRF_HEADER: "1"})
+        assert bad.status_code == 403
+
+    def test_forwarded_host_accepted(self, tc, no_password):
+        headers = {
+            "origin": "https://copycord.example.com",
+            "x-forwarded-host": "copycord.example.com",
+            CSRF_HEADER: "1",
+        }
+        assert _post(tc, headers).status_code == 200
+
+    def test_get_not_checked(self, tc, no_password):
+        resp = tc.get("/api/event-logs", headers={"origin": "http://evil.example"})
+        assert resp.status_code == 200
+
+    def test_login_exempt_from_header(self, tc, password, clock):
+        assert _login(tc, "pw").status_code == 302
+        assert _login(tc, "nope").status_code == 401
+
+    def test_login_cross_origin_rejected(self, tc, password, clock):
+        resp = _login(tc, "pw", origin="http://evil.example")
+        assert resp.status_code == 403
+        assert auth.ADMIN_COOKIE_NAME not in resp.cookies
+
+    def test_internal_token_accepted(self, tc, no_password, internal_token):
+        assert _post(tc, {INTERNAL_TOKEN_HEADER: TOKEN}).status_code == 200
+
+    def test_bad_internal_token_rejected(self, tc, no_password, internal_token):
+        assert _post(tc, {INTERNAL_TOKEN_HEADER: "wrong"}).status_code == 403
+
+    def test_internal_token_unset_rejected(self, tc, no_password, monkeypatch):
+        monkeypatch.delenv(INTERNAL_TOKEN_ENV, raising=False)
+        assert _post(tc, {INTERNAL_TOKEN_HEADER: ""}).status_code == 403
