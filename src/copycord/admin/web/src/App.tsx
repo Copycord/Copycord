@@ -1,8 +1,10 @@
+import type { ReactNode } from "react";
 import { Route, Routes } from "react-router";
 import { Layout } from "./components/Layout";
 import { Kit } from "./pages/Kit";
 import { Logs } from "./pages/Logs";
 import { Placeholder } from "./pages/Placeholder";
+import { System } from "./pages/System";
 
 // Paths are relative to the router basename /app.
 export const PAGES = [
@@ -15,21 +17,24 @@ export const PAGES = [
   { path: "/logs", title: "Logs", legacy: "/event-logs" },
 ] as const;
 
+// Pages already ported to the SPA, one line each; the rest render a Placeholder linking to the old page.
+const PAGE_ELEMENTS: Partial<Record<(typeof PAGES)[number]["path"], ReactNode>> = {
+  "/system": <System />,
+  "/logs": <Logs />,
+};
+
 export function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        {PAGES.map((p) =>
-          p.path === "/" ? (
-            <Route key={p.path} index element={<Placeholder title={p.title} legacyHref={p.legacy} />} />
+        {PAGES.map((p) => {
+          const element = PAGE_ELEMENTS[p.path] ?? <Placeholder title={p.title} legacyHref={p.legacy} />;
+          return p.path === "/" ? (
+            <Route key={p.path} index element={element} />
           ) : (
-            <Route
-              key={p.path}
-              path={p.path}
-              element={p.path === "/logs" ? <Logs /> : <Placeholder title={p.title} legacyHref={p.legacy} />}
-            />
-          ),
-        )}
+            <Route key={p.path} path={p.path} element={element} />
+          );
+        })}
         <Route path="/_kit" element={<Kit />} />
         <Route path="*" element={<Placeholder title="Not found" legacyHref="/" />} />
       </Route>
