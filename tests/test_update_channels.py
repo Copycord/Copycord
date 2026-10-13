@@ -623,6 +623,7 @@ def test_installed_commit_from_vcs_info(monkeypatch):
 
 
 def test_installed_commit_from_a_local_checkout(monkeypatch, tmp_path):
+    monkeypatch.setattr(update, "build_commit", lambda: None)
     repo = tmp_path / "src"
     repo.mkdir()
     git = ["git", "-C", str(repo), "-c", "user.email=t@t", "-c", "user.name=t"]
@@ -633,11 +634,19 @@ def test_installed_commit_from_a_local_checkout(monkeypatch, tmp_path):
     assert update.installed_commit() == sha
 
 
-def test_installed_commit_is_none_for_a_wheel(monkeypatch):
+def test_installed_commit_is_none_for_a_wheel_without_a_stamp(monkeypatch):
+    monkeypatch.setattr(update, "build_commit", lambda: None)
     _fake_dist(monkeypatch, {"url": "https://github.com/Copycord/Copycord/releases/download/v4.0.0/copycord-4.0.0-py3-none-any.whl", "archive_info": {}})
     assert update.installed_commit() is None
 
 
 def test_installed_commit_is_none_for_a_folder_without_git(monkeypatch, tmp_path):
+    monkeypatch.setattr(update, "build_commit", lambda: None)
     _fake_dist(monkeypatch, {"url": tmp_path.as_uri(), "dir_info": {}})
     assert update.installed_commit() is None
+
+
+def test_installed_commit_from_the_build_stamp_of_a_release_wheel(monkeypatch):
+    monkeypatch.setattr(update, "build_commit", lambda: "c" * 40)
+    _fake_dist(monkeypatch, {"url": "https://github.com/Copycord/Copycord/releases/download/v4.0.0/copycord-4.0.0-py3-none-any.whl", "archive_info": {}})
+    assert update.installed_commit() == "c" * 40

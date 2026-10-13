@@ -164,16 +164,14 @@ def print_version() -> None:
 
     version = _version()
     commit = installed_commit()
-    rows = [("version", version), ("channel", load_channel().describe())]
     if commit:
-        rows.append(("commit", commit[:7]))
+        version = f"{version} ({commit[:7]})"
     if ui.use_color():
         ui.banner(version)
-        ui.kv(rows)
+        ui.kv([("version", version), ("channel", load_channel().describe())])
     else:
         print(version)
-        for key, value in rows[1:]:
-            print(f"{key} {value}")
+        print(f"channel {load_channel().describe()}")
     if sys.stdout.isatty():
         from copycord import update_check
 

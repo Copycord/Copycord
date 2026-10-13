@@ -384,6 +384,18 @@ def fetch_branch_head(
     return Commit(str(data["sha"]), date, subject[0] if subject else "")
 
 
+def build_commit() -> Optional[str]:
+    """Commit stamped into the wheel at build time (hatch_build.py); None if absent."""
+    from importlib import resources
+
+    try:
+        raw = (resources.files("copycord") / "_build.json").read_text(encoding="utf-8")
+        commit = json.loads(raw).get("commit", "")
+    except Exception:
+        return None
+    return commit if re.fullmatch(r"[0-9a-f]{40}", commit) else None
+
+
 def installed_commit() -> Optional[str]:
     """Commit of a git install; None otherwise.
 
@@ -401,6 +413,9 @@ def installed_commit() -> Optional[str]:
     except Exception:
         return None
     commit = (info.get("vcs_info") or {}).get("commit_id")
+    if commit:
+        return commit
+    commit = build_commit()
     if commit:
         return commit
     url = info.get("url", "")

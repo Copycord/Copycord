@@ -65,7 +65,7 @@ def test_version_prints_short_commit_of_a_git_install(data_dir, capsys, monkeypa
     with pytest.raises(SystemExit):
         cli.main(["--version"])
     lines = capsys.readouterr().out.strip().splitlines()
-    assert lines == [CURRENT_VERSION, "channel stable", "commit 7cf4866"]
+    assert lines == [f"{CURRENT_VERSION} (7cf4866)", "channel stable"]
 
 
 @pytest.mark.parametrize("argv", (["version"], ["update", "--check"], ["update", "--branch", "main"], ["onboard"]))

@@ -18,13 +18,20 @@ builds it first with `npm ci && npm run build`. When the frontend source is
 there but npm is not, or the build fails, the build stops with an error rather
 than ship a wheel without the admin UI. COPYCORD_SKIP_FRONTEND=1 builds without
 it anyway (only a warning; `copycord doctor` reports the missing assets).
+
+The wheel also gets copycord/_build.json with the commit it was built from
+(COPYCORD_BUILD_COMMIT, else GITHUB_SHA, else `git rev-parse HEAD`), so
+`copycord --version` can show it for release installs too.
 """
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 from hatchling.builders.hooks.plugin.interface import BuildHookInterface
@@ -45,6 +52,8 @@ class FrontendBuildHook(BuildHookInterface):
         # Editable installs serve src/copycord/admin/static straight from the checkout.
         if self.target_name == "wheel" and version == "editable":
             return
+        if self.target_name == "wheel":
+            self.stamp_commit(build_data)
         dist = Path(self.root) / DIST
         if not _has_files(dist):
             self.build_frontend()
@@ -56,6 +65,24 @@ class FrontendBuildHook(BuildHookInterface):
             return
         target = "copycord/admin/static" if self.target_name == "wheel" else DIST.as_posix()
         build_data["force_include"][str(dist)] = target
+
+    def stamp_commit(self, build_data: dict) -> None:
+        """Ship copycord/_build.json with the commit this wheel is built from."""
+        commit = os.environ.get("COPYCORD_BUILD_COMMIT") or os.environ.get("GITHUB_SHA") or ""
+        if not commit:
+            try:
+                res = subprocess.run(
+                    ["git", "-C", self.root, "rev-parse", "HEAD"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                commit = res.stdout.strip() if res.returncode == 0 else ""
+            except (OSError, subprocess.SubprocessError):
+                commit = ""
+        if not re.fullmatch(r"[0-9a-f]{40}", commit):
+            return
+        out = Path(tempfile.mkdtemp(prefix="copycord-build-")) / "_build.json"
+        out.write_text(json.dumps({"commit": commit}), encoding="utf-8")
+        build_data["force_include"][str(out)] = "copycord/_build.json"
 
     def build_frontend(self) -> None:
         """npm ci && npm run build in src/copycord/admin/frontend.
