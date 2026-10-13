@@ -148,10 +148,7 @@ class Config:
             "USER_TOKEN_STICKY_NICKNAME": False,
             "USER_TOKEN_STICKY_AVATAR": False,
             "USER_TOKEN_STICKY_ROLES": False,
-            # Off by default on purpose: proxies.txt is shared with the client
-            # (ENABLE_CLIENT_PROXIES), so anyone already using proxies for
-            # their client must opt in explicitly before token sends start
-            # routing through them too.
+            # off by default: proxies.txt is shared with the client, so users must opt in for token sends
             "USER_TOKEN_USE_PROXIES": False,
         }
 
@@ -182,9 +179,7 @@ class Config:
             return (ta > tb) - (ta < tb)
 
         async def _maybe_update_status(text: str):
-            """
-            Only server has update_status; client receivers might not.
-            """
+            """Only the server has update_status."""
             fn = getattr(receiver, "update_status", None)
             if callable(fn):
                 try:
@@ -197,11 +192,7 @@ class Config:
                 )
 
         async def _notify_all_guild_owners(latest_tag: str, latest_url: str) -> bool:
-            """
-            DM every unique guild owner for every guild this bot is currently in.
-            If an owner owns multiple guilds that the bot is in, they only get one DM.
-            Returns True if we successfully DM’d at least one owner.
-            """
+            """DM each unique guild owner once. Returns True if at least one DM was sent."""
             notified_any = False
             seen_owner_ids: set[int] = set()
 
@@ -312,10 +303,7 @@ class Config:
             await asyncio.sleep(self.RELEASE_CHECK_INTERVAL_SECONDS)
 
     def _load_filters_from_db(self):
-        """
-        Populate include/exclude sets from SQLite filters table.
-        Whitelist is ON iff any include set is non-empty.
-        """
+        """Populate include/exclude sets from the filters table; the whitelist is on iff any include set is non-empty."""
         try:
             f = self.db.get_filters()
         except Exception:
