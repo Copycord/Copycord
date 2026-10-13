@@ -20,6 +20,7 @@ import contextlib
 import errno
 import logging
 import os
+import secrets
 import signal
 import socket
 import sys
@@ -31,6 +32,7 @@ from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 from copycord.common.config import CURRENT_VERSION
 from copycord.common.control_protocol import ALLOWED_ENV, serve_json, status_payload
 from copycord.common.paths import data_dir
+from copycord.common.websockets import INTERNAL_TOKEN_ENV
 from copycord import ui
 from copycord.logging_setup import setup_logging
 
@@ -507,6 +509,8 @@ def _set_runtime_env() -> None:
         ("WS_CLIENT_URL", f"ws://127.0.0.1:{os.getenv('CLIENT_WS_PORT', '8766')}"),
     ):
         os.environ.setdefault(key, value)
+    # Shared by the roles for the admin's internal sockets (/bus, /ws/out).
+    os.environ.setdefault(INTERNAL_TOKEN_ENV, secrets.token_urlsafe(32))
 
 
 def _control_port(role: str) -> int:

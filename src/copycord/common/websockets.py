@@ -32,6 +32,26 @@ logger = logging.getLogger("common.websockets")
 
 MessageHandler = Callable[[dict], Awaitable[None]]
 
+# Per-run secret the supervisor puts in the environment; the admin's internal
+# sockets (/bus, /ws/out) accept agents that send it in this header.
+INTERNAL_TOKEN_ENV = "COPYCORD_INTERNAL_TOKEN"
+INTERNAL_TOKEN_HEADER = "X-Copycord-Token"
+
+# websockets 14 replaced the legacy client and renamed its header argument.
+try:
+    _WS_MAJOR = int(str(getattr(websockets, "__version__", "11")).split(".")[0])
+except ValueError:
+    _WS_MAJOR = 0
+_HEADERS_KWARG = "additional_headers" if _WS_MAJOR >= 14 else "extra_headers"
+
+
+def internal_connect_kwargs() -> dict:
+    """websockets.connect() kwargs that carry the internal token, if one is set."""
+    token = os.getenv(INTERNAL_TOKEN_ENV, "")
+    if not token:
+        return {}
+    return {_HEADERS_KWARG: {INTERNAL_TOKEN_HEADER: token}}
+
 
 def _ptype(p: dict | None) -> str:
     try:
@@ -296,13 +316,19 @@ class WebsocketManager:
                 if connect_timeout is not None:
                     ws = await asyncio.wait_for(
                         websockets.connect(
-                            self.send_url, max_size=None, ping_interval=None
+                            self.send_url,
+                            max_size=None,
+                            ping_interval=None,
+                            **internal_connect_kwargs(),
                         ),
                         connect_timeout,
                     )
                 else:
                     ws = await websockets.connect(
-                        self.send_url, max_size=None, ping_interval=None
+                        self.send_url,
+                        max_size=None,
+                        ping_interval=None,
+                        **internal_connect_kwargs(),
                     )
 
                 try:
@@ -440,13 +466,19 @@ class WebsocketManager:
                 if connect_timeout is not None:
                     ws = await asyncio.wait_for(
                         websockets.connect(
-                            self.send_url, max_size=None, ping_interval=None
+                            self.send_url,
+                            max_size=None,
+                            ping_interval=None,
+                            **internal_connect_kwargs(),
                         ),
                         connect_timeout,
                     )
                 else:
                     ws = await websockets.connect(
-                        self.send_url, max_size=None, ping_interval=None
+                        self.send_url,
+                        max_size=None,
+                        ping_interval=None,
+                        **internal_connect_kwargs(),
                     )
 
                 try:
@@ -653,7 +685,10 @@ class AdminBus:
             try:
                 self.logger.debug("AdminBus subscribe → %s", ws_out)
                 async with websockets.connect(
-                    ws_out, ping_interval=None, max_size=None
+                    ws_out,
+                    ping_interval=None,
+                    max_size=None,
+                    **internal_connect_kwargs(),
                 ) as ws:
                     attempt = 0
                     async for raw in ws:

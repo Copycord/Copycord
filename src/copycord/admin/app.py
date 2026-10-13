@@ -28,7 +28,7 @@ import logging
 from dotenv import load_dotenv
 from typing import Dict, List, Set, Literal, Optional, Any, Union
 from copycord.admin.auth import init_admin_auth
-from copycord.admin.security import safe_child
+from copycord.admin.security import authorize_websocket, safe_child
 from copycord.admin.logging_setup import (
     LOGGER,
     get_logger,
@@ -1172,6 +1172,8 @@ async def _bot_in_guild(server_token: str, guild_id: int) -> bool:
 
 @app.websocket("/bus")
 async def admin_bus(ws: WebSocket):
+    if not await authorize_websocket(ws, internal=True):
+        return
     await ws.accept()
     _set_ws_context("/bus", ws)
     bus_sockets.add(ws)
@@ -1303,6 +1305,8 @@ async def bus_stream(request: Request):
 
 @app.websocket("/ws/ui")
 async def ws_ui(ws: WebSocket):
+    if not await authorize_websocket(ws, browser=True):
+        return
     await ws.accept()
     _set_ws_context("/ws/ui", ws)
     hub.ui_sockets.add(ws)
@@ -1336,6 +1340,8 @@ async def ws_ui(ws: WebSocket):
 
 @app.websocket("/ws/out")
 async def ws_out(websocket: WebSocket):
+    if not await authorize_websocket(websocket, browser=True, internal=True):
+        return
     await websocket.accept()
     _set_ws_context("/ws/out", websocket)
     await hub.add_ui(websocket)
@@ -1363,6 +1369,8 @@ async def ws_out(websocket: WebSocket):
 
 @app.websocket("/ws/in")
 async def ws_in(websocket: WebSocket):
+    if not await authorize_websocket(websocket, browser=True):
+        return
     await websocket.accept()
     _set_ws_context("/ws/in", websocket)
     agent_sockets.add(websocket)
