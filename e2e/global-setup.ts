@@ -51,6 +51,10 @@ export default async function globalSetup(): Promise<void> {
     const fe = path.join(REPO_DIR, "src", "copycord", "admin", "frontend");
     sh("npm", ["ci", "--no-audit", "--no-fund"], fe);
     sh("npm", ["run", "build"], fe);
+    // Editable installs serve admin/static from the checkout (hatch_build.py), so the build goes there (gitignored).
+    fs.cpSync(path.join(fe, "dist", "assets"), path.join(REPO_DIR, "src", "copycord", "admin", "static", "assets"), {
+      recursive: true,
+    });
   }
   const py = path.join(VENV, "bin", "python");
   if (!fs.existsSync(path.join(VENV, "bin", "copycord"))) {
