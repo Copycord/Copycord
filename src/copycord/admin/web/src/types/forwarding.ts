@@ -48,8 +48,10 @@ export interface ForwardingDeleteResponse {
   deleted: string;
 }
 
-/** POST /api/forwarding */
+/** POST /api/forwarding; the server answers with the id only, so callers reload the list. */
 export interface ForwardingSaveResponse {
   ok: boolean;
+  rule_id: string;
+  guild_id: string;
   item?: ForwardingRule;
 }
