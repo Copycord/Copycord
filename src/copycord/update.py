@@ -23,6 +23,11 @@ copycord update --channel beta --no-install
                                       only save the channel (the install
                                       scripts use this)
 copycord update --no-backup           skip the pre-update database backup
+copycord update --yes, -y             downgrade without asking
+
+Installing a version older than the installed one (--tag, or a stable/beta
+channel whose latest is older) asks y/N first; with no terminal it needs
+--yes. Dev refs have no comparable version and never ask.
 
 Every update that installs first copies data.db with the sqlite3 online
 backup API to <backups>/data-pre-update-<from version>-<UTC timestamp>.db
@@ -284,6 +289,12 @@ def is_prerelease(v: str) -> bool:
     return bool(m) and (m["pre"] is not None or m["dev"] is not None)
 
 
+def is_older(target: str, current: str) -> bool:
+    """True only when both are versions and target sorts below current."""
+    a, b = parse_version(target), parse_version(current)
+    return a is not None and b is not None and a < b
+
+
 def is_newer(latest: str, current: str) -> bool:
     a, b = parse_version(latest), parse_version(current)
     if a is None or b is None:
@@ -540,6 +551,32 @@ def backup_database(skip: bool = False) -> bool:
     return True
 
 
+def confirm_downgrade(current: str, target: str, yes: bool = False) -> int:
+    """0 to go on with a downgrade from current to target; else the exit code."""
+    if yes:
+        ui.warn(f"downgrading from v{current} to v{target} (--yes)")
+        return 0
+    if not ui.is_interactive():
+        _err(f"copycord update would downgrade from v{current} to v{target}",
+             "no terminal to ask in; rerun with --yes to downgrade without a prompt")
+        return 1
+    try:
+        ok = ui.confirm(
+            f"Downgrade from v{current} to v{target}? Your data is backed up first; "
+            "a newer database schema will block the older version until you "
+            "restore the backup.",
+            default=False,
+        )
+    except (KeyboardInterrupt, EOFError):
+        print()
+        ui.warn("update cancelled", "nothing was changed")
+        return 130
+    if not ok:
+        ui.warn("update cancelled", "nothing was changed")
+        return 1
+    return 0
+
+
 def update(
     check_only: bool = False,
     channel: Optional[str] = None,
@@ -548,6 +585,7 @@ def update(
     no_install: bool = False,
     repo: Optional[str] = None,
     no_backup: bool = False,
+    yes: bool = False,
 ) -> int:
     saved = load_channel()
     if tag and (channel or branch or repo):
@@ -594,6 +632,7 @@ def update(
         return 1
 
     ui.heading(f"Updating Copycord ({target.describe() if not tag else 'tag ' + tag})")
+    release = None
     if target.channel == DEV and not tag:
         spec = git_spec(target.ref, target.repo)
     else:
@@ -619,6 +658,11 @@ def update(
     if shutil.which(cmd[0]) is None:
         _err(f"{cmd[0]} is not on PATH", f"update Copycord with: {hint}")
         return 1
+    # Dev refs have no comparable version, so only releases can be a downgrade.
+    if release is not None and is_older(release.version, current_version()):
+        rc = confirm_downgrade(current_version(), release.version, yes)
+        if rc:
+            return rc
     if not backup_database(no_backup):
         return 1
     # A dev update builds from git, and that build compiles the admin UI with
