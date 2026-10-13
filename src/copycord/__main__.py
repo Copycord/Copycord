@@ -149,15 +149,100 @@ COMMAND_EXAMPLES = {
     ),
 }
 
-# prog -> (section title, option dests, examples) for options printed last.
+
+class Advanced(NamedTuple):
+    """One command's advanced options: (invocation, text, probe argv) rows and examples."""
+
+    title: str
+    rows: tuple
+    examples: tuple
+    inline: bool = False
+
+
+# prog -> Advanced. `copycord help advanced` prints all of it; commands with
+# inline=True also print their own section in `<command> --help`.
 COMMAND_ADVANCED = {
-    "copycord update": ("Advanced (channels and git installs)", ("channel", "branch", "repo", "no_install", "force"), (
+    "copycord update": Advanced("Advanced (channels and git installs)", (
+        ("--channel stable|beta|dev", "Switch to this channel and save it (beta adds pre-releases, dev installs a git ref)",
+         ("update", "--channel", "beta")),
+        ("--ref REF", "Dev channel: the git branch, tag or commit to install (default main)",
+         ("update", "--ref", "v4-dev")),
+        ("--repo OWNER/NAME", "Dev channel: the GitHub repo to install from (default Copycord/Copycord)",
+         ("update", "--repo", "you/Copycord")),
+        ("--no-install", "Only save --channel, --repo and --ref, install nothing",
+         ("update", "--no-install")),
+        ("--force", "Reinstall even when up to date",
+         ("update", "--force")),
+    ), (
         ("copycord update --channel beta", "switch to pre-releases"),
         ("copycord update --channel stable", "back to releases"),
         ("copycord update --channel dev --ref v4-dev", "install a git branch"),
         ("copycord update --channel dev --repo you/Copycord --ref 1a2b3c4", "a fork's commit"),
+    ), inline=True),
+    "copycord service": Advanced("Service", (
+        ("--system", "Linux: the system-wide service in /etc/systemd/system (needs root)",
+         ("service", "install", "--system")),
+        ("--user", "Linux: the service for your own account (the default unless run as root)",
+         ("service", "status", "--user")),
+    ), (
+        ("copycord service install --system", "system-wide service, as root"),
+    )),
+    "copycord doctor": Advanced("Doctor", (
+        ("--fix", "Apply every automatic fix, then check again",
+         ("doctor", "--fix")),
+        ("--brief", "Print only the fixes applied, the failed checks and one result line",
+         ("doctor", "--brief")),
+    ), (
+        ("copycord doctor --fix", "fix what it can"),
+    )),
+    "copycord config": Advanced("Config", (
+        ("get|export --show-secrets", "Print token, password and secret values unmasked",
+         ("config", "get", "PASSWORD", "--show-secrets")),
+    ), (
+        ("copycord config get PASSWORD --show-secrets", "read a masked value"),
+    )),
+    "copycord run": Advanced("Run", (
+        ("--data-dir PATH", "Use another data directory (sets DATA_DIR); also works on backup, restore, config and service install",
+         ("run", "--data-dir", "/tmp/copycord")),
+    ), (
+        ("copycord run --data-dir ~/copycord", "use another data directory"),
+    )),
+    "copycord backup": Advanced("Backup and restore", (
+        ("backup --json", "Print the path of the backup as JSON",
+         ("backup", "--json")),
+        ("restore --yes", "Restore without asking (needed without a terminal)",
+         ("restore", "--yes")),
+    ), (
+        ("copycord restore --yes FILE", "restore with no prompt"),
+    )),
+    "copycord uninstall": Advanced("Uninstall", (
+        ("--purge", "Also delete the Copycord home without asking",
+         ("uninstall", "--purge")),
+        ("--keep-data", "Keep the Copycord home without asking",
+         ("uninstall", "--keep-data")),
+        ("--keep-service", "Leave the OS service installed",
+         ("uninstall", "--keep-service")),
+        ("--dry-run", "Print the steps and change nothing",
+         ("uninstall", "--dry-run")),
+    ), (
+        ("copycord uninstall --yes --purge", "no prompts, delete the data too"),
     )),
 }
+
+# (name, text) for the environment overrides on the advanced page.
+ADVANCED_ENV = (
+    ("COPYCORD_HOME", "Use another Copycord home instead of ~/.copycord"),
+    ("COPYCORD_ALLOW_ROOT", "Let the install scripts run as root or Administrator (set to 1)"),
+    ("COPYCORD_TASK_NAME", "Windows: the name of the Scheduled Task for the service"),
+    ("COPYCORD_SKIP_FRONTEND", "doctor: skip the web UI checks, for git installs without a build"),
+    ("COPYCORD_ALLOW_INSECURE_DASHBOARD", "Listen beyond this computer with no or the default password (set to 1)"),
+    ("COPYCORD_NO_UPDATE_CHECK", "Skip the update check (set to 1)"),
+    ("COPYCORD_NODE_VERSION", "The Node version a git install downloads"),
+    ("COPYCORD_PLAIN_PROMPTS", "Use plain numbered prompts instead of the arrow-key selector (set to 1)"),
+    ("DASHBOARD_HOST", "The address the dashboard listens on: 127.0.0.1, 0.0.0.0 or one IP"),
+    ("TRUSTED_PROXIES", "Comma-separated proxy IPs whose client address headers the dashboard believes"),
+    ("AUTO_UPDATE_ALL_CHANNELS", "Let auto-update run on every channel, not only stable (set to 1)"),
+)
 
 
 def _cmd(text: str) -> str:
@@ -227,6 +312,46 @@ def format_help() -> str:
     w(f"  {ui.cmd('--verbose'.ljust(opt_width))}  Show more detail, and the full error if something fails")
     w()
     w(ui.dim("Run ") + ui.cmd("copycord <command> --help") + ui.dim(" for the options of one command."))
+    w(ui.dim("More: ") + ui.cmd("copycord help advanced"))
+    w(ui.dim(f"Docs: {ui.link(DOCS_URL)}"))
+    return buf.getvalue()
+
+
+def format_advanced_help() -> str:
+    """The page for `copycord help advanced`: every advanced option, by command."""
+    import io
+    import textwrap
+
+    from copycord import ui
+
+    buf = io.StringIO()
+
+    def w(text: str = "") -> None:
+        buf.write(text + "\n")
+
+    def rows(title: str, items) -> None:
+        width = min(max(len(n) for n, _ in items), 34)
+        w()
+        w(ui.accent(title + ":"))
+        for name, text in items:
+            lines = textwrap.wrap(text, max(30, 78 - width - 4)) or [""]
+            if len(name) > width:
+                w(f"  {ui.cmd(name)}")
+            else:
+                w(f"  {ui.cmd(name.ljust(width))}  {lines.pop(0)}".rstrip())
+            for x in lines:
+                w(f"  {' ' * width}  {x}")
+
+    w(ui.accent("copycord help advanced"))
+    w("Options most installs never need, by command.")
+    for section in COMMAND_ADVANCED.values():
+        rows(section.title, [(inv, text) for inv, text, _ in section.rows])
+        w()
+        for example, text in section.examples:
+            w(f"  {ui.cmd(example)}  {ui.dim(text)}")
+    rows("Environment", ADVANCED_ENV)
+    w()
+    w(ui.dim("Run ") + ui.cmd("copycord <command> --help") + ui.dim(" for the options of one command."))
     w(ui.dim(f"Docs: {ui.link(DOCS_URL)}"))
     return buf.getvalue()
 
@@ -285,8 +410,14 @@ def format_command_help(parser: argparse.ArgumentParser) -> str:
             else:
                 w(f"  {ui.cmd(example.ljust(width))}  {ui.dim(text)}")
 
-    advanced_title, advanced_dests, advanced_examples = COMMAND_ADVANCED.get(parser.prog, ("", (), ()))
-    commands, arguments, options, advanced = [], [], [], []
+    section = COMMAND_ADVANCED.get(parser.prog)
+    if section is not None and not section.inline:
+        section = None
+    advanced_title = section.title if section else ""
+    advanced_examples = section.examples if section else ()
+    advanced_flags = {row[0].split()[0] for row in section.rows} if section else set()
+    commands, arguments, options = [], [], []
+    advanced = [(inv, _sentence(text)) for inv, text, _ in section.rows] if section else []
     usage = [parser.prog]
     for action in parser._actions:
         if isinstance(action, argparse._SubParsersAction):
@@ -297,8 +428,8 @@ def format_command_help(parser: argparse.ArgumentParser) -> str:
             name = "|".join(action.choices) if action.choices else (action.metavar or action.dest).upper()
             usage.append(f"[{name}]" if action.nargs == "?" else name)
             arguments.append((name, _sentence(action.help or "")))
-        elif action.dest in advanced_dests:
-            advanced.append((_invocation(action), _sentence(action.help or "")))
+        elif advanced_flags.intersection(action.option_strings):
+            continue
         elif not isinstance(action, argparse._HelpAction):
             options.append((_invocation(action), _sentence(action.help or "")))
     options.append(("-h, --help", "Show this help"))
@@ -451,6 +582,20 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     argv = _take_verbose(argv)
     if not argv:
         sys.stdout.write(format_help())
+        raise SystemExit(0)
+    if argv[0] == "help":
+        topic = argv[1] if len(argv) > 1 else ""
+        if topic in ("", "--help", "-h"):
+            sys.stdout.write(format_help())
+        elif topic == "advanced":
+            sys.stdout.write(format_advanced_help())
+        else:
+            from copycord import ui
+
+            ui.fail(f"no help topic '{topic}'.", stream=sys.stderr)
+            print(f"  Run {ui.cmd('copycord help advanced', stream=sys.stderr)} for the advanced options.",
+                  file=sys.stderr)
+            raise SystemExit(2)
         raise SystemExit(0)
     parser = _Parser(prog="copycord")
     end = argv.index("--") if "--" in argv else len(argv)
