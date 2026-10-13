@@ -253,7 +253,8 @@ test.describe("system", () => {
     await expect(del).toBeVisible();
     const href = `/api/backup/download/${encodeURIComponent(file)}`;
     await expect(page.locator("#adv-download-latest")).toHaveAttribute("href", href);
-    const row = page.locator("#adv-archives tbody tr", { has: del });
+    // has: is resolved inside each row, so it takes the bare attribute selector.
+    const row = page.locator("#adv-archives tbody tr", { has: page.locator(`[data-delete="${file}"]`) });
     await expect(row.getByRole("link", { name: "Download" })).toHaveAttribute("href", href);
     const dl = await page.request.get(href);
     expect(dl.ok()).toBeTruthy();
