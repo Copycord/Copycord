@@ -11,13 +11,18 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import gzip
 import io
 import json
 import os
+import posixpath
+import shutil
 import sqlite3
+import stat
 import tarfile
 import tempfile
 import time
+import zlib
 from dataclasses import dataclass
 from datetime import datetime, timezone, time as dtime, timedelta
 from pathlib import Path
@@ -142,6 +147,182 @@ def write_archive(db_copy: Path, dest: Path, key_path: Optional[Path] = None) ->
             _add_bytes(tar, KEY_FILE, key)
         _add_bytes(tar, MANIFEST, (json.dumps(manifest, indent=2) + "\n").encode("utf-8"))
     return files
+
+
+def archive_names(archive: Path) -> list:
+    """The names of the files in a backup archive."""
+    with tarfile.open(archive, "r:*") as tar:
+        return tar.getnames()
+
+
+# pre-restore-<UTC timestamp>.tar.gz, written by `copycord restore`; never pruned.
+PRE_RESTORE_PREFIX = "pre-restore-"
+
+
+class ArchiveError(ValueError):
+    """A file that is not a readable Copycord backup."""
+
+
+def list_backups(backup_dir: Path) -> list:
+    """Restorable backups in backup_dir (*.tar.gz archives and *.db copies), newest first."""
+    d = Path(backup_dir)
+    if not d.is_dir():
+        return []
+    found = []
+    for pattern in ("*.tar.gz", "*.db"):
+        for p in d.glob(pattern):
+            if p.name.startswith("."):
+                continue
+            try:
+                if p.is_file():
+                    found.append((p.stat().st_mtime, p))
+            except OSError:
+                pass
+    return [p for _, p in sorted(found, key=lambda t: t[0], reverse=True)]
+
+
+@dataclass
+class Unpacked:
+    db: Path
+    # None for an older archive or a .db copy.
+    key: Optional[Path]
+    # {} when the backup has no manifest.json.
+    manifest: dict
+
+
+def _write_private(dest: Path, src) -> None:
+    fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0), 0o600)
+    with os.fdopen(fd, "wb") as out:
+        shutil.copyfileobj(src, out)
+
+
+def unpack_backup(src: Path, into: Path) -> Unpacked:
+    """Copy the database, secret.key and manifest.json of a backup into the folder into.
+
+    src is a .tar.gz archive (older ones hold only data.db) or a plain .db copy.
+    Members are read by name and written here, never extracted by their own path.
+    """
+    src, into = Path(src), Path(into)
+    if src.name.endswith(".db"):
+        with open(src, "rb") as fh:
+            _write_private(into / DB_FILE, fh)
+        return Unpacked(into / DB_FILE, None, {})
+    found = {}
+    try:
+        with tarfile.open(src, "r:*") as tar:
+            for member in tar.getmembers():
+                name = posixpath.normpath(member.name)
+                if name not in (DB_FILE, KEY_FILE, MANIFEST) or name in found or not member.isfile():
+                    continue
+                fh = tar.extractfile(member)
+                if fh is None:
+                    continue
+                with fh:
+                    _write_private(into / name, fh)
+                found[name] = into / name
+    except (tarfile.TarError, EOFError, zlib.error, gzip.BadGzipFile) as e:
+        raise ArchiveError(f"{src.name} is not a readable backup archive ({e})") from None
+    if DB_FILE not in found:
+        raise ArchiveError(f"{src.name} has no {DB_FILE} in it")
+    manifest = {}
+    if MANIFEST in found:
+        try:
+            manifest = json.loads(found[MANIFEST].read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            manifest = {}
+        if not isinstance(manifest, dict):
+            manifest = {}
+    return Unpacked(found[DB_FILE], found.get(KEY_FILE), manifest)
+
+
+def snapshot_database(db_path: Path, dest: Path) -> None:
+    """Copy db_path to dest with SQLite's online backup; a file SQLite cannot
+    read is copied byte for byte, so even a damaged database is kept."""
+    try:
+        src = sqlite3.connect(str(db_path))
+        try:
+            out = sqlite3.connect(str(dest))
+            try:
+                src.backup(out)
+            finally:
+                out.close()
+        finally:
+            src.close()
+    except sqlite3.DatabaseError:
+        Path(dest).unlink(missing_ok=True)
+        shutil.copyfile(db_path, dest)
+
+
+def pre_restore_backup(db_path: Path, backup_dir: Path, key_path: Optional[Path]) -> Optional[Path]:
+    """Archive the current database and key as pre-restore-<UTC timestamp>.tar.gz
+    in backup_dir; None when there is no database."""
+    db_path, backup_dir = Path(db_path), Path(backup_dir)
+    if not db_path.is_file() or db_path.stat().st_size == 0:
+        return None
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    dest = backup_dir / f"{PRE_RESTORE_PREFIX}{stamp}.tar.gz"
+    n = 1
+    while dest.exists():
+        dest = backup_dir / f"{PRE_RESTORE_PREFIX}{stamp}-{n}.tar.gz"
+        n += 1
+    tmp = backup_dir / f".{dest.name}.tmp"
+    with tempfile.TemporaryDirectory() as work:
+        copy = Path(work) / DB_FILE
+        snapshot_database(db_path, copy)
+        try:
+            write_archive(copy, tmp, key_path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
+    tmp.replace(dest)
+    return dest
+
+
+def _match_owner(new: Path, old: Path, mode: bool) -> None:
+    """Give new the owner (when run as root) and, with mode, the permissions of old."""
+    try:
+        st = old.stat()
+    except OSError:
+        return
+    if mode:
+        os.chmod(new, stat.S_IMODE(st.st_mode))
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        with contextlib.suppress(OSError):
+            os.chown(new, st.st_uid, st.st_gid)
+
+
+def put_in_place(unpacked: Unpacked, db_path: Path, key_path: Path) -> tuple:
+    """Move a checked backup over the database and, when it has one, the key.
+
+    unpacked must be on the same drive as db_path, so each move is atomic.
+    Returns (key result, where the previous key was kept or None); the result
+    is "restored", "same" or "none" (the backup has no key).
+    """
+    db_path, key_path = Path(db_path), Path(key_path)
+    _match_owner(unpacked.db, db_path, mode=True)
+    if unpacked.key is not None:
+        _match_owner(unpacked.key, key_path, mode=False)
+    # A journal left by the old database would be applied to the restored one.
+    for suffix in ("-wal", "-shm", "-journal"):
+        Path(f"{db_path}{suffix}").unlink(missing_ok=True)
+    os.replace(unpacked.db, db_path)
+    if unpacked.key is None:
+        return "none", None
+    new = unpacked.key.read_bytes()
+    try:
+        old = key_path.read_bytes()
+    except FileNotFoundError:
+        old = None
+    if old == new:
+        return "same", None
+    kept = None
+    if old is not None:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        kept = key_path.with_name(f"{key_path.name}.bak-{stamp}")
+        os.replace(key_path, kept)
+    os.replace(unpacked.key, key_path)
+    return "restored", kept
 
 
 def record_backup_stats(set_config: Callable[[str, str], None], archive_path: Path) -> None:
@@ -447,7 +628,8 @@ class DailySQLiteBackupScheduler:
             return
 
         archives = sorted(
-            self.cfg.backup_dir.glob("*.tar.gz"),
+            (p for p in self.cfg.backup_dir.glob("*.tar.gz")
+             if not p.name.startswith(PRE_RESTORE_PREFIX)),
             key=lambda p: p.stat().st_mtime,
             reverse=True,
         )

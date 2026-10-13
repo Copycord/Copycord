@@ -73,6 +73,10 @@ COMMAND_GROUPS = (
     ("Service", (
         ("service", "Run Copycord as an OS service (install, start, stop, status)"),
     )),
+    ("Backups", (
+        ("backup", "Back up the database now"),
+        ("restore", "Restore the database from a backup"),
+    )),
     ("Updates", (
         ("update", "Update Copycord to the latest version"),
     )),
@@ -116,6 +120,15 @@ COMMAND_EXAMPLES = {
         ("copycord service install --user", "Linux: a per-user unit, no sudo"),
         ("copycord service status", "is it installed and running?"),
         ("copycord service stop", "stop it"),
+    ),
+    "copycord backup": (
+        ("copycord backup", "back up the database and secret.key now"),
+        ("copycord backup --json", "print the path of the backup as JSON"),
+    ),
+    "copycord restore": (
+        ("copycord restore", "choose one of the newest backups"),
+        ("copycord restore backups/2026-10-12_03-17-00.tar.gz", "restore this backup"),
+        ("copycord restore --yes FILE", "no prompt (needed without a terminal)"),
     ),
     "copycord update": (
         ("copycord update", "update to the latest version"),
@@ -531,6 +544,32 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     ):
         ssub.add_parser(name, parents=[user], help=text)
 
+    sub.add_parser(
+        "backup",
+        parents=[data_dir, json_flag],
+        help="back up the database now",
+        description="Back up the database and secret.key into the backups folder "
+        "(BACKUP_DIR), the same archive the daily backup makes, and print its path. "
+        "Works while Copycord is running.",
+    )
+    restore = sub.add_parser(
+        "restore",
+        parents=[data_dir],
+        help="restore the database from a backup",
+        description="Replace the database with a backup. Copycord must be stopped. "
+        "The backup is checked first, and the current database is backed up to "
+        "pre-restore-<time>.tar.gz, so a restore can be undone. Without ARCHIVE "
+        "it lists the newest backups to choose from.",
+    )
+    restore.add_argument(
+        "archive",
+        nargs="?",
+        metavar="ARCHIVE",
+        help="the backup to restore: a .tar.gz archive or a .db copy",
+    )
+    restore.add_argument("--yes", "-y", action="store_true",
+                         help="restore without asking (needed without a terminal)")
+
     update = sub.add_parser(
         "update",
         parents=[data_dir, json_flag],
@@ -616,14 +655,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     args.verbose = verbose or getattr(args, "verbose", False)
     args.json = bool(getattr(args, "json", False) or args.top_json)
     if args.json and not json_supported(args):
-        parser.error("--json works with --version, doctor, update status, config get "
-                     "and config export")
+        parser.error("--json works with --version, doctor, backup, update status, "
+                     "config get and config export")
     return args
 
 
 def json_supported(args: argparse.Namespace) -> bool:
     """True for the reporting commands that can print JSON."""
-    if args.command == "doctor":
+    if args.command in ("doctor", "backup"):
         return True
     if args.command == "config":
         return args.config_command in ("get", "export")
@@ -1138,7 +1177,11 @@ def fix_backup(checks: List[Check]) -> str:
         timezone=os.getenv("TZ") or "UTC",
         key_path=data_dir() / "secret.key",
     )
-    scheduler = DailySQLiteBackupScheduler(cfg, logger=logging.getLogger("copycord.backup"))
+    log = logging.getLogger("copycord.backup")
+    # The callers report a failure themselves; no bare log line on the console.
+    if not log.handlers:
+        log.addHandler(logging.NullHandler())
+    scheduler = DailySQLiteBackupScheduler(cfg, logger=log)
     archive = asyncio.run(scheduler.run_now())
     try:
         conn = sqlite3.connect(str(db))
@@ -2046,6 +2089,254 @@ def _uninstall_steps(args: argparse.Namespace, target: Path, purge: Optional[boo
     return 0 if ok else 1
 
 
+# --------------------------------------------------------------------------
+# backup and restore
+# --------------------------------------------------------------------------
+
+
+def backup_command(args: argparse.Namespace) -> int:
+    """Back up the database now, the same archive the daily backup makes."""
+    from copycord import ui
+    from copycord.common.backup_scheduler import (
+        BackupCheckError,
+        KEY_FILE,
+        archive_names,
+    )
+
+    def run():
+        try:
+            with ui.Spinner("Backing up the database"):
+                return Path(fix_backup([])), None
+        except FixError as e:
+            return None, ("nothing to back up", str(e))
+        except BackupCheckError as e:
+            return None, ("backup failed its check", str(e))
+        except Exception as e:
+            return None, ("backup failed", str(e) or type(e).__name__)
+
+    if args.json:
+        from copycord import jsonout
+
+        with jsonout.human_to_stderr():
+            archive, error = run()
+            if error:
+                ui.fail(*error, stream=sys.stderr)
+        if archive is None:
+            jsonout.emit({"ok": False, "file": None, "error": f"{error[0]}: {error[1]}"})
+            return 1
+        jsonout.emit({
+            "ok": True,
+            "file": str(archive),
+            "size": archive.stat().st_size,
+            "includes_key": KEY_FILE in archive_names(archive),
+        })
+        return 0
+    archive, error = run()
+    if error:
+        ui.fail(*error)
+        return 1
+    ui.ok("Database backed up", str(archive))
+    return 0
+
+
+def copycord_running() -> str:
+    """Why Copycord looks to be running, or "" when it does not."""
+    state = service_state()
+    if state is not None and state.running:
+        return f"the copycord service is running; stop it with {_cmd('copycord service stop')}"
+    port = admin_port()
+    if copycord_on_port(port):
+        return (f"the dashboard answers on port {port}; stop Copycord (Ctrl+C in its "
+                "terminal, or stop its container), then run this again")
+    if sys.platform == "win32":
+        from copycord import winupdate
+
+        _launchers, other = winupdate.running()
+        if other is not None:
+            return f"it is running in another window (process {other}); stop it first"
+    return ""
+
+
+def _size_text(n: int) -> str:
+    for unit in ("bytes", "KB", "MB"):
+        if n < 1024:
+            return f"{n} {unit}" if unit == "bytes" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} GB"
+
+
+def _backup_label(path: Path) -> str:
+    """One line in the restore list: when, what kind of backup, how big."""
+    from datetime import datetime
+
+    from copycord.common.backup_scheduler import PRE_RESTORE_PREFIX
+    from copycord.common.db import PRE_UPDATE_PREFIX
+
+    st = path.stat()
+    when = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M")
+    if path.name.startswith(PRE_RESTORE_PREFIX):
+        kind = "made before a restore"
+    elif path.name.startswith(PRE_UPDATE_PREFIX):
+        kind = "made before an update"
+    elif path.name.startswith("pre-v4-"):
+        kind = "made before the first v4 start"
+    else:
+        kind = "backup"
+    return f"{when}  {kind}, {_size_text(st.st_size)}  ({path.name})"
+
+
+RESTORE_LIST = 10
+
+
+def _restore_cancelled() -> int:
+    from copycord import ui
+
+    ui.warn("restore cancelled", "nothing was changed")
+    return 1
+
+
+def restore_command(args: argparse.Namespace) -> int:
+    from copycord import ui
+
+    interactive = ui.is_interactive()
+    if not args.yes and not interactive:
+        ui.fail("copycord restore needs a confirmation",
+                "no terminal to ask in; rerun with --yes and the backup to restore")
+        return 1
+    if args.archive is None and not interactive:
+        ui.fail("copycord restore needs the backup to restore",
+                "no terminal to choose in; give its path, for example "
+                "copycord restore --yes <backups folder>/<name>.tar.gz")
+        return 1
+    why = copycord_running()
+    if why:
+        ui.fail("Copycord is running; stop it before restoring", why)
+        return 1
+    with ui.Rail("Restore a backup") as rail:
+        return _restore_steps(args, rail)
+
+
+def _restore_steps(args: argparse.Namespace, rail) -> int:
+    """restore_command from its title on: pick, check, confirm, back up, replace."""
+    import shutil
+
+    from copycord import ui
+    from copycord.common.backup_scheduler import (
+        ArchiveError,
+        integrity_problems,
+        list_backups,
+        pre_restore_backup,
+        put_in_place,
+        unpack_backup,
+    )
+    from copycord.common.db import SchemaTooNewError, backups_dir, check_schema_version
+    from copycord.common.paths import data_dir, db_path
+
+    db, key, where = db_path(), data_dir() / "secret.key", backups_dir()
+    ui.note("Replaces the database with a backup. The current database is backed up first.")
+    ui.gap()
+
+    if args.archive:
+        src = Path(args.archive).expanduser()
+        if not src.is_file():
+            ui.fail("backup not found", str(src))
+            return 1
+    else:
+        found = list_backups(where)[:RESTORE_LIST]
+        if not found:
+            ui.fail("no backups to restore", f"none in {where}")
+            return 1
+        options = [_backup_label(p) for p in found] + ["Cancel"]
+        try:
+            picked = ui.choose("Which backup do you want to restore?", options, default=0)
+        except (KeyboardInterrupt, EOFError):
+            ui.gap()
+            return _restore_cancelled()
+        if picked == len(found):
+            ui.gap(blank=False)
+            return _restore_cancelled()
+        src = found[picked]
+        ui.gap()
+
+    db.parent.mkdir(parents=True, exist_ok=True)
+    # Unpacked next to the database, so moving it into place is atomic.
+    work = Path(tempfile.mkdtemp(prefix=".restore-", dir=db.parent))
+    try:
+        try:
+            with ui.Spinner("Checking the backup"):
+                unpacked = unpack_backup(src, work)
+                problems = integrity_problems(unpacked.db)
+        except (ArchiveError, OSError) as e:
+            ui.fail("cannot read the backup, nothing was changed", str(e))
+            return 1
+        if problems:
+            ui.fail("the backup failed its integrity check, nothing was changed",
+                    "; ".join(problems[:3]))
+            return 1
+        try:
+            check_schema_version(str(unpacked.db))
+        except SchemaTooNewError as e:
+            ui.fail(f"the backup is from a newer Copycord (schema {e.stored}, this "
+                    f"version supports {e.supported}), nothing was changed",
+                    f"update Copycord with {_cmd('copycord update')}, then restore it")
+            return 1
+        ui.ok("backup checked", str(src))
+        made = unpacked.manifest.get("created_at") or ""
+        version = unpacked.manifest.get("copycord_version") or ""
+        if made:
+            ui.note(f"  Made {made.replace('T', ' ')[:16]} UTC"
+                    + (f" by Copycord {version}" if version else ""))
+        ui.note("  Includes the database and secret.key" if unpacked.key is not None
+                else "  Includes the database only; your current secret.key is kept")
+
+        if not args.yes:
+            ui.gap(blank=False)
+            try:
+                ok = ui.confirm(f"Replace the database in {db.parent} with this backup?",
+                                default=False)
+            except (KeyboardInterrupt, EOFError):
+                ui.gap()
+                return _restore_cancelled()
+            ui.gap(blank=False)
+            if not ok:
+                return _restore_cancelled()
+
+        try:
+            before = pre_restore_backup(db, where, key)
+        except Exception as e:
+            ui.fail("could not back up the current database, nothing was changed",
+                    str(e) or type(e).__name__)
+            return 1
+        if before is None:
+            ui.info("no current database, nothing to back up", str(db))
+        else:
+            ui.ok("backed up the current database", str(before))
+
+        try:
+            key_result, key_kept = put_in_place(unpacked, db, key)
+        except OSError as e:
+            hint = f"; the previous database is in {before}" if before else ""
+            ui.fail("restore failed", f"{e}{hint}")
+            return 1
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+    ui.ok("database restored", str(db))
+    if key_result == "restored":
+        ui.ok("secret.key restored", str(key))
+        if key_kept is not None:
+            ui.info("previous secret.key kept as", str(key_kept))
+    elif key_result == "same":
+        ui.ok("secret.key unchanged", "the backup has the same key")
+    ui.gap()
+    ui.ok("Restore complete", f"from {src.name}")
+    if before is not None:
+        path = f'"{before}"' if " " in str(before) else str(before)
+        ui.note(f"To undo it, run {_cmd('copycord restore ' + path)}")
+    rail.close(f"Start Copycord with {_cmd('copycord service start')} or {_cmd('copycord run')}")
+    return 0
+
+
 def schema_too_new_message(err) -> None:
     """The refusal `copycord run` prints for a DB written by a newer Copycord."""
     from copycord import ui
@@ -2158,6 +2449,12 @@ def run_command(argv: Optional[List[str]] = None) -> int:
 
     if args.command == "uninstall":
         return uninstall_command(args)
+
+    if args.command == "backup":
+        return backup_command(args)
+
+    if args.command == "restore":
+        return restore_command(args)
 
     if args.command == "update":
         from copycord.update import update
