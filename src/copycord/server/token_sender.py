@@ -54,7 +54,7 @@ def _reply_bits(reply_to: Optional[dict]) -> dict:
     ``allowed_mentions`` is spelled out rather than left off: a reply pings the
     author it answers by default, which a clone should never do. ``parse``
     lists every type so mentions inside the content keep behaving exactly as
-    they do on a non-reply send — omitting it would silently make them inert.
+    they do on a non-reply send: omitting it would silently make them inert.
     """
     if not reply_to:
         return {}
@@ -398,7 +398,7 @@ class UserTokenSender:
         """Edit a message, as the account that posted it.
 
         Discord only lets an author edit their own message, so this is not a
-        "pick any token" operation the way sending is — it needs the exact
+        "pick any token" operation the way sending is; it needs the exact
         account recorded when the message went out.
         """
         token = self._token_value_for(mapping_id, token_id)
@@ -441,7 +441,7 @@ class UserTokenSender:
         """Delete a message, as the account that posted it.
 
         Returns ``SEND_NOT_FOUND`` when it is already gone, which the caller
-        treats as success — the desired end state is the same.
+        treats as success; the desired end state is the same.
         """
         token = self._token_value_for(mapping_id, token_id)
         if not token:
@@ -743,7 +743,7 @@ class UserTokenSender:
 
     def _token_lock(self, key: str) -> asyncio.Lock:
         """Per-account lock held across a request so one account's messages take
-        strict turns — a rate-limited account holds back its own queued messages
+        strict turns; a rate-limited account holds back its own queued messages
         instead of firing them all and collecting more 429s."""
         self._token_last_seen[key] = time.monotonic()
         lock = self._token_locks.get(key)
