@@ -1160,7 +1160,8 @@ def test_dev_update_shows_the_new_commit(current, tty, monkeypatch, capsys):
     assert cli.main(["update"]) == 0
     assert rec.calls == [] and backups == []
     out = capsys.readouterr().out
-    assert "4.0.0 (fffffff) -> v4-dev (0123456) client: fix reconnect" in out
+    assert "4.0.0 (fffffff) -> v4-dev (0123456)" in out
+    assert "client: fix reconnect" not in out
 
 
 @pytest.mark.parametrize("flag", ["--yes", "-y"])
