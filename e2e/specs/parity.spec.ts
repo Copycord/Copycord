@@ -459,14 +459,94 @@ test.describe("scraper", () => {
     }
   });
 
-  test("48 49 log and past scrapes cards", async ({ page }) => {
-    // Lane 12 ports these cards to the SPA; until then /app/scraper has only the top half.
-    test.skip(Boolean(BASE_PATH), "queue, progress, logs and past scrapes cards are not in the SPA yet");
+  test("46 47 queue list, remove, clear, cancel all and progress card", async ({ page }) => {
+    const queue = [
+      { id: 7, guild_id: "111111111111111111", status: "running" },
+      { id: 8, guild_id: "222222222222222222", status: "pending" },
+    ];
+    const hits: string[] = [];
+    await page.route("**/api/scraper/status", (r) =>
+      r.fulfill({ json: { running: true, guild_id: queue[0]!.guild_id, started_at: Date.now() / 1000, queue } }),
+    );
+    for (const p of ["queue/8", "queue/clear", "cancel-all"]) {
+      await page.route(`**/api/scraper/${p}`, async (r) => {
+        hits.push(`${r.request().method()} ${p}`);
+        await r.fulfill({ json: { ok: true } });
+      });
+    }
     await open(page, "scraper");
-    for (const id of ["sc-config-card", "sc-log-card", "sc-log-search", "sc-log-autoclear", "sc-scrapes-card", "sc-scrapes-refresh"]) {
+    await expect(page.locator("#sc-queue-card")).toBeVisible();
+    await expect(page.locator("#sc-queue-count")).toHaveText("2 items");
+    await expect(page.locator(".sc-queue-item")).toHaveCount(2);
+    await expect(page.locator("#sc-queue-list")).toContainText("222222222222222222");
+    await expect(page.locator(".sc-queue-remove")).toHaveCount(1);
+    await expect(page.locator("#sc-progress-card")).toBeVisible();
+    for (const id of ["sc-elapsed", "sc-progress-fill", "sc-progress-text", "sc-progress-pct"]) {
       await expect(page.locator(`#${id}`), id).toBeAttached();
     }
+
+    await page.locator('.sc-queue-remove[data-id="8"]').click();
+    await expect.poll(() => hits).toContain("DELETE queue/8");
+    await page.locator("#sc-queue-clear").click();
+    await expect.poll(() => hits).toContain("POST queue/clear");
+    if (!BASE_PATH) page.once("dialog", (d) => void d.accept());
+    await page.locator("#sc-cancel-all-btn").click();
+    if (BASE_PATH) await page.getByRole("dialog").getByRole("button", { name: "Cancel All", exact: true }).click();
+    await expect.poll(() => hits).toContain("POST cancel-all");
+  });
+
+  test("48 49 log and past scrapes cards", async ({ page }) => {
+    await open(page, "scraper");
+    for (const id of ["sc-config-card", "sc-log-card", "sc-log-search", "sc-log-autoclear", "sc-log-body", "sc-scrapes-card", "sc-scrapes-refresh"]) {
+      await expect(page.locator(`#${id}`), id).toBeAttached();
+    }
+    await expect(page.locator("#sc-log-autoclear")).toBeChecked();
+    await page.locator("#sc-log-search").fill("nothing-matches-this");
+    const cleared = page.waitForResponse((r) => r.url().endsWith("/api/scraper/logs/clear"));
+    await page.locator("#sc-log-clear").click();
+    expect((await cleared).ok()).toBeTruthy();
+    await expect(page.locator("#sc-log-search")).toHaveValue("");
+    await expect(page.locator("#sc-log-body")).toHaveText("");
     expect((await page.request.get("/api/scraper/scrapes")).ok()).toBeTruthy();
+    await expect(page.locator("#sc-scrapes-empty")).toBeVisible();
+  });
+
+  test("49 past scrapes download link and delete with confirm and encoded path", async ({ page }) => {
+    const scrape = {
+      filename: "scrape_e2e.json",
+      path: "123456789/scrape_e2e.json",
+      guild_id: "123456789",
+      guild_name: "Parity <i>Guild</i>",
+      total_count: 3,
+      scraped_at: "2026-10-13T09:41:00Z",
+      metadata: { method: "gateway" },
+      file_size: 2048,
+    };
+    let scrapes = [scrape];
+    const deleted: string[] = [];
+    await page.route("**/api/scraper/scrapes", (r) => r.fulfill({ json: { ok: true, scrapes } }));
+    await page.route("**/api/scraper/scrapes/*", async (r) => {
+      if (r.request().method() !== "DELETE") return r.fallback();
+      deleted.push(new URL(r.request().url()).pathname);
+      scrapes = [];
+      await r.fulfill({ json: { ok: true } });
+    });
+    await open(page, "scraper");
+    const item = page.locator(".sc-scrape-item");
+    await expect(item).toHaveCount(1);
+    await expect(item).toContainText("Parity <i>Guild</i>");
+    await expect(item).toContainText("3 members");
+    await expect(item.locator("a[download]")).toHaveAttribute("href", "/api/scraper/scrapes/123456789%2Fscrape_e2e.json");
+
+    await page.locator("#sc-scrapes-refresh").click();
+    await expect(item).toHaveCount(1);
+
+    if (!BASE_PATH) page.once("dialog", (d) => void d.accept());
+    await item.locator(".sc-scrape-delete").click();
+    if (BASE_PATH) await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
+    await expect.poll(() => deleted).toEqual(["/api/scraper/scrapes/123456789%2Fscrape_e2e.json"]);
+    await expect(page.locator("#sc-scrapes-empty")).toBeVisible();
+    await expect(item).toHaveCount(0);
   });
 });
 
