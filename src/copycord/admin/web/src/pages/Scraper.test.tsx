@@ -1,12 +1,13 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../components/Toast";
 import { ConfirmProvider } from "../components/ui/ConfirmDialog";
 import { CSRF_HEADER } from "../lib/api";
 import type { ScraperToken } from "../types/scraper";
 import { Scraper } from "./Scraper";
 import { displayMask, maskToken } from "./scraper/mask";
+import { FakeSource, FakeWs } from "./scraper/testFakes";
 
 // Made up test values, not Discord tokens.
 const RAW = "FAKE.test-token-value.abcdefghijklmnop.WXYZ";
@@ -65,6 +66,12 @@ function findRow(id: string): Promise<HTMLElement> {
     return row;
   });
 }
+
+// The live cards open /ws/out and /logs/stream/scraper; keep them off the network.
+beforeEach(() => {
+  vi.stubGlobal("WebSocket", FakeWs);
+  vi.stubGlobal("EventSource", FakeSource);
+});
 
 afterEach(() => {
   vi.unstubAllGlobals();
