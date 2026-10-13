@@ -69,6 +69,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from copycord.common.config import CURRENT_VERSION
 from copycord.common.db import DBManager, backups_dir
 from copycord.common.paths import data_dir, out_candidates, out_dir
+from copycord.common.timezone import configured_tz_name
 from copycord.common import inprocess
 from copycord.common.backup_scheduler import (
     BackupConfig,
@@ -168,7 +169,7 @@ def _log_files(name: str) -> list:
     return list(dict.fromkeys([*out_candidates(name), DATA_DIR / name]))
 BACKUP_RETAIN = int(os.getenv("BACKUP_RETAIN") or "14")
 BACKUP_AT = os.getenv("BACKUP_AT") or "03:17"
-BACKUP_TZ = os.getenv("TZ") or "UTC"
+BACKUP_TZ = configured_tz_name()
 
 _backup_cfg = BackupConfig(
     db_path=DB_PATH,

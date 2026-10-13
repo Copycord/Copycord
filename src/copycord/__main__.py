@@ -1210,6 +1210,7 @@ def fix_backup(checks: List[Check]) -> str:
         DailySQLiteBackupScheduler,
         record_backup_stats,
     )
+    from copycord.common.timezone import configured_tz_name
     from copycord.common.db import backups_dir
     from copycord.common.paths import data_dir, db_path
 
@@ -1220,7 +1221,7 @@ def fix_backup(checks: List[Check]) -> str:
         db_path=db,
         backup_dir=backups_dir(),
         retain=int(os.getenv("BACKUP_RETAIN") or "14"),
-        timezone=os.getenv("TZ") or "UTC",
+        timezone=configured_tz_name(),
         key_path=data_dir() / "secret.key",
     )
     log = logging.getLogger("copycord.backup")

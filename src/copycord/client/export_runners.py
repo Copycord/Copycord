@@ -1330,10 +1330,9 @@ class BackfillEngine:
         self.logger = logger or logging.getLogger("backfill")
 
         try:
-            from zoneinfo import ZoneInfo
+            from copycord.common.timezone import configured_tz
 
-            _DEFAULT_UI_TZ = os.getenv("UI_TZ") or "America/New_York"
-            self.LOCAL_TZ = ZoneInfo(_DEFAULT_UI_TZ)
+            self.LOCAL_TZ = configured_tz()
         except Exception:
             self.LOCAL_TZ = datetime.now().astimezone().tzinfo or timezone.utc
 
