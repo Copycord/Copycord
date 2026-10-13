@@ -284,3 +284,32 @@ def test_sh_upgrade_detection_checks_the_data_folder():
     text = _text(SH)
     detect = text[text.index("UPGRADE=0"):text.index("UPGRADE=1")]
     assert '"$COPYCORD_HOME/data/data.db"' in detect
+
+
+def test_sh_checks_the_wheel_before_installing_it():
+    text = _text(SH)
+    release = _sh_function(text, "install_release")
+    assert '"digest"' in release and "sha256:" in release
+    assert 'download "$WHEEL_URL" "$WHEEL_FILE"' in release
+    check = release.index('sha256_of "$WHEEL_FILE"')
+    assert check < release.index("stop_service") < release.index('uv tool install --force --python "$PYTHON_VERSION" "$WHEEL_FILE"')
+    assert "nothing was installed" in release
+    # The local, checked file is installed, never the URL.
+    assert '"$WHEEL_URL"' not in release[release.index("uv tool install"):]
+
+
+def test_sh_has_one_release_lookup():
+    text = _text(SH)
+    lookup = _sh_function(text, "release_tag")
+    assert '"$API?per_page=30"' in lookup and '"$API/latest"' in lookup
+    assert '"draft"' in lookup and "newest_version" in lookup
+    # Both the already-installed check and the install use it; nothing else asks the API.
+    assert "release_tag" in _sh_function(text, "already_installed")
+    assert 'TAG="$(release_tag)"' in _sh_function(text, "install_release")
+    assert text.count("$API?per_page") == 1 and text.count("$API/latest") == 1
+    # The token goes to the GitHub API only.
+    fetch = _sh_function(text, "fetch")
+    assert "GITHUB_TOKEN" in fetch and "https://api.github.com/*" in fetch
+    # Pre-releases rank below the release they lead to.
+    newest = _sh_function(text, "newest_version")
+    assert "rank = 3" in newest and "sort -k1,1n -k2,2n -k3,3n -k4,4n -k5,5n" in newest
