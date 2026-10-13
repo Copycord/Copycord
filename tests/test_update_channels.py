@@ -358,15 +358,16 @@ def test_channel_switch_to_an_older_stable_asks(env, tty, monkeypatch):
     assert rec.calls == []
 
 
-@pytest.mark.parametrize("argv", [
-    ["update", "--tag", "4.1.0b1"],
-    ["update", "--channel", "beta"],
-    ["update", "--tag", "4.0.0"],
+@pytest.mark.parametrize("argv, prompt", [
+    (["update", "--tag", "4.1.0b1"], "Update Copycord now? (Y/n)"),
+    (["update", "--channel", "beta"], "Update Copycord now? (Y/n)"),
+    (["update", "--tag", "4.0.0"], "Reinstall Copycord 4.0.0? (Y/n)"),
 ])
-def test_newer_or_same_version_does_not_ask(env, tty, argv):
+def test_newer_or_same_version_asks_once_and_enter_installs(env, tty, argv, prompt):
     rec, _, _ = env
+    tty["answers"] = [""]
     assert cli.main(argv) == 0
-    assert tty["asked"] == []
+    assert len(tty["asked"]) == 1 and prompt in tty["asked"][0]
     assert len(rec.calls) == 1
 
 
@@ -1122,3 +1123,120 @@ def test_running_without_powershell_does_not_block(monkeypatch):
 
     monkeypatch.setattr(winupdate.subprocess, "run", boom)
     assert winupdate.running()[1] is None
+
+
+# --------------------------------------------------------------------------
+# copycord update asks before it changes anything
+# --------------------------------------------------------------------------
+
+
+def test_update_shows_the_versions_and_no_changes_nothing(current, tty, monkeypatch, capsys):
+    rec, backups, _, _ = current
+    monkeypatch.setattr(update, "current_version", lambda: "3.28.0")
+    monkeypatch.setattr(update.node_runtime, "ensure_npm",
+                        lambda: pytest.fail("npm checked before the answer"))
+    tty["answers"] = ["n"]
+    assert cli.main(["update"]) == 0
+    assert len(tty["asked"]) == 1 and "Update Copycord now? (Y/n)" in tty["asked"][0]
+    assert rec.calls == [] and backups == []
+    out = capsys.readouterr().out
+    assert "Update available" in out and "3.28.0 -> 4.0.0" in out
+    assert "Update cancelled, nothing was changed" in out
+
+
+@pytest.mark.parametrize("answer", ["", "y", "yes"])
+def test_update_installs_when_the_answer_is_yes(current, tty, monkeypatch, answer):
+    rec, backups, _, _ = current
+    monkeypatch.setattr(update, "current_version", lambda: "3.28.0")
+    tty["answers"] = [answer]
+    assert cli.main(["update"]) == 0
+    assert rec.calls == [uv(wheel_url("v4.0.0"))] and backups == [1]
+
+
+def test_dev_update_shows_the_new_commit(current, tty, monkeypatch, capsys):
+    rec, backups, _, _ = current
+    _on_dev_head(monkeypatch, "f" * 40)
+    tty["answers"] = ["n"]
+    assert cli.main(["update"]) == 0
+    assert rec.calls == [] and backups == []
+    out = capsys.readouterr().out
+    assert "4.0.0 (fffffff) -> v4-dev (0123456) client: fix reconnect" in out
+
+
+@pytest.mark.parametrize("flag", ["--yes", "-y"])
+def test_yes_updates_without_asking(current, tty, monkeypatch, flag):
+    rec, backups, _, _ = current
+    monkeypatch.setattr(update, "current_version", lambda: "3.28.0")
+    assert cli.main(["update", flag]) == 0
+    assert tty["asked"] == []
+    assert rec.calls == [uv(wheel_url("v4.0.0"))] and backups == [1]
+
+
+def test_no_terminal_updates_without_asking(current, monkeypatch):
+    rec, backups, _, _ = current
+    monkeypatch.setattr(update, "current_version", lambda: "3.28.0")
+    monkeypatch.setattr(update.ui, "is_interactive", lambda: False)
+    monkeypatch.setattr("builtins.input", lambda prompt="": pytest.fail("asked"))
+    assert cli.main(["update"]) == 0
+    assert rec.calls == [uv(wheel_url("v4.0.0"))] and backups == [1]
+
+
+def test_doctor_reinstall_does_not_ask(current, tty, monkeypatch):
+    rec, _, _, _ = current
+    _on_dev_head(monkeypatch)
+    assert update.update(reinstall=True) == 0
+    assert tty["asked"] == [] and len(rec.calls) == 1
+
+
+def test_auto_update_does_not_ask(monkeypatch):
+    from copycord import update_check as uc
+
+    seen = []
+    monkeypatch.setattr(uc, "auto_update_enabled", lambda: True)
+    monkeypatch.setattr(uc.ui, "is_interactive", lambda: False)
+    monkeypatch.setattr(update, "detect_installer", lambda *a, **kw: update.UV_TOOL)
+    monkeypatch.setattr(uc, "check_cached", lambda *a, **kw: type(
+        "R", (), {"available": True, "dev": False, "latest": "4.0.1"})())
+    monkeypatch.setattr(uc, "hint_text", lambda result: "")
+    monkeypatch.setattr(update, "update", lambda **kw: seen.append(kw) or 0)
+    assert uc.auto_update_once()
+    assert seen == [{"yes": True}]
+
+
+@pytest.mark.parametrize("argv", [["update", "--force"], ["update", "--force", "--channel", "dev"]])
+def test_force_on_the_same_version_asks_to_reinstall(current, tty, monkeypatch, argv, capsys):
+    rec, backups, _, _ = current
+    _on_dev_head(monkeypatch)
+    tty["answers"] = ["n"]
+    assert cli.main(argv) == 0
+    assert len(tty["asked"]) == 1 and "Reinstall Copycord 4.0.0? (Y/n)" in tty["asked"][0]
+    assert rec.calls == [] and backups == []
+    assert "Update cancelled, nothing was changed" in capsys.readouterr().out
+
+
+def test_force_without_a_terminal_reinstalls(current, monkeypatch):
+    rec, _, _, _ = current
+    _on_dev_head(monkeypatch)
+    monkeypatch.setattr(update.ui, "is_interactive", lambda: False)
+    assert cli.main(["update", "--force"]) == 0
+    assert len(rec.calls) == 1
+
+
+def test_channel_switch_shows_from_and_to_and_asks(current, tty, monkeypatch, data_dir, capsys):
+    rec, backups, _, _ = current
+    tty["answers"] = ["n"]
+    assert cli.main(["update", "--channel", "dev", "--ref", "v4-dev"]) == 0
+    assert len(tty["asked"]) == 1 and "Update Copycord now? (Y/n)" in tty["asked"][0]
+    assert rec.calls == [] and backups == []
+    assert not (data_dir / "update.json").exists()
+    out = capsys.readouterr().out
+    assert "Switch to the dev channel" in out and "4.0.0 -> v4-dev" in out
+
+
+def test_downgrade_asks_once_with_its_own_question(current, tty, monkeypatch):
+    rec, backups, _, _ = current
+    monkeypatch.setattr(update, "current_version", lambda: "4.1.0b2")
+    tty["answers"] = ["y"]
+    assert cli.main(["update", "--channel", "stable"]) == 0
+    assert len(tty["asked"]) == 1 and DOWNGRADE_PROMPT in tty["asked"][0]
+    assert len(rec.calls) == 1 and backups == [1]

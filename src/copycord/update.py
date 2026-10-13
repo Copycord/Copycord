@@ -768,12 +768,12 @@ def update(
     elif not yes and ui.is_interactive():
         current = current_version()
         same = release.version == current if release is not None else force
-        if same and not switching:
+        if same and target == saved:
             rc = confirm_update([], f"Reinstall Copycord {current}?")
         else:
             new = release.version if release is not None else _target_label(target)
             title = (f"Switch to the {target.channel} channel"
-                     if switching and target != saved else "Update available")
+                     if target.channel != saved.channel else "Update available")
             rc = confirm_update([f"{_installed_label()} -> {new}"], "Update Copycord now?", title)
         if rc == CANCELLED:
             return 0

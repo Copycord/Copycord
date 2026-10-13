@@ -546,7 +546,7 @@ copycord update --tag 4.0.0            # install exactly this release, once
 | `status` | Prints the installed version, the channel, the install method and the newest version on that channel, then exits without installing. Network errors are printed as `WARN`. |
 | `--tag VERSION` | Installs this exact release (`4.0.0` or `v4.0.0`). One-off: the saved channel does not change. Cannot be combined with the [advanced](#update-advanced) `--channel`, `--repo` or `--ref`. |
 | `--no-backup` | Skips the [database backup](#downgrade) made before the install |
-| `--yes`, `-y` | Installs an [older version](#downgrade) without asking |
+| `--yes`, `-y` | Updates without [asking first](#update-confirm), and installs an [older version](#downgrade) without asking |
 | `--data-dir PATH` | Reads and saves the channel in this data directory |
 
 After a successful update, a running [service](#copycord-service) is restarted so it uses the new version.
@@ -559,11 +559,25 @@ On Windows, a running program's files cannot be deleted, but they can be renamed
 
 `status` also shows when Copycord last checked for an update and whether auto-update is on.
 
+### Confirming the update {#update-confirm}
+
+When there is something to install, `copycord update` shows what will change before it backs up or installs anything, for example:
+
+```
+Update available
+3.28.0 (00f0f8d) -> v4-dev (abc1234) client: fix reconnect
+? Update Copycord now? (Y/n)
+```
+
+For a release it shows the installed and the new version (`3.28.0 -> 4.0.0`). A channel switch (`--channel`, `--ref`, `--repo`) shows the same line and asks too. Enter or `y` updates; `n` prints `Update cancelled, nothing was changed` and exits with status 0. Reinstalling the installed version (`--force`, or `--tag` with the installed version) asks `Reinstall Copycord <version>? (Y/n)` instead. A downgrade asks only its own question (see below).
+
+It does not ask with `--yes` (`-y`), without a terminal (scripts and services), during [auto-update](#auto-update) or when `copycord doctor --fix` reinstalls Copycord.
+
 ### Downgrading and backups {#downgrade}
 
 Before it installs anything, every `copycord update` (any channel, `--tag`, dev refs, upgrades and downgrades alike) copies the database with SQLite's online backup to `data-pre-update-<version>-<UTC timestamp>.db` in the backups directory (`BACKUP_DIR`, by default `backups` in the [data directory](#data-dir)), for example `data-pre-update-4.0.0-20261012T091500Z.db`. It prints the path. The newest 5 are kept; the daily backups have their own retention. With no database yet it says so and goes on. If the backup fails, the update stops and nothing is installed; `--no-backup` skips the backup.
 
-When the version to install is older than the installed one (a `--tag` below it, or `--channel stable` or `beta` whose newest release is older), `copycord update` first asks `Downgrade from vX to vY? Your data is backed up first; a newer database schema will block the older version until you restore the backup. (y/N)`; `--yes` (`-y`) skips the question, and without a terminal it exits with status 1 unless you add `--yes`. Dev refs have no comparable version and are never asked about.
+When the version to install is older than the installed one (a `--tag` below it, or `--channel stable` or `beta` whose newest release is older), `copycord update` first asks `Downgrade from vX to vY? Your data is backed up first; a newer database schema will block the older version until you restore the backup. (y/N)`; `--yes` (`-y`) skips the question, and without a terminal it exits with status 1 unless you add `--yes`. Dev refs have no comparable version and are never treated as a downgrade.
 
 Copycord refuses to start on a database written by a newer version (a higher `schema_version`), so an older version never changes it. `copycord run` prints:
 
