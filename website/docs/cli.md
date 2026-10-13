@@ -514,7 +514,7 @@ It runs these steps in order:
 
 1. Stops and removes the [service](#copycord-service), the same as `copycord service uninstall`. On Linux it checks both the user and the system service; removing the system service needs root. A service that is not installed is skipped.
 2. If you chose to delete everything, or gave `--purge`, deletes the [Copycord home](#data-dir) (database, logs, backups, settings, `src/`, `node/`) and the saved `~/.copycord-home`. It refuses when that path is `/`, your home directory or empty.
-3. Removes the program with `uv tool uninstall copycord`, or `pipx uninstall copycord` when `uv` is not on your `PATH`, and deletes the saved `update.json`. When neither tool is found it prints the command to run yourself.
+3. Removes the program with `uv tool uninstall copycord`, or `pipx uninstall copycord` when `uv` is not on your `PATH`, and deletes the saved `update.json`. When neither tool is found it prints the command to run yourself. On Windows it stops if another Copycord of this install is running, and the program's locked files are moved to a temporary folder that is deleted a few seconds after the command exits.
 4. Prints `Copycord uninstalled`, or `Uninstall incomplete` when a step failed.
 
 | Option | What it does |
