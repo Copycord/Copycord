@@ -47,7 +47,7 @@ Where the [data directory](/docs/cli#data-dir) is depends on how you run Copycor
 When Copycord runs as a [service](/docs/cli#copycord-service), the terminal output goes to:
 
 - **Linux:** the journal: `journalctl --user -u copycord -f` for the service of your account (the default), `sudo journalctl -u copycord -f` for a `--system` service
-- **macOS:** `copycord.out.log` and `copycord.err.log` in the data directory
+- **macOS:** nowhere visible; the same lines are in the log files in `<home>/logs`
 - **Windows:** nowhere visible; use the dashboard log viewers or the files in the data directory
 
 ### Log pruning

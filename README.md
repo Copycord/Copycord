@@ -123,6 +123,8 @@ To keep Copycord running in the background, run `copycord service install`.
 
 > [!IMPORTANT]
 > Change the default password: edit `PASSWORD` in `~/.copycord/.env` (`%USERPROFILE%\.copycord\.env` on Windows), then run `copycord restart`.
+>
+> The dashboard is only reachable from this computer. To open it from other devices, set your own `PASSWORD` and `DASHBOARD_HOST=0.0.0.0` in the same file. Copycord will not start with that address while the password is empty or still `copycord`.
 
 The [Quick Start guide](https://copycord.github.io/Copycord/docs/getting-started/quick-start) walks through every step.
 

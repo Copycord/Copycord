@@ -60,7 +60,7 @@ services:
     image: ghcr.io/copycord/copycord:latest # pinning a release tag (e.g. v4.0.0) is recommended
     container_name: copycord
     environment:
-      - PASSWORD=copycord  # change this or remove the line to disable login
+      - PASSWORD=  # set your own password; required in Docker
     ports:
       - '8080:8080'       # change the left port if 8080 is taken (e.g. "9060:8080")
     volumes:
@@ -69,7 +69,7 @@ services:
 ```
 
 :::tip Customizing the password
-Change `PASSWORD=copycord` to your preferred password, or remove the line entirely to disable dashboard authentication.
+Put your own password after `PASSWORD=`. The container listens on every network (`DASHBOARD_HOST=0.0.0.0`), so Copycord will not start while the password is empty or `copycord`. If another layer already protects the dashboard, `COPYCORD_ALLOW_INSECURE_DASHBOARD=1` skips this check.
 :::
 
 :::note Upgrading from v3
@@ -148,4 +148,4 @@ Then restart: `docker compose up -d`
 
 ## Next steps
 
-Open **http://localhost:8080**, log in with `copycord` (or the `PASSWORD` you set) and continue with [First Run](/docs/getting-started/first-run).
+Open **http://localhost:8080**, log in with the `PASSWORD` you set and continue with [First Run](/docs/getting-started/first-run).

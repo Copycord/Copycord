@@ -29,6 +29,8 @@ ADMIN_PORT=9060 copycord run
 
 For a background service, see [Environment variables for the service](/docs/cli#environment-variables-for-the-service).
 
+The dashboard is only reachable from this computer by default. `DASHBOARD_HOST=0.0.0.0` opens it to your network, and needs your own `PASSWORD`; see [Dashboard address](/docs/cli#dashboard-address).
+
 ## Update settings
 
 These app config keys are set with `copycord config set KEY VALUE` and apply after a restart. See [Update check on start](/docs/cli#update-check) and [Auto-update](/docs/cli#auto-update).

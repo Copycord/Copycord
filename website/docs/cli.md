@@ -211,6 +211,7 @@ Useful environment variables (on a native install, set them in [`<home>/.env`](#
 |----------|---------|--------------|
 | `PASSWORD` | `copycord` (set by the installer) | Dashboard login password; no login page when unset |
 | `ADMIN_PORT` | `8080` | Dashboard port |
+| `DASHBOARD_HOST` | `127.0.0.1` | Where the dashboard listens. The default is this computer only; `0.0.0.0` opens it to your network (see [Dashboard address](#dashboard-address)) |
 | `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG`; also an app config key, which wins once it is saved |
 | `DATA_DIR` | see above | Same as `--data-dir` |
 
@@ -219,6 +220,12 @@ Useful environment variables (on a native install, set them in [`<home>/.env`](#
 The terminal shows the dashboard's log and warnings or errors from the server and client. The full server and client logs go to files in the data directory; see [Logs](/docs/dashboard/system#where-logs-go).
 
 When the dashboard port or one of the internal ports (`9101` and `9102`) is in use at start, Copycord waits up to 15 seconds for it, since a Copycord that just stopped can hold its ports for a moment. If the port is still in use, it prints `✗ Port 9101 is in use, so Copycord cannot start` with what to do (stop the other Copycord with `copycord service stop`, or run `copycord doctor` to check the port) and exits with 1.
+
+### Dashboard address {#dashboard-address}
+
+The dashboard listens on `127.0.0.1`, so only this computer can open it, at `http://localhost:8080`. To open it from other devices, set `DASHBOARD_HOST=0.0.0.0` (every network) or one IP address of this computer in [`<home>/.env`](#env-file), then run `copycord restart`. The Docker image sets `0.0.0.0` already.
+
+With any address other than `127.0.0.1`, `copycord run` refuses to start while `PASSWORD` is empty or still `copycord`, and `copycord doctor` shows it as a failure. Fix it by setting your own `PASSWORD`, or by removing `DASHBOARD_HOST` so the dashboard stays on this computer. If something else already protects the dashboard (a reverse proxy with its own login, for example), `COPYCORD_ALLOW_INSECURE_DASHBOARD=1` skips the check.
 
 ## copycord --version {#copycord-version}
 
@@ -440,6 +447,10 @@ PASSWORD=copycord
 # dashboard port
 ADMIN_PORT=8080
 
+# the dashboard is on this computer only (127.0.0.1); remove the # and use 0.0.0.0
+# to open it to your network, after setting your own PASSWORD
+#DASHBOARD_HOST=127.0.0.1
+
 # time zone for scheduled backups and export timestamps, e.g. America/New_York
 TZ=UTC
 
@@ -490,6 +501,7 @@ copycord restart
 | `PASSWORD` | `copycord` in the file | Dashboard login password; no login page when empty or unset. |
 | `SECRET_KEY` | a key saved in `<data dir>/secret.key` | Signs the dashboard login cookie. Not in the file; add it only to use a key of your own. |
 | `ADMIN_PORT` | `8080` | Dashboard port. |
+| `DASHBOARD_HOST` | `127.0.0.1` | Where the dashboard listens. Commented out in the file, so only this computer can open it. See [Dashboard address](#dashboard-address). |
 | `TZ` | `UTC` | Time zone for scheduled backups and export timestamps, e.g. `America/New_York`. |
 | `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG` for the first log lines; an app config key, so the dashboard's value wins once it is saved and `copycord config set LOG_LEVEL` writes the database. |
 | `LOG_FORMAT` | `HUMAN` | `HUMAN` or `JSON` log lines. |
@@ -626,7 +638,9 @@ When installed with `sudo`, the system service runs as your user (not root) and 
 
 `start`, `stop`, `status` and `uninstall` use whichever service is installed. If both a user service and a system service are installed, they use the one for your account (the system service when run as root) and say which; add `--user` or `--system` to choose. On a system without systemd (for example WSL without systemd, or a container), `copycord service install` stops with the error from `systemctl`; run `copycord run` instead.
 
-**macOS.** The agent's output goes to `copycord.out.log` and `copycord.err.log` in the data directory. `--user` has no effect.
+**Linux sandboxing.** The unit sets `NoNewPrivileges`, `RestrictSUIDSGID` and `LockPersonality`. The `--system` unit also sets `PrivateTmp`, `ProtectSystem=strict` and `ReadWritePaths` (the Copycord home, the data directory, `~/.local` and `~/.cache`), so Copycord can only write there; put `BACKUP_DIR` inside the home, or add a `ReadWritePaths=` line with `systemctl edit copycord`. The user unit leaves those three out, because they need root.
+
+**macOS.** The agent's console output goes to `/dev/null`: the same lines are already in the rotating log files in the [logs folder](#data-dir), and launchd never trims its own files. `--user` has no effect.
 
 **Windows.** The task runs as the current user at logon, without a window: it starts `copycordw.exe`, which is installed next to `copycord.exe` (or `pythonw.exe` of the same install when `copycordw.exe` is missing). What a terminal would show goes to `copycord.out` in the [logs folder](#data-dir). A task created by an older version runs `copycord.exe` in a console window, and closing that window stops Copycord; `copycord doctor` shows `service runs in a console window`, and `copycord doctor --fix` writes the task again so it runs without a window, keeping its data directory (`copycord service install` does the same with the data directory you give it). `--user` has no effect.
 
