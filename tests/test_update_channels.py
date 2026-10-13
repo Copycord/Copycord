@@ -1238,5 +1238,5 @@ def test_downgrade_asks_once_with_its_own_question(current, tty, monkeypatch):
     monkeypatch.setattr(update, "current_version", lambda: "4.1.0b2")
     tty["answers"] = ["y"]
     assert cli.main(["update", "--channel", "stable"]) == 0
-    assert len(tty["asked"]) == 1 and DOWNGRADE_PROMPT in tty["asked"][0]
+    assert len(tty["asked"]) == 1 and "Downgrade from v4.1.0b2 to v4.0.0?" in tty["asked"][0]
     assert len(rec.calls) == 1 and backups == [1]
