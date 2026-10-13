@@ -79,22 +79,22 @@ Tests the FastAPI admin endpoints using `httpx.AsyncClient`. WebSocket control c
 
 ## CI / GitHub workflows
 
-### `ci.yml` — Runs on every PR and push to `main`
+### `ci.yml`, Runs on every PR and push to `main`
 
-- **Lint & syntax check** — ruff + py_compile on all Python files
-- **DB unit tests** — pytest `test_db.py`
-- **API endpoint tests** — pytest `test_api.py`
-- **Frontend build** — `npm ci && npm run build` in `src/copycord/admin/frontend/`
+- **Lint & syntax check**: ruff + py_compile on all Python files
+- **DB unit tests**: pytest `test_db.py`
+- **API endpoint tests**: pytest `test_api.py`
+- **Frontend build**: `npm ci && npm run build` in `src/copycord/admin/frontend/`
 
-### `docker-build-test.yml` — Manual trigger
+### `docker-build-test.yml`, Manual trigger
 
 Builds the Docker image without pushing to verify the Dockerfile is valid. Trigger it from the GitHub Actions tab via "Run workflow".
 
 You can optionally choose the platform (`linux/amd64`, `linux/arm64`, or both).
 
-### `dependency-audit.yml` — Weekly (Monday 09:00 UTC) + manual trigger
+### `dependency-audit.yml`, Weekly (Monday 09:00 UTC) + manual trigger
 
 - **Python**: runs `pip-audit` against the dependencies in `pyproject.toml`
-- **npm** — runs `npm audit` on the frontend
+- **npm**: runs `npm audit` on the frontend
 
 Alerts you if any dependency has a known vulnerability.
