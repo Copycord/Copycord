@@ -230,7 +230,7 @@ def test_backup_json_without_a_database(data_dir, capsys):
 
 def test_restore_has_no_json(data_dir, capsys):
     with pytest.raises(SystemExit) as exc:
-        cli.main(["restore", "--json"])
+        cli.main(["--json", "restore"])
     assert exc.value.code == 2
     assert "--json works with --version, doctor, backup" in capsys.readouterr().err
 
