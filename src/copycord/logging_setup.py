@@ -59,7 +59,7 @@ def _level() -> int:
 
 
 def logs_dir() -> Path:
-    """Where the admin reads <role>.out: the data dir (common.paths)."""
+    """Where the admin reads <role>.out: the data dir (copycord.common.paths)."""
     from copycord.common.paths import data_dir
 
     return data_dir()

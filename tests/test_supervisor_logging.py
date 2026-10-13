@@ -17,7 +17,7 @@ from copycord import supervisor
 def clean_root(monkeypatch):
     # tests/test_api.py sets LOG_LEVEL=WARNING for the whole session at import.
     monkeypatch.setenv("LOG_LEVEL", "INFO")
-    # Importing admin.app (other tests do) turns propagation off on the
+    # Importing copycord.admin.app (other tests do) turns propagation off on the
     # "copycord" logger and may leave levels on role loggers; reset both.
     monkeypatch.setattr(logging.getLogger("copycord"), "propagate", True)
     names = ("copycord", "server", "server.server", "client", "client.client")

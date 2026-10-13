@@ -275,7 +275,7 @@ def test_closed_loop_endpoint_is_dropped(reg):
 
 
 class FakeHub:
-    """The parts of admin.app.BusHub the in-process bus touches."""
+    """The parts of copycord.admin.app.BusHub the in-process bus touches."""
 
     def __init__(self):
         self.sinks = set()

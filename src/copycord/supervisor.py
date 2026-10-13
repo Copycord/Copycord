@@ -377,7 +377,7 @@ def client_factory() -> RoleFactory:
 
 
 def admin_factory(host: str, port: int, log_level: str) -> RoleFactory:
-    """uvicorn admin.app:app driven in the supervisor's loop (entrypoint.sh flags)."""
+    """uvicorn copycord.admin.app:app driven in the supervisor's loop (entrypoint.sh flags)."""
 
     async def run_admin() -> None:
         import uvicorn
@@ -437,7 +437,7 @@ def _set_runtime_env() -> None:
     data = data_dir()
     with contextlib.suppress(Exception):
         data.mkdir(parents=True, exist_ok=True)
-    # admin.app reads DATA_DIR itself; keep it on the same directory as DB_PATH.
+    # copycord.admin.app reads DATA_DIR itself; keep it on the same directory as DB_PATH.
     os.environ.setdefault("DATA_DIR", str(data))
     os.environ.setdefault("DB_PATH", str(data / "data.db"))
     sport = os.getenv("CONTROL_PORT_SERVER", str(DEFAULT_SERVER_CONTROL_PORT))
@@ -473,7 +473,7 @@ def build_supervisor(
     server/client through loopback control ports.
 
     WebsocketManager/AdminBus switch to the in-process transport
-    (common.inprocess); inprocess_transport overrides that (tests use fake
+    (copycord.common.inprocess); inprocess_transport overrides that (tests use fake
     factories).
 
     factories/control_* overrides exist for tests.

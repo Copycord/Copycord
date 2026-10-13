@@ -1,5 +1,5 @@
 """
-Unit tests for common.db.DBManager.
+Unit tests for copycord.common.db.DBManager.
 
 Tests schema creation, CRUD operations for core mapping tables,
 config management, event logs, and edge cases.

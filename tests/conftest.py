@@ -5,7 +5,7 @@ import os
 import tempfile
 import pytest
 
-# Modules such as admin.app create the data dir at import time; point it at a
+# Modules such as copycord.admin.app create the data dir at import time; point it at a
 # session temp dir before any test imports them (never /data or C:\data).
 _SESSION_DATA_DIR = tempfile.mkdtemp(prefix="copycord-test-data-")
 os.environ["DATA_DIR"] = _SESSION_DATA_DIR
