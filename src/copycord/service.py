@@ -8,15 +8,9 @@
 # =============================================================================
 
 """
-copycord service install [--user] [--data-dir PATH]
-copycord service start|stop|status|uninstall [--user]
-
-Registers `copycord run --data-dir PATH` with the host's service manager:
-  Linux    systemd unit (~/.config/systemd/user with --user, else /etc/systemd/system)
-  macOS    launchd agent ~/Library/LaunchAgents/com.copycord.plist
-  Windows  Scheduled Task "Copycord" at logon of the current user
-
-Every external command goes through run_cmd() so tests can fake it.
+Registers `copycord run --data-dir PATH` with the host's service manager: a
+systemd unit on Linux, a launchd agent on macOS, a logon Scheduled Task on
+Windows.
 """
 
 from __future__ import annotations
@@ -42,7 +36,7 @@ SYSTEMD_SYSTEM_DIR = Path("/etc/systemd/system")
 def run_cmd(
     cmd: Sequence[str], capture: bool = True, env: Optional[Mapping[str, str]] = None
 ) -> subprocess.CompletedProcess:
-    """The one place Copycord runs an external command (systemctl, launchctl, ...)."""
+    """Run an external command; tests replace this."""
     try:
         return subprocess.run(
             list(cmd), capture_output=capture, text=True, check=False,
@@ -226,7 +220,6 @@ def launchd_plist(command: Sequence[str], data_dir: Path) -> bytes:
             "Label": LAUNCHD_LABEL,
             "ProgramArguments": [*command, "run", "--data-dir", str(data_dir)],
             "RunAtLoad": True,
-            # Restart when it exits with an error (like systemd Restart=on-failure).
             "KeepAlive": {"SuccessfulExit": False},
             "ThrottleInterval": 10,
             "StandardOutPath": str(data_dir / "copycord.out.log"),
@@ -467,8 +460,7 @@ class ScheduledTaskService:
 def get_service(
     user: bool = False, platform: Optional[str] = None, home: Optional[Path] = None
 ):
-    """The service manager for this OS. On Linux without --user, an existing
-    user unit is used when there is no system unit (start/stop/status)."""
+    """The service manager for this OS; on Linux falls back to an existing user unit."""
     platform = sys.platform if platform is None else platform
     if platform == "win32":
         return ScheduledTaskService()
@@ -492,10 +484,7 @@ def restart_service() -> None:
 
 
 def install_data_dir(user: bool, env=None, platform: Optional[str] = None) -> Path:
-    """Data dir baked into the service: DATA_DIR / --data-dir, else the Copycord
-    home (COPYCORD_HOME or ~/.copycord).
-    A system unit installed with sudo runs as SUDO_USER, so it defaults to
-    that user's data dir rather than root's."""
+    """The data dir written into the service; under sudo, SUDO_USER's rather than root's."""
     from copycord.common.paths import data_dir, platform_data_dir
 
     env = os.environ if env is None else env

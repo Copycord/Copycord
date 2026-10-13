@@ -8,11 +8,10 @@
 # =============================================================================
 
 """
-Terminal styling for the copycord CLI: plain ANSI, no dependencies.
+Terminal styling for the copycord CLI, plain ANSI.
 
-Color is on when the stream is a TTY, NO_COLOR is unset and TERM is not
-"dumb"; FORCE_COLOR=1 turns it on anyway. Without color every helper prints
-plain ASCII text, so piped output and logs stay greppable.
+Color follows NO_COLOR, FORCE_COLOR, TERM and whether the stream is a TTY;
+without it every helper prints plain ASCII.
 """
 
 from __future__ import annotations
@@ -121,10 +120,7 @@ def mark(status: str, stream: Optional[TextIO] = None) -> str:
 
 
 def line(status: str, text: str, detail: str = "", stream: Optional[TextIO] = None) -> None:
-    """One step line: a check, cross, bang or bullet, a label and a dim detail.
-
-    Plain form is "PASS  label: detail" so scripts can grep the status.
-    """
+    """One status line; without color it reads "PASS  label: detail"."""
     stream = sys.stdout if stream is None else stream
     if use_color(stream):
         tail = f"  {dim(detail, stream)}" if detail else ""
@@ -152,8 +148,7 @@ def info(text, detail="", stream=None):
 
 
 def kv(rows: Iterable[tuple], stream: Optional[TextIO] = None, width: int = 0) -> None:
-    """Aligned "key  value" rows; plain form is the key padded to width, a space
-    and the value."""
+    """Aligned key and value rows."""
     stream = sys.stdout if stream is None else stream
     rows = list(rows)
     width = width or max((len(k) for k, _ in rows), default=0)
@@ -205,7 +200,7 @@ def _visible_len(text: str) -> int:
 
 def box(lines: Iterable[str], title: str = "", status: str = "info",
         stream: Optional[TextIO] = None) -> None:
-    """A boxed notice, e.g. the dashboard URL."""
+    """A boxed notice."""
     stream = sys.stdout if stream is None else stream
     lines = list(lines)
     fancy = use_color(stream) and _unicode(stream)
@@ -230,7 +225,7 @@ def box(lines: Iterable[str], title: str = "", status: str = "info",
 
 
 class Spinner:
-    """`with Spinner("Checking GitHub"):` shows a spinner on a TTY, nothing else."""
+    """Context manager that shows a spinner on a TTY and nothing otherwise."""
 
     FRAMES = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
 

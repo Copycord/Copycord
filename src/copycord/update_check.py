@@ -10,17 +10,9 @@
 """
 Update check on start and the optional auto-update.
 
-The check is a read-only hint: it asks GitHub about the saved channel (newest
-release for stable and beta, the branch head for dev), caches the answer in
-<data dir>/update-check.json for 24 hours and prints one line. It runs in a
-background thread with a short timeout and never fails or delays startup.
-
-Opt out with the app config UPDATE_CHECK_ON_START=false or the environment
-variable COPYCORD_NO_UPDATE_CHECK=1.
-
-AUTO_UPDATE=true (app config, off by default) makes the running background
-service check every 6 hours and run the same flow as `copycord update`, which
-restarts the service. A foreground `copycord run` in a terminal only hints.
+The check asks GitHub about the saved channel in a background thread, caches
+the answer for 24 hours in <data dir>/update-check.json and prints one line.
+With AUTO_UPDATE=true the background service also updates itself every 6 hours.
 """
 
 from __future__ import annotations
@@ -115,7 +107,7 @@ def cache_path() -> Path:
 
 
 def _identity(channel: update.Channel) -> dict:
-    """What a cached answer is only valid for."""
+    """The key a cached answer is valid for."""
     ident = {"channel": channel.describe()}
     ident["installed"] = (update.installed_commit() or "") if channel.channel == update.DEV else update.current_version()
     return ident
@@ -173,7 +165,7 @@ def fetch(channel: update.Channel, timeout: float = CHECK_TIMEOUT, now: Optional
 
 def check_cached(channel: Optional[update.Channel] = None, force: bool = False,
                  timeout: float = CHECK_TIMEOUT) -> Result:
-    """The cached answer when it is under 24 hours old, else a fresh one (saved)."""
+    """The cached answer if under 24 hours old, else a fresh one."""
     channel = update.load_channel() if channel is None else channel
     if not force:
         cached = load_cache(channel)
@@ -199,11 +191,7 @@ def print_hint(result: Result, stream=None) -> None:
 
 
 def start(stream=None, wait: float = 0.0) -> Optional[threading.Thread]:
-    """Check in a background thread and print the hint when there is one.
-
-    Does nothing when opted out. wait > 0 joins the thread for at most that
-    many seconds (for short commands that would exit before the answer).
-    """
+    """Check in a background thread and print a hint; wait > 0 joins it for that long."""
     try:
         if not check_enabled():
             return None
@@ -226,7 +214,7 @@ def start(stream=None, wait: float = 0.0) -> Optional[threading.Thread]:
 
 
 def last_check_line() -> str:
-    """For `copycord update status`: when the last check ran."""
+    """When the last check ran."""
     try:
         raw = json.loads(cache_path().read_text(encoding="utf-8"))
         ts = float(raw["checked_at"])
@@ -270,7 +258,7 @@ def auto_update_once() -> bool:
 
 
 async def auto_update_loop(interval: float = AUTO_UPDATE_INTERVAL) -> None:
-    """Runs for the life of the service; the update restarts the service."""
+    """Auto-update loop for the life of the service."""
     while True:
         try:
             await asyncio.to_thread(auto_update_once)

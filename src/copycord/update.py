@@ -8,49 +8,11 @@
 # =============================================================================
 
 """
-copycord update                       reinstall from the saved channel (default
-                                      stable) with the tool that installed
-                                      Copycord, then restart the service if it
-                                      is installed and running
-copycord update --channel stable|beta|dev [--repo OWNER/NAME] [--ref REF]
-                                      switch channel (saved in <data dir>/update.json)
-copycord update --tag VERSION         install that exact version once; the
-                                      saved channel stays as it is
-copycord update status              print the installed version, the saved
-                                      channel and the latest on that channel
-                                      (--check is the same)
-copycord update --channel beta --no-install
-                                      only save the channel (the install
-                                      scripts use this)
-copycord update --no-backup           skip the pre-update database backup
-copycord update --yes, -y             downgrade without asking
+copycord update: reinstall Copycord from the saved channel with the tool that
+installed it, back up the database first, then restart the service.
 
-Installing a version older than the installed one (--tag, or a stable/beta
-channel whose latest is older) asks y/N first; with no terminal it needs
---yes. Dev refs have no comparable version and never ask.
-
-Every update that installs first copies data.db with the sqlite3 online
-backup API to <backups>/data-pre-update-<from version>-<UTC timestamp>.db
-(BACKUP_DIR, default <data dir>/backups); the newest 5 are kept, apart from
-the daily backups. A failed backup aborts the update.
-
-stable  newest GitHub release that is not a draft or a pre-release
-beta    newest GitHub release that is not a draft, pre-releases included
-        (e.g. v4.0.0b1)
-dev     git install of a branch, tag or commit (--ref, default main) of a
-        GitHub repo (--repo, default Copycord/Copycord):
-        uv tool install --force git+https://github.com/<repo>@<ref>
-        needs npm to build the admin UI; without one, Node is downloaded into
-        <Copycord home>/node (copycord.node_runtime)
-
-update.json is {"channel": ...}; dev adds "branch" (the ref) and, when it is
-not the default, "repo". Files without "repo" read as Copycord/Copycord.
-With no update.json, a `git+https://github.com/...` install (PEP 610
-direct_url.json vcs_info) reads as dev at the ref it was installed from;
-anything else reads as stable. A reinstall (doctor --fix) of a git install
-always builds the installed commit from the same git URL, never a release.
-
-stable, beta and --tag install the wheel asset of the release by its URL.
+The channel is saved in <data dir>/update.json. stable and beta install a
+release wheel; dev builds a git ref, which needs npm for the admin UI.
 """
 
 from __future__ import annotations
@@ -71,7 +33,7 @@ RELEASES_URL = "https://api.github.com/repos/Copycord/Copycord/releases"
 RELEASE_TAG_URL = RELEASES_URL + "/tags/{tag}"
 GITHUB_COMMITS_URL = "https://api.github.com/repos/{repo}/commits/{branch}"
 GITHUB_TIMEOUT = 5.0
-# Python `copycord update` asks uv for: the recommended, tested version.
+# The Python version uv is asked for.
 PYTHON_VERSION = "3.12"
 
 STABLE, BETA, DEV = "stable", "beta", "dev"
@@ -104,8 +66,8 @@ def valid_repo(repo: str) -> bool:
 
 class Channel(NamedTuple):
     channel: str
-    branch: Optional[str] = None  # DEV only: the git ref (branch, tag or sha)
-    repo: Optional[str] = None  # DEV only: owner/name; None means DEFAULT_REPO
+    branch: Optional[str] = None  # dev only: branch, tag or sha
+    repo: Optional[str] = None  # dev only; None means DEFAULT_REPO
 
     @property
     def ref(self) -> str:
@@ -130,8 +92,7 @@ def settings_path() -> Path:
 
 
 def load_channel(path: Optional[Path] = None) -> Channel:
-    """The saved channel. When nothing (valid) is saved: dev at the installed
-    ref for a `git+https://github.com/...` install, else Channel(stable)."""
+    """The saved channel; if none, dev at its ref for a git install, else stable."""
     fallback = Channel(DEFAULT_CHANNEL)
     if path is None:
         path = settings_path()
@@ -159,7 +120,7 @@ def save_channel(channel: Channel, path: Optional[Path] = None) -> Path:
     data = {"channel": channel.channel}
     if channel.channel == DEV:
         data["branch"] = channel.ref
-        # Only a non-default repo is written, so older Copycords read the file too.
+        # Only a non-default repo is written, so older versions can still read the file.
         if channel.repo and channel.repo != DEFAULT_REPO:
             data["repo"] = channel.repo
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -172,7 +133,7 @@ def save_channel(channel: Channel, path: Optional[Path] = None) -> Path:
 
 
 def installer_metadata() -> Optional[str]:
-    """Contents of copycord's dist-info INSTALLER file; None when not installed."""
+    """The dist-info INSTALLER text; None when not installed as a package."""
     from importlib import metadata
 
     try:
@@ -187,11 +148,7 @@ def detect_installer(
     installer: Optional[str] = "",
     docker: Optional[bool] = None,
 ) -> str:
-    """How this Copycord was installed: UV_TOOL, PIPX, UV_PIP, PIP, DOCKER or SOURCE.
-
-    installer is the dist-info INSTALLER text (None: copycord is not installed
-    as a package, e.g. run from a checkout); "" reads it.
-    """
+    """How Copycord was installed; installer="" reads the INSTALLER file."""
     if docker is None:
         from copycord.common.paths import in_docker
 
@@ -223,12 +180,7 @@ def _quote(arg: str) -> str:
 
 
 def install_command(kind: str, spec: str, reinstall: bool = False) -> Tuple[Optional[list], str]:
-    """(command to run, or None) and a human hint for installing spec with kind.
-
-    spec is a release wheel URL (stable, beta, --tag) or git_spec() (dev).
-    reinstall: uv reinstalls every package and rebuilds a git spec instead of
-    keeping what is installed or cached (pipx --force already recreates the venv).
-    """
+    """The install command for spec (or None) and a hint; reinstall also rebuilds cached packages."""
     if kind == UV_TOOL:
         cmd = ["uv", "tool", "install", "--force", "--python", PYTHON_VERSION, spec]
         if reinstall:
@@ -279,7 +231,7 @@ _PRE_RANK = {"a": 0, "alpha": 0, "b": 1, "beta": 1, "c": 2, "rc": 2, "pre": 2, "
 
 
 def parse_version(v: str):
-    """Sort key for v; None when it is not a version this comparator knows."""
+    """Sort key for v; None when it does not parse."""
     m = _VERSION_RE.match(v)
     if not m:
         return None
@@ -305,7 +257,7 @@ def is_prerelease(v: str) -> bool:
 
 
 def is_older(target: str, current: str) -> bool:
-    """True only when both are versions and target sorts below current."""
+    """True when both parse and target sorts below current."""
     a, b = parse_version(target), parse_version(current)
     return a is not None and b is not None and a < b
 
@@ -345,7 +297,7 @@ class Release(NamedTuple):
 
 
 def _wheel_asset(release: dict) -> Optional[str]:
-    """browser_download_url of the copycord-*.whl asset of a GitHub release."""
+    """Download URL of the release's copycord-*.whl asset."""
     for asset in release.get("assets") or []:
         name = str(asset.get("name") or "")
         if name.startswith("copycord-") and name.endswith(".whl"):
@@ -359,9 +311,7 @@ def _release(data: dict) -> Release:
 
 
 def latest_from_releases(data: list, prerelease: bool) -> Release:
-    """Newest release in a GitHub releases list: drafts are skipped, pre-releases
-    too unless prerelease. Newest is the highest version; tags that are not
-    versions are skipped."""
+    """The highest-versioned release, skipping drafts and, unless prerelease, pre-releases."""
     best = None
     for item in data or []:
         if not isinstance(item, dict) or item.get("draft"):
@@ -386,7 +336,7 @@ def fetch_latest_release(
 
 
 def fetch_release(tag: str, timeout: float = GITHUB_TIMEOUT) -> Release:
-    """The release tagged v<VERSION> (tag may be given with or without the v)."""
+    """The release tagged v<VERSION>, with or without the v."""
     import urllib.error
 
     tag = "v" + tag.lstrip("v")
@@ -418,7 +368,7 @@ def fetch_branch_head(
 
 
 def build_commit() -> Optional[str]:
-    """Commit stamped into the wheel at build time (hatch_build.py); None if absent."""
+    """The commit stamped into the wheel at build time, or None."""
     from importlib import resources
 
     try:
@@ -431,8 +381,8 @@ def build_commit() -> Optional[str]:
 
 class GitSource(NamedTuple):
     url: str  # the git URL, without git+ and @ref
-    ref: Optional[str]  # requested_revision: the branch, tag or commit asked for
-    commit: Optional[str]  # commit_id: the commit that was installed
+    ref: Optional[str]  # requested_revision
+    commit: Optional[str]  # commit_id
 
     @property
     def repo(self) -> Optional[str]:
@@ -441,14 +391,13 @@ class GitSource(NamedTuple):
         return m.group(1) if m and valid_repo(m.group(1)) else None
 
     def spec(self) -> str:
-        """The installed commit again (else the requested ref) from the same URL."""
+        """The same URL at the installed commit, else the requested ref."""
         rev = self.commit or self.ref
         return f"git+{self.url}@{rev}" if rev else f"git+{self.url}"
 
 
 def git_source() -> Optional[GitSource]:
-    """Where a `git+https://...` install came from (PEP 610 direct_url.json
-    vcs_info); None for wheels, folders and checkouts."""
+    """Source of a git install from PEP 610 direct_url.json; None otherwise."""
     from importlib import metadata
 
     try:
@@ -466,12 +415,7 @@ def git_source() -> Optional[GitSource]:
 
 
 def installed_commit() -> Optional[str]:
-    """Commit of a git install; None otherwise.
-
-    PEP 610 direct_url.json carries it for `git+https://...` installs. The
-    installer's git method installs from its local checkout (a file:// URL),
-    so for those the commit is read from that checkout.
-    """
+    """Commit of a git install, from direct_url.json or the local checkout; None otherwise."""
     import subprocess
     import urllib.parse
     from importlib import metadata
@@ -574,7 +518,7 @@ def _err(text: str, detail: str = "") -> None:
 
 
 def backup_database(skip: bool = False) -> bool:
-    """Pre-update copy of the database; False (after saying why) when it failed."""
+    """Back up the database before updating; False when it failed."""
     from copycord.common.db import backup_pre_update
     from copycord.common.paths import db_path
 
@@ -603,7 +547,7 @@ def backup_database(skip: bool = False) -> bool:
 
 
 def confirm_downgrade(current: str, target: str, yes: bool = False) -> int:
-    """0 to go on with a downgrade from current to target; else the exit code."""
+    """0 to go ahead with a downgrade, else the exit code."""
     if yes:
         ui.warn(f"downgrading from v{current} to v{target} (--yes)")
         return 0
@@ -639,9 +583,7 @@ def update(
     yes: bool = False,
     reinstall: bool = False,
 ) -> int:
-    """reinstall: install the running version again: a git install from its
-    git URL and commit, else from the saved channel (a dev ref from git, else
-    the release of this exact version); used by `copycord doctor --fix`."""
+    """Run an update; reinstall=True reinstalls the running version, for doctor --fix."""
     saved = load_channel()
     source = git_source() if reinstall else None
     if reinstall:
@@ -732,9 +674,7 @@ def update(
             return rc
     if not backup_database(no_backup):
         return 1
-    # A dev update builds from git, and that build compiles the admin UI with
-    # npm; Node is downloaded into the Copycord home when there is none.
-    # Release updates install a wheel and never touch Node.
+    # Only a git build needs npm, for the admin UI.
     cmd_env = None
     if git:
         try:
@@ -753,7 +693,7 @@ def update(
         cmd_env = node_runtime.with_path(npm_dir)
         ui.info("the admin UI is built during the install")
 
-    # The service state is read before the install replaces the files.
+    # Read before the install replaces the files.
     try:
         state = service.service_state()
     except Exception as e:
