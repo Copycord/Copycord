@@ -22,26 +22,27 @@ from typing import Dict, List, Optional
 
 FILENAME = ".env"
 
+# Each key's comment line in the template.
 ENV_KEYS: Dict[str, str] = {
-    "PASSWORD": "dashboard login password; change it from the default (empty: no login page)",
-    "SECRET_KEY": "signs the dashboard login cookie (default: a key saved in <home>/data/secret.key)",
-    "ADMIN_PORT": "dashboard port",
-    "DASHBOARD_HOST": "where the dashboard listens; 127.0.0.1 is this computer only",
-    "TZ": "time zone for scheduled backups and export timestamps, e.g. America/New_York",
-    "LOG_FORMAT": "HUMAN or JSON log lines",
-    "BACKUP_DIR": "where the daily database backups go",
-    "BACKUP_AT": "time of the daily backup, HH:MM",
-    "BACKUP_RETAIN": "how many daily backups to keep",
-    "COPYCORD_NO_UPDATE_CHECK": "1 turns off the update check on start; 0 keeps it on",
+    "PASSWORD": "Dashboard password",
+    "SECRET_KEY": "Key that signs the login cookie",
+    "ADMIN_PORT": "Dashboard port",
+    "DASHBOARD_HOST": "Who can open the dashboard: 127.0.0.1 = this computer, 0.0.0.0 = your network",
+    "TZ": "Time zone for backups and exports",
+    "LOG_FORMAT": "Log style: HUMAN or JSON",
+    "BACKUP_DIR": "Backup folder",
+    "BACKUP_AT": "Daily backup time (HH:MM)",
+    "BACKUP_RETAIN": "Backups to keep",
+    "COPYCORD_NO_UPDATE_CHECK": "Skip the update check: 1 = yes, 0 = no",
 }
 
 DEFAULT_PASSWORD = "copycord"
 
-# BACKUP_DIR is left out: the default <data dir>/backups applies, and the
-# template shows it as a commented example.
+# BACKUP_DIR is not here: the template writes the real folder for its home.
 ENV_DEFAULTS: Dict[str, str] = {
     "PASSWORD": DEFAULT_PASSWORD,
     "ADMIN_PORT": "8080",
+    "DASHBOARD_HOST": "127.0.0.1",
     "TZ": "UTC",
     "LOG_LEVEL": "INFO",
     "LOG_FORMAT": "HUMAN",
@@ -51,22 +52,11 @@ ENV_DEFAULTS: Dict[str, str] = {
 }
 
 # LOG_LEVEL is an app config key; it is in the template so early log lines follow it.
-LOG_LEVEL_TEXT = "DEBUG or INFO; the dashboard's log level wins once it is saved"
+LOG_LEVEL_TEXT = "Log detail: INFO or DEBUG"
 
-SECRET_KEY_TEXT = (
-    "SECRET_KEY is left out: Copycord keeps its own key in <home>/data/secret.key"
-)
-
-DASHBOARD_HOST_TEXT = (
-    "the dashboard is on this computer only (127.0.0.1); remove the # and use 0.0.0.0\n"
-    "# to open it to your network, after setting your own PASSWORD"
-)
-
-BACKUP_DIR_TEXT = "where the daily database backups go; remove the # to use another folder"
-
+# SECRET_KEY is not in the template: Copycord keeps its own in <home>/data/secret.key.
 TEMPLATE_KEYS = (
     "PASSWORD",
-    "SECRET_KEY",
     "ADMIN_PORT",
     "DASHBOARD_HOST",
     "TZ",
@@ -191,25 +181,17 @@ def template(home: Optional[Path] = None, password: Optional[str] = None) -> str
     the default PASSWORD."""
     home = env_path().parent if home is None else Path(home)
     values = dict(ENV_DEFAULTS)
+    values["BACKUP_DIR"] = _quote(str(default_backup_dir(home)))
     if password is not None:
         values["PASSWORD"] = _quote(password)
     lines = [
-        "# Copycord settings that are read from the environment only.",
-        "# Everything else is set in the dashboard. Each value below is the default.",
-        "# Edit one here or run `copycord config set KEY VALUE`, then run",
-        "# `copycord restart` to apply it.",
+        "# Copycord settings. Everything else is in the dashboard.",
+        "# After a change, run: copycord restart",
         "",
     ]
     texts = {**ENV_KEYS, "LOG_LEVEL": LOG_LEVEL_TEXT}
     for key in TEMPLATE_KEYS:
-        if key == "SECRET_KEY":
-            lines += [f"# {SECRET_KEY_TEXT}", ""]
-        elif key == "DASHBOARD_HOST":
-            lines += [f"# {DASHBOARD_HOST_TEXT}", "#DASHBOARD_HOST=127.0.0.1", ""]
-        elif key == "BACKUP_DIR":
-            lines += [f"# {BACKUP_DIR_TEXT}", f"#BACKUP_DIR={default_backup_dir(home)}", ""]
-        else:
-            lines += [f"# {texts[key]}", f"{key}={values[key]}", ""]
+        lines += [f"# {texts[key]}", f"{key}={values[key]}", ""]
     return "\n".join(lines)
 
 
