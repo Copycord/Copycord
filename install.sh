@@ -160,7 +160,7 @@ else
 fi
 case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
     *UTF-8* | *utf-8* | *UTF8* | *utf8*)
-        OK_MARK="✔"; FAIL_MARK="✖"; WARN_MARK="!"; DOT="•"
+        OK_MARK="✓"; FAIL_MARK="✗"; WARN_MARK="!"; DOT="•"
         SPIN_FRAMES="⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏"
         BOX_TL="╭"; BOX_TR="╮"; BOX_BL="╰"; BOX_BR="╯"; BOX_H="─"; BOX_V="│"
         ;;
@@ -774,9 +774,9 @@ if [ "$UPGRADE" = "1" ]; then
         # Plain output, restyled with the installer's marks.
         NO_COLOR=1 "$BIN_DIR/copycord" doctor --fix --brief </dev/null 2>&1 | while IFS= read -r line; do
             case "$line" in
-                "✔ "* | "+ "*) done_line "${line#* }" ;;
+                "✓ "* | "+ "*) done_line "${line#* }" ;;
                 "! "*) printf '  %s%s%s %s\n' "$YELLOW" "$WARN_MARK" "$RESET" "${line#! }" ;;
-                "✖ "* | "x "*) printf '  %s%s%s %s\n' "$RED" "$FAIL_MARK" "$RESET" "${line#* }" ;;
+                "✗ "* | "x "*) printf '  %s%s%s %s\n' "$RED" "$FAIL_MARK" "$RESET" "${line#* }" ;;
                 "PASS  "*) done_line "${line#PASS  }" ;;
                 "WARN  "*) printf '  %s%s%s %s\n' "$YELLOW" "$WARN_MARK" "$RESET" "${line#WARN  }" ;;
                 "FAIL  "*) printf '  %s%s%s %s\n' "$RED" "$FAIL_MARK" "$RESET" "${line#FAIL  }" ;;

@@ -135,8 +135,8 @@ Test a branch, no release needed:
 
     $useColor = -not [Console]::IsOutputRedirected -and -not $env:NO_COLOR
     $utf = [Console]::OutputEncoding.CodePage -eq 65001
-    $okMark = if ($utf) { [string][char]0x2714 } else { '+' }
-    $failMark = if ($utf) { [string][char]0x2716 } else { 'x' }
+    $okMark = if ($utf) { [string][char]0x2713 } else { '+' }
+    $failMark = if ($utf) { [string][char]0x2717 } else { 'x' }
     $dotMark = if ($utf) { [string][char]0x2022 } else { '-' }
     $frames = if ($utf) { @(0x280B, 0x2819, 0x2839, 0x2838, 0x283C, 0x2834, 0x2826, 0x2827, 0x2807, 0x280F) | ForEach-Object { [string][char]$_ } } else { @('|', '/', '-', '\') }
     $box = if ($utf) { @{ TL = [char]0x256D; TR = [char]0x256E; BL = [char]0x2570; BR = [char]0x256F; H = [char]0x2500; V = [char]0x2502 } } else { @{ TL = '+'; TR = '+'; BL = '+'; BR = '+'; H = '-'; V = '|' } }
@@ -616,10 +616,10 @@ Test a branch, no release needed:
                 try {
                     & $exe doctor --fix --brief 2>&1 | ForEach-Object {
                         $line = "$_"
-                        if ($line -match '^([+x!]|\u2714|\u2716) (.*)$') {
+                        if ($line -match '^([+x!]|\u2713|\u2717) (.*)$') {
                             $text = $Matches[2]
                             if ($Matches[1] -eq '!') { Warn $text }
-                            elseif ($Matches[1] -in @('x', [string][char]0x2716)) { Out "  $failMark " Red -NoNewline; Out $text }
+                            elseif ($Matches[1] -in @('x', [string][char]0x2717)) { Out "  $failMark " Red -NoNewline; Out $text }
                             else { Done $text }
                         }
                         elseif ($line.StartsWith('PASS  ')) { Done $line.Substring(6) }

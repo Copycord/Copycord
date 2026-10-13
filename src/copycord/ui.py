@@ -119,9 +119,9 @@ def cmd(text: str, stream=None) -> str:
 
 # status -> (color, symbol, ASCII fallback)
 _MARKS = {
-    "ok": ("green", "✔", "+"),
+    "ok": ("green", "✓", "+"),
     "warn": ("yellow", "!", "!"),
-    "fail": ("red", "✖", "x"),
+    "fail": ("red", "✗", "x"),
     "info": ("blue", "•", "-"),
 }
 
@@ -135,7 +135,7 @@ def mark(status: str, stream: Optional[TextIO] = None) -> str:
 
 
 def line(status: str, text: str, detail: str = "", stream: Optional[TextIO] = None) -> None:
-    """One status line: "✔ label  detail"."""
+    """One status line: "✓ label  detail"."""
     stream = sys.stdout if stream is None else stream
     tail = f"  {dim(detail, stream)}" if detail else ""
     print(f"{mark(status, stream)} {text}{tail}", file=stream)

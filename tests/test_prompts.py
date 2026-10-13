@@ -101,7 +101,7 @@ def test_confirm_enter_takes_the_default(keys, capsys):
     assert ui.confirm("Update Copycord now?") is True
     out = _screen(capsys)
     assert "Update Copycord now?  ❯ Yes / No" in out
-    assert out.rstrip().endswith("✔ Update Copycord now? Yes")
+    assert out.rstrip().endswith("✓ Update Copycord now? Yes")
     keys["keys"] = ["enter"]
     assert ui.confirm("Fix it?", default=False) is False
 

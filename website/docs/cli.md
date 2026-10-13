@@ -70,7 +70,7 @@ Every command has `--help`, for example `copycord service install --help`. Each 
 
 ```
 $ copycord updte
-✖ unknown command 'updte'. Did you mean 'update'?
+✗ unknown command 'updte'. Did you mean 'update'?
   Run copycord --help to see all commands.
 ```
 
@@ -110,14 +110,14 @@ Colors follow the same rules as the rest of the output: no color when it is not 
 
 ## Output and colors {#output}
 
-Every status line starts with one symbol: `✔` success, `!` warning, `✖` failure, `•` info, and `?` for a question. The installers use the same set. Commands inside a message are shown in the command color. The Copycord banner appears only on the bare `copycord` overview and in the installers. In a terminal the CLI also shows a spinner while it waits for GitHub and boxed notices for things you need to act on.
+Every status line starts with one symbol: `✓` success, `!` warning, `✗` failure, `•` info, and `?` for a question. The installers use the same set. Commands inside a message are shown in the command color. The Copycord banner appears only on the bare `copycord` overview and in the installers. In a terminal the CLI also shows a spinner while it waits for GitHub and boxed notices for things you need to act on.
 
 Colors are turned off when the output is not a terminal (a pipe, a file, a service log), when `NO_COLOR` is set, with `--no-color` (before or after the command, for example `copycord --no-color doctor`), or when `TERM=dumb`. `FORCE_COLOR=1` turns them on anyway. Without colors the lines and symbols stay the same:
 
 ```
-✔ home writable
+✓ home writable
 ! the default password is still set  change PASSWORD in /home/you/.copycord/.env, then run copycord restart
-✖ database schema 5 is newer than this Copycord supports (4)  ...
+✗ database schema 5 is newer than this Copycord supports (4)  ...
 ```
 
 Where the terminal cannot print these symbols (for example a Windows console on code page 437 or 1252), they fall back to `+ ! x -`.
@@ -198,26 +198,26 @@ Without colors it looks like this on a new install:
 
 ```
 Install
-✔ Copycord v4.0.0 (1a2b3c4) · stable channel
-✔ Python 3.12.3
-✔ web UI included
-✔ dependencies OK
+✓ Copycord v4.0.0 (1a2b3c4) · stable channel
+✓ Python 3.12.3
+✓ web UI included
+✓ dependencies OK
 
 Settings
-✔ .env found
+✓ .env found
 ! the default password is still set  change PASSWORD in /home/you/.copycord/.env, then run copycord restart
 
 Data
-✔ home writable
+✓ home writable
 • database created on first run
 • no backups yet
 
 Running
-✔ admin port 8080 free
+✓ admin port 8080 free
 • service not installed  copycord service install runs Copycord in the background
 
 Updates
-✔ up to date
+✓ up to date
 
 Needs your attention
 ! the default password is still set  change PASSWORD in /home/you/.copycord/.env, then run copycord restart
@@ -225,7 +225,7 @@ Needs your attention
 ! 1 warning, 0 problems
 ```
 
-Each line starts with `✔`, `!`, `✖` or `•`; in a terminal they are green, yellow, red and blue. The report ends with a **Needs your attention** section that lists each warning and problem once with what to do, then a last line: `✔ All good`, or the number of warnings and problems. A warning that `--fix` can repair says so there, for example `! .env not found  run copycord doctor --fix to create it with the default settings`, while its line in the group shows the path. The command exits with status 1 when any check fails and 0 otherwise (warnings included), so it can be used in scripts. When `copycord doctor --fix` can repair some of the warnings and problems, a last line says how many.
+Each line starts with `✓`, `!`, `✗` or `•`; in a terminal they are green, yellow, red and blue. The report ends with a **Needs your attention** section that lists each warning and problem once with what to do, then a last line: `✓ All good`, or the number of warnings and problems. A warning that `--fix` can repair says so there, for example `! .env not found  run copycord doctor --fix to create it with the default settings`, while its line in the group shows the path. The command exits with status 1 when any check fails and 0 otherwise (warnings included), so it can be used in scripts. When `copycord doctor --fix` can repair some of the warnings and problems, a last line says how many.
 
 :::tip Port in use
 `! port 8080 in use` means another program has the port: set `ADMIN_PORT` to a free one, or let `copycord doctor --fix` pick the next free port. When Copycord itself is listening (as a service, or `copycord run` in another terminal) the line says `port 8080 in use by Copycord` instead.
@@ -235,7 +235,7 @@ Each line starts with `✔`, `!`, `✖` or `•`; in a terminal they are green, 
 
 `copycord doctor --fix` applies the fixes first, then prints the report once, as things are after the fixes. Every automatic fix runs directly, without asking. The guided fix needs your input, so it asks before the report, and only when there is a terminal; without one (in a script or a pipe) it is skipped, and its entry in Needs your attention says to run `copycord doctor --fix` in a terminal.
 
-A check that was fixed shows on its own line as fixed, for example `✔ .env created with the default settings  /home/you/.copycord/.env (fixed)`. A fix that did not work shows on the check's line as a failure with the reason. **Needs your attention** lists what is left, and the report ends with `Fixed 1 issue` (when something was fixed), then `1 thing needs your attention` or `Everything looks good`.
+A check that was fixed shows on its own line as fixed, for example `✓ .env created with the default settings  /home/you/.copycord/.env (fixed)`. A fix that did not work shows on the check's line as a failure with the reason. **Needs your attention** lists what is left, and the report ends with `Fixed 1 issue` (when something was fixed), then `1 thing needs your attention` or `Everything looks good`.
 
 `--brief` prints only the result: a line for each fix applied, a line for each failed check, and `All checks passed` or the number of warnings and problems. The installers use it.
 
@@ -260,31 +260,31 @@ With the `.env` deleted on a new install it prints:
 
 ```
 Install
-✔ Copycord v4.0.0 (1a2b3c4) · stable channel
-✔ Python 3.12.3
-✔ web UI included
-✔ dependencies OK
+✓ Copycord v4.0.0 (1a2b3c4) · stable channel
+✓ Python 3.12.3
+✓ web UI included
+✓ dependencies OK
 
 Settings
-✔ .env created with the default settings  /home/you/.copycord/.env (fixed)
+✓ .env created with the default settings  /home/you/.copycord/.env (fixed)
 ! the default password is still set  change PASSWORD in /home/you/.copycord/.env, then run copycord restart
 
 Data
-✔ home writable
+✓ home writable
 • database created on first run
 • no backups yet
 
 Running
-✔ admin port 8080 free
+✓ admin port 8080 free
 • service not installed  copycord service install runs Copycord in the background
 
 Updates
-✔ up to date
+✓ up to date
 
 Needs your attention
 ! the default password is still set  change PASSWORD in /home/you/.copycord/.env, then run copycord restart
 
-✔ Fixed 1 issue
+✓ Fixed 1 issue
 ! 1 thing needs your attention
 ```
 
@@ -509,7 +509,7 @@ Removes the Copycord program and its background service.
   ↑/↓ to move, Enter to select
 ```
 
-Move with the arrow keys (or `j` and `k`) and press Enter; Enter right away keeps your data, and Esc or Ctrl-C cancels. After you pick, the question folds into one line, for example `✔ Your data is in /home/you/.copycord Keep my data`. Yes or no questions work the same way on one line, `? Update Copycord now?  ❯ Yes / No`: Left/Right switch, `y` or `n` answer at once, Enter takes the highlighted one.
+Move with the arrow keys (or `j` and `k`) and press Enter; Enter right away keeps your data, and Esc or Ctrl-C cancels. After you pick, the question folds into one line, for example `✓ Your data is in /home/you/.copycord Keep my data`. Yes or no questions work the same way on one line, `? Update Copycord now?  ❯ Yes / No`: Left/Right switch, `y` or `n` answer at once, Enter takes the highlighted one.
 
 Where single keys cannot be read (input piped in, `TERM=dumb`, Git Bash without a real console, or `COPYCORD_PLAIN_PROMPTS=1`), the prompts are typed instead: a numbered list with `Enter 1, 2 or 3 [1]`, and `(y/N)` for yes or no.
 
