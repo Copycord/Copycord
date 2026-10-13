@@ -200,6 +200,7 @@ def format_help() -> str:
     w(f"  {ui.cmd('--no-color'.ljust(opt_width))}  Turn off color, same as NO_COLOR=1")
     w(f"  {ui.cmd('--json'.ljust(opt_width))}  Print the result as JSON (with --version, doctor,")
     w(f"  {' ' * opt_width}  update status, config get and config export)")
+    w(f"  {ui.cmd('--verbose'.ljust(opt_width))}  Show more detail, and the full error if something fails")
     w()
     w(ui.dim("Run ") + ui.cmd("copycord <command> --help") + ui.dim(" for the options of one command."))
     w(ui.dim(f"Docs: {DOCS_URL}"))
@@ -403,8 +404,24 @@ def _take_no_color(argv: List[str]) -> List[str]:
     return [a for a in argv[:end] if a != "--no-color"] + argv[end:]
 
 
+def wants_verbose(argv: Sequence[str]) -> bool:
+    """True when --verbose (or doctor's -v) is given before "--"."""
+    end = list(argv).index("--") if "--" in argv else len(argv)
+    return any(a in ("--verbose", "-v") for a in argv[:end])
+
+
+def _take_verbose(argv: List[str]) -> List[str]:
+    """Drop --verbose wherever it is (before "--"); parse_args sets args.verbose."""
+    end = argv.index("--") if "--" in argv else len(argv)
+    return [a for a in argv[:end] if a != "--verbose"] + argv[end:]
+
+
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     argv = _take_no_color(list(sys.argv[1:] if argv is None else argv))
+    # --verbose works with every command: doctor shows its paths, and an
+    # unexpected error also prints the traceback.
+    verbose = wants_verbose(argv)
+    argv = _take_verbose(argv)
     if not argv:
         sys.stdout.write(format_help())
         raise SystemExit(0)
@@ -597,6 +614,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     uninst.add_argument("--dry-run", action="store_true",
                         help="print the steps and change nothing")
     args = parser.parse_args(argv)
+    args.verbose = verbose or getattr(args, "verbose", False)
     args.json = bool(getattr(args, "json", False) or args.top_json)
     if args.json and not json_supported(args):
         parser.error("--json works with --version, doctor, update status, config get "
@@ -2016,6 +2034,18 @@ def migrate_on_start() -> None:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    """Run one command; an unexpected error prints a short report instead of a traceback."""
+    argv = list(sys.argv[1:] if argv is None else argv)
+    try:
+        return run_command(argv)
+    except Exception as e:
+        # KeyboardInterrupt and SystemExit are not Exceptions, so they pass through.
+        from copycord import crash
+
+        return crash.report(e, argv, verbose=wants_verbose(argv))
+
+
+def run_command(argv: Optional[List[str]] = None) -> int:
     args = parse_args(argv)
     apply_data_dir(args)
     from copycord import envfile

@@ -23,6 +23,7 @@ copycord update status [--json]
 copycord uninstall [--purge|--keep-data] [--yes] [--keep-service] [--dry-run] [--data-dir PATH]
 copycord --version | -V [--json]
 copycord --no-color <command>
+copycord --verbose <command>
 ```
 
 `copycord` on its own (or `copycord --help`) lists the commands by group with a few examples:
@@ -63,6 +64,7 @@ Options:
   --no-color     Turn off color, same as NO_COLOR=1
   --json         Print the result as JSON (with --version, doctor,
                  update status, config get and config export)
+  --verbose      Show more detail, and the full error if something fails
 
 Run copycord <command> --help for the options of one command.
 Docs: https://copycord.github.io/Copycord/docs/cli
@@ -154,6 +156,18 @@ $ copycord doctor --json
 - `config get`: `key`, `value` (masked for a secret unless `--show-secrets`), `set`, `masked` and `source` (`env` for `.env`, else `database`). A key that is not set prints `"set": false` with an `error` and exits 1.
 - `config export`: the same object as without `--json`; with a file, `{"file": ..., "keys": N}`.
 - `--version`: `version`, `commit`, `channel`, and `ref` and `repo` on the dev channel.
+
+### Unexpected errors {#crash}
+
+If a command hits an error Copycord does not expect, it prints three plain lines on stderr instead of a Python traceback and exits with status 1:
+
+```
+Copycord hit an unexpected error: OSError: [Errno 28] No space left on device
+The details were saved to /home/you/.copycord/logs/copycord-crash-20261013-141502-4242.log
+Report it at https://github.com/Copycord/Copycord/issues
+```
+
+The log file holds the full traceback, the Copycord and Python versions and the command (without its values, which can be secrets). It goes in the `logs` folder of the Copycord home, or in the temp folder when that is not writable. Add `--verbose` to any command to also print the traceback. Ctrl+C stops a command as before, without a report.
 
 ## The data directory {#data-dir}
 
