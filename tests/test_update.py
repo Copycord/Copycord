@@ -231,4 +231,4 @@ def test_update_tool_missing_from_path(monkeypatch, capsys, fake_net):
     monkeypatch.setattr(update.shutil, "which", lambda name: None)
     monkeypatch.setattr(service, "run_cmd", lambda *a, **k: pytest.fail("ran a command"))
     assert update.update() == 1
-    assert f"uv tool install --force {WHEEL}" in capsys.readouterr().err
+    assert f"uv tool install --force --python 3.12 {WHEEL}" in capsys.readouterr().err
