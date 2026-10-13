@@ -44,7 +44,7 @@ Get started:
   doctor     Check this machine can run Copycord
 
 Settings:
-  config     Read or write settings (get, set, unset, export, import)
+  config     Read or write settings (get, set, unset, export, import, init)
 
 Service:
   service    Run Copycord in the background (install, status, start, stop, restart, uninstall)
@@ -190,7 +190,7 @@ Copycord keeps its database (`data.db`), `secret.key`, backups, exports and the 
 
 `~/.copycord` is the Copycord home. It holds `.env`, the `data` folder and a `logs` folder with all logs (`server.out`, `client.out`, `scraper.out`, `update.log`). A git install keeps its checkout in `src/` and its per-user Node in `node/` inside it; on Windows, `copycord update` leaves `.copycord-old` there. Set `COPYCORD_HOME` to use another home; `--data-dir` and `DATA_DIR` still win over the data directory. In Docker, and with any other `DATA_DIR`, everything stays in that one folder as before (`.env`, `*.out` and `logs/update.log` included).
 
-Older installs kept everything loose in the home. When Copycord starts and finds `data.db` or `secret.key` directly in the home and no `data/data.db`, it first backs up the database to `backups/data-pre-update-layout-<timestamp>.db`, then moves the data files into `data` and the `*.out` files into `logs`, and logs one line: `Moved Copycord data into <home>/data and logs into <home>/logs`. It never overwrites a file that is already in the new place and never deletes anything. If a move fails, it puts everything back and keeps using the old layout. `copycord doctor` shows `data files loose in the home` until then, and `copycord doctor --fix` does the same move when Copycord is stopped. Docker data is never moved. If `~/.copycord` does not exist but an older install left a `data.db` in `~/.local/share/copycord` (Linux), `~/Library/Application Support/Copycord` (macOS) or `%LOCALAPPDATA%\Copycord` (Windows), Copycord keeps using that folder and prints a notice. It never moves data by itself; to move, stop Copycord and move the folder to `~/.copycord`.
+Older installs kept everything loose in the home. When Copycord starts and finds `data.db` or `secret.key` directly in the home and no `data/data.db`, it first backs up the database to `backups/data-pre-update-layout-<timestamp>.db`, then moves the data files into `data` and the `*.out` files into `logs`, and logs one line: `Moved Copycord data into <home>/data and logs into <home>/logs`. It never overwrites a file that is already in the new place and never deletes anything. If a move fails, it puts everything back and keeps using the old layout. `copycord doctor` shows `data files loose in the home` until then, and `copycord doctor --fix` does the same move when Copycord is stopped. An earlier 4.0 installer also wrote `BACKUP_DIR=<home>/backups` into `.env`. When `.env` still has exactly that line, Copycord moves the backups into `<home>/data/backups` on start and turns the line into the commented default; if a backup with the same name is already there, it moves nothing and keeps the line. `copycord doctor` shows `backups outside the data folder` until then, and `copycord doctor --fix` does the same. A `BACKUP_DIR` you chose yourself is left alone. Docker data is never moved. If `~/.copycord` does not exist but an older install left a `data.db` in `~/.local/share/copycord` (Linux), `~/Library/Application Support/Copycord` (macOS) or `%LOCALAPPDATA%\Copycord` (Windows), Copycord keeps using that folder and prints a notice. It never moves data by itself; to move, stop Copycord and move the folder to `~/.copycord`.
 
 `--data-dir PATH` uses another folder for that command. It does the same as setting the `DATA_DIR` environment variable. It is accepted by `run`, `doctor`, every `config` command, `service install` and `uninstall`.
 
@@ -407,6 +407,7 @@ copycord config import settings.json
 | `export` | Prints every value as JSON. Values of keys containing `TOKEN`, `PASSWORD` or `SECRET` are shown as `********` unless you add `--show-secrets`. |
 | `export FILE` | Writes every value, unmasked, to `FILE` (readable only by you on Linux/macOS). |
 | `import FILE` | Stores every value from a JSON object of key/value pairs (strings or numbers). Masked `********` values are skipped. |
+| `init` | Writes the default [`<home>/.env`](#env-file) when it is missing and prints its path; an existing file is kept as it is. The installer runs it on first install. |
 
 `get` and `export` need an existing database for database keys; when there is none they say so (check `--data-dir`). Restart Copycord after `set`, `unset` or `import` so it picks up the new values. On a service install that is `copycord service stop`, then `copycord service start`; the command prints this reminder.
 
@@ -423,7 +424,7 @@ Some settings are read from the environment only, before the database is open. I
 
 With `COPYCORD_HOME` or `--data-dir` it is `.env` in that folder. `copycord` reads the file on every start, for `copycord run` and the service alike, so a restart applies your changes. Variables already set in the real environment win over the file.
 
-The installer makes sure the file exists. It writes it on first install and never overwrites it, with every key set to its default and a one-line description above it. On Linux, for a user named `alice`:
+The installer makes sure the file exists: on first install it runs `copycord config init`, which writes the file with every key set to its default and a one-line description above it, and prints its path. It never overwrites an existing file, and on Linux and macOS only your user can read it. `BACKUP_DIR` is shown commented out, so the backups go to the default folder, `backups` in the [data directory](#data-dir). On Linux, for a user named `alice`:
 
 ```ini
 # Copycord settings that are read from the environment only.
@@ -451,8 +452,8 @@ LOG_LEVEL=INFO
 # HUMAN or JSON log lines
 LOG_FORMAT=HUMAN
 
-# where the daily database backups go
-BACKUP_DIR=/home/alice/.copycord/data/backups
+# where the daily database backups go; remove the # to use another folder
+#BACKUP_DIR=/home/alice/.copycord/data/backups
 
 # time of the daily backup, HH:MM
 BACKUP_AT=03:17

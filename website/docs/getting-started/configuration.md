@@ -39,7 +39,7 @@ With a custom home (`--home` or `COPYCORD_HOME`, see [Install Options](/docs/get
 
 ## The file the installer writes
 
-The installer writes the file on the first install, with every key set to its default, and never overwrites it afterwards. On Linux, for a user named `alice`:
+The installer writes the file on the first install (with `copycord config init`, which you can also run yourself), with every key set to its default, and never overwrites it afterwards. `BACKUP_DIR` is shown commented out, so the backups go to `data/backups` in the Copycord home. On Linux, for a user named `alice`:
 
 ```ini title="~/.copycord/.env"
 # Copycord settings that are read from the environment only.
@@ -67,8 +67,8 @@ LOG_LEVEL=INFO
 # HUMAN or JSON log lines
 LOG_FORMAT=HUMAN
 
-# where the daily database backups go
-BACKUP_DIR=/home/alice/.copycord/data/backups
+# where the daily database backups go; remove the # to use another folder
+#BACKUP_DIR=/home/alice/.copycord/data/backups
 
 # time of the daily backup, HH:MM
 BACKUP_AT=03:17
