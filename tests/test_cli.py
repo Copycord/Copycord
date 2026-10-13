@@ -639,8 +639,9 @@ def test_doctor_has_no_yes_flag(doctor_env, capsys):
 def test_doctor_fix_with_nothing_to_fix(doctor_env, capsys):
     assert _fix(doctor_env) == 0
     out = capsys.readouterr().out
-    assert _after(out, "Fixes") == ["PASS  nothing to fix"]
-    assert "Re-check" not in out
+    lines = out.splitlines()
+    assert "Fixed" not in lines and "Needs your attention" not in lines
+    assert lines[-1] == "All good"
 
 
 def test_doctor_fix_recreates_the_env_file(doctor_env, capsys):
@@ -652,14 +653,14 @@ def test_doctor_fix_recreates_the_env_file(doctor_env, capsys):
 
     out = capsys.readouterr().out
     assert "WARN  .env not found" in out
-    assert f"PASS  recreated .env with the default settings: {env.resolve()}" in _after(out, "Fixes")
+    assert f"PASS  recreated .env with the default settings: {env.resolve()}" in _after(out, "Fixed")
     # The installer's file: the same template, the same live defaults.
     assert env.read_text(encoding="utf-8") == envfile.template(env.resolve().parent)
     assert f"BACKUP_DIR={env.resolve().parent / 'backups'}" in env.read_text(encoding="utf-8").splitlines()
     if sys.platform != "win32":
         assert (env.stat().st_mode & 0o777) == 0o600
     # The re-check runs after the fix; the real environment's PASSWORD still wins.
-    assert _after(out, "Re-check") == []
+    assert "Needs your attention" not in out
     assert out.splitlines()[-1] == "All good"
 
 
@@ -669,7 +670,7 @@ def test_doctor_fix_applies_the_automatic_fixes_without_asking(doctor_env, monke
     asked = _answers(monkeypatch)
     assert _fix(doctor_env) == 0
     assert asked == []
-    fixes = _after(capsys.readouterr().out, "Fixes")
+    fixes = _after(capsys.readouterr().out, "Fixed")
     assert [x.split(":")[0] for x in fixes] == [
         "PASS  recreated .env with the default settings",
         "PASS  backed up the database",
@@ -681,7 +682,7 @@ def test_doctor_fix_creates_the_home_before_the_env_file(doctor_env, capsys):
 
     shutil.rmtree(doctor_env)
     assert _fix(doctor_env) == 0
-    fixes = _after(capsys.readouterr().out, "Fixes")
+    fixes = _after(capsys.readouterr().out, "Fixed")
     assert fixes[0] == f"PASS  created the Copycord home: {doctor_env.resolve()}"
     assert fixes[1].startswith("PASS  recreated .env")
     assert (doctor_env / ".env").is_file()
@@ -714,7 +715,7 @@ def test_doctor_fix_backs_up_a_stale_database(doctor_env, capsys):
     assert len(archives) == 1
     with tarfile.open(archives[0]) as tar:
         assert tar.getnames() == ["data.db"]
-    assert f"PASS  backed up the database: {archives[0].resolve()}" in _after(out, "Fixes")
+    assert f"PASS  backed up the database: {archives[0].resolve()}" in _after(out, "Fixed")
     # The dashboard's last-backup values, as after a scheduled backup.
     db = DBManager(str(doctor_env / "data.db"))
     assert db.get_config("DB_LAST_BACKUP_FILE") == archives[0].name
@@ -751,7 +752,7 @@ def test_doctor_fix_reinstalls_once_for_ui_and_dependencies(reinstall, doctor_en
     monkeypatch.setattr(cli, "REQUIRED_IMPORTS", (("no_such_module_copycord", "nothing-dist"),))
     assert _fix(doctor_env) == 1
     assert calls == [{"reinstall": True}]
-    fixes = _after(capsys.readouterr().out, "Fixes")
+    fixes = _after(capsys.readouterr().out, "Fixed")
     assert [x for x in fixes if x.startswith("PASS")] == [f"PASS  reinstalled Copycord: v{CURRENT_VERSION.lstrip('v')}"]
 
 
@@ -768,8 +769,9 @@ def test_doctor_fix_reinstall_failure_is_reported(reinstall, doctor_env, capsys)
     state["rc"] = 3
     assert _fix(doctor_env) == 1
     out = capsys.readouterr().out
-    assert "FAIL  could not fix: web UI missing: the reinstall failed (exit 3)" in out
-    assert _after(out, "Re-check")[0].startswith("FAIL  web UI missing")
+    assert "Fixed" not in out.splitlines()
+    assert _after(out, "Needs your attention")[0].startswith(
+        "FAIL  web UI missing: could not fix it: the reinstall failed (exit 3)")
 
 
 @pytest.mark.parametrize("kind", ("source", "docker", "pip"))
@@ -780,7 +782,7 @@ def test_doctor_fix_does_not_reinstall_what_update_cannot(reinstall, doctor_env,
     monkeypatch.setattr(update, "detect_installer", lambda: kind)
     assert _fix(doctor_env) == 1
     assert calls == []
-    assert f"FAIL  could not fix: web UI missing: Copycord was installed with {kind}" in capsys.readouterr().out
+    assert f"FAIL  web UI missing: could not fix it: Copycord was installed with {kind}" in capsys.readouterr().out
 
 
 def test_doctor_fix_does_not_reinstall_without_the_frontend_build(reinstall, doctor_env, monkeypatch, capsys):
@@ -801,7 +803,7 @@ def test_doctor_fix_on_a_git_install_without_npm_fails_early(reinstall, doctor_e
     assert _fix(doctor_env) == 1
     assert calls == []
     out = capsys.readouterr().out
-    assert f"FAIL  could not fix: web UI missing: {cli.NPM_MISSING}" in out
+    assert f"FAIL  web UI missing: could not fix it: {cli.NPM_MISSING}" in out
     assert "npm is not installed" in cli.NPM_MISSING and "Node.js" in cli.NPM_MISSING
 
 
@@ -848,7 +850,7 @@ def test_doctor_fix_service_start_failure(stopped_service, doctor_env, capsys):
     stopped_service["error"] = "the system service needs root: rerun with sudo"
     assert _fix(doctor_env) == 0
     out = capsys.readouterr().out
-    assert "FAIL  could not fix: service installed, not running: the system service needs root" in out
+    assert "service installed, not running: could not fix it: the system service needs root" in out
 
 
 @pytest.fixture()
@@ -868,10 +870,11 @@ def test_doctor_fix_never_changes_the_password(default_password, doctor_env, mon
     assert asked == []
     assert default_password.read_text(encoding="utf-8") == "PASSWORD=copycord\n"
     out = capsys.readouterr().out
-    assert (f"INFO  the default password is still set: change PASSWORD in "
-            f"{default_password.resolve()}, then run `copycord restart` (no automatic fix)"
-            ) in _after(out, "Fixes")
-    assert not any(x.startswith("PASS") for x in _after(out, "Fixes"))
+    assert _after(out, "Needs your attention") == [
+        f"WARN  the default password is still set: change PASSWORD in "
+        f"{default_password.resolve()}, then run `copycord restart`"]
+    assert "Fixed" not in out.splitlines()
+    assert "no automatic fix" not in out
     assert out.splitlines()[-1] == "1 warning, 0 problems"
 
 
@@ -912,13 +915,13 @@ def test_doctor_fix_port_declined(taken_port, doctor_env, monkeypatch, capsys):
     _answers(monkeypatch, "n")
     assert _fix(doctor_env) == 0
     assert (doctor_env / ".env").read_text(encoding="utf-8") == f"ADMIN_PORT={taken_port}\n"
-    assert f"INFO  port {taken_port} in use: skipped" in capsys.readouterr().out
+    assert f"port {taken_port} in use: fix skipped" in capsys.readouterr().out
 
 
 def test_doctor_fix_without_a_terminal_skips_the_port(taken_port, doctor_env, capsys):
     assert _fix(doctor_env) == 0
     out = capsys.readouterr().out
-    assert (f"INFO  port {taken_port} in use: "
+    assert (f"port {taken_port} in use: "
             "run `copycord doctor --fix` in a terminal to move the dashboard to a free port") in out
     assert (doctor_env / ".env").read_text(encoding="utf-8") == f"ADMIN_PORT={taken_port}\n"
 
@@ -949,15 +952,16 @@ def test_doctor_fix_never_touches_tokens_role_or_a_newer_schema(doctor_env, monk
 
     assert _fix(doctor_env) == 1
 
-    fixes = _after(capsys.readouterr().out, "Fixes")
+    out = capsys.readouterr().out
+    left = _after(out, "Needs your attention")
     port = os.environ["ADMIN_PORT"]
-    assert (f"INFO  SERVER_TOKEN and CLIENT_TOKEN not set yet: finish setup at "
-            f"http://localhost:{port} (no automatic fix)") in fixes
-    role = next(x for x in fixes if x.startswith("INFO  ROLE is set"))
-    assert "Delete ROLE" in role and role.endswith("(no automatic fix)")
-    schema = next(x for x in fixes if "database schema" in x)
+    assert any(f"SERVER_TOKEN and CLIENT_TOKEN not set yet: finish setup at "
+               f"http://localhost:{port}" in x for x in left)
+    role = next(x for x in left if "ROLE is set" in x)
+    assert "Delete ROLE" in role
+    schema = next(x for x in left if "database schema" in x)
     assert "copycord update" in schema and "restore a backup" in schema
-    assert not any(x.startswith("PASS") for x in fixes)
+    assert "Fixed" not in out.splitlines() and "no automatic fix" not in out
     assert sorted(os.listdir(doctor_env)) == before
 
 
@@ -970,8 +974,8 @@ def test_doctor_fix_rechecks_after_the_fixes(doctor_env, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert len(runs) == 2
     lines = out.splitlines()
-    assert lines.index("Fixes") < lines.index("Re-check")
-    assert lines[lines.index("Fixes") - 2] == "1 warning, 0 problems"
+    assert "Fixed" in lines and "Re-check" not in lines
+    assert "1 warning, 0 problems" not in lines
     assert lines[-1] == "All good"
 
 
@@ -986,7 +990,40 @@ def test_doctor_fix_ctrl_c_stops(taken_port, doctor_env, monkeypatch, capsys):
     monkeypatch.setattr("builtins.input", interrupt)
     assert _fix(doctor_env) == 130
     assert (doctor_env / ".env").read_text(encoding="utf-8") == f"ADMIN_PORT={taken_port}\n"
-    assert "Re-check" not in capsys.readouterr().out
+    assert "Needs your attention" not in capsys.readouterr().out
+
+
+def test_doctor_fix_brief_after_a_fix(doctor_env, capsys):
+    (doctor_env / ".env").unlink()
+    assert _fix(doctor_env, "--brief") == 0
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith("PASS  recreated .env with the default settings")
+    assert lines[-1] == "PASS  All checks passed"
+    assert "Install" not in lines and "Fixed" not in lines
+
+
+def test_doctor_fix_brief_shows_only_the_failures(reinstall, doctor_env, capsys):
+    _, state = reinstall
+    state["rc"] = 3
+    assert _fix(doctor_env, "--brief") == 1
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].startswith("FAIL  web UI missing: could not fix it: the reinstall failed (exit 3)")
+    assert lines[-1] == "FAIL  0 warnings, 1 problem: run `copycord doctor` for details"
+    assert len(lines) == 2
+
+
+def test_doctor_brief_with_a_warning(default_password, doctor_env, capsys):
+    assert _fix(doctor_env, "--brief") == 0
+    assert capsys.readouterr().out.splitlines() == [
+        "WARN  1 warning, 0 problems: run `copycord doctor` for details"]
+
+
+def test_doctor_ends_with_what_needs_attention(default_password, doctor_env, capsys):
+    assert cli.main(["doctor", "--data-dir", str(doctor_env)]) == 0
+    out = capsys.readouterr().out
+    left = _after(out, "Needs your attention")
+    assert len(left) == 1 and left[0].startswith("WARN  the default password is still set")
+    assert out.splitlines()[-1] == "1 warning, 0 problems"
 
 
 def test_envfile_write_template_never_overwrites(tmp_path):

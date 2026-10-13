@@ -1225,13 +1225,14 @@ def _print_summary(checks: List[Check], fixable: int = 0) -> None:
         print(ui.dim(f"Run `copycord doctor --fix` to fix {fixable} of them."))
 
 
-def _print_brief(checks: List[Check]) -> None:
+def _print_brief(checks: List[Check], notes: dict) -> None:
     """--brief: the FAIL lines and one result line."""
     from copycord import ui
 
     for c in checks:
         if c.status == FAIL:
-            ui.fail(c.name, _hint(c), stream=sys.stdout)
+            hint = "; ".join(p for p in (notes.get(c.name, ""), _hint(c)) if p)
+            ui.fail(c.name, hint, stream=sys.stdout)
     summary = doctor_summary(checks)
     if summary == "All good":
         ui.ok("All checks passed")
@@ -1275,7 +1276,7 @@ def doctor(verbose: bool = False, fix: bool = False, brief: bool = False) -> int
         fixable = 0 if ui.is_interactive() else sum(
             c.fix in FIXES and FIXES[c.fix].guided for c in flagged)
     if brief:
-        _print_brief(checks)
+        _print_brief(checks, notes)
     else:
         _print_attention(checks, notes)
         _print_summary(checks, fixable)
