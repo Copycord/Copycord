@@ -9,20 +9,8 @@
 
 """The Client's caches, kept up to date from parsed gateway dispatches.
 
-``ConnectionState`` is the ``state`` every model wrapper and every
-selfclient.events parser is handed: it answers ``get_guild``, ``get_channel``,
-``get_user``, ``_get_message`` and ``_get_private_channel_by_user``, and
-carries ``user``, the logged-in account.
-
-It is dict-backed over the wrappers in selfclient.models. Guild channels,
-threads, roles, members, emojis and stickers live on their ``Guild`` (the
-wrapper already indexes them); the state holds the guilds themselves, the
-private channels, a user index and a bounded message cache.
-
-``apply(dispatch)`` is the one write path. The events parsers never mutate
-anything: each ``Dispatch`` carries the new object as ``payload`` and this is
-where it lands. The Client parses first (so a handler's "before" comes from
-the cache as it was), applies second, then calls the handlers.
+``apply(dispatch)`` is the only write path. The Client parses before applying,
+so a handler's "before" comes from the cache as it was.
 """
 
 from __future__ import annotations
@@ -48,7 +36,7 @@ from .models import (
 
 log = logging.getLogger("selfclient.state")
 
-#: discord.py's default ``max_messages``.
+# discord.py's default ``max_messages``.
 DEFAULT_MAX_MESSAGES = 1000
 
 
@@ -59,8 +47,7 @@ class ConnectionState:
         self.max_messages: Optional[int] = max_messages
         self.user: Optional[User] = None
         self.session_id: Optional[str] = None
-        #: The Client's HTTPClient, for code that reaches REST through a
-        #: model's ``_state`` the way it reaches ``guild._state.http`` today.
+        # The Client's HTTPClient, reached through a model's ``_state``.
         self.http: Any = None
         self._guilds: Dict[int, Guild] = {}
         self._private_channels: Dict[int, DMChannel] = {}
@@ -107,7 +94,7 @@ class ConnectionState:
         }
 
     # ------------------------------------------------------------------
-    # lookups (the duck-typed surface models and events read)
+    # lookups
     # ------------------------------------------------------------------
 
     @property
@@ -168,7 +155,7 @@ class ConnectionState:
     # ------------------------------------------------------------------
 
     def clear(self) -> None:
-        """Forget everything, for a client that will be started again."""
+        """Forget everything."""
         self.user = None
         self.session_id = None
         self._guilds.clear()
@@ -226,7 +213,7 @@ class ConnectionState:
         if guild is None:
             return channel
         if channel.guild is not guild:
-            # Built against a stub or another snapshot: rebind to the cached one.
+            # Rebind to the cached guild.
             channel = type(channel)(channel.raw, guild, self)
         if isinstance(channel, Thread):
             guild._channels.pop(channel.id, None)
@@ -260,7 +247,7 @@ class ConnectionState:
         return message
 
     # ------------------------------------------------------------------
-    # appliers, one per Dispatch.event
+    # appliers
     # ------------------------------------------------------------------
 
     def _apply_ready(self, d: Dispatch) -> None:
@@ -284,7 +271,7 @@ class ConnectionState:
             self.store_guild(d.payload)
 
     def _apply_guild_unavailable(self, d: Dispatch) -> None:
-        # An outage: keep whatever is cached, only learn a guild never seen.
+        # An outage: keep the cached guild if there is one.
         guild = d.payload
         if isinstance(guild, Guild) and guild.id and guild.id not in self._guilds:
             self._guilds[guild.id] = guild
@@ -295,9 +282,8 @@ class ConnectionState:
             return
         before = self._guilds.get(after.id)
         if before is not None:
-            # GUILD_UPDATE carries no channels, threads or members, and the
-            # merged raw holds the ones from the original GUILD_CREATE, which
-            # may be stale. Carry the live ones over, rebound to the new guild.
+            # GUILD_UPDATE has no channels, threads or members, and the merged
+            # raw ones may be stale, so carry the live ones over.
             after._channels.clear()
             after._threads.clear()
             for ch in before.channels + before.threads:
@@ -305,9 +291,8 @@ class ConnectionState:
             after._members.clear()
             for member in before.members:
                 after._add_member(Member(member.raw, after, self))
-            # The merge is shallow, so a list the update did not send is the
-            # very object from before.raw: stale, while the live copy has had
-            # the role/emoji/sticker events applied to it since.
+            # A list the update did not send is still before.raw's, which
+            # misses later role/emoji/sticker events; use the live copy.
             if after.raw.get("roles") is before.raw.get("roles"):
                 after._roles = {r.id: Role(r.raw, after, self) for r in before.roles}
             if after.raw.get("emojis") is before.raw.get("emojis"):
@@ -354,7 +339,6 @@ class ConnectionState:
             self._messages.pop(message.id, None)
 
     def _apply_raw_message_delete(self, d: Dispatch) -> None:
-        # The cached copy, if any, is gone too; message_delete only follows a hit.
         raw = d.args[0] if d.args else None
         mid = getattr(raw, "message_id", None)
         if mid:
