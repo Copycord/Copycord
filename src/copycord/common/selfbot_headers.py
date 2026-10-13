@@ -28,6 +28,7 @@ from copycord.common.exit_timezone import (
     note_token_proxy as _note_token_proxy,
     timezone_for as _timezone_for,
 )
+from copycord.common.http_session import shared_session
 from copycord.common.proxy_pool import get_pool as _get_proxy_pool
 
 try:
@@ -139,8 +140,8 @@ async def _scrape_build_number_from_web(
 
 async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> dict:
     """Refresh the shared build number from Discord's live web assets."""
-    owns = session is None
-    sess = session or aiohttp.ClientSession()
+    # Without a caller's session, use the role's shared one (closed on role shutdown).
+    sess = session or shared_session()
     try:
         scraped = await _scrape_build_number_from_web(sess)
         if not scraped or scraped < 400000:
@@ -157,12 +158,6 @@ async def refresh_build_info(session: aiohttp.ClientSession | None = None) -> di
     except Exception as e:
         logger.debug("build-info fetch failed: %r", e)
         return get_build_info()
-    finally:
-        if owns:
-            try:
-                await sess.close()
-            except Exception:
-                pass
 
 
 def make_fingerprint(token: str) -> dict:

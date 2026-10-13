@@ -20,6 +20,8 @@ import aiohttp
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
+from copycord.common.http_session import DEFAULT_TIMEOUT
+
 
 REMOTE_URLS: List[str] = [
     os.getenv(
@@ -252,7 +254,8 @@ async def startup_links(
 ) -> None:
     base_app = _unwrap_starlette_app(app)
 
-    session = aiohttp.ClientSession(trust_env=True)
+    # Its own session: it honours HTTP(S)_PROXY from the environment, the shared one does not.
+    session = aiohttp.ClientSession(trust_env=True, timeout=DEFAULT_TIMEOUT)
     mgr = LinksManager()
     try:
         await mgr.attach_session(session)

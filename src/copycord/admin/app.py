@@ -69,6 +69,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from copycord.common.config import CURRENT_VERSION
 from copycord.common.db import DBManager, backups_dir
 from copycord.common.paths import data_dir, out_candidates, out_dir
+from copycord.common.http_session import close_shared_session, shared_session
 from copycord.common.timezone import configured_tz_name
 from copycord.common import inprocess
 from copycord.common.backup_scheduler import (
@@ -838,7 +839,7 @@ async def _check_client_token_valid(raw_token: str) -> bool:
     headers = _selfbot_headers(token)
 
     try:
-        async with aiohttp.ClientSession() as sess:
+        async with contextlib.nullcontext(shared_session()) as sess:
             async with sess.get(url, headers=headers, timeout=10) as resp:
                 body_preview = None
                 is_bot = None
@@ -898,7 +899,7 @@ async def _check_server_token_valid(bot_token: str) -> tuple[bool, Optional[str]
     }
 
     try:
-        async with aiohttp.ClientSession() as sess:
+        async with contextlib.nullcontext(shared_session()) as sess:
             async with sess.get(url, headers=headers, timeout=10) as resp:
                 body_preview = None
                 is_bot = None
@@ -1013,7 +1014,7 @@ async def _selfbot_in_guild(client_token: str, guild_id: int) -> bool:
     wanted = str(guild_id)
 
     try:
-        async with aiohttp.ClientSession() as sess:
+        async with contextlib.nullcontext(shared_session()) as sess:
             after = "0"
             total_checked = 0
 
@@ -1092,7 +1093,7 @@ async def _selfbot_identity(token: str) -> dict | None:
 
     headers = _selfbot_headers(token)
     try:
-        async with aiohttp.ClientSession() as sess:
+        async with contextlib.nullcontext(shared_session()) as sess:
             async with sess.get(url, headers=headers, timeout=10) as resp:
                 if resp.status != 200:
                     return None
@@ -2218,6 +2219,16 @@ async def _refresh_discord_build_on_boot():
 @_on_shutdown
 async def _stop_backup_scheduler():
     await backup_scheduler.stop()
+
+
+@_on_startup
+async def _open_http_session():
+    shared_session()
+
+
+@_on_shutdown
+async def _close_http_session():
+    await close_shared_session()
 
 
 @app.get("/api/validate-tokens", response_class=JSONResponse)

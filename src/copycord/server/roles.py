@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio, logging, discord, aiohttp
 from typing import List, Dict, Tuple, Optional
 from copycord.server import logctx
+from copycord.common.http_session import shared_session
 
 logger = logging.getLogger("server.roles")
 
@@ -926,10 +927,9 @@ class RoleManager:
     async def _fetch_icon_bytes(self, url: str) -> Optional[bytes]:
         """Download a role icon from a URL and return the raw bytes."""
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
-                    if resp.status == 200:
-                        return await resp.read()
+            async with shared_session().get(url) as resp:
+                if resp.status == 200:
+                    return await resp.read()
         except Exception as e:
             self._log("debug", "[🧩] Failed to download role icon: %s", e)
         return None

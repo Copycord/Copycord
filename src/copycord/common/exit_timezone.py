@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 
+from copycord.common.http_session import shared_session
 from copycord.common.proxy_pool import _mask_proxy_url
 
 logger = logging.getLogger("common.exit_timezone")
@@ -63,12 +64,12 @@ async def _fetch_json(proxy: Optional[str], timeout: float) -> dict:
             async with sess.get(LOOKUP_URL, timeout=client_timeout) as r:
                 r.raise_for_status()
                 return await r.json(content_type=None)
-    async with aiohttp.ClientSession() as sess:
-        async with sess.get(
-            LOOKUP_URL, proxy=proxy or None, timeout=client_timeout
-        ) as r:
-            r.raise_for_status()
-            return await r.json(content_type=None)
+    # A SOCKS proxy needs its own connector above; everything else reuses the role's session.
+    async with shared_session().get(
+        LOOKUP_URL, proxy=proxy or None, timeout=client_timeout
+    ) as r:
+        r.raise_for_status()
+        return await r.json(content_type=None)
 
 
 async def resolve_timezone(

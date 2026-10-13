@@ -10,12 +10,15 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import socket
 import time
 from urllib.parse import urlparse
 
 import aiohttp
+
+from copycord.common.http_session import shared_session
 
 logger = logging.getLogger("admin.notifications")
 
@@ -62,7 +65,7 @@ async def send_webhook(
     }
 
     try:
-        async with aiohttp.ClientSession() as sess:
+        async with contextlib.nullcontext(shared_session()) as sess:
             async with sess.post(
                 webhook_url,
                 json=payload,

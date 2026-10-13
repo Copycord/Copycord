@@ -38,6 +38,7 @@ from copycord.selfclient.events import RawMessageDeleteEvent, RawMessageUpdateEv
 from copycord.common.config import Config, CURRENT_VERSION
 from copycord.common.selfbot_headers import refresh_build_info
 from copycord.common.db import DBManager
+from copycord.common.http_session import close_shared_session
 from copycord.common.paths import data_dir
 from copycord.client.sitemap import SitemapService
 from copycord.client.message_utils import (
@@ -2894,6 +2895,7 @@ class ClientListener:
             for task in pending:
                 task.cancel()
             loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            loop.run_until_complete(close_shared_session())
             loop.close()
             # Nothing touches the DB after the tasks are gone; fold the WAL back in.
             self.db.close()

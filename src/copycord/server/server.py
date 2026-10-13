@@ -49,6 +49,7 @@ from copycord.common.selfbot_headers import (
 from copycord.common.proxy_pool import get_pool as get_proxy_pool
 from copycord.common.websockets import WebsocketManager, AdminBus
 from copycord.common.db import DBManager
+from copycord.common.http_session import close_shared_session
 from copycord.common.paths import data_dir
 from copycord.server.rate_limiter import RateLimitManager, ActionType
 from copycord.server.token_sender import (
@@ -13401,6 +13402,7 @@ class ServerReceiver:
             for task in pending:
                 task.cancel()
             loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            loop.run_until_complete(close_shared_session())
             # Nothing touches the DB after the tasks are gone; fold the WAL back in.
             self.db.close()
             self.config.db.close()
