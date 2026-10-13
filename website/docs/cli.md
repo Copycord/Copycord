@@ -554,7 +554,9 @@ copycord update --tag 4.0.0            # install exactly this release, once
 
 After a successful update, a running [service](#copycord-service) is restarted so it uses the new version.
 
-On Windows, a program's files cannot be replaced while it runs, so the install itself starts once `copycord update` exits: it stops the service if it is running, installs, starts the service again and prints the result in the same window. The output is also saved to `logs/update.log` in the [data directory](#data-dir). The backup, version checks and questions above still happen first. If Copycord is running in another window (for example `copycord run`), `copycord update` stops with `Copycord is running in another window (process N); stop it first, then run this again` and changes nothing. `copycord doctor --fix` reinstalls the same way.
+`copycord update` shows one progress line while it installs, then `Copycord updated to <version> (<commit>)` and, if the service was running, `restarted the copycord service`. The installer output is saved to `logs/update.log` in the [data directory](#data-dir); if the install fails, the last 20 lines and the log path are printed.
+
+On Windows, a running program's files cannot be deleted, but they can be renamed. So right before the install, `copycord update` stops the service if it is running and moves the running `python.exe`, the `copycord.exe` launcher and the other executable files of the install into `.copycord-old` in the Copycord home. Then it installs in the same window and returns when the update is done, like on Linux and macOS. The next update deletes `.copycord-old`. If the install fails before replacing the old files, they are put back. If Copycord is running in another window (for example `copycord run`), `copycord update` stops with `Copycord is running in another window (process N); stop it first, then run this again` and changes nothing. `copycord doctor --fix` reinstalls the same way.
 
 `status` also shows when Copycord last checked for an update and whether auto-update is on.
 
