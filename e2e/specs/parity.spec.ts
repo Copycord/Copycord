@@ -261,14 +261,50 @@ test.describe("forwarding", () => {
   });
 
   test("41 new rule modal opens and closes", async ({ page }) => {
-    // The SPA rule modal is plan lane 10; until it lands New Forward opens nothing under /app.
-    test.skip(BASE_PATH !== "", "rule modal not ported to the SPA yet (lane 10)");
     await open(page, "forwarding");
     const m = modal(page, "fwdModal");
     await page.locator(FWD_CREATE_BTN).filter({ visible: true }).first().click();
     await expectOpen(m);
     await closeX(m).click();
     await expectClosed(m);
+  });
+
+  test("41 modal creates a Discord rule and edit prefills it", async ({ page }) => {
+    // Saving only stores the rule; nothing is sent to the made up webhook.
+    const label = "E2E Modal Rule";
+    await open(page, "forwarding");
+    const m = modal(page, "fwdModal");
+    await page.locator(FWD_CREATE_BTN).filter({ visible: true }).first().click();
+    await expectOpen(m);
+    await m.locator("#fwd_label").fill(label);
+    await m.locator("#fwd_guild_id").selectOption(SEED.guildId);
+    await m.locator("#providerSelectBtn").click();
+    await m.locator('#providerSelectMenu [role="option"][data-value="discord"]').click();
+    const hook = m.locator('[data-chip-input="discord_webhook_urls"] .chip-text-input');
+    await hook.fill(SEED.webhook);
+    await hook.press("Enter");
+    const saved = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/forwarding");
+    await m.locator("#fwdSaveBtn").click();
+    const r = await saved;
+    expect(r.status()).toBe(200);
+    const body = r.request().postDataJSON() as { label: string; provider: string; guild_id: string; config: { urls: string[] } };
+    expect(body).toMatchObject({ label, provider: "discord", guild_id: SEED.guildId, config: { urls: [SEED.webhook] } });
+    const id = ((await r.json()) as { rule_id: string }).rule_id;
+    await expectClosed(m);
+
+    const card = page.locator(".fwd-card", { hasText: label });
+    await expect(card).toBeVisible();
+    await card.locator(".fwd-edit-btn").click();
+    await expectOpen(m);
+    await expect(m.locator("#fwdModalTitle")).toHaveText("Edit Forwarding Rule");
+    await expect(m.locator("#fwd_label")).toHaveValue(label);
+    await expect(m.locator("#fwd_provider")).toHaveValue("discord");
+    await expect(m.locator("#fwd_guild_id")).toHaveValue(SEED.guildId);
+    await expect(m.locator("#provider_discord")).toContainText(SEED.webhook);
+    await m.locator("#fwdCancelBtn").click();
+    await expectClosed(m);
+
+    expect((await page.request.delete(`/api/forwarding/${encodeURIComponent(id)}`, { headers: CSRF_HEADERS })).ok()).toBeTruthy();
   });
 
   test("40 total and per rule counts answer", async ({ page }) => {
