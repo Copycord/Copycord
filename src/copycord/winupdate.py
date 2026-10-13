@@ -125,9 +125,9 @@ def service_leftovers(rows: list, me: int, prefix: str,
         path = r.get("ExecutablePath")
         if _under(path, prefix):
             return True
-        if (r.get("Name") or "").lower() not in _LAUNCHERS or not path:
+        if folder is None or (r.get("Name") or "").lower() not in _LAUNCHERS or not path:
             return False
-        return folder is None or ntpath.normcase(ntpath.dirname(path)) == folder
+        return ntpath.normcase(ntpath.dirname(path)) == folder
 
     mine, pid = set(), me
     while pid in by_pid and pid not in mine:
@@ -139,10 +139,12 @@ def service_leftovers(rows: list, me: int, prefix: str,
         pid = r.get("ProcessId")
         if pid in mine or not ours(r):
             continue
+        # Climb through the launchers to whatever started them.
         top, hops = r, 0
         while hops < 50:
             parent = by_pid.get(top.get("ParentProcessId"))
-            if parent is None or not ours(parent):
+            if parent is None or not (ours(parent)
+                                      or (parent.get("Name") or "").lower() in _LAUNCHERS):
                 break
             top, hops = parent, hops + 1
         parent = by_pid.get(top.get("ParentProcessId"))

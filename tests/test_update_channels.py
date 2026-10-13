@@ -1137,6 +1137,8 @@ def test_service_leftovers_finds_what_the_task_started():
     assert winupdate.service_leftovers(rows, 30, PREFIX, BIN) == [41, 42, 45]
     # This command and its launcher are never in the list.
     assert winupdate.service_leftovers([LAUNCHER, ME], 30, PREFIX, BIN) == []
+    # Without the launcher folder only the environment's processes count.
+    assert winupdate.service_leftovers(rows, 30, PREFIX) == [42, 45]
 
 
 def test_scan_counts_the_windowless_launcher_as_copycord():
