@@ -34,10 +34,7 @@ _UP_HP = re.compile(r"^(?P<user>[^:@]+):(?P<pass>[^@]+)@(?P<host>[^:]+):(?P<port
 
 
 def _normalise_proxy_url(raw: str) -> Optional[str]:
-    """
-    Accept many common proxy formats and normalise to ``scheme://[user:pass@]host:port``.
-    Returns *None* for lines that cannot be parsed.
-    """
+    """Normalise common proxy formats to ``scheme://[user:pass@]host:port``; None if unparsable."""
     raw = raw.strip()
     if not raw:
         return None
@@ -61,26 +58,10 @@ def _normalise_proxy_url(raw: str) -> Optional[str]:
 
 
 class ProxyRotator:
-    """
-    Proxy rotator with health tracking and optional timed rotation.
+    """Proxy rotator with health tracking and optional timed rotation.
 
-    By default one proxy is selected and used for all requests.  It only
-    switches when the current proxy is suspended due to failures.
-
-    When ``rotation_interval`` is set (> 0 seconds), the proxy
-    automatically rotates to the next healthy one after the interval
-    elapses.
-
-    Proxies that fail repeatedly are temporarily suspended and
-    automatically re-tested after a cooldown period.
-
-    Usage::
-
-        rotator = ProxyRotator()
-        rotator.reload()
-
-        if rotator.enabled:
-            proxy_url = rotator.next()
+    Sticks with one proxy until it is suspended after repeated failures, or
+    rotates every ``rotation_interval`` seconds when that is set.
     """
 
     MAX_FAILURES = 3
@@ -94,12 +75,10 @@ class ProxyRotator:
 
         self._health: Dict[str, Dict] = {}
 
-        # Preferred proxies for the gateway connection. Empty means "no
-        # preference", which is not the same as "none are favorites" -- with
-        # no favorites configured every proxy is equally acceptable.
+        # empty favorites means every proxy is acceptable
         self._favorites: set[str] = set()
 
-        # Time-based rotation (0 = per-request round-robin)
+        # 0 = per-request round-robin
         self._rotation_interval: int = 0
         self._current_proxy: Optional[str] = None
         self._current_proxy_since: float = 0.0
@@ -131,15 +110,11 @@ class ProxyRotator:
         return self._rotation_interval
 
     def set_rotation_interval(self, seconds: int) -> None:
-        """Set the time-based rotation interval in seconds.
-
-        ``0`` disables timed rotation (sticky — one proxy used until it
-        fails).
-        """
+        """Set the timed rotation interval in seconds; 0 disables it."""
         seconds = max(0, int(seconds))
         if seconds != self._rotation_interval:
             self._rotation_interval = seconds
-            # Reset current assignment so the next call picks fresh
+            # reset so the next call picks fresh
             self._current_proxy = None
             self._current_proxy_since = 0.0
             if seconds:
@@ -158,13 +133,7 @@ class ProxyRotator:
         return bool(self._favorites & set(self._proxies))
 
     def set_favorites(self, raw_lines: Optional[List[str]]) -> int:
-        """Mark proxies as preferred for the gateway.
-
-        Accepts the same raw forms as the proxy list itself and normalises
-        them, because the UI stores what the user typed while the rotator
-        works in normalised URLs -- comparing the two directly would silently
-        match nothing.
-        """
+        """Mark proxies as preferred for the gateway; raw forms are normalised to match the rotator's URLs."""
         normalised: set[str] = set()
         for line in raw_lines or []:
             url = _normalise_proxy_url(line)
@@ -189,22 +158,13 @@ class ProxyRotator:
         ]
 
     def on_fallback(self) -> bool:
-        """True when we are on a non-favorite while favorites are configured.
-
-        This is the only state the favorite re-check task should run in: with
-        no favorites there is nothing to prefer, and while already on one
-        there is nothing to go back to.
-        """
+        """True when on a non-favorite while favorites are configured."""
         if not self.has_favorites:
             return False
         return not self.is_favorite(self._current_proxy)
 
     def clear_suspension(self, proxy_url: str) -> None:
-        """Forget a proxy's failure history after it has been proven working.
-
-        The re-check task probes a favorite directly, so waiting out the
-        remaining suspension would ignore evidence we just gathered.
-        """
+        """Forget a proxy's failure history after it was probed working."""
         info = self._health.get(proxy_url)
         if info:
             info["failures"] = 0
@@ -228,10 +188,7 @@ class ProxyRotator:
             self._current_proxy_since = 0.0
 
     def reload(self, proxy_lines: Optional[List[str]] = None) -> int:
-        """
-        (Re)load proxy list.  If *proxy_lines* is ``None``, read from disk.
-        Returns the number of valid proxies loaded.
-        """
+        """(Re)load the proxy list from proxy_lines or disk; returns the number loaded."""
         if proxy_lines is None:
             proxy_lines = self._read_file()
 
@@ -245,7 +202,7 @@ class ProxyRotator:
 
         self._health = {k: v for k, v in self._health.items() if k in normalised}
 
-        # Reset time-based assignment when proxy list changes
+        # reset time-based assignment when the list changes
         self._current_proxy = None
         self._current_proxy_since = 0.0
 
@@ -253,20 +210,9 @@ class ProxyRotator:
         return len(normalised)
 
     def next(self, *, exclude: Optional[set] = None) -> Optional[str]:
-        """Return the next healthy proxy URL, or *None*.
+        """Return the next healthy proxy URL, or None.
 
-        Default behaviour (``rotation_interval == 0``): pick one proxy and
-        stick with it indefinitely — only switch when it is suspended.
-
-        When ``rotation_interval > 0``: use one proxy for the configured
-        duration, then advance to the next healthy proxy.
-
-        Parameters
-        ----------
-        exclude:
-            Set of proxy URLs to skip (e.g. already tried this request).
-            When provided, a temporary fallback is returned *without*
-            changing the sticky ``_current_proxy`` assignment.
+        With ``exclude``, a temporary fallback is returned without changing the sticky proxy.
         """
         if not self._proxies:
             return None
@@ -274,27 +220,26 @@ class ProxyRotator:
         exclude = exclude or set()
         now = time.monotonic()
 
-        # Check if the current proxy is still usable
+        # is the current proxy still usable
         if (
             self._current_proxy
             and self._current_proxy not in exclude
             and not self._is_suspended(self._current_proxy, now)
         ):
-            # With timed rotation, check if the interval has expired
+            # with timed rotation, check whether the interval expired
             if self._rotation_interval > 0:
                 if (now - self._current_proxy_since) < self._rotation_interval:
                     return self._current_proxy
-                # Interval expired — fall through to assign a new one
+                # expired, assign a new one
             else:
-                # No rotation — stick with this proxy forever
+                # no rotation, stay on this proxy
                 return self._current_proxy
 
-        # ── Retry / fallback (exclude is non-empty) ──
-        # Return a temporary alternative without changing the sticky proxy.
+        # retry/fallback: temporary alternative, sticky proxy unchanged
         if exclude:
             return self._next_healthy(exclude, now)
 
-        # ── Genuine rotation or first assignment ──
+        # rotation or first assignment
         proxy = self._next_healthy(exclude, now)
         if proxy:
             old = self._current_proxy
@@ -308,11 +253,7 @@ class ProxyRotator:
         return proxy
 
     def rotate_now(self) -> Optional[str]:
-        """Force an immediate rotation to the next healthy proxy.
-
-        Returns the new proxy URL, or *None* if no healthy proxy is
-        available.  Used by the background rotation timer.
-        """
+        """Rotate immediately to the next healthy proxy; returns it, or None."""
         if not self._proxies or not self._enabled:
             return None
 
@@ -320,7 +261,7 @@ class ProxyRotator:
         exclude = {self._current_proxy} if self._current_proxy else set()
         proxy = self._next_healthy(exclude, now)
 
-        # If all other proxies are dead, stick with the current one
+        # if all others are dead, stay on the current one
         if not proxy:
             proxy = self._current_proxy
 
@@ -340,12 +281,7 @@ class ProxyRotator:
         return proxy
 
     async def run_rotation_loop(self) -> None:
-        """Background task that handles timed proxy rotation.
-
-        Runs forever; safe to wrap in ``asyncio.create_task``.
-        Health monitoring is handled reactively via ``on_disconnect``
-        / ``on_resumed`` events in the client — no polling needed.
-        """
+        """Background task that handles timed proxy rotation."""
         while True:
             if not self._enabled or self._rotation_interval <= 0:
                 await asyncio.sleep(5)
@@ -359,11 +295,7 @@ class ProxyRotator:
             await asyncio.sleep(5)
 
     def _next_healthy(self, exclude: set, now: float) -> Optional[str]:
-        """Pick a random healthy proxy that isn't excluded or suspended.
-
-        Favorites win outright: every healthy favorite is tried before any
-        non-favorite, so a fallback only happens when no favorite is usable.
-        """
+        """Pick a random healthy, non-excluded proxy; any healthy favorite wins over non-favorites."""
         candidates = [
             url for url in self._proxies
             if url not in exclude and not self._is_suspended(url, now)
@@ -387,7 +319,7 @@ class ProxyRotator:
 
         info = self._health[proxy_url]
 
-        # If already suspended, don't pile on — avoids duplicate log spam
+        # already suspended, avoid duplicate log spam
 
         if info.get("suspended_until", 0) > time.monotonic():
             return
@@ -406,7 +338,7 @@ class ProxyRotator:
                 info["failures"],
             )
 
-            # If the suspended proxy was the current time-based proxy, force rotation
+            # force rotation if this was the current time-based proxy
             if self._current_proxy == proxy_url:
                 self._current_proxy = None
                 self._current_proxy_since = 0.0
@@ -448,13 +380,9 @@ class ProxyRotator:
 
 
 def _mask_proxy_url(url: str) -> str:
-    """Mask credentials in a proxy URL for safe logging.
+    """Mask credentials in a proxy URL, appending a short hash of the whole URL.
 
-    Ends with a short fingerprint of the whole URL. Rotating-proxy providers
-    hand out a pool that differs ONLY in the credentials -- same host, same
-    port, one session id per entry -- so masking the credentials alone made
-    all of them log as the same string, and "Switched to proxy ..." could not
-    be told apart from spinning on a single dead one.
+    Rotating-proxy pools differ only in the credentials, so without the hash every entry logs identically.
     """
     digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:6]
     try:

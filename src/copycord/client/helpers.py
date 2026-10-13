@@ -116,10 +116,7 @@ class ClientUiController:
             kind = (ev.get("kind") or ev.get("topic") or "").lower()
             role = (ev.get("role") or ev.get("source") or "").lower()
 
-            # Nothing is logged before this filter on purpose: every role
-            # publishes a status heartbeat every ~30s, so logging each event
-            # (plus a full payload dump) on arrival buried the handful that
-            # are actual commands. Log only what we're going to act on.
+            # not logged earlier: every role sends a status heartbeat every ~30s, which buries real commands
             if kind != "client":
                 return
             if role and role != "ui":
@@ -348,9 +345,7 @@ def _safe_preview(obj: Any, limit: int = 400) -> str:
 
 
 async def dm_member_by_id(bot, member_id: int, message: str) -> bool:
-    """
-    DM a member by their ID.
-    """
+    """DM a member by their ID."""
     try:
         member = bot.get_user(member_id)
         if not member:
@@ -370,9 +365,7 @@ async def dm_member_by_id(bot, member_id: int, message: str) -> bool:
         return False
 
 def _safe_primitive(val: Any) -> Any:
-    """
-    Try to convert any random Discord model attr into something JSON-friendly.
-    """
+    """Convert a Discord model attribute to something JSON-friendly."""
 
     if val is None or isinstance(val, (str, int, float, bool)):
         return val
@@ -431,10 +424,7 @@ def _safe_primitive(val: Any) -> Any:
 
 
 def dump_message_debug(message: Message) -> str:
-    """
-    Produce a pretty, multi-line JSON-ish string describing the full message.
-    Safe for logging. Does not include tokens.
-    """
+    """Pretty JSON-ish dump of a message for logging; excludes tokens."""
 
     try:
         data = {
