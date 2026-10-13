@@ -4,6 +4,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { BASE_PATH, CSRF_HEADERS, LOGIN_PATH, NOT_FOUND_PATH, PAGES, PASSWORD, pageUrl, type PageName } from "../lib/env.ts";
 import { SEED, stubClientGuilds } from "../lib/seed.ts";
 import { FWD_CREATE_BTN, MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, closeX, expectClosed, expectOpen, modal, settle } from "../lib/ui.ts";
+import { DETAILS, FIRST, GUILDS, LAST, dialog as guildDialog, guildAction, guildCard, stubGuilds } from "./guilds-fixtures.ts";
 
 async function open(page: Page, name: PageName): Promise<void> {
   const errors: string[] = [];
@@ -167,6 +168,87 @@ test.describe("guilds", () => {
     await expect(page.locator("#g-search")).toBeAttached();
     await expect(page.locator("#g-sortdir")).toBeAttached();
     expect((await page.request.get("/api/guilds")).ok()).toBeTruthy();
+  });
+
+  test.describe("with guilds", () => {
+    test.beforeEach(async ({ page }) => stubGuilds(page));
+
+    test("37 guild grid lists, search filters, sort direction flips", async ({ page }) => {
+      await open(page, "guilds");
+      const cards = page.locator("#guilds-root [data-gid]");
+      await expect(cards).toHaveCount(GUILDS.length);
+      await expect(guildCard(page, FIRST.id)).toContainText(FIRST.name);
+      await page.locator("#g-search").fill("BETA");
+      await expect(cards).toHaveCount(1);
+      await page.locator("#g-search").fill("");
+      await expect(cards).toHaveCount(GUILDS.length);
+      const sort = page.locator("#g-sortdir");
+      await expect(sort).toContainText("A → Z");
+      await expect(cards.first()).toHaveAttribute("data-gid", FIRST.id);
+      await sort.click();
+      await expect(sort).toContainText("Z → A");
+      await expect(cards.first()).toHaveAttribute("data-gid", LAST.id);
+    });
+
+    test("38 view details shows the guild and closes with X and Close", async ({ page }) => {
+      await open(page, "guilds");
+      const d = guildDialog(page, "Guild details");
+      for (const which of ["x", "footer"] as const) {
+        await guildAction(page, FIRST.id, "View details");
+        await expect(d).toBeVisible();
+        await expect(d).toContainText("1,234 members");
+        await expect(d).toContainText(DETAILS.owner_id);
+        await expect(d).toContainText(DETAILS.description);
+        const close = d.getByRole("button", { name: "Close" });
+        await (which === "x" ? close.first() : close.last()).click();
+        await expect(d).toBeHidden();
+      }
+    });
+
+    test("39 export dialog has every option and posts the download media choice", async ({ page }) => {
+      let body: Record<string, unknown> | undefined;
+      await page.route("**/api/export/messages", async (r) => {
+        body = r.request().postDataJSON() as Record<string, unknown>;
+        await r.fulfill({ json: { ok: true, accepted: true } });
+      });
+      await open(page, "guilds");
+      await guildAction(page, FIRST.id, "Export messages");
+      const d = guildDialog(page, "Export messages");
+      await expect(d).toBeVisible();
+      const ids = [
+        "ex-channel", "ex-user", "ex-f-hascontent", "ex-f-embeds", "ex-f-attachments", "ex-f-att-tip", "ex-f-links",
+        "ex-f-emojis", "ex-f-word-on", "ex-f-word", "ex-f-replies", "ex-f-bots", "ex-f-system", "ex-f-pinned",
+        "ex-f-stickers", "ex-f-mentions", "ex-f-threads", "ex-f-minlen", "ex-f-minreacts", "ex-webhook", "ex-after",
+        "ex-before", "ex-dl-images", "ex-dl-videos", "ex-dl-audio", "ex-dl-other",
+      ];
+      for (const id of ids) await expect(page.locator(`#${id}`), id).toBeAttached();
+      await page.locator("#ex-channel").fill("123456789012345678");
+      await page.locator("#ex-dlwrap > summary").click();
+      await page.locator("#ex-dl-images").check();
+      await page.locator("#ex-dl-other").check();
+      await d.getByRole("button", { name: "Start export" }).click();
+      await expect(d).toBeHidden();
+      expect(body?.guild_id).toBe(FIRST.id);
+      expect(body?.channel_id).toBe("123456789012345678");
+      const filters = body?.filters as { download_media?: unknown; attachments?: unknown } | undefined;
+      expect(filters?.attachments).toBe(true);
+      expect(filters?.download_media).toEqual({ images: true, videos: false, audio: false, other: true });
+    });
+
+    test("39 export dialog closes with Cancel without posting", async ({ page }) => {
+      let posted = false;
+      await page.route("**/api/export/messages", (r) => {
+        posted = true;
+        return r.fulfill({ json: { ok: true } });
+      });
+      await open(page, "guilds");
+      await guildAction(page, FIRST.id, "Export messages");
+      const d = guildDialog(page, "Export messages");
+      await expect(d).toBeVisible();
+      await d.getByRole("button", { name: "Cancel" }).click();
+      await expect(d).toBeHidden();
+      expect(posted).toBe(false);
+    });
   });
 });
 

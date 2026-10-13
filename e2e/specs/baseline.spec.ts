@@ -1,9 +1,10 @@
 import fs from "node:fs";
 import path from "node:path";
-import { test, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { BASE_PATH, E2E_DIR, LOGIN_PATH, NOT_FOUND_PATH, PAGES, pageUrl, type PageName } from "../lib/env.ts";
 import { FWD_CREATE_BTN, MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, expectOpen, modal, settle } from "../lib/ui.ts";
 import { stubClientGuilds } from "../lib/seed.ts";
+import { DETAILS, FIRST, dialog as guildDialog, guildAction, guildCard, stubGuilds } from "./guilds-fixtures.ts";
 
 // E2E_SHOTS_DIR=baseline/new captures the SPA into a separate folder for scripts/compare.ts.
 const OUT = path.resolve(E2E_DIR, process.env.E2E_SHOTS_DIR ?? "baseline/old");
@@ -32,6 +33,19 @@ const MODALS: ModalShot[] = [
     open: (p) => p.locator(MAPPING_FILTERS_BTN).first().click() },
   { name: "forwarding-new-rule", page: "forwarding", id: "fwdModal",
     open: (p) => p.locator(FWD_CREATE_BTN).filter({ visible: true }).first().click() },
+];
+
+const GUILD_SHOTS: Array<{ name: string; fullPage: boolean; open: (page: Page) => Promise<void> }> = [
+  { name: "guilds-grid", fullPage: true, open: async () => undefined },
+  { name: "guilds-menu", fullPage: false, open: (p) => guildAction(p, FIRST.id) },
+  { name: "guilds-details", fullPage: false, open: async (p) => {
+    await guildAction(p, FIRST.id, "View details");
+    await expect(guildDialog(p, "Guild details")).toContainText(DETAILS.owner_id);
+  } },
+  { name: "guilds-export", fullPage: false, open: async (p) => {
+    await guildAction(p, FIRST.id, "Export messages");
+    await expect(guildDialog(p, "Export messages")).toBeVisible();
+  } },
 ];
 
 fs.mkdirSync(OUT, { recursive: true });
@@ -71,6 +85,19 @@ for (const vp of VIEWPORTS) {
         await page.locator("#menu-toggle").click();
         await page.waitForTimeout(300);
         await page.screenshot({ path: path.join(OUT, `mobile-drawer-${vp.name}.png`) });
+      });
+    }
+
+    // The guilds page with stubbed guilds (it stays gated without Discord), its card menu and dialogs.
+    for (const g of GUILD_SHOTS) {
+      test(`guilds ${g.name}`, async ({ page }) => {
+        await stubGuilds(page);
+        await page.goto(pageUrl("guilds"));
+        await settle(page);
+        await expect(guildCard(page, FIRST.id)).toBeVisible();
+        await g.open(page);
+        await page.waitForTimeout(400);
+        await page.screenshot({ path: path.join(OUT, `${g.name}-${vp.name}.png`), fullPage: g.fullPage });
       });
     }
 
