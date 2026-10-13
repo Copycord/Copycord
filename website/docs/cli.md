@@ -62,8 +62,7 @@ Options:
   -h, --help     Show this help
   -V, --version  Print the version
   --no-color     Turn off color, same as NO_COLOR=1
-  --json         Print the result as JSON (with --version, doctor,
-                 update status, config get and config export)
+  --json         Print the result as JSON, for scripts
   --verbose      Show more detail, and the full error if something fails
 
 Run copycord <command> --help for the options of one command.
