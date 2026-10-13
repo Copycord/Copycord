@@ -94,3 +94,46 @@ export function reason(e: unknown, fallback: string): string {
 export function plural(n: number, word: string): string {
   return `${n} ${word}${n !== 1 ? "s" : ""}`;
 }
+
+export const QUEUE_CLEAR_URL = "/api/scraper/queue/clear";
+export const CANCEL_ALL_URL = "/api/scraper/cancel-all";
+export const SCRAPES_URL = "/api/scraper/scrapes";
+export const LOGS_CLEAR_URL = "/api/scraper/logs/clear";
+export const LOG_STREAM_URL = "/logs/stream/scraper";
+
+export function queueItemUrl(id: string | number): string {
+  return `/api/scraper/queue/${encodeURIComponent(String(id))}`;
+}
+
+/** Download and delete address of a saved scrape; the whole path is one encoded segment, as on the old page. */
+export function scrapeUrl(path: string): string {
+  return `${SCRAPES_URL}/${encodeURIComponent(path)}`;
+}
+
+export function queueRemove(id: string | number): Promise<ScraperOk> {
+  return api.del<ScraperOk>(queueItemUrl(id));
+}
+
+export function queueClear(): Promise<ScraperOk> {
+  return api.post<ScraperOk>(QUEUE_CLEAR_URL);
+}
+
+export function cancelAll(): Promise<ScraperOk> {
+  return api.post<ScraperOk>(CANCEL_ALL_URL);
+}
+
+export function deleteScrape(path: string): Promise<ScraperOk> {
+  return api.del<ScraperOk>(scrapeUrl(path));
+}
+
+/** Empties scraper.out so a reload does not bring the lines back; failures are ignored. */
+export function clearLogFile(): void {
+  api.post<ScraperOk>(LOGS_CLEAR_URL).catch(() => undefined);
+}
+
+/** "42s", "3m 7s", or a dash when unknown, as the old fmtSec. */
+export function fmtSec(s: number | null | undefined): string {
+  if (s == null || !Number.isFinite(s)) return "\u2014";
+  const r = Math.round(s);
+  return r < 60 ? `${r}s` : `${Math.floor(r / 60)}m ${r % 60}s`;
+}

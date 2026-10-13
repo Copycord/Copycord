@@ -11,7 +11,7 @@ import { addToken, deleteToken, plural, reason, validateToken } from "./scraperA
 
 export const TITLE = "m-0 text-lg font-bold text-accent";
 
-const ICON_BUTTON =
+export const ICON_BUTTON =
   "inline-flex size-8 cursor-pointer items-center justify-center rounded-control border border-border bg-white/4 " +
   "text-accent outline-none transition duration-200 focus-visible:ring-2 focus-visible:ring-accent/60 " +
   "enabled:hover:-translate-y-0.5 enabled:hover:border-accent/30 enabled:hover:bg-white/8 disabled:cursor-not-allowed disabled:opacity-55";

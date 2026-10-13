@@ -101,3 +101,60 @@ export interface ScraperProxiesResponse {
   proxies?: string[];
   error?: string;
 }
+
+/** GET /api/scraper/queue and the queue field of a queue_update message. */
+export interface ScraperQueueResponse {
+  ok?: boolean;
+  queue?: ScraperQueueItem[];
+  running?: boolean;
+  error?: string;
+}
+
+/** One entry of GET /api/scraper/scrapes; unreadable files only carry the name and an error. */
+export interface ScraperScrape {
+  filename: string;
+  /** Relative to data/scrapes, either "name.json" or "{guild_id}/name.json". */
+  path: string;
+  guild_id?: string | number | null;
+  guild_name?: string | null;
+  total_count?: number | null;
+  elapsed_seconds?: number | null;
+  scraped_at?: string | null;
+  metadata?: { method?: string; [key: string]: unknown } | null;
+  file_size?: number | null;
+  error?: string;
+}
+
+/** GET /api/scraper/scrapes */
+export interface ScraperScrapesResponse {
+  ok: boolean;
+  scrapes?: ScraperScrape[];
+  error?: string;
+}
+
+/** Payload of a /ws/out message whose kind is "scraper". */
+export type ScraperEvent =
+  | { type: "progress"; current?: number; total?: number; message?: string }
+  | {
+      type: "complete";
+      success?: boolean;
+      guild_id?: string | number | null;
+      total_count?: number;
+      elapsed_seconds?: number | null;
+      error?: string | null;
+    }
+  | { type: "queue_update"; queue?: ScraperQueueItem[]; running?: boolean };
+
+/** A /ws/out message as the scraper sends it. */
+export interface ScraperWsMessage {
+  kind?: string;
+  type?: string;
+  payload?: ScraperEvent;
+  [key: string]: unknown;
+}
+
+/** One line of /logs/stream/scraper: a tail batch, a single new line, or raw text. */
+export interface ScraperLogEvent {
+  lines?: unknown[];
+  line?: string;
+}
