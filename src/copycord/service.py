@@ -862,7 +862,7 @@ def show_status(svc, as_json: bool = False) -> int:
         is_cmd = logs.startswith("journalctl")
         rows.append(("Logs", ui.cmd(logs) if is_cmd else ui.path_link(logs)))
     ui.heading("Copycord service")
-    ui.kv(rows)
+    ui.kv(rows, width=len("Started"))
     print()
     if st.running:
         print(f"Stop it with {ui.cmd('copycord service stop')}, "

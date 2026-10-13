@@ -96,7 +96,7 @@ def test_version_json_on_the_dev_channel(data_dir, monkeypatch, capsys):
     ["--json", "run"],
     ["config", "set", "A", "1", "--json"],
     ["update", "--json"],
-    ["--json", "service", "status"],
+    ["--json", "service", "stop"],
 ])
 def test_json_only_on_reporting_commands(argv, data_dir, capsys):
     with pytest.raises(SystemExit) as exc:
