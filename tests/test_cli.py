@@ -95,6 +95,19 @@ def test_version_prints_short_commit_of_a_git_install(data_dir, capsys, monkeypa
     assert lines == [f"{CURRENT_VERSION} (7cf4866)", "stable channel"]
 
 
+def test_version_on_a_terminal_is_a_header_line(data_dir, monkeypatch):
+    from copycord import update, update_check
+
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(update, "installed_commit", lambda: "7cf48660c2cd76d8a4bf5aac5b427904a2dcd86b")
+    monkeypatch.setattr(update_check, "start", lambda wait=0: None)
+    out, _ = _terminal(monkeypatch)
+    with pytest.raises(SystemExit):
+        cli.main(["--version"])
+    version = CURRENT_VERSION if CURRENT_VERSION.startswith("v") else f"v{CURRENT_VERSION}"
+    assert out.getvalue().splitlines() == [f"Copycord {version} (7cf4866) \u00b7 stable channel"]
+
+
 def test_bare_copycord_prints_the_overview(data_dir, capsys):
     with pytest.raises(SystemExit) as exc:
         cli.main([])

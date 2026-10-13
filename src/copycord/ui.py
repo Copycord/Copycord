@@ -488,12 +488,13 @@ class Rail:
             _rail = self._outer
 
 
-def brand_line(version: str, commit: str = "", stream: Optional[TextIO] = None) -> str:
+def brand_line(version: str, commit: str = "", stream: Optional[TextIO] = None,
+               tail: str = TAGLINE) -> str:
     """The header of a rail command: "Copycord v4.0.0 (abc1234) · tagline"."""
     stream = sys.stdout if stream is None else stream
     version = version if version[:1] in ("v", "u") else f"v{version}"
     sha = f" {dim('(' + commit[:7] + ')', stream)}" if commit else ""
-    return f"{accent('Copycord', stream)} {version}{sha}{dim(dot(stream) + TAGLINE, stream)}"
+    return f"{accent('Copycord', stream)} {version}{sha}{dim(dot(stream) + tail, stream)}"
 
 
 def brand(stream: Optional[TextIO] = None) -> str:

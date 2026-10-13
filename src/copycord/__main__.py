@@ -347,10 +347,13 @@ def print_version(as_json: bool = False) -> None:
         return
     version = _version()
     commit = installed_commit()
-    if commit:
-        version = f"{version} ({commit[:7]})"
-    print(version)
-    print(load_channel().describe(ui.dot()))
+    channel = load_channel().describe(ui.dot())
+    if sys.stdout.isatty():
+        # On a terminal one header line: "Copycord v4.0.0 (abc1234) · stable channel".
+        print(ui.brand_line(version, commit or "", tail=channel))
+    else:
+        print(f"{version} ({commit[:7]})" if commit else version)
+        print(channel)
     if sys.stdout.isatty():
         from copycord import update_check
 
