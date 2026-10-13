@@ -74,8 +74,7 @@ formatter = logging.Formatter(
 root = logging.getLogger()
 root.setLevel(LEVEL)
 
-# Skip when the supervisor (or the other role module) already installed the
-# console handler, otherwise every record prints once per handler.
+# skip if the supervisor or the other role module already installed the console handler, or each record prints twice
 if not any(getattr(h, "_copycord_console", False) for h in root.handlers):
     ch = logging.StreamHandler()
     ch._copycord_console = True
@@ -103,20 +102,9 @@ for lib in ("selfclient.state", "selfclient.client"):
 def _is_proxy_exception(exc: BaseException | None) -> bool:
     """Is this failure the proxy's fault, so another route is worth trying?
 
-    The exception that reaches us is often not the one that matters. Two cases
-    the obvious check misses:
-
-    * ``CurlError`` does not subclass ``OSError`` -- it inherits straight from
-      ``Exception`` -- so an isinstance test against the socket error types
-      never matches, even though curl_cffi raises it for every gateway dial
-      through a dead proxy.
-    * discord.py's connect loop reads ``self.ws.sequence`` when preparing to
-      retry, but on the FIRST failed dial ``self.ws`` is still None. It
-      therefore raises ``AttributeError`` while handling the real error, and
-      that is what propagates. The original failure survives only as the
-      chained ``__context__``.
-
-    So walk the chain rather than judging the outermost exception alone.
+    Walks the exception chain: CurlError does not subclass OSError, and on the
+    first failed dial the connect loop raises an AttributeError (self.ws is
+    None) that hides the real error in __context__.
     """
     seen: set[int] = set()
     current: BaseException | None = exc
@@ -301,11 +289,7 @@ class ClientListener:
     )
 
     def _new_bot(self, proxy: Optional[str]) -> Client:
-        """A fresh selfclient Client with every handler registered.
-
-        The build is resolved and pinned by _resolve_client_build before each
-        start, so the gateway does not fetch it again.
-        """
+        """A fresh Client with every handler registered; the build is pinned by _resolve_client_build before each start."""
         bot = Client(proxy=proxy, refresh_build=False)
         for name in self.EVENT_HANDLERS:
             bot.event(getattr(self, name))
@@ -405,9 +389,7 @@ class ClientListener:
             logger.debug("Failed to publish proxies_dead event", exc_info=True)
 
     async def _on_ws(self, msg: dict) -> dict | None:
-        """
-        Handles WebSocket (WS) messages received by the client.
-        """
+        """Handle WebSocket messages received by the client."""
         typ = msg.get("type")
         data = msg.get("data", {})
 
@@ -738,10 +720,7 @@ class ClientListener:
         return None
 
     async def _resolve_accessible_host_channel(self, orig_channel_id: int):
-        """
-        Maps a cloned channel id to its host channel id (if applicable), and returns a
-        channel object you can actually access along with the resolved channel_id and guild.
-        """
+        """Map a cloned channel id to its host channel id; returns an accessible channel object with the resolved channel_id and guild."""
         logger = logging.getLogger("client")
 
         channel_id = int(orig_channel_id)
@@ -847,9 +826,7 @@ class ClientListener:
                 logger.exception("Error in startup sitemap sync")
 
     def schedule_sync(self, guild_id: int | None = None, delay: float = 1.0):
-        """
-        Ask SitemapService to (debounced) resend sitemap(s).
-        """
+        """Ask SitemapService to resend sitemap(s), debounced."""
         try:
             self.sitemap.schedule_sync(guild_id=guild_id, delay=delay)
         except TypeError:
@@ -974,9 +951,7 @@ class ClientListener:
         logger.debug("[⚙️] Block list now: %s", self.blocked_keywords_map)
 
     def should_ignore(self, message: Message) -> bool:
-        """
-        Determines whether a given Discord message should be ignored based on various conditions.
-        """
+        """Whether a Discord message should be ignored."""
         ch = message.channel
         try:
             if isinstance(ch, Thread):
@@ -1057,9 +1032,7 @@ class ClientListener:
         return False
 
     async def on_message(self, message: Message):
-        """
-        Handles incoming Discord messages and processes them for forwarding.
-        """
+        """Process an incoming message for forwarding."""
         asyncio.create_task(
             self.forwarding.handle_new_message(discord_message=message, bot=self.bot)
         )
@@ -1280,9 +1253,7 @@ class ClientListener:
         return False
 
     async def on_message_edit(self, before: Message, after: Message):
-        """
-        When an upstream message is edited, forward the new content/embeds/components.
-        """
+        """Forward the new content/embeds/components of an edited upstream message."""
         g = getattr(after, "guild", None)
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
@@ -1624,9 +1595,7 @@ class ClientListener:
         )
 
     async def on_message_delete(self, message: Message):
-        """
-        When an upstream message is deleted, tell the server to delete the cloned webhook message.
-        """
+        """Tell the server to delete the cloned webhook message for a deleted upstream message."""
         g = getattr(message, "guild", None)
 
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
@@ -1669,9 +1638,7 @@ class ClientListener:
         )
 
     async def on_raw_message_delete(self, payload: RawMessageDeleteEvent):
-        """
-        Handle deletes for messages that weren't cached.
-        """
+        """Handle deletes of messages that were not cached."""
 
         g = getattr(payload, "guild", None)
 
@@ -1751,9 +1718,7 @@ class ClientListener:
         )
 
     async def on_thread_delete(self, thread: Thread):
-        """
-        Event handler that is triggered when a thread is deleted in a Discord server.
-        """
+        """Handle a deleted thread."""
         g = getattr(thread, "guild", None)
         if not g or not self._is_mapped_origin(g.id):
             return
@@ -1773,9 +1738,7 @@ class ClientListener:
         logger.info("[📩] Forwarded thread %s delete from %s", thread.id, g.name)
 
     async def on_thread_update(self, before: Thread, after: Thread):
-        """
-        Handles updates to a Discord thread, such as renaming.
-        """
+        """Handle thread updates such as renames."""
         g = getattr(before, "guild", None)
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
             return
@@ -1839,9 +1802,7 @@ class ClientListener:
                 await self.ws.send(payload)
 
     async def on_guild_channel_create(self, channel: GuildChannel):
-        """
-        Event handler that is triggered when a new channel is created in a guild.
-        """
+        """Handle a channel created in a guild."""
         g = getattr(channel, "guild", None)
 
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
@@ -1856,9 +1817,7 @@ class ClientListener:
         self.schedule_sync(guild_id=g.id)
 
     async def on_guild_channel_delete(self, channel: GuildChannel):
-        """
-        Event handler that is triggered when a guild channel is deleted.
-        """
+        """Handle a guild channel deletion."""
         g = getattr(channel, "guild", None)
 
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
@@ -1873,9 +1832,7 @@ class ClientListener:
         self.schedule_sync(guild_id=g.id)
 
     async def on_guild_channel_update(self, before, after):
-        """
-        Handles updates to guild channels within the host guild.
-        """
+        """Handle updates to channels in the host guild."""
         g = getattr(before, "guild", None)
 
         if not g or not self._is_mapped_origin(getattr(g, "id", None)):
@@ -2247,9 +2204,7 @@ class ClientListener:
             logger.exception("[guilds] on_guild_remove failed")
 
     async def on_guild_update(self, before: Guild, after: Guild):
-        """
-        Fired when the host guild updates.
-        """
+        """Handle an update to the host guild."""
         try:
 
             row = self._guild_row_from_obj(after)
@@ -2466,9 +2421,7 @@ class ClientListener:
         return {"ok": True, "queued": True, "position": pos}
 
     async def _shutdown(self):
-        """
-        Asynchronously shuts down the client.
-        """
+        """Shut down the client."""
         logger.info("Shutting down client…")
         hb = getattr(self, "_status_hb_task", None)
         if hb is not None:
@@ -2513,9 +2466,7 @@ class ClientListener:
             logger.warning("[⚠️] Failed to notify admin of dead token: %s", e)
 
     def _try_backup_token(self, loop: asyncio.AbstractEventLoop) -> bool:
-        """
-        Attempt to find and use any backup token stored in the database.
-        """
+        """Find and use a backup token stored in the database."""
         try:
             for row in self.db.get_backup_tokens():
                 token = (row.get("token_value") or "").strip()
@@ -2560,9 +2511,7 @@ class ClientListener:
     async def _probe_proxy(self, proxy_url: str) -> bool:
         """Is this proxy able to reach Discord right now?
 
-        A real request rather than a TCP connect: a proxy that accepts the
-        connection and then fails to tunnel is exactly the kind that got
-        suspended in the first place.
+        Uses a real request, since a proxy that accepts the connection but fails to tunnel is what got suspended.
         """
         import aiohttp
 
@@ -2572,7 +2521,7 @@ class ClientListener:
                 try:
                     from aiohttp_socks import ProxyConnector
                 except ImportError:
-                    # Cannot verify it, so do not claim it recovered.
+                    # cannot verify, so do not claim it recovered
                     return False
                 connector = ProxyConnector.from_url(proxy_url)
                 async with aiohttp.ClientSession(connector=connector) as sess:
@@ -2592,11 +2541,8 @@ class ClientListener:
     async def _switch_to_proxy(self, proxy_url: str) -> None:
         """Move the gateway onto ``proxy_url``.
 
-        Setting the proxy alone is not enough: the live websocket was dialled
-        through the old proxy and stays there. Dropping it with a non-1000
-        code makes the selfclient gateway reconnect (and resume), and it reads
-        the proxy again when it dials -- so the new route is picked up without
-        us having to drive the reconnect ourselves.
+        The live websocket stays on the old proxy, so it is dropped with a
+        non-1000 code; the gateway reconnects and reads the proxy again when it dials.
         """
         self.proxy_rotator._current_proxy = proxy_url
         self.proxy_rotator._current_proxy_since = time.monotonic()
@@ -2613,11 +2559,8 @@ class ClientListener:
     async def _favorite_recheck_loop(self) -> None:
         """Return to a favorite proxy once one is reachable again.
 
-        Only runs while on a fallback: with no favorites there is nothing to
-        prefer, and while already on one there is nothing to go back to. The
-        rotator's own suspension timer is not enough on its own -- it expires
-        blindly, whereas this proves the proxy works before moving a live
-        gateway onto it.
+        Only runs while on a fallback. Unlike the rotator's suspension timer,
+        this proves the proxy works before moving a live gateway onto it.
         """
         while True:
             try:
@@ -2692,12 +2635,7 @@ class ClientListener:
         return False
 
     def _apply_client_build(self, build: dict) -> None:
-        """Pin the shared fingerprint to a build we resolved.
-
-        REST headers and the gateway IDENTIFY are both built from
-        selfclient.fingerprint, so this one call covers both, and the pin
-        holds across reconnects and fresh Clients for the life of the process.
-        """
+        """Pin the shared fingerprint to a resolved build; REST headers and the gateway IDENTIFY both use it, and it holds across reconnects."""
         fingerprint.set_build_info(
             {
                 "release_channel": build.get("release_channel"),
@@ -2762,12 +2700,7 @@ class ClientListener:
         self._clear_bot_state()
 
     def _clear_bot_state(self) -> None:
-        """Replace the spent client with a fresh one on the same proxy.
-
-        A selfclient Client is not restarted in place: the new one starts with
-        empty caches, no gateway and its own HTTP session, so nothing from the
-        failed attempt (token, socket, half-filled cache) carries over.
-        """
+        """Replace the spent client with a fresh one on the same proxy, so nothing from the failed attempt carries over."""
         old = self.bot
         self._install_bot(self._new_bot(getattr(old, "proxy", None)))
         self._retire_bot(old)
@@ -2825,9 +2758,7 @@ class ClientListener:
         )
 
     def _run_client_gracefully(self, loop: asyncio.AbstractEventLoop) -> None:
-        """
-        Start the Discord client and handle gateway/login errors in a user-friendly way.
-        """
+        """Start the Discord client and handle gateway/login errors."""
 
         token = (self.config.CLIENT_TOKEN or "").strip()
         if not token:
@@ -2910,8 +2841,7 @@ class ClientListener:
         return _is_proxy_exception(exc)
 
     def _try_next_proxy_on_error(self, exc: Exception, token: str, loop) -> bool:
-        """If the error is proxy-related, try connecting through other proxies.
-        Returns True if handled (logged), False if caller should handle it."""
+        """If the error is proxy-related, try other proxies. Returns True if handled, False if the caller should handle it."""
         if not self.proxy_rotator.enabled or not self._initial_proxy:
             return False
         if not self._is_proxy_error(exc):
@@ -2949,9 +2879,7 @@ class ClientListener:
         return True
 
     def run(self):
-        """
-        Runs the Copycord client.
-        """
+        """Run the Copycord client."""
         logger.info("[✨] Starting Copycord Client %s", CURRENT_VERSION)
         if self.proxy_rotator.enabled:
             self.proxy_rotator.next()
