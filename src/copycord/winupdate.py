@@ -18,6 +18,7 @@ service, installs, and restarts the service.
 from __future__ import annotations
 
 import json
+import ntpath
 import os
 import subprocess
 import sys
@@ -119,8 +120,8 @@ def _under(path: Optional[str], root: str) -> bool:
     if not path:
         return False
     try:
-        return os.path.normcase(os.path.abspath(path)).startswith(
-            os.path.normcase(os.path.abspath(root)) + os.sep
+        return ntpath.normcase(ntpath.normpath(path)).startswith(
+            ntpath.normcase(ntpath.normpath(root)) + "\\"
         )
     except (TypeError, ValueError):
         return False
