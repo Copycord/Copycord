@@ -39,6 +39,7 @@ CHECK_TIMEOUT = 3.0
 ENV_OPT_OUT = "COPYCORD_NO_UPDATE_CHECK"
 KEY_ON_START = "UPDATE_CHECK_ON_START"
 KEY_AUTO_UPDATE = "AUTO_UPDATE"
+KEY_AUTO_UPDATE_ANY = "AUTO_UPDATE_ALL_CHANNELS"
 
 _FALSE = ("0", "false", "no", "off")
 _TRUE = ("1", "true", "yes", "on")
@@ -93,6 +94,11 @@ def check_enabled() -> bool:
 
 def auto_update_enabled() -> bool:
     return _flag(KEY_AUTO_UPDATE, False)
+
+
+def any_channel_enabled() -> bool:
+    """Auto-update the beta and dev channels too, not only stable."""
+    return _flag(KEY_AUTO_UPDATE_ANY, False)
 
 
 # --------------------------------------------------------------------------
@@ -245,7 +251,17 @@ def auto_update_once() -> bool:
     if update.detect_installer() in (update.DOCKER, update.SOURCE):
         logger.info("auto-update: skipped, Copycord is not installed with a tool that can update it")
         return False
+    stopped = update.auto_update_stopped()
+    if stopped is not None:
+        logger.warning("auto-update: stopped after the update from %s to %s did not work; "
+                       "run copycord update to update and turn it back on",
+                       stopped.get("from", "?"), stopped.get("to", "?"))
+        return False
     channel = update.load_channel()
+    if channel.channel != update.STABLE and not any_channel_enabled():
+        logger.info("auto-update: skipped on the %s; set %s=true to auto-update it too",
+                    channel.describe(), KEY_AUTO_UPDATE_ANY)
+        return False
     try:
         result = check_cached(channel, force=True)
     except Exception as e:
@@ -256,7 +272,7 @@ def auto_update_once() -> bool:
     if not result.available:
         return False
     logger.info("auto-update: applying %s", result.latest[:12] if result.dev else result.latest)
-    rc = update.update(yes=True)
+    rc = update.update(yes=True, auto=True)
     if rc != 0:
         logger.error("auto-update: failed (exit %s)", rc)
         return False
@@ -266,6 +282,11 @@ def auto_update_once() -> bool:
 
 async def auto_update_loop(interval: float = AUTO_UPDATE_INTERVAL) -> None:
     """Auto-update loop for the life of the service."""
+    try:
+        # Right after an auto-update: check this new version answers, else put the old one back.
+        await asyncio.to_thread(update.finish_pending)
+    except Exception:
+        logger.exception("auto-update: health check after the update crashed")
     while True:
         try:
             await asyncio.to_thread(auto_update_once)

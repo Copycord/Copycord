@@ -19,9 +19,13 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
+import os
 import re
 import shutil
+import sqlite3
 import sys
+import time
 import urllib.request
 from pathlib import Path
 from typing import NamedTuple, Optional, Tuple
@@ -593,11 +597,17 @@ def backup_database(skip: bool = False) -> bool:
             title="Database backup failed", status="fail", stream=sys.stderr,
         )
         return False
+    global _last_backup
+    _last_backup = dest
     if dest is None:
         ui.info("no database yet, nothing to back up", str(path))
     else:
         ui.ok("backed up the database", str(dest))
     return True
+
+
+# The pre-update backup made by the last backup_database, for a rollback.
+_last_backup: Optional[Path] = None
 
 
 def confirm_downgrade(current: str, target: str, yes: bool = False) -> int:
@@ -714,11 +724,14 @@ def update(
     reinstall: bool = False,
     force: bool = False,
     as_json: bool = False,
+    auto: bool = False,
 ) -> int:
     """Run an update; reinstall=True reinstalls the running version, for doctor --fix.
 
     With nothing new on the saved channel it changes nothing, unless force.
-    as_json only applies with check_only.
+    as_json only applies with check_only. auto (the auto-update) records the
+    installed version first, checks the new one and puts the old one back
+    if it does not work.
     """
     saved = load_channel()
     source = git_source() if reinstall else None
@@ -844,8 +857,15 @@ def update(
                 return 0
             if rc:
                 return rc
+        doctor_was_ok = auto and _doctor_ok()
         if not backup_database(no_backup):
             return 1
+        if auto:
+            try:
+                record_previous(kind, saved)
+            except Exception as e:
+                _err("auto-update: could not record the installed version, not updating", str(e))
+                return 1
         # Only a git build needs npm, for the admin UI.
         cmd_env = None
         if git:
@@ -898,6 +918,14 @@ def update(
         else:
             ui.ok("Copycord updated", spec)
 
+        if auto:
+            problem = verify_install(doctor_was_ok)
+            if problem:
+                rollback(problem, version or spec, restart)
+                return 1
+        else:
+            clear_auto_update_stop()
+
         # --tag is a one-off; a channel switch is saved once the install worked.
         if not tag and switching:
             try:
@@ -906,6 +934,9 @@ def update(
             except OSError as e:
                 ui.warn("could not save the update channel", str(e))
 
+        if auto and restart:
+            # The restarted service checks /health and rolls back (finish_pending).
+            mark_pending(version or spec)
         if restart and not _restart_service():
             return 1
         return 0
@@ -982,3 +1013,272 @@ def installed_version() -> Tuple[Optional[str], Optional[str]]:
     except (OSError, ValueError, IndexError, subprocess.SubprocessError):
         return None, None
     return (version or None), (commit or None)
+
+
+# --------------------------------------------------------------------------
+# auto-update safety: record the installed version, check the new one, roll back
+# --------------------------------------------------------------------------
+
+logger = logging.getLogger("copycord.update")
+
+PREVIOUS_FILE = "update-previous.json"
+STOP_FILE = "auto-update-stopped.json"
+HEALTH_TIMEOUT = 60.0
+HEALTH_INTERVAL = 2.0
+
+
+def previous_path() -> Path:
+    from copycord.common.paths import data_dir
+
+    return data_dir() / PREVIOUS_FILE
+
+
+def stop_path() -> Path:
+    from copycord.common.paths import data_dir
+
+    return data_dir() / STOP_FILE
+
+
+def _write_json(path: Path, data: dict) -> None:
+    from copycord.common.private_file import write_private_file
+
+    write_private_file(path, json.dumps(data, indent=2) + "\n")
+
+
+def _read_json(path: Path) -> Optional[dict]:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
+def _previous_spec() -> Optional[str]:
+    """What reinstalls the running version exactly: its git commit, or its release wheel."""
+    source = git_source()
+    if source is not None:
+        return source.spec()
+    try:
+        return fetch_release(current_version()).wheel()
+    except Exception:
+        return None
+
+
+def record_previous(kind: str, channel: Channel) -> Path:
+    """Write <data dir>/update-previous.json; raises when the running version cannot be found again."""
+    from copycord.common.db import stored_schema_version
+    from copycord.common.paths import db_path
+
+    spec = _previous_spec()
+    if spec is None:
+        raise ReleaseError(f"no release wheel or git source found for {current_version()}")
+    dev = channel.channel == DEV
+    data = {
+        "version": current_version(),
+        "commit": installed_commit(),
+        "channel": channel.channel,
+        "ref": channel.ref if dev else None,
+        "repo": channel.repo_name if dev else None,
+        "method": kind,
+        "spec": spec,
+        "schema": stored_schema_version(str(db_path())),
+        "backup": str(_last_backup) if _last_backup else None,
+        "recorded_at": time.time(),
+        "pending": None,
+    }
+    path = previous_path()
+    _write_json(path, data)
+    return path
+
+
+def load_previous() -> Optional[dict]:
+    return _read_json(previous_path())
+
+
+def _previous_label(prev: Optional[dict]) -> str:
+    if not prev:
+        return "the previous version"
+    commit = prev.get("commit") or ""
+    return str(prev.get("version") or "?") + (f" ({commit[:7]})" if commit else "")
+
+
+def _copycord_exe() -> Path:
+    return Path(sys.prefix) / ("Scripts/copycord.exe" if sys.platform == "win32" else "bin/copycord")
+
+
+def _run_copycord(*args: str):
+    return service.run_cmd([str(_copycord_exe()), *args], capture=True)
+
+
+def _doctor_ok() -> bool:
+    return _run_copycord("doctor", "--brief").returncode == 0
+
+
+def verify_install(doctor_was_ok: bool) -> Optional[str]:
+    """Run the new copycord --version and doctor --brief; why it failed, or None."""
+    res = _run_copycord("--version")
+    if res.returncode != 0:
+        return f"copycord --version failed (exit {res.returncode})"
+    # doctor only counts when it passed before the update, so an old problem does not roll back.
+    if doctor_was_ok:
+        res = _run_copycord("doctor", "--brief")
+        if res.returncode != 0:
+            lines = ((res.stdout or "") + (res.stderr or "")).strip().splitlines()
+            return "copycord doctor found a problem" + (f": {lines[-1].strip()}" if lines else "")
+    return None
+
+
+def health_url() -> str:
+    from copycord.common import ports
+
+    host = ports.agent_host(ports.dashboard_host())
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    port = os.getenv("ADMIN_PORT") or ports.DEFAULT_ADMIN_PORT
+    return f"http://{host}:{port}/health"
+
+
+def wait_healthy(timeout: float = HEALTH_TIMEOUT, interval: float = HEALTH_INTERVAL,
+                 sleep=time.sleep, clock=time.monotonic) -> bool:
+    """Poll /health until it answers 200, for up to timeout seconds."""
+    url = health_url()
+    deadline = clock() + timeout
+    while True:
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                if resp.status == 200:
+                    return True
+        except Exception:
+            pass
+        if clock() >= deadline:
+            return False
+        sleep(interval)
+
+
+def mark_pending(new_label: str) -> None:
+    """Ask the restarted service to check /health (finish_pending)."""
+    data = load_previous() or {}
+    data["pending"] = {"version": new_label, "since": time.time()}
+    try:
+        _write_json(previous_path(), data)
+    except OSError as e:
+        logger.warning("auto-update: could not save the health check request: %s", e)
+
+
+def finish_pending() -> Optional[bool]:
+    """In the restarted service after an auto-update: True when /health answered,
+    False when it did not and the old version was put back, None when nothing was pending."""
+    data = load_previous()
+    if not data or not data.get("pending"):
+        return None
+    new = str((data["pending"] or {}).get("version") or "the new version")
+    # Cleared first, so a crash during the check never starts it again.
+    data["pending"] = None
+    try:
+        _write_json(previous_path(), data)
+    except OSError:
+        pass
+    if wait_healthy():
+        logger.info("auto-update: %s is running and the dashboard answers", new)
+        return True
+    rollback(f"the dashboard did not answer at {health_url()} within {int(HEALTH_TIMEOUT)} seconds",
+             new, restart=True)
+    return False
+
+
+def stop_auto_update(reason: str, old: str, new: str) -> None:
+    try:
+        _write_json(stop_path(), {"reason": reason, "from": old, "to": new, "at": time.time()})
+    except OSError as e:
+        logger.error("auto-update: could not save that auto-update is stopped: %s", e)
+
+
+def auto_update_stopped() -> Optional[dict]:
+    """Why auto-update is stopped after a failed update; None when it is not."""
+    return _read_json(stop_path())
+
+
+def clear_auto_update_stop() -> None:
+    try:
+        stop_path().unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _restore_db_if_needed(prev: dict) -> Optional[bool]:
+    """Restore the pre-update backup when the new version raised the schema version.
+
+    True when restored, False when not needed, None when needed but not possible.
+    """
+    from copycord.common.db import stored_schema_version
+    from copycord.common.paths import db_path
+
+    path = db_path()
+    before, now = prev.get("schema"), stored_schema_version(str(path))
+    if before is None or now is None or now <= before:
+        return False
+    backup = Path(prev["backup"]) if prev.get("backup") else None
+    if backup is None or not backup.is_file():
+        return None
+    src = sqlite3.connect(f"{backup.resolve().as_uri()}?mode=ro", uri=True)
+    try:
+        dst = sqlite3.connect(str(path))
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    except sqlite3.Error:
+        return None
+    finally:
+        src.close()
+    return True
+
+
+def _rollback_failed(text: str) -> bool:
+    text += " Auto-update is off until you run copycord update yourself."
+    logger.error("auto-update: %s", text)
+    _err(text)
+    return False
+
+
+def rollback(reason: str, new: str, restart: bool) -> bool:
+    """Put back the version in update-previous.json, once; True when it worked.
+
+    Auto-update stops either way until the next copycord update by hand.
+    """
+    prev = load_previous()
+    old = _previous_label(prev)
+    stop_auto_update(reason, old, new)
+    what = f"The update from {old} to {new} did not work ({reason})"
+    if not prev or not prev.get("spec"):
+        return _rollback_failed(f"{what}, and there is no record of how to put {old} back.")
+    kind = str(prev.get("method") or detect_installer())
+    spec = str(prev["spec"])
+    cmd, hint = install_command(kind, spec, reinstall=True)
+    if cmd is None or shutil.which(cmd[0]) is None:
+        return _rollback_failed(f"{what}. Put {old} back with: {hint}")
+    env = None
+    if spec.startswith("git+"):
+        try:
+            env = node_runtime.with_path(node_runtime.ensure_npm())
+        except node_runtime.NodeError as e:
+            return _rollback_failed(f"{what}. Putting {old} back needs Node.js/npm: {e}")
+    windows = sys.platform == "win32" and kind in (UV_TOOL, PIPX)
+    launchers = winupdate.running()[0] if windows else []
+    result, log = _install(cmd, hint, env, windows, launchers, restart, f"Putting back Copycord {old}...")
+    if result.returncode != 0:
+        return _rollback_failed(f"{what}, and putting {old} back failed too "
+                                f"(exit {result.returncode}, see {log}). Put it back with: {hint}")
+    restored = _restore_db_if_needed(prev)
+    text = f"{what}. Copycord {old} is back"
+    if restored:
+        text += ", and the database was restored from the backup made before the update"
+    elif restored is None:
+        text += (", but the database was changed by the new version and could not be restored; "
+                 f"restore {prev.get('backup') or 'the pre-update backup'} by hand")
+    text += ". Auto-update is off until you run copycord update yourself."
+    logger.error("auto-update: %s", text)
+    _err(text)
+    if restart:
+        _restart_service()
+    return True
