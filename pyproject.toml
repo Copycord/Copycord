@@ -9,7 +9,7 @@ description = "Mirror Discord servers: admin UI, server bot and client in one pr
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
-# Union of code/admin, code/server and code/client requirements.txt (same pins).
+# Single source of dependencies for the admin, server and client.
 dependencies = [
     "fastapi==0.116.1",
     "uvicorn[standard]==0.35.0",

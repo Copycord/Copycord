@@ -55,7 +55,7 @@ RUN --mount=type=cache,target=/root/.cache/pip,sharing=locked,id=pip-copycord-${
     && rm -rf /src
 
 WORKDIR /app
-COPY code/entrypoint.sh /entrypoint.sh
+COPY entrypoint.sh /entrypoint.sh
 
 RUN sed -i 's/\r$//' /entrypoint.sh \
     && sed -i '1s/^\xEF\xBB\xBF//' /entrypoint.sh \

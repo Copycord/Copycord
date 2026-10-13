@@ -13,10 +13,6 @@ jobs:
   python-audit:
     name: Python dependency audit
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        component: [admin, server, client]
     steps:
       - uses: actions/checkout@v6
 
@@ -27,19 +23,21 @@ jobs:
       - name: Install pip-audit
         run: pip install pip-audit
 
-      - name: Audit ${{ matrix.component }} dependencies
+      - name: Audit dependencies (pyproject.toml)
         id: audit
+        env:
+          COPYCORD_SKIP_FRONTEND: "1"
         run: |
-          pip-audit -r code/${{ matrix.component }}/requirements.txt -f json 2>/dev/null \
+          pip-audit . -f json 2>/dev/null \
             | tee /tmp/audit.json || true
-          pip-audit -r code/${{ matrix.component }}/requirements.txt 2>&1 \
+          pip-audit . 2>&1 \
             | tee /tmp/audit.txt
         continue-on-error: true
 
       - name: Job summary
         if: always()
         run: |
-          echo "## Python Dependency Audit — ${{ matrix.component }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Python Dependency Audit" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
 
           if grep -q "No known vulnerabilities found" /tmp/audit.txt 2>/dev/null; then

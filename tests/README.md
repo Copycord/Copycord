@@ -8,7 +8,8 @@
 ## Install dependencies
 
 ```bash
-pip install pytest pytest-asyncio -r tests/requirements-test.txt
+pip install -r tests/requirements-test.txt
+COPYCORD_SKIP_FRONTEND=1 pip install -e .   # runtime dependencies from pyproject.toml
 ```
 
 ## Running tests
@@ -93,7 +94,7 @@ You can optionally choose the platform (`linux/amd64`, `linux/arm64`, or both).
 
 ### `dependency-audit.yml` — Weekly (Monday 09:00 UTC) + manual trigger
 
-- **Python** — runs `pip-audit` against each component's `requirements.txt` (admin, server, client)
+- **Python** — runs `pip-audit` against the dependencies in `pyproject.toml`
 - **npm** — runs `npm audit` on the frontend
 
 Alerts you if any dependency has a known vulnerability.

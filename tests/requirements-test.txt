@@ -1,16 +1,4 @@
 pytest==8.3.5
+pytest-asyncio
 httpx==0.28.1
-# Server-side `discord` package (keep in sync with code/server/requirements.txt).
-py-cord==2.8.1
-fastapi==0.116.1
-jinja2==3.1.6
-python-dotenv==1.2.2
-python-multipart==0.0.26
-itsdangerous>=2.1
-aiohttp>=3.9,<4
-aiohttp-socks>=0.8,<1
-# token_sender imports this at module scope, so collection fails without it.
-curl_cffi==0.16.2
-websockets==13.1
-uvicorn[standard]==0.35.0
-tzdata==2025.2
+# Runtime dependencies come from pyproject.toml: pip install -e . (set COPYCORD_SKIP_FRONTEND=1 to skip the frontend build)

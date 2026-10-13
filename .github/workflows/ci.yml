@@ -127,7 +127,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r tests/requirements-test.txt
-          pip install pytest-asyncio
+          COPYCORD_SKIP_FRONTEND=1 pip install -e .
 
       - name: Run unit tests
         env:
