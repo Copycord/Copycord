@@ -671,14 +671,7 @@ def check_env_file(path: Optional[Path] = None) -> Check:
     path = envfile.env_path() if path is None else path
     if path.is_file():
         return Check(PASS, ".env found", path=str(path))
-    return Check(
-        WARN,
-        ".env not found",
-        f"{path} is missing, so every setting is at its default; "
-        "`copycord doctor --fix` writes it with the defaults",
-        str(path),
-        "env_file",
-    )
+    return Check(WARN, ".env not found", path=str(path), fix="env_file")
 
 
 def check_password(env: Optional[Mapping[str, str]] = None) -> Check:
@@ -706,25 +699,6 @@ def admin_port(env: Optional[Mapping[str, str]] = None) -> int:
     except ValueError:
         return DEFAULT_ADMIN_PORT
     return port if 0 < port < 65536 else DEFAULT_ADMIN_PORT
-
-
-def check_tokens(env: Optional[Mapping[str, str]] = None) -> Check:
-    """The bot tokens as the app reads them: app config, then the environment."""
-    from copycord.update_check import config_value
-
-    env = os.environ if env is None else env
-    missing = [
-        key
-        for key in ("SERVER_TOKEN", "CLIENT_TOKEN")
-        if not (config_value(key).strip() or (env.get(key) or "").strip())
-    ]
-    if not missing:
-        return Check(PASS, "Discord tokens set")
-    return Check(
-        WARN,
-        f"{' and '.join(missing)} not set yet",
-        f"finish setup at http://localhost:{admin_port(env)}",
-    )
 
 
 # --- Data ------------------------------------------------------------------
@@ -938,7 +912,7 @@ def run_doctor() -> List[tuple]:
     """[(section, [Check])] in print order."""
     from copycord.common.paths import data_dir, db_path
 
-    settings = [check_env_file(), check_password(), check_tokens()]
+    settings = [check_env_file(), check_password()]
     role = check_role()
     if role.status == FAIL:
         settings.insert(0, role)
@@ -1119,12 +1093,12 @@ def fix_port(checks: List[Check]) -> str:
 class Fix(NamedTuple):
     # (checks) -> what it did; raises FixError when it cannot be done.
     apply: object
-    # Printed with the apply() result once it worked.
+    # The check's line once it worked, shown with the apply() result.
     done: str
+    # Completes "run `copycord doctor --fix` to ..." in Needs your attention.
+    todo: str
     # Guided fixes only: (checks) -> the y/N question; may raise FixError.
     question: object = None
-    # Completes "run `copycord doctor --fix` in a terminal to ..." when there is no terminal.
-    skipped: str = ""
 
     @property
     def guided(self) -> bool:
@@ -1138,53 +1112,49 @@ def _port_question(checks):
 
 # Run in this order: the home before its files, reinstall and settings before the service.
 FIXES = {
-    "home": Fix(fix_home, "created the Copycord home"),
-    "env_file": Fix(fix_env_file, "recreated .env with the default settings"),
-    "backup": Fix(fix_backup, "backed up the database"),
-    "reinstall": Fix(fix_reinstall, "reinstalled Copycord"),
-    "port": Fix(fix_port, "moved the dashboard to a free port", question=_port_question,
-                skipped="move the dashboard to a free port"),
-    "service": Fix(fix_service, "started the copycord service"),
+    "home": Fix(fix_home, "Copycord home created", "create it"),
+    "env_file": Fix(fix_env_file, ".env created with the default settings",
+                    "create it with the default settings"),
+    "backup": Fix(fix_backup, "database backed up", "back it up now"),
+    "reinstall": Fix(fix_reinstall, "Copycord reinstalled", "reinstall Copycord"),
+    "port": Fix(fix_port, "dashboard moved to a free port", "move the dashboard to a free port",
+                question=_port_question),
+    "service": Fix(fix_service, "copycord service started", "start it"),
 }
 
 
-def apply_fixes(checks: List[Check], notes: dict, brief: bool = False) -> int:
-    """Apply the fixes for flagged checks, printing each one applied; returns how many.
+def apply_fixes(checks: List[Check], notes: dict, fixed: dict, failed: set) -> int:
+    """Apply the fixes for flagged checks; returns how many worked.
 
-    Fills notes with {check name: why it was not fixed}.
+    Fills fixed with {fix key: what it did}, notes with {check name: why it was
+    not fixed} and failed with the names whose fix raised.
     """
     from copycord import ui
 
     interactive = ui.is_interactive()
-    flagged = [c for c in checks if c.status in (WARN, FAIL)]
     wanted = {}
-    for c in flagged:
-        if c.fix in FIXES:
+    for c in checks:
+        if c.status in (WARN, FAIL) and c.fix in FIXES:
             wanted.setdefault(c.fix, []).append(c)
-    applied = 0
     for key, fix in FIXES.items():
         if key not in wanted:
             continue
         found = wanted[key]
         name = found[0].name
         if fix.guided and not interactive:
-            notes[name] = f"run `copycord doctor --fix` in a terminal to {fix.skipped}"
+            notes[name] = f"run `copycord doctor --fix` in a terminal to {fix.todo}"
             continue
         try:
             if fix.guided and not ui.confirm(fix.question(found), default=False):
                 notes[name] = "fix skipped"
                 continue
-            result = fix.apply(found)
+            fixed[key] = fix.apply(found)
         except (KeyboardInterrupt, EOFError):
             raise
         except Exception as e:
             notes[name] = f"could not fix it: {str(e) or type(e).__name__}"
-            continue
-        if not applied and not brief:
-            ui.heading("Fixed")
-        ui.ok(fix.done, result)
-        applied += 1
-    return applied
+            failed.add(name)
+    return len(fixed)
 
 
 def _hint(c: Check, verbose: bool = False, note: str = "") -> str:
@@ -1195,21 +1165,41 @@ def _hint(c: Check, verbose: bool = False, note: str = "") -> str:
     return "; ".join(p for p in parts if p)
 
 
-def _print_checks(rows: List[Check], verbose: bool) -> None:
+def _print_checks(rows: List[Check], verbose: bool, done: Optional[dict] = None,
+                  notes: Optional[dict] = None, failed: Optional[set] = None) -> None:
+    """One line per check; done maps a row index to (text, result) for a fixed check."""
     from copycord import ui
 
+    done, notes, failed = done or {}, notes or {}, failed or set()
     status = {PASS: "ok", WARN: "warn", FAIL: "fail", INFO: "info"}
-    for c in rows:
-        ui.line(status[c.status], c.name, _hint(c, verbose), stream=sys.stdout)
+    for i, c in enumerate(rows):
+        if i in done:
+            text, result = done[i]
+            ui.ok(text, " ".join(p for p in (result, "(fixed)") if p), stream=sys.stdout)
+        elif c.name in failed:
+            ui.fail(c.name, notes[c.name], stream=sys.stdout)
+        else:
+            ui.line(status[c.status], c.name, _hint(c, verbose), stream=sys.stdout)
 
 
-def _print_attention(checks: List[Check], notes: Optional[dict] = None) -> None:
+def _attention_hint(c: Check, note: str, fix: bool) -> str:
+    """The reason, or why --fix left it, and how to fix it; the path is on the check's line."""
+    if note:
+        return note
+    parts = [c.reason]
+    if not fix and c.fix in FIXES:
+        parts.append(f"run `copycord doctor --fix` to {FIXES[c.fix].todo}")
+    return "; ".join(p for p in parts if p) or c.path
+
+
+def _print_attention(checks: List[Check], notes: Optional[dict] = None, fix: bool = False) -> None:
     """Every WARN and FAIL once, with its hint and why --fix left it."""
     from copycord import ui
 
     notes = notes or {}
     ui.attention(
-        (("fail" if c.status == FAIL else "warn", c.name, _hint(c, note=notes.get(c.name, "")))
+        (("fail" if c.status == FAIL else "warn", c.name,
+          _attention_hint(c, notes.get(c.name, ""), fix))
          for c in checks if c.status in (WARN, FAIL)),
         stream=sys.stdout,
     )
@@ -1233,10 +1223,37 @@ def _print_summary(checks: List[Check], fixable: int = 0) -> None:
         print(ui.dim(f"Run `copycord doctor --fix` to fix {fixable} of them."))
 
 
-def _print_brief(checks: List[Check], notes: dict) -> None:
-    """--brief: the FAIL lines and one result line."""
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def _print_fix_summary(checks: List[Check], applied: int) -> None:
+    """--fix: what was fixed and what is left."""
     from copycord import ui
 
+    left = [c for c in checks if c.status in (WARN, FAIL)]
+    print()
+    if applied:
+        ui.ok(f"Fixed {_plural(applied, 'issue')}", stream=sys.stdout)
+    if not left:
+        ui.ok("Everything looks good",
+              f"start it with {ui.cmd('copycord run')}" if ui.use_color() else "",
+              stream=sys.stdout)
+        return
+    things = _plural(len(left), "thing")
+    text = f"{things} {'needs' if len(left) == 1 else 'need'} your attention"
+    if any(c.status == FAIL for c in left):
+        ui.fail(text, stream=sys.stdout)
+    else:
+        ui.warn(text, stream=sys.stdout)
+
+
+def _print_brief(checks: List[Check], notes: dict, fixed: dict) -> None:
+    """--brief: the fixes applied, the FAIL lines and one result line."""
+    from copycord import ui
+
+    for key, result in fixed.items():
+        ui.ok(FIXES[key].done, result, stream=sys.stdout)
     for c in checks:
         if c.status == FAIL:
             ui.fail(c.name, _hint(c, note=notes.get(c.name, "")), stream=sys.stdout)
@@ -1247,6 +1264,19 @@ def _print_brief(checks: List[Check], notes: dict) -> None:
         ui.fail(summary, "run `copycord doctor` for details", stream=sys.stdout)
     else:
         ui.warn(summary, "run `copycord doctor` for details", stream=sys.stdout)
+
+
+def _fixed_rows(before: List[tuple], after: List[tuple], fixed: dict) -> dict:
+    """{(section, row index): (text, result)} for each fix that cleared its check."""
+    rows = {}
+    for (title, old), (_, new) in zip(before, after):
+        if len(old) != len(new):
+            continue
+        for i, (o, n) in enumerate(zip(old, new)):
+            if (o.fix in fixed and o.status in (WARN, FAIL) and n.status not in (WARN, FAIL)
+                    and o.fix not in {k for k, _ in rows.values()}):
+                rows[(title, i)] = (o.fix, fixed[o.fix])
+    return {k: (FIXES[key].done, result) for k, (key, result) in rows.items()}
 
 
 def doctor(verbose: bool = False, fix: bool = False, brief: bool = False) -> int:
@@ -1260,33 +1290,38 @@ def doctor(verbose: bool = False, fix: bool = False, brief: bool = False) -> int
             pass
     sections = run_doctor()
     checks: List[Check] = [c for _, rows in sections for c in rows]
-    if not brief:
-        if ui.use_color():
-            ui.heading("Copycord doctor")
-        for title, rows in sections:
-            ui.heading(title)
-            _print_checks(rows, verbose)
-    flagged = [c for c in checks if c.status in (WARN, FAIL)]
     notes: dict = {}
-    fixable = sum(c.fix in FIXES for c in flagged)
-    if fix and flagged:
+    fixed: dict = {}
+    failed: set = set()
+    done: dict = {}
+    # --fix runs first (the port fix asks), then one report shows the state after it.
+    if fix and any(c.status in (WARN, FAIL) for c in checks):
         try:
-            applied = apply_fixes(checks, notes, brief)
+            applied = apply_fixes(checks, notes, fixed, failed)
         except (KeyboardInterrupt, EOFError):
             print()
-            ui.warn("fixes stopped", "the ones above were applied", stream=sys.stdout)
+            ui.warn("fixes stopped",
+                    f"{_plural(len(fixed), 'fix')} applied before that" if fixed else "",
+                    stream=sys.stdout)
             return 130
         if applied:
-            checks = [c for _, rows in run_doctor() for c in rows]
-        flagged = [c for c in checks if c.status in (WARN, FAIL)]
-        # Only the guided fixes skipped for want of a terminal are worth another run.
-        fixable = 0 if ui.is_interactive() else sum(
-            c.fix in FIXES and FIXES[c.fix].guided for c in flagged)
+            before, sections = sections, run_doctor()
+            checks = [c for _, rows in sections for c in rows]
+            done = _fixed_rows(before, sections, fixed)
     if brief:
-        _print_brief(checks, notes)
+        _print_brief(checks, notes, fixed)
+        return 1 if any(c.status == FAIL for c in checks) else 0
+    if ui.use_color():
+        ui.heading("Copycord doctor")
+    for title, rows in sections:
+        ui.heading(title)
+        _print_checks(rows, verbose, {i: v for (t, i), v in done.items() if t == title},
+                      notes, failed)
+    _print_attention(checks, notes, fix)
+    if fix:
+        _print_fix_summary(checks, len(fixed))
     else:
-        _print_attention(checks, notes)
-        _print_summary(checks, fixable)
+        _print_summary(checks, sum(c.status in (WARN, FAIL) and c.fix in FIXES for c in checks))
     return 1 if any(c.status == FAIL for c in checks) else 0
 
 
