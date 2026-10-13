@@ -270,8 +270,8 @@ export function System() {
                           {archiveLabel(a.name)}
                         </code>
                       </td>
-                      <td className={CELL}>{fmtBytes(a.size)}</td>
-                      <td className={CELL}>{fmtBackupWhen(a.mtime)}</td>
+                      <td className={cx(CELL, "whitespace-nowrap")}>{fmtBytes(a.size)}</td>
+                      <td className={cx(CELL, "whitespace-nowrap")}>{fmtBackupWhen(a.mtime)}</td>
                       <td className={cx(CELL, "pr-4 text-right")}>
                         <span className="inline-flex flex-col items-end gap-2 md:flex-row md:whitespace-nowrap">
                           <LinkButton href={downloadUrl(a.name)} download className={ROW_BUTTON}>
