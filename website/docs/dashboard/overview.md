@@ -32,11 +32,13 @@ The dashboard sidebar has these pages:
 
 ## Authentication
 
-If you set a `PASSWORD` environment variable, you'll need to log in before accessing the dashboard. The session persists via a secure cookie.
+The dashboard always asks for a password. The session stays signed in through a secure cookie. Click **Log out** in the sidebar to end it.
 
-To change or remove the password:
+To change the password:
 - **Docker**: Edit the `PASSWORD` environment variable in `docker-compose.yml`, then `docker compose up -d`
-- **Install script**: Set or unset `PASSWORD` before `copycord run`; for a service see [Environment variables for the service](/docs/cli#environment-variables-for-the-service)
+- **Install script**: Run `copycord config set PASSWORD 'your-new-password'`, then `copycord restart`
+
+See [Security defaults](/docs/configuration/security) for who can reach the dashboard.
 
 ## Starting and stopping bots
 

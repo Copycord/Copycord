@@ -69,7 +69,7 @@ services:
     image: ghcr.io/copycord/copycord:latest # or pin a v4 release tag
     container_name: copycord
     environment:
-      - PASSWORD=copycord  # keep whatever you had on the admin service
+      - PASSWORD=your-own-password  # required; Copycord will not start with the old default "copycord"
     ports:
       - '8080:8080'
     volumes:
