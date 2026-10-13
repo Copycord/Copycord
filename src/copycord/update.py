@@ -645,7 +645,7 @@ def _target_label(target: Channel) -> str:
     head = _heads.get((target.repo_name, target.ref))
     if head is None:
         return ref
-    return f"{ref} ({head.sha[:7]})" + (f" {head.subject[:60]}" if head.subject else "")
+    return f"{ref} ({head.sha[:7]})"
 
 
 # Branch heads read by nothing_new, so the prompt can show the new commit.
