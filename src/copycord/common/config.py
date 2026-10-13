@@ -13,6 +13,7 @@ import logging
 from typing import Optional
 
 from copycord.common.db import DBManager
+from copycord.common import ports
 from copycord.common.paths import db_path
 
 logger = logging.getLogger("common.config")
@@ -21,7 +22,7 @@ CURRENT_VERSION = "v3.28.0"
 
 def _peer_host(_compose_name: str) -> str:
     """Default host of another role: they all share this process, so loopback."""
-    return "127.0.0.1"
+    return ports.LOOPBACK
 
 
 class Config:
@@ -58,7 +59,7 @@ class Config:
         self.CLIENT_TOKEN = _str("CLIENT_TOKEN")
 
         self.SERVER_WS_HOST = _str("SERVER_WS_HOST", _peer_host("server")) or _peer_host("server")
-        self.SERVER_WS_PORT = _int("SERVER_WS_PORT", "8765")
+        self.SERVER_WS_PORT = _int("SERVER_WS_PORT", str(ports.DEFAULT_SERVER_WS_PORT))
 
         self.SERVER_WS_URL = _str(
             "WS_SERVER_URL", f"ws://{self.SERVER_WS_HOST}:{self.SERVER_WS_PORT}"
@@ -66,11 +67,11 @@ class Config:
 
         self.ADMIN_WS_URL = _str(
             "ADMIN_WS_URL",
-            f"ws://{os.getenv('ADMIN_HOST', _peer_host('admin'))}:{os.getenv('ADMIN_PORT') or '8080'}/bus",
+            f"ws://{os.getenv('ADMIN_HOST', _peer_host('admin'))}:{os.getenv('ADMIN_PORT') or ports.DEFAULT_ADMIN_PORT}/bus",
         )
 
         self.CLIENT_WS_HOST = _str("CLIENT_WS_HOST", _peer_host("client")) or _peer_host("client")
-        self.CLIENT_WS_PORT = _int("CLIENT_WS_PORT", "8766")
+        self.CLIENT_WS_PORT = _int("CLIENT_WS_PORT", str(ports.DEFAULT_CLIENT_WS_PORT))
         self.CLIENT_WS_URL = _str(
             "WS_CLIENT_URL", f"ws://{self.CLIENT_WS_HOST}:{self.CLIENT_WS_PORT}"
         )
