@@ -62,11 +62,7 @@ def _has_archived_threads(ch: Any) -> bool:
 def _archived_threads(
     bot: Any, ch: Any, *, private: bool = False, joined: bool = False, **kwargs: Any
 ) -> AsyncIterator:
-    """`ch.archived_threads(...)` through the client.
-
-    Forum channels only have the public list, so asking one for private
-    threads raises TypeError, as the old library's ForumChannel did.
-    """
+    """`ch.archived_threads(...)` through the client; forum channels only have the public list, so asking for private raises TypeError."""
     if (private or joined) and isinstance(ch, ForumChannel):
         raise TypeError("forum channels have no private archived threads")
     return bot.archived_threads(
@@ -110,9 +106,7 @@ class ExportMessagesRunner:
         self._active_lock = asyncio.Lock()
 
     async def try_begin(self, guild_id: int) -> bool:
-        """
-        Attempt to mark a guild as 'running'. Returns False if already running.
-        """
+        """Mark a guild as running; False if already running."""
         async with self._active_lock:
             if guild_id in self._active_guilds:
                 return False
@@ -131,11 +125,7 @@ class ExportMessagesRunner:
         include_forum_threads: bool,
         include_private_threads: bool,
     ) -> list[Any]:
-        """
-        Returns a list of Thread objects (active + archived) under the parent channel `ch`,
-        respecting permissions if `me` is provided.
-        Works for TextChannel and ForumChannel. Best-effort if API varies.
-        """
+        """Return active and archived threads under channel `ch` (text or forum), honouring permissions when `me` is given."""
         threads: list[Any] = []
 
         try:
@@ -207,10 +197,7 @@ class ExportMessagesRunner:
         return threads
 
     async def run(self, d: DictLike, guild: Any, acquired: bool = False) -> None:
-        """
-        Execute the export with the provided `data` and resolved `guild`.
-        Emits progress logs and a final 'export_messages_done' ws event.
-        """
+        """Run the export for `data` and `guild`, logging progress and emitting a final 'export_messages_done' ws event."""
         gid_log = getattr(guild, "id", None)
         gname = getattr(guild, "name", "") or "Unknown"
 
@@ -316,9 +303,7 @@ class ExportMessagesRunner:
                 return "forum" in cls
 
             async def _collect_threads_for_parent(parent: Any) -> list[Any]:
-                """
-                Collect active + archived threads for a parent channel, respecting toggles and perms.
-                """
+                """Collect active and archived threads for a parent channel, respecting toggles and permissions."""
                 out: list[Any] = []
 
                 if _is_forum(parent) and not F["forum_threads"]:
@@ -1060,10 +1045,7 @@ class ExportMessagesRunner:
     def _iter_attachment_links(
         self, msg_obj: DictLike
     ) -> Iterable[Tuple[str, str, str]]:
-        """
-        Yield (kind, url, filename) from a serialized message object (dict).
-        Expects message['attachments'] list with items having 'url' and 'filename' (and optionally 'content_type').
-        """
+        """Yield (kind, url, filename) from the attachments of a serialized message dict."""
         atts = msg_obj.get("attachments") or []
         for a in atts:
             url = a.get("url") or a.get("proxy_url")
@@ -1115,10 +1097,7 @@ class ExportMessagesRunner:
 
 
 class DmHistoryExporter:
-    """
-    Export a user's DM history.
-    Enforces: only 1 export per user_id at a time (class-level registry).
-    """
+    """Export a user's DM history; one export per user_id at a time."""
 
     _lock: asyncio.Lock = asyncio.Lock()
     _active_users: set[int] = set()
@@ -1333,9 +1312,7 @@ class DmHistoryExporter:
 
 
 class BackfillEngine:
-    """
-    Message backfill engine for for pulling a channels message history.
-    """
+    """Pulls a channel's message history for backfill."""
 
     MAX_RETRIES = 6
     BASE_DELAY = 0.75
@@ -1375,9 +1352,7 @@ class BackfillEngine:
         cloned_guild_id: int | None = None,
         exclude_ids: list | None = None,
     ):
-        """
-        Primary entry point used by client code to backfill a single channel.
-        """
+        """Backfill a single channel."""
         loop = asyncio.get_running_loop()
         t0 = loop.time()
         sent = 0
@@ -2223,13 +2198,9 @@ class BackfillEngine:
             pass
 
     async def _iter_all_threads(self, parent) -> AsyncIterator:
-        """
-        Yield all threads (active + archived) under a TextChannel or ForumChannel.
+        """Yield all threads under a text or forum channel.
 
-        Rules:
-        - ForumChannel: only public archived threads (no `private=`/`joined=`).
-        - TextChannel: public archived, then private archived, then joined private archived.
-        - Voice / Stage / other non-threadable channels: yield nothing (no threads).
+        Forums only have public archived threads; text channels also get private and joined-private archived. Other channels yield nothing.
         """
         seen: set[int] = set()
 
@@ -2255,10 +2226,7 @@ class BackfillEngine:
             return
 
         async def _drain(iter_factory, label: str):
-            """
-            Run an iterator factory once, with a retry on transient HTTP 5xx.
-            iter_factory() must return an async iterator (NOT a coroutine).
-            """
+            """Run an iterator factory once, retrying on transient HTTP 5xx; it must return an async iterator, not a coroutine."""
 
             async def _once():
                 it = iter_factory()
@@ -2341,10 +2309,7 @@ class BackfillEngine:
         oldest_first: bool,
         after_obj_id: Optional[int] = None,
     ) -> AsyncIterator:
-        """
-        Yield messages with a cursor that survives transient 5xx errors.
-        If `after_obj_id` is provided, the FIRST page will start strictly after that message ID.
-        """
+        """Yield messages with a cursor that survives transient 5xx errors; with `after_obj_id` the first page starts strictly after it."""
         remaining = n if (n and n > 0) else None
         last_id = None
         used_initial_after_obj = False
@@ -2441,16 +2406,9 @@ class BackfillEngine:
 
 
 class AssetExportRunner:
-    """
-    Export selected guild assets (emojis, stickers, or both) into a timestamped
-    directory structured as:
-        <ts>/emoji/...
-        <ts>/stickers/...
-    Compress that directory as a single .tar.gz, then remove the directory so
-    only the archive remains.
+    """Export guild emojis and/or stickers into a timestamped directory, compress it to a single .tar.gz and remove the directory.
 
-    Output file:
-      /data/assets/<safe_guild>_<id>/<safe_guild>_<id>__<YYYYMMDD-HHMMSS>.tar.gz
+    Output: /data/assets/<safe_guild>_<id>/<safe_guild>_<id>__<YYYYMMDD-HHMMSS>.tar.gz
     """
 
     _active_lock: asyncio.Lock = asyncio.Lock()
@@ -2522,19 +2480,7 @@ class AssetExportRunner:
     async def run(
         self, guild, *, include_emojis: bool = True, include_stickers: bool = True
     ) -> dict:
-        """
-        Returns:
-          {
-            "saved": int, "failed": int, "total": int,
-            "saved_emojis": int, "saved_stickers": int,
-            "failed_emojis": int, "failed_stickers": int,
-            "total_emojis": int, "total_stickers": int,
-            "dir": None,
-            "archive": <.tar.gz path or None>,
-            "files_emojis": [first few],
-            "files_stickers": [first few],
-          }
-        """
+        """Return counts (saved/failed/total, with per-emoji and per-sticker variants), the archive path or None, and the first few file names."""
         gid = getattr(guild, "id", None)
         gname = getattr(guild, "name", "") or "Unknown"
         if gid is None:
