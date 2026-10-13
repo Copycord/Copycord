@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { test, type Page } from "@playwright/test";
-import { E2E_DIR, LOGIN_PATH, NOT_FOUND_PATH, PAGES, pageUrl, type PageName } from "../lib/env.ts";
+import { BASE_PATH, E2E_DIR, LOGIN_PATH, NOT_FOUND_PATH, PAGES, pageUrl, type PageName } from "../lib/env.ts";
 import { FWD_CREATE_BTN, MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, expectOpen, modal, settle } from "../lib/ui.ts";
 import { stubClientGuilds } from "../lib/seed.ts";
 
@@ -42,7 +42,8 @@ for (const vp of VIEWPORTS) {
 
     for (const name of Object.keys(PAGES) as PageName[]) {
       test(`${name}`, async ({ page }) => {
-        await page.goto(pageUrl(name));
+        // The SPA serves the old /event-logs page at /app/logs (App.tsx PAGES).
+        await page.goto(name === "event-logs" && BASE_PATH ? `${BASE_PATH}/logs` : pageUrl(name));
         await settle(page);
         await page.screenshot({ path: path.join(OUT, `${name}-${vp.name}.png`), fullPage: true });
       });

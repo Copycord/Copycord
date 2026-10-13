@@ -1,7 +1,7 @@
 // Parity smoke for inventory items reachable without Discord (numbers refer to copycord-frontend-inventory.md).
 // Runs against the old UI by default; E2E_BASE_PATH=/app runs the same checks against the SPA.
 import { expect, test, type Page } from "@playwright/test";
-import { CSRF_HEADERS, LOGIN_PATH, NOT_FOUND_PATH, PAGES, PASSWORD, pageUrl, type PageName } from "../lib/env.ts";
+import { BASE_PATH, CSRF_HEADERS, LOGIN_PATH, NOT_FOUND_PATH, PAGES, PASSWORD, pageUrl, type PageName } from "../lib/env.ts";
 import { SEED, stubClientGuilds } from "../lib/seed.ts";
 import { FWD_CREATE_BTN, MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, closeX, expectClosed, expectOpen, modal, settle } from "../lib/ui.ts";
 
@@ -207,8 +207,47 @@ test.describe("system", () => {
 });
 
 test.describe("event logs", () => {
+  // The SPA serves the old /event-logs page at /app/logs (App.tsx PAGES).
+  const LOGS_URL = BASE_PATH ? `${BASE_PATH}/logs` : PAGES["event-logs"];
+  const SEEDED: Array<[string, string]> = [
+    ["channel_created", "Created channel #general"],
+    ["channel_deleted", "Deleted channel #old-news"],
+    ["role_created", "Created role Moderator"],
+    ["category_created", "Created category Text Channels"],
+  ];
+
+  async function openLogs(page: Page): Promise<void> {
+    const errors: string[] = [];
+    page.on("pageerror", (e) => errors.push(e.message));
+    const r = await page.goto(LOGS_URL);
+    expect(r?.status(), "event-logs status").toBeLessThan(400);
+    await settle(page);
+    expect(errors, "event-logs page errors").toEqual([]);
+  }
+
+  async function addLog(page: Page, event_type: string, details: string): Promise<string> {
+    const r = await page.request.post("/api/event-logs", {
+      data: { event_type, details, guild_id: SEED.clonedGuildId, guild_name: "E2E Clone", channel_name: "general" },
+      headers: CSRF_HEADERS,
+    });
+    expect(r.ok(), `add log ${details}`).toBeTruthy();
+    return ((await r.json()) as { log_id: string }).log_id;
+  }
+
+  async function deleteLogs(page: Page, ids: string[]): Promise<number> {
+    const r = await page.request.post("/api/event-logs/delete-bulk", { data: { ids }, headers: CSRF_HEADERS });
+    expect(r.ok(), "bulk delete").toBeTruthy();
+    return ((await r.json()) as { deleted: number }).deleted;
+  }
+
+  /** The SPA confirms every delete; the old page confirms only clear all. */
+  async function confirmIfAsked(page: Page, name: string): Promise<void> {
+    const btn = page.getByRole("dialog").getByRole("button", { name, exact: true });
+    await btn.click({ timeout: 2_000 }).catch(() => undefined);
+  }
+
   test("51 seeded events listed, search filters, clear filters restores", async ({ page }) => {
-    await open(page, "event-logs");
+    await openLogs(page);
     const body = page.locator("#logs-tbody");
     await expect(body).toContainText("Created channel #general");
     await expect(body).toContainText("Created role Moderator");
@@ -216,5 +255,102 @@ test.describe("event logs", () => {
     await expect(body).not.toContainText("Created channel #general");
     await page.locator("#logs-clear-filters").click();
     await expect(body).toContainText("Created channel #general");
+  });
+
+  test("51 type filter lists the server types and narrows the table", async ({ page }) => {
+    await openLogs(page);
+    const types = (await (await page.request.get("/api/event-log-types")).json()) as { types: string[] };
+    expect(types.types).toEqual(expect.arrayContaining(["role_created", "channel_created"]));
+    const select = page.locator("#logs-filter-type");
+    await expect(select.locator('option[value="role_created"]')).toHaveCount(1);
+    await select.selectOption("role_created", { force: true });
+    const body = page.locator("#logs-tbody");
+    await expect(body).not.toContainText("Created channel #general");
+    await expect(body).toContainText("Created role Moderator");
+    await page.locator("#logs-clear-filters").click();
+    await expect(body).toContainText("Created channel #general");
+  });
+
+  test("51 refresh shows a new event and delete one removes it", async ({ page }) => {
+    await openLogs(page);
+    const body = page.locator("#logs-tbody");
+    await addLog(page, "channel_renamed", "Renamed channel e2e-refresh-probe");
+    await expect(body).not.toContainText("e2e-refresh-probe");
+    await page.locator("#logs-refresh").click();
+    const row = body.locator("tr", { hasText: "e2e-refresh-probe" });
+    await expect(row).toHaveCount(1);
+    await row.locator('button[aria-label="Delete log"]').click();
+    await confirmIfAsked(page, "Delete");
+    await expect(body).not.toContainText("e2e-refresh-probe");
+    await expect(body).toContainText("Created channel #general");
+  });
+
+  test("51 pagination pages 50 at a time", async ({ page }) => {
+    test.setTimeout(90_000);
+    const ids: string[] = [];
+    for (let i = 0; i < 55; i++) ids.push(await addLog(page, "emoji_synced", `Synced emoji e2e-page-${i}`));
+    try {
+      await openLogs(page);
+      await page.locator("#logs-search").fill("e2e-page-");
+      const count = page.locator("#logs-count");
+      await expect(count).toHaveText("Showing 1-50 of 55");
+      const pager = page.locator("#logs-pagination");
+      await pager.locator('button[aria-label="Next page"]').click();
+      await expect(count).toHaveText("Showing 51-55 of 55");
+      await expect(page.locator("#logs-tbody tr[data-log-id]")).toHaveCount(5);
+      await pager.locator('button[aria-label="Previous page"]').click();
+      await expect(count).toHaveText("Showing 1-50 of 55");
+    } finally {
+      expect(await deleteLogs(page, ids)).toBe(55);
+    }
+  });
+
+  test("51 bulk delete endpoint removes the given ids", async ({ page }) => {
+    const ids = [await addLog(page, "role_updated", "e2e-bulk-api 1"), await addLog(page, "role_updated", "e2e-bulk-api 2")];
+    expect(await deleteLogs(page, ids)).toBe(2);
+    const empty = await page.request.post("/api/event-logs/delete-bulk", { data: { ids: [] }, headers: CSRF_HEADERS });
+    expect(empty.status()).toBe(400);
+  });
+
+  test("51 bulk delete selected rows after confirming", async ({ page }) => {
+    test.skip(!BASE_PATH, "the old page has no row selection");
+    for (const n of [1, 2, 3]) await addLog(page, "sticker_synced", `Synced sticker e2e-bulk-ui ${n}`);
+    await openLogs(page);
+    await page.locator("#logs-search").fill("e2e-bulk-ui");
+    const body = page.locator("#logs-tbody");
+    await expect(page.locator("#logs-count")).toHaveText("Showing 1-3 of 3");
+    for (const n of [1, 3]) {
+      await body.locator("tr", { hasText: `e2e-bulk-ui ${n}` }).getByRole("checkbox", { name: "Select log" }).check();
+    }
+    const bulk = page.locator("#logs-delete-selected");
+    await expect(bulk).toHaveText(/Delete selected \(2\)/);
+    const posted = page.waitForRequest((r) => r.url().endsWith("/api/event-logs/delete-bulk") && r.method() === "POST");
+    await bulk.click();
+    await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
+    expect(((await posted).postDataJSON() as { ids: string[] }).ids).toHaveLength(2);
+    await expect(page.locator("#logs-count")).toHaveText("Showing 1-1 of 1");
+    await expect(body).toContainText("e2e-bulk-ui 2");
+    await body.locator("tr", { hasText: "e2e-bulk-ui 2" }).locator('button[aria-label="Delete log"]').click();
+    await confirmIfAsked(page, "Delete");
+    await expect(body.locator("tr[data-log-id]")).toHaveCount(0);
+  });
+
+  // Runs last in the file: clears the table, then puts the seeded events back.
+  test("51 clear all asks first and Cancel keeps the logs", async ({ page }) => {
+    await openLogs(page);
+    const body = page.locator("#logs-tbody");
+    await expect(body).toContainText("Created channel #general");
+    await page.locator("#logs-clear-all").click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("Are you sure you want to delete all event logs? This cannot be undone.");
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(dialog).toBeHidden();
+    await expect(body).toContainText("Created channel #general");
+
+    await page.locator("#logs-clear-all").click();
+    await page.getByRole("dialog").getByRole("button", { name: "Delete All", exact: true }).click();
+    await expect(body.locator("tr[data-log-id]")).toHaveCount(0);
+    await expect(page.locator("#logs-empty")).toBeVisible();
+    for (const [type, details] of SEEDED) await addLog(page, type, details);
   });
 });
