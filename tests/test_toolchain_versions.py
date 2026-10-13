@@ -51,7 +51,7 @@ def test_workflows_read_versions_from_files():
             raise AssertionError("%s hardcodes node-version %s" % (wf.name, m.group(1)))
         for m in re.finditer(r"^\s*python-version:\s*(\S+)", text, re.M):
             # Only the test matrix (explicit min and max Python) may list versions.
-            assert m.group(1).startswith("${{"), "%s hardcodes python-version %s" % (wf.name, m.group(1))
+            assert m.group(1).startswith(("${{", "[")), "%s hardcodes python-version %s" % (wf.name, m.group(1))
         for m in re.finditer(r"node-version-file:\s*(\S+)", text):
             assert m.group(1) == ".nvmrc"
         for m in re.finditer(r"python-version-file:\s*(\S+)", text):

@@ -72,6 +72,16 @@ services:
 Put your own password after `PASSWORD=`. The container listens on every network (`DASHBOARD_HOST=0.0.0.0`), so Copycord will not start while the password is empty or still `copycord`. If another layer already protects the dashboard, `COPYCORD_ALLOW_INSECURE_DASHBOARD=1` skips this check.
 :::
 
+:::note Non-root user and volume ownership
+The container runs as a non-root user (`copycord`, uid and gid 1000), so the `./data` folder must be writable by uid 1000. A new folder created by Docker is owned by root, and so is one left by an older image that ran as root. If Copycord exits with "is not writable", fix it once on the host:
+
+```bash
+sudo chown -R 1000:1000 ./data
+```
+
+Files created from now on are owned by uid 1000 on the host.
+:::
+
 :::note Upgrading from v3
 v3 used three services (`admin`, `server`, `client`) with a `ROLE` variable. Copycord v4 is this one service and refuses to start while `ROLE` is set. See [Upgrading from v3](/docs/getting-started/upgrading-from-v3).
 :::
