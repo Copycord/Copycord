@@ -169,3 +169,138 @@ class TestScrapeTraversal:
         resp = await client.delete("/api/scraper/scrapes/123/scrape_123_1.json")
         assert resp.status_code == 200
         assert not (dirs / "scrapes" / "123").exists()
+
+
+# ---------------------------------------------------------------------------
+# Websocket authentication
+# ---------------------------------------------------------------------------
+
+from starlette.testclient import TestClient  # noqa: E402
+from starlette.websockets import WebSocketDisconnect  # noqa: E402
+
+from copycord.admin import auth  # noqa: E402
+from copycord.common.websockets import (  # noqa: E402
+    INTERNAL_TOKEN_ENV,
+    INTERNAL_TOKEN_HEADER,
+    internal_connect_kwargs,
+)
+
+ORIGIN = "http://testserver"
+TOKEN = "per-run-test-token"
+
+
+@pytest.fixture()
+def tc():
+    # No context manager: the lifespan (agents, schedulers) is not started.
+    return TestClient(app)
+
+
+@pytest.fixture()
+def password(monkeypatch):
+    monkeypatch.setattr(auth, "ADMIN_PASSWORD", "pw")
+
+
+@pytest.fixture()
+def no_password(monkeypatch):
+    monkeypatch.setattr(auth, "ADMIN_PASSWORD", "")
+
+
+@pytest.fixture()
+def internal_token(monkeypatch):
+    monkeypatch.setenv(INTERNAL_TOKEN_ENV, TOKEN)
+
+
+def _session_cookie():
+    return f"{auth.ADMIN_COOKIE_NAME}={auth._get_signer().dumps({'ok': True})}"
+
+
+def _rejected(tc, path, headers):
+    with pytest.raises(WebSocketDisconnect) as exc:
+        with tc.websocket_connect(path, headers=headers):
+            pass
+    assert exc.value.code == 1008
+
+
+class TestBrowserSockets:
+
+    @pytest.mark.parametrize("path", ["/ws/ui", "/ws/out", "/ws/in"])
+    def test_no_cookie_rejected(self, tc, password, path):
+        _rejected(tc, path, {"origin": ORIGIN})
+
+    @pytest.mark.parametrize("path", ["/ws/ui", "/ws/out", "/ws/in"])
+    def test_bad_cookie_rejected(self, tc, password, path):
+        _rejected(tc, path, {"origin": ORIGIN, "cookie": "cc_admin=forged"})
+
+    @pytest.mark.parametrize("path", ["/ws/ui", "/ws/out", "/ws/in"])
+    @pytest.mark.parametrize(
+        "origin", ["http://evil.example", "http://testserver.evil.example", "null", ""]
+    )
+    def test_bad_origin_rejected_with_cookie(self, tc, password, path, origin):
+        headers = {"cookie": _session_cookie()}
+        if origin:
+            headers["origin"] = origin
+        _rejected(tc, path, headers)
+
+    @pytest.mark.parametrize("path", ["/ws/ui", "/ws/out", "/ws/in"])
+    def test_bad_origin_rejected_without_password(self, tc, no_password, path):
+        _rejected(tc, path, {"origin": "http://evil.example"})
+
+    @pytest.mark.parametrize("path", ["/ws/ui", "/ws/in"])
+    def test_internal_token_not_enough_for_ui(self, tc, password, internal_token, path):
+        _rejected(tc, path, {INTERNAL_TOKEN_HEADER: TOKEN})
+
+    def test_valid_cookie_and_origin_accepted(self, tc, password):
+        headers = {"origin": ORIGIN, "cookie": _session_cookie()}
+        with tc.websocket_connect("/ws/ui", headers=headers):
+            pass
+
+    def test_no_password_same_origin_accepted(self, tc, no_password):
+        with tc.websocket_connect("/ws/ui", headers={"origin": ORIGIN}):
+            pass
+
+    def test_forwarded_host_accepted(self, tc, password):
+        headers = {
+            "origin": "https://copycord.example.com",
+            "x-forwarded-host": "copycord.example.com",
+            "cookie": _session_cookie(),
+        }
+        with tc.websocket_connect("/ws/ui", headers=headers):
+            pass
+
+
+class TestInternalSockets:
+
+    @pytest.mark.parametrize("path", ["/bus", "/ws/out"])
+    def test_no_token_rejected(self, tc, internal_token, path):
+        _rejected(tc, path, {})
+
+    @pytest.mark.parametrize("path", ["/bus", "/ws/out"])
+    def test_bad_token_rejected(self, tc, internal_token, path):
+        _rejected(tc, path, {INTERNAL_TOKEN_HEADER: "wrong"})
+
+    def test_token_required_even_without_password(self, tc, no_password, internal_token):
+        _rejected(tc, "/bus", {"origin": ORIGIN})
+
+    def test_session_cookie_not_enough_for_bus(self, tc, password, internal_token):
+        _rejected(tc, "/bus", {"origin": ORIGIN, "cookie": _session_cookie()})
+
+    def test_no_token_configured_rejects_everything(self, tc, monkeypatch):
+        monkeypatch.delenv(INTERNAL_TOKEN_ENV, raising=False)
+        _rejected(tc, "/bus", {INTERNAL_TOKEN_HEADER: ""})
+
+    def test_valid_token_accepted(self, tc, password, internal_token):
+        with tc.websocket_connect("/bus", headers={INTERNAL_TOKEN_HEADER: TOKEN}) as ws:
+            ws.send_text('{"kind":"log","role":"test","payload":{"text":"hi"}}')
+
+
+class TestInternalClientHeaders:
+
+    def test_kwargs_carry_token(self, internal_token):
+        kwargs = internal_connect_kwargs()
+        assert len(kwargs) == 1
+        (headers,) = kwargs.values()
+        assert headers == {INTERNAL_TOKEN_HEADER: TOKEN}
+
+    def test_no_token_no_kwargs(self, monkeypatch):
+        monkeypatch.delenv(INTERNAL_TOKEN_ENV, raising=False)
+        assert internal_connect_kwargs() == {}
