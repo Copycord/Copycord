@@ -209,7 +209,7 @@ Useful environment variables (on a native install, set them in [`<home>/.env`](#
 
 | Variable | Default | What it does |
 |----------|---------|--------------|
-| `PASSWORD` | `copycord` (set by the installer) | Dashboard login password; no login page when unset |
+| `PASSWORD` | a random password (set by the installer) | Dashboard login password; no login page when unset |
 | `ADMIN_PORT` | `8080` | Dashboard port |
 | `DASHBOARD_HOST` | `127.0.0.1` | Where the dashboard listens. The default is this computer only; `0.0.0.0` opens it to your network (see [Dashboard address](#dashboard-address)) |
 | `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG`; also an app config key, which wins once it is saved |
@@ -475,8 +475,8 @@ COPYCORD_NO_UPDATE_CHECK=0
 
 An empty value, such as `TZ=`, means the default, except for `PASSWORD`: an empty password turns the login page off.
 
-:::warning Change the default password
-The default dashboard password is `copycord`. The dashboard listens on all network interfaces, so change the password right after installing.
+:::note The dashboard password
+`copycord config init`, which the installers run, writes a random `PASSWORD` into a new file, and the installer shows it once. `copycord config get PASSWORD --show-secrets` prints it again. A file written by `copycord doctor --fix` has the old default `copycord`; change it.
 :::
 
 To change a setting, edit the file, then restart Copycord:
@@ -498,7 +498,7 @@ copycord restart
 
 | Key | Default | What it does |
 |-----|---------|--------------|
-| `PASSWORD` | `copycord` in the file | Dashboard login password; no login page when empty or unset. |
+| `PASSWORD` | a random password in the file (`copycord` when `doctor --fix` wrote it) | Dashboard login password; no login page when empty or unset. |
 | `SECRET_KEY` | a key saved in `<data dir>/secret.key` | Signs the dashboard login cookie. Not in the file; add it only to use a key of your own. |
 | `ADMIN_PORT` | `8080` | Dashboard port. |
 | `DASHBOARD_HOST` | `127.0.0.1` | Where the dashboard listens. Commented out in the file, so only this computer can open it. See [Dashboard address](#dashboard-address). |

@@ -44,7 +44,7 @@ The install script above is the recommended way. Docker is for advanced users wh
 </TabItem>
 </Tabs>
 
-Then run `copycord run`, open **http://localhost:8080** and log in with the password `copycord`. The steps below explain each part.
+Then run `copycord run`, open **http://localhost:8080** and log in with the password the installer shows at the end. The steps below explain each part.
 
 ## Steps
 
@@ -97,14 +97,14 @@ This starts the dashboard, the server bot and the client. Leave the terminal ope
 
 ### 3. Log in to the dashboard
 
-Open **http://localhost:8080** and log in with the default password:
+Open **http://localhost:8080** and log in with the password from the installer's final box. The installer makes up a random one on a first install and shows it only once. It is saved as `PASSWORD` in `.env`; to see it again:
 
-```text title="Default password"
-copycord
+```bash title="Terminal"
+copycord config get PASSWORD --show-secrets
 ```
 
-:::warning Change the default password
-Anyone who can reach port 8080 and knows the default can open your dashboard and read your tokens. Change `PASSWORD` right after your first login:
+:::tip Pick your own password
+To use a password you can remember:
 
 ```bash title="Terminal"
 copycord config set PASSWORD 'your-new-password'

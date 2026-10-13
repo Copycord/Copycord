@@ -79,8 +79,8 @@ COPYCORD_NO_UPDATE_CHECK=0
 
 An empty value, such as `TZ=`, means the default, except for `PASSWORD`: an empty password turns the login page off.
 
-:::warning Change the default password
-The default dashboard password is `copycord` and the dashboard listens on all network interfaces. Anyone who can reach the port and knows the default can open your dashboard and read your tokens. Change it right after installing.
+:::note The dashboard password
+The installer writes a random `PASSWORD` into a new `.env` and shows it once; `copycord config get PASSWORD --show-secrets` prints it again. A `.env` made another way (by `copycord doctor --fix`, say) has the old default `copycord`: change it, since anyone who can reach the dashboard and knows the default can read your tokens.
 :::
 
 ## Change a setting
@@ -134,7 +134,7 @@ Variables set in the real environment win over the file, for example `ADMIN_PORT
 
 | Key | Default | What it does |
 |-----|---------|--------------|
-| `PASSWORD` | `copycord` | Dashboard login password; no login page when empty or unset. |
+| `PASSWORD` | a random password from the installer | Dashboard login password; no login page when empty or unset. |
 | `ADMIN_PORT` | `8080` | Dashboard port. |
 | `TZ` | `UTC` | Time zone for scheduled backups and export timestamps. |
 | `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG`; the dashboard's value wins once it is saved. |

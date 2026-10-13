@@ -45,7 +45,7 @@ Otherwise it runs numbered steps:
 4. **Finishing up:** adds uv's tool directory to your `PATH` when needed (`uv tool update-shell`), writes [`.env`](/docs/getting-started/configuration) in the Copycord home if it does not exist yet, and saves the update channel when you chose one.
 5. **Repairing (upgrades and reinstalls only):** when Copycord or its home was already there, runs [`copycord doctor --fix --brief`](/docs/cli#doctor-fix) to apply the automatic repairs, such as starting a stopped service or taking an overdue backup. It prints a line for each repair, any failed check and `All checks passed` or the number of warnings; it never fails the install. A first install skips this step.
 
-It ends with a box that shows the settings file, the next commands (`copycord run`, `copycord restart`, `copycord update`) and a **Needs your attention** list: change the default password `copycord` (while it is still set) and finish the setup in the dashboard at `http://localhost:8080`. It does not start Copycord and does not touch Docker. It refuses to run as root: Copycord installs for your user.
+It ends with a box that shows the settings file, the next commands (`copycord run`, `copycord restart`, `copycord update`) and a **Needs your attention** list: the dashboard address (the port from your settings file) and, on a first install, the dashboard password. The installer makes up a random password when it creates the settings file and shows it once, in that box. It is saved as `PASSWORD` in `.env`; if you lose it, `copycord config get PASSWORD --show-secrets` prints it, and `copycord config set PASSWORD 'your-new-password'` changes it. An existing settings file is never changed, so a reinstall keeps your password. If an older install still has the default password `copycord`, the box asks you to change it. Before replacing a running [service](/docs/cli#copycord-service), the installer stops it and starts it again afterwards. It does not start Copycord otherwise and does not touch Docker. It refuses to run as root: Copycord installs for your user.
 
 ## Flags
 
@@ -57,13 +57,19 @@ On Linux and macOS, pass flags after `sh -s --`. On Windows, set the environment
 | `--beta` | `-Beta` | `COPYCORD_BETA=1` | The newest release, pre-releases included. Saved as the `copycord update` channel. |
 | `--home <path>` | `-CopycordHome <path>` | `COPYCORD_HOME` | The [Copycord home](#home) (default `~/.copycord`). |
 | `--repo owner/name` | `-Repo owner/name` | `COPYCORD_REPO` | Repository to install from (default `Copycord/Copycord`). |
-| `--git-dir <path>` | `-GitDir <path>` | `COPYCORD_GIT_DIR` | Git builds: the checkout directory (default `<home>/src`). |
+| `--git-dir <path>` | `-GitDir <path>` | `COPYCORD_GIT_DIR` | Git builds: a folder the installer owns (default `<home>/src`). Each install replaces every file in it, so never point it at your own copy of the code. |
 | `--verify` | `-Verify` | `COPYCORD_VERIFY=1` | Run `copycord --version` and `copycord doctor` after installing and fail if either fails. |
 | `--dry-run` | `-DryRun` | `COPYCORD_DRY_RUN=1` | Print the plan and every action, change nothing. |
 | `--verbose` | `-ShowOutput` | `COPYCORD_VERBOSE=1` | Show the full output of every step instead of a spinner. |
 | `--force` | `-Force` | `COPYCORD_FORCE=1` | Reinstall even when the same version is already installed. |
 | `--help` | `-Help` | | Show the options. |
 | | | `NO_COLOR=1` | Plain output. |
+
+:::warning `--git-dir` is not for your own copy of the code
+A git build resets the folder to the version you asked for and deletes every other file in it. To protect your work, `install.sh` only does that to a folder it created itself, or to an unchanged copy of the same repository. Any other folder stops the install with a message and nothing is changed; pick an empty or new folder instead.
+:::
+
+Release installs check the downloaded wheel against the checksum GitHub lists for it and stop if they differ. Set `GITHUB_TOKEN` if many installs share one network and GitHub starts refusing the release lookup.
 
 Rarely needed: `--install-method release|git` (PowerShell `-InstallMethod`) forces the method instead of inferring it from `--version`, `COPYCORD_NODE_VERSION` picks the Node.js version for git builds, and `COPYCORD_ALLOW_ROOT=1` allows running as root.
 

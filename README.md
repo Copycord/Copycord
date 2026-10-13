@@ -117,12 +117,12 @@ The installer sets up everything Copycord needs. Run again, it stops when that v
 copycord run
 ```
 
-Open **http://localhost:8080**, log in with the password `copycord`, and add your tokens in the dashboard. That's it.
+Open **http://localhost:8080**, log in with the password the installer showed at the end, and add your tokens in the dashboard. That's it.
 
 To keep Copycord running in the background, run `copycord service install`.
 
 > [!IMPORTANT]
-> Change the default password: edit `PASSWORD` in `~/.copycord/.env` (`%USERPROFILE%\.copycord\.env` on Windows), then run `copycord restart`.
+> The installer makes up a random dashboard password and shows it once. It is saved as `PASSWORD` in `~/.copycord/.env` (`%USERPROFILE%\.copycord\.env` on Windows); `copycord config get PASSWORD --show-secrets` prints it again. To pick your own, run `copycord config set PASSWORD 'your-new-password'`, then `copycord restart`.
 >
 > The dashboard is only reachable from this computer. To open it from other devices, set your own `PASSWORD` and `DASHBOARD_HOST=0.0.0.0` in the same file. Copycord will not start with that address while the password is empty or still `copycord`.
 

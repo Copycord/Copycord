@@ -41,10 +41,10 @@ The dashboard, the server bot and the client start together. If you installed th
 
 ## 2. Log in
 
-Open **http://localhost:8080** and log in with the password `copycord`. If you changed `ADMIN_PORT`, use that port.
+Open **http://localhost:8080** and log in with the password the installer showed at the end (`copycord config get PASSWORD --show-secrets` prints it again). If you changed `ADMIN_PORT`, use that port.
 
-:::warning Change the default password
-Change `PASSWORD` right after your first login: `copycord config set PASSWORD 'your-new-password'`, then `copycord restart`. See [Configuration File (.env)](/docs/getting-started/configuration).
+:::tip Pick your own password
+To use a password you can remember: `copycord config set PASSWORD 'your-new-password'`, then `copycord restart`. See [Configuration File (.env)](/docs/getting-started/configuration).
 :::
 
 ## 3. Enter your tokens
