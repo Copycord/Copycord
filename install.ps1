@@ -135,6 +135,8 @@ Test a branch, no release needed:
 
     $useColor = -not [Console]::IsOutputRedirected -and -not $env:NO_COLOR
     $utf = [Console]::OutputEncoding.CodePage -eq 65001
+    # Clickable links (OSC 8) only in Windows Terminal and VS Code; the classic console shows the codes.
+    $hyperlinks = $useColor -and ([bool]$env:WT_SESSION -or $env:TERM_PROGRAM -eq 'vscode')
     $okMark = if ($utf) { [string][char]0x2713 } else { '+' }
     $failMark = if ($utf) { [string][char]0x2717 } else { 'x' }
     $dotMark = if ($utf) { [string][char]0x2022 } else { '-' }
@@ -664,6 +666,14 @@ Test a branch, no release needed:
         Out ('{0,-52}' -f $Text) -NoNewline
         Out (' ' + $box.V) Magenta
     }
+    function BoxLink([string]$Url) {
+        # A box row with the URL, clickable where the terminal supports it.
+        $row = '{0,-52}' -f "    $Url"
+        if ($hyperlinks) { $e = [char]27; $row = $row.Replace($Url, "$e]8;;$Url$e\$Url$e]8;;$e\") }
+        Out ("  " + $box.V + ' ') Magenta -NoNewline
+        Out $row -NoNewline
+        Out (' ' + $box.V) Magenta
+    }
     function BoxItem([string]$Text) {
         Out ("  " + $box.V + ' ') Magenta -NoNewline
         Out '! ' Yellow -NoNewline
@@ -692,7 +702,7 @@ Test a branch, no release needed:
         BoxLine '    then run: copycord restart'
     }
     BoxItem 'Finish the setup in the dashboard once it runs:'
-    BoxLine "    http://localhost:$port"
+    BoxLink "http://localhost:$port"
 
     Out ("  " + $box.BL + $rule + $box.BR) Magenta
     Out ''

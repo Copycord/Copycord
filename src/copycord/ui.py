@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import itertools
 import os
+import re
 import sys
 import threading
 import time
@@ -114,6 +115,66 @@ def cmd(text: str, stream=None) -> str:
 
 
 # --------------------------------------------------------------------------
+# links
+# --------------------------------------------------------------------------
+
+_URL = re.compile(r"https?://[^\s<>\"'`\033]+")
+_ANSI = re.compile(r"\033\[[0-9;?]*[A-Za-z]|\033\][^\033\a]*(?:\033\\|\a)")
+
+
+def _version(raw: str) -> tuple:
+    return tuple(int(x) for x in re.findall(r"\d+", raw or "")[:2])
+
+
+def hyperlinks(stream: Optional[TextIO] = None) -> bool:
+    """True when the terminal on stream shows OSC 8 links as clickable."""
+    stream = sys.stdout if stream is None else stream
+    if not use_color(stream):
+        return False
+    try:
+        if not stream.isatty():
+            return False
+    except (AttributeError, ValueError):
+        return False
+    env = os.environ
+    # tmux and screen pass on the variables of the outer terminal but not the links.
+    if env.get("TMUX") or env.get("STY"):
+        return False
+    if env.get("WT_SESSION") or env.get("KITTY_WINDOW_ID") or env.get("WEZTERM_PANE"):
+        return True
+    program = env.get("TERM_PROGRAM", "")
+    if program in ("vscode", "WezTerm", "ghostty"):
+        return True
+    if program == "iTerm.app":
+        return _version(env.get("TERM_PROGRAM_VERSION", "")) >= (3, 1)
+    if env.get("TERM") == "xterm-kitty":
+        return True
+    vte = env.get("VTE_VERSION", "")
+    return vte.isdigit() and int(vte) >= 5000
+
+
+def link(url: str, stream: Optional[TextIO] = None) -> str:
+    """url, clickable where the terminal supports it; the text shown is always the url."""
+    if not hyperlinks(stream):
+        return url
+    return f"\033]8;;{url}\033\\{url}\033]8;;\033\\"
+
+
+def linkify(text: str, stream: Optional[TextIO] = None) -> str:
+    """text with every http(s) URL in it made clickable, see link()."""
+    if "://" not in text or not hyperlinks(stream):
+        return text
+
+    def one(m: "re.Match") -> str:
+        url = m.group(0)
+        trail = len(url) - len(url.rstrip(".,;:!?)"))
+        url, rest = (url[:-trail], url[-trail:]) if trail else (url, "")
+        return link(url, stream) + rest
+
+    return _URL.sub(one, text)
+
+
+# --------------------------------------------------------------------------
 # step lines
 # --------------------------------------------------------------------------
 
@@ -137,8 +198,8 @@ def mark(status: str, stream: Optional[TextIO] = None) -> str:
 def line(status: str, text: str, detail: str = "", stream: Optional[TextIO] = None) -> None:
     """One status line: "✓ label  detail"."""
     stream = sys.stdout if stream is None else stream
-    tail = f"  {dim(detail, stream)}" if detail else ""
-    print(f"{mark(status, stream)} {text}{tail}", file=stream)
+    tail = f"  {dim(linkify(detail, stream), stream)}" if detail else ""
+    print(f"{mark(status, stream)} {linkify(text, stream)}{tail}", file=stream)
 
 
 def ok(text, detail="", stream=None):
@@ -188,22 +249,14 @@ def heading(text: str, stream: Optional[TextIO] = None) -> None:
 
 
 def _visible_len(text: str) -> int:
-    out, skip = 0, False
-    for ch in text:
-        if ch == "\033":
-            skip = True
-        elif skip and ch == "m":
-            skip = False
-        elif not skip:
-            out += 1
-    return out
+    return len(_ANSI.sub("", text))
 
 
 def box(lines: Iterable[str], title: str = "", status: str = "info",
         stream: Optional[TextIO] = None) -> None:
     """A boxed notice."""
     stream = sys.stdout if stream is None else stream
-    lines = list(lines)
+    lines = [linkify(x, stream) for x in lines]
     fancy = use_color(stream) and _unicode(stream)
     tl, tr, bl, br, h, v = (
         ("╭", "╮", "╰", "╯", "─", "│")

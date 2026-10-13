@@ -158,6 +158,16 @@ else
     BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; CYAN=""; ACCENT=""; RESET=""
     TTY=0
 fi
+# Clickable links (OSC 8) only in terminals known to show them; tmux and screen do not pass them on.
+HYPERLINKS=0
+if [ "$TTY" = "1" ] && [ -z "${TMUX:-}" ] && [ -z "${STY:-}" ]; then
+    case "${TERM_PROGRAM:-}" in vscode | WezTerm | ghostty) HYPERLINKS=1 ;; esac
+    if [ -n "${WT_SESSION:-}" ] || [ -n "${KITTY_WINDOW_ID:-}" ] || [ -n "${WEZTERM_PANE:-}" ]; then HYPERLINKS=1; fi
+    case "${VTE_VERSION:-}" in *[!0-9]* | "") ;; *) [ "$VTE_VERSION" -ge 5000 ] && HYPERLINKS=1 ;; esac
+    if [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
+        case "${TERM_PROGRAM_VERSION:-}" in 3.[1-9]* | [4-9].* | [1-9][0-9]*) HYPERLINKS=1 ;; esac
+    fi
+fi
 case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
     *UTF-8* | *utf-8* | *UTF8* | *utf8*)
         OK_MARK="✓"; FAIL_MARK="✗"; WARN_MARK="!"; DOT="•"
@@ -804,6 +814,14 @@ fi
 
 box_line() { printf '  %s%s%s %-52s %s%s%s\n' "$ACCENT" "$BOX_V" "$RESET" "$1" "$ACCENT" "$BOX_V" "$RESET"; }
 box_item() { printf '  %s%s%s %s!%s %-50s %s%s%s\n' "$ACCENT" "$BOX_V" "$RESET" "$YELLOW$BOLD" "$RESET" "$1" "$ACCENT" "$BOX_V" "$RESET"; }
+# box_link URL: a box row with the URL, clickable where the terminal supports it.
+box_link() {
+    row="$(printf '%-52s' "    $1")"
+    if [ "$HYPERLINKS" = "1" ]; then
+        row="${row%%"$1"*}$ESC]8;;$1$ESC\\$1$ESC]8;;$ESC\\${row#*"$1"}"
+    fi
+    printf '  %s%s%s %s %s%s%s\n' "$ACCENT" "$BOX_V" "$RESET" "$row" "$ACCENT" "$BOX_V" "$RESET"
+}
 box_rule() {
     i=0
     rule=""
@@ -835,7 +853,7 @@ if grep -qx 'PASSWORD=copycord' "$ENV_FILE" 2>/dev/null; then
     box_line "    then run: copycord restart"
 fi
 box_item "Finish the setup in the dashboard once it runs:"
-box_line "    $URL"
+box_link "$URL"
 box_rule "$BOX_BL" "$BOX_BR"
 say ""
 say "  ${DIM}Open a new shell first if copycord is not found.$RESET"

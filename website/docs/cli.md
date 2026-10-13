@@ -122,6 +122,8 @@ Colors are turned off when the output is not a terminal (a pipe, a file, a servi
 
 Where the terminal cannot print these symbols (for example a Windows console on code page 437 or 1252), they fall back to `+ ! x -`.
 
+Web addresses in the output (the dashboard address, the docs link) can be clicked in Windows Terminal, VS Code, iTerm2, kitty, WezTerm, Ghostty and GNOME Terminal and other VTE-based terminals. The full address is always printed, so you can still copy it anywhere else. Links are off when colors are off, and inside tmux or screen.
+
 ## The data directory {#data-dir}
 
 Copycord keeps its database (`data.db`), `secret.key`, backups, exports and the saved update state in the data directory:

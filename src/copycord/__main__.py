@@ -200,7 +200,7 @@ def format_help() -> str:
     w(f"  {ui.cmd('--no-color'.ljust(opt_width))}  Turn off color, same as NO_COLOR=1")
     w()
     w(ui.dim("Run ") + ui.cmd("copycord <command> --help") + ui.dim(" for the options of one command."))
-    w(ui.dim(f"Docs: {DOCS_URL}"))
+    w(ui.dim(f"Docs: {ui.link(DOCS_URL)}"))
     return buf.getvalue()
 
 
@@ -293,7 +293,7 @@ def format_command_help(parser: argparse.ArgumentParser) -> str:
     w()
     if commands:
         w(ui.dim("Run ") + ui.cmd(f"{parser.prog} <command> --help") + ui.dim(" for the options of one command."))
-    w(ui.dim(f"Docs: {DOCS_URL}"))
+    w(ui.dim(f"Docs: {ui.link(DOCS_URL)}"))
     return buf.getvalue()
 
 
