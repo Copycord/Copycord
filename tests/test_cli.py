@@ -226,15 +226,15 @@ def test_uninstall_data_yes_without_delete_changes_nothing(uninstall_env, monkey
     _answers(monkeypatch, "y", "y", "delete")
     assert cli.main(["uninstall"]) == 1
     assert (uninstall_env / "data.db").exists()
-    assert "DELETE was not typed" in capsys.readouterr().out
+    assert "DELETE was not typed" in capsys.readouterr().err
 
 
 def test_uninstall_data_yes_refuses_the_home_directory(uninstall_env, monkeypatch, capsys):
     monkeypatch.setenv("DATA_DIR", str(Path.home()))
     _answers(monkeypatch, "y", "y")
     assert cli.main(["uninstall"]) == 1
-    out = capsys.readouterr().out
-    assert "refusing to delete the Copycord home" in out and "home directory" in out
+    err = capsys.readouterr().err
+    assert "refusing to delete the Copycord home" in err and "home directory" in err
 
 
 def test_uninstall_without_a_terminal_keeps_the_data(uninstall_env, monkeypatch, capsys):
@@ -254,7 +254,7 @@ def test_uninstall_without_a_terminal_needs_yes(uninstall_env, monkeypatch, caps
     monkeypatch.setattr(ui, "is_interactive", lambda: False)
     assert cli.main(["uninstall"]) == 1
     assert (uninstall_env / "data.db").exists()
-    assert "rerun with --yes" in capsys.readouterr().out
+    assert "rerun with --yes" in capsys.readouterr().err
 
 
 def test_uninstall_purge_deletes_without_asking(uninstall_env, monkeypatch, capsys):
