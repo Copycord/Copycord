@@ -319,3 +319,76 @@ def test_sh_has_one_release_lookup():
     # Pre-releases rank below the release they lead to.
     newest = _sh_function(text, "newest_version")
     assert "rank = 3" in newest and "sort -k1,1n -k2,2n -k3,3n -k4,4n -k5,5n" in newest
+
+
+def _sh_box_functions():
+    text = _text(SH)
+    return text[text.index("BOX_NL='\n"):text.index('\nsay ""\nif [ "$DRY_RUN" = "1" ]; then\n    say "  ${YELLOW}')]
+
+
+def _render_sh_box(tmp_path, rows, hyperlinks="0", color=True):
+    import subprocess
+    esc = "\x1b"
+    script = tmp_path / "box.sh"
+    script.write_text(
+        "ESC=$(printf '\\033')\n"
+        f"HYPERLINKS={hyperlinks}\n"
+        + ("ACCENT=$ESC'[35m'; RESET=$ESC'[0m'; YELLOW=$ESC'[33m'; BOLD=$ESC'[1m'\n" if color
+           else "ACCENT=''; RESET=''; YELLOW=''; BOLD=''\n")
+        + 'BOX_TL="+"; BOX_TR="+"; BOX_BL="+"; BOX_BR="+"; BOX_H="-"; BOX_V="|"\n'
+        + _sh_box_functions() + "\n" + rows + "\nbox_flush\n",
+        encoding="utf-8",
+    )
+    out = subprocess.run(
+        ["bash", str(script)], capture_output=True, text=True, check=True,
+        env={"PATH": "/usr/bin:/bin", "LC_ALL": "C.UTF-8"},
+    ).stdout
+    assert esc in out or not color
+    return out
+
+
+def _plain(line):
+    return re.sub(r"\x1b\]8;;[^\x1b]*\x1b\\|\x1b\[[0-9;]*m", "", line)
+
+
+@pytest.mark.parametrize("hyperlinks", ["0", "1"])
+def test_sh_box_borders_line_up_for_long_rows(tmp_path, hyperlinks):
+    home = "/home/someone/" + "very-long-folder/" * 5 + "copycord"
+    rows = "\n".join([
+        'box_line "Copycord v4.0.0-beta.12-with-a-long-label is installed"',
+        f'box_line "Home: {home}"',
+        f'box_line "Settings: {home}/.env"',
+        'box_line ""',
+        'box_item "Finish the setup in the dashboard once it runs:"',
+        'box_link "http://[2001:db8:85a3:8d3:1319:8a2e:370:7348]:8080"',
+        'box_item "Your dashboard password (shown once):"',
+        'box_line "    hunter2hunter2hunter2"',
+        'box_line "    saved as PASSWORD in the settings file"',
+    ])
+    lines = _render_sh_box(tmp_path, rows, hyperlinks).splitlines()
+    plain = [_plain(line) for line in lines]
+    assert plain[0].startswith("  +-") and plain[-1].startswith("  +-")
+    assert len(plain) == 11
+    assert len({len(line) for line in plain}) == 1
+    assert len(plain[0]) > 2 + 54
+    for line in plain[1:-1]:
+        assert line.startswith("  | ") and line.endswith(" |")
+    if hyperlinks == "1":
+        assert "\x1b]8;;http://[2001:db8:85a3:8d3:1319:8a2e:370:7348]:8080\x1b\\" in "".join(lines)
+
+
+def test_sh_box_keeps_the_usual_width_for_short_rows(tmp_path):
+    rows = 'box_line "Home: /home/a"\nbox_item "Change it:"\nbox_link "http://localhost:8080"'
+    plain = [_plain(line) for line in _render_sh_box(tmp_path, rows).splitlines()]
+    assert {len(line) for line in plain} == {2 + 54}
+    assert plain[2].startswith("  | ! Change it:")
+
+
+def test_ps1_box_width_comes_from_the_rows():
+    text = _text(PS1)
+    box = text[text.index("function BoxLine"):]
+    assert "* 54" not in box and "-52" not in box and "-50" not in box
+    assert "$width = 52" in box
+    assert "$rule = [string]$box.H * ($width + 2)" in box
+    assert "PadRight($Width" in box
+    assert "shown once" in box and "saved as PASSWORD in the settings file" in box
