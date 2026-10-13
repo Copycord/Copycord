@@ -9,32 +9,9 @@
 
 """User-token gateway over raw websockets.
 
-Ported from wizard/core/gateway.py, which has been holding user-token sessions
-in production: same handshake, same heartbeat and zombie rule, same op 37
-subscription frames, same resume discipline, same close-code handling. What is
-added here:
-
-  * zlib-stream transport compression (``compress=zlib-stream``), which is what
-    the web client connects with. One ``zlib.decompressobj`` per socket, fed
-    every binary frame, inflated whenever the buffer ends in the 4-byte
-    Z_SYNC_FLUSH marker. ``zlib_stream=False`` is the plain-json fallback
-    wizard runs on, and a socket whose stream fails to inflate falls back to
-    it for the reconnects that follow.
-  * op 8 REQUEST_GUILD_MEMBERS, which the admin standalone scraper's gateway
-    (admin/standalone_scraper.py) drives, so it can run on this gateway instead
-    of keeping one of its own.
-  * proxy dialing that works on the pinned websockets 11, which has no
-    ``proxy=`` argument: the tunnel is opened here (HTTP CONNECT, or SOCKS via
-    python-socks when it is installed) and handed to websockets as ``sock``.
-
-The proxy source is common/proxy_pool's per-token lease, the same one the
-curl_cffi REST session leases from, so the socket and the REST calls leave from
-one exit IP. A dial that fails rotates to a fresh lease; a Discord-side close
-does not, because the proxy is evidently fine.
-
-Events go out raw: ``on(event, handler)`` gets the dispatch ``d`` dict, and
-``on_dispatch(handler)`` gets every ``(event, d)``. Turning those into models is
-selfclient.events; caching them is the Client's job.
+Handlers get raw dispatch payloads. The proxy tunnel is opened here because
+websockets 11 has no ``proxy=`` argument. A failed dial rotates the proxy
+lease; a close from Discord does not.
 """
 
 from __future__ import annotations
@@ -86,39 +63,23 @@ _HEADERS_KWARG = "additional_headers" if _WS_MAJOR >= 14 else "extra_headers"
 MAX_FRAME_SIZE = 10 * 1024 * 1024
 OPEN_TIMEOUT = 20.0
 
-# The trailer zlib puts on every Z_SYNC_FLUSH. Discord ends each logical
-# message with one, so a buffer ending in it is a complete message.
+# Discord ends each zlib-stream message with this Z_SYNC_FLUSH trailer.
 ZLIB_SUFFIX = b"\x00\x00\xff\xff"
 
-# The close code for a socket we mean to RESUME on. Discord invalidates the
-# session when the client closes with 1000 or 1001 (discord-api-docs #1472), so
-# a reconnect closed with websockets' default 1000 came back to "invalid session
-# (resumable=False)" and a fresh IDENTIFY, and every event in the gap was lost.
-# Any 4000-range code keeps the session; 1000 is only for a deliberate goodbye.
+# Closing with 1000 or 1001 invalidates the session; a 4000-range code keeps it
+# resumable.
 RESUME_CLOSE_CODE = CloseCode.RESUME
 
-# Close codes after which the session cannot be resumed and a fresh IDENTIFY is
-# the only way back.
+# Close codes after which only a fresh IDENTIFY works.
 _SESSION_RESET_CODES = frozenset({CloseCode.INVALID_SEQ, CloseCode.SESSION_TIMED_OUT})
 
-# What the official web client asks for, minus bit 15, CHANNEL_OBFUSCATION.
-# With that bit set the gateway replaces the name and topic of every channel the
-# account cannot view with the literal string `___hidden___`, and the sitemap
-# clones that placeholder onto the destination server. Clearing it is what makes
-# READY carry the real names.
+# Without CHANNEL_OBFUSCATION, so READY has real names for channels the account
+# cannot view instead of `___hidden___`.
 CAPABILITIES = Capabilities.DEFAULT  # 1734653
 
-# The gateway auto-subscribes a user account to its guilds on connect, but that
-# default tier only covers top-level channels: messages in threads the account
-# hasn't joined are never dispatched. Opting into the `threads` feature via op 37
-# is what turns them on (and makes the gateway send THREAD_LIST_SYNC).
-#
-# DO NOT SPLIT `typing` AND `threads` ACROSS FRAMES. Once a client subscribes to
-# `typing` for a guild it counts as subscribed to that guild indefinitely, and a
-# guild that was already subscribed will not emit THREAD_LIST_SYNC when `threads`
-# is added later; recovering from that needs an unsubscribe/resubscribe cycle.
-# So every guild's *first* frame must carry both flags, which is why these ship
-# as one fixed feature set rather than as caller-selectable options.
+# The default subscription skips threads the account has not joined; `threads`
+# turns them on. A guild's first frame must carry both `typing` and `threads`:
+# once subscribed via `typing`, adding `threads` later sends no THREAD_LIST_SYNC.
 SUBSCRIPTION_FEATURES = {
     "typing": True,
     "threads": True,
@@ -138,15 +99,10 @@ Connector = Callable[[str, Dict[str, str], Optional[str]], Awaitable[Any]]
 
 
 def gateway_url(host: str = GATEWAY_HOST, *, zlib_stream: bool = False) -> str:
-    """Return `host` carrying this client's `encoding`/`v`/`compress` query.
+    """Return `host` with this client's `encoding`/`v`/`compress` query.
 
-    Whatever query `host` already has is discarded, so this is the single place
-    that decides the query string. It matters for resumes: READY's
-    `resume_gateway_url` arrives as a bare host with no query at all, and
-    reconnecting to it verbatim silently drops to the gateway's default API
-    version: no error, no close code, just no more thread events.
-
-    The order is the web client's (`encoding`, `v`, `compress`).
+    READY's `resume_gateway_url` has no query, and connecting to it bare
+    silently falls back to the default API version and loses thread events.
     """
     parts = urlsplit(host or GATEWAY_HOST)
     params: Dict[str, Any] = {"encoding": "json", "v": API_VERSION}
@@ -157,11 +113,7 @@ def gateway_url(host: str = GATEWAY_HOST, *, zlib_stream: bool = False) -> str:
 
 
 def build_subscription_frames(guild_ids: Iterable[Any]) -> List[Dict[str, Any]]:
-    """Batch guild ids into as few op 37 frames as the size cap allows.
-
-    Each guild appears in exactly one frame with the full feature set, so a
-    guild's `typing` and `threads` never land in different frames.
-    """
+    """Batch guild ids into as few op 37 frames as the size cap allows."""
     frames: List[Dict[str, Any]] = []
     batch: Dict[str, Dict[str, bool]] = {}
     seen: set = set()
@@ -181,7 +133,6 @@ def build_subscription_frames(guild_ids: Iterable[Any]) -> List[Dict[str, Any]]:
             continue
         seen.add(gid)
         batch[gid] = dict(SUBSCRIPTION_FEATURES)
-        # A lone guild that somehow blows the cap still ships: nothing to split.
         if (
             len(batch) > 1
             and len(json.dumps({"subscriptions": batch})) > MAX_SUBSCRIPTION_PAYLOAD
@@ -194,12 +145,7 @@ def build_subscription_frames(guild_ids: Iterable[Any]) -> List[Dict[str, Any]]:
 
 
 class ZlibStreamInflater:
-    """One socket's zlib-stream context.
-
-    The whole connection is a single deflate stream, so the decompressor must
-    live as long as the socket and see every frame in order. A message can span
-    several frames; it is complete when the buffered bytes end in ZLIB_SUFFIX.
-    """
+    """One socket's zlib-stream context; the whole connection is one deflate stream."""
 
     def __init__(self) -> None:
         self._inflator = zlib.decompressobj()
@@ -216,7 +162,7 @@ class ZlibStreamInflater:
 
 
 class _GatewayRatelimiter:
-    """Sliding window: 110 sends per 60 s. Heartbeats bypass this entirely."""
+    """Sliding window of 110 sends per 60 s. Heartbeats bypass it."""
 
     RATE = 110
     PER = 60.0
@@ -264,8 +210,7 @@ async def _http_connect_tunnel(
 ) -> socket.socket:
     """Open a CONNECT tunnel to host:port through an HTTP proxy.
 
-    ``https://`` proxy URLs are dialed the same way: in proxy lists that scheme
-    almost always names a CONNECT-capable HTTP proxy, not TLS to the proxy.
+    ``https://`` proxies are dialed the same way, as plain CONNECT proxies.
     """
     parts = urlsplit(proxy)
     if not parts.hostname:
@@ -359,8 +304,7 @@ async def open_websocket(
         "open_timeout": open_timeout,
     }
     if _WS_MAJOR >= 15:
-        # 15+ picks a proxy up from the environment on its own; the proxy here
-        # is the token's lease and nothing else.
+        # 15+ would otherwise pick up a proxy from the environment.
         kwargs["proxy"] = None
     sock = None
     if proxy:
@@ -394,9 +338,7 @@ def _close_info(ws: Any, exc: Optional[BaseException]) -> Tuple[Optional[int], s
 class GatewayClient:
     """One user-token gateway session, reconnecting and resuming on its own.
 
-    ``run()`` connects and keeps the session alive until ``close()``, or until
-    Discord closes it with a code no reconnect can fix, in which case ``run()``
-    raises: LoginFailure for 4004, ConnectionClosed for the other fatal codes.
+    ``run()`` returns after ``close()``, or raises on a fatal close code.
     """
 
     def __init__(
@@ -423,21 +365,16 @@ class GatewayClient:
         self.reconnect = reconnect
         self.base_reconnect_delay = base_reconnect_delay
         self.max_reconnect_delay = max_reconnect_delay
-        #: Whether the next socket asks for zlib-stream. Cleared, for good, if a
-        #: stream ever fails to inflate.
+        # Cleared for good if a stream ever fails to inflate.
         self.zlib_stream = zlib_stream
         self.host = host
         self.capabilities = capabilities
-        #: A fixed proxy, used when no pool is given (or the pool is disabled).
+        # Used when there is no enabled proxy pool.
         self.proxy = proxy
-        #: common/proxy_pool.ProxyPool or anything with its lease /
-        #: report_failure / report_success / enabled surface.
         self.proxy_pool = proxy_pool
         self._connector = connector
 
-        # Per process, not per socket: a resume is the same client continuing.
-        # Registered with the header builder on READY so the REST
-        # super-properties quote the same heartbeat session as the socket.
+        # Per client, not per socket. Shared with the REST super-properties on READY.
         self.heartbeat_session_id = str(uuid.uuid4())
 
         self._guild_ids: List[str] = []
@@ -454,17 +391,12 @@ class GatewayClient:
         self._heartbeat_task: Optional[asyncio.Task] = None
         self._time_spent_task: Optional[asyncio.Task] = None
         self._stopped: bool = False
-        # Seconds range slept after an INVALID_SESSION, before reconnecting.
         self._invalid_session_delay: Tuple[float, float] = (1.0, 5.0)
-        #: (close code, reason) once Discord has closed the session for good: a
-        #: bad token, bad intents, a bad shard. Nothing reconnects after one.
+        # (code, reason) of a close no reconnect can fix.
         self.fatal_close: Optional[Tuple[Optional[int], str]] = None
-        #: Wall-clock time the gateway last stopped being connected, None while a
-        #: session is live. Starts set: a client that has not reached READY yet
-        #: is down as far as anything reading this is concerned.
+        # None while a session is live; set until the first READY.
         self.disconnected_since: Optional[float] = time.time()
         self.reconnect_count: int = 0
-        #: Sockets opened so far, successful or not. Mostly for tests and logs.
         self.connect_count: int = 0
         self._ratelimiter = _GatewayRatelimiter()
 
@@ -494,8 +426,7 @@ class GatewayClient:
     async def run(self, *, refresh_build: bool = True) -> None:
         log.debug("starting gateway client")
         if refresh_build:
-            # The build number feeds IDENTIFY; a stale one is a top detection
-            # signal, so fetch it before the first socket rather than after.
+            # IDENTIFY carries the build number, and a stale one stands out.
             try:
                 await fingerprint.refresh_build_info()
             except Exception as exc:
@@ -508,8 +439,7 @@ class GatewayClient:
                     await self._connect()
                     delay = self.base_reconnect_delay
                 except GatewayDialError as exc:
-                    # Failed before the handshake finished: most likely the proxy
-                    # itself is dead (refused/timed out), so rotate to the next one.
+                    # Likely a dead proxy, so rotate.
                     log.warning("gateway dial failed: %s", exc)
                     await self._rotate_proxy()
                 except Exception as exc:
@@ -534,7 +464,7 @@ class GatewayClient:
             raise ConnectionClosed(code, reason)
 
     async def close(self) -> None:
-        """Stop for good. Closes with 1000, so the session is not resumable."""
+        """Stop for good, closing with 1000 so the session is not resumable."""
         self._stopped = True
         await self._cancel_task("_heartbeat_task")
         await self._cancel_task("_time_spent_task")
@@ -550,10 +480,9 @@ class GatewayClient:
         await self._send(payload)
 
     async def subscribe_guilds(self, guild_ids: Iterable[Any], *, force: bool = False) -> None:
-        """Opt into thread (and typing/activity/member) events for these guilds.
+        """Opt into thread, typing, activity and member events for these guilds.
 
-        Already-subscribed guilds are skipped unless `force`: a resumed session
-        replays nothing server-side, so a resume re-sends the whole set.
+        Already-subscribed guilds are skipped unless `force`.
         """
         ids = [str(g) for g in guild_ids if g]
         if not force:
@@ -579,7 +508,7 @@ class GatewayClient:
         user_ids: Optional[Iterable[Any]] = None,
         nonce: Optional[str] = None,
     ) -> None:
-        """op 8: ask for members; the answer arrives as GUILD_MEMBERS_CHUNK."""
+        """Send op 8; the answer arrives as GUILD_MEMBERS_CHUNK."""
         d: Dict[str, Any] = {
             "guild_id": str(guild_id),
             "limit": int(limit),
@@ -685,16 +614,11 @@ class GatewayClient:
         except _WSClosed as exc:
             closed_exc = exc
         finally:
-            # The socket belongs to this connection, not to the client. Cleared
-            # in a finally because a close arrives as an exception at least as
-            # often as it arrives as a return.
             self._ws = None
             if self.disconnected_since is None:
                 self.disconnected_since = time.time()
             await self._cancel_task("_heartbeat_task")
             try:
-                # A no-op on a socket that is already closed; otherwise keep
-                # the session resumable.
                 await ws.close(code=RESUME_CLOSE_CODE)
             except Exception:
                 pass
@@ -804,9 +728,7 @@ class GatewayClient:
             await self._send_identify()
 
     async def _heartbeat_loop(self, ws: Any) -> None:
-        # First beat at interval * jitter, as the gateway docs ask and the web
-        # client does: a fleet of clients reconnecting together must not beat
-        # in lockstep.
+        # The first beat is jittered, as the gateway docs ask.
         await asyncio.sleep(self.heartbeat_interval * random.random())
         while self._ws is ws:
             await self._send_heartbeat()
@@ -827,8 +749,6 @@ class GatewayClient:
     # ------------------------------------------------------------------
 
     def _gateway_properties(self) -> Dict[str, Any]:
-        # client_launch_id is already the REST super-properties' one: both come
-        # out of the same cached per-token fingerprint.
         return dict(fingerprint.gateway_properties(self.token))
 
     async def _send_identify(self) -> None:
@@ -852,8 +772,7 @@ class GatewayClient:
                         "since": 0,
                         "afk": False,
                     },
-                    # Payload compression, which the web client leaves off; the
-                    # transport compression is the `compress` URL parameter.
+                    # Payload compression; transport compression is the URL's `compress`.
                     "compress": False,
                     "client_state": {
                         "guild_versions": {},
@@ -944,7 +863,7 @@ class GatewayClient:
             except Exception:
                 pass
             await self._send_presence_update()
-            # Fresh session: the gateway remembers no subscriptions from the old one.
+            # A new session keeps no subscriptions from the old one.
             self._subscribed_guilds.clear()
             await self.subscribe_guilds(self._guild_ids, force=True)
 
@@ -963,7 +882,7 @@ class GatewayClient:
 
         elif event == "GUILD_DELETE":
             gid = data_dict.get("id")
-            # An outage marks a guild unavailable; it is still ours.
+            # unavailable means an outage, not a guild we left.
             if gid and not data_dict.get("unavailable"):
                 gid = str(gid)
                 if gid in self._guild_ids:
@@ -1038,7 +957,7 @@ class GatewayClient:
             log.warning("tried to send on a closed socket")
 
     async def _send_bypass(self, payload: Dict[str, Any]) -> None:
-        """Send without the ratelimiter. Heartbeats only."""
+        """Send without the ratelimiter, for heartbeats."""
         ws = self._ws
         if ws is None:
             return
