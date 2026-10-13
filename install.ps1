@@ -247,7 +247,8 @@ Test a branch, no release needed:
     # An upgrade or reinstall ends with `copycord doctor --fix`.
     $upgrade = [bool](Get-Command copycord -ErrorAction SilentlyContinue) -or
         (Test-Path (Join-Path $env:USERPROFILE '.local\bin\copycord.exe')) -or
-        (Test-Path (Join-Path $homeDir '.env')) -or (Test-Path (Join-Path $homeDir 'data.db'))
+        (Test-Path (Join-Path $homeDir '.env')) -or (Test-Path (Join-Path $homeDir 'data\data.db')) -or
+        (Test-Path (Join-Path $homeDir 'data.db'))
 
     # --- plan ---------------------------------------------------------------
 

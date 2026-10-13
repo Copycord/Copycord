@@ -301,7 +301,7 @@ def test_installers_link_the_dashboard():
     for probe in ('[ "$TTY" = "1" ]', "TMUX", "STY", "WT_SESSION", "vscode", "VTE_VERSION", "KITTY_WINDOW_ID"):
         assert probe in detect
     ps1 = (ROOT / "install.ps1").read_text(encoding="utf-8")
-    assert 'BoxLink "http://localhost:$port"' in ps1
+    assert 'BoxLink "http://${dashHost}:$port"' in ps1
     assert "$hyperlinks = $useColor -and ([bool]$env:WT_SESSION -or $env:TERM_PROGRAM -eq 'vscode')" in ps1
     assert '"$esc]8;;$Url$esc\\$Url$esc]8;;$esc\\"' in ps1
 
