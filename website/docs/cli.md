@@ -22,6 +22,7 @@ copycord update [--channel stable|beta|dev] [--repo OWNER/NAME] [--ref REF] [--t
 copycord update status
 copycord uninstall [--purge|--keep-data] [--yes] [--keep-service] [--dry-run] [--data-dir PATH]
 copycord --version | -V
+copycord --no-color <command>
 ```
 
 `copycord` on its own (or `copycord --help`) lists the commands by group with a few examples:
@@ -59,12 +60,19 @@ Examples:
 Options:
   -h, --help     Show this help
   -V, --version  Print the version
+  --no-color     Turn off color, same as NO_COLOR=1
 
-Run `copycord <command> --help` for the options of one command.
+Run copycord <command> --help for the options of one command.
 Docs: https://copycord.github.io/Copycord/docs/cli
 ```
 
-Every command has `--help`, for example `copycord service install --help`. Each command's help has the same layout: a heading, the usage line, its commands or options, and examples. Options most people never need come last, under their own heading. A command group on its own (`copycord config`, `copycord service`) prints its help. A mistake such as an unknown option prints one line and points at the help:
+Every command has `--help`, for example `copycord service install --help`. Each command's help has the same layout: a heading, the usage line, its commands or options, and examples. Options most people never need come last, under their own heading. A command group on its own (`copycord config`, `copycord service`) prints its help. A mistake such as an unknown option prints one line and points at the help. An unknown command suggests the closest one and exits with status 2:
+
+```
+$ copycord updte
+✖ unknown command 'updte'. Did you mean 'update'?
+  Run copycord --help to see all commands.
+```
 
 ```
 $ copycord update --help
@@ -98,19 +106,21 @@ Advanced (channels and git installs):
   ...
 ```
 
-Colors follow the same rules as the rest of the output: plain text when it is not a terminal or `NO_COLOR` is set.
+Colors follow the same rules as the rest of the output: no color when it is not a terminal, `NO_COLOR` is set or `--no-color` is given.
 
 ## Output and colors {#output}
 
-In a terminal the CLI shows the Copycord banner, colored check marks and crosses, a spinner while it waits for GitHub, and boxed notices for things you need to act on. Colors are turned off when the output is not a terminal (a pipe, a file, a service log), when `NO_COLOR` is set, or when `TERM=dumb`. `FORCE_COLOR=1` turns them on anyway.
+Every status line starts with one symbol: `✔` success, `!` warning, `✖` failure, `•` info, and `?` for a question. The installers use the same set. Commands inside a message are shown in the command color. The Copycord banner appears only on the bare `copycord` overview and in the installers. In a terminal the CLI also shows a spinner while it waits for GitHub and boxed notices for things you need to act on.
 
-Without colors every status line starts with a plain word, so scripts can match it:
+Colors are turned off when the output is not a terminal (a pipe, a file, a service log), when `NO_COLOR` is set, with `--no-color` (before or after the command, for example `copycord --no-color doctor`), or when `TERM=dumb`. `FORCE_COLOR=1` turns them on anyway. Without colors the lines and symbols stay the same:
 
 ```
-PASS  home writable
-WARN  the default password is still set: change PASSWORD in /home/you/.copycord/.env, then run `copycord restart`
-FAIL  database schema 5 is newer than this Copycord supports (4): ...
+✔ home writable
+! the default password is still set  change PASSWORD in /home/you/.copycord/.env, then run copycord restart
+✖ database schema 5 is newer than this Copycord supports (4)  ...
 ```
+
+Where the terminal cannot print these symbols (for example a Windows console on code page 437 or 1252), they fall back to `+ ! x -`.
 
 ## The data directory {#data-dir}
 
@@ -154,13 +164,15 @@ The terminal shows the dashboard's log and warnings or errors from the server an
 
 ## copycord --version {#copycord-version}
 
-`copycord --version` (or `-V`) prints the installed version and the saved [update channel](#update-channels). In a terminal it shows the banner too; piped, it prints two plain lines:
+`copycord --version` (or `-V`) prints two plain lines: the installed version and the saved [update channel](#update-channels).
 
 ```bash
-$ copycord --version | cat
+$ copycord --version
 4.0.0
-channel stable
+stable channel
 ```
+
+A dev install shows the commit and the ref, for example `4.0.0 (1a2b3c4)` and `dev channel · v4-dev`.
 
 ## copycord doctor {#copycord-doctor}
 
@@ -186,44 +198,44 @@ Without colors it looks like this on a new install:
 
 ```
 Install
-PASS  Copycord v4.0.0 (1a2b3c4), channel stable
-PASS  Python 3.12.3
-PASS  web UI included
-PASS  dependencies OK
+✔ Copycord v4.0.0 (1a2b3c4) · stable channel
+✔ Python 3.12.3
+✔ web UI included
+✔ dependencies OK
 
 Settings
-PASS  .env found
-WARN  the default password is still set: change PASSWORD in /home/you/.copycord/.env, then run `copycord restart`
+✔ .env found
+! the default password is still set  change PASSWORD in /home/you/.copycord/.env, then run copycord restart
 
 Data
-PASS  home writable
-INFO  database created on first run
-INFO  no backups yet
+✔ home writable
+• database created on first run
+• no backups yet
 
 Running
-PASS  admin port 8080 free
-INFO  service not installed: `copycord service install` runs Copycord in the background
+✔ admin port 8080 free
+• service not installed  copycord service install runs Copycord in the background
 
 Updates
-PASS  up to date
+✔ up to date
 
 Needs your attention
-WARN  the default password is still set: change PASSWORD in /home/you/.copycord/.env, then run `copycord restart`
+! the default password is still set  change PASSWORD in /home/you/.copycord/.env, then run copycord restart
 
-1 warning, 0 problems
+! 1 warning, 0 problems
 ```
 
-In a terminal each line shows a green check, a yellow `!`, a red cross or a blue dot; piped, each line starts with `PASS`, `WARN`, `FAIL` or `INFO`. The report ends with a **Needs your attention** section that lists each warning and problem once with what to do (a yellow `!` for a warning, a red one for a problem in a terminal), then a last line: `All good`, or the number of warnings and problems. A warning that `--fix` can repair says so there, for example `` WARN  .env not found: run `copycord doctor --fix` to create it with the default settings ``, while its line in the group shows the path. The command exits with status 1 when any check fails and 0 otherwise (warnings included), so it can be used in scripts. When `copycord doctor --fix` can repair some of the warnings and problems, a last line says how many.
+Each line starts with `✔`, `!`, `✖` or `•`; in a terminal they are green, yellow, red and blue. The report ends with a **Needs your attention** section that lists each warning and problem once with what to do, then a last line: `✔ All good`, or the number of warnings and problems. A warning that `--fix` can repair says so there, for example `! .env not found  run copycord doctor --fix to create it with the default settings`, while its line in the group shows the path. The command exits with status 1 when any check fails and 0 otherwise (warnings included), so it can be used in scripts. When `copycord doctor --fix` can repair some of the warnings and problems, a last line says how many.
 
 :::tip Port in use
-`WARN  port 8080 in use` means another program has the port: set `ADMIN_PORT` to a free one, or let `copycord doctor --fix` pick the next free port. When Copycord itself is listening (as a service, or `copycord run` in another terminal) the line says `port 8080 in use by Copycord` instead.
+`! port 8080 in use` means another program has the port: set `ADMIN_PORT` to a free one, or let `copycord doctor --fix` pick the next free port. When Copycord itself is listening (as a service, or `copycord run` in another terminal) the line says `port 8080 in use by Copycord` instead.
 :::
 
 ### Fixing problems {#doctor-fix}
 
 `copycord doctor --fix` applies the fixes first, then prints the report once, as things are after the fixes. Every automatic fix runs directly, without asking. The guided fix needs your input, so it asks before the report, and only when there is a terminal; without one (in a script or a pipe) it is skipped, and its entry in Needs your attention says to run `copycord doctor --fix` in a terminal.
 
-A check that was fixed shows on its own line as fixed, for example `PASS  .env created with the default settings: /home/you/.copycord/.env (fixed)`. A fix that did not work shows on the check's line as a failure with the reason. **Needs your attention** lists what is left, and the report ends with `Fixed 1 issue` (when something was fixed), then `1 thing needs your attention` or `Everything looks good`.
+A check that was fixed shows on its own line as fixed, for example `✔ .env created with the default settings  /home/you/.copycord/.env (fixed)`. A fix that did not work shows on the check's line as a failure with the reason. **Needs your attention** lists what is left, and the report ends with `Fixed 1 issue` (when something was fixed), then `1 thing needs your attention` or `Everything looks good`.
 
 `--brief` prints only the result: a line for each fix applied, a line for each failed check, and `All checks passed` or the number of warnings and problems. The installers use it.
 
@@ -248,32 +260,32 @@ With the `.env` deleted on a new install it prints:
 
 ```
 Install
-PASS  Copycord v4.0.0 (1a2b3c4), channel stable
-PASS  Python 3.12.3
-PASS  web UI included
-PASS  dependencies OK
+✔ Copycord v4.0.0 (1a2b3c4) · stable channel
+✔ Python 3.12.3
+✔ web UI included
+✔ dependencies OK
 
 Settings
-PASS  .env created with the default settings: /home/you/.copycord/.env (fixed)
-WARN  the default password is still set: change PASSWORD in /home/you/.copycord/.env, then run `copycord restart`
+✔ .env created with the default settings  /home/you/.copycord/.env (fixed)
+! the default password is still set  change PASSWORD in /home/you/.copycord/.env, then run copycord restart
 
 Data
-PASS  home writable
-INFO  database created on first run
-INFO  no backups yet
+✔ home writable
+• database created on first run
+• no backups yet
 
 Running
-PASS  admin port 8080 free
-INFO  service not installed: `copycord service install` runs Copycord in the background
+✔ admin port 8080 free
+• service not installed  copycord service install runs Copycord in the background
 
 Updates
-PASS  up to date
+✔ up to date
 
 Needs your attention
-WARN  the default password is still set: change PASSWORD in /home/you/.copycord/.env, then run `copycord restart`
+! the default password is still set  change PASSWORD in /home/you/.copycord/.env, then run copycord restart
 
-PASS  Fixed 1 issue
-WARN  1 thing needs your attention
+✔ Fixed 1 issue
+! 1 thing needs your attention
 ```
 
 The recreated `.env` sets the default password `copycord`, so it is listed after the fix. Change `PASSWORD` in `<home>/.env`, then run `copycord restart`.

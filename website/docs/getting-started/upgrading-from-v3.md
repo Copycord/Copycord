@@ -164,6 +164,6 @@ Then run `copycord doctor` and `copycord run` without `--data-dir`.
 
 ### 5. Check and clean up
 
-`copycord doctor` should report `PASS  database: ... opens`. Start Copycord, open the dashboard and check your mappings. The first start writes the `pre-v4` backup described above.
+`copycord doctor` should report `✔ database OK`. Start Copycord, open the dashboard and check your mappings. The first start writes the `pre-v4` backup described above.
 
 Once v4 works, you can delete the v3 `code/` and `venvs/` folders, the launcher and the start scripts. Keep the `data/` folder if you chose option A.

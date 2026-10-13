@@ -35,7 +35,7 @@ The installer is not used with Docker. See [Docker Install](/docs/getting-starte
 </TabItem>
 </Tabs>
 
-It prints the banner and first checks for an existing install. When the `copycord` command is there and `copycord --version` shows what this run would install (the same release version, or for a git ref the same commit as the remote head of that ref, read with `git ls-remote`), it prints `✓ Copycord v4-dev (b2d8c1c) is already installed` and a hint to run `copycord update` or rerun with `--force` (`-Force` on Windows), then exits without changing anything. An older install is upgraded. When the check cannot be done (no network, unknown output), it installs as usual. A dry run skips the check.
+It prints the banner and first checks for an existing install. When the `copycord` command is there and `copycord --version` shows what this run would install (the same release version, or for a git ref the same commit as the remote head of that ref, read with `git ls-remote`), it prints `✔ Copycord v4-dev (b2d8c1c) is already installed` and a hint to run `copycord update` or rerun with `--force` (`-Force` on Windows), then exits without changing anything. An older install is upgraded. When the check cannot be done (no network, unknown output), it installs as usual. A dry run skips the check.
 
 Otherwise it runs numbered steps:
 
