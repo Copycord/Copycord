@@ -3,7 +3,7 @@ services:
   copycord:
     build:
       context: .
-      dockerfile: code/dockerfile
+      dockerfile: Dockerfile
     container_name: copycord
     ports:
       - "8080:8080"

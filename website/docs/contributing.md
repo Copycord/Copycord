@@ -30,20 +30,14 @@ We welcome contributions to Copycord! Whether it's bug fixes, new features, or d
 
 ### Running locally with Docker
 
-Copycord runs as one container (dashboard, server and client together). To build it from your local source, copy the development compose file to the repository root as `compose.yml` (it is ignored by git):
-
-```bash
-cp docs/contribute/docker-compose.yml compose.yml
-```
-
-It contains:
+Copycord runs as one container (dashboard, server and client together). To build it from your local source, use the development compose file `docker-compose.dev.yml` at the repository root. It contains:
 
 ```yaml
 services:
   copycord:
     build:
       context: .
-      dockerfile: code/dockerfile
+      dockerfile: Dockerfile
     container_name: copycord
     ports:
       - "8080:8080"
@@ -54,10 +48,10 @@ services:
 Add an `environment:` entry with `- PASSWORD=...` if you want a login page. Then build and start:
 
 ```bash
-docker compose up --build
+docker compose -f docker-compose.dev.yml up --build
 ```
 
-This builds the image from `code/dockerfile`: it builds the dashboard frontend with Node, installs Copycord from `pyproject.toml` on Python 3.14 and runs `copycord run`. Rebuild with the same command after every change. The dashboard is at **http://localhost:8080** and your test data stays in `./data`.
+This builds the image from the root `Dockerfile`: it builds the dashboard frontend with Node, installs Copycord from `pyproject.toml` on Python 3.14 and runs `copycord run`. Rebuild with the same command after every change. The dashboard is at **http://localhost:8080** and your test data stays in `./data`.
 
 The container output shows the dashboard's log plus warnings and errors from the server and client. For the full server and client logs, open the dashboard log viewers or read `./data/server.out` and `./data/client.out` (see [Where logs go](/docs/dashboard/system#where-logs-go)).
 
@@ -147,13 +141,13 @@ copycord/
 │   │   ├── db.py        # SQLite database manager
 │   │   ├── paths.py     # Data directory per OS
 │   │   └── websockets.py # Communication between the parts
-│   └── dockerfile       # The single Copycord image
-├── docs/contribute/     # Development compose file and build notes
 ├── tests/               # pytest suite
 ├── install.sh           # Install script for Linux and macOS
 ├── install.ps1          # Install script for Windows
 ├── pyproject.toml       # Package definition and dependencies
+├── Dockerfile           # The single Copycord image
 ├── docker-compose.yml   # Example compose file for users
+├── docker-compose.dev.yml # Builds the image from your checkout
 └── website/             # Docusaurus documentation
 ```
 
