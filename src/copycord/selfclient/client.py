@@ -7,26 +7,10 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-"""``Client``: the gateway, REST and caches behind one discord.py-shaped object.
+"""``Client``: gateway, REST and caches behind one discord.py-shaped object.
 
-This is the object src/copycord/client will hold as ``self.bot`` once it drops
-discord.py-self. The surface is the one that code reaches for today:
-
-  * lifecycle: ``start(token)``, ``login``, ``connect``, ``close``, ``run``,
-    ``clear``, ``is_closed()``, ``is_ready()``, ``wait_until_ready()``,
-    ``latency``, ``user``, ``loop``, ``http`` (whose ``proxy`` it assigns);
-  * events: ``bot.event(self.on_message)`` sets the handler by name, as
-    discord.py does, ``add_listener``/``listen`` add extra ones, and every
-    gateway dispatch is run through selfclient.events and then the state
-    before ``on_<event>(*args)`` is scheduled. ``on_connect`` fires when a
-    socket opens and ``on_disconnect`` when it closes;
-  * caches: ``guilds``, ``private_channels``, ``users``, ``get_guild``,
-    ``get_channel``, ``get_user``, kept by selfclient.state;
-  * REST that lives on library objects today (``channel.history``,
-    ``parent.archived_threads``, ``guild.fetch_member``, ``user.send`` ...)
-    as Client methods taking the object or its id, returning model wrappers.
-
-Nothing in src/copycord/client imports this yet.
+REST that discord.py puts on model objects (``channel.history``,
+``user.send``) lives here as methods taking the object or its id.
 """
 
 from __future__ import annotations
@@ -83,11 +67,7 @@ def _cursor(value: Any, *, high: bool = False) -> Optional[int]:
 
 
 class _TrackedSocket:
-    """A gateway socket that reports, once, when it stops being one.
-
-    The gateway always closes the socket on its way out of a connection, and
-    a server-side close ends the read loop; either is a disconnect.
-    """
+    """A gateway socket that calls ``on_end`` once, on close or end of reads."""
 
     def __init__(self, ws: Any, on_end: Callable[[], None]):
         self._ws = ws
@@ -120,12 +100,9 @@ class _TrackedSocket:
 
 
 class Client:
-    """A user-token Discord client: GatewayClient + HTTPClient + ConnectionState.
+    """A user-token Discord client: GatewayClient, HTTPClient and ConnectionState.
 
-    ``http``, ``gateway_factory`` and ``connector`` exist for tests and for
-    callers that already hold a primed session; the defaults are the real
-    transports. ``command_prefix`` and ``self_bot``, which src/copycord/client passes
-    to ``commands.Bot`` today, are accepted and ignored.
+    ``command_prefix``, ``self_bot`` and ``intents`` are accepted and ignored.
     """
 
     def __init__(
@@ -267,11 +244,7 @@ class Client:
         return _TrackedSocket(ws, lambda: self.dispatch("disconnect"))
 
     async def connect(self, *, reconnect: bool = True) -> None:
-        """Run the gateway until close(), or until Discord ends it for good.
-
-        Raises LoginFailure on close code 4004 and ConnectionClosed on the
-        other codes no reconnect can fix, as the gateway does.
-        """
+        """Run the gateway until close(), or until a fatal close code."""
         if self.token is None:
             raise ClientException("login() must be called before connect()")
         self.loop = asyncio.get_running_loop()
@@ -310,7 +283,7 @@ class Client:
         self.gateway = None
 
     def run(self, token: str, *, reconnect: bool = True) -> None:
-        """Blocking start(): owns the event loop until the client stops."""
+        """Blocking start() on its own event loop."""
 
         async def runner() -> None:
             async with self:
@@ -338,13 +311,9 @@ class Client:
             self.gateway.proxy = self.proxy
 
     async def drop_socket(self, *, code: int = 4000) -> bool:
-        """Close the live gateway socket with ``code`` but keep the client running.
+        """Close the live socket so the gateway reconnects and RESUMEs, e.g. on a new proxy.
 
-        A non-1000 code leaves the session resumable, so the gateway's own
-        reconnect loop dials again (reading ``proxy`` afresh) and RESUMEs.
-        This is how src/copycord/client moves a live connection onto another proxy;
-        ``close()`` would stop the gateway for good. Returns False when no
-        socket is open.
+        Returns False when no socket is open.
         """
         ws = getattr(self.gateway, "_ws", None)
         if ws is None:
@@ -375,11 +344,7 @@ class Client:
     # ------------------------------------------------------------------
 
     def event(self, coro: Coro) -> Coro:
-        """Install ``coro`` as the handler named by its ``__name__``.
-
-        Works as a decorator and as ``client.event(self.on_message)``; one
-        handler per name, a second replaces the first, as in discord.py.
-        """
+        """Install ``coro`` as the handler named by its ``__name__``, replacing any earlier one."""
         if not inspect.iscoroutinefunction(coro):
             raise TypeError("event registered must be a coroutine function")
         setattr(self, coro.__name__, coro)
@@ -489,7 +454,7 @@ class Client:
         return self._connection.store_user(User(data, self._connection))
 
     async def fetch_user_profile(self, user_id: Any, *, guild: Any = None) -> Dict[str, Any]:
-        """The raw profile payload; there is no wrapper for it yet."""
+        """The raw profile payload."""
         return await self._http().get_user_profile(_snowflake(user_id), guild_id=_snowflake(guild))
 
     async def fetch_channel(self, channel_id: Any) -> Any:
@@ -538,10 +503,7 @@ class Client:
         presences: bool = False,
         timeout: float = MEMBER_CHUNK_TIMEOUT,
     ) -> List[Member]:
-        """Members over the gateway (op 8); user tokens get no REST list.
-
-        The answer is every GUILD_MEMBERS_CHUNK carrying this request's nonce.
-        """
+        """Members over the gateway (op 8), since user tokens cannot list them over REST."""
         if self.gateway is None:
             raise ClientException("fetch_members needs a connected gateway")
         nonce = uuid.uuid4().hex
@@ -587,14 +549,9 @@ class Client:
         oldest_first: Optional[bool] = None,
         raise_on_error: bool = False,
     ) -> AsyncIterator[Message]:
-        """``channel.history(...)``: newest first unless ``oldest_first``.
+        """``channel.history(...)``, with discord.py's ordering and ``limit`` rules.
 
-        ``before``/``after`` take a message, an id or a datetime. With
-        ``after`` set the default order is oldest first, as in discord.py.
-        A bounded oldest-first walk pages forward from ``after`` (or from the
-        start of the channel), so ``limit`` picks the oldest messages, as in
-        discord.py. ``raise_on_error`` raises the HTTPException a refused page
-        came back with instead of ending the walk quietly.
+        ``before``/``after`` take a message, an id or a datetime.
         """
         cid = _snowflake(channel)
         obj = self._channel_obj(channel)
@@ -623,7 +580,6 @@ class Client:
             async for raw in walk:
                 yield self._wrap_message(raw, obj)
             return
-        # The API pages newest first; the oldest-first order needs the lot.
         collected = [raw async for raw in walk]
         for raw in reversed(collected):
             yield self._wrap_message(raw, obj)
