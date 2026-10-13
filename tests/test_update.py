@@ -150,6 +150,16 @@ def test_is_newer():
     assert not update.is_newer("3.28.0", "4.0.0")
 
 
+def test_is_older():
+    assert update.is_older("3.28.0", "4.0.0")
+    assert update.is_older("4.0.0b1", "4.0.0")
+    assert not update.is_older("4.0.0", "4.0.0")
+    assert not update.is_older("4.0.1", "4.0.0")
+    # Something that is not a version is never older.
+    assert not update.is_older("main", "4.0.0")
+    assert not update.is_older("4.0.0", "abc123")
+
+
 # --------------------------------------------------------------------------
 # upgrade + restart
 # --------------------------------------------------------------------------

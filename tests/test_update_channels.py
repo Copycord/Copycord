@@ -290,10 +290,99 @@ def test_tag_installs_that_release_and_keeps_the_channel(env, data_dir, fake_net
     rec, _, _ = env
     _, seen = fake_net
     update.save_channel(update.Channel("beta"))
-    assert cli.main(["update", "--tag", tag]) == 0
+    assert cli.main(["update", "--tag", tag, "--yes"]) == 0
     assert rec.calls == [uv(wheel_url("v3.28.0"))]
     assert seen == [(f"{RELEASES}/tags/v3.28.0", 5.0)]
     assert _saved(data_dir) == {"channel": "beta"}
+
+
+DOWNGRADE_PROMPT = (
+    "Downgrade from v4.0.0 to v3.28.0? Your data is backed up first; a newer "
+    "database schema will block the older version until you restore the backup. (y/N)"
+)
+
+
+@pytest.fixture()
+def tty(monkeypatch):
+    """A terminal whose answers are given per test; the prompts asked are kept."""
+    state = {"answers": [], "asked": []}
+
+    def ask(prompt=""):
+        state["asked"].append(prompt)
+        if not state["answers"]:
+            pytest.fail(f"asked {prompt!r}")
+        return state["answers"].pop(0)
+
+    monkeypatch.setattr(update.ui, "is_interactive", lambda: True)
+    monkeypatch.setattr("builtins.input", ask)
+    return state
+
+
+def test_older_tag_asks_and_installs_on_yes(env, tty):
+    rec, _, _ = env
+    tty["answers"] = ["y"]
+    assert cli.main(["update", "--tag", "3.28.0"]) == 0
+    assert len(tty["asked"]) == 1 and DOWNGRADE_PROMPT in tty["asked"][0]
+    assert rec.calls == [uv(wheel_url("v3.28.0"))]
+
+
+@pytest.mark.parametrize("answer", ["n", ""])
+def test_older_tag_declined_installs_nothing(env, data_dir, tty, answer, capsys):
+    rec, _, _ = env
+    tty["answers"] = [answer]
+    assert cli.main(["update", "--tag", "3.28.0"]) == 1
+    assert rec.calls == []
+    assert "update cancelled" in capsys.readouterr().err
+    assert not (data_dir / "backups").exists()
+
+
+@pytest.mark.parametrize("flag", ["--yes", "-y"])
+def test_yes_skips_the_downgrade_prompt(env, tty, flag):
+    rec, _, _ = env
+    assert cli.main(["update", "--tag", "3.28.0", flag]) == 0
+    assert tty["asked"] == []
+    assert rec.calls == [uv(wheel_url("v3.28.0"))]
+
+
+def test_downgrade_without_a_terminal_refuses(env, monkeypatch, capsys):
+    rec, _, _ = env
+    monkeypatch.setattr(update.ui, "is_interactive", lambda: False)
+    assert cli.main(["update", "--tag", "3.28.0"]) == 1
+    assert rec.calls == []
+    err = capsys.readouterr().err
+    assert "would downgrade from v4.0.0 to v3.28.0" in err
+    assert "rerun with --yes" in err
+
+
+def test_channel_switch_to_an_older_stable_asks(env, tty, monkeypatch):
+    rec, _, _ = env
+    monkeypatch.setattr(update, "current_version", lambda: "4.1.0b2")
+    tty["answers"] = ["n"]
+    assert cli.main(["update", "--channel", "stable"]) == 1
+    assert "Downgrade from v4.1.0b2 to v4.0.0?" in tty["asked"][0]
+    assert rec.calls == []
+
+
+@pytest.mark.parametrize("argv", [
+    ["update", "--tag", "4.1.0b1"],
+    ["update", "--channel", "beta"],
+    ["update", "--tag", "4.0.0"],
+])
+def test_newer_or_same_version_does_not_ask(env, tty, argv):
+    rec, _, _ = env
+    assert cli.main(argv) == 0
+    assert tty["asked"] == []
+    assert len(rec.calls) == 1
+
+
+def test_dev_ref_does_not_ask(env, monkeypatch):
+    rec, _, _ = env
+    # A dev ref has no comparable version, so even a far newer install goes ahead
+    # without a terminal and without --yes.
+    monkeypatch.setattr(update, "current_version", lambda: "99.0.0")
+    monkeypatch.setattr(update.ui, "is_interactive", lambda: False)
+    assert cli.main(["update", "--channel", "dev", "--ref", "1a2b3c4"]) == 0
+    assert rec.calls == [uv(GIT_SPEC.format("1a2b3c4"))]
 
 
 def test_tag_without_saved_channel_saves_nothing(env, data_dir):
