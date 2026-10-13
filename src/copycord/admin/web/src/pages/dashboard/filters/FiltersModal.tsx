@@ -23,7 +23,7 @@ function SearchIcon() {
   );
 }
 
-function FetchButton({ id, label, onClick, ...data }: { id?: string; label: string; onClick: () => void } & Record<string, string | undefined>) {
+function FetchButton({ id, label, onClick, ...data }: { id?: string; label: string; onClick: () => void; [data: `data-${string}`]: string | undefined }) {
   return (
     <button
       type="button"
