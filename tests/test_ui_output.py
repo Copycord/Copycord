@@ -296,14 +296,14 @@ def test_box_width_ignores_path_link_codes(local):
 def test_installers_link_the_dashboard():
     sh = (ROOT / "install.sh").read_text(encoding="utf-8")
     assert 'box_link "$URL"' in sh
-    assert "$ESC]8;;$1$ESC\\\\$1$ESC]8;;$ESC\\\\" in sh
+    assert "$ESC]8;;$url$ESC\\\\$url$ESC]8;;$ESC\\\\" in sh
     detect = sh[sh.index("HYPERLINKS=0"):sh.index("HYPERLINKS=0") + 700]
     for probe in ('[ "$TTY" = "1" ]', "TMUX", "STY", "WT_SESSION", "vscode", "VTE_VERSION", "KITTY_WINDOW_ID"):
         assert probe in detect
     ps1 = (ROOT / "install.ps1").read_text(encoding="utf-8")
     assert 'BoxLink "http://${dashHost}:$port"' in ps1
     assert "$hyperlinks = $useColor -and ([bool]$env:WT_SESSION -or $env:TERM_PROGRAM -eq 'vscode')" in ps1
-    assert '"$esc]8;;$Url$esc\\$Url$esc]8;;$esc\\"' in ps1
+    assert '"$esc]8;;$text$esc\\$text$esc]8;;$esc\\"' in ps1
 
 
 # --------------------------------------------------------------------------

@@ -370,7 +370,7 @@ def test_sh_box_borders_line_up_for_long_rows(tmp_path, hyperlinks):
     assert plain[0].startswith("  +-") and plain[-1].startswith("  +-")
     assert len(plain) == 11
     assert len({len(line) for line in plain}) == 1
-    assert len(plain[0]) > 2 + 54
+    assert len(plain[0]) > 2 + 56
     for line in plain[1:-1]:
         assert line.startswith("  | ") and line.endswith(" |")
     if hyperlinks == "1":
@@ -380,7 +380,7 @@ def test_sh_box_borders_line_up_for_long_rows(tmp_path, hyperlinks):
 def test_sh_box_keeps_the_usual_width_for_short_rows(tmp_path):
     rows = 'box_line "Home: /home/a"\nbox_item "Change it:"\nbox_link "http://localhost:8080"'
     plain = [_plain(line) for line in _render_sh_box(tmp_path, rows).splitlines()]
-    assert {len(line) for line in plain} == {2 + 54}
+    assert {len(line) for line in plain} == {2 + 56}
     assert plain[2].startswith("  | ! Change it:")
 
 
