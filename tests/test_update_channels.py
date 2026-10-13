@@ -1290,7 +1290,7 @@ def test_auto_update_does_not_ask(monkeypatch):
     monkeypatch.setattr(uc, "hint_text", lambda result: "")
     monkeypatch.setattr(update, "update", lambda **kw: seen.append(kw) or 0)
     assert uc.auto_update_once()
-    assert seen == [{"yes": True}]
+    assert seen == [{"yes": True, "auto": True}]
 
 
 @pytest.mark.parametrize("argv", [["update", "--force"], ["update", "--force", "--channel", "dev"]])
