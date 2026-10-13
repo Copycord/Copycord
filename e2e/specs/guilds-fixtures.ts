@@ -16,6 +16,7 @@ export const LAST = GUILDS[4]!; // "Zeta ..." sorts first Z to A
 
 export const DETAILS = {
   ...FIRST,
+  member_count: 1234,
   owner_id: "123456789012345678",
   created_at: "2021-03-04T05:06:07+00:00",
   description: "Seeded for the e2e suite.",
