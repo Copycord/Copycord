@@ -807,6 +807,9 @@ def test_check_service():
     assert cli.check_service(State(True, True, "x")).status == cli.PASS
     stopped = cli.check_service(State(True, False, "x"))
     assert stopped.status == cli.WARN and "copycord service start" in stopped.reason
+    console = cli.check_service(State(True, True, "x"), r"C:\bin\copycord.exe")
+    assert console.status == cli.WARN and console.fix == "service_window"
+    assert console.name == "service runs in a console window"
 
 
 def test_check_updates_never_fails(data_dir, monkeypatch):
@@ -1135,6 +1138,70 @@ def test_doctor_fix_service_start_failure(stopped_service, doctor_env, capsys):
     assert _fix(doctor_env) == 0
     out = capsys.readouterr().out
     assert "service installed, not running  could not fix it: the system service needs root" in out
+
+
+def test_doctor_fix_rewrites_a_service_in_a_console_window(doctor_env, monkeypatch, capsys):
+    from copycord import service
+
+    state = {"console": r"C:\Users\Mac\.local\bin\copycord.exe"}
+
+    class FakeService:
+        where = 'scheduled task "Copycord"'
+
+        def use_windowless(self):
+            state["console"] = None
+            return ["ok"]
+
+    monkeypatch.setattr(service, "get_service", lambda: FakeService())
+    monkeypatch.setattr(cli, "service_state",
+                        lambda: service.State(True, True, FakeService.where))
+    monkeypatch.setattr(cli, "service_console", lambda: state["console"])
+    assert _fix(doctor_env) == 0
+    out = capsys.readouterr().out
+    assert '✓ service runs without a window  scheduled task "Copycord" (fixed)' in out
+    assert state["console"] is None
+
+
+def test_doctor_flags_a_service_in_a_console_window(doctor_env, monkeypatch, capsys):
+    from copycord import service
+
+    monkeypatch.setattr(cli, "service_state", lambda: service.State(True, True, "task"))
+    monkeypatch.setattr(cli, "service_console", lambda: r"C:\bin\copycord.exe")
+    cli.main(["doctor", "--data-dir", str(doctor_env)])
+    out = capsys.readouterr().out
+    assert "service runs in a console window" in out
+    assert "run it without a window" in out
+
+
+def test_run_with_a_busy_port_prints_one_line(data_dir, monkeypatch, capsys):
+    from copycord import supervisor
+
+    async def busy():
+        raise supervisor.PortBusyError(9101)
+
+    monkeypatch.setattr(supervisor, "run", busy)
+    assert cli.main(["run"]) == 1
+    err = capsys.readouterr().err
+    assert "Port 9101 is in use, so Copycord cannot start" in err
+    assert "copycord service stop" in err and "copycord doctor" in err
+    assert "Traceback" not in err and "crash" not in err.lower()
+
+
+def test_main_without_console_streams(data_dir, monkeypatch):
+    from copycord import logging_setup, service
+
+    class Svc:
+        def state(self):
+            return service.State(True, True, "task")
+
+    monkeypatch.setattr(service, "get_service", lambda user=False: Svc())
+    monkeypatch.setattr(logging_setup, "WINDOWLESS", False)
+    for name in ("stdin", "stdout", "stderr"):
+        monkeypatch.setattr(sys, name, None)
+    assert cli.main(["service", "status"]) == 0
+    assert logging_setup.WINDOWLESS
+    assert not sys.stdin.isatty() and not sys.stdout.isatty()
+    print("no console", file=sys.stderr)
 
 
 @pytest.fixture()

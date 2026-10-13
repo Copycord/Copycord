@@ -447,3 +447,96 @@ def test_threaded_role_crash_is_restarted():
         await rs.stop()
 
     asyncio.run(main())
+
+
+# --------------------------------------------------------------------------
+# Busy ports at startup
+# --------------------------------------------------------------------------
+
+
+def _held_port():
+    import socket
+
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    s.listen()
+    return s, s.getsockname()[1]
+
+
+def test_control_port_busy_at_start_is_retried(monkeypatch):
+    monkeypatch.setattr(sup_mod, "PORT_RETRY", 0.05)
+
+    async def main():
+        holder, port = _held_port()
+        ctl = sup_mod.ControlEndpoint(RoleSupervisor("server", FakeRole("server")),
+                                      "127.0.0.1", port, port_wait=5)
+        starting = asyncio.ensure_future(ctl.start())
+        await asyncio.sleep(0.3)
+        assert not starting.done()
+        holder.close()
+        await asyncio.wait_for(starting, 5)
+        try:
+            assert ctl.port == port
+            assert (await _cmd(port, {"cmd": "status"}))["ok"] is True
+        finally:
+            await ctl.close()
+
+    asyncio.run(main())
+
+
+def test_control_port_still_busy_raises_port_busy(monkeypatch):
+    monkeypatch.setattr(sup_mod, "PORT_RETRY", 0.05)
+
+    async def main():
+        holder, port = _held_port()
+        try:
+            ctl = sup_mod.ControlEndpoint(RoleSupervisor("server", FakeRole("server")),
+                                          "127.0.0.1", port, port_wait=0.2)
+            with pytest.raises(sup_mod.PortBusyError) as exc:
+                await ctl.start()
+            assert exc.value.port == port
+        finally:
+            holder.close()
+
+    asyncio.run(main())
+
+
+def test_admin_port_busy_stops_the_start_before_any_role(monkeypatch):
+    monkeypatch.setattr(sup_mod, "PORT_RETRY", 0.05)
+
+    async def main():
+        holder, port = _held_port()
+        fakes = _fakes()
+        sup = _loopback(fakes)
+        sup.ports, sup.port_wait = [("127.0.0.1", port)], 0.2
+        try:
+            with pytest.raises(sup_mod.PortBusyError) as exc:
+                await sup.start()
+            assert exc.value.port == port
+            assert fakes["admin"].starts == 0
+        finally:
+            holder.close()
+            await sup.shutdown()
+
+    asyncio.run(main())
+
+
+def test_admin_port_freed_while_waiting(monkeypatch):
+    monkeypatch.setattr(sup_mod, "PORT_RETRY", 0.05)
+
+    async def main():
+        holder, port = _held_port()
+        asyncio.get_running_loop().call_later(0.2, holder.close)
+        await sup_mod.wait_for_port("127.0.0.1", port, timeout=5)
+
+    asyncio.run(main())
+
+
+def test_real_supervisor_waits_for_the_admin_port(monkeypatch):
+    monkeypatch.setenv("ADMIN_PORT", "8181")
+    monkeypatch.setattr(sup_mod, "admin_factory", lambda **k: FakeRole("admin"))
+    monkeypatch.setattr(sup_mod, "server_factory", lambda: FakeRole("server"))
+    monkeypatch.setattr(sup_mod, "client_factory", lambda: FakeRole("client"))
+    sup = build_supervisor(inprocess_transport=False)
+    assert sup.ports == [("0.0.0.0", 8181)]
+    assert build_supervisor(_fakes()).ports == []

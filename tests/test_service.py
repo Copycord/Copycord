@@ -339,6 +339,254 @@ def test_scheduled_task_state_not_installed_and_ready(monkeypatch):
     assert svc.state() == service.State(True, False, svc.where)
 
 
+def _launchers(tmp_path, *names):
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir(exist_ok=True)
+    for name in names:
+        (bin_dir / name).write_bytes(b"")
+    return bin_dir
+
+
+def test_windowless_command_prefers_copycordw_next_to_the_launcher(tmp_path):
+    bin_dir = _launchers(tmp_path, "copycord.exe", "copycordw.exe")
+    assert service.windowless_command([str(bin_dir / "copycord.exe")]) == [
+        str(bin_dir / "copycordw.exe")
+    ]
+
+
+def test_windowless_command_falls_back_to_pythonw_of_this_environment(tmp_path, monkeypatch):
+    bin_dir = _launchers(tmp_path, "copycord.exe")
+    scripts = tmp_path / "env" / "Scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "python.exe").write_bytes(b"")
+    (scripts / "pythonw.exe").write_bytes(b"")
+    monkeypatch.setattr(service.sys, "executable", str(scripts / "python.exe"))
+    assert service.windowless_command([str(bin_dir / "copycord.exe")]) == [
+        str(scripts / "pythonw.exe"), "-m", "copycord"
+    ]
+    # The python -m copycord command keeps its arguments.
+    assert service.windowless_command([str(scripts / "python.exe"), "-m", "copycord"]) == [
+        str(scripts / "pythonw.exe"), "-m", "copycord"
+    ]
+
+
+def test_windowless_command_keeps_the_command_without_a_windowless_program(tmp_path, monkeypatch):
+    bin_dir = _launchers(tmp_path, "copycord.exe")
+    monkeypatch.setattr(service.sys, "executable", str(tmp_path / "none" / "python.exe"))
+    command = [str(bin_dir / "copycord.exe")]
+    assert service.windowless_command(command) == command
+    assert service.windowless_command(EXE) == EXE
+
+
+def test_opens_window_and_task_data_dir():
+    assert service.opens_window(r"C:\Users\Mac\.local\bin\copycord.exe")
+    assert service.opens_window(r'"C:\Py\python.exe"')
+    assert not service.opens_window(r"C:\Users\Mac\.local\bin\copycordw.exe")
+    assert not service.opens_window(r"C:\Py\pythonw.exe")
+    assert service.task_data_dir('run --data-dir "C:\\Mac Doe\\data"') == Path("C:\\Mac Doe\\data")
+    assert service.task_data_dir("-m copycord run --data-dir C:\\d") == Path("C:\\d")
+    assert service.task_data_dir("run") is None
+
+
+class FakeTask:
+    """schtasks and taskkill for one task: /End stops it after `lingers`
+    queries, /Run starts it; /Query /XML answers with the task's action."""
+
+    def __init__(self, running=False, lingers=0, command="", arguments=""):
+        self.running = running
+        self.lingers = lingers
+        self.ending = False
+        self.calls = []
+        self.xml = {}
+        self.command, self.arguments = command, arguments
+
+    def __call__(self, cmd, capture=True):
+        cmd = list(cmd)
+        self.calls.append(cmd)
+        if cmd[:2] == ["schtasks", "/Create"]:
+            self.xml["text"] = Path(cmd[cmd.index("/XML") + 1]).read_bytes().decode("utf-16")
+        elif cmd[:2] == ["schtasks", "/Run"]:
+            self.running = True
+        elif cmd[:2] == ["schtasks", "/End"]:
+            self.ending = True
+        elif cmd[:2] == ["schtasks", "/Query"]:
+            if "/XML" in cmd:
+                out = (f"<Task><Actions><Exec><Command>{self.command}</Command>"
+                       f"<Arguments>{self.arguments}</Arguments></Exec></Actions></Task>")
+                return subprocess.CompletedProcess(cmd, 0, out, "")
+            if self.ending:
+                if self.lingers:
+                    self.lingers -= 1
+                else:
+                    self.running, self.ending = False, False
+            status = "Running" if self.running else "Ready"
+            return subprocess.CompletedProcess(cmd, 0, f'"\\Copycord","N/A","{status}"\n', "")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    def actions(self):
+        return [c[:2] if c[0] == "schtasks" else c for c in self.calls if "/Query" not in c]
+
+
+@pytest.fixture()
+def clock(monkeypatch):
+    """A fake clock that sleep moves forward."""
+    now = {"t": 0.0}
+    monkeypatch.setattr(service, "_clock", lambda: now["t"])
+    monkeypatch.setattr(service, "_sleep", lambda s: now.__setitem__("t", now["t"] + s))
+    return now
+
+
+def test_restart_ends_leftover_processes_and_waits_for_the_port(monkeypatch, clock):
+    task = FakeTask(running=True, lingers=2)
+    monkeypatch.setattr(service, "run_cmd", task)
+    left = [[{"ProcessId": 42}], [], []]
+    monkeypatch.setattr(service, "list_processes", lambda: [])
+    monkeypatch.setattr(service.ScheduledTaskService, "_leftovers",
+                        lambda self: left.pop(0) if left else [])
+    busy = [[9101], [9101], [9101], []]
+    monkeypatch.setattr(service, "busy_ports", lambda env=None: busy.pop(0) if busy else [])
+
+    service.ScheduledTaskService(env={}).restart()
+    assert task.actions() == [
+        ["schtasks", "/End"],
+        ["taskkill", "/F", "/T", "/PID", "42"],
+        ["schtasks", "/Run"],
+    ]
+    # It waited for the task to stop and the port to be free, then started it.
+    assert 1.0 <= clock["t"] < service.STOP_WAIT
+    assert task.running
+
+
+def test_restart_gives_up_when_the_port_stays_in_use(monkeypatch, clock):
+    task = FakeTask(running=True)
+    monkeypatch.setattr(service, "run_cmd", task)
+    monkeypatch.setattr(service, "list_processes", lambda: [])
+    monkeypatch.setattr(service, "busy_ports", lambda env=None: [9101])
+    with pytest.raises(service.ServiceError) as exc:
+        service.ScheduledTaskService(env={}).restart()
+    assert "did not stop within 20 seconds: port 9101 is still in use" in str(exc.value)
+    assert "copycord service start" in str(exc.value)
+    assert ["schtasks", "/Run"] not in task.actions()
+    assert clock["t"] >= service.STOP_WAIT
+
+
+def test_stop_waits_for_the_processes_but_not_the_ports(monkeypatch, clock):
+    task = FakeTask(running=True)
+    monkeypatch.setattr(service, "run_cmd", task)
+    left = [[7], [7], []]
+    monkeypatch.setattr(service.ScheduledTaskService, "_leftovers",
+                        lambda self: left.pop(0) if left else [])
+    monkeypatch.setattr(service, "busy_ports",
+                        lambda env=None: pytest.fail("stop does not need the ports"))
+    service.ScheduledTaskService(env={}).stop()
+    assert task.actions() == [
+        ["schtasks", "/End"],
+        ["taskkill", "/F", "/T", "/PID", "7"],
+        ["taskkill", "/F", "/T", "/PID", "7"],
+    ]
+
+
+def test_leftovers_use_the_process_list_of_this_install(monkeypatch):
+    from copycord import winupdate
+
+    seen = {}
+    monkeypatch.setattr(service, "list_processes", lambda: [{"ProcessId": 1}])
+    monkeypatch.setattr(service, "copycord_command",
+                        lambda: ["/opt/bin/copycord.exe"])
+
+    def fake(rows, me, prefix, launcher_dir):
+        seen.update(rows=rows, me=me, prefix=prefix, launcher_dir=launcher_dir)
+        return [5]
+
+    monkeypatch.setattr(winupdate, "service_leftovers", fake)
+    assert service.ScheduledTaskService(env={})._leftovers() == [5]
+    assert seen["me"] == service.os.getpid() and seen["prefix"] == service.sys.prefix
+    assert seen["launcher_dir"] == "/opt/bin"
+    monkeypatch.setattr(service, "list_processes", lambda: None)
+    assert service.ScheduledTaskService(env={})._leftovers() == []
+
+
+def test_install_writes_the_windowless_launcher(tmp_path, monkeypatch, no_processes):
+    bin_dir = _launchers(tmp_path, "copycord.exe", "copycordw.exe")
+    task = FakeTask()
+    monkeypatch.setattr(service, "run_cmd", task)
+    data = Path(r"C:\Users\Mac Doe\.copycord\data")
+    service.ScheduledTaskService(env={"USERNAME": "mac"}).install(
+        [str(bin_dir / "copycord.exe")], data)
+    xml = task.xml["text"]
+    assert f"<Command>{bin_dir / 'copycordw.exe'}</Command>" in xml
+    assert '<Arguments>run --data-dir "C:\\Users\\Mac Doe\\.copycord\\data"</Arguments>' in xml
+
+
+def test_reinstall_ends_the_running_task_first(tmp_path, monkeypatch, no_processes):
+    task = FakeTask(running=True)
+    monkeypatch.setattr(service, "run_cmd", task)
+    service.ScheduledTaskService(env={}).install(WIN_EXE, tmp_path / "data")
+    assert task.actions() == [
+        ["schtasks", "/End"], ["schtasks", "/Create"], ["schtasks", "/Run"],
+    ]
+
+
+def test_use_windowless_rewrites_a_console_task_with_its_data_dir(tmp_path, monkeypatch, no_processes):
+    bin_dir = _launchers(tmp_path, "copycord.exe", "copycordw.exe")
+    task = FakeTask(running=True, command=str(bin_dir / "copycord.exe"),
+                    arguments='run --data-dir "C:\\Mac Doe\\data"')
+    monkeypatch.setattr(service, "run_cmd", task)
+    monkeypatch.setattr(service, "copycord_command", lambda: [str(bin_dir / "copycord.exe")])
+    svc = service.ScheduledTaskService(env={})
+    assert svc.console_command() == str(bin_dir / "copycord.exe")
+    svc.use_windowless()
+    xml = task.xml["text"]
+    assert f"<Command>{bin_dir / 'copycordw.exe'}</Command>" in xml
+    assert '<Arguments>run --data-dir "C:\\Mac Doe\\data"</Arguments>' in xml
+    assert task.running
+    task.command = str(bin_dir / "copycordw.exe")
+    assert svc.console_command() is None
+
+
+def test_use_windowless_without_a_windowless_program(tmp_path, monkeypatch, no_processes):
+    bin_dir = _launchers(tmp_path, "copycord.exe")
+    task = FakeTask()
+    monkeypatch.setattr(service, "run_cmd", task)
+    monkeypatch.setattr(service, "copycord_command", lambda: [str(bin_dir / "copycord.exe")])
+    monkeypatch.setattr(service.sys, "executable", str(tmp_path / "none" / "python.exe"))
+    with pytest.raises(service.ServiceError, match="copycordw.exe or pythonw.exe"):
+        service.ScheduledTaskService(env={}).use_windowless()
+    assert task.actions() == []
+
+
+def test_console_task_is_windows_only(monkeypatch):
+    monkeypatch.setattr(service.sys, "platform", "linux")
+    monkeypatch.setattr(service, "run_cmd", lambda *a, **k: pytest.fail("ran schtasks"))
+    assert service.console_task() is None
+
+
+def test_task_name_override(monkeypatch):
+    fake = FakeRun()
+    monkeypatch.setattr(service, "run_cmd", fake)
+    svc = service.ScheduledTaskService(env={"COPYCORD_TASK_NAME": "Copycord Test"})
+    svc.start()
+    assert fake.calls == [["schtasks", "/Run", "/TN", "Copycord Test"]]
+    assert svc.where == 'scheduled task "Copycord Test"'
+
+
+def test_busy_ports_reads_the_configured_ports(monkeypatch):
+    seen = []
+    monkeypatch.setattr(service, "port_free", lambda host, port: seen.append((host, port)) or port != 9200)
+    env = {"CONTROL_PORT_SERVER": "9200", "ADMIN_PORT": "8181"}
+    assert service.busy_ports(env) == [9200]
+    assert seen == [("127.0.0.1", 9200), ("127.0.0.1", 9102), ("0.0.0.0", 8181)]
+
+
+def test_port_free_sees_a_listening_socket():
+    import socket
+
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        s.listen()
+        assert not service.port_free("127.0.0.1", s.getsockname()[1])
+
+
 # --------------------------------------------------------------------------
 # CLI
 # --------------------------------------------------------------------------

@@ -160,3 +160,13 @@ def test_size_stays_bounded(tmp_path, clean_root):
         _emit_on_thread("copycord-client", "client.client", f"line {i} " + "x" * 50)
     assert (tmp_path / "client.out").stat().st_size < 2500
     assert (tmp_path / "client.out.1").exists()
+
+
+def test_windowless_console_goes_to_a_log_file(clean_root, tmp_path, monkeypatch):
+    monkeypatch.setattr(ls, "WINDOWLESS", True)
+    ls.setup_logging(tmp_path, roles=())
+    logging.getLogger("copycord.supervisor").error("Port 9101 is in use")
+    for h in clean_root.handlers:
+        h.flush()
+    assert "Port 9101 is in use" in (tmp_path / ls.CONSOLE_FILE).read_text(encoding="utf-8")
+    assert ls.has_console_handler(clean_root)
