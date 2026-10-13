@@ -98,6 +98,13 @@ def test_bare_copycord_prints_the_overview(data_dir, capsys):
     assert "Usage: copycord <command>" in out and "Examples:" in out
 
 
+def test_overview_shows_the_home(data_dir, monkeypatch, tmp_path, capsys):
+    monkeypatch.setenv("COPYCORD_HOME", str(tmp_path / "cc-home"))
+    with pytest.raises(SystemExit):
+        cli.main([])
+    assert f"Home: {tmp_path / 'cc-home'}\n" in capsys.readouterr().out
+
+
 def test_overview_shows_only_what_a_regular_user_needs(data_dir, capsys):
     with pytest.raises(SystemExit):
         cli.main([])

@@ -168,6 +168,9 @@ def format_help() -> str:
         w(f"  {ui.dim(_version() + '  ' + ui.TAGLINE)}")
     else:
         w(f"Copycord {_version()}")
+    from copycord.common.paths import copycord_home
+
+    w(f"  {ui.dim('Home:')} {copycord_home()}")
     w()
     w(f"{ui.bold('Usage:')} copycord <command> [options]")
     width = max(len(c) for _, cmds in COMMAND_GROUPS for c, _ in cmds)
