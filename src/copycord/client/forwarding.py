@@ -36,10 +36,7 @@ DISCORD_WEBHOOK_FANOUT_CONCURRENCY = 8
 
 
 class RetryableForwardingError(Exception):
-    """
-    Raised to signal the worker that this job should be retried.
-    Optionally includes a server-provided delay (e.g., retry_after seconds).
-    """
+    """Signals that the job should be retried, optionally after a server-provided delay."""
 
     def __init__(
         self,
@@ -63,11 +60,7 @@ def _safe_json_loads(text: str) -> Any:
 
 
 def _extract_retry_after_from_body(text: str) -> float | None:
-    """
-    Supports:
-    - Discord: {"retry_after": 1.23, ...}
-    - Telegram: {"parameters": {"retry_after": 3}, ...}
-    """
+    """Read retry_after from a Discord or Telegram error body."""
     data = _safe_json_loads(text)
     if not isinstance(data, dict):
         return None
@@ -88,11 +81,7 @@ def _extract_retry_after_from_body(text: str) -> float | None:
 def _extract_retry_after_from_headers(
     headers: aiohttp.typedefs.LooseHeaders,
 ) -> float | None:
-    """
-    Discord provides:
-    - Retry-After (seconds)
-    - X-RateLimit-Reset-After (seconds)
-    """
+    """Read the delay from Retry-After or X-RateLimit-Reset-After."""
     try:
 
         ra = headers.get("Retry-After") if headers else None
@@ -140,10 +129,7 @@ def _clip(s: str, limit: int) -> str:
 
 
 def _sanitize_discord_embed_for_webhook(e: dict) -> dict | None:
-    """
-    Keep only fields that Discord webhooks accept for outgoing embeds.
-    Drops keys that are commonly present in incoming embeds but not useful/accepted.
-    """
+    """Keep only the embed fields Discord webhooks accept."""
     if not isinstance(e, dict):
         return None
 
@@ -460,9 +446,7 @@ class ForwardingRule:
 
 @dataclass
 class ForwardingJob:
-    """
-    A single forwarding "work item" that gets enqueued and processed by a provider worker.
-    """
+    """A work item enqueued for a provider worker."""
 
     provider_queue: str
     rule: ForwardingRule
@@ -478,13 +462,7 @@ class ForwardingJob:
 
 
 class ForwardingManager:
-    """
-    Manages per-guild forwarding rules for Copycord.
-
-    Async provider queues (Telegram / Pushover / Discord webhook).
-    - Each provider has its own asyncio.Queue and its own worker task(s).
-    - Queues drain concurrently.
-    """
+    """Per-guild forwarding rules with an async queue and worker task(s) per provider (Telegram, Pushover, Discord webhook)."""
 
     def __init__(
         self,
@@ -1432,9 +1410,7 @@ class ForwardingManager:
         data_payload: dict | None = None,
         timeout: float | None = None,
     ) -> tuple[int, str, Any]:
-        """
-        Returns (status, body_text, headers_obj). Raises RetryableForwardingError on network/timeout.
-        """
+        """Returns (status, body_text, headers_obj); raises RetryableForwardingError on network/timeout."""
         try:
             async with session.post(
                 url, json=json_payload, data=data_payload, timeout=timeout
@@ -2138,7 +2114,7 @@ async def _post_with_discord_429_retry(
             )
             return status, body, retry_after2
 
-    # next call in this slot doesn't immediately 429. Short resets only — longer
+    # short resets only, so the next call in this slot does not immediately 429
 
     reset_after = _extract_ratelimit_reset_after(headers)
     if (
