@@ -762,3 +762,58 @@ class TestGuildMappingCascade:
         assert db.list_mapping_tokens(mid) == []
         # Event logs are NOT cascade-deleted (they're audit records)
         assert db.count_event_logs() == 1
+
+
+# ---------------------------------------------------------------------------
+# WAL journal, backups and concurrent writers
+# ---------------------------------------------------------------------------
+
+class TestWal:
+
+    def test_journal_mode_is_wal(self, db):
+        assert db.conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+        # 1 = NORMAL
+        assert db.conn.execute("PRAGMA synchronous").fetchone()[0] == 1
+
+    def test_backup_of_wal_db_is_complete(self, db, tmp_path):
+        from pathlib import Path
+        from copycord.common.backup_scheduler import snapshot_database
+
+        for i in range(50):
+            db.upsert_emoji_mapping(i, f"e{i}", 1000 + i, f"c{i}", original_guild_id=1, cloned_guild_id=2)
+        # the rows still sit in data.db-wal: the connection is open, no checkpoint ran
+        assert Path(f"{db.path}-wal").stat().st_size > 0
+
+        copy = tmp_path / "copy.db"
+        snapshot_database(Path(db.path), copy)
+        out = sqlite3.connect(str(copy))
+        try:
+            assert out.execute("SELECT COUNT(*) FROM emoji_mappings").fetchone()[0] == 50
+            assert out.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        finally:
+            out.close()
+
+    def test_restore_clears_stale_wal_and_shm(self, db, tmp_path):
+        from pathlib import Path
+        from copycord.common.backup_scheduler import Unpacked, put_in_place, snapshot_database
+
+        db.upsert_emoji_mapping(1, "e1", 11, "c1", original_guild_id=1, cloned_guild_id=2)
+        staged = tmp_path / "staged.db"
+        snapshot_database(Path(db.path), staged)
+        db.close()
+
+        live = tmp_path / "live" / "data.db"
+        live.parent.mkdir()
+        live.write_bytes(b"old")
+        Path(f"{live}-wal").write_bytes(b"stale wal")
+        Path(f"{live}-shm").write_bytes(b"stale shm")
+
+        put_in_place(Unpacked(staged, None, {}), live, tmp_path / "live" / "secret.key")
+
+        assert not Path(f"{live}-wal").exists()
+        assert not Path(f"{live}-shm").exists()
+        conn = sqlite3.connect(str(live))
+        try:
+            assert conn.execute("SELECT COUNT(*) FROM emoji_mappings").fetchone()[0] == 1
+        finally:
+            conn.close()
