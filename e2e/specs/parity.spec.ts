@@ -2,8 +2,8 @@
 // Runs against the old UI by default; E2E_BASE_PATH=/app runs the same checks against the SPA.
 import { expect, test, type Page } from "@playwright/test";
 import { CSRF_HEADERS, LOGIN_PATH, NOT_FOUND_PATH, PAGES, PASSWORD, pageUrl, type PageName } from "../lib/env.ts";
-import { SEED } from "../lib/seed.ts";
-import { closeX, expectClosed, expectOpen, modal, settle } from "../lib/ui.ts";
+import { SEED, stubClientGuilds } from "../lib/seed.ts";
+import { MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, closeX, expectClosed, expectOpen, modal, settle } from "../lib/ui.ts";
 
 async function open(page: Page, name: PageName): Promise<void> {
   const errors: string[] = [];
@@ -111,7 +111,7 @@ test.describe("dashboard", () => {
 
   test("19 mapping settings modal opens with the seeded guild IDs and closes", async ({ page }) => {
     await open(page, "dashboard");
-    await page.locator('[data-act="edit"], [data-action="edit"], .mapping-card button:has-text("Settings")').first().click();
+    await page.locator(MAPPING_EDIT_BTN).first().click();
     const m = modal(page, "mapping-modal");
     await expectOpen(m);
     await expect(m.locator(`input[value="${SEED.guildId}"]`).first()).toBeAttached();
@@ -121,7 +121,7 @@ test.describe("dashboard", () => {
 
   test("22 filters modal opens and closes", async ({ page }) => {
     await open(page, "dashboard");
-    await page.locator('[data-act="filters"], [data-action="filters"], .mapping-card button:has-text("Filters")').first().click();
+    await page.locator(MAPPING_FILTERS_BTN).first().click();
     const m = modal(page, "filters-modal");
     await expectOpen(m);
     await page.keyboard.press("Escape");
@@ -139,7 +139,7 @@ test.describe("dashboard", () => {
 
   test("27 proxy settings and favorites help modals open and close", async ({ page }) => {
     await open(page, "dashboard");
-    for (const [btn, id] of [["#srv-proxy-settings-btn", "proxy-settings-modal"], ["#srv-proxy-fav-help-btn", "proxy-fav-help-modal"]]) {
+    for (const [btn, id] of [["#srv-proxy-settings-btn", "proxy-settings-modal"], ["#srv-proxy-fav-help-btn", "proxy-fav-help-modal"]] as const) {
       const m = modal(page, id);
       await page.locator(btn).click();
       await expectOpen(m);
@@ -168,6 +168,8 @@ test.describe("guilds", () => {
 });
 
 test.describe("forwarding", () => {
+  test.beforeEach(async ({ page }) => stubClientGuilds(page));
+
   test("40 seeded rule is listed", async ({ page }) => {
     await open(page, "forwarding");
     await expect(page.locator("#forwarding-list")).toContainText(SEED.ruleLabel);

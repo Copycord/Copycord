@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, type Page } from "@playwright/test";
 import { E2E_DIR, LOGIN_PATH, NOT_FOUND_PATH, PAGES, pageUrl, type PageName } from "../lib/env.ts";
-import { expectOpen, modal, settle } from "../lib/ui.ts";
+import { MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, expectOpen, modal, settle } from "../lib/ui.ts";
+import { stubClientGuilds } from "../lib/seed.ts";
 
 // E2E_SHOTS_DIR=baseline/new captures the SPA into a separate folder for scripts/compare.ts.
 const OUT = path.resolve(E2E_DIR, process.env.E2E_SHOTS_DIR ?? "baseline/old");
@@ -26,9 +27,9 @@ const MODALS: ModalShot[] = [
   { name: "dashboard-proxy-fav-help", page: "dashboard", id: "proxy-fav-help-modal",
     open: (p) => p.locator("#srv-proxy-fav-help-btn").click() },
   { name: "dashboard-mapping-settings", page: "dashboard", id: "mapping-modal",
-    open: (p) => p.locator('[data-act="edit"], [data-action="edit"], .mapping-card button:has-text("Settings")').first().click() },
+    open: (p) => p.locator(MAPPING_EDIT_BTN).first().click() },
   { name: "dashboard-filters", page: "dashboard", id: "filters-modal",
-    open: (p) => p.locator('[data-act="filters"], [data-action="filters"], .mapping-card button:has-text("Filters")').first().click() },
+    open: (p) => p.locator(MAPPING_FILTERS_BTN).first().click() },
   { name: "forwarding-new-rule", page: "forwarding", id: "fwdModal",
     open: (p) => p.locator("#fwdCreateBtn").click() },
 ];
@@ -74,6 +75,7 @@ for (const vp of VIEWPORTS) {
 
     for (const m of MODALS) {
       test(`modal ${m.name}`, async ({ page }) => {
+        await stubClientGuilds(page);
         await page.goto(pageUrl(m.page));
         await settle(page);
         test.setTimeout(20_000);

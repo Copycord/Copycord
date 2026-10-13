@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import path from "node:path";
-import type { APIRequestContext } from "@playwright/test";
+import type { APIRequestContext, Page } from "@playwright/test";
 import { CSRF_HEADERS, E2E_DIR, HOME } from "./env.ts";
 
 export const SEED = {
@@ -21,6 +21,13 @@ export function seedDb(python: string): void {
     env: { ...process.env, COPYCORD_HOME: HOME },
     stdio: "inherit",
   });
+}
+
+/** The forwarding page keeps its create button disabled until /api/client-guilds answers, which needs a bot. */
+export async function stubClientGuilds(page: Page): Promise<void> {
+  await page.route("**/api/client-guilds", (route) =>
+    route.fulfill({ json: { items: [{ id: SEED.guildId, name: "E2E Guild" }] } }),
+  );
 }
 
 export async function seedApi(api: APIRequestContext): Promise<void> {
