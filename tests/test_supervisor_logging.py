@@ -1,7 +1,9 @@
 """Tests for the supervisor's logging."""
 import asyncio
 import io
+import json
 import logging
+import re
 import threading
 
 import pytest
@@ -170,3 +172,74 @@ def test_windowless_console_goes_to_a_log_file(clean_root, tmp_path, monkeypatch
         h.flush()
     assert "Port 9101 is in use" in (tmp_path / ls.CONSOLE_FILE).read_text(encoding="utf-8")
     assert ls.has_console_handler(clean_root)
+
+
+LINE_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \| [A-Z]+ *\| \[(admin|server|client)\] \S"
+)
+
+
+def _run_setup(tmp_path, root):
+    # What `copycord run` does: console first, then the role files in supervisor.run.
+    ls.setup_logging(roles=())
+    ls.setup_logging(tmp_path)
+    buf = io.StringIO()
+    next(h for h in root.handlers if getattr(h, ls.CONSOLE_MARK, False)).setStream(buf)
+    return buf
+
+
+def test_every_logger_shares_one_console_format(tmp_path, clean_root, monkeypatch):
+    monkeypatch.delenv("LOG_FORMAT", raising=False)
+    import copycord.admin.app as app_mod
+
+    buf = _run_setup(tmp_path, clean_root)
+    token = ls.req_id_var.set("abc123")
+    try:
+        app_mod.LOGGER.info("update check: up to date")
+        app_mod.backup_scheduler.log.info("backup scheduler started (run_at=03:17 UTC)")
+        app_mod.LOGGER.info("Log pruning task started (checks every 5 minutes)")
+        logging.getLogger("copycord.supervisor").info("admin role started")
+        _emit_on_thread("copycord-server", "server.server", "server warns", logging.WARNING)
+        _emit_on_thread("copycord-client", "client.client", "client warns", logging.WARNING)
+    finally:
+        ls.req_id_var.reset(token)
+    lines = buf.getvalue().splitlines()
+    assert len(lines) == 6, lines
+    for line in lines:
+        assert LINE_RE.match(line), line
+        assert "rid=" not in line and "cli=" not in line
+    assert "[server] server warns" in lines[4]
+    assert "[client] client warns" in lines[5]
+
+
+def test_json_mode_is_valid_json_and_redacts(tmp_path, clean_root, monkeypatch):
+    monkeypatch.setenv("LOG_FORMAT", "JSON")
+    monkeypatch.setenv("SERVER_TOKEN", "sekrit-server-token")
+    import copycord.admin.app as app_mod
+
+    buf = _run_setup(tmp_path, clean_root)
+    app_mod.LOGGER.info("token is %s", "sekrit-server-token")
+    app_mod.LOGGER.info("config %s", {"SERVER_TOKEN": "x", "OTHER": "y"})
+    _emit_on_thread("copycord-server", "server.server", "boom", logging.ERROR)
+    out = buf.getvalue()
+    assert "sekrit-server-token" not in out
+    rows = [json.loads(line) for line in out.splitlines()]
+    assert len(rows) == 3
+    assert rows[0]["msg"] == "token is ***REDACTED***"
+    assert "'SERVER_TOKEN': '***REDACTED***'" in rows[1]["msg"]
+    assert rows[2]["role"] == "server" and rows[2]["lvl"] == "ERROR"
+    for row in rows:
+        assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$", row["time"])
+        assert "req_id" not in row
+
+
+def test_websockets_listening_line_hidden_at_info(tmp_path, clean_root):
+    buf = _run_setup(tmp_path, clean_root)
+    logging.getLogger("websockets.server").info("server listening on 127.0.0.1:9101")
+    logging.getLogger("copycord.supervisor").info(
+        "%s control listening on %s:%d", "client", "127.0.0.1", 9102
+    )
+    out = buf.getvalue()
+    assert "server listening on" not in out
+    assert out.count("listening on") == 1
+    assert "[admin] client control listening on 127.0.0.1:9102" in out

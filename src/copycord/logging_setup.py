@@ -144,7 +144,9 @@ class RedactFilter(logging.Filter):
         record.client = client_var.get()
         try:
             if isinstance(record.args, dict):
-                record.args = {k: _redact_arg(v) for k, v in record.args.items()}
+                # A lone dict argument lands here, so its token keys count too.
+                args = _redact_obj(record.args)
+                record.args = {k: _redact_arg(v) for k, v in args.items()}
             elif isinstance(record.args, (tuple, list)):
                 new = [_redact_arg(a) for a in record.args]
                 record.args = tuple(new) if isinstance(record.args, tuple) else new
