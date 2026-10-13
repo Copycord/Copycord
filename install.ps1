@@ -135,8 +135,13 @@ Test a branch, no release needed:
 
     $useColor = -not [Console]::IsOutputRedirected -and -not $env:NO_COLOR
     $utf = [Console]::OutputEncoding.CodePage -eq 65001
-    $okMark = if ($utf) { [string][char]0x2714 } else { '+' }
-    $failMark = if ($utf) { [string][char]0x2716 } else { 'x' }
+    # Clickable links (OSC 8) only in Windows Terminal and VS Code; the classic console shows the codes.
+    $hyperlinks = $useColor -and ([bool]$env:WT_SESSION -or $env:TERM_PROGRAM -eq 'vscode')
+    # Windows Terminal shows OSC 9;4 progress on the tab while a step runs.
+    $progressBar = $useColor -and [bool]$env:WT_SESSION
+    $esc = [char]27
+    $okMark = if ($utf) { [string][char]0x2713 } else { '+' }
+    $failMark = if ($utf) { [string][char]0x2717 } else { 'x' }
     $dotMark = if ($utf) { [string][char]0x2022 } else { '-' }
     $frames = if ($utf) { @(0x280B, 0x2819, 0x2839, 0x2838, 0x283C, 0x2834, 0x2826, 0x2827, 0x2807, 0x280F) | ForEach-Object { [string][char]$_ } } else { @('|', '/', '-', '\') }
     $box = if ($utf) { @{ TL = [char]0x256D; TR = [char]0x256E; BL = [char]0x2570; BR = [char]0x256F; H = [char]0x2500; V = [char]0x2502 } } else { @{ TL = '+'; TR = '+'; BL = '+'; BR = '+'; H = '-'; V = '|' } }
@@ -165,6 +170,11 @@ Test a branch, no release needed:
         Out "[$($script:step)/$($script:stepTotal)] " Magenta -NoNewline; Out $Title
     }
 
+    function Spent([int]$Seconds) {
+        if ($Seconds -lt 60) { return "${Seconds}s" }
+        return '{0}m {1:00}s' -f [Math]::Floor($Seconds / 60), ($Seconds % 60)
+    }
+
     $log = [IO.Path]::GetTempFileName()
     function Run([string]$Label, [string]$File, [string[]]$Arguments, [string]$Cwd = (Get-Location).Path) {
         # Output goes to $log; on failure print its tail and stop.
@@ -183,13 +193,27 @@ Test a branch, no release needed:
         # Touch the handle now: without it ExitCode stays empty once the process exits.
         $null = $p.Handle
         $i = 0
-        while (-not $p.HasExited) {
-            if ($useColor) { Out ("`r  " + $frames[$i % $frames.Count] + " $Label") Magenta -NoNewline }
-            $i++
-            Start-Sleep -Milliseconds 100
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        $tail = ''
+        # The finally also runs on Ctrl-C, so the tab never stays busy.
+        try {
+            if ($progressBar) { Write-Host "$esc]9;4;3;0$esc\" -NoNewline }
+            while (-not $p.HasExited) {
+                if ($useColor) {
+                    # The time spent shows from 3 seconds on.
+                    $secs = [int][Math]::Floor($clock.Elapsed.TotalSeconds)
+                    if ($secs -ge 3) { $tail = '  ' + (Spent $secs) }
+                    Out ("`r  " + $frames[$i % $frames.Count] + " $Label") Magenta -NoNewline
+                    if ($tail) { Out $tail DarkGray -NoNewline }
+                }
+                $i++
+                Start-Sleep -Milliseconds 100
+            }
+            $p.WaitForExit()
+        } finally {
+            if ($progressBar) { Write-Host "$esc]9;4;0;0$esc\" -NoNewline }
         }
-        $p.WaitForExit()
-        if ($useColor) { Write-Host ("`r" + (' ' * ($Label.Length + 6)) + "`r") -NoNewline }
+        if ($useColor) { Write-Host ("`r" + (' ' * ($Label.Length + $tail.Length + 6)) + "`r") -NoNewline }
         Get-Content $err -ErrorAction SilentlyContinue | Add-Content $log
         Remove-Item $err -ErrorAction SilentlyContinue
         if ($p.ExitCode -ne 0) {
@@ -616,10 +640,10 @@ Test a branch, no release needed:
                 try {
                     & $exe doctor --fix --brief 2>&1 | ForEach-Object {
                         $line = "$_"
-                        if ($line -match '^([+x!]|\u2714|\u2716) (.*)$') {
+                        if ($line -match '^([+x!]|\u2713|\u2717) (.*)$') {
                             $text = $Matches[2]
                             if ($Matches[1] -eq '!') { Warn $text }
-                            elseif ($Matches[1] -in @('x', [string][char]0x2716)) { Out "  $failMark " Red -NoNewline; Out $text }
+                            elseif ($Matches[1] -in @('x', [string][char]0x2717)) { Out "  $failMark " Red -NoNewline; Out $text }
                             else { Done $text }
                         }
                         elseif ($line.StartsWith('PASS  ')) { Done $line.Substring(6) }
@@ -664,6 +688,14 @@ Test a branch, no release needed:
         Out ('{0,-52}' -f $Text) -NoNewline
         Out (' ' + $box.V) Magenta
     }
+    function BoxLink([string]$Url) {
+        # A box row with the URL, clickable where the terminal supports it.
+        $row = '{0,-52}' -f "    $Url"
+        if ($hyperlinks) { $row = $row.Replace($Url, "$esc]8;;$Url$esc\$Url$esc]8;;$esc\") }
+        Out ("  " + $box.V + ' ') Magenta -NoNewline
+        Out $row -NoNewline
+        Out (' ' + $box.V) Magenta
+    }
     function BoxItem([string]$Text) {
         Out ("  " + $box.V + ' ') Magenta -NoNewline
         Out '! ' Yellow -NoNewline
@@ -692,7 +724,7 @@ Test a branch, no release needed:
         BoxLine '    then run: copycord restart'
     }
     BoxItem 'Finish the setup in the dashboard once it runs:'
-    BoxLine "    http://localhost:$port"
+    BoxLink "http://localhost:$port"
 
     Out ("  " + $box.BL + $rule + $box.BR) Magenta
     Out ''

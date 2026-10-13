@@ -158,9 +158,29 @@ else
     BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; CYAN=""; ACCENT=""; RESET=""
     TTY=0
 fi
+# Windows Terminal shows OSC 9;4 progress on the tab while a step runs.
+PROGRESS=0
+if [ "$TTY" = "1" ] && [ -n "${WT_SESSION:-}" ]; then PROGRESS=1; fi
+PROGRESS_ON=0
+progress_off() {
+    if [ "$PROGRESS_ON" = "1" ]; then
+        printf '%s]9;4;0;0%s\\' "$ESC" "$ESC"
+        PROGRESS_ON=0
+    fi
+}
+# Clickable links (OSC 8) only in terminals known to show them; tmux and screen do not pass them on.
+HYPERLINKS=0
+if [ "$TTY" = "1" ] && [ -z "${TMUX:-}" ] && [ -z "${STY:-}" ]; then
+    case "${TERM_PROGRAM:-}" in vscode | WezTerm | ghostty) HYPERLINKS=1 ;; esac
+    if [ -n "${WT_SESSION:-}" ] || [ -n "${KITTY_WINDOW_ID:-}" ] || [ -n "${WEZTERM_PANE:-}" ]; then HYPERLINKS=1; fi
+    case "${VTE_VERSION:-}" in *[!0-9]* | "") ;; *) [ "$VTE_VERSION" -ge 5000 ] && HYPERLINKS=1 ;; esac
+    if [ "${TERM_PROGRAM:-}" = "iTerm.app" ]; then
+        case "${TERM_PROGRAM_VERSION:-}" in 3.[1-9]* | [4-9].* | [1-9][0-9]*) HYPERLINKS=1 ;; esac
+    fi
+fi
 case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
     *UTF-8* | *utf-8* | *UTF8* | *utf8*)
-        OK_MARK="✔"; FAIL_MARK="✖"; WARN_MARK="!"; DOT="•"
+        OK_MARK="✓"; FAIL_MARK="✗"; WARN_MARK="!"; DOT="•"
         SPIN_FRAMES="⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏"
         BOX_TL="╭"; BOX_TR="╮"; BOX_BL="╰"; BOX_BR="╯"; BOX_H="─"; BOX_V="│"
         ;;
@@ -206,6 +226,7 @@ dry() { printf '  %sdry run:%s %s\n' "$YELLOW" "$RESET" "$*"; }
 LOG="$(mktemp "${TMPDIR:-/tmp}/copycord-install.XXXXXX")"
 TMP_DIR=""
 cleanup() {
+    progress_off
     rm -f "$LOG"
     [ -n "$TMP_DIR" ] && rm -rf "$TMP_DIR"
     return 0
@@ -227,15 +248,29 @@ run() {
     if [ "$TTY" = "1" ]; then
         "$@" >"$LOG" 2>&1 </dev/null &
         pid=$!
+        if [ "$PROGRESS" = "1" ]; then
+            printf '%s]9;4;3;0%s\\' "$ESC" "$ESC"
+            PROGRESS_ON=1
+        fi
+        started=$(date +%s)
+        spent=""
         while kill -0 "$pid" 2>/dev/null; do
+            # The time spent shows from 3 seconds on.
+            secs=$(($(date +%s) - started))
+            if [ "$secs" -ge 60 ]; then
+                spent="  $DIM$((secs / 60))m $(printf '%02d' $((secs % 60)))s$RESET"
+            elif [ "$secs" -ge 3 ]; then
+                spent="  $DIM${secs}s$RESET"
+            fi
             for frame in $SPIN_FRAMES; do
                 kill -0 "$pid" 2>/dev/null || break
-                printf '\r  %s%s%s %s' "$ACCENT" "$frame" "$RESET" "$label"
+                printf '\r  %s%s%s %s%s' "$ACCENT" "$frame" "$RESET" "$label" "$spent"
                 sleep 0.1 2>/dev/null || sleep 1
             done
         done
         if wait "$pid"; then rc=0; else rc=$?; fi
         printf '\r%s' "$ESC[2K"
+        progress_off
     else
         if "$@" >"$LOG" 2>&1 </dev/null; then rc=0; else rc=$?; fi
     fi
@@ -774,9 +809,9 @@ if [ "$UPGRADE" = "1" ]; then
         # Plain output, restyled with the installer's marks.
         NO_COLOR=1 "$BIN_DIR/copycord" doctor --fix --brief </dev/null 2>&1 | while IFS= read -r line; do
             case "$line" in
-                "✔ "* | "+ "*) done_line "${line#* }" ;;
+                "✓ "* | "+ "*) done_line "${line#* }" ;;
                 "! "*) printf '  %s%s%s %s\n' "$YELLOW" "$WARN_MARK" "$RESET" "${line#! }" ;;
-                "✖ "* | "x "*) printf '  %s%s%s %s\n' "$RED" "$FAIL_MARK" "$RESET" "${line#* }" ;;
+                "✗ "* | "x "*) printf '  %s%s%s %s\n' "$RED" "$FAIL_MARK" "$RESET" "${line#* }" ;;
                 "PASS  "*) done_line "${line#PASS  }" ;;
                 "WARN  "*) printf '  %s%s%s %s\n' "$YELLOW" "$WARN_MARK" "$RESET" "${line#WARN  }" ;;
                 "FAIL  "*) printf '  %s%s%s %s\n' "$RED" "$FAIL_MARK" "$RESET" "${line#FAIL  }" ;;
@@ -804,6 +839,14 @@ fi
 
 box_line() { printf '  %s%s%s %-52s %s%s%s\n' "$ACCENT" "$BOX_V" "$RESET" "$1" "$ACCENT" "$BOX_V" "$RESET"; }
 box_item() { printf '  %s%s%s %s!%s %-50s %s%s%s\n' "$ACCENT" "$BOX_V" "$RESET" "$YELLOW$BOLD" "$RESET" "$1" "$ACCENT" "$BOX_V" "$RESET"; }
+# box_link URL: a box row with the URL, clickable where the terminal supports it.
+box_link() {
+    row="$(printf '%-52s' "    $1")"
+    if [ "$HYPERLINKS" = "1" ]; then
+        row="${row%%"$1"*}$ESC]8;;$1$ESC\\$1$ESC]8;;$ESC\\${row#*"$1"}"
+    fi
+    printf '  %s%s%s %s %s%s%s\n' "$ACCENT" "$BOX_V" "$RESET" "$row" "$ACCENT" "$BOX_V" "$RESET"
+}
 box_rule() {
     i=0
     rule=""
@@ -835,7 +878,7 @@ if grep -qx 'PASSWORD=copycord' "$ENV_FILE" 2>/dev/null; then
     box_line "    then run: copycord restart"
 fi
 box_item "Finish the setup in the dashboard once it runs:"
-box_line "    $URL"
+box_link "$URL"
 box_rule "$BOX_BL" "$BOX_BR"
 say ""
 say "  ${DIM}Open a new shell first if copycord is not found.$RESET"
