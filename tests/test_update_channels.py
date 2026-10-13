@@ -857,7 +857,7 @@ def win(env, monkeypatch, tmp_path):
     monkeypatch.setattr(winupdate, "running", lambda: ([r"C:\bin\copycord.exe"], None))
     monkeypatch.setattr(winupdate, "clean_old", lambda home, launchers: calls.append("clean"))
 
-    def move_aside(prefix, launchers, home):
+    def move_aside(prefix, launchers, home, failed=None):
         calls.append(("move", launchers))
         return [("src", "dest")]
 

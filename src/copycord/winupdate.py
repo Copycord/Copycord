@@ -125,7 +125,8 @@ def clean_old(home: Path, launchers: List[str]) -> None:
             shutil.rmtree(folder, ignore_errors=True)
 
 
-def move_aside(prefix: str, launchers: List[str], home: Path) -> List[Tuple[Path, Path]]:
+def move_aside(prefix: str, launchers: List[str], home: Path,
+               failed: Optional[List[str]] = None) -> List[Tuple[Path, Path]]:
     """Rename the executable files of the environment and the launchers out of the way."""
     files = [p for p in Path(prefix).rglob("*") if p.suffix.lower() in _LOCKED and p.is_file()]
     files += [Path(p) for p in launchers if Path(p).is_file()]
@@ -135,7 +136,9 @@ def move_aside(prefix: str, launchers: List[str], home: Path) -> List[Tuple[Path
         try:
             dest.parent.mkdir(parents=True, exist_ok=True)
             os.replace(src, dest)
-        except OSError:
+        except OSError as e:
+            if failed is not None:
+                failed.append(f"{src}: {e}")
             continue
         moved.append((src, dest))
     return moved
