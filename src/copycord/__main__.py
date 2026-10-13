@@ -11,7 +11,8 @@
 copycord run                  start the dashboard, server bot and client
 copycord restart              restart the OS service so it re-reads <home>/.env
 copycord --version            print the version and the update channel
-copycord doctor               preflight checks (no network)
+copycord doctor [--verbose]   grouped health checks: install, settings, data,
+                              running and updates (exit 1 on a problem)
 copycord config get KEY       read one setting (secrets masked)
 copycord config set KEY VAL   write one setting: env-only keys such as PASSWORD
                               go to <home>/.env, the rest to the DB app_config
@@ -52,9 +53,9 @@ from copycord.envfile import ENV_KEYS
 logger = logging.getLogger("copycord")
 
 ROLE_REMOVED_MESSAGE = (
-    "ROLE is set, but Copycord v4 runs admin, server and client in one container "
-    "and the ROLE option was removed. Delete ROLE from your compose file "
-    "(and the extra server/client services), or stay on a v3 image tag."
+    "ROLE is set, but Copycord v4 removed the ROLE option. Delete ROLE from "
+    "your compose file (and the extra server/client services), or stay on a "
+    "v3 image tag."
 )
 
 MIN_PYTHON = (3, 12)
@@ -74,7 +75,10 @@ REQUIRED_IMPORTS = (
 SECRET_MARKERS = ("TOKEN", "PASSWORD", "SECRET")
 MASK = "********"
 
-PASS, WARN, FAIL = "PASS", "WARN", "FAIL"
+PASS, WARN, FAIL, INFO = "PASS", "WARN", "FAIL", "INFO"
+# A backup older than this is a doctor warning.
+BACKUP_MAX_AGE = 2 * 24 * 3600
+DOCS_URL = "https://copycord.github.io/Copycord/docs/cli"
 
 
 # (group, [(command, one-line description)]) for the top-level help.
@@ -105,6 +109,58 @@ EXAMPLES = (
     ("copycord update --channel beta", "switch to pre-releases"),
     ("copycord update --channel dev --ref main", "install from git"),
 )
+
+
+# prog -> examples for `copycord <command> --help`.
+COMMAND_EXAMPLES = {
+    "copycord run": (
+        ("copycord run", "start Copycord in this terminal"),
+        ("copycord run --data-dir ~/copycord", "use another data directory"),
+    ),
+    "copycord restart": (
+        ("copycord config set PASSWORD hunter2", "change a setting"),
+        ("copycord restart", "apply it"),
+    ),
+    "copycord doctor": (
+        ("copycord doctor", "check everything"),
+        ("copycord doctor --verbose", "also show the paths checked"),
+    ),
+    "copycord config": (
+        ("copycord config set PASSWORD hunter2", "change the dashboard password"),
+        ("copycord config get ADMIN_PORT", "read one setting"),
+        ("copycord config export backup.json", "save the app config (unmasked)"),
+        ("copycord config import backup.json", "load it back"),
+    ),
+    "copycord service": (
+        ("copycord service install", "install, enable and start the service"),
+        ("copycord service install --user", "Linux: a per-user unit, no sudo"),
+        ("copycord service status", "is it installed and running?"),
+        ("copycord service stop", "stop it"),
+    ),
+    "copycord update": (
+        ("copycord update status", "see whether an update is available"),
+        ("copycord update", "update on the saved channel"),
+        ("copycord update --channel beta", "switch to pre-releases"),
+        ("copycord update --channel dev --ref v4-dev", "install a git branch"),
+        ("copycord update --channel dev --repo you/Copycord --ref 1a2b3c4", "a fork's commit"),
+        ("copycord update --tag 4.0.0", "install one exact version"),
+    ),
+    "copycord uninstall": (
+        ("copycord uninstall --dry-run", "show what would be removed"),
+        ("copycord uninstall", "remove the service and the program"),
+        ("copycord uninstall --purge", "also delete the data"),
+        ("copycord uninstall --yes --keep-service", "no prompts, keep the service"),
+    ),
+}
+
+# prog -> (section title, [(name, text)]) printed before the examples.
+COMMAND_NOTES = {
+    "copycord update": ("Channels", (
+        ("stable", "newest GitHub release"),
+        ("beta", "newest GitHub release, pre-releases included"),
+        ("dev", "a git branch, tag or commit (needs npm to build the dashboard)"),
+    )),
+}
 
 
 def _version() -> str:
@@ -154,7 +210,98 @@ def format_help() -> str:
     w(f"  {ui.cmd('-V, --version'.ljust(opt_width))}  Print the version and the update channel")
     w()
     w(ui.dim("Run `copycord <command> --help` for the options of one command."))
-    w(ui.dim("Docs: https://copycord.github.io/Copycord/docs/cli"))
+    w(ui.dim(f"Docs: {DOCS_URL}"))
+    return buf.getvalue()
+
+
+def _sentence(text: str) -> str:
+    return text[:1].upper() + text[1:] if text else ""
+
+
+def _invocation(action: argparse.Action) -> str:
+    """`--channel stable|beta|dev`, `-y, --yes`, `--data-dir PATH`."""
+    flags = ", ".join(sorted(action.option_strings, key=len))
+    if action.nargs == 0:
+        return flags
+    if action.choices:
+        return f"{flags} {'|'.join(action.choices)}"
+    return f"{flags} {action.metavar or action.dest.upper()}"
+
+
+def format_command_help(parser: argparse.ArgumentParser) -> str:
+    """`copycord <command> --help` in the style of the top-level overview."""
+    import io
+    import textwrap
+
+    from copycord import ui
+
+    buf = io.StringIO()
+
+    def w(text: str = "") -> None:
+        buf.write(text + "\n")
+
+    def rows(title: str, items, style=ui.cmd) -> None:
+        if not items:
+            return
+        width = min(max(len(n) for n, _ in items), 34)
+        w()
+        w(ui.accent(title + ":"))
+        for name, text in items:
+            lines = textwrap.wrap(text, max(30, 78 - width - 4)) or [""]
+            if len(name) > width:
+                w(f"  {style(name)}")
+                first = []
+            else:
+                first = [f"  {style(name.ljust(width))}  {lines[0]}"]
+                lines = lines[1:]
+            for x in first:
+                w(x)
+            for x in lines:
+                w(f"  {' ' * width}  {x}")
+
+    w(ui.accent(parser.prog))
+    if parser.description:
+        for x in textwrap.wrap(parser.description, 78):
+            w(x)
+
+    commands, arguments, options = [], [], []
+    usage = [parser.prog]
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            usage.append("<command>")
+            for choice in action._choices_actions:
+                commands.append((choice.dest, _sentence(choice.help or "")))
+        elif not action.option_strings:
+            name = "|".join(action.choices) if action.choices else (action.metavar or action.dest).upper()
+            usage.append(f"[{name}]" if action.nargs == "?" else name)
+            arguments.append((name, _sentence(action.help or "")))
+        elif not isinstance(action, argparse._HelpAction):
+            options.append((_invocation(action), _sentence(action.help or "")))
+    options.append(("-h, --help", "Show this help"))
+    usage.append("[options]")
+    w()
+    w(f"{ui.bold('Usage:')} {' '.join(usage)}")
+    rows("Commands", commands)
+    rows("Arguments", arguments)
+    rows("Options", options)
+    note = COMMAND_NOTES.get(parser.prog)
+    if note:
+        rows(note[0], note[1])
+    examples = COMMAND_EXAMPLES.get(parser.prog, ())
+    if examples:
+        width = min(max(len(c) for c, _ in examples), 44)
+        w()
+        w(ui.accent("Examples:"))
+        for example, text in examples:
+            if len(example) > width:
+                w(f"  {ui.cmd(example)}")
+                w(f"  {' ' * width}  {ui.dim(text)}")
+            else:
+                w(f"  {ui.cmd(example.ljust(width))}  {ui.dim(text)}")
+    w()
+    if commands:
+        w(ui.dim(f"Run `{parser.prog} <command> --help` for the options of one command."))
+    w(ui.dim(f"Docs: {DOCS_URL}"))
     return buf.getvalue()
 
 
@@ -206,6 +353,9 @@ class _Parser(argparse.ArgumentParser):
 
 
 class _SubParser(argparse.ArgumentParser):
+    def format_help(self) -> str:
+        return format_command_help(self)
+
     def error(self, message: str) -> NoReturn:
         """A command group without its subcommand shows the group's help; other
         mistakes get a styled one-liner and a pointer to the help."""
@@ -246,9 +396,15 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         description="Restart the OS service so it applies changed settings; "
         "<home>/.env is read on every start.",
     )
-    sub.add_parser(
-        "doctor", parents=[data_dir], help="check this machine can run Copycord"
+    doctor_p = sub.add_parser(
+        "doctor",
+        parents=[data_dir],
+        help="check this machine can run Copycord",
+        description="Check the install, the settings, the data, whether Copycord "
+        "is running and whether an update is out. Exits 1 when a check fails.",
     )
+    doctor_p.add_argument("--verbose", "-v", action="store_true",
+                          help="show the path behind every check")
 
     config = sub.add_parser(
         "config",
@@ -289,7 +445,12 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         action="store_true",
         help="Linux: per-user systemd unit (systemctl --user) instead of a system one",
     )
-    service = sub.add_parser("service", help="run Copycord as an OS service")
+    service = sub.add_parser(
+        "service",
+        help="run Copycord as an OS service",
+        description="Run Copycord in the background as a systemd unit (Linux), "
+        "a launchd agent (macOS) or a Scheduled Task (Windows).",
+    )
     ssub = service.add_subparsers(dest="service_command", required=True)
     ssub.add_parser(
         "install", parents=[user, data_dir], help="install, enable and start the service"
@@ -308,19 +469,6 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         help="update Copycord",
         description="Update Copycord from the saved channel (default stable), or "
         "switch channel. The channel is saved in <data dir>/update.json.",
-        epilog="channels:\n"
-        "  stable  newest GitHub release\n"
-        "  beta    newest GitHub release, pre-releases included\n"
-        "  dev     git install: uv tool install --force git+https://github.com/<repo>@<ref>\n"
-        "          (needs npm to build the admin UI)\n"
-        "\nexamples:\n"
-        "  copycord update status\n"
-        "  copycord update\n"
-        "  copycord update --channel beta\n"
-        "  copycord update --channel dev --ref v4-dev\n"
-        "  copycord update --channel dev --repo you/Copycord --ref 1a2b3c4\n"
-        "  copycord update --tag 4.0.0",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     update.add_argument(
         "action",
@@ -375,12 +523,6 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         description="Stop and remove the OS service, remove the copycord program "
         "(uv tool or pipx) and the saved update channel. The Copycord home "
         "(~/.copycord or COPYCORD_HOME: data, src, node) stays unless --purge is given.",
-        epilog="examples:\n"
-        "  copycord uninstall --dry-run\n"
-        "  copycord uninstall\n"
-        "  copycord uninstall --purge\n"
-        "  copycord uninstall --yes --keep-service",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     uninst.add_argument("--purge", action="store_true",
                         help="also delete the Copycord home (database, logs, backups, src, node)")
@@ -416,65 +558,42 @@ def apply_data_dir(args: argparse.Namespace) -> None:
 class Check(NamedTuple):
     status: str
     name: str
-    reason: str
+    # Why it is not OK and what to do; shown for every status.
+    reason: str = ""
+    # The file or folder checked; shown on WARN/FAIL or with --verbose.
+    path: str = ""
+
+
+# --- Install ---------------------------------------------------------------
+
+
+def check_version() -> Check:
+    from copycord import ui
+    from copycord.update import installed_commit, load_channel
+
+    version = f"Copycord v{_version().lstrip('v')}"
+    try:
+        commit = installed_commit()
+    except Exception:
+        commit = None
+    if commit:
+        version += f" ({commit[:7]})"
+    sep = " · " if ui.use_color() and ui._unicode(sys.stdout) else ", "
+    try:
+        channel = load_channel().describe()
+    except Exception:
+        channel = "unknown"
+    return Check(PASS, f"{version}{sep}channel {channel}")
 
 
 def check_python(version_info=None) -> Check:
     v = sys.version_info if version_info is None else version_info
     found = ".".join(str(p) for p in tuple(v)[:3])
     if MIN_PYTHON <= tuple(v)[:2] < MAX_PYTHON:
-        return Check(PASS, "python", f"Python {found}")
+        return Check(PASS, f"Python {found}")
     low = ".".join(str(p) for p in MIN_PYTHON)
     high = f"{MAX_PYTHON[0]}.{MAX_PYTHON[1] - 1}"
-    return Check(FAIL, "python", f"Python {found}, Copycord needs {low} to {high}")
-
-
-def check_data_dir(path: Path) -> Check:
-    if path.exists():
-        if not path.is_dir():
-            return Check(FAIL, "data dir", f"{path} exists but is not a directory")
-        try:
-            with tempfile.TemporaryFile(dir=path):
-                pass
-        except OSError as e:
-            return Check(FAIL, "data dir", f"{path} is not writable ({e})")
-        return Check(PASS, "data dir", f"{path} is writable")
-    parent = path.parent
-    while not parent.exists() and parent != parent.parent:
-        parent = parent.parent
-    if parent.is_dir() and os.access(parent, os.W_OK | os.X_OK):
-        return Check(PASS, "data dir", f"{path} will be created on first run")
-    return Check(
-        FAIL, "data dir", f"{path} cannot be created ({parent} is not writable)"
-    )
-
-
-def check_admin_port(
-    env: Optional[Mapping[str, str]] = None, host: str = ADMIN_BIND_HOST
-) -> Check:
-    env = os.environ if env is None else env
-    raw = env.get("ADMIN_PORT") or str(DEFAULT_ADMIN_PORT)
-    try:
-        port = int(raw)
-        if not 0 < port < 65536:
-            raise ValueError
-    except ValueError:
-        return Check(FAIL, "admin port", f"ADMIN_PORT={raw!r} is not a valid port")
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        # Same as uvicorn: lingering TIME_WAIT sockets do not count as in use.
-        # (On Windows SO_REUSEADDR would allow sharing a live port, so skip it.)
-        if sys.platform != "win32":
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        try:
-            s.bind((host, port))
-        except OSError as e:
-            return Check(
-                FAIL,
-                "admin port",
-                f"port {port} is in use ({e.strerror or e}); is Copycord already "
-                "running? Set ADMIN_PORT to use another port",
-            )
-    return Check(PASS, "admin port", f"port {port} is free")
+    return Check(FAIL, f"Python {found}", f"Copycord needs Python {low} to {high}")
 
 
 def admin_static_dir() -> Optional[Path]:
@@ -491,45 +610,145 @@ def admin_static_dir() -> Optional[Path]:
 def check_frontend(static_dir: Optional[Path] = None) -> Check:
     static_dir = admin_static_dir() if static_dir is None else static_dir
     if static_dir is None:
-        return Check(FAIL, "frontend", "the admin package cannot be found")
+        return Check(FAIL, "web UI missing", "the admin package cannot be found")
     main_js = static_dir / "assets" / "main.js"
     if main_js.is_file():
-        return Check(PASS, "frontend", f"assets in {static_dir}")
+        return Check(PASS, "web UI included", path=str(static_dir))
     return Check(
-        WARN,
-        "frontend",
-        f"{main_js} is missing, the admin UI will not load "
-        "(run `npm run build` in src/copycord/admin/frontend and copy dist/ to admin/static)",
+        FAIL,
+        "web UI missing",
+        "the dashboard will not load; reinstall Copycord (a git install needs npm "
+        "to build it)",
+        str(main_js),
     )
-
-
-def check_role(env: Optional[Mapping[str, str]] = None) -> Check:
-    env = os.environ if env is None else env
-    if "ROLE" in env:
-        return Check(FAIL, "ROLE", ROLE_REMOVED_MESSAGE)
-    return Check(PASS, "ROLE", "unset")
 
 
 def check_import(module: str, dist: str) -> Check:
     from importlib import metadata
 
-    name = f"import {module}"
     try:
         importlib.import_module(module)
     except Exception as e:
-        return Check(FAIL, name, f"cannot import {module}: {e!r} (install {dist})")
+        return Check(FAIL, dist, f"cannot import {module}: {e!r}")
     try:
         version = metadata.version(dist)
     except metadata.PackageNotFoundError:
+        return Check(WARN, dist, f"{module} imports, but {dist} is not installed (wrong package?)")
+    return Check(PASS, dist, version)
+
+
+def check_dependencies(imports=None) -> Check:
+    """One line for every REQUIRED_IMPORTS; names only the broken ones."""
+    imports = REQUIRED_IMPORTS if imports is None else imports
+    bad = [c for c in (check_import(m, d) for m, d in imports) if c.status != PASS]
+    if not bad:
+        return Check(PASS, "dependencies OK")
+    status = FAIL if any(c.status == FAIL for c in bad) else WARN
+    names = ", ".join(c.name for c in bad)
+    return Check(
+        status,
+        f"missing dependencies: {names}",
+        "; ".join(c.reason for c in bad) + "; reinstall Copycord to repair them",
+    )
+
+
+# --- Settings --------------------------------------------------------------
+
+
+def check_role(env: Optional[Mapping[str, str]] = None) -> Check:
+    env = os.environ if env is None else env
+    if "ROLE" in env:
+        return Check(FAIL, "ROLE is set", ROLE_REMOVED_MESSAGE)
+    return Check(PASS, "ROLE not set")
+
+
+def check_env_file(path: Optional[Path] = None) -> Check:
+    from copycord import envfile
+
+    path = envfile.env_path() if path is None else path
+    if path.is_file():
+        return Check(PASS, ".env found", path=str(path))
+    return Check(
+        WARN,
+        ".env not found",
+        f"{path} is missing, so every setting is at its default; "
+        "`copycord config set PASSWORD <new>` creates it",
+        str(path),
+    )
+
+
+def check_password(env: Optional[Mapping[str, str]] = None) -> Check:
+    from copycord.envfile import DEFAULT_PASSWORD
+
+    env = os.environ if env is None else env
+    value = env.get("PASSWORD")
+    if value == DEFAULT_PASSWORD:
         return Check(
-            WARN, name, f"{module} imports, but {dist} is not installed (wrong package?)"
+            WARN,
+            "dashboard password is the default",
+            "change it with `copycord config set PASSWORD <new>`, then `copycord restart`",
         )
-    return Check(PASS, name, f"{dist} {version}")
+    if not value:
+        return Check(INFO, "no dashboard password", "the dashboard has no login page")
+    return Check(PASS, "dashboard password set")
+
+
+def admin_port(env: Optional[Mapping[str, str]] = None) -> int:
+    """ADMIN_PORT when it is valid, else the default."""
+    env = os.environ if env is None else env
+    try:
+        port = int(env.get("ADMIN_PORT") or DEFAULT_ADMIN_PORT)
+    except ValueError:
+        return DEFAULT_ADMIN_PORT
+    return port if 0 < port < 65536 else DEFAULT_ADMIN_PORT
+
+
+def check_tokens(env: Optional[Mapping[str, str]] = None) -> Check:
+    """SERVER_TOKEN / CLIENT_TOKEN as the app reads them: the DB app config,
+    then the environment. The values are never printed."""
+    from copycord.update_check import config_value
+
+    env = os.environ if env is None else env
+    missing = [
+        key
+        for key in ("SERVER_TOKEN", "CLIENT_TOKEN")
+        if not (config_value(key).strip() or (env.get(key) or "").strip())
+    ]
+    if not missing:
+        return Check(PASS, "Discord tokens set")
+    return Check(
+        WARN,
+        f"{' and '.join(missing)} not set yet",
+        f"finish setup at http://localhost:{admin_port(env)}",
+    )
+
+
+# --- Data ------------------------------------------------------------------
+
+
+def check_data_dir(path: Path) -> Check:
+    if path.exists():
+        if not path.is_dir():
+            return Check(FAIL, "home is not a directory", path=str(path))
+        try:
+            with tempfile.TemporaryFile(dir=path):
+                pass
+        except OSError as e:
+            return Check(FAIL, "home is not writable", str(e), str(path))
+        return Check(PASS, "home writable", path=str(path))
+    parent = path.parent
+    while not parent.exists() and parent != parent.parent:
+        parent = parent.parent
+    if parent.is_dir() and os.access(parent, os.W_OK | os.X_OK):
+        return Check(PASS, "home will be created on first run", path=str(path))
+    return Check(
+        FAIL, "home cannot be created", f"{parent} is not writable", str(path)
+    )
 
 
 def check_db(path: Path) -> Check:
     if not path.exists():
-        return Check(PASS, "database", f"{path} will be created on first run")
+        return Check(INFO, "database created on first run", path=str(path))
     try:
         conn = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
         try:
@@ -542,8 +761,8 @@ def check_db(path: Path) -> Check:
         finally:
             conn.close()
     except sqlite3.Error as e:
-        return Check(FAIL, "database", f"{path} does not open: {e}")
-    from copycord.common.db import SCHEMA_VERSION, stored_schema_version
+        return Check(FAIL, "database does not open", str(e), str(path))
+    from copycord.common.db import SCHEMA_VERSION, backups_dir, stored_schema_version
 
     try:
         stored = stored_schema_version(str(path))
@@ -551,48 +770,219 @@ def check_db(path: Path) -> Check:
         stored = None
     if stored is not None and stored > SCHEMA_VERSION:
         return Check(
-            FAIL, "database",
-            f"{path} has schema {stored}, newer than this Copycord supports "
-            f"({SCHEMA_VERSION}); run copycord update to go back to a newer version",
+            FAIL,
+            f"database schema {stored} is newer than this Copycord supports ({SCHEMA_VERSION})",
+            "run `copycord update` to go back to a newer version, or restore a "
+            f"backup from {backups_dir()}",
+            str(path),
         )
     if "app_config" not in tables:
-        return Check(
-            WARN, "database", f"{path} opens but has no app_config table yet"
-        )
-    return Check(PASS, "database", f"{path} opens")
+        return Check(WARN, "database has no app_config table yet", path=str(path))
+    at = f" at schema {stored}" if stored is not None else ""
+    return Check(PASS, f"database OK{at}", path=str(path))
 
 
-def run_doctor() -> List[Check]:
+def _age(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 3600:
+        n, unit = max(1, seconds // 60), "minute"
+    elif seconds < 2 * 86400:
+        n, unit = seconds // 3600, "hour"
+    else:
+        n, unit = seconds // 86400, "day"
+    return f"{n} {unit}{'' if n == 1 else 's'}"
+
+
+def check_backups(
+    backup_dir: Optional[Path] = None,
+    db: Optional[Path] = None,
+    now: Optional[float] = None,
+) -> Check:
+    """The newest daily (*.tar.gz) or pre-update (*.db) backup."""
+    import time
+
+    from copycord.common.db import backups_dir
+    from copycord.common.paths import db_path
+
+    backup_dir = backups_dir() if backup_dir is None else backup_dir
+    db = db_path() if db is None else db
+    now = time.time() if now is None else now
+    times = []
+    if backup_dir.is_dir():
+        for pattern in ("*.tar.gz", "*.db"):
+            for p in backup_dir.glob(pattern):
+                if not p.name.startswith("."):
+                    try:
+                        times.append(p.stat().st_mtime)
+                    except OSError:
+                        pass
+    hint = "the daily backup runs at BACKUP_AT (03:17 by default) while Copycord is running"
+    if not times:
+        try:
+            fresh = not db.exists() or now - db.stat().st_mtime < BACKUP_MAX_AGE
+            # The DB is written all the time; its creation shows a new install best.
+            fresh = fresh or now - db.stat().st_ctime < BACKUP_MAX_AGE
+        except OSError:
+            fresh = True
+        if fresh:
+            return Check(INFO, "no backups yet", path=str(backup_dir))
+        return Check(WARN, "no backups yet", hint, str(backup_dir))
+    age = now - max(times)
+    if age > BACKUP_MAX_AGE:
+        return Check(WARN, f"last backup {_age(age)} ago", hint, str(backup_dir))
+    return Check(PASS, f"last backup {_age(age)} ago", path=str(backup_dir))
+
+
+# --- Running ---------------------------------------------------------------
+
+
+def copycord_on_port(port: int, timeout: float = 1.0) -> bool:
+    """True when the Copycord dashboard answers on 127.0.0.1:port."""
+    import urllib.error
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/version", timeout=timeout) as r:
+            data = json.loads(r.read(4096).decode("utf-8", "replace"))
+        return isinstance(data, dict) and "current" in data
+    except urllib.error.HTTPError as e:
+        # Behind the login page.
+        return e.code in (401, 403) or "login" in (e.headers.get("location") or "")
+    except Exception:
+        return False
+
+
+def check_admin_port(
+    env: Optional[Mapping[str, str]] = None,
+    host: str = ADMIN_BIND_HOST,
+    service_running: bool = False,
+    probe=None,
+) -> Check:
+    env = os.environ if env is None else env
+    raw = env.get("ADMIN_PORT") or str(DEFAULT_ADMIN_PORT)
+    try:
+        port = int(raw)
+        if not 0 < port < 65536:
+            raise ValueError
+    except ValueError:
+        return Check(FAIL, f"ADMIN_PORT={raw!r} is not a valid port")
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        # Same as uvicorn: lingering TIME_WAIT sockets do not count as in use.
+        # (On Windows SO_REUSEADDR would allow sharing a live port, so skip it.)
+        if sys.platform != "win32":
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, port))
+        except OSError as e:
+            probe = copycord_on_port if probe is None else probe
+            if service_running or probe(port):
+                return Check(PASS, f"port {port} in use by Copycord")
+            return Check(
+                WARN,
+                f"port {port} in use",
+                f"{e.strerror or e}; another program has it, so set ADMIN_PORT to a free port",
+            )
+    return Check(PASS, f"admin port {port} free")
+
+
+def service_state():
+    """The OS service state, or None when it cannot be read."""
+    try:
+        from copycord import service
+
+        return service.service_state()
+    except Exception:
+        return None
+
+
+def check_service(state) -> Check:
+    if state is None:
+        return Check(INFO, "service state unknown")
+    if not state.installed:
+        return Check(INFO, "service not installed",
+                     "`copycord service install` runs Copycord in the background")
+    if state.running:
+        return Check(PASS, "service running", path=state.where)
+    return Check(WARN, "service installed, not running",
+                 "start it with `copycord service start`", state.where)
+
+
+# --- Updates ---------------------------------------------------------------
+
+
+def check_updates(timeout: float = 2.0) -> Check:
+    """The cached update check; a network error is INFO, never a failure."""
+    from copycord import update_check
+
+    try:
+        if not update_check.check_enabled():
+            return Check(INFO, "update check off", "COPYCORD_NO_UPDATE_CHECK is set")
+        result = update_check.check_cached(timeout=timeout)
+    except Exception as e:
+        return Check(INFO, "could not check for updates", str(e).splitlines()[0][:120] if str(e) else type(e).__name__)
+    if result.available:
+        return Check(INFO, update_check.hint_text(result).split(". Run")[0],
+                     "install it with `copycord update`")
+    return Check(PASS, "up to date")
+
+
+def run_doctor() -> List[tuple]:
+    """[(section, [Check])] in the order the doctor prints them."""
     from copycord.common.paths import data_dir, db_path
 
-    checks = [
-        check_python(),
-        check_role(),
-        check_data_dir(data_dir()),
-        check_db(db_path()),
-        check_admin_port(),
-        check_frontend(),
+    settings = [check_env_file(), check_password(), check_tokens()]
+    role = check_role()
+    if role.status == FAIL:
+        settings.insert(0, role)
+    state = service_state()
+    return [
+        ("Install", [check_version(), check_python(), check_frontend(), check_dependencies()]),
+        ("Settings", settings),
+        ("Data", [check_data_dir(data_dir()), check_db(db_path()), check_backups()]),
+        ("Running", [
+            check_admin_port(service_running=bool(state and state.running)),
+            check_service(state),
+        ]),
+        ("Updates", [check_updates()]),
     ]
-    checks.extend(check_import(m, d) for m, d in REQUIRED_IMPORTS)
-    return checks
 
 
-def doctor() -> int:
+def doctor_summary(checks: List[Check]) -> str:
+    warns = sum(c.status == WARN for c in checks)
+    fails = sum(c.status == FAIL for c in checks)
+    if not warns and not fails:
+        return "All good"
+    return (f"{warns} warning{'' if warns == 1 else 's'}, "
+            f"{fails} problem{'' if fails == 1 else 's'}")
+
+
+def doctor(verbose: bool = False) -> int:
     from copycord import ui
 
-    checks = run_doctor()
+    sections = run_doctor()
     if ui.use_color():
         ui.heading("Copycord doctor")
-    status = {PASS: "ok", WARN: "warn", FAIL: "fail"}
-    for c in checks:
-        ui.line(status[c.status], c.name, c.reason, stream=sys.stdout)
-    failed = sum(c.status == FAIL for c in checks)
-    if ui.use_color():
-        print()
-        if failed:
-            ui.fail(f"{failed} check(s) failed", stream=sys.stdout)
-        else:
-            ui.ok("ready to run", ui.cmd("copycord run"))
+    status = {PASS: "ok", WARN: "warn", FAIL: "fail", INFO: "info"}
+    checks: List[Check] = []
+    for title, rows in sections:
+        ui.heading(title)
+        for c in rows:
+            checks.append(c)
+            parts = [c.reason]
+            if c.path and (verbose or c.status in (WARN, FAIL)):
+                parts.append(c.path)
+            ui.line(status[c.status], c.name, "; ".join(p for p in parts if p), stream=sys.stdout)
+    failed = any(c.status == FAIL for c in checks)
+    summary = doctor_summary(checks)
+    print()
+    if not ui.use_color():
+        print(summary)
+    elif failed:
+        ui.fail(summary, stream=sys.stdout)
+    elif summary != "All good":
+        ui.warn(summary, stream=sys.stdout)
+    else:
+        ui.ok(summary, f"start it with {ui.cmd('copycord run')}")
     return 1 if failed else 0
 
 
@@ -1038,7 +1428,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     envfile.load()
 
     if args.command == "doctor":
-        return doctor()
+        return doctor(verbose=args.verbose)
 
     if args.command == "restart":
         return restart_command()

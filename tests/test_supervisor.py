@@ -376,8 +376,8 @@ def test_role_env_guard_exits_before_starting(monkeypatch, caplog):
     with caplog.at_level("ERROR", logger="copycord"):
         assert main(["run"]) != 0
     assert started == []
-    assert "ROLE option was removed" in caplog.text
-    assert "one container" in caplog.text
+    assert "v4 removed the ROLE option" in caplog.text
+    assert "compose file" in caplog.text
 
 
 def test_role_env_guard_trips_on_empty_value(monkeypatch):
