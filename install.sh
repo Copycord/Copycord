@@ -725,14 +725,22 @@ fi
 
 # Write <home>/.env once, never overwriting it. The installed CLI writes it
 # (copycord config init), so the default settings live in one place.
+env_value() {
+    # env_value KEY [--show-secrets]: KEY from <home>/.env, empty when unset.
+    NO_COLOR=1 "$BIN_DIR/copycord" config get "$@" </dev/null 2>/dev/null | tail -n 1
+}
+
+# A new file gets a random dashboard password, shown once in the box below.
 ENV_FILE="$COPYCORD_HOME/.env"
+NEW_PASSWORD=""
 if [ -e "$ENV_FILE" ]; then
     :
 elif [ "$DRY_RUN" = "1" ]; then
-    dry "write the settings file $ENV_FILE (copycord config init)"
+    dry "write the settings file $ENV_FILE with a random password (copycord config init)"
 elif WROTE="$("$BIN_DIR/copycord" config init 2>>"$LOG" </dev/null)" && [ -n "$WROTE" ]; then
     ENV_FILE="$WROTE"
     done_line "Wrote the settings file $ENV_FILE"
+    NEW_PASSWORD="$(env_value PASSWORD --show-secrets)"
 else
     warn "could not write $ENV_FILE; $(cmd "copycord config set") creates it later"
 fi
@@ -817,13 +825,19 @@ box_rule() {
     printf '  %s%s%s%s%s\n' "$ACCENT" "$1" "$rule" "$2" "$RESET"
 }
 
-URL="http://localhost:${ADMIN_PORT:-8080}"
 say ""
 if [ "$DRY_RUN" = "1" ]; then
     say "  ${YELLOW}${BOLD}Dry run complete:$RESET nothing was changed."
     say ""
     exit 0
 fi
+# The address from the settings file: this computer unless DASHBOARD_HOST names one.
+PORT="$(env_value ADMIN_PORT)"
+case "$PORT" in "" | *[!0-9]*) PORT="${ADMIN_PORT:-8080}" ;; esac
+HOST="$(env_value DASHBOARD_HOST)"
+case "$HOST" in "" | 0.0.0.0 | :: | "[::]" | 127.0.0.1 | localhost) HOST="localhost" ;; esac
+case "$HOST" in *:*) case "$HOST" in \[*) ;; *) HOST="[$HOST]" ;; esac ;; esac
+URL="http://$HOST:$PORT"
 box_rule "$BOX_TL" "$BOX_TR"
 box_line "Copycord $LABEL is installed"
 box_line "Home: $COPYCORD_HOME"
@@ -835,13 +849,17 @@ box_line "  copycord restart   apply a changed setting"
 box_line "  copycord update    update it later"
 box_line ""
 box_line "Needs your attention:"
-if grep -qx 'PASSWORD=copycord' "$ENV_FILE" 2>/dev/null; then
+box_item "Finish the setup in the dashboard once it runs:"
+box_link "$URL"
+if [ -n "$NEW_PASSWORD" ]; then
+    box_item "Your dashboard password (shown only this once):"
+    box_line "    $NEW_PASSWORD"
+    box_line "    it is saved as PASSWORD in the settings file above"
+elif grep -qx 'PASSWORD=copycord' "$ENV_FILE" 2>/dev/null; then
     box_item "Change the default dashboard password:"
     box_line "    edit PASSWORD in the settings file above,"
     box_line "    then run: copycord restart"
 fi
-box_item "Finish the setup in the dashboard once it runs:"
-box_link "$URL"
 box_rule "$BOX_BL" "$BOX_BR"
 say ""
 say "  ${DIM}Open a new shell first if copycord is not found.$RESET"
