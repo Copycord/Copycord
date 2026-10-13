@@ -115,6 +115,18 @@ def _systemd_quote(arg: str) -> str:
     return f'"{escaped}"'
 
 
+def _writable_paths(data_dir: Path, run_as: Optional[str]) -> List[str]:
+    """What ProtectSystem=strict leaves writable: the Copycord home and data dir, plus
+    ~/.local and ~/.cache (where uv keeps Copycord) so auto-update still works.
+    A leading - lets systemd skip a path that does not exist."""
+    from copycord.common.paths import home_dir
+
+    user_home = Path(os.path.expanduser(f"~{run_as}" if run_as else "~"))
+    paths = [str(home_dir()), str(data_dir)]
+    paths += [f"-{user_home / '.local'}", f"-{user_home / '.cache'}"]
+    return list(dict.fromkeys(paths))
+
+
 def systemd_unit(
     command: Sequence[str], data_dir: Path, user: bool, run_as: Optional[str] = None
 ) -> str:
@@ -133,7 +145,17 @@ def systemd_unit(
         "Restart=on-failure",
         "RestartSec=10",
         "Environment=PYTHONUNBUFFERED=1",
+        # These three work in a per-user unit too (seccomp, allowed with NoNewPrivileges).
+        "NoNewPrivileges=yes",
+        "RestrictSUIDSGID=yes",
+        "LockPersonality=yes",
     ]
+    if not user:
+        lines += [
+            "PrivateTmp=yes",
+            "ProtectSystem=strict",
+            f"ReadWritePaths={' '.join(_systemd_quote(p) for p in _writable_paths(data_dir, run_as))}",
+        ]
     if run_as and not user:
         lines.append(f"User={run_as}")
     lines += [
@@ -294,8 +316,10 @@ def launchd_plist(command: Sequence[str], data_dir: Path) -> bytes:
             "RunAtLoad": True,
             "KeepAlive": {"SuccessfulExit": False},
             "ThrottleInterval": 10,
-            "StandardOutPath": str(data_dir / "copycord.out.log"),
-            "StandardErrorPath": str(data_dir / "copycord.err.log"),
+            # The console log handler repeats every line the rotating files in
+            # <home>/logs already keep, and launchd never rotates its own files.
+            "StandardOutPath": "/dev/null",
+            "StandardErrorPath": "/dev/null",
             "EnvironmentVariables": {"PYTHONUNBUFFERED": "1"},
         }
     )
@@ -338,7 +362,7 @@ class LaunchdService:
         return [
             ("ok", "Created the launchd agent", str(self.plist_path)),
             ("ok", "Started Copycord, and it starts again at every login", ""),
-            ("info", "Output goes to", str(data_dir / "copycord.out.log")),
+            ("info", "Logs go to", str(_logs_dir())),
         ]
 
     def _need_plist(self) -> None:
