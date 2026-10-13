@@ -1,37 +1,42 @@
 ---
-sidebar_position: 4
+sidebar_position: 6
 title: Docker Install
 ---
 
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+
 # Docker Install
 
-Docker runs Copycord in a single container with everything it needs. Use it if you already run your apps with Docker; otherwise the [install script](/docs/getting-started/manual-install) is simpler.
+Docker runs Copycord in a single container with everything it needs. Use it if you already run your apps with Docker; otherwise the [one-command installer](/docs/getting-started/quick-start) is simpler.
 
 ## Install Docker
 
-### Windows
+<Tabs groupId="os" queryString>
+  <TabItem value="unix" label="Linux / macOS" default>
 
-1. Download and install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop)
-2. Follow the installation wizard
-3. Restart your computer if prompted
+On Linux (Ubuntu, Debian and most others):
 
-### Linux (Ubuntu/Debian)
-
-```bash
+```bash title="Terminal"
 curl -fsSL https://get.docker.com | sh
-```
-
-Verify the installation:
-
-```bash
 docker --version
 docker compose version
 ```
 
-### macOS
+On macOS, install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop) and follow the wizard.
 
-1. Download and install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop)
-2. Follow the installation wizard
+  </TabItem>
+  <TabItem value="windows" label="Windows">
+
+Install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop), follow the wizard and restart if asked.
+
+  </TabItem>
+  <TabItem value="docker" label="Docker">
+
+Docker is already installed. Continue below.
+
+  </TabItem>
+</Tabs>
 
 ## Set up Copycord
 
@@ -49,7 +54,7 @@ copycord/
 
 Create a file named `docker-compose.yml` with the following content. Copycord runs as one container with the dashboard, server and client together:
 
-```yaml
+```yaml title="docker-compose.yml"
 services:
   copycord:
     image: ghcr.io/copycord/copycord:latest # pinning a release tag (e.g. v4.0.0) is recommended
@@ -143,4 +148,4 @@ Then restart: `docker compose up -d`
 
 ## Next steps
 
-Head to [First Run](/docs/getting-started/first-run) to configure your tokens and create your first server mapping.
+Open **http://localhost:8080**, log in with `copycord` (or the `PASSWORD` you set) and continue with [First Run](/docs/getting-started/first-run).

@@ -5,7 +5,7 @@ title: CLI Reference
 
 # CLI Reference
 
-The [install script](/docs/getting-started/manual-install) installs the `copycord` command. It runs Copycord, checks your setup, reads and writes settings, manages the background service and updates Copycord.
+The [installer](/docs/getting-started/quick-start) installs the `copycord` command. It runs Copycord, checks your setup, reads and writes settings, manages the background service and updates Copycord.
 
 ```
 copycord run [--data-dir PATH]

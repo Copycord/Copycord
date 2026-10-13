@@ -1,51 +1,57 @@
 ---
-sidebar_position: 1
-title: Prerequisites
+sidebar_position: 7
+title: Requirements
+description: Supported systems, what the installer brings and the hardware Copycord needs.
 ---
 
-# Prerequisites
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
 
-Before installing Copycord, you'll need a few things ready.
+# Requirements
 
-## Requirements
+## Systems
 
-### For the install script
+<Tabs groupId="os" queryString>
+  <TabItem value="unix" label="Linux / macOS" default>
 
-- **Linux**, **macOS** or **Windows**
-- `curl` or `wget` on Linux/macOS, **PowerShell** on Windows
-- A Discord **bot token** (for the server bot)
-- A Discord **user token** (for the client)
+- A recent Linux distribution or macOS
+- `curl` or `wget`
+- A normal user account: the installer refuses to run as root
 
-You do not need to install Python, Node.js or virtual environments. The install script installs [uv](https://docs.astral.sh/uv/), and uv provides Python 3.12 or newer and every dependency Copycord needs.
+  </TabItem>
+  <TabItem value="windows" label="Windows">
 
-### For Docker
+- Windows 10 or 11
+- PowerShell, opened as your normal user (not as Administrator)
 
-- [Docker](https://www.docker.com/products/docker-desktop) and Docker Compose
-- A Discord **bot token**
-- A Discord **user token**
+  </TabItem>
+  <TabItem value="docker" label="Docker">
 
-:::tip Which install method should I use?
-Use the **install script** if you want Copycord running directly on your computer or server; it can also install Copycord as a background service. Use **Docker** if you already run your apps in containers. Both run the same Copycord and keep all data in one data directory.
-:::
+- [Docker](https://docs.docker.com/get-docker/) with Docker Compose
 
-## What you'll need from Discord
+  </TabItem>
+</Tabs>
 
-You need **two tokens** to run Copycord:
+You do not need to install Python, Node.js or virtual environments. The installer installs [uv](https://docs.astral.sh/uv/), and uv provides Python 3.12 or newer and every package Copycord needs. Only [testing a branch](/docs/getting-started/manual-install#branches) also needs git, and Node.js, which the installer fetches for you when it is missing.
 
-| Token | What it is | Where it's used |
-|-------|-----------|----------------|
-| **Bot Token** | A token from the Discord Developer Portal for a bot application | The **server** part: manages the clone server |
-| **User Token** | Your personal Discord account token (or an alt account) | The **client** part: reads messages from the source server |
+## From Discord
 
-The next page walks you through obtaining both tokens and setting up your Discord bot.
+| Token | What it is | Used by |
+|-------|------------|---------|
+| **Bot token** | A bot application from the Discord Developer Portal | The **server** part, which manages the clone server |
+| **User token** | The token of a Discord account, ideally an alt | The **client** part, which reads the source servers |
 
-## System requirements
+[Discord Setup](/docs/getting-started/discord-setup) shows how to get both.
 
-Copycord is lightweight and runs comfortably on:
+## Hardware
+
+Copycord is light and runs well on:
 
 - **1 CPU core**
-- **512 MB RAM** (1 GB recommended for large servers)
-- **1 GB disk space** (more if backfilling history or storing backups)
+- **512 MB RAM** (1 GB for large servers)
+- **1 GB disk** (more for backfilled history and backups)
 - A stable internet connection
 
-Copycord runs on **Windows**, **Linux**, and **macOS**. Natively it supports **Python 3.12 and newer**; the Docker image uses Python 3.14.
+:::tip Installer or Docker?
+Use the **installer** to run Copycord directly on your computer or server; it can also install Copycord as a background service. Use **Docker** if you already run your apps in containers. Both run the same Copycord.
+:::

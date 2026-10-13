@@ -1,11 +1,11 @@
 ---
-sidebar_position: 2
+sidebar_position: 1
 title: Discord Setup
 ---
 
 # Discord Setup
 
-This guide walks you through everything you need to set up on Discord before running Copycord.
+Copycord needs a clone server, a bot token and a user token. Get them before your first login to the dashboard.
 
 ## Step 1: Create the clone server
 
@@ -16,7 +16,7 @@ Create a **new Discord server** that will receive all the mirrored content. This
 3. Give it a name (e.g., "My Clone Server")
 
 :::tip
-Keep the clone server empty — Copycord will create all channels, roles, and emojis automatically.
+Keep the clone server empty. Copycord creates all channels, roles, and emojis automatically.
 :::
 
 ## Step 2: Obtain your user token
@@ -24,7 +24,7 @@ Keep the clone server empty — Copycord will create all channels, roles, and em
 The user token allows Copycord's client to read messages from source servers as your Discord account.
 
 :::warning Use an alt account
-Since self-botting violates Discord's Terms of Service, we strongly recommend using an **alternate Discord account** — not your main account. The alt account must be a member of the source server(s) you want to clone.
+Since self-botting violates Discord's Terms of Service, we strongly recommend using an **alternate Discord account**, not your main account. The alt account must be a member of the source server(s) you want to clone.
 :::
 
 ### How to get your user token
@@ -46,8 +46,8 @@ console.log(
 iframe.remove()
 ```
 
-5. Press **Enter** — your token will appear in the console
-6. **Copy and store this token securely** — treat it like a password
+5. Press **Enter**: your token appears in the console
+6. **Copy and store this token securely** and treat it like a password
 
 :::danger Keep your token secret
 Anyone with your user token has full access to your Discord account. Never share it publicly or commit it to version control.
@@ -70,7 +70,7 @@ The bot token is used by Copycord's server component to manage the cloned server
    - Click **Save Changes**
 
 2. In the left sidebar, click **Bot**
-   - Click **Reset Token** and copy the new token — store it securely
+   - Click **Reset Token** and copy the new token, then store it securely
    - Disable **Public Bot** (so only you can add it to servers)
    - Enable these **Privileged Gateway Intents**:
      - ✅ **Presence Intent**
@@ -99,6 +99,4 @@ At this point you should have:
 - ✅ A **user token** from your alt account (which is a member of source servers)
 - ✅ A **bot token** from the Developer Portal
 
-Next, choose your installation method:
-- [Install Script](/docs/getting-started/manual-install) (Linux, macOS, Windows)
-- [Docker Install](/docs/getting-started/docker-install)
+You paste both tokens into the dashboard after the install. If you have not installed Copycord yet, go back to the [Quick Start](/docs/getting-started/quick-start); otherwise continue with [First Run](/docs/getting-started/first-run).

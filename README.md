@@ -114,23 +114,18 @@ Windows (PowerShell):
 irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1 | iex
 ```
 
-Then:
+Then start Copycord, open http://localhost:8080 and log in with the default password `copycord`. Enter your bot token (Server Token) and user token (Client Token) and finish the setup in the dashboard:
 
 ```bash
-copycord doctor                   # check the setup
 copycord run                      # start Copycord, then open http://localhost:8080
-copycord service install --user   # or run it in the background as a service
+copycord service install --user   # or run it in the background as a service (Linux; macOS/Windows: without --user)
 ```
 
-The dashboard password is `copycord`. Change it in `~/.copycord/.env` (`%USERPROFILE%\.copycord\.env` on Windows) or with `copycord config set PASSWORD 'new-pass'`, then run `copycord restart`. Update later with `copycord update`.
+Change the default password in `~/.copycord/.env` (`%USERPROFILE%\.copycord\.env` on Windows) or with `copycord config set PASSWORD 'new-pass'`, then run `copycord restart`. Update later with `copycord update`; `copycord doctor` checks the setup.
 
-Installer options (after `sh -s --`): `--version` picks a release (`4.0.0`) or builds a branch, tag or commit from source, `--repo owner/name` picks a fork, `--beta`, `--home` (default `~/.copycord`, or `COPYCORD_HOME`), `--verify` and `--dry-run`. Finish the setup in the dashboard at http://localhost:8080. Test a branch (a release-looking version installs that release, anything else is a git ref):
+Testers can build a branch: add `sh -s -- --version v4-dev` (Windows: run `$env:COPYCORD_VERSION='v4-dev'` before the `irm` line).
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/v4-dev/install.sh | sh -s -- --version v4-dev
-```
-
-See [Install Script](https://copycord.github.io/Copycord/docs/getting-started/manual-install) and the [CLI reference](https://copycord.github.io/Copycord/docs/cli).
+See the [Quick Start](https://copycord.github.io/Copycord/docs/getting-started/quick-start), [Install Options](https://copycord.github.io/Copycord/docs/getting-started/manual-install) and the [CLI reference](https://copycord.github.io/Copycord/docs/cli).
 
 ### Docker
 
@@ -165,7 +160,7 @@ v4 replaces the three `admin`/`server`/`client` containers with one and removes 
 
 Visit the **[Copycord Docs](https://copycord.github.io/Copycord/)** for:
 
-- [Getting Started](https://copycord.github.io/Copycord/docs/getting-started/prerequisites): Prerequisites, Discord setup, installation
+- [Getting Started](https://copycord.github.io/Copycord/docs/getting-started/quick-start): Quick Start, Discord setup, install options
 - [Upgrading from v3](https://copycord.github.io/Copycord/docs/getting-started/upgrading-from-v3): Moving from three containers or the v3 launcher to v4
 - [CLI Reference](https://copycord.github.io/Copycord/docs/cli): `copycord run`, `doctor`, `config`, `service` and `update`
 - [Web Dashboard](https://copycord.github.io/Copycord/docs/dashboard/overview): Managing mappings, filters, backfills, forwarding

@@ -1,11 +1,11 @@
 ---
-sidebar_position: 6
+sidebar_position: 8
 title: Upgrading from v3
 ---
 
 # Upgrading from v3
 
-Copycord v4 runs the dashboard (admin), the server bot and the client in **one process**. Docker users run one container instead of three, and non-Docker users install with the [install script](/docs/getting-started/manual-install) instead of the v3 launcher. Your database is kept: v4 opens the same `data.db` and takes a backup of it first.
+Copycord v4 runs the dashboard (admin), the server bot and the client in **one process**. Docker users run one container instead of three, and non-Docker users install with the [one-command installer](/docs/getting-started/quick-start) instead of the v3 launcher. Your database is kept: v4 opens the same `data.db` and takes a backup of it first.
 
 ## What changes
 
@@ -14,7 +14,7 @@ Copycord v4 runs the dashboard (admin), the server bot and the client in **one p
 | Three containers: `admin`, `server`, `client` | One `copycord` container |
 | `ROLE=admin`, `ROLE=server`, `ROLE=client` | No `ROLE`; v4 refuses to start while it is set |
 | `install-tools/` launcher, `Copycord.exe`, `launcher.py` | Install script and the [`copycord` command](/docs/cli) |
-| Settings in `code/.env` (non-Docker) | Environment variables, the dashboard, or [`copycord config`](/docs/cli#copycord-config) |
+| Settings in `code/.env` (non-Docker) | The dashboard, plus a few keys in [`<home>/.env`](/docs/getting-started/configuration) |
 | Python 3.11, Node.js and venvs (non-Docker) | Python 3.12+ provided by uv; nothing else to install |
 | Client on discord.py-self | Client on Copycord's own built-in library |
 
@@ -106,7 +106,7 @@ Close the Copycord windows (Windows) or press **Ctrl+C** in the terminal running
 
 ### 2. Note your settings
 
-v4 does not read `code/.env`. Open it and note any values you changed, typically `PASSWORD` and `ADMIN_PORT`. In v4 you set them in `<home>/.env` with `copycord config set PASSWORD 'new-pass'`, or as environment variables (see [Settings that live in .env](/docs/getting-started/manual-install#env-file)). Tokens, mappings and dashboard settings are stored in the database and need no action.
+v4 does not read `code/.env`. Open it and note any values you changed, typically `PASSWORD` and `ADMIN_PORT`. In v4 they live in `<home>/.env`: edit the file or run `copycord config set PASSWORD 'new-pass'`, then `copycord restart` (see [Configuration File (.env)](/docs/getting-started/configuration)). Tokens, mappings and dashboard settings are stored in the database and need no action.
 
 ### 3. Install v4
 
@@ -129,7 +129,7 @@ Your v3 data is in the `data/` folder of your v3 install (for example `~/copycor
 | Linux, macOS | `~/.copycord` |
 | Windows | `%USERPROFILE%\.copycord` |
 
-Set `COPYCORD_HOME` to use another folder.
+Set `COPYCORD_HOME` (or pass `--home` to the installer) to use another folder; see [The Copycord home](/docs/getting-started/manual-install#home).
 
 Choose one of these:
 
