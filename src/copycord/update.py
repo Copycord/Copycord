@@ -29,7 +29,8 @@ beta    newest GitHub release that is not a draft, pre-releases included
 dev     git install of a branch, tag or commit (--ref, default main) of a
         GitHub repo (--repo, default Copycord/Copycord):
         uv tool install --force git+https://github.com/<repo>@<ref>
-        needs npm to build the admin UI
+        needs npm to build the admin UI; without one, Node is downloaded into
+        <Copycord home>/node (copycord.node_runtime)
 
 update.json is {"channel": ...}; dev adds "branch" (the ref) and, when it is
 not the default, "repo". Files without "repo" read as Copycord/Copycord.
@@ -47,7 +48,7 @@ import urllib.request
 from pathlib import Path
 from typing import NamedTuple, Optional, Tuple
 
-from copycord import service, ui
+from copycord import node_runtime, service, ui
 
 DEFAULT_REPO = "Copycord/Copycord"
 REPO_URL = f"https://github.com/{DEFAULT_REPO}"
@@ -582,19 +583,26 @@ def update(
     if shutil.which(cmd[0]) is None:
         _err(f"{cmd[0]} is not on PATH", f"update Copycord with: {hint}")
         return 1
+    # A dev update builds from git, and that build compiles the admin UI with
+    # npm; Node is downloaded into the Copycord home when there is none.
+    # Release updates install a wheel and never touch Node.
+    cmd_env = None
     if target.channel == DEV and not tag:
-        if shutil.which("npm") is None:
+        try:
+            npm_dir = node_runtime.ensure_npm()
+        except node_runtime.NodeError as e:
             ui.box(
                 [
                     "The dev channel builds the admin UI from source and needs",
-                    "Node.js/npm, but npm is not on PATH.",
-                    "Install Node.js (which includes npm) and retry, or stay on",
-                    f"the stable or beta channel: {ui.cmd('copycord update --channel stable')}",
+                    "Node.js/npm, which could not be set up:",
+                    str(e),
+                    f"Or stay on a release: {ui.cmd('copycord update --channel stable')}",
                 ],
-                title="npm not found", status="fail", stream=sys.stderr,
+                title="Node.js not available", status="fail", stream=sys.stderr,
             )
             return 1
-        ui.ok("npm found", "the admin UI is built during the install")
+        cmd_env = node_runtime.with_path(npm_dir)
+        ui.info("the admin UI is built during the install")
 
     # The service state is read before the install replaces the files.
     try:
@@ -604,7 +612,10 @@ def update(
         state = None
 
     print(f"$ {hint}")
-    result = service.run_cmd(cmd, capture=False)
+    if cmd_env is None:
+        result = service.run_cmd(cmd, capture=False)
+    else:
+        result = service.run_cmd(cmd, capture=False, env=cmd_env)
     if result.returncode != 0:
         _err(f"update failed (exit {result.returncode})")
         return result.returncode

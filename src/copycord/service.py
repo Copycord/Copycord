@@ -28,7 +28,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import List, NamedTuple, Optional, Sequence
+from typing import List, Mapping, NamedTuple, Optional, Sequence
 from xml.sax.saxutils import escape
 
 SERVICE_NAME = "copycord"
@@ -39,11 +39,14 @@ TASK_NAME = "Copycord"
 SYSTEMD_SYSTEM_DIR = Path("/etc/systemd/system")
 
 
-def run_cmd(cmd: Sequence[str], capture: bool = True) -> subprocess.CompletedProcess:
+def run_cmd(
+    cmd: Sequence[str], capture: bool = True, env: Optional[Mapping[str, str]] = None
+) -> subprocess.CompletedProcess:
     """The one place Copycord runs an external command (systemctl, launchctl, ...)."""
     try:
         return subprocess.run(
-            list(cmd), capture_output=capture, text=True, check=False
+            list(cmd), capture_output=capture, text=True, check=False,
+            env=None if env is None else dict(env),
         )
     except OSError as e:
         return subprocess.CompletedProcess(list(cmd), 127, "", str(e))
