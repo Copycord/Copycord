@@ -379,7 +379,13 @@ class LaunchdService:
 
     @property
     def logs(self) -> str:
-        return str(_logs_dir())
+        """The agent's output file, as written in its plist."""
+        try:
+            with open(self.plist_path, "rb") as f:
+                out = plistlib.load(f).get("StandardOutPath")
+        except (OSError, ValueError, AttributeError):
+            out = None
+        return str(out or _logs_dir())
 
     def started(self) -> Optional[str]:
         return None

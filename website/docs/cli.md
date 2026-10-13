@@ -17,7 +17,9 @@ copycord config unset KEY [--data-dir PATH]
 copycord config export [FILE] [--show-secrets] [--json] [--data-dir PATH]
 copycord config import FILE [--data-dir PATH]
 copycord service install [--user | --system] [--data-dir PATH]
-copycord service start|stop|status|uninstall [--user | --system]
+copycord service status [--user | --system] [--json]
+copycord service start|stop|restart [--user | --system]
+copycord service uninstall [--user | --system] [--yes]
 copycord backup [--json] [--data-dir PATH]
 copycord restore [ARCHIVE] [--yes] [--data-dir PATH]
 copycord update [--channel stable|beta|dev] [--repo OWNER/NAME] [--ref REF] [--tag VERSION] [--no-install] [--force]
@@ -45,7 +47,7 @@ Settings:
   config     Read or write settings (get, set, unset, export, import)
 
 Service:
-  service    Run Copycord as an OS service (install, start, stop, status)
+  service    Run Copycord in the background (install, status, start, stop, restart, uninstall)
 
 Updates:
   update     Update Copycord to the latest version
@@ -133,7 +135,7 @@ Folders and files in the Copycord home can be clicked the same way to open them:
 
 ### JSON output {#json}
 
-`--json` makes a reporting command print exactly one JSON document on stdout, for scripts and monitoring. It works with `copycord --version`, `copycord doctor` (also with `--fix`), `copycord backup`, `copycord update status`, `copycord config get` and `copycord config export`, and can go before or after the command. With `--json` there is no banner, no color, no spinner and no question; any other message goes to stderr. The exit status is the same as without it.
+`--json` makes a reporting command print exactly one JSON document on stdout, for scripts and monitoring. It works with `copycord --version`, `copycord doctor` (also with `--fix`), `copycord backup`, `copycord update status`, `copycord service status`, `copycord config get` and `copycord config export`, and can go before or after the command. With `--json` there is no banner, no color, no spinner and no question; any other message goes to stderr. The exit status is the same as without it.
 
 ```bash
 $ copycord doctor --json
@@ -160,6 +162,7 @@ $ copycord doctor --json
 - `update status`: the installed version and commit, the channel, how Copycord was installed, the latest version on the channel and `update_available`. When GitHub cannot be reached, `error` says why.
 - `config get`: `key`, `value` (masked for a secret unless `--show-secrets`), `set`, `masked` and `source` (`env` for `.env`, else `database`). A key that is not set prints `"set": false` with an `error` and exits 1.
 - `config export`: the same object as without `--json`; with a file, `{"file": ..., "keys": N}`.
+- `service status`: `installed`, `running`, `type` (for example `service for your account, starts at boot`), `file` (the unit, plist or `null` for the Windows task), `started` (Linux only, else `null`) and `logs` (the command or folder with its output). Exits with 0 when running, 3 when not.
 - `backup`: `ok`, `file` (the path of the new archive), `size` in bytes and `includes_key`. When no backup was made, `"ok": false` with an `error`, and the exit status is 1.
 - `--version`: `version`, `commit`, `channel`, and `ref` and `repo` on the dev channel.
 
@@ -477,7 +480,7 @@ copycord restart
 
 | Copycord is running | What `copycord restart` does |
 |---------------------|------------------------------|
-| As a [service](#copycord-service) | Restarts the service. |
+| As a [service](#copycord-service) | Restarts the service and prints `✓ Copycord restarted`. |
 | In a terminal (`copycord run`) | Prints that Copycord is not running as a service and exits with 1. Stop it with **Ctrl+C** and run `copycord run` again. |
 | Not at all, service installed | Prints the service state and exits with 1; start it with `copycord service start`. |
 
@@ -494,16 +497,50 @@ copycord service install      # install, enable and start
 copycord service status
 copycord service stop
 copycord service start
-copycord service uninstall    # stop and remove
+copycord service restart
+copycord service uninstall    # stop and remove; your data is kept
+```
+
+`copycord service` on its own lists these commands.
+
+```text
+$ copycord service install
+✓ Created the service for your account  /home/mac/.config/systemd/user/copycord.service
+✓ Enabled it, so it starts at boot
+✓ Started Copycord
+• Data  /home/mac/.copycord
+
+Dashboard: http://localhost:8080
+Manage it with copycord service status | stop | start | restart | uninstall
+
+$ copycord service status
+
+Copycord service
+  Status   ✓ running
+  Type     service for your account, starts at boot
+  File     /home/mac/.config/systemd/user/copycord.service
+  Started  Tue 2026-10-13 09:12:03 BST
+  Logs     journalctl --user -u copycord -f
+
+Stop it with copycord service stop, or open the dashboard at http://localhost:8080
+
+$ copycord service stop
+✓ Copycord stopped  start it again with copycord service start
+
+$ copycord service uninstall
+? Stop and remove the Copycord service? Your data is kept.  Yes / › No
 ```
 
 | Command | What it does |
 |---------|--------------|
 | `install [--user \| --system] [--data-dir PATH]` | Registers `copycord run --data-dir <data dir>` with the service manager, enables it and starts it |
-| `start` | Starts the service |
-| `stop` | Stops the service |
-| `status` | Prints whether the service is installed and running. Exits with 0 when running, 3 when not. |
-| `uninstall` | Stops and removes the service. Your data is kept. To remove Copycord itself too, use [`copycord uninstall`](#copycord-uninstall). |
+| `status [--json]` | Shows whether the service is installed and running, what kind of service it is, its file, when it started (Linux) and where its output goes. Exits with 0 when running, 3 when not. |
+| `start` | Starts the service and confirms it with `✓ Copycord started` and the dashboard address |
+| `stop` | Stops the service and confirms it with `✓ Copycord stopped` |
+| `restart` | Restarts the service, the same as [`copycord restart`](#copycord-restart) |
+| `uninstall [--yes]` | Asks, then stops and removes the service. Your data is kept. Without a terminal it needs `--yes`. To remove Copycord itself too, use [`copycord uninstall`](#copycord-uninstall). |
+
+`start`, `stop`, `restart` and `uninstall` print `• The Copycord service is not installed` with the install command when there is no service; `start`, `stop` and `restart` then exit with 1. When the service manager reports an error, the command prints `✗ Could not stop Copycord` (or start, restart, install, remove) with the reason and exits with 1.
 
 The data directory is fixed when you install the service: the one given with `--data-dir` (or `DATA_DIR`), else the default for your user. To change it, run `copycord service install` again with the new `--data-dir`.
 
@@ -519,10 +556,10 @@ The data directory is fixed when you install the service: the one given with `--
 **Linux service for your account (default).** `copycord service install` needs no sudo. It installs a systemd user unit that runs as you, with your Copycord home. A user unit normally runs only while you are logged in, so the install also turns on lingering for your account, which starts Copycord at boot and keeps it running after you log out. Most systems allow this without sudo, and the install prints:
 
 ```text
-created user service copycord.service (starts at boot)
+✓ Enabled it, so it starts at boot
 ```
 
-If your system does not allow it, the install prints `starts when you log in` and one line under `needs your attention` with the command to run once:
+If your system does not allow it, the install prints `Enabled it, so it starts when you log in` and `! Starts only when you log in` with the command to run once:
 
 ```bash
 sudo loginctl enable-linger "$USER"
