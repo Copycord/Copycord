@@ -44,7 +44,7 @@ LOGO = (
     " \\___\\___/ .__/\\_, \\__\\___/_| \\__,_|",
     "         |_|   |__/                 ",
 )
-TAGLINE = "Ultimate Discord Mirror Tool by xMacJ"
+TAGLINE = "Ultimate Discord server mirroring and utility toolkit"
 
 
 def use_color(stream: Optional[TextIO] = None) -> bool:
