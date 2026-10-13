@@ -18,6 +18,8 @@ copycord config export [FILE] [--show-secrets] [--json] [--data-dir PATH]
 copycord config import FILE [--data-dir PATH]
 copycord service install [--user] [--data-dir PATH]
 copycord service start|stop|status|uninstall [--user]
+copycord backup [--json] [--data-dir PATH]
+copycord restore [ARCHIVE] [--yes] [--data-dir PATH]
 copycord update [--channel stable|beta|dev] [--repo OWNER/NAME] [--ref REF] [--tag VERSION] [--no-install] [--force]
 copycord update status [--json]
 copycord uninstall [--purge|--keep-data] [--yes] [--keep-service] [--dry-run] [--data-dir PATH]
@@ -131,7 +133,7 @@ Folders and files in the Copycord home can be clicked the same way to open them:
 
 ### JSON output {#json}
 
-`--json` makes a reporting command print exactly one JSON document on stdout, for scripts and monitoring. It works with `copycord --version`, `copycord doctor` (also with `--fix`), `copycord update status`, `copycord config get` and `copycord config export`, and can go before or after the command. With `--json` there is no banner, no color, no spinner and no question; any other message goes to stderr. The exit status is the same as without it.
+`--json` makes a reporting command print exactly one JSON document on stdout, for scripts and monitoring. It works with `copycord --version`, `copycord doctor` (also with `--fix`), `copycord backup`, `copycord update status`, `copycord config get` and `copycord config export`, and can go before or after the command. With `--json` there is no banner, no color, no spinner and no question; any other message goes to stderr. The exit status is the same as without it.
 
 ```bash
 $ copycord doctor --json
@@ -158,6 +160,7 @@ $ copycord doctor --json
 - `update status`: the installed version and commit, the channel, how Copycord was installed, the latest version on the channel and `update_available`. When GitHub cannot be reached, `error` says why.
 - `config get`: `key`, `value` (masked for a secret unless `--show-secrets`), `set`, `masked` and `source` (`env` for `.env`, else `database`). A key that is not set prints `"set": false` with an `error` and exits 1.
 - `config export`: the same object as without `--json`; with a file, `{"file": ..., "keys": N}`.
+- `backup`: `ok`, `file` (the path of the new archive), `size` in bytes and `includes_key`. When no backup was made, `"ok": false` with an `error`, and the exit status is 1.
 - `--version`: `version`, `commit`, `channel`, and `ref` and `repo` on the dev channel.
 
 ### Unexpected errors {#crash}
@@ -242,7 +245,7 @@ copycord doctor --data-dir ~/copycord/data
 |-------|--------|
 | Install | The version, commit and update channel; Python is 3.12 to 3.14; the web UI files are installed; the required packages (`curl_cffi`, `py-cord`, `fastapi`, `uvicorn`) import, as one `dependencies OK` line that names only the missing ones |
 | Settings | `<home>/.env` exists; `PASSWORD` is not still the default `copycord`; a `FAIL` when the removed `ROLE` variable is still set |
-| Data | The Copycord home exists and is writable; `data.db` opens and its schema is one this Copycord supports (a fresh install says it is created on first run); the data files are in the `data` folder, not loose in the home; the last backup in the backups folder is under 2 days old |
+| Data | The Copycord home exists and is writable; `data.db` opens and its schema is one this Copycord supports (a fresh install says it is created on first run); the data files are in the `data` folder, not loose in the home; the last backup in the backups folder is under 2 days old and did not fail its check |
 | Running | `ADMIN_PORT` (default 8080) is free, or in use by Copycord itself; whether the OS service is installed and running |
 | Updates | The update check, cached for 24 hours. A network error is only reported, never a failure |
 
@@ -295,7 +298,7 @@ A check that was fixed shows on its own line as fixed, for example `✓ .env cre
 |-------|-----|------|
 | `.env not found` | Writes `<home>/.env` with every setting at its default, the same file the installer writes | Automatic |
 | `home folder missing` | Creates the Copycord home | Automatic |
-| `last backup ... ago`, `no backups yet` | Backs up the database now, the same `.tar.gz` the daily backup makes | Automatic |
+| `last backup ... ago`, `no backups yet`, `last backup failed its check` | Backs up the database now, the same `.tar.gz` the daily backup makes | Automatic |
 | `service installed, not running` | Starts the service | Automatic |
 | `service runs in a console window` (Windows) | Writes the service task again so it runs without a window, with the same data directory, and restarts it | Automatic |
 | `web UI missing`, `missing dependencies` | Reinstalls the version you have from your update channel (a dev install rebuilds the same ref), through `copycord update`, which backs up the database first | Automatic |
@@ -549,6 +552,78 @@ The service does not see variables you set in your terminal. The simplest way to
 - **macOS:** add the variables to the `EnvironmentVariables` dictionary in `~/Library/LaunchAgents/com.copycord.plist`, then run `copycord service stop` and `copycord service start`. Running `copycord service install` again rewrites this file.
 - **Windows:** set them as user environment variables, for example `setx PASSWORD changeme`, then sign out and back in so the task starts with them.
 
+## copycord backup {#copycord-backup}
+
+Backs up the database now, the same archive the [daily backup](/docs/dashboard/backups) makes, and prints its path:
+
+```
+$ copycord backup
+✓ Database backed up  /home/you/.copycord/data/backups/2026-10-13_15-31-24.tar.gz
+```
+
+The archive holds `data.db`, `secret.key` (when there is one) and `manifest.json`, and goes into the backups folder (`BACKUP_DIR`, by default `backups` in the [data directory](#data-dir)). The copy of the database is checked with SQLite's integrity check before it is saved; when the check fails, nothing is kept, the command says why and exits with status 1, and `copycord doctor` shows `last backup failed its check`. It works while Copycord is running. With `--json` it prints `{"ok": true, "file": ..., "size": ..., "includes_key": true}`.
+
+In Docker, run it inside the container:
+
+```bash
+docker compose exec copycord /opt/venvs/copycord/bin/copycord backup
+```
+
+## copycord restore {#copycord-restore}
+
+Replaces the database with a backup. Copycord must be stopped first: stop the service with `copycord service stop`, or press Ctrl+C where `copycord run` is running. Without a file it lists the 10 newest backups in the backups folder, the daily archives and the copies made before an update or a restore, newest first:
+
+```
+┌  Restore a backup
+│  Replaces the database with a backup. The current database is backed up first.
+│
+◆  Which backup do you want to restore?
+│  ❯ 2026-10-13 03:17  backup, 8.4 MB  (2026-10-13_03-17-00.tar.gz)
+│    2026-10-12 09:15  made before an update, 8.3 MB  (data-pre-update-4.0.0-20261012T091500Z.db)
+│    2026-10-12 03:17  backup, 8.3 MB  (2026-10-12_03-17-00.tar.gz)
+│    Cancel
+│    ↑/↓ to move, Enter to select
+```
+
+Give a file to restore that one: `copycord restore ~/.copycord/data/backups/2026-10-13_03-17-00.tar.gz`. It accepts a `.tar.gz` archive (older archives that hold only `data.db` work too) or a `.db` copy, such as the ones `copycord update` makes.
+
+Before it changes anything, `copycord restore`:
+
+1. Refuses while Copycord is running (the service, the dashboard answering on `ADMIN_PORT`, or on Windows a Copycord in another window).
+2. Checks the backup with SQLite's integrity check, and refuses a backup that fails it.
+3. Refuses a backup from a newer Copycord (a higher database schema than this version supports); update Copycord first, then restore it.
+4. Shows when the backup was made and what it includes, and asks `Replace the database in <data dir> with this backup? (y/N)`.
+
+Then it backs up the current database and `secret.key` to `pre-restore-<UTC time>.tar.gz` in the backups folder, so the restore can be undone; these copies are never removed by the daily cleanup. It moves the restored `data.db` into place in one step and, when the backup has a `secret.key` that differs from the current one, restores it and keeps the current key as `secret.key.bak-<UTC time>`. A backup without a key leaves the current key alone. After you pick a backup it looks like this:
+
+```
+✓  backup checked  /home/you/.copycord/data/backups/2026-10-13_03-17-00.tar.gz
+│  Made 2026-10-13 03:17 UTC by Copycord 4.0.0
+│  Includes the database and secret.key
+│
+◇  Replace the database in /home/you/.copycord/data with this backup?
+│  Yes
+│
+✓  backed up the current database  /home/you/.copycord/data/backups/pre-restore-20261013T153124Z.tar.gz
+✓  database restored  /home/you/.copycord/data/data.db
+✓  secret.key restored  /home/you/.copycord/data/secret.key
+•  previous secret.key kept as  /home/you/.copycord/data/secret.key.bak-20261013T153124Z
+│
+✓  Restore complete  from 2026-10-13_03-17-00.tar.gz
+│  To undo it, run copycord restore /home/you/.copycord/data/backups/pre-restore-20261013T153124Z.tar.gz
+└  Start Copycord with copycord service start or copycord run
+```
+
+`--yes` (`-y`) skips the question. Without a terminal (a script) it needs `--yes` and the file to restore, and exits with status 1 otherwise.
+
+In Docker, stop the container, run the restore in a one-off container on the same `/data` volume, then start it again:
+
+```bash
+docker compose stop copycord
+docker compose run --rm --entrypoint /opt/venvs/copycord/bin/copycord copycord restore
+docker compose up -d
+```
+
 ## copycord uninstall {#copycord-uninstall}
 
 Removes the Copycord program and its background service. It asks one question, about your data in the [Copycord home](#data-dir):
@@ -680,7 +755,7 @@ This database was created by a newer Copycord (schema 5, this version supports 4
 Run copycord update to go back to a newer version, or restore a backup from <backups dir>.
 ```
 
-and exits with status 1, naming the newest pre-update backup when there is one. `copycord doctor` reports it as `FAIL`. To go back to an older version for good, stop Copycord and copy the matching `data-pre-update-*.db` over `data.db`.
+and exits with status 1, naming the newest pre-update backup when there is one. `copycord doctor` reports it as `FAIL`. To go back to an older version for good, stop Copycord and restore the matching pre-update copy with [`copycord restore`](#copycord-restore), for example `copycord restore ~/.copycord/data/backups/data-pre-update-4.0.0-20261012T091500Z.db`.
 
 ### Update check on start {#update-check}
 
