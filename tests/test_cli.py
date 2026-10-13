@@ -1633,10 +1633,23 @@ def test_config_init_writes_the_template_once(data_dir, capsys):
     captured = capsys.readouterr()
     assert captured.out == f"{env.resolve()}\n"
     assert "Settings file created" in captured.err
-    assert env.read_text(encoding="utf-8") == envfile.template(env.resolve().parent)
-    assert "PASSWORD=copycord" in env.read_text(encoding="utf-8").splitlines()
+    # The template, with a random first-run password in place of the default.
+    password = envfile.get("PASSWORD", env)
+    assert password and password != envfile.DEFAULT_PASSWORD and len(password) >= 20
+    assert env.read_text(encoding="utf-8") == envfile.template(env.resolve().parent, password)
+    assert "PASSWORD=copycord" not in env.read_text(encoding="utf-8").splitlines()
     if sys.platform != "win32":
         assert env.stat().st_mode & 0o777 == 0o600
+
+    # The installers read it back unmasked.
+    assert cli.main(["config", "get", "PASSWORD", "--show-secrets", *dd]) == 0
+    assert capsys.readouterr().out.splitlines()[-1] == password
+
+    # Each new file gets its own password.
+    env.unlink()
+    assert cli.main(["config", "init", *dd]) == 0
+    capsys.readouterr()
+    assert envfile.get("PASSWORD", env) not in (password, envfile.DEFAULT_PASSWORD)
 
     # An existing file is never overwritten.
     env.write_text("PASSWORD=mine\n", encoding="utf-8")
@@ -1659,7 +1672,7 @@ def test_config_init_follows_copycord_home(tmp_path, monkeypatch, capsys):
 def test_config_init_reports_a_write_error(data_dir, monkeypatch, capsys):
     from copycord import envfile
 
-    def deny(path=None):
+    def deny(path=None, password=None):
         raise PermissionError("denied")
 
     monkeypatch.setattr(envfile, "write_template", deny)

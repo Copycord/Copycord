@@ -179,9 +179,20 @@ def unset(key: str, path: Optional[Path] = None) -> bool:
     return True
 
 
-def template(home: Optional[Path] = None) -> str:
-    """The default <home>/.env written on first install."""
+def new_password() -> str:
+    """A random first-run dashboard password."""
+    import secrets
+
+    return secrets.token_urlsafe(16)
+
+
+def template(home: Optional[Path] = None, password: Optional[str] = None) -> str:
+    """The default <home>/.env written on first install; password replaces
+    the default PASSWORD."""
     home = env_path().parent if home is None else Path(home)
+    values = dict(ENV_DEFAULTS)
+    if password is not None:
+        values["PASSWORD"] = _quote(password)
     lines = [
         "# Copycord settings that are read from the environment only.",
         "# Everything else is set in the dashboard. Each value below is the default.",
@@ -198,7 +209,7 @@ def template(home: Optional[Path] = None) -> str:
         elif key == "BACKUP_DIR":
             lines += [f"# {BACKUP_DIR_TEXT}", f"#BACKUP_DIR={default_backup_dir(home)}", ""]
         else:
-            lines += [f"# {texts[key]}", f"{key}={ENV_DEFAULTS[key]}", ""]
+            lines += [f"# {texts[key]}", f"{key}={values[key]}", ""]
     return "\n".join(lines)
 
 
@@ -215,11 +226,11 @@ def default_backup_dir(home: Path) -> Path:
     return home / DATA_SUBDIR / "backups"
 
 
-def write_template(path: Optional[Path] = None) -> Path:
+def write_template(path: Optional[Path] = None, password: Optional[str] = None) -> Path:
     """Write template() to a new <home>/.env; raises FileExistsError if it exists."""
     path = env_path() if path is None else path
     path.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
-        f.write(template(path.parent))
+        f.write(template(path.parent, password))
     return path

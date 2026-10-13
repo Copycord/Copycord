@@ -1813,13 +1813,14 @@ def _print_value(key: str, value: Optional[str], show_secrets: bool,
 
 
 def env_init_command() -> int:
-    """Write the default <home>/.env when it is missing; an existing file is kept.
-    The path goes to stdout so the installers can show it."""
+    """Write the default <home>/.env with a random PASSWORD when it is missing;
+    an existing file is kept. The path goes to stdout so the installers can show
+    it; they read the password back with `copycord config get PASSWORD --show-secrets`."""
     from copycord import envfile, ui
 
     path = envfile.env_path()
     try:
-        envfile.write_template(path)
+        envfile.write_template(path, envfile.new_password())
         ui.ok("Settings file created", str(path), stream=sys.stderr)
     except FileExistsError:
         ui.ok("Settings file already exists", str(path), stream=sys.stderr)
