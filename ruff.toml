@@ -67,3 +67,5 @@ ignore = []
 "src/copycord/ui.py" = ["BLE001", "S110"]
 "src/copycord/update_check.py" = ["BLE001", "S110"]
 "src/copycord/update.py" = ["BLE001", "S110"]
+# Tests catch broadly on purpose: best-effort cleanup and collecting errors from threads.
+"tests/**" = ["BLE001", "S110"]

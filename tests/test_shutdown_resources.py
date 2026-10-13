@@ -169,12 +169,17 @@ def test_ctrl_c_shutdown_leaves_no_wal_or_shm(monkeypatch, tmp_path):
     admin_db = dbmod.DBManager(str(db_file), init_schema=True)
     monkeypatch.setitem(sys.modules, "copycord.admin.app", types.SimpleNamespace(db=admin_db))
 
+    built = {}
+
     async def admin_role():
         admin_db.set_config("ADMIN_WROTE", "1")
+        # Only admin autostarts; the real admin starts server and client over their control ports.
+        for name in ("server", "client"):
+            built["sup"].roles[name].start()
         await asyncio.Event().wait()
 
     def fake_build():
-        return build_supervisor(
+        built["sup"] = build_supervisor(
             {
                 "admin": admin_role,
                 "server": ThreadedRole("server", _DbRole),
@@ -184,6 +189,7 @@ def test_ctrl_c_shutdown_leaves_no_wal_or_shm(monkeypatch, tmp_path):
             control_ports={"server": 0, "client": 0},
             backoff=Backoff(initial=0.01, maximum=0.04, reset_after=60.0),
         )
+        return built["sup"]
 
     async def no_update():
         await asyncio.Event().wait()
