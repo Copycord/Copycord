@@ -464,7 +464,10 @@ def admin_factory(host: str, port: int, log_level: str) -> RoleFactory:
             "copycord.admin.app:app",
             host=host,
             port=port,
-            log_level=log_level,
+            # No uvicorn log config: its records go through logging_setup like
+            # every other logger, held at WARNING there unless LOG_LEVEL=DEBUG.
+            log_config=None,
+            log_level=log_level if log_level == "debug" else None,
             timeout_keep_alive=2,
             timeout_graceful_shutdown=1,
         )
