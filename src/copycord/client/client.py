@@ -2895,24 +2895,3 @@ class ClientListener:
                 task.cancel()
             loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
             loop.close()
-
-
-def _autostart_enabled() -> bool:
-    import os
-
-    return os.getenv("COPYCORD_AUTOSTART", "false").lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-
-
-if __name__ == "__main__":
-    if _autostart_enabled():
-        ClientListener().run()
-    else:
-        import time
-
-        while True:
-            time.sleep(3600)

@@ -13401,20 +13401,3 @@ class ServerReceiver:
             for task in pending:
                 task.cancel()
             loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-
-
-def _autostart_enabled() -> bool:
-    return os.getenv("COPYCORD_AUTOSTART", "false").lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-
-
-if __name__ == "__main__":
-    if _autostart_enabled():
-        ServerReceiver().run()
-    else:
-        while True:
-            time.sleep(3600)

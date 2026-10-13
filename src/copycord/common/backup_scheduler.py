@@ -14,6 +14,7 @@ import contextlib
 import gzip
 import io
 import json
+import logging
 import os
 import posixpath
 import shutil
@@ -28,6 +29,8 @@ from datetime import datetime, timezone, time as dtime, timedelta
 from pathlib import Path
 from typing import Awaitable, Callable, Iterable, Optional
 from zoneinfo import ZoneInfo
+
+_log = logging.getLogger("copycord.backup")
 
 # Written next to the archives when a backup fails its check; the next good backup removes it.
 CHECK_FAILED = ".last-backup-failed.json"
@@ -659,38 +662,24 @@ class DailySQLiteBackupScheduler:
         else:
             self._dbg("prune: nothing to delete")
 
-    def _dbg(self, msg: str, *args) -> None:
+    def _emit(self, level: str, msg: str, *args) -> None:
+        # Use the caller's logger when given; fall back to the module logger, never print().
         if self.log:
             try:
-                self.log.debug(msg, *args)
+                getattr(self.log, level)(msg, *args)
                 return
             except Exception:
-                pass
-        print("[backup:debug] " + (msg % args))
+                _log.debug("backup: caller logger failed", exc_info=True)
+        getattr(_log, level)(msg, *args)
+
+    def _dbg(self, msg: str, *args) -> None:
+        self._emit("debug", msg, *args)
 
     def _info(self, msg: str, *args) -> None:
-        if self.log:
-            try:
-                self.log.info(msg, *args)
-                return
-            except Exception:
-                pass
-        print("[backup] " + (msg % args))
+        self._emit("info", msg, *args)
 
     def _warn(self, msg: str, *args) -> None:
-        if self.log:
-            try:
-                self.log.warning(msg, *args)
-                return
-            except Exception:
-                pass
-        print("[backup:warn] " + (msg % args))
+        self._emit("warning", msg, *args)
 
     def _exception(self, msg: str, *args) -> None:
-        if self.log:
-            try:
-                self.log.exception(msg, *args)
-                return
-            except Exception:
-                pass
-        print("[backup:exception] " + (msg % args))
+        self._emit("exception", msg, *args)
