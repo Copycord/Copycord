@@ -57,12 +57,7 @@ def _bytes_len(s: str | bytes) -> int:
 
 
 class WebsocketManager:
-    """
-    - Outbound: fire-and-forget `send()` and request/response `request()`
-    - Inbound: simple server (`start_server`) with per-message handler
-    - Fast shutdown: call `begin_shutdown()` or `await stop()`
-      to collapse retries and lower timeouts so the process exits quickly.
-    """
+    """Outbound send()/request(), inbound start_server(); begin_shutdown() or stop() collapses retries and timeouts."""
 
     def __init__(
         self,
@@ -89,11 +84,7 @@ class WebsocketManager:
         self,
         handler: Callable[[dict], Awaitable[dict | None]],
     ) -> None:
-        """
-        Spins up a websockets.server using `handler` for each incoming JSON message.
-        Runs until cancelled by the event loop.
-        Under the supervisor the handler is registered in-process instead.
-        """
+        """Serve a websocket calling `handler` for each incoming JSON message until cancelled; under the supervisor the handler is registered in-process."""
         reg = inprocess.active()
         if reg is not None:
             await self._serve_inprocess(reg, handler)
@@ -135,18 +126,9 @@ class WebsocketManager:
         path: str,
         handler: Callable[[dict], Awaitable[dict | None]],
     ):
-        """
-        Minimal resilient loop:
-        - graceful on peer close
-        - no traceback spam when peer closes before our send
-        - logs unexpected exceptions, but never blocks shutdown
-        """
+        """Resilient serve loop: graceful on peer close, no traceback when the peer closes before our send, never blocks shutdown."""
         peer = getattr(ws, "remote_address", None)
-        # Deliberately no open/close logging: senders dial a fresh connection
-        # per message and hang up immediately, so "connection open", "peer
-        # closed (OK)" and "connection closed" fire once PER MESSAGE and say
-        # nothing the per-request line below doesn't already say. Abnormal
-        # closes still log (see ConnectionClosedError).
+        # no open/close logging: senders dial a fresh connection per message, so it would fire per message; abnormal closes still log
         try:
             while True:
                 try:
@@ -190,8 +172,7 @@ class WebsocketManager:
 
                 payload = _json(response)
                 ok = await self._safe_send(ws, payload)
-                # One line per request rather than five (recv/handle/done/
-                # reply/sent) — same information, a fifth of the volume.
+                # one line per request instead of five
                 self.logger.debug(
                     "[ws] type=%s rid=%s in=%dB out=%dB %.1fms ok=%s",
                     ptype,
@@ -245,10 +226,7 @@ class WebsocketManager:
         await asyncio.sleep(delay)
 
     async def send_json(self, obj: Any) -> bool:
-        """
-        Convenience helper: ensure we hand a dict to `send()`.
-        If given a JSON string, try to parse; if given a non-dict, wrap it.
-        """
+        """Ensure a dict is passed to `send()`; JSON strings are parsed, non-dicts wrapped."""
         try:
             if isinstance(obj, str):
                 try:
@@ -275,11 +253,7 @@ class WebsocketManager:
         connect_timeout: float | None = 5.0,
         send_timeout: float | None = 5.0,
     ) -> None:
-        """
-        Fire-and-forget: connect, send JSON, close.
-        Retries on OSError/Timeout with exponential backoff.
-        During shutdown, retries/timeouts collapse to a single quick attempt.
-        """
+        """Fire-and-forget: connect, send JSON, close, retrying with backoff; during shutdown a single quick attempt."""
 
         if isinstance(payload, str):
             try:
@@ -308,9 +282,7 @@ class WebsocketManager:
 
         for attempt in range(1, max_attempts + 1):
             try:
-                # Only announce retries. The first attempt is the boring case
-                # and fires on every outbound message; a failure that leads to
-                # attempt 2 already logs a warning of its own below.
+                # only announce retries; the first attempt fires on every message
                 if attempt > 1:
                     self.logger.debug(
                         "WS send retry %d/%d → %s type=%s rid=%s",
@@ -435,9 +407,7 @@ class WebsocketManager:
         retry_on_timeout: bool = False,
         retry_on_connect_error: bool = True,
     ) -> dict | None:
-        """
-        Request/response helper. During shutdown we also collapse retries.
-        """
+        """Request/response helper; retries collapse during shutdown."""
         rid = payload.get("rid") or str(uuid.uuid4())
         payload = dict(payload)
         payload["rid"] = rid
@@ -488,8 +458,7 @@ class WebsocketManager:
                         raw_in = await asyncio.wait_for(ws.recv(), timeout)
                     else:
                         raw_in = await ws.recv()
-                    # One line per round trip rather than four
-                    # (connected/sent/recv/closed).
+                    # one line per round trip
                     self.logger.debug(
                         "[ws] request type=%s rid=%s out=%dB in=%dB %.1fms",
                         ptype,
@@ -632,9 +601,7 @@ class WebsocketManager:
 
 
 class AdminBus:
-    """
-    Helper to publish events to Admin's /bus.
-    """
+    """Publishes events to Admin's /bus."""
 
     def __init__(
         self,
@@ -670,10 +637,7 @@ class AdminBus:
         await self.publish("log", {"text": text})
 
     async def subscribe(self, admin_ws_url: str, handler: MessageHandler):
-        """
-        Connect to admin /ws/out and invoke `handler(event_dict)` per JSON event.
-        Under the supervisor the admin's hub feeds this loop directly.
-        """
+        """Connect to admin /ws/out and call `handler(event_dict)` per event; under the supervisor the admin hub feeds this loop directly."""
         reg = inprocess.active()
         if reg is not None:
             await self._subscribe_inprocess(reg, handler)
@@ -740,11 +704,7 @@ class AdminBus:
     async def _subscribe_inprocess(
         self, reg: "inprocess.Registry", handler: MessageHandler
     ) -> None:
-        """
-        Attach a LoopSink to the admin hub (on the admin's loop) and drain it
-        on ours. Reattaches with backoff if the admin is not up yet or drops
-        the sink, as the socket version reconnects.
-        """
+        """Attach a LoopSink to the admin hub and drain it on this loop, reattaching with backoff if the sink is dropped."""
         loop = asyncio.get_running_loop()
         attempt = 0
         while True:
@@ -768,7 +728,7 @@ class AdminBus:
                     try:
                         raw = await asyncio.wait_for(queue.get(), 1.0)
                     except asyncio.TimeoutError:
-                        # The hub closes sinks on admin shutdown or a failed send.
+                        # the hub closes sinks on admin shutdown or a failed send
                         if sink.closed or reg.feed() is not feed:
                             raise inprocess.EndpointUnavailable("admin bus went away")
                         continue
