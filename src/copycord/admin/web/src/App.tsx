@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Route, Routes } from "react-router";
 import { Layout } from "./components/Layout";
 import { Guilds } from "./pages/Guilds";
+import { Forwarding } from "./pages/Forwarding";
 import { Kit } from "./pages/Kit";
 import { Logs } from "./pages/Logs";
 import { Placeholder } from "./pages/Placeholder";
@@ -21,6 +22,7 @@ export const PAGES = [
 // Pages already ported to the SPA, one line each; the rest render a Placeholder linking to the old page.
 const PAGE_ELEMENTS: Partial<Record<(typeof PAGES)[number]["path"], ReactNode>> = {
   "/guilds": <Guilds />,
+  "/forwarding": <Forwarding />,
   "/system": <System />,
   "/logs": <Logs />,
 };
