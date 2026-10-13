@@ -6,6 +6,7 @@ import { SEED, stubClientGuilds } from "../lib/seed.ts";
 import { FWD_CREATE_BTN, MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, closeX, expectClosed, expectOpen, modal, settle } from "../lib/ui.ts";
 import { DETAILS, FIRST, GUILDS, LAST, dialog as guildDialog, guildAction, guildCard, stubGuilds } from "./guilds-fixtures.ts";
 import { LOG_LINES, stubLogStream, stubRunning, stubVersion } from "./dashboard-fixtures.ts";
+import { CHANNELS, categoryChips, channelCards, stubChannels } from "./channels-fixtures.ts";
 
 async function open(page: Page, name: PageName): Promise<void> {
   const errors: string[] = [];
@@ -238,6 +239,61 @@ test.describe("channels", () => {
     for (const id of ["mapping-select", "ch-search", "ch-filter", "ch-sort"]) {
       await expect(page.locator(`#${id}`), id).toBeAttached();
     }
+  });
+
+  // Row actions, orphans and the verify and backfill modals are lanes 23 and 24; their tests land with them.
+  test.describe("with channels", () => {
+    const seen: string[] = [];
+    test.beforeEach(async ({ page }) => {
+      seen.length = 0;
+      await stubChannels(page, seen);
+    });
+    const cats = (page: Page) => page.locator("#channels-root [data-cat-name]").evaluateAll((els) => els.map((e) => e.getAttribute("data-cat-name")));
+
+    test("29 mapping select loads the tree of categories and channels for its mapping", async ({ page }) => {
+      await open(page, "channels");
+      await expect(channelCards(page)).toHaveCount(CHANNELS.length);
+      const mid = await page.locator("#mapping-select").inputValue();
+      expect(mid).not.toBe("");
+      await expect(page.locator("#mapping-select option:checked")).toHaveText(SEED.mappingName);
+      expect(seen.some((u) => new URL(u).searchParams.get("mapping_id") === mid)).toBeTruthy();
+      expect(await cats(page)).toEqual(["Information", "Community", "Support", "Uncategorized"]);
+      await expect(categoryChips(page).nth(1)).toContainText("Chat Zone");
+      await expect(channelCards(page).first()).toHaveAttribute("data-cid", "444444444444444402");
+      const memes = page.locator('#channels-root .ch-card[data-cid="444444444444444405"]');
+      await expect(memes).toContainText("# funny-stuff");
+      await expect(memes).toContainText("Custom");
+      await expect(memes).toContainText("→ 555555555555555505");
+      await expect(page.locator('#channels-root .ch-card[data-cid="444444444444444407"]')).toContainText("Forum");
+    });
+
+    test("30 search, filter and sort", async ({ page }) => {
+      await open(page, "channels");
+      const cards = channelCards(page);
+      await expect(cards).toHaveCount(CHANNELS.length);
+      const search = page.locator("#ch-search");
+      for (const [q, n] of [["chat zone", 3], ["COMMUNITY", 3], ["#cafe", 1], ["funny", 1], ["555555555555555508", 1]] as const) {
+        await search.fill(q);
+        await expect(cards, q).toHaveCount(n);
+      }
+      await search.fill("zzz-nothing");
+      await expect(cards).toHaveCount(0);
+      await expect(page.locator("#channels-empty")).toBeVisible();
+      await search.fill("");
+      await expect(cards).toHaveCount(CHANNELS.length);
+      await expect(page.locator("#channels-empty")).toBeHidden();
+
+      await page.locator("#ch-filter").selectOption("orphans");
+      await expect(cards).toHaveCount(0);
+      await page.locator("#ch-filter").selectOption("nonorphans");
+      await expect(cards).toHaveCount(CHANNELS.length);
+
+      await page.locator("#ch-sort").selectOption("category");
+      await expect.poll(() => cats(page)).toEqual(["Community", "Information", "Support", "Uncategorized"]);
+      await page.locator("#ch-sort").selectOption("type");
+      await expect.poll(() => cats(page)).toEqual(["Information", "Community", "Support", "Uncategorized"]);
+      await expect(cards.first()).toHaveAttribute("data-cid", "444444444444444403");
+    });
   });
 });
 

@@ -6,6 +6,7 @@ import { FWD_CREATE_BTN, MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, expectOpen, moda
 import { stubClientGuilds } from "../lib/seed.ts";
 import { DETAILS, FIRST, dialog as guildDialog, guildAction, guildCard, stubGuilds } from "./guilds-fixtures.ts";
 import { LOG_LINES, stubLogStream, stubRunning, stubVersion } from "./dashboard-fixtures.ts";
+import { CHANNELS, channelCards, stubChannels } from "./channels-fixtures.ts";
 
 // E2E_SHOTS_DIR=baseline/new captures the SPA into a separate folder for scripts/compare.ts.
 const OUT = path.resolve(E2E_DIR, process.env.E2E_SHOTS_DIR ?? "baseline/old");
@@ -61,6 +62,18 @@ const DASHBOARD_SHOTS: Array<{ name: string; stub: (page: Page) => Promise<void>
     await expect(p.locator("#log-body")).toContainText(LOG_LINES[2]);
     await p.locator("#log-search-input").fill("beta");
     await expect(p.locator("#log-body")).not.toContainText(LOG_LINES[0]);
+  } },
+];
+
+const CHANNEL_SHOTS: Array<{ name: string; fullPage: boolean; open: (page: Page) => Promise<void> }> = [
+  { name: "channels-tree", fullPage: true, open: async () => undefined },
+  { name: "channels-search", fullPage: true, open: async (p) => {
+    await p.locator("#ch-search").fill("i");
+    await p.locator("#ch-sort").selectOption("category");
+  } },
+  { name: "channels-empty", fullPage: false, open: async (p) => {
+    await p.locator("#ch-search").fill("zzz-nothing");
+    await expect(p.locator("#channels-empty")).toBeVisible();
   } },
 ];
 
@@ -126,6 +139,19 @@ for (const vp of VIEWPORTS) {
         await d.open(page);
         await page.waitForTimeout(400);
         await page.screenshot({ path: path.join(OUT, `${d.name}-${vp.name}.png`) });
+      });
+    }
+
+    // The channels tree with stubbed channels (it stays gated without Discord), searched and sorted, and empty.
+    for (const c of CHANNEL_SHOTS) {
+      test(`channels ${c.name}`, async ({ page }) => {
+        await stubChannels(page);
+        await page.goto(pageUrl("channels"));
+        await settle(page);
+        await expect(channelCards(page)).toHaveCount(CHANNELS.length);
+        await c.open(page);
+        await page.waitForTimeout(400);
+        await page.screenshot({ path: path.join(OUT, `${c.name}-${vp.name}.png`), fullPage: c.fullPage });
       });
     }
 
