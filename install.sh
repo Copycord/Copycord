@@ -335,37 +335,40 @@ fi
 
 # --- plan ---------------------------------------------------------------------
 
+# Only a dry run prints the plan.
 banner
-say "  ${BOLD}Plan$RESET"
-if [ "$METHOD" = "release" ]; then
-    plan_line "home" "$COPYCORD_HOME"
-    plan_line "method" "release (GitHub release wheel$INFERRED)"
-    plan_line "repo" "$REPO"
-    if [ -n "$VERSION" ]; then
-        plan_line "version" "v$VERSION"
+if [ "$DRY_RUN" = "1" ]; then
+    say "  ${BOLD}Plan$RESET"
+    if [ "$METHOD" = "release" ]; then
+        plan_line "home" "$COPYCORD_HOME"
+        plan_line "method" "release (GitHub release wheel$INFERRED)"
+        plan_line "repo" "$REPO"
+        if [ -n "$VERSION" ]; then
+            plan_line "version" "v$VERSION"
+        else
+            plan_line "channel" "$CHANNEL (newest release)"
+        fi
     else
-        plan_line "channel" "$CHANNEL (newest release)"
+        plan_line "home" "$COPYCORD_HOME"
+        plan_line "method" "git (build from source, no release needed$INFERRED)"
+        plan_line "repo" "$REPO_URL"
+        plan_line "ref" "$REF"
+        plan_line "checkout" "$GIT_DIR_PATH"
+        if [ "$need_node" = "1" ]; then
+            plan_line "node" "Node $NODE_VERSION into $NODE_HOME (per user)"
+        else
+            plan_line "node" "$(node -v) at $(command -v node)"
+        fi
     fi
-else
-    plan_line "home" "$COPYCORD_HOME"
-    plan_line "method" "git (build from source, no release needed$INFERRED)"
-    plan_line "repo" "$REPO_URL"
-    plan_line "ref" "$REF"
-    plan_line "checkout" "$GIT_DIR_PATH"
-    if [ "$need_node" = "1" ]; then
-        plan_line "node" "Node $NODE_VERSION into $NODE_HOME (per user)"
+    if [ "$need_uv" = "1" ]; then
+        plan_line "uv" "not found, will install it from $UV_INSTALLER"
     else
-        plan_line "node" "$(node -v) at $(command -v node)"
+        plan_line "uv" "$(command -v uv)"
     fi
+    [ "$UPGRADE" = "1" ] && plan_line "repair" "copycord doctor --fix (an upgrade or reinstall)"
+    [ "$VERIFY" = "1" ] && plan_line "verify" "copycord --version and copycord doctor"
+    plan_line "dry run" "nothing will be changed"
 fi
-if [ "$need_uv" = "1" ]; then
-    plan_line "uv" "not found, will install it from $UV_INSTALLER"
-else
-    plan_line "uv" "$(command -v uv)"
-fi
-[ "$UPGRADE" = "1" ] && plan_line "repair" "copycord doctor --fix (an upgrade or reinstall)"
-[ "$VERIFY" = "1" ] && plan_line "verify" "copycord --version and copycord doctor"
-[ "$DRY_RUN" = "1" ] && plan_line "dry run" "nothing will be changed"
 
 if [ "$METHOD" = "git" ]; then STEP_TOTAL=5; else STEP_TOTAL=4; fi
 [ "$need_node" = "1" ] && STEP_TOTAL=$((STEP_TOTAL + 1))
@@ -675,9 +678,9 @@ fi
 if [ "$UPGRADE" = "1" ]; then
     step "Repairing (copycord doctor --fix)"
     if [ "$DRY_RUN" = "1" ]; then
-        dry "copycord doctor --fix"
+        dry "copycord doctor --fix --brief"
     else
-        "$BIN_DIR/copycord" doctor --fix </dev/null 2>&1 | sed 's/^/    /' || true
+        "$BIN_DIR/copycord" doctor --fix --brief </dev/null 2>&1 | sed 's/^/  /' || true
     fi
 fi
 
@@ -698,6 +701,7 @@ fi
 # --- done -------------------------------------------------------------------------
 
 box_line() { printf '  %s%s%s %-52s %s%s%s\n' "$ACCENT" "$BOX_V" "$RESET" "$1" "$ACCENT" "$BOX_V" "$RESET"; }
+box_item() { printf '  %s%s%s %s!%s %-50s %s%s%s\n' "$ACCENT" "$BOX_V" "$RESET" "$YELLOW$BOLD" "$RESET" "$1" "$ACCENT" "$BOX_V" "$RESET"; }
 box_rule() {
     i=0
     rule=""
@@ -717,16 +721,19 @@ box_line "Copycord $LABEL is installed"
 box_line "Home: $COPYCORD_HOME"
 box_line "Settings: $ENV_FILE"
 box_line ""
-box_line "Default dashboard password: copycord"
-box_line "  edit it in that file, then: copycord restart"
-box_line ""
 box_line "Next:"
 box_line "  copycord run       start Copycord"
 box_line "  copycord restart   apply a changed setting"
 box_line "  copycord update    update it later"
 box_line ""
-box_line "Finish the setup in the dashboard once it runs:"
-box_line "  $URL"
+box_line "Needs your attention:"
+if grep -qx 'PASSWORD=copycord' "$ENV_FILE" 2>/dev/null; then
+    box_item "Change the default dashboard password:"
+    box_line "    edit PASSWORD in the settings file above,"
+    box_line "    then run: copycord restart"
+fi
+box_item "Finish the setup in the dashboard once it runs:"
+box_line "    $URL"
 box_rule "$BOX_BL" "$BOX_BR"
 say ""
 say "  ${DIM}Open a new shell first if copycord is not found.$RESET"
