@@ -32,6 +32,7 @@ param(
     [switch]$Verify,
     [switch]$DryRun,
     [switch]$ShowOutput,
+    [switch]$Force,
     [switch]$Help
 )
 
@@ -73,6 +74,8 @@ Options:
                               ``copycord doctor`` and fail if either fails
   -DryRun                     print the plan and the actions, change nothing
   -ShowOutput                 stream the output of every step
+  -Force                      reinstall even when this version is already
+                              installed (without it the installer stops there)
   -Help                       show this help
 
 Advanced:
@@ -82,7 +85,8 @@ Advanced:
 Environment (parameters win):
   COPYCORD_REPO, COPYCORD_VERSION, COPYCORD_CHANNEL=stable|beta,
   COPYCORD_BETA=1, COPYCORD_GIT_DIR, COPYCORD_HOME, COPYCORD_VERIFY=1,
-  COPYCORD_DRY_RUN=1, COPYCORD_NODE_VERSION, COPYCORD_ALLOW_ROOT=1, NO_COLOR=1
+  COPYCORD_DRY_RUN=1, COPYCORD_NODE_VERSION, COPYCORD_ALLOW_ROOT=1,
+  COPYCORD_FORCE=1, NO_COLOR=1
 
 Test a branch, no release needed:
   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/$DefaultRepo/v4-dev/install.ps1))) -Version v4-dev
@@ -107,6 +111,7 @@ Test a branch, no release needed:
     }
     $verify = $Opts.Verify -or $env:COPYCORD_VERIFY -eq '1'
     $dryRun = $Opts.DryRun -or $env:COPYCORD_DRY_RUN -eq '1'
+    $force = $Opts.Force -or $env:COPYCORD_FORCE -eq '1'
     $showOutput = [bool]$Opts.ShowOutput
     $version = if ($Opts.Version) { $Opts.Version } else { '' }
     # Without an explicit method, a -Version that looks like a release version
@@ -230,6 +235,91 @@ Test a branch, no release needed:
     ) | ForEach-Object { Out $_ Magenta }
     Out '           |_|   |__/' Magenta -NoNewline; Out '   installer' DarkGray
     Out ''
+
+    # --- already installed? -------------------------------------------------
+
+    function RemoteHead([string]$Name) {
+        # Commit of a branch or tag of $repoUrl (a tag peeled), or $null.
+        $ErrorActionPreference = 'Continue'
+        if (-not (Get-Command git -ErrorAction SilentlyContinue)) { return $null }
+        $env:GIT_TERMINAL_PROMPT = '0'
+        $lines = @(& git ls-remote "$repoUrl.git" "refs/heads/$Name" "refs/tags/$Name" "refs/tags/$Name^{}" 2>$null)
+        if ($LASTEXITCODE -ne 0) { return $null }
+        $found = @{}
+        foreach ($line in $lines) {
+            $parts = "$line" -split '\s+'
+            if ($parts.Count -ge 2) { $found[$parts[1]] = $parts[0] }
+        }
+        foreach ($key in @("refs/heads/$Name", "refs/tags/$Name^{}", "refs/tags/$Name")) {
+            if ($found.ContainsKey($key)) { return $found[$key] }
+        }
+        return $null
+    }
+
+    function AlreadyInstalled {
+        # The installed label when it is what this run would install, else $null.
+        # Any doubt (no network, unknown output) means install.
+        # Continue: stderr from a native command must not stop the check.
+        $ErrorActionPreference = 'Continue'
+        $exe = Get-Command copycord -ErrorAction SilentlyContinue | Select-Object -First 1
+        $exePath = if ($exe) { $exe.Source } else { $null }
+        if (-not $exePath) {
+            foreach ($dir in @($env:UV_TOOL_BIN_DIR, $env:XDG_BIN_HOME, (Join-Path $env:USERPROFILE '.local\bin'))) {
+                if ($dir -and (Test-Path (Join-Path $dir 'copycord.exe'))) { $exePath = Join-Path $dir 'copycord.exe'; break }
+            }
+        }
+        if (-not $exePath) { return $null }
+        $oldNoColor = $env:NO_COLOR
+        $env:NO_COLOR = '1'
+        try { $out = @(& $exePath --version 2>$null) } finally { $env:NO_COLOR = $oldNoColor }
+        if ($LASTEXITCODE -ne 0 -or $out.Count -lt 2) { return $null }
+        if ("$($out[0])" -notmatch '^(\S+)(?: \(([0-9a-f]{7,40})\))?$') { return $null }
+        $haveVersion = $Matches[1]
+        $haveCommit = if ($Matches.Count -gt 2) { $Matches[2] } else { '' }
+        $chanLine = $out | Where-Object { "$_" -like 'channel *' } | Select-Object -First 1
+        if (-not $chanLine) { return $null }
+        $chan = "$chanLine".Substring(8)
+        if ($method -eq 'git') {
+            if (-not $haveCommit) { return $null }
+            if ($ref -cmatch '^[0-9a-f]{7,40}$') {
+                $want = $ref
+            } else {
+                # The installer saves this channel for a branch of the default repo.
+                if ($repo -eq $DefaultRepo -and $chan -ne "dev (branch $ref)") { return $null }
+                $want = RemoteHead $ref
+            }
+            if (-not $want -or -not $want.StartsWith($haveCommit)) { return $null }
+            return "$ref ($($haveCommit.Substring(0, 7)))"
+        }
+        if ($chan -notin @('stable', 'beta')) { return $null }
+        if ($version) {
+            $want = $version
+        } else {
+            if ($channelSet -and $chan -ne $channel) { return $null }
+            if ($channel -eq 'beta') {
+                $list = Invoke-RestMethod -Uri "${api}?per_page=30" -Headers $Headers -TimeoutSec 30
+                $want = ($list | Where-Object { -not $_.draft } | Select-Object -First 1).tag_name
+            } else {
+                $want = (Invoke-RestMethod -Uri "$api/latest" -Headers $Headers -TimeoutSec 30).tag_name
+            }
+            if (-not $want) { return $null }
+            $want = "$want".TrimStart('v')
+        }
+        if ($haveVersion.TrimStart('v') -ne $want) { return $null }
+        return "v$want"
+    }
+
+    if (-not $force -and -not $dryRun) {
+        $have = $null
+        try { $have = AlreadyInstalled } catch { $have = $null }
+        if ($have) {
+            Done "Copycord $have is already installed"
+            Info 'Run copycord update to update it, or rerun with -Force to reinstall.'
+            Out ''
+            return
+        }
+    }
+
     # Only a dry run prints the plan.
     if ($dryRun) {
         Out '  Plan'
@@ -602,5 +692,5 @@ Test a branch, no release needed:
 Install-Copycord -Opts @{
     InstallMethod = $InstallMethod; MethodSet = ($PSBoundParameters.ContainsKey('InstallMethod') -or [bool]$env:COPYCORD_INSTALL_METHOD); Git = $Git; Repo = $Repo; Version = $Version; Beta = $Beta
     GitDir = $GitDir; CopycordHome = $CopycordHome; Verify = $Verify; DryRun = $DryRun
-    ShowOutput = $ShowOutput; Help = $Help
+    ShowOutput = $ShowOutput; Force = $Force; Help = $Help
 }
