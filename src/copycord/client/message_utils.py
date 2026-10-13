@@ -20,13 +20,7 @@ from copycord.selfclient.models import Member, Message
 
 
 class MessageUtils:
-    """
-    Formatting & extraction helpers used by the client:
-    - mention expansion
-    - embed sanitizing
-    - sticker payload shaping
-    - safe attribute extraction
-    """
+    """Mention expansion, embed sanitizing, sticker payload shaping and safe attribute extraction."""
 
     _MENTION_RE = re.compile(r"<@!?(\d+)>")
 
@@ -175,9 +169,7 @@ class MessageUtils:
                 u = getattr(asset, "url", None) if asset else None
             return str(u) if u else ""
 
-        # Ids of the source guild's own custom stickers. Lets the server tell a
-        # custom guild sticker (cloneable / token-sendable only when cloned) from
-        # a standard Discord-library sticker (global id, token-sendable w/ Nitro).
+        # ids of the source guild's own stickers, so the server can tell them from standard global stickers
         guild_sticker_ids: set[int] = set()
         if guild is not None:
             try:
@@ -278,13 +270,7 @@ class MessageUtils:
 
     @staticmethod
     def author_role_ids(src_msg: Message) -> list[int]:
-        """The host author's own role ids (excluding @everyone).
-
-        Used by the server's sticky-author identity feature to mirror the
-        author's roles onto the token account. Falls back to looking the author
-        up as a guild member when the message author is a bare ``User`` (e.g.
-        historical/backfilled messages).
-        """
+        """The host author's role ids (excluding @everyone), falling back to a member lookup for a bare User."""
         author = getattr(src_msg, "author", None)
         if author is None:
             return []
@@ -375,11 +361,7 @@ class Snapshot:
             return dict(self._d)
 
     class Message:
-        """
-        Minimal message-like object built from a REST message_snapshot.
-        Exposes attributes your pipeline already reads (content, attachments,
-        embeds with .to_dict(), stickers, author, components, channel, guild, type).
-        """
+        """Minimal message-like object built from a REST message_snapshot."""
 
         __is_snapshot__ = True
 
