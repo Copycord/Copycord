@@ -14,27 +14,27 @@ All of Copycord's setup happens in the web dashboard; there is no setup command.
 ## 1. Start Copycord
 
 <Tabs groupId="os" queryString>
-  <TabItem value="unix" label="Linux / macOS" default>
+<TabItem value="unix" label="Linux / macOS" default>
 
 ```bash title="Terminal"
 copycord run
 ```
 
-  </TabItem>
-  <TabItem value="windows" label="Windows">
+</TabItem>
+<TabItem value="windows" label="Windows">
 
 ```powershell title="PowerShell"
 copycord run
 ```
 
-  </TabItem>
-  <TabItem value="docker" label="Docker">
+</TabItem>
+<TabItem value="docker" label="Docker">
 
 ```bash title="Terminal"
 docker compose up -d
 ```
 
-  </TabItem>
+</TabItem>
 </Tabs>
 
 The dashboard, the server bot and the client start together. If you installed the [service](/docs/cli#copycord-service), Copycord is already running.

@@ -12,24 +12,24 @@ import TabItem from '@theme/TabItem';
 ## Systems
 
 <Tabs groupId="os" queryString>
-  <TabItem value="unix" label="Linux / macOS" default>
+<TabItem value="unix" label="Linux / macOS" default>
 
 - A recent Linux distribution or macOS
 - `curl` or `wget`
 - A normal user account: the installer refuses to run as root
 
-  </TabItem>
-  <TabItem value="windows" label="Windows">
+</TabItem>
+<TabItem value="windows" label="Windows">
 
 - Windows 10 or 11
 - PowerShell, opened as your normal user (not as Administrator)
 
-  </TabItem>
-  <TabItem value="docker" label="Docker">
+</TabItem>
+<TabItem value="docker" label="Docker">
 
 - [Docker](https://docs.docker.com/get-docker/) with Docker Compose
 
-  </TabItem>
+</TabItem>
 </Tabs>
 
 You do not need to install Python, Node.js or virtual environments. The installer installs [uv](https://docs.astral.sh/uv/), and uv provides Python 3.12 or newer and every package Copycord needs. Only [testing a branch](/docs/getting-started/manual-install#branches) also needs git, and Node.js, which the installer fetches for you when it is missing.

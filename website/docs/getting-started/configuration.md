@@ -14,25 +14,25 @@ Almost everything in Copycord is set in the dashboard: tokens, mappings, filters
 ## Where it is
 
 <Tabs groupId="os" queryString>
-  <TabItem value="unix" label="Linux / macOS" default>
+<TabItem value="unix" label="Linux / macOS" default>
 
 ```text title="Settings file"
 ~/.copycord/.env
 ```
 
-  </TabItem>
-  <TabItem value="windows" label="Windows">
+</TabItem>
+<TabItem value="windows" label="Windows">
 
 ```text title="Settings file"
 %USERPROFILE%\.copycord\.env
 ```
 
-  </TabItem>
-  <TabItem value="docker" label="Docker">
+</TabItem>
+<TabItem value="docker" label="Docker">
 
 Docker does not use `.env` in the Copycord home. Set these keys under `environment:` in `docker-compose.yml`, then run `docker compose up -d`. See [Docker Install](/docs/getting-started/docker-install).
 
-  </TabItem>
+</TabItem>
 </Tabs>
 
 With a custom home (`--home` or `COPYCORD_HOME`, see [Install Options](/docs/getting-started/manual-install#home)) it is `.env` in that folder.
@@ -91,7 +91,7 @@ The default dashboard password is `copycord` and the dashboard listens on all ne
 Edit the line in the file, or let `copycord config set` do it for you. Then restart Copycord so it reads the file again.
 
 <Tabs groupId="os" queryString>
-  <TabItem value="unix" label="Linux / macOS" default>
+<TabItem value="unix" label="Linux / macOS" default>
 
 ```bash title="Terminal"
 nano ~/.copycord/.env
@@ -101,8 +101,8 @@ copycord config set PASSWORD 'your-new-password'
 copycord restart
 ```
 
-  </TabItem>
-  <TabItem value="windows" label="Windows">
+</TabItem>
+<TabItem value="windows" label="Windows">
 
 ```powershell title="PowerShell"
 notepad "$HOME\.copycord\.env"
@@ -112,8 +112,8 @@ copycord config set PASSWORD 'your-new-password'
 copycord restart
 ```
 
-  </TabItem>
-  <TabItem value="docker" label="Docker">
+</TabItem>
+<TabItem value="docker" label="Docker">
 
 ```yaml title="docker-compose.yml"
     environment:
@@ -124,7 +124,7 @@ copycord restart
 docker compose up -d
 ```
 
-  </TabItem>
+</TabItem>
 </Tabs>
 
 `copycord restart` restarts the [service](/docs/cli#copycord-service). If Copycord runs in a terminal, press **Ctrl+C** and run `copycord run` again instead.

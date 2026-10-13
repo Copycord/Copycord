@@ -13,7 +13,7 @@ Docker runs Copycord in a single container with everything it needs. Use it if y
 ## Install Docker
 
 <Tabs groupId="os" queryString>
-  <TabItem value="unix" label="Linux / macOS" default>
+<TabItem value="unix" label="Linux / macOS" default>
 
 On Linux (Ubuntu, Debian and most others):
 
@@ -25,17 +25,17 @@ docker compose version
 
 On macOS, install [Docker Desktop for Mac](https://www.docker.com/products/docker-desktop) and follow the wizard.
 
-  </TabItem>
-  <TabItem value="windows" label="Windows">
+</TabItem>
+<TabItem value="windows" label="Windows">
 
 Install [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop), follow the wizard and restart if asked.
 
-  </TabItem>
-  <TabItem value="docker" label="Docker">
+</TabItem>
+<TabItem value="docker" label="Docker">
 
 Docker is already installed. Continue below.
 
-  </TabItem>
+</TabItem>
 </Tabs>
 
 ## Set up Copycord

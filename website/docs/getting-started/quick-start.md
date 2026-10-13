@@ -23,25 +23,25 @@ Use an **alternate Discord account** for the user token. Self-bots are against D
 ## Try it in one command
 
 <Tabs groupId="os" queryString>
-  <TabItem value="unix" label="Linux / macOS" default>
+<TabItem value="unix" label="Linux / macOS" default>
 
 ```bash title="Terminal"
 curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh
 ```
 
-  </TabItem>
-  <TabItem value="windows" label="Windows">
+</TabItem>
+<TabItem value="windows" label="Windows">
 
 ```powershell title="PowerShell (not as Administrator)"
 irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1 | iex
 ```
 
-  </TabItem>
-  <TabItem value="docker" label="Docker">
+</TabItem>
+<TabItem value="docker" label="Docker">
 
 Docker is the alternative if you already run your apps in containers. See [Docker Install](/docs/getting-started/docker-install).
 
-  </TabItem>
+</TabItem>
 </Tabs>
 
 Then run `copycord run`, open **http://localhost:8080** and log in with the password `copycord`. The steps below explain each part.
@@ -62,25 +62,25 @@ Run the command for your system from above. The installer prints a short plan, t
 The Copycord home holds everything Copycord stores: `data.db`, the logs, the daily backups and `.env`.
 
 <Tabs groupId="os" queryString>
-  <TabItem value="unix" label="Linux / macOS" default>
+<TabItem value="unix" label="Linux / macOS" default>
 
 | Copycord home | Settings file |
 |---------------|---------------|
 | `~/.copycord` | `~/.copycord/.env` |
 
-  </TabItem>
-  <TabItem value="windows" label="Windows">
+</TabItem>
+<TabItem value="windows" label="Windows">
 
 | Copycord home | Settings file |
 |---------------|---------------|
 | `%USERPROFILE%\.copycord` | `%USERPROFILE%\.copycord\.env` |
 
-  </TabItem>
-  <TabItem value="docker" label="Docker">
+</TabItem>
+<TabItem value="docker" label="Docker">
 
 The `./data` folder next to `docker-compose.yml`. Settings go in the compose file instead of `.env`.
 
-  </TabItem>
+</TabItem>
 </Tabs>
 
 :::tip Command not found?
@@ -123,7 +123,7 @@ On the dashboard, paste the **bot token** into **Server Token** (`SERVER_TOKEN`)
 Install Copycord as a service so it runs without an open terminal and starts again on its own. Stop the `copycord run` in your terminal first.
 
 <Tabs groupId="os" queryString>
-  <TabItem value="unix" label="Linux / macOS" default>
+<TabItem value="unix" label="Linux / macOS" default>
 
 ```bash title="Terminal"
 # Linux: a systemd service for your user
@@ -134,20 +134,20 @@ sudo loginctl enable-linger "$USER"   # keep it running after you log out
 copycord service install
 ```
 
-  </TabItem>
-  <TabItem value="windows" label="Windows">
+</TabItem>
+<TabItem value="windows" label="Windows">
 
 ```powershell title="PowerShell"
 # a Scheduled Task that starts when you log in
 copycord service install
 ```
 
-  </TabItem>
-  <TabItem value="docker" label="Docker">
+</TabItem>
+<TabItem value="docker" label="Docker">
 
 `restart: unless-stopped` in the compose file already keeps the container running. `copycord service` is not used with Docker.
 
-  </TabItem>
+</TabItem>
 </Tabs>
 
 Check it with `copycord service status`. See [`copycord service`](/docs/cli#copycord-service) for the system service and the details per OS.

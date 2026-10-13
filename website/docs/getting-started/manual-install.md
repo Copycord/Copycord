@@ -14,25 +14,25 @@ The [Quick Start](/docs/getting-started/quick-start) covers the default install.
 ## What the installer does
 
 <Tabs groupId="os" queryString>
-  <TabItem value="unix" label="Linux / macOS" default>
+<TabItem value="unix" label="Linux / macOS" default>
 
 ```bash title="Terminal"
 curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh
 ```
 
-  </TabItem>
-  <TabItem value="windows" label="Windows">
+</TabItem>
+<TabItem value="windows" label="Windows">
 
 ```powershell title="PowerShell (not as Administrator)"
 irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1 | iex
 ```
 
-  </TabItem>
-  <TabItem value="docker" label="Docker">
+</TabItem>
+<TabItem value="docker" label="Docker">
 
 The installer is not used with Docker. See [Docker Install](/docs/getting-started/docker-install).
 
-  </TabItem>
+</TabItem>
 </Tabs>
 
 It prints a plan, then runs numbered steps:
@@ -64,7 +64,7 @@ On Linux and macOS, pass flags after `sh -s --`. On Windows, set the environment
 Rarely needed: `--install-method release|git` (PowerShell `-InstallMethod`) forces the method instead of inferring it from `--version`, `COPYCORD_NODE_VERSION` picks the Node.js version for git builds, and `COPYCORD_ALLOW_ROOT=1` allows running as root.
 
 <Tabs groupId="os" queryString>
-  <TabItem value="unix" label="Linux / macOS" default>
+<TabItem value="unix" label="Linux / macOS" default>
 
 ```bash title="Terminal"
 # the newest beta, and keep updating from the beta channel
@@ -77,8 +77,8 @@ curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh |
 curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh -s -- --dry-run
 ```
 
-  </TabItem>
-  <TabItem value="windows" label="Windows">
+</TabItem>
+<TabItem value="windows" label="Windows">
 
 ```powershell title="PowerShell"
 # the newest beta, and keep updating from the beta channel
@@ -88,12 +88,12 @@ curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh |
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1))) -Version 4.0.0 -Verify
 ```
 
-  </TabItem>
-  <TabItem value="docker" label="Docker">
+</TabItem>
+<TabItem value="docker" label="Docker">
 
 Pin a release with the image tag, for example `ghcr.io/copycord/copycord:v4.0.0`.
 
-  </TabItem>
+</TabItem>
 </Tabs>
 
 ## Test a branch {#branches}
@@ -101,26 +101,26 @@ Pin a release with the image tag, for example `ghcr.io/copycord/copycord:v4.0.0`
 Testers can install any branch, tag or commit without a release. The installer then clones the repository into `<home>/src`, builds the dashboard with npm and installs that checkout. It needs git; when Node.js 20 or newer is missing it downloads the official build from nodejs.org, checks its SHA-256 and unpacks it into `<home>/node`, without sudo.
 
 <Tabs groupId="os" queryString>
-  <TabItem value="unix" label="Linux / macOS" default>
+<TabItem value="unix" label="Linux / macOS" default>
 
 ```bash title="Terminal"
 curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh -s -- --version v4-dev
 ```
 
-  </TabItem>
-  <TabItem value="windows" label="Windows">
+</TabItem>
+<TabItem value="windows" label="Windows">
 
 ```powershell title="PowerShell"
 $env:COPYCORD_VERSION = 'v4-dev'
 irm https://raw.githubusercontent.com/Copycord/Copycord/main/install.ps1 | iex
 ```
 
-  </TabItem>
-  <TabItem value="docker" label="Docker">
+</TabItem>
+<TabItem value="docker" label="Docker">
 
 Branches are not published as images. Use the installer to test one.
 
-  </TabItem>
+</TabItem>
 </Tabs>
 
 A branch of `Copycord/Copycord` is saved as the `dev` update channel, so `copycord update` keeps following it. A branch of a fork works with `--repo you/Copycord --version my-fix`; to update a fork, run the installer again. To go back to releases, run `copycord update --channel stable`.
