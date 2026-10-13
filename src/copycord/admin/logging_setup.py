@@ -174,13 +174,7 @@ def get_logger(name="copycord", **ctx):
 
 
 def configure_app_logging():
-    """
-    Unified logging config with:
-    - LOG_FORMAT: HUMAN (default) or JSON
-    - LOG_LEVEL: DEBUG/INFO/etc.
-    - redaction + context
-    - reuses uvicorn.error handlers when present
-    """
+    """Configure logging (LOG_FORMAT HUMAN or JSON, LOG_LEVEL) with redaction, reusing uvicorn.error handlers when present."""
     fmt = os.getenv("LOG_FORMAT", "HUMAN").strip().upper()
     lvl = os.getenv("LOG_LEVEL", "INFO").strip().upper()
 

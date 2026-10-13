@@ -37,9 +37,7 @@ _session_signer: URLSafeTimedSerializer | None = None
 
 
 def _client_ip(request: Request) -> str:
-    """
-    Best-effort client IP for logging, aware of reverse proxies / Cloudflare.
-    """
+    """Best-effort client IP for logging, honoring reverse proxy and Cloudflare headers."""
     try:
         hdrs = request.headers
 
@@ -71,14 +69,7 @@ def _load_or_create_secret_key(
     secret_env: str,
     filename: str = "secret.key",
 ) -> str:
-    """
-    Load a stable secret key for signing admin session cookies.
-
-    Priority:
-      1) SECRET_KEY env (advanced users)
-      2) <data dir>/secret.key (auto-persisted)
-      3) freshly generated (non-persisted if write fails)
-    """
+    """Load the key for signing session cookies: SECRET_KEY env, then <data dir>/secret.key, else a generated key (not persisted if the write fails)."""
     if secret_env:
         return secret_env
 
@@ -112,9 +103,7 @@ def _get_signer() -> URLSafeTimedSerializer:
 
 
 def decode_admin_session(token: str | None) -> Optional[Dict]:
-    """
-    Return session payload if token is valid & not expired, else None.
-    """
+    """Return the session payload if the token is valid and unexpired, else None."""
     if not token:
         return None
     try:
@@ -124,16 +113,8 @@ def decode_admin_session(token: str | None) -> Optional[Dict]:
 
 
 class PasswordGuardMiddleware(BaseHTTPMiddleware):
-    """
-    Very simple 'one password for everything' gate.
-
-    - If PASSWORD is not set, it does nothing.
-    - If PASSWORD is set:
-        * /login and /health (and static assets) are always allowed
-        * every other request must have a valid signed session cookie,
-          otherwise you get redirected to /login (for GET/HEAD)
-          or a 401 for other methods.
-    """
+    """Single-password gate: with PASSWORD set, everything except /login, /health and static assets needs a valid session cookie.
+    Unauthenticated GET/HEAD requests redirect to /login; others get a 401."""
 
     async def dispatch(self, request: Request, call_next):
 
@@ -163,14 +144,7 @@ class PasswordGuardMiddleware(BaseHTTPMiddleware):
 
 
 def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) -> None:
-    """
-    Initialize admin login / cookie auth:
-
-    - Reads PASSWORD & SECRET_KEY from env
-    - Sets up the session signer
-    - Adds PasswordGuardMiddleware
-    - Registers /login GET+POST routes
-    """
+    """Set up admin login: read PASSWORD and SECRET_KEY, add PasswordGuardMiddleware and the /login routes."""
     global ADMIN_PASSWORD, _session_signer
 
     ADMIN_PASSWORD = os.getenv("PASSWORD", "").strip()

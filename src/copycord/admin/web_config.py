@@ -50,10 +50,7 @@ LINKS_DISK_CACHE = Path(
 
 
 def _unwrap_starlette_app(obj):
-    """
-    Return the underlying Starlette/FastAPI app that has `.state`.
-    Handles wrappers that expose the real app on `.app`.
-    """
+    """Return the underlying app that has .state, unwrapping wrappers that expose it on .app."""
     cur = obj
     for _ in range(5):
         if hasattr(cur, "state"):
@@ -65,11 +62,7 @@ def _unwrap_starlette_app(obj):
 
 
 class LinksManager:
-    """
-    Live links loader with robust remote fetch, disk/local fallback, and in-place cache mutation.
-    On every browser refresh (via /api/links or your page route), we force a remote fetch.
-    If remote fails and cache is empty, we fall back to disk cache, then local JSON.
-    """
+    """Loads links from a remote URL on every refresh, falling back to the disk cache, then the local JSON."""
 
     def __init__(
         self,

@@ -73,11 +73,7 @@ class _PQItem:
 
 
 class QueryPlanner:
-    """
-    Bigram-aware planner for search prefixes.
-    Learns unigram + bigram models from observed usernames.
-    Class-aware children (letters first, careful with digits/punct).
-    """
+    """Planner for search prefixes using unigram and bigram models learned from observed usernames."""
 
     def __init__(
         self,
@@ -229,7 +225,7 @@ class QueryPlanner:
             self._saw_digit_lead = True
 
     def mark_observed_usernames_bulk(self, usernames: list[str]) -> None:
-        """Batch-update frequency tables for a list of usernames (no lock — caller holds it)."""
+        """Batch-update frequency tables; the caller holds the lock."""
         for username in usernames:
             if not username:
                 continue
@@ -393,7 +389,7 @@ class QueryPlanner:
 
 
 class SharedPlanner:
-    """Async-safe shared planner wrapper.  All sessions pull from the same PQ/frontier."""
+    """Async-safe wrapper so all sessions share one queue and frontier."""
 
     def __init__(self, planner: QueryPlanner):
         self.p = planner
@@ -429,7 +425,7 @@ class SharedPlanner:
             self.p.mark_observed_username(name)
 
     async def mark_observed_usernames_bulk(self, usernames: list[str]):
-        """Batch-update frequency tables — single lock acquisition for all usernames."""
+        """Batch-update frequency tables under a single lock acquisition."""
         async with self._lock:
             self.p.mark_observed_usernames_bulk(usernames)
 
@@ -444,7 +440,7 @@ class SharedPlanner:
     async def on_chunk_result_and_expand(
         self, prefix: str, size: int, *, expand_step: int = 10
     ) -> int:
-        """Atomic: record chunk result + expand children if saturated — single lock."""
+        """Record a chunk result and expand children if saturated, under a single lock."""
         async with self._lock:
             self.p.on_chunk_result(prefix, size)
             if size >= self.p.limit:
@@ -534,14 +530,12 @@ class SharedPlanner:
 
 
 def _build_headers(token: str) -> dict[str, str]:
-    """Realistic Discord desktop-client headers for a user token."""
+    """Discord desktop-client headers for a user token."""
     return build_headers(token)
 
 
 class StandaloneScraper:
-    """
-    Independent member scraper using multiple tokens via Discord gateway.
-    """
+    """Member scraper that uses multiple tokens over the Discord gateway."""
 
     DISCORD_API = "https://discord.com/api/v9"
     GATEWAY_URL = "wss://gateway.discord.gg/?v=9&encoding=json"
@@ -560,9 +554,7 @@ class StandaloneScraper:
 
     @staticmethod
     def _normalize_proxy(raw: str) -> str:
-        """
-        Accept multiple common proxy formats and return a proper URL.
-        """
+        """Accept common proxy formats and return a URL."""
         raw = raw.strip()
         if not raw:
             return raw
@@ -613,7 +605,7 @@ class StandaloneScraper:
 
     @staticmethod
     def _proxy_kwarg(proxy: Optional[str]) -> dict:
-        """Return {'proxy': url} for HTTP proxies, {} for SOCKS (handled by connector) or None."""
+        """Return {'proxy': url} for HTTP proxies, {} for SOCKS (handled by the connector) or None."""
         if proxy and not proxy.startswith("socks"):
             return {"proxy": proxy}
         return {}
@@ -627,7 +619,7 @@ class StandaloneScraper:
                 pass
 
     def _debug(self, message: str, level: str = "info"):
-        """Internal diagnostic log — goes to Python logger only, NOT to the UI."""
+        """Diagnostic log to the Python logger only, not the UI."""
         getattr(logger, level if level != "warn" else "warning", logger.info)(message)
 
     def _progress(self, current: int, total: Optional[int] = None, message: str = ""):
@@ -826,10 +818,7 @@ class StandaloneScraper:
         proxy_url: Optional[str] = None,
         num_tokens: int = 1,
     ):
-        """
-        Single gateway session: identify -> pump op-8 queries -> collect
-        GUILD_MEMBERS_CHUNK responses.
-        """
+        """Run one gateway session: identify, send op-8 queries, collect GUILD_MEMBERS_CHUNK responses."""
 
         if (member_count_hint or 0) >= 500_000:
             parallel = max(parallel, 8)
