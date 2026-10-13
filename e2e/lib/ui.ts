@@ -36,6 +36,8 @@ export async function expectClosed(m: Locator): Promise<void> {
 // Mapping card buttons are icon-only; these classes come from the card markup in app.js.
 export const MAPPING_EDIT_BTN = "#guild-mapping-list .edit-mapping-btn";
 export const MAPPING_FILTERS_BTN = "#guild-mapping-list .mapping-filters-btn";
+// The forwarding page shows #fwdCreateBtn only in the empty state; with rules listed the toolbar has .fwd-add-btn.
+export const FWD_CREATE_BTN = "#fwdCreateBtn, .fwd-add-btn";
 
 /** The X button inside a modal. */
 export function closeX(m: Locator): Locator {

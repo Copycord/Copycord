@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, type Page } from "@playwright/test";
 import { E2E_DIR, LOGIN_PATH, NOT_FOUND_PATH, PAGES, pageUrl, type PageName } from "../lib/env.ts";
-import { MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, expectOpen, modal, settle } from "../lib/ui.ts";
+import { FWD_CREATE_BTN, MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, expectOpen, modal, settle } from "../lib/ui.ts";
 import { stubClientGuilds } from "../lib/seed.ts";
 
 // E2E_SHOTS_DIR=baseline/new captures the SPA into a separate folder for scripts/compare.ts.
@@ -31,7 +31,7 @@ const MODALS: ModalShot[] = [
   { name: "dashboard-filters", page: "dashboard", id: "filters-modal",
     open: (p) => p.locator(MAPPING_FILTERS_BTN).first().click() },
   { name: "forwarding-new-rule", page: "forwarding", id: "fwdModal",
-    open: (p) => p.locator("#fwdCreateBtn").click() },
+    open: (p) => p.locator(FWD_CREATE_BTN).filter({ visible: true }).first().click() },
 ];
 
 fs.mkdirSync(OUT, { recursive: true });

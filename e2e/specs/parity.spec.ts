@@ -3,7 +3,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import { CSRF_HEADERS, LOGIN_PATH, NOT_FOUND_PATH, PAGES, PASSWORD, pageUrl, type PageName } from "../lib/env.ts";
 import { SEED, stubClientGuilds } from "../lib/seed.ts";
-import { MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, closeX, expectClosed, expectOpen, modal, settle } from "../lib/ui.ts";
+import { FWD_CREATE_BTN, MAPPING_EDIT_BTN, MAPPING_FILTERS_BTN, closeX, expectClosed, expectOpen, modal, settle } from "../lib/ui.ts";
 
 async function open(page: Page, name: PageName): Promise<void> {
   const errors: string[] = [];
@@ -178,7 +178,7 @@ test.describe("forwarding", () => {
   test("41 new rule modal opens and closes", async ({ page }) => {
     await open(page, "forwarding");
     const m = modal(page, "fwdModal");
-    await page.locator("#fwdCreateBtn").click();
+    await page.locator(FWD_CREATE_BTN).filter({ visible: true }).first().click();
     await expectOpen(m);
     await page.keyboard.press("Escape");
     await expectClosed(m);
