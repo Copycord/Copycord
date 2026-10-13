@@ -77,12 +77,13 @@ class Channel(NamedTuple):
     def repo_name(self) -> str:
         return self.repo or DEFAULT_REPO
 
-    def describe(self) -> str:
+    def describe(self, sep: str = " · ") -> str:
+        """"stable channel", "dev channel · v4-dev" or "dev channel · owner/repo@ref"."""
         if self.channel == DEV:
             if self.repo and self.repo != DEFAULT_REPO:
-                return f"{DEV} ({self.repo}@{self.ref})"
-            return f"{DEV} (branch {self.ref})"
-        return self.channel
+                return f"{DEV} channel{sep}{self.repo}@{self.ref}"
+            return f"{DEV} channel{sep}{self.ref}"
+        return f"{self.channel} channel"
 
 
 def settings_path() -> Path:
@@ -202,7 +203,7 @@ def install_command(kind: str, spec: str, reinstall: bool = False) -> Tuple[Opti
 
 
 def manual_hint(kind: str) -> str:
-    """How to update an install `copycord update` cannot reinstall from a URL."""
+    """How to update an install copycord update cannot reinstall from a URL."""
     if kind == DOCKER:
         return "pull the new image and recreate the container (docker compose pull && docker compose up -d)"
     return (
@@ -462,7 +463,7 @@ def check(channel: Optional[Channel] = None) -> int:
     out = sys.stdout
     ui.heading("Copycord update status")
     _row("current", current)
-    _row("channel", channel.describe())
+    _row("channel", channel.describe(ui.dot()))
     _row("method", detect_installer())
     from copycord import update_check
 
@@ -701,7 +702,7 @@ def update(
         except OSError as e:
             _err("could not save the update channel", str(e))
             return 1
-        ui.ok(f"update channel set to {target.describe()}", str(path))
+        ui.ok(f"update channel set to {target.describe(ui.dot())}", str(path))
         return 0
 
     if check_only:
@@ -728,10 +729,10 @@ def update(
             return 1
 
     if reinstall:
-        label = "v" + tag if tag else target.describe() if target.channel == DEV else "git"
-        ui.heading(f"Reinstalling Copycord ({label})")
+        label = "v" + tag if tag else target.describe(ui.dot()) if target.channel == DEV else "git"
+        ui.heading(f"Reinstalling Copycord{ui.dot()}{label}")
     else:
-        ui.heading(f"Updating Copycord ({target.describe() if not tag else 'tag ' + tag})")
+        ui.heading(f"Updating Copycord{ui.dot()}{target.describe(ui.dot()) if not tag else 'tag ' + tag}")
     git = source is not None or (target.channel == DEV and not tag)
     if source is not None:
         spec = source.spec()
@@ -837,7 +838,7 @@ def update(
     if not tag and switching:
         try:
             path = save_channel(target)
-            ui.ok(f"update channel set to {target.describe()}", str(path))
+            ui.ok(f"update channel set to {target.describe(ui.dot())}", str(path))
         except OSError as e:
             ui.warn("could not save the update channel", str(e))
 

@@ -155,7 +155,7 @@ class SystemdService:
         if not self.user and not is_root():
             raise ServiceError(
                 f"the system service ({self.unit_path}) needs root: rerun with sudo, "
-                "or use `copycord service install --user` for a per-user service"
+                "or use copycord service install --user for a per-user service"
             )
 
     def install(self, command: Sequence[str], data_dir: Path) -> List[str]:
@@ -273,7 +273,7 @@ class LaunchdService:
         if not self.plist_path.exists():
             raise ServiceError(
                 f"not installed ({self.plist_path} is missing); "
-                "run `copycord service install` first"
+                "run copycord service install first"
             )
 
     def start(self) -> None:

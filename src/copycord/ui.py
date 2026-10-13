@@ -10,8 +10,9 @@
 """
 Terminal styling for the copycord CLI, plain ANSI.
 
-Color follows NO_COLOR, FORCE_COLOR, TERM and whether the stream is a TTY;
-without it every helper prints plain ASCII.
+Color follows NO_COLOR, FORCE_COLOR, TERM and whether the stream is a TTY.
+Without color the layout and symbols stay the same; the symbols fall back to
+ASCII only where the stream's encoding cannot print them.
 """
 
 from __future__ import annotations
@@ -73,6 +74,21 @@ def _unicode(stream: TextIO) -> bool:
     return "utf" in enc
 
 
+def _encodable(text: str, stream: TextIO) -> bool:
+    enc = getattr(stream, "encoding", None) or "utf-8"
+    try:
+        text.encode(enc)
+    except (LookupError, UnicodeEncodeError):
+        return False
+    return True
+
+
+def dot(stream: Optional[TextIO] = None) -> str:
+    """The separator in "dev channel · v4-dev"."""
+    stream = sys.stdout if stream is None else stream
+    return " · " if _encodable("·", stream) else " - "
+
+
 def paint(text: str, *styles: str, stream: Optional[TextIO] = None) -> str:
     if not styles or not use_color(stream):
         return text
@@ -93,7 +109,7 @@ def accent(text: str, stream=None) -> str:
 
 
 def cmd(text: str, stream=None) -> str:
-    """A command the user can copy, e.g. `copycord update`."""
+    """A command the user can copy, e.g. copycord update; plain without color."""
     return paint(text, "cyan", stream=stream)
 
 
@@ -101,34 +117,28 @@ def cmd(text: str, stream=None) -> str:
 # step lines
 # --------------------------------------------------------------------------
 
-# status -> (colored symbol, unicode symbol, plain label)
+# status -> (color, symbol, ASCII fallback)
 _MARKS = {
-    "ok": ("green", "✔", "PASS"),
-    "warn": ("yellow", "!", "WARN"),
-    "fail": ("red", "✖", "FAIL"),
-    "info": ("blue", "•", "INFO"),
-    "step": ("accent", "◇", "-"),
+    "ok": ("green", "✔", "+"),
+    "warn": ("yellow", "!", "!"),
+    "fail": ("red", "✖", "x"),
+    "info": ("blue", "•", "-"),
 }
 
 
 def mark(status: str, stream: Optional[TextIO] = None) -> str:
     stream = sys.stdout if stream is None else stream
-    color, symbol, label = _MARKS[status]
-    if use_color(stream) and _unicode(stream):
-        return paint(symbol, color, "bold", stream=stream)
-    return label
+    color, symbol, ascii_symbol = _MARKS[status]
+    if not _encodable(symbol, stream):
+        symbol = ascii_symbol
+    return paint(symbol, color, "bold", stream=stream)
 
 
 def line(status: str, text: str, detail: str = "", stream: Optional[TextIO] = None) -> None:
-    """One status line; without color it reads "PASS  label: detail"."""
+    """One status line: "✔ label  detail"."""
     stream = sys.stdout if stream is None else stream
-    if use_color(stream):
-        tail = f"  {dim(detail, stream)}" if detail else ""
-        print(f"{mark(status, stream)} {text}{tail}", file=stream)
-    else:
-        label = _MARKS[status][2]
-        tail = f": {detail}" if detail else ""
-        print(f"{label}  {text}{tail}", file=stream)
+    tail = f"  {dim(detail, stream)}" if detail else ""
+    print(f"{mark(status, stream)} {text}{tail}", file=stream)
 
 
 def ok(text, detail="", stream=None):
@@ -148,18 +158,14 @@ def info(text, detail="", stream=None):
 
 
 def attention(items: Iterable[tuple], stream: Optional[TextIO] = None) -> None:
-    """The "Needs your attention" section: one "!" item per (status, text, hint)."""
+    """The "Needs your attention" section: one item per (status, text, hint)."""
     stream = sys.stdout if stream is None else stream
     items = list(items)
     if not items:
         return
     heading("Needs your attention", stream)
     for status, text, hint in items:
-        if not use_color(stream):
-            line(status, text, hint, stream)
-            continue
-        color = "red" if status == "fail" else "yellow"
-        print(f"{paint('!', color, 'bold', stream=stream)} {text}", file=stream)
+        print(f"{mark(status, stream)} {text}", file=stream)
         if hint:
             print(f"  {dim(hint, stream)}", file=stream)
 
@@ -169,38 +175,18 @@ def kv(rows: Iterable[tuple], stream: Optional[TextIO] = None, width: int = 0) -
     stream = sys.stdout if stream is None else stream
     rows = list(rows)
     width = width or max((len(k) for k, _ in rows), default=0)
-    if not use_color(stream):
-        for k, v in rows:
-            print(f"{k.ljust(width)} {v}", file=stream)
-        return
     for k, v in rows:
         print(f"  {dim(k.ljust(width), stream)}  {v}", file=stream)
 
 
 # --------------------------------------------------------------------------
-# banner, headings and boxes
+# headings and boxes
 # --------------------------------------------------------------------------
-
-
-def banner(version: str = "", stream: Optional[TextIO] = None) -> None:
-    stream = sys.stdout if stream is None else stream
-    if not use_color(stream):
-        print(f"Copycord {version}".rstrip(), file=stream)
-        return
-    print(file=stream)
-    for row in LOGO:
-        print(paint(row, "accent", "bold", stream=stream), file=stream)
-    sub = f"{version}  {TAGLINE}" if version else TAGLINE
-    print(f"  {dim(sub, stream)}", file=stream)
-    print(file=stream)
 
 
 def heading(text: str, stream: Optional[TextIO] = None) -> None:
     stream = sys.stdout if stream is None else stream
-    if use_color(stream):
-        print(f"\n{accent(text, stream)}", file=stream)
-    else:
-        print(f"\n{text}", file=stream)
+    print(f"\n{accent(text, stream)}", file=stream)
 
 
 def _visible_len(text: str) -> int:

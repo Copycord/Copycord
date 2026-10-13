@@ -65,13 +65,13 @@ Options:
   (alias -Tag)                that release; anything else (a branch, tag or
                               commit sha) installs from git at that ref
   -Beta                       release: newest release, pre-releases included;
-                              saved as the ``copycord update`` channel
+                              saved as the copycord update channel
   -CopycordHome <path>        Copycord home: data, logs, backups, src\ and node\
                               (default: %USERPROFILE%\.copycord)
   -GitDir <path>              git: checkout directory
                               (default: <home>\src)
-  -Verify                     after installing, run ``copycord --version`` and
-                              ``copycord doctor`` and fail if either fails
+  -Verify                     after installing, run copycord --version and
+                              copycord doctor and fail if either fails
   -DryRun                     print the plan and the actions, change nothing
   -ShowOutput                 stream the output of every step
   -Force                      reinstall even when this version is already
@@ -135,8 +135,9 @@ Test a branch, no release needed:
 
     $useColor = -not [Console]::IsOutputRedirected -and -not $env:NO_COLOR
     $utf = [Console]::OutputEncoding.CodePage -eq 65001
-    $okMark = if ($utf) { [string][char]0x2713 } else { 'ok' }
-    $failMark = if ($utf) { [string][char]0x2717 } else { 'x' }
+    $okMark = if ($utf) { [string][char]0x2714 } else { '+' }
+    $failMark = if ($utf) { [string][char]0x2716 } else { 'x' }
+    $dotMark = if ($utf) { [string][char]0x2022 } else { '-' }
     $frames = if ($utf) { @(0x280B, 0x2819, 0x2839, 0x2838, 0x283C, 0x2834, 0x2826, 0x2827, 0x2807, 0x280F) | ForEach-Object { [string][char]$_ } } else { @('|', '/', '-', '\') }
     $box = if ($utf) { @{ TL = [char]0x256D; TR = [char]0x256E; BL = [char]0x2570; BR = [char]0x256F; H = [char]0x2500; V = [char]0x2502 } } else { @{ TL = '+'; TR = '+'; BL = '+'; BR = '+'; H = '-'; V = '|' } }
 
@@ -151,7 +152,7 @@ Test a branch, no release needed:
         throw "copycord install: $Message"
     }
     function Done([string]$Text) { Out "  $okMark " Green -NoNewline; Out $Text }
-    function Info([string]$Text) { Out '  - ' DarkGray -NoNewline; Out $Text }
+    function Info([string]$Text) { Out "  $dotMark " DarkGray -NoNewline; Out $Text }
     function Warn([string]$Text) { Out '  ! ' Yellow -NoNewline; Out $Text }
     function Dry([string]$Text) { Out '  dry run: ' Yellow -NoNewline; Out $Text }
     function PlanLine([string]$Key, [string]$Value) { Out ('  {0,-10} ' -f $Key) DarkGray -NoNewline; Out $Value }
@@ -276,9 +277,13 @@ Test a branch, no release needed:
         if ("$($out[0])" -notmatch '^(\S+)(?: \(([0-9a-f]{7,40})\))?$') { return $null }
         $haveVersion = $Matches[1]
         $haveCommit = if ($Matches.Count -gt 2) { $Matches[2] } else { '' }
+        # "dev channel · v4-dev" on line 2; older versions print "channel dev (branch v4-dev)".
         $chanLine = $out | Where-Object { "$_" -like 'channel *' } | Select-Object -First 1
-        if (-not $chanLine) { return $null }
-        $chan = "$chanLine".Substring(8)
+        if ($chanLine) {
+            $chan = "$chanLine".Substring(8)
+        } elseif ("$($out[1])" -match '^(stable|beta|dev) channel(?:\s+\S+\s+(\S+))?$') {
+            $chan = if ($Matches[1] -eq 'dev') { "dev (branch $($Matches[2]))" } else { $Matches[1] }
+        } else { return $null }
         if ($method -eq 'git') {
             if (-not $haveCommit) { return $null }
             if ($ref -cmatch '^[0-9a-f]{7,40}$') {
@@ -586,9 +591,9 @@ Test a branch, no release needed:
                 $isBranch = $LASTEXITCODE -eq 0
             }
             if ($isBranch) { $channelArgs = @('--channel', 'dev', '--ref', $ref) }
-            else { Info "$ref is not a branch: the ``copycord update`` channel is left as it is" }
+            else { Info "$ref is not a branch: the copycord update channel is left as it is" }
         } else {
-            Warn "``copycord update`` follows $DefaultRepo, not $repo; run this installer again to update from the fork"
+            Warn "copycord update follows $DefaultRepo, not $repo; run this installer again to update from the fork"
         }
         if ($channelArgs) {
             if ($dryRun) { Dry "copycord update $($channelArgs -join ' ') --no-install" }
@@ -611,7 +616,13 @@ Test a branch, no release needed:
                 try {
                     & $exe doctor --fix --brief 2>&1 | ForEach-Object {
                         $line = "$_"
-                        if ($line.StartsWith('PASS  ')) { Done $line.Substring(6) }
+                        if ($line -match '^([+x!]|\u2714|\u2716) (.*)$') {
+                            $text = $Matches[2]
+                            if ($Matches[1] -eq '!') { Warn $text }
+                            elseif ($Matches[1] -in @('x', [string][char]0x2716)) { Out "  $failMark " Red -NoNewline; Out $text }
+                            else { Done $text }
+                        }
+                        elseif ($line.StartsWith('PASS  ')) { Done $line.Substring(6) }
                         elseif ($line.StartsWith('WARN  ')) { Warn $line.Substring(6) }
                         elseif ($line.StartsWith('FAIL  ')) { Out "  $failMark " Red -NoNewline; Out $line.Substring(6) }
                         else { Out "    $line" }

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import difflib
 import importlib
 import importlib.util
 import json
@@ -141,6 +142,13 @@ COMMAND_ADVANCED = {
 }
 
 
+def _cmd(text: str) -> str:
+    """A command inside a message, styled like ui.cmd."""
+    from copycord import ui
+
+    return ui.cmd(text)
+
+
 def _version() -> str:
     try:
         from copycord.common.config import CURRENT_VERSION
@@ -189,8 +197,9 @@ def format_help() -> str:
     opt_width = max(width, len("-V, --version"))
     w(f"  {ui.cmd('-h, --help'.ljust(opt_width))}  Show this help")
     w(f"  {ui.cmd('-V, --version'.ljust(opt_width))}  Print the version")
+    w(f"  {ui.cmd('--no-color'.ljust(opt_width))}  Turn off color, same as NO_COLOR=1")
     w()
-    w(ui.dim("Run `copycord <command> --help` for the options of one command."))
+    w(ui.dim("Run ") + ui.cmd("copycord <command> --help") + ui.dim(" for the options of one command."))
     w(ui.dim(f"Docs: {DOCS_URL}"))
     return buf.getvalue()
 
@@ -283,7 +292,7 @@ def format_command_help(parser: argparse.ArgumentParser) -> str:
         example_rows(advanced_examples)
     w()
     if commands:
-        w(ui.dim(f"Run `{parser.prog} <command> --help` for the options of one command."))
+        w(ui.dim("Run ") + ui.cmd(f"{parser.prog} <command> --help") + ui.dim(" for the options of one command."))
     w(ui.dim(f"Docs: {DOCS_URL}"))
     return buf.getvalue()
 
@@ -296,12 +305,8 @@ def print_version() -> None:
     commit = installed_commit()
     if commit:
         version = f"{version} ({commit[:7]})"
-    if ui.use_color():
-        ui.banner(version)
-        ui.kv([("version", version), ("channel", load_channel().describe())])
-    else:
-        print(version)
-        print(f"channel {load_channel().describe()}")
+    print(version)
+    print(load_channel().describe(ui.dot()))
     if sys.stdout.isatty():
         from copycord import update_check
 
@@ -315,6 +320,11 @@ class _VersionAction(argparse.Action):
 
 
 class _Parser(argparse.ArgumentParser):
+    def __init__(self, *args, **kwargs):
+        if sys.version_info >= (3, 14):
+            kwargs.setdefault("suggest_on_error", True)
+        super().__init__(*args, **kwargs)
+
     def format_help(self) -> str:
         if self.prog == "copycord":
             return format_help()
@@ -327,15 +337,20 @@ class _Parser(argparse.ArgumentParser):
         from copycord import ui
 
         if "invalid choice" in message:
-            bad = message.split("invalid choice: ", 1)[-1].split(" ", 1)[0].strip("'\"")
-            text = f"unknown command '{bad}'"
+            bad = message.split("invalid choice: ", 1)[-1].split(" ", 1)[0].strip("'\",")
+            text = f"unknown command '{bad}'."
+            match = difflib.get_close_matches(bad, _command_names(self), n=1, cutoff=0.6)
+            if match:
+                text += f" Did you mean '{match[0]}'?"
         else:
             text = message
-        ui.fail(text, f"run {ui.cmd('copycord --help', stream=sys.stderr)} to see the commands", stream=sys.stderr)
+        ui.fail(text, stream=sys.stderr)
+        hint = f"Run {ui.cmd('copycord --help', stream=sys.stderr)} to see all commands."
+        print(f"  {hint}", file=sys.stderr)
         self.exit(2)
 
 
-class _SubParser(argparse.ArgumentParser):
+class _SubParser(_Parser):
     def format_help(self) -> str:
         return format_command_help(self)
 
@@ -350,13 +365,32 @@ class _SubParser(argparse.ArgumentParser):
         self.exit(2)
 
 
+def _command_names(parser: argparse.ArgumentParser) -> List[str]:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return list(action.choices)
+    return []
+
+
+def _take_no_color(argv: List[str]) -> List[str]:
+    """Drop --no-color wherever it is (before "--") and set NO_COLOR for this process."""
+    end = argv.index("--") if "--" in argv else len(argv)
+    if "--no-color" not in argv[:end]:
+        return argv
+    os.environ["NO_COLOR"] = "1"
+    return [a for a in argv[:end] if a != "--no-color"] + argv[end:]
+
+
 def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
-    if not (sys.argv[1:] if argv is None else argv):
+    argv = _take_no_color(list(sys.argv[1:] if argv is None else argv))
+    if not argv:
         sys.stdout.write(format_help())
         raise SystemExit(0)
     parser = _Parser(prog="copycord")
     parser.add_argument("-V", "--version", action=_VersionAction, nargs=0,
                         help="print the version")
+    parser.add_argument("--no-color", action="store_true",
+                        help="turn off color, same as NO_COLOR=1")
     sub = parser.add_subparsers(dest="command", required=True, parser_class=_SubParser)
 
     data_dir = argparse.ArgumentParser(add_help=False)
@@ -580,12 +614,12 @@ def check_version() -> Check:
         commit = None
     if commit:
         version += f" ({commit[:7]})"
-    sep = " · " if ui.use_color() and ui._unicode(sys.stdout) else ", "
+    sep = ui.dot()
     try:
-        channel = load_channel().describe()
+        channel = load_channel().describe(sep)
     except Exception:
-        channel = "unknown"
-    return Check(PASS, f"{version}{sep}channel {channel}")
+        channel = "unknown channel"
+    return Check(PASS, f"{version}{sep}{channel}")
 
 
 def check_python(version_info=None) -> Check:
@@ -685,7 +719,7 @@ def check_password(env: Optional[Mapping[str, str]] = None) -> Check:
         return Check(
             WARN,
             "the default password is still set",
-            f"change PASSWORD in {env_path()}, then run `copycord restart`",
+            f"change PASSWORD in {env_path()}, then run {_cmd('copycord restart')}",
         )
     if not value:
         return Check(INFO, "no dashboard password", "the dashboard has no login page")
@@ -764,7 +798,7 @@ def check_db(path: Path) -> Check:
         return Check(
             FAIL,
             f"database schema {stored} is newer than this Copycord supports ({SCHEMA_VERSION})",
-            "run `copycord update` to go back to a newer version, or restore a "
+            f"run {_cmd('copycord update')} to go back to a newer version, or restore a "
             f"backup from {backups_dir()}",
             str(path),
         )
@@ -895,11 +929,11 @@ def check_service(state) -> Check:
         return Check(INFO, "service state unknown")
     if not state.installed:
         return Check(INFO, "service not installed",
-                     "`copycord service install` runs Copycord in the background")
+                     f"{_cmd('copycord service install')} runs Copycord in the background")
     if state.running:
         return Check(PASS, "service running", path=state.where)
     return Check(WARN, "service installed, not running",
-                 "start it with `copycord service start`", state.where, "service")
+                 f"start it with {_cmd('copycord service start')}", state.where, "service")
 
 
 # --- Updates ---------------------------------------------------------------
@@ -917,7 +951,7 @@ def check_updates(timeout: float = 2.0) -> Check:
         return Check(INFO, "could not check for updates", str(e).splitlines()[0][:120] if str(e) else type(e).__name__)
     if result.available:
         text = update_check.hint_text(result).split(". Run")[0]
-        return Check(INFO, text[:1].lower() + text[1:], "install it with `copycord update`")
+        return Check(INFO, text[:1].lower() + text[1:], f"install it with {_cmd('copycord update')}")
     return Check(PASS, "up to date")
 
 
@@ -1123,7 +1157,7 @@ class Fix(NamedTuple):
     apply: object
     # The check's line once it worked, shown with the apply() result.
     done: str
-    # Completes "run `copycord doctor --fix` to ..." in Needs your attention.
+    # Completes "run copycord doctor --fix to ..." in Needs your attention.
     todo: str
     # Guided fixes only: (checks) -> the y/N question; may raise FixError.
     question: object = None
@@ -1171,7 +1205,7 @@ def apply_fixes(checks: List[Check], notes: dict, fixed: dict, failed: set) -> i
         found = wanted[key]
         name = found[0].name
         if fix.guided and not interactive:
-            notes[name] = f"run `copycord doctor --fix` in a terminal to {fix.todo}"
+            notes[name] = f"run {_cmd('copycord doctor --fix')} in a terminal to {fix.todo}"
             continue
         try:
             if fix.guided and not ui.confirm(fix.question(found), default=False):
@@ -1217,7 +1251,7 @@ def _attention_hint(c: Check, note: str, fix: bool) -> str:
         return note
     parts = [c.reason]
     if not fix and c.fix in FIXES:
-        parts.append(f"run `copycord doctor --fix` to {FIXES[c.fix].todo}")
+        parts.append(f"run {_cmd('copycord doctor --fix')} to {FIXES[c.fix].todo}")
     return "; ".join(p for p in parts if p) or c.path
 
 
@@ -1240,16 +1274,14 @@ def _print_summary(checks: List[Check], fixable: int = 0) -> None:
 
     summary = doctor_summary(checks)
     print()
-    if not ui.use_color():
-        print(summary)
-    elif any(c.status == FAIL for c in checks):
+    if any(c.status == FAIL for c in checks):
         ui.fail(summary, stream=sys.stdout)
     elif summary != "All good":
         ui.warn(summary, stream=sys.stdout)
     else:
         ui.ok(summary, f"start it with {ui.cmd('copycord run')}")
     if fixable:
-        print(ui.dim(f"Run `copycord doctor --fix` to fix {fixable} of them."))
+        print(ui.dim("Run ") + ui.cmd("copycord doctor --fix") + ui.dim(f" to fix {fixable} of them."))
 
 
 def _plural(n: int, word: str) -> str:
@@ -1265,8 +1297,7 @@ def _print_fix_summary(checks: List[Check], applied: int) -> None:
     if applied:
         ui.ok(f"Fixed {_plural(applied, 'issue')}", stream=sys.stdout)
     if not left:
-        ui.ok("Everything looks good",
-              f"start it with {ui.cmd('copycord run')}" if ui.use_color() else "",
+        ui.ok("Everything looks good", f"start it with {ui.cmd('copycord run')}",
               stream=sys.stdout)
         return
     things = _plural(len(left), "thing")
@@ -1290,9 +1321,9 @@ def _print_brief(checks: List[Check], notes: dict, fixed: dict) -> None:
     if summary == "All good":
         ui.ok("All checks passed")
     elif any(c.status == FAIL for c in checks):
-        ui.fail(summary, "run `copycord doctor` for details", stream=sys.stdout)
+        ui.fail(summary, f"run {ui.cmd('copycord doctor')} for details", stream=sys.stdout)
     else:
-        ui.warn(summary, "run `copycord doctor` for details", stream=sys.stdout)
+        ui.warn(summary, f"run {ui.cmd('copycord doctor')} for details", stream=sys.stdout)
 
 
 def _fixed_rows(before: List[tuple], after: List[tuple], fixed: dict) -> dict:
@@ -1402,7 +1433,7 @@ def restart_hint() -> str:
 
 NOT_A_SERVICE = (
     "Copycord is not running as a service. Stop it in its terminal (Ctrl+C) "
-    "and run `copycord run` again; <home>/.env is read on every start."
+    "and run copycord run again; <home>/.env is read on every start."
 )
 
 

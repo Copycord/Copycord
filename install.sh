@@ -58,14 +58,14 @@ Options:
                          that release; anything else (a branch, tag or
                          commit sha) installs from git at that ref
   --beta                 release: newest release, pre-releases included;
-                         saved as the \`copycord update\` channel
+                         saved as the copycord update channel
   --home <path>          Copycord home: data, logs, backups, src/ and node/
                          (default: ~/.copycord)
   --git-dir, --dir <path>
                          git: checkout directory
                          (default: <home>/src)
-  --verify               after installing, run \`copycord --version\` and
-                         \`copycord doctor\` and fail if either fails
+  --verify               after installing, run copycord --version and
+                         copycord doctor and fail if either fails
   --dry-run              print the plan and the actions, change nothing
   --verbose              stream the output of every step
   --force                reinstall even when this version is already
@@ -152,26 +152,28 @@ export COPYCORD_HOME
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
     ESC="$(printf '\033')"
     BOLD="$ESC[1m"; DIM="$ESC[2m"; RED="$ESC[31m"; GREEN="$ESC[32m"
-    YELLOW="$ESC[33m"; ACCENT="$ESC[38;5;99m"; RESET="$ESC[0m"
+    YELLOW="$ESC[33m"; CYAN="$ESC[36m"; ACCENT="$ESC[38;5;99m"; RESET="$ESC[0m"
     TTY=1
 else
-    BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; ACCENT=""; RESET=""
+    BOLD=""; DIM=""; RED=""; GREEN=""; YELLOW=""; CYAN=""; ACCENT=""; RESET=""
     TTY=0
 fi
 case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
     *UTF-8* | *utf-8* | *UTF8* | *utf8*)
-        OK_MARK="✓"; FAIL_MARK="✗"; WARN_MARK="!"; DOT="•"
+        OK_MARK="✔"; FAIL_MARK="✖"; WARN_MARK="!"; DOT="•"
         SPIN_FRAMES="⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏"
         BOX_TL="╭"; BOX_TR="╮"; BOX_BL="╰"; BOX_BR="╯"; BOX_H="─"; BOX_V="│"
         ;;
     *)
-        OK_MARK="ok"; FAIL_MARK="x"; WARN_MARK="!"; DOT="-"
+        OK_MARK="+"; FAIL_MARK="x"; WARN_MARK="!"; DOT="-"
         SPIN_FRAMES="| / - \\"
         BOX_TL="+"; BOX_TR="+"; BOX_BL="+"; BOX_BR="+"; BOX_H="-"; BOX_V="|"
         ;;
 esac
 
 say() { printf '%s\n' "$*"; }
+# A command inside a message, in the CLI's command color.
+cmd() { printf '%s%s%s' "$CYAN" "$1" "$RESET"; }
 info() { printf '  %s%s%s %s\n' "$DIM" "$DOT" "$RESET" "$*"; }
 warn() { printf '  %s%s%s %s\n' "$YELLOW" "$WARN_MARK" "$RESET" "$*" >&2; }
 
@@ -372,7 +374,9 @@ already_installed() {
     exe="$(installed_copycord)" || return 1
     out="$(NO_COLOR=1 "$exe" --version </dev/null 2>/dev/null)" || return 1
     first="$(printf '%s\n' "$out" | sed -n 1p)"
+    # "dev channel · v4-dev" on line 2; older versions print "channel dev (branch v4-dev)".
     chan="$(printf '%s\n' "$out" | sed -n 's/^channel //p' | head -n 1)"
+    [ -n "$chan" ] || chan="$(printf '%s\n' "$out" | sed -n 2p)"
     have_version="${first%% *}"
     have_commit="$(printf '%s' "$first" | sed -n 's/^[^ ]* (\([0-9a-f]\{7,40\}\))$/\1/p')"
     [ -n "$have_version" ] && [ -n "$chan" ] || return 1
@@ -382,15 +386,18 @@ already_installed() {
             want="$REF"
         else
             # The installer saves this channel for a branch of the default repo.
-            if [ "$REPO" = "$DEFAULT_REPO" ] && [ "$chan" != "dev (branch $REF)" ]; then
-                return 1
+            if [ "$REPO" = "$DEFAULT_REPO" ]; then
+                case "$chan" in
+                    "dev (branch $REF)" | "dev channel · $REF" | "dev channel - $REF") ;;
+                    *) return 1 ;;
+                esac
             fi
             want="$(remote_head "$REF")" || return 1
         fi
         case "$want" in "$have_commit"*) ;; *) return 1 ;; esac
         printf '%s (%s)\n' "$REF" "$(printf '%s' "$have_commit" | cut -c1-7)"
     else
-        case "$chan" in stable | beta) ;; *) return 1 ;; esac
+        case "$chan" in stable | beta | "stable channel" | "beta channel") ;; *) return 1 ;; esac
         if [ -n "$VERSION" ]; then
             want="$VERSION"
         else
@@ -729,7 +736,7 @@ ENVEOF
 ); then
     done_line "Wrote the settings file $ENV_FILE"
 else
-    warn "could not write $ENV_FILE; \`copycord config set\` creates it later"
+    warn "could not write $ENV_FILE; $(cmd "copycord config set") creates it later"
 fi
 
 # The CLI writes update.json, so its format lives in one place.
@@ -742,10 +749,10 @@ elif [ "$REPO" = "$DEFAULT_REPO" ]; then
     if [ "$DRY_RUN" = "1" ] || git -C "$GIT_DIR_PATH" rev-parse -q --verify "refs/remotes/origin/$REF" >/dev/null; then
         CHANNEL_ARGS="--channel dev --ref $REF"
     else
-        info "$REF is not a branch: the \`copycord update\` channel is left as it is"
+        info "$REF is not a branch: the $(cmd "copycord update") channel is left as it is"
     fi
 else
-    warn "\`copycord update\` follows $DEFAULT_REPO, not $REPO; run this installer again to update from the fork"
+    warn "$(cmd "copycord update") follows $DEFAULT_REPO, not $REPO; run this installer again to update from the fork"
 fi
 if [ -n "$CHANNEL_ARGS" ]; then
     if [ "$DRY_RUN" = "1" ]; then
@@ -767,6 +774,9 @@ if [ "$UPGRADE" = "1" ]; then
         # Plain output, restyled with the installer's marks.
         NO_COLOR=1 "$BIN_DIR/copycord" doctor --fix --brief </dev/null 2>&1 | while IFS= read -r line; do
             case "$line" in
+                "✔ "* | "+ "*) done_line "${line#* }" ;;
+                "! "*) printf '  %s%s%s %s\n' "$YELLOW" "$WARN_MARK" "$RESET" "${line#! }" ;;
+                "✖ "* | "x "*) printf '  %s%s%s %s\n' "$RED" "$FAIL_MARK" "$RESET" "${line#* }" ;;
                 "PASS  "*) done_line "${line#PASS  }" ;;
                 "WARN  "*) printf '  %s%s%s %s\n' "$YELLOW" "$WARN_MARK" "$RESET" "${line#WARN  }" ;;
                 "FAIL  "*) printf '  %s%s%s %s\n' "$RED" "$FAIL_MARK" "$RESET" "${line#FAIL  }" ;;
