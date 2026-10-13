@@ -164,7 +164,7 @@ Check it with `copycord service status`. See [`copycord service`](/docs/cli#copy
 copycord doctor
 ```
 
-`copycord doctor` checks this machine without touching the network: Python, the Copycord home and database, the dashboard port and the dashboard files. Each line starts with `PASS`, `WARN` or `FAIL`. See [`copycord doctor`](/docs/cli#copycord-doctor).
+`copycord doctor` checks this machine without touching the network: Python, the Copycord home and database, the dashboard port and the dashboard files. Each line starts with `PASS`, `WARN` or `FAIL`. `copycord doctor --fix` repairs what it can and asks only before moving the dashboard to a free port; it never changes your password. See [`copycord doctor`](/docs/cli#copycord-doctor).
 
 - `copycord` not found: open a new terminal.
 - Port 8080 is taken: set `ADMIN_PORT` in [`.env`](/docs/getting-started/configuration) and restart.

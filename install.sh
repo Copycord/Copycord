@@ -334,6 +334,15 @@ fi
 need_uv=0
 command -v uv >/dev/null 2>&1 || need_uv=1
 
+# An upgrade or a reinstall (Copycord or its home is already there) ends with
+# `copycord doctor --fix`, so the automatic repairs happen on their own. A
+# first install has nothing to repair.
+UPGRADE=0
+if command -v copycord >/dev/null 2>&1 || [ -x "$HOME/.local/bin/copycord" ] \
+    || [ -e "$COPYCORD_HOME/.env" ] || [ -e "$COPYCORD_HOME/data.db" ]; then
+    UPGRADE=1
+fi
+
 # --- plan ---------------------------------------------------------------------
 
 banner
@@ -364,12 +373,14 @@ if [ "$need_uv" = "1" ]; then
 else
     plan_line "uv" "$(command -v uv)"
 fi
+[ "$UPGRADE" = "1" ] && plan_line "repair" "copycord doctor --fix (an upgrade or reinstall)"
 [ "$VERIFY" = "1" ] && plan_line "verify" "copycord --version and copycord doctor"
 [ "$DRY_RUN" = "1" ] && plan_line "dry run" "nothing will be changed"
 
 # uv, install, finishing up; release: find the release; git: fetch, build.
 if [ "$METHOD" = "git" ]; then STEP_TOTAL=5; else STEP_TOTAL=4; fi
 [ "$need_node" = "1" ] && STEP_TOTAL=$((STEP_TOTAL + 1))
+[ "$UPGRADE" = "1" ] && STEP_TOTAL=$((STEP_TOTAL + 1))
 [ "$VERIFY" = "1" ] && STEP_TOTAL=$((STEP_TOTAL + 1))
 
 # --- uv -----------------------------------------------------------------------
@@ -676,6 +687,19 @@ if [ -n "$CHANNEL_ARGS" ]; then
     else
         # shellcheck disable=SC2086 # CHANNEL_ARGS is a word list on purpose
         run "Saving the update channel ($CHANNEL_ARGS)" "$BIN_DIR/copycord" update $CHANNEL_ARGS --no-install
+    fi
+fi
+
+# --- repair -----------------------------------------------------------------------
+
+# After an upgrade or a reinstall: the doctor's automatic fixes (piped, it never
+# prompts). Its exit status does not fail the install; what is left is in its output.
+if [ "$UPGRADE" = "1" ]; then
+    step "Repairing (copycord doctor --fix)"
+    if [ "$DRY_RUN" = "1" ]; then
+        dry "copycord doctor --fix"
+    else
+        "$BIN_DIR/copycord" doctor --fix </dev/null 2>&1 | sed 's/^/    /' || true
     fi
 fi
 

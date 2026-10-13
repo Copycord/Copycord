@@ -768,3 +768,35 @@ def test_installed_commit_from_the_build_stamp_of_a_release_wheel(monkeypatch):
     monkeypatch.setattr(update, "build_commit", lambda: "c" * 40)
     _fake_dist(monkeypatch, {"url": "https://github.com/Copycord/Copycord/releases/download/v4.0.0/copycord-4.0.0-py3-none-any.whl", "archive_info": {}})
     assert update.installed_commit() == "c" * 40
+
+
+# --------------------------------------------------------------------------
+# reinstall (copycord doctor --fix)
+# --------------------------------------------------------------------------
+
+
+def test_reinstall_installs_this_exact_release_again(env, data_dir, fake_net):
+    rec, _, _ = env
+    _, seen = fake_net
+    update.save_channel(update.Channel("beta"))
+    assert update.update(reinstall=True) == 0
+    assert rec.calls == [["uv", "tool", "install", "--reinstall", "--force", "--python", "3.12",
+                          wheel_url("v4.0.0")]]
+    assert seen == [(f"{RELEASES}/tags/v4.0.0", 5.0)]
+    assert _saved(data_dir) == {"channel": "beta"}
+
+
+def test_reinstall_on_dev_rebuilds_the_saved_ref(env, data_dir, fake_net):
+    rec, _, _ = env
+    _, seen = fake_net
+    update.save_channel(update.Channel("dev", "v4-dev"))
+    assert update.update(reinstall=True) == 0
+    assert rec.calls == [["uv", "tool", "install", "--reinstall", "--force", "--python", "3.12",
+                          GIT_SPEC.format("v4-dev")]]
+    assert seen == []
+    assert _saved(data_dir) == {"channel": "dev", "branch": "v4-dev"}
+
+
+def test_reinstall_with_pipx_forces_a_new_venv():
+    cmd, _ = update.install_command(update.PIPX, "spec", reinstall=True)
+    assert cmd == ["pipx", "install", "--force", "spec"]

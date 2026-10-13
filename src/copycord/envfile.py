@@ -198,3 +198,14 @@ def template(home: Optional[Path] = None) -> str:
         else:
             lines += [f"# {texts[key]}", f"{key}={defaults[key]}", ""]
     return "\n".join(lines)
+
+
+def write_template(path: Optional[Path] = None) -> Path:
+    """Write template() to a missing <home>/.env (0600), as the installer
+    does; FileExistsError when the file is there, it is never overwritten."""
+    path = env_path() if path is None else path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+        f.write(template(path.parent))
+    return path

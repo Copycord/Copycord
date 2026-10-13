@@ -70,7 +70,11 @@ from copycord.common.config import CURRENT_VERSION
 from copycord.common.db import DBManager
 from copycord.common.paths import data_dir
 from copycord.common import inprocess
-from copycord.common.backup_scheduler import BackupConfig, DailySQLiteBackupScheduler
+from copycord.common.backup_scheduler import (
+    BackupConfig,
+    DailySQLiteBackupScheduler,
+    record_backup_stats,
+)
 from copycord.common.common_helpers import (
     discord_urls_from_config,
     is_discord_webhook_url,
@@ -178,11 +182,7 @@ _backup_cfg = BackupConfig(
 
 async def _record_backup_stats(archive_path: Path):
     try:
-        size = archive_path.stat().st_size if archive_path.exists() else 0
-        now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
-        db.set_config("DB_LAST_BACKUP_AT", now_iso)
-        db.set_config("DB_LAST_BACKUP_FILE", archive_path.name)
-        db.set_config("DB_LAST_BACKUP_SIZE", str(size))
+        record_backup_stats(db.set_config, archive_path)
     except Exception as e:
         LOGGER.exception("Failed writing backup stats: %s", e)
 

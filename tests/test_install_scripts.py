@@ -155,3 +155,58 @@ def test_never_touches_docker(path):
 @pytest.mark.parametrize("path", [SH, PS1])
 def test_no_em_dashes(path):
     assert "—" not in _text(path)
+
+
+def _guarded_by(text, call, guard, close):
+    """True when CALL sits inside the block GUARD opens (closed by CLOSE at its indent)."""
+    lines = text.splitlines()
+    at = next(i for i, line in enumerate(lines) if call in line)
+    for i in range(at - 1, -1, -1):
+        if guard in lines[i]:
+            indent = len(lines[i]) - len(lines[i].lstrip())
+            closing = indent * " " + close
+            return not any(line.rstrip() == closing for line in lines[i + 1:at])
+    return False
+
+
+def test_sh_repairs_with_the_doctor_after_an_upgrade_only():
+    text = _text(SH)
+    call = '"$BIN_DIR/copycord" doctor --fix </dev/null'
+    assert call in text
+    assert _guarded_by(text, call, 'if [ "$UPGRADE" = "1" ]; then', "fi")
+    # An existing program or home makes it an upgrade; a first install has neither.
+    assert re.search(r'^UPGRADE=0$', text, re.M)
+    detect = text[text.index("UPGRADE=0"):text.index("UPGRADE=1")]
+    for probe in ("command -v copycord", '"$COPYCORD_HOME/.env"', '"$COPYCORD_HOME/data.db"'):
+        assert probe in detect
+    # Before the install replaces anything, after the settings and the channel.
+    assert text.index("UPGRADE=0") < text.index("install_release()")
+    assert text.index("<<ENVEOF") < text.index(call) > text.index("--no-install\n")
+    # Its exit status never fails the install.
+    assert "| sed 's/^/    /' || true" in text[text.index(call):].splitlines()[0]
+
+
+def test_ps1_repairs_with_the_doctor_after_an_upgrade_only():
+    text = _text(PS1)
+    call = "& $exe doctor --fix 2>&1"
+    assert call in text
+    assert _guarded_by(text, call, "if ($upgrade) {", "}")
+    detect = text[text.index("$upgrade = "):text.index("PlanLine 'repair'")]
+    for probe in ("Get-Command copycord", "Join-Path $homeDir '.env'", "Join-Path $homeDir 'data.db'"):
+        assert probe in detect
+    assert text.index("$upgrade = ") < text.index("Step 'Finishing up'")
+    assert text.index("$envTemplate") < text.index(call) > text.index("'--no-install'")
+    # stderr lines are output, not errors, and the exit status is ignored.
+    block = text[text.index(call) - 300:text.index(call) + 300]
+    assert "$ErrorActionPreference = 'Continue'" in block
+    assert "$global:LASTEXITCODE = 0" in block
+
+
+@pytest.mark.parametrize("path", [SH, PS1])
+def test_plan_names_the_repair_step(path):
+    assert "copycord doctor --fix (an upgrade or reinstall)" in _text(path)
+
+
+@pytest.mark.parametrize("path", [SH, PS1])
+def test_doctor_has_no_yes_flag(path):
+    assert "doctor --fix --yes" not in _text(path)

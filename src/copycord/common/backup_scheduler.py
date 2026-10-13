@@ -22,6 +22,15 @@ from typing import Awaitable, Callable, Iterable, Optional
 from zoneinfo import ZoneInfo
 
 
+def record_backup_stats(set_config: Callable[[str, str], None], archive_path: Path) -> None:
+    """Store the DB_LAST_BACKUP_* app config values the dashboard shows."""
+    size = archive_path.stat().st_size if archive_path.exists() else 0
+    now_iso = datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z"
+    set_config("DB_LAST_BACKUP_AT", now_iso)
+    set_config("DB_LAST_BACKUP_FILE", archive_path.name)
+    set_config("DB_LAST_BACKUP_SIZE", str(size))
+
+
 @dataclass
 class BackupConfig:
     """
