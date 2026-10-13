@@ -63,8 +63,11 @@ def is_root() -> bool:
 def copycord_command() -> List[str]:
     """Absolute command that starts the installed `copycord` console script."""
     argv0 = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
-    if argv0 is not None and argv0.stem.lower() == "copycord" and argv0.is_file():
-        return [str(argv0.resolve())]
+    if argv0 is not None and argv0.stem.lower() == "copycord":
+        # On Windows the entry point drops ".exe" from argv[0].
+        for exe in (argv0, argv0.with_name(argv0.name + ".exe")):
+            if exe.is_file():
+                return [str(exe.resolve())]
     found = shutil.which("copycord")
     if found:
         return [str(Path(found).resolve())]

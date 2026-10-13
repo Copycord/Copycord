@@ -638,6 +638,14 @@ def test_copycord_command_prefers_running_console_script(tmp_path, monkeypatch):
     monkeypatch.setattr(service.sys, "argv", [str(exe), "service", "install"])
     assert service.copycord_command() == [str(exe.resolve())]
 
+    # Windows: argv[0] is the launcher without ".exe"; another copycord on PATH loses.
+    launcher = tmp_path / "win" / "copycord.exe"
+    launcher.parent.mkdir()
+    launcher.write_bytes(b"")
+    monkeypatch.setattr(service.sys, "argv", [str(launcher.with_suffix("")), "service"])
+    monkeypatch.setattr(service.shutil, "which", lambda name: str(exe))
+    assert service.copycord_command() == [str(launcher.resolve())]
+
     monkeypatch.setattr(service.sys, "argv", ["-c"])
     monkeypatch.setattr(service.shutil, "which", lambda name: None)
     cmd = service.copycord_command()
