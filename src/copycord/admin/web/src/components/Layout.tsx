@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { Outlet, useLocation } from "react-router";
+import { Footer } from "./Footer";
 import { Sidebar } from "./Sidebar";
 
 export function Layout() {
@@ -26,6 +27,7 @@ export function Layout() {
         <button
           type="button"
           className="flex size-menu-btn items-center justify-center rounded-control border border-border text-muted hover:text-text"
+          id="menu-toggle"
           aria-label="Open menu"
           aria-expanded={drawerOpen}
           aria-controls="side-menu"
@@ -41,6 +43,7 @@ export function Layout() {
       {drawerOpen ? (
         <div
           className="fixed inset-0 z-40 bg-black/50 md:hidden"
+          id="menu-backdrop"
           data-testid="menu-backdrop"
           onClick={() => setDrawerOpen(false)}
         />
@@ -57,9 +60,10 @@ export function Layout() {
         <Sidebar onNavigate={() => setDrawerOpen(false)} />
       </aside>
 
-      <main className="p-4 md:ml-64 md:p-page">
+      <main className="p-4 pb-14 md:ml-64 md:p-page md:pb-14">
         <Outlet />
       </main>
+      <Footer />
     </div>
   );
 }

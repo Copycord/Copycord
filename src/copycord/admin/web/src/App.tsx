@@ -8,6 +8,7 @@ import { Scraper } from "./pages/Scraper";
 import { Channels } from "./pages/Channels";
 import { Kit } from "./pages/Kit";
 import { Logs } from "./pages/Logs";
+import { NotFound } from "./pages/NotFound";
 import { Placeholder } from "./pages/Placeholder";
 import { System } from "./pages/System";
 
@@ -46,7 +47,7 @@ export function App() {
           );
         })}
         <Route path="/_kit" element={<Kit />} />
-        <Route path="*" element={<Placeholder title="Not found" legacyHref="/" />} />
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
   );

@@ -29,7 +29,10 @@ export type PageName = keyof typeof PAGES;
 
 export function pageUrl(name: PageName): string {
   const p = PAGES[name];
-  return BASE_PATH ? `${BASE_PATH}${p === "/" ? "/" : p}` : p;
+  if (!BASE_PATH) return p;
+  // The SPA serves the logs page at /logs; the old UI calls it /event-logs.
+  if (name === "event-logs") return `${BASE_PATH}/logs`;
+  return `${BASE_PATH}${p === "/" ? "/" : p}`;
 }
 
 // The login and 404 pages stay server routes until the SPA login lane replaces them.
