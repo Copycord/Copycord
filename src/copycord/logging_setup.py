@@ -12,7 +12,8 @@ Process-wide logging for `copycord run`.
 
 The console shows every record tagged by role, with server and client records
 only at WARNING and above. Server and client records also go to
-<DATA_DIR>/<role>.out, which the admin log tabs read.
+<home>/logs/<role>.out (<DATA_DIR>/<role>.out in Docker), which the admin
+log tabs read.
 """
 
 from __future__ import annotations
@@ -52,9 +53,9 @@ def _level() -> int:
 
 
 def logs_dir() -> Path:
-    from copycord.common.paths import data_dir
+    from copycord.common.paths import out_dir
 
-    return data_dir()
+    return out_dir()
 
 
 class ThreadRoleFilter(logging.Filter):

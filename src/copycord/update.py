@@ -806,9 +806,9 @@ def _restart_service() -> bool:
 
 
 def log_path() -> Path:
-    from copycord.common.paths import data_dir
+    from copycord.common.paths import logs_dir
 
-    return data_dir() / "logs" / "update.log"
+    return logs_dir() / "update.log"
 
 
 def _install(cmd, hint, env, windows, launchers, restart, text):
@@ -819,15 +819,15 @@ def _install(cmd, hint, env, windows, launchers, restart, text):
     moved: list = []
     failed: list = []
     if windows:
-        from copycord.common.paths import data_dir
+        from copycord.common.paths import home_dir
 
         if restart:
             try:
                 service.get_service().stop()
             except service.ServiceError:
                 pass
-        winupdate.clean_old(data_dir(), launchers)
-        moved = winupdate.move_aside(sys.prefix, launchers, data_dir(), failed)
+        winupdate.clean_old(home_dir(), launchers)
+        moved = winupdate.move_aside(sys.prefix, launchers, home_dir(), failed)
     with ui.Spinner(text) as spin:
         if not spin.active:
             ui.info(text)

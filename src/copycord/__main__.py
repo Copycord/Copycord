@@ -725,6 +725,18 @@ def check_data_dir(path: Path) -> Check:
     )
 
 
+def check_layout() -> Check:
+    """WARN while a native home still has data.db or secret.key loose in it."""
+    from copycord.common.paths import copycord_home, needs_migration
+
+    if needs_migration():
+        home = copycord_home().resolve()
+        return Check(WARN, "data files loose in the home",
+                     "Copycord moves them into data and logs folders on its next start",
+                     str(home), "layout")
+    return Check(PASS, "data folder layout")
+
+
 def check_db(path: Path) -> Check:
     if not path.exists():
         return Check(INFO, "database created on first run", path=str(path))
@@ -920,7 +932,8 @@ def run_doctor() -> List[tuple]:
     return [
         ("Install", [check_version(), check_python(), check_frontend(), check_dependencies()]),
         ("Settings", settings),
-        ("Data", [check_data_dir(data_dir()), check_db(db_path()), check_backups()]),
+        ("Data", [check_data_dir(data_dir()), check_layout(), check_db(db_path()),
+                  check_backups()]),
         ("Running", [
             check_admin_port(service_running=bool(state and state.running)),
             check_service(state),
@@ -960,6 +973,20 @@ def fix_home(checks: List[Check]) -> str:
     path = data_dir()
     path.mkdir(parents=True, exist_ok=True)
     return str(path)
+
+
+def fix_layout(checks: List[Check]) -> str:
+    """Move the old flat home into <home>/data and <home>/logs."""
+    from copycord.common.paths import data_dir, migrate_layout
+
+    state = service_state()
+    if state and state.running:
+        raise FixError("Copycord is running; stop it first (copycord service stop)")
+    try:
+        line = migrate_layout()
+    except OSError as e:
+        raise FixError(f"could not move the files, nothing changed: {e}")
+    return line or str(data_dir())
 
 
 def fix_env_file(checks: List[Check]) -> str:
@@ -1113,6 +1140,7 @@ def _port_question(checks):
 # Run in this order: the home before its files, reinstall and settings before the service.
 FIXES = {
     "home": Fix(fix_home, "Copycord home created", "create it"),
+    "layout": Fix(fix_layout, "data moved into the data folder", "move them now"),
     "env_file": Fix(fix_env_file, ".env created with the default settings",
                     "create it with the default settings"),
     "backup": Fix(fix_backup, "database backed up", "back it up now"),
@@ -1599,10 +1627,10 @@ def _uninstall_program(dry_run: bool, purge: bool, removed: list, kept: list,
         # Windows cannot delete the running copycord.exe or loaded .pyd/.dll files, but
         # can rename them: move them into a scratch folder deleted after this exits.
         from copycord import winupdate
-        from copycord.common.paths import data_dir
+        from copycord.common.paths import home_dir
 
         if not purge:
-            winupdate.clean_old(data_dir(), launchers)
+            winupdate.clean_old(home_dir(), launchers)
         try:
             scratch = winupdate.scratch_dir(sys.prefix)
             moved = winupdate.move_aside(sys.prefix, launchers, scratch)
@@ -1630,16 +1658,16 @@ def _delete_aside(scratch, moved: list, purge: bool) -> None:
     if scratch is None:
         return
     from copycord import winupdate
-    from copycord.common.paths import data_dir
+    from copycord.common.paths import home_dir
 
     folders = [scratch, *(dest.parent for _src, dest in moved)]
     if not purge:
-        folders.append(data_dir() / winupdate.ASIDE)
+        folders.append(home_dir() / winupdate.ASIDE)
     winupdate.delete_after_exit(folders)
 
 
 def uninstall_command(args: argparse.Namespace) -> int:
-    from copycord.common.paths import data_dir
+    from copycord.common.paths import home_dir
     from copycord import ui
 
     dry_run, yes = args.dry_run, args.yes
@@ -1647,7 +1675,7 @@ def uninstall_command(args: argparse.Namespace) -> int:
     purge: Optional[bool] = True if args.purge else False if args.keep_data else None
     if purge is None and (yes or dry_run):
         purge = False
-    target = data_dir()
+    target = home_dir()
     if purge:
         why = purge_refusal(target)
         if why:
@@ -1741,7 +1769,9 @@ def uninstall_command(args: argparse.Namespace) -> int:
     else:
         ui.warn("Uninstall incomplete", "see the messages above", stream=sys.stdout)
     if not purge and target.exists():
-        print(f"  Your data is still in {target}")
+        from copycord.common.paths import data_dir
+
+        print(f"  Your data is still in {data_dir()}")
     return 0 if ok else 1
 
 
@@ -1778,6 +1808,18 @@ def schema_guard() -> bool:
         schema_too_new_message(e)
         return False
     return True
+
+
+def migrate_on_start() -> None:
+    """Move an old flat native home into data and logs folders; on failure keep it."""
+    from copycord.common.paths import migrate_layout
+
+    log = logging.getLogger("copycord.layout")
+    try:
+        migrate_layout(log=log.info)
+    except Exception as e:
+        log.warning("Could not move the data into the data folder, still using the old "
+                    "layout: %s", e)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -1826,6 +1868,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         setup_logging(roles=())
         if not check_removed_options():
             return 1
+        migrate_on_start()
         if not schema_guard():
             return 1
 
