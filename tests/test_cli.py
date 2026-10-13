@@ -223,39 +223,48 @@ def _answers(monkeypatch, *replies):
     return asked
 
 
-def test_uninstall_asks_and_deletes_the_data(uninstall_env, monkeypatch, capsys):
-    asked = _answers(monkeypatch, "y", "y", "DELETE")
+def test_uninstall_asks_one_question_and_deletes_the_data(uninstall_env, monkeypatch, capsys):
+    asked = _answers(monkeypatch, "2")
     assert cli.main(["uninstall"]) == 0
     assert not uninstall_env.exists()
-    assert len(asked) == 3
-    assert "Also delete your Copycord data (database, logs, backups, settings)" in asked[1]
-    assert str(uninstall_env) in asked[1] and "This cannot be undone." in asked[1]
-    assert "(y/N)" in asked[1]
-    assert "Type DELETE" in asked[2]
-    assert f"Copycord home: {uninstall_env}" in capsys.readouterr().out
+    assert len(asked) == 1
+    out = capsys.readouterr().out
+    assert "Removes the Copycord program and its background service." in out
+    assert f"Your data is in {uninstall_env}" in out
+    assert "1) Keep my data (default)" in out
+    assert "2) Delete everything (database, logs, backups, settings)" in out
+    assert "3) Cancel" in out
+    assert "Copycord uninstalled" in out and "Your data is still in" not in out
 
 
-def test_uninstall_asks_and_keeps_the_data_by_default(uninstall_env, monkeypatch, capsys):
-    asked = _answers(monkeypatch, "y", "")
+def test_uninstall_keeps_the_data_on_enter(uninstall_env, monkeypatch, capsys):
+    asked = _answers(monkeypatch, "")
+    assert cli.main(["uninstall"]) == 0
+    assert (uninstall_env / "data.db").exists()
+    assert len(asked) == 1
+    out = capsys.readouterr().out
+    assert "Copycord uninstalled" in out
+    assert f"Your data is still in {uninstall_env}" in out
+
+
+def test_uninstall_cancel_changes_nothing(uninstall_env, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_uninstall_service", lambda *a: pytest.fail("ran after cancel"))
+    _answers(monkeypatch, "3")
+    assert cli.main(["uninstall"]) == 1
+    assert (uninstall_env / "data.db").exists()
+    assert "nothing was changed" in capsys.readouterr().err
+
+
+def test_uninstall_asks_again_on_a_bad_answer(uninstall_env, monkeypatch):
+    asked = _answers(monkeypatch, "x", "1")
     assert cli.main(["uninstall"]) == 0
     assert (uninstall_env / "data.db").exists()
     assert len(asked) == 2
-    out = capsys.readouterr().out
-    assert "keeping your data" in out
-    kept = out.split("Kept", 1)[1]
-    assert f"Copycord home: {uninstall_env}" in kept
 
 
-def test_uninstall_data_yes_without_delete_changes_nothing(uninstall_env, monkeypatch, capsys):
-    _answers(monkeypatch, "y", "y", "delete")
-    assert cli.main(["uninstall"]) == 1
-    assert (uninstall_env / "data.db").exists()
-    assert "DELETE was not typed" in capsys.readouterr().err
-
-
-def test_uninstall_data_yes_refuses_the_home_directory(uninstall_env, monkeypatch, capsys):
+def test_uninstall_delete_refuses_the_home_directory(uninstall_env, monkeypatch, capsys):
     monkeypatch.setenv("DATA_DIR", str(Path.home()))
-    _answers(monkeypatch, "y", "y")
+    _answers(monkeypatch, "2")
     assert cli.main(["uninstall"]) == 1
     err = capsys.readouterr().err
     assert "refusing to delete the Copycord home" in err and "home directory" in err
@@ -269,7 +278,7 @@ def test_uninstall_without_a_terminal_keeps_the_data(uninstall_env, monkeypatch,
     assert cli.main(["uninstall", "--yes"]) == 0
     assert (uninstall_env / "data.db").exists()
     out = capsys.readouterr().out
-    assert f"Copycord home: {uninstall_env}" in out.split("Kept", 1)[1]
+    assert f"Your data is still in {uninstall_env}" in out
 
 
 def test_uninstall_without_a_terminal_needs_yes(uninstall_env, monkeypatch, capsys):
@@ -290,18 +299,21 @@ def test_uninstall_purge_deletes_without_asking(uninstall_env, monkeypatch, caps
     assert not uninstall_env.exists()
 
 
-def test_uninstall_purge_interactive_skips_the_question(uninstall_env, monkeypatch):
-    asked = _answers(monkeypatch, "y", "DELETE")
+def test_uninstall_purge_interactive_offers_delete_or_cancel(uninstall_env, monkeypatch, capsys):
+    _answers(monkeypatch, "")
     assert cli.main(["uninstall", "--purge"]) == 0
     assert not uninstall_env.exists()
-    assert not any("Also delete" in a for a in asked)
+    out = capsys.readouterr().out
+    assert "1) Delete everything" in out and "2) Cancel" in out and "Keep my data" not in out
 
 
 def test_uninstall_keep_data_does_not_ask(uninstall_env, monkeypatch, capsys):
-    asked = _answers(monkeypatch, "y")
+    asked = _answers(monkeypatch, "")
     assert cli.main(["uninstall", "--keep-data"]) == 0
     assert (uninstall_env / "data.db").exists()
     assert len(asked) == 1
+    out = capsys.readouterr().out
+    assert "1) Keep my data" in out and "Delete everything" not in out
 
 
 def test_uninstall_purge_and_keep_data_conflict(uninstall_env, capsys):
