@@ -1429,6 +1429,20 @@ def test_envfile_write_template_never_overwrites(tmp_path):
 # --------------------------------------------------------------------------
 
 
+def test_config_on_a_terminal_is_a_rail(data_dir, monkeypatch):
+    dd = ["--data-dir", str(data_dir)]
+    monkeypatch.setenv("NO_COLOR", "1")
+    monkeypatch.setattr(cli, "brand", lambda: "Copycord v4.0.0 (abcdef1)")
+    out, err = _terminal(monkeypatch)
+    assert cli.main(["config", "set", "COMMAND_USERS", "1,2", *dd]) == 0
+    assert cli.main(["config", "get", "COMMAND_USERS", *dd]) == 0
+    lines = out.getvalue().splitlines()
+    assert lines.count("Copycord v4.0.0 (abcdef1)") == 2
+    assert "\u250c  Save a setting" in lines and "\u250c  Read a setting" in lines
+    assert lines[-2:] == ["\u2502  1,2", "\u2514"]
+    assert "\u2713  COMMAND_USERS saved" in err.getvalue()
+
+
 def test_config_round_trip_with_masking(data_dir, tmp_path, capsys):
     dd = ["--data-dir", str(data_dir)]
     assert cli.main(["config", "set", "SERVER_TOKEN", "srv-secret", *dd]) == 0

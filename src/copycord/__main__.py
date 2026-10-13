@@ -1780,7 +1780,12 @@ def _print_value(key: str, value: Optional[str], show_secrets: bool,
     where it is stored and, when it is not set, why."""
     shown = MASK if is_secret(key) and value and not show_secrets else value
     if not as_json:
-        print(shown)
+        from copycord import ui
+
+        if ui.on_rail():
+            ui.note(shown)
+        else:
+            print(shown)
         return
     from copycord import jsonout
 
@@ -1820,7 +1825,27 @@ def env_config_command(args: argparse.Namespace) -> int:
     return 2
 
 
+# On a terminal each config command opens a rail with this title.
+CONFIG_TITLES = {
+    "get": "Read a setting",
+    "set": "Save a setting",
+    "unset": "Remove a setting",
+    "export": "Export the settings",
+    "import": "Import settings",
+}
+
+
 def config_command(args: argparse.Namespace) -> int:
+    from copycord import ui
+
+    tty = sys.stdout.isatty()
+    title = CONFIG_TITLES.get(args.config_command, "Copycord settings")
+    with ui.Rail(title, brand=brand() if tty and not args.json else "", heading=False):
+        ui.gap(blank=False)
+        return _config_steps(args)
+
+
+def _config_steps(args: argparse.Namespace) -> int:
     from copycord import ui
     from copycord.envfile import is_env_key
 
@@ -1879,7 +1904,11 @@ def config_command(args: argparse.Namespace) -> int:
                     jsonout.emit({"file": str(out), "keys": len(values)})
                 return 0
             shown = values if args.show_secrets else masked(values)
-            print(json.dumps(shown, indent=2))
+            if ui.on_rail():
+                with ui.section(f"{len(shown)} settings"):
+                    print(json.dumps(shown, indent=2))
+            else:
+                print(json.dumps(shown, indent=2))
             return 0
 
         if cmd == "import":
