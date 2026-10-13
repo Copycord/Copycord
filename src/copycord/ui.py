@@ -147,6 +147,23 @@ def info(text, detail="", stream=None):
     line("info", text, detail, stream)
 
 
+def attention(items: Iterable[tuple], stream: Optional[TextIO] = None) -> None:
+    """The "Needs your attention" section: one "!" item per (status, text, hint)."""
+    stream = sys.stdout if stream is None else stream
+    items = list(items)
+    if not items:
+        return
+    heading("Needs your attention", stream)
+    for status, text, hint in items:
+        if not use_color(stream):
+            line(status, text, hint, stream)
+            continue
+        color = "red" if status == "fail" else "yellow"
+        print(f"{paint('!', color, 'bold', stream=stream)} {text}", file=stream)
+        if hint:
+            print(f"  {dim(hint, stream)}", file=stream)
+
+
 def kv(rows: Iterable[tuple], stream: Optional[TextIO] = None, width: int = 0) -> None:
     """Aligned key and value rows."""
     stream = sys.stdout if stream is None else stream

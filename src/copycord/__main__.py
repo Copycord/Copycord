@@ -387,6 +387,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     doctor_p.add_argument("--fix", action="store_true",
                           help="apply every automatic fix, ask before moving the dashboard "
                           "to a free port when there is a terminal, then check again")
+    doctor_p.add_argument("--brief", action="store_true",
+                          help="print only the fixes applied, the failed checks and "
+                          "one result line")
 
     config = sub.add_parser(
         "config",
@@ -1137,8 +1140,11 @@ FIXES = {
 }
 
 
-def apply_fixes(checks: List[Check]) -> int:
-    """Apply the fixes for flagged checks; returns how many were applied."""
+def apply_fixes(checks: List[Check], notes: dict, brief: bool = False) -> int:
+    """Apply the fixes for flagged checks, printing each one applied; returns how many.
+
+    Fills notes with {check name: why it was not fixed}.
+    """
     from copycord import ui
 
     interactive = ui.is_interactive()
@@ -1154,24 +1160,30 @@ def apply_fixes(checks: List[Check]) -> int:
         found = wanted[key]
         name = found[0].name
         if fix.guided and not interactive:
-            ui.info(name, f"run `copycord doctor --fix` in a terminal to {fix.skipped}")
+            notes[name] = f"run `copycord doctor --fix` in a terminal to {fix.skipped}"
             continue
         try:
             if fix.guided and not ui.confirm(fix.question(found), default=False):
-                ui.info(name, "skipped")
+                notes[name] = "fix skipped"
                 continue
             result = fix.apply(found)
         except (KeyboardInterrupt, EOFError):
             raise
         except Exception as e:
-            ui.fail(f"could not fix: {name}", str(e) or type(e).__name__, stream=sys.stdout)
+            notes[name] = f"could not fix it: {str(e) or type(e).__name__}"
             continue
+        if not applied and not brief:
+            ui.heading("Fixed")
         ui.ok(fix.done, result)
         applied += 1
-    for c in flagged:
-        if c.fix not in FIXES:
-            ui.info(c.name, f"{c.reason} (no automatic fix)" if c.reason else "no automatic fix")
     return applied
+
+
+def _hint(c: Check, verbose: bool = False) -> str:
+    parts = [c.reason]
+    if c.path and (verbose or c.status in (WARN, FAIL)):
+        parts.append(c.path)
+    return "; ".join(p for p in parts if p)
 
 
 def _print_checks(rows: List[Check], verbose: bool) -> None:
@@ -1179,10 +1191,20 @@ def _print_checks(rows: List[Check], verbose: bool) -> None:
 
     status = {PASS: "ok", WARN: "warn", FAIL: "fail", INFO: "info"}
     for c in rows:
-        parts = [c.reason]
-        if c.path and (verbose or c.status in (WARN, FAIL)):
-            parts.append(c.path)
-        ui.line(status[c.status], c.name, "; ".join(p for p in parts if p), stream=sys.stdout)
+        ui.line(status[c.status], c.name, _hint(c, verbose), stream=sys.stdout)
+
+
+def _print_attention(checks: List[Check], notes: Optional[dict] = None) -> None:
+    """Every WARN and FAIL once, with its hint and why --fix left it."""
+    from copycord import ui
+
+    notes = notes or {}
+    ui.attention(
+        (("fail" if c.status == FAIL else "warn", c.name,
+          "; ".join(p for p in (notes.get(c.name, ""), _hint(c)) if p))
+         for c in checks if c.status in (WARN, FAIL)),
+        stream=sys.stdout,
+    )
 
 
 def _print_summary(checks: List[Check], fixable: int = 0) -> None:
@@ -1203,7 +1225,23 @@ def _print_summary(checks: List[Check], fixable: int = 0) -> None:
         print(ui.dim(f"Run `copycord doctor --fix` to fix {fixable} of them."))
 
 
-def doctor(verbose: bool = False, fix: bool = False) -> int:
+def _print_brief(checks: List[Check]) -> None:
+    """--brief: the FAIL lines and one result line."""
+    from copycord import ui
+
+    for c in checks:
+        if c.status == FAIL:
+            ui.fail(c.name, _hint(c), stream=sys.stdout)
+    summary = doctor_summary(checks)
+    if summary == "All good":
+        ui.ok("All checks passed")
+    elif any(c.status == FAIL for c in checks):
+        ui.fail(summary, "run `copycord doctor` for details", stream=sys.stdout)
+    else:
+        ui.warn(summary, "run `copycord doctor` for details", stream=sys.stdout)
+
+
+def doctor(verbose: bool = False, fix: bool = False, brief: bool = False) -> int:
     from copycord import ui
 
     if fix:
@@ -1213,37 +1251,34 @@ def doctor(verbose: bool = False, fix: bool = False) -> int:
         except (AttributeError, ValueError):
             pass
     sections = run_doctor()
-    if ui.use_color():
-        ui.heading("Copycord doctor")
-    checks: List[Check] = []
-    for title, rows in sections:
-        ui.heading(title)
-        _print_checks(rows, verbose)
-        checks += rows
+    checks: List[Check] = [c for _, rows in sections for c in rows]
+    if not brief:
+        if ui.use_color():
+            ui.heading("Copycord doctor")
+        for title, rows in sections:
+            ui.heading(title)
+            _print_checks(rows, verbose)
     flagged = [c for c in checks if c.status in (WARN, FAIL)]
-    if not fix:
-        _print_summary(checks, sum(c.fix in FIXES for c in flagged))
-        return 1 if any(c.status == FAIL for c in checks) else 0
-
-    _print_summary(checks)
-    ui.heading("Fixes")
-    if not flagged:
-        ui.ok("nothing to fix")
-        return 0
-    try:
-        apply_fixes(checks)
-    except (KeyboardInterrupt, EOFError):
-        print()
-        ui.warn("fixes stopped", "the ones above were applied", stream=sys.stdout)
-        return 130
-
-    ui.heading("Re-check")
-    checks = [c for _, rows in run_doctor() for c in rows]
-    flagged = [c for c in checks if c.status in (WARN, FAIL)]
-    _print_checks(flagged, verbose)
-    # Only the guided fixes skipped for want of a terminal are worth another run.
-    guided = 0 if ui.is_interactive() else sum(c.fix in FIXES and FIXES[c.fix].guided for c in flagged)
-    _print_summary(checks, guided)
+    notes: dict = {}
+    fixable = sum(c.fix in FIXES for c in flagged)
+    if fix and flagged:
+        try:
+            applied = apply_fixes(checks, notes, brief)
+        except (KeyboardInterrupt, EOFError):
+            print()
+            ui.warn("fixes stopped", "the ones above were applied", stream=sys.stdout)
+            return 130
+        if applied:
+            checks = [c for _, rows in run_doctor() for c in rows]
+        flagged = [c for c in checks if c.status in (WARN, FAIL)]
+        # Only the guided fixes skipped for want of a terminal are worth another run.
+        fixable = 0 if ui.is_interactive() else sum(
+            c.fix in FIXES and FIXES[c.fix].guided for c in flagged)
+    if brief:
+        _print_brief(checks)
+    else:
+        _print_attention(checks, notes)
+        _print_summary(checks, fixable)
     return 1 if any(c.status == FAIL for c in checks) else 0
 
 
@@ -1706,7 +1741,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     envfile.load()
 
     if args.command == "doctor":
-        return doctor(verbose=args.verbose, fix=args.fix)
+        return doctor(verbose=args.verbose, fix=args.fix, brief=args.brief)
 
     if args.command == "restart":
         return restart_command()
