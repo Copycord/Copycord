@@ -173,7 +173,7 @@ test.describe("dashboard proxy", () => {
     await openCard(page);
     await page.locator("#srv-proxy-settings-btn").click();
     const settings = page.locator("#proxy-settings-modal.show");
-    await expect(settings).toHaveClass(/(^|\s)show(\s|$)/);
+    await expect(settings).toHaveCount(1);
     await expect(page.locator("#ps-suspend-duration")).toHaveValue("120");
     await expect(page.locator("#ps-test-batch")).toHaveValue("20");
     await expect(page.locator("#ps-slow-threshold")).toHaveValue("2");
@@ -187,13 +187,13 @@ test.describe("dashboard proxy", () => {
       settings: { PROXY_SUSPEND_DURATION: 300, PROXY_TEST_BATCH_SIZE: 50, PROXY_SLOW_THRESHOLD: 3 },
     });
     await page.locator("#proxy-settings-close").click();
-    await expect(settings).not.toHaveClass(/(^|\s)show(\s|$)/);
+    await expect(settings).toHaveCount(0);
 
     await page.locator("#srv-proxy-fav-help-btn").click();
     const help = page.locator("#proxy-fav-help-modal.show");
-    await expect(help).toHaveClass(/(^|\s)show(\s|$)/);
+    await expect(help).toHaveCount(1);
     await expect(page.locator("#srv-proxy-card")).toHaveJSProperty("open", true);
     await page.locator("#proxy-fav-help-close").click();
-    await expect(help).not.toHaveClass(/(^|\s)show(\s|$)/);
+    await expect(help).toHaveCount(0);
   });
 });
