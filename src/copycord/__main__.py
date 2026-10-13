@@ -26,7 +26,7 @@ import sqlite3
 import sys
 import tempfile
 from pathlib import Path
-from typing import List, Mapping, NamedTuple, NoReturn, Optional
+from typing import List, Mapping, NamedTuple, NoReturn, Optional, Sequence
 
 from copycord.envfile import ENV_KEYS
 
@@ -1512,7 +1512,8 @@ def _uninstall_service(dry_run: bool, removed: list, kept: list) -> bool:
     return ok
 
 
-def _uninstall_program(dry_run: bool, purge: bool, removed: list, kept: list) -> bool:
+def _uninstall_program(dry_run: bool, purge: bool, removed: list, kept: list,
+                       launchers: Sequence[str] = ()) -> bool:
     import shutil
 
     from copycord import ui
@@ -1549,34 +1550,49 @@ def _uninstall_program(dry_run: bool, purge: bool, removed: list, kept: list) ->
         ui.info("would run", " ".join(commands[0]))
         removed.append("copycord program")
         return ok
+    moved: list = []
+    scratch = None
     if sys.platform == "win32":
-        # Windows cannot delete the running copycord.exe; finish in a detached shell after exit.
-        import subprocess
+        # Windows cannot delete the running copycord.exe or loaded .pyd/.dll files, but
+        # can rename them: move them into a scratch folder deleted after this exits.
+        from copycord import winupdate
+        from copycord.common.paths import data_dir
 
-        text = " ".join(commands[0])
-        flags = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        subprocess.Popen(
-            ["cmd", "/c", f"timeout /t 3 /nobreak >nul & {text}"],
-            creationflags=flags,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            close_fds=True,
-        )
-        ui.ok("removing the copycord program after this command exits", text)
-        removed.append("copycord program")
-        return ok
+        if not purge:
+            winupdate.clean_old(data_dir(), launchers)
+        try:
+            scratch = winupdate.scratch_dir(sys.prefix)
+            moved = winupdate.move_aside(sys.prefix, launchers, scratch)
+        except OSError:
+            scratch = None
     for command in commands:
         text = " ".join(command)
         res = run_cmd(command)
         if res.returncode == 0:
             ui.ok("removed the copycord program", text)
             removed.append("copycord program")
+            _delete_aside(scratch, moved, purge)
             return ok
         detail = (res.stderr or res.stdout or "").strip().splitlines()
         ui.warn(f"{text} failed", detail[-1] if detail else f"exit {res.returncode}")
+    if moved:
+        winupdate.restore(moved)
+    _delete_aside(scratch, moved, purge)
     kept.append(f"copycord program (remove it with: {manual})")
     return False
+
+
+def _delete_aside(scratch, moved: list, purge: bool) -> None:
+    """Windows: delete the moved-aside files (and old update leftovers) after exit."""
+    if scratch is None:
+        return
+    from copycord import winupdate
+    from copycord.common.paths import data_dir
+
+    folders = [scratch, *(dest.parent for _src, dest in moved)]
+    if not purge:
+        folders.append(data_dir() / winupdate.ASIDE)
+    winupdate.delete_after_exit(folders)
 
 
 def uninstall_command(args: argparse.Namespace) -> int:
@@ -1600,6 +1616,17 @@ def uninstall_command(args: argparse.Namespace) -> int:
             "no terminal to ask in; rerun with --yes (keeps your data unless you add --purge)",
         )
         return 1
+
+    # Windows cannot delete the files of a running Copycord (see winupdate).
+    launchers: list = []
+    if sys.platform == "win32" and not dry_run:
+        from copycord import winupdate
+
+        launchers, other = winupdate.running()
+        if other is not None:
+            ui.fail("Copycord is running in another window "
+                    f"(process {other}); stop it first, then run this again")
+            return 1
 
     ui.heading("Uninstall Copycord" + (" (dry run, nothing changes)" if dry_run else ""))
     print("Removes the Copycord program and its background service.")
@@ -1661,7 +1688,7 @@ def uninstall_command(args: argparse.Namespace) -> int:
             kept.append(f"Copycord home: {target}")
             ok = False
 
-    ok = _uninstall_program(dry_run, purge, removed, kept) and ok
+    ok = _uninstall_program(dry_run, purge, removed, kept, launchers) and ok
 
     print()
     if dry_run:

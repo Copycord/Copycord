@@ -169,3 +169,49 @@ def running():
     by_pid = {r.get("ProcessId"): r for r in rows}
     exes = [by_pid[p].get("ExecutablePath") for p in mine if p != os.getpid()]
     return [e for e in exes if e and not _under(e, sys.prefix)], other
+
+
+def scratch_dir(prefix: str) -> Path:
+    """A new folder for moved-aside files on the same drive as prefix (uninstall)."""
+    import tempfile
+
+    tmp = tempfile.gettempdir()
+    same = ntpath.splitdrive(tmp)[0].lower() == ntpath.splitdrive(prefix)[0].lower()
+    base = tmp if same else str(Path(prefix).parent.parent)
+    return Path(tempfile.mkdtemp(prefix="copycord-uninstall-", dir=base))
+
+
+def _delay_until_reboot(folder: Path) -> None:
+    import ctypes
+
+    move = ctypes.windll.kernel32.MoveFileExW
+    paths = sorted(folder.rglob("*"), key=lambda p: len(p.parts), reverse=True)
+    for p in [*paths, folder]:
+        move(str(p), None, 4)  # MOVEFILE_DELAY_UNTIL_REBOOT
+
+
+def delete_after_exit(folders: List[Path]) -> None:
+    """Delete folders once this process has exited: a detached cmd retries for a
+    minute; if it cannot start, Windows deletes them at the next reboot."""
+    folders = [f for f in dict.fromkeys(folders) if f.exists()]
+    if not folders:
+        return
+    # ping is the sleep: timeout needs a console, which a detached process lacks.
+    steps = " & ".join(f'rd /s /q "{f}" 2>nul' for f in folders)
+    done = " if not exist ".join(f'"{f}"' for f in folders)
+    script = (f"for /l %i in (1,1,60) do (ping -n 2 127.0.0.1 >nul & {steps} & "
+              f"if not exist {done} exit)")
+    try:
+        subprocess.Popen(
+            # A string, not a list: list2cmdline would escape the quotes as \" for cmd.
+            f'cmd /d /s /c "{script}"',
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, close_fds=True,
+        )
+    except (OSError, AttributeError, ValueError):
+        for f in folders:
+            try:
+                _delay_until_reboot(f)
+            except (OSError, AttributeError):
+                pass
