@@ -18,7 +18,7 @@ copycord config export [FILE] [--show-secrets] [--data-dir PATH]
 copycord config import FILE [--data-dir PATH]
 copycord service install [--user] [--data-dir PATH]
 copycord service start|stop|status|uninstall [--user]
-copycord update [--channel stable|beta|dev] [--repo OWNER/NAME] [--ref REF] [--tag VERSION] [--no-install]
+copycord update [--channel stable|beta|dev] [--repo OWNER/NAME] [--ref REF] [--tag VERSION] [--no-install] [--force]
 copycord update status
 copycord uninstall [--purge|--keep-data] [--yes] [--keep-service] [--dry-run] [--data-dir PATH]
 copycord --version | -V
@@ -556,6 +556,8 @@ After a successful update, a running [service](#copycord-service) is restarted s
 
 `copycord update` shows one progress line while it installs, then `Copycord updated to <version> (<commit>)` and, if the service was running, `restarted the copycord service`. The installer output is saved to `logs/update.log` in the [data directory](#data-dir); if the install fails, the last 20 lines and the log path are printed.
 
+When the install is already the newest on the saved channel (the same release version on `stable` or `beta`, the same commit as the branch head on `dev`), `copycord update` prints `Copycord is up to date (<version>)`, with the commit on `dev` (`Copycord is up to date (3.28.0, dd7c8b2)`), and exits with status 0 without a backup or an install. If GitHub cannot be reached for that check, it warns and installs as before. A channel switch, `--tag`, `--force` and `copycord doctor --fix` always install.
+
 On Windows, a running program's files cannot be deleted, but they can be renamed. So right before the install, `copycord update` stops the service if it is running and moves the running `python.exe`, the `copycord.exe` launcher and the other executable files of the install into `.copycord-old` in the Copycord home. Then it installs in the same window and returns when the update is done, like on Linux and macOS. The next update deletes `.copycord-old`. If the install fails before replacing the old files, they are put back. If Copycord is running in another window (for example `copycord run`), `copycord update` stops with `Copycord is running in another window (process N); stop it first, then run this again` and changes nothing. `copycord doctor --fix` reinstalls the same way.
 
 `status` also shows when Copycord last checked for an update and whether auto-update is on.
@@ -610,6 +612,7 @@ copycord update --channel beta --no-install
 | `--ref REF` | Dev channel only: the git branch, tag or commit to install (default `main`). |
 | `--repo OWNER/NAME` | Dev channel only: the GitHub repository to install from (default `Copycord/Copycord`), for example a fork |
 | `--no-install` | Only saves `--channel` (and `--repo`, `--ref`), installs nothing. The install scripts use this. |
+| `--force` | Reinstalls even when Copycord is already up to date |
 
 ### Update channels {#update-channels}
 
