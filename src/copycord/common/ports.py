@@ -66,12 +66,10 @@ def insecure_dashboard(env: Optional[Mapping[str, str]] = None) -> Optional[str]
         return None
     if (env.get(ALLOW_INSECURE_ENV) or "").strip() == "1":
         return None
-    password = (env.get("PASSWORD") or "").strip()
-    if password and password != DEFAULT_PASSWORD:
+    if (env.get("PASSWORD") or "").strip() != DEFAULT_PASSWORD:
         return None
-    why = "no password" if not password else "the default password"
     return (
         f"{DASHBOARD_HOST_ENV}={host} makes the dashboard reachable from other computers, "
-        f"but it has {why}. Set your own PASSWORD, or remove {DASHBOARD_HOST_ENV} so the "
-        f"dashboard stays on this computer only (http://localhost)."
+        f"but it has the default password. Set your own PASSWORD, or set "
+        f"{DASHBOARD_HOST_ENV}=127.0.0.1 so the dashboard stays on this computer only (http://localhost)."
     )

@@ -112,9 +112,7 @@ def websocket_origin_ok(ws: WebSocket) -> bool:
 
 
 def websocket_session_ok(ws: WebSocket) -> bool:
-    """True when no PASSWORD is set or the cc_admin cookie is a valid session."""
-    if not auth.ADMIN_PASSWORD:
-        return True
+    """True when the cc_admin cookie is a valid session."""
     sess = auth.decode_admin_session(ws.cookies.get(auth.ADMIN_COOKIE_NAME))
     return bool(sess and sess.get("ok") is True)
 

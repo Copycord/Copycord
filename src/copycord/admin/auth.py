@@ -91,7 +91,10 @@ def _limiter_key(request: Request) -> str:
 
 
 def password_matches(given: str, expected: str) -> bool:
-    """Constant-time compare of the submitted and configured passwords."""
+    """Constant-time compare of the submitted and configured passwords; an
+    empty password never matches."""
+    if not expected:
+        return False
     return hmac.compare_digest(
         (given or "").encode("utf-8"), (expected or "").encode("utf-8")
     )
@@ -250,13 +253,10 @@ def decode_admin_session(token: str | None) -> Optional[Dict]:
 
 
 class PasswordGuardMiddleware(BaseHTTPMiddleware):
-    """Single-password gate: with PASSWORD set, everything except /login, /health and static assets needs a valid session cookie.
+    """Single-password gate: everything except /login, /health and static assets needs a valid session cookie.
     Unauthenticated GET/HEAD requests redirect to /login; others get a 401."""
 
     async def dispatch(self, request: Request, call_next):
-
-        if not ADMIN_PASSWORD:
-            return await call_next(request)
 
         path = request.url.path or "/"
 
@@ -293,9 +293,6 @@ def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) ->
     _session_secret = secret_key
     _session_signer = URLSafeTimedSerializer(secret_key, salt="copycord-admin")
 
-    # The side menu shows "Log out" only when there is a password to log out of.
-    templates.env.globals["logout_enabled"] = lambda: bool(ADMIN_PASSWORD)
-
     app.add_middleware(PasswordGuardMiddleware)
     # Added last so it runs first; security imports this module.
     from copycord.admin.security import CSRFMiddleware
@@ -316,9 +313,6 @@ def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) ->
 
     @app.get("/login", response_class=HTMLResponse)
     async def login_page(request: Request):
-
-        if not ADMIN_PASSWORD:
-            return RedirectResponse("/", status_code=status.HTTP_302_FOUND)
 
         sess = decode_admin_session(request.cookies.get(ADMIN_COOKIE_NAME))
         if sess and sess.get("ok") is True:
@@ -343,10 +337,7 @@ def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) ->
         password: str = Form(...),
     ):
 
-        if not ADMIN_PASSWORD:
-            return RedirectResponse("/", status_code=status.HTTP_302_FOUND)
-
-        key = _limiter_key(request)
+        key =_limiter_key(request)
         wait = LOGIN_LIMITER.retry_after(key)
         if wait:
             LOGGER.warning(

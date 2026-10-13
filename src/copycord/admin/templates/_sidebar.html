@@ -2,8 +2,7 @@
       sidebar_active: config | channels | guilds | forwarding | scraper | system | logs (or unset)
       sidebar_hide:   list of the same names to leave out (optional)
       sidebar_footer: "social" for the GitHub + Discord footer (optional)
-    logout_enabled() is a Jinja global set by init_admin_auth; the Log out item
-    is handled by js/logout.js. -#}
+    The Log out item is handled by js/logout.js. -#}
 {%- set sidebar_hide = sidebar_hide | default([]) -%}
   <div id="menu-backdrop" class="menu-backdrop" hidden></div>
   <aside id="side-menu" class="side-menu" aria-hidden="true" aria-label="Site menu">
@@ -100,7 +99,6 @@
             <span class="mi-label">Logs</span>
           </a>
         </li>
-{% if logout_enabled and logout_enabled() %}
         <li>
           <a class="menu-item" href="/login" rel="noopener" role="button" data-logout>
             <span class="mi" aria-hidden="true">
@@ -113,7 +111,6 @@
             <span class="mi-label">Log out</span>
           </a>
         </li>
-{% endif %}
       </ul>
     </nav>
 

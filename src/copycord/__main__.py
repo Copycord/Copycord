@@ -859,7 +859,7 @@ def check_password(env: Optional[Mapping[str, str]] = None) -> Check:
             f"change PASSWORD in {env_path()}, then run {_cmd('copycord restart')}",
         )
     if not value:
-        return Check(INFO, "no dashboard password", "the dashboard has no login page")
+        return Check(INFO, "no dashboard password", "copycord run will make one and save it in .env")
     return Check(PASS, "dashboard password set")
 
 
@@ -1202,12 +1202,35 @@ def fix_layout(checks: List[Check]) -> str:
 
 
 def fix_env_file(checks: List[Check]) -> str:
-    """Write the default <home>/.env."""
+    """Write the default <home>/.env with a random PASSWORD."""
     from copycord import envfile
 
-    path = envfile.write_template()
+    path = envfile.write_template(password=envfile.new_password())
     envfile.load(path)
     return str(path)
+
+
+def ensure_password() -> bool:
+    """The dashboard always needs a password. When PASSWORD is missing or empty,
+    a random one is saved to <home>/.env and shown once; in Docker, Copycord
+    does not start."""
+    if (os.environ.get("PASSWORD") or "").strip():
+        return True
+    from copycord import envfile, ui
+    from copycord.common.paths import in_docker
+
+    if in_docker():
+        ui.fail(
+            "Copycord did not start",
+            "the dashboard needs a password. Set PASSWORD in your Docker settings, then start it again.",
+        )
+        return False
+    password = envfile.new_password()
+    path = envfile.set_value("PASSWORD", password)
+    os.environ["PASSWORD"] = password
+    print(f"Your dashboard password is: {password}")
+    print(f"It is saved in {path}. Change it with: copycord config set PASSWORD <new password>")
+    return True
 
 
 def fix_backup(checks: List[Check]) -> str:
@@ -2624,6 +2647,8 @@ def run_command(argv: Optional[List[str]] = None) -> int:
         # Console only here; supervisor.run adds the per-role files once DATA_DIR is set.
         setup_logging(roles=())
         if not check_removed_options():
+            return 1
+        if not ensure_password():
             return 1
         exposed = insecure_dashboard()
         if exposed:
