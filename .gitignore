@@ -3,6 +3,8 @@
 src/copycord/admin/frontend/node_modules/
 /src/copycord/admin/static/assets/
 src/copycord/admin/frontend/dist/
+src/copycord/admin/web/node_modules/
+src/copycord/admin/web/dist/
 __pycache__/
 *.pyc
 .env
