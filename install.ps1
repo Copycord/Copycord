@@ -222,6 +222,13 @@ Test a branch, no release needed:
     }
     $uv = Get-Command uv -ErrorAction SilentlyContinue
 
+    # An upgrade or a reinstall (Copycord or its home is already there) ends with
+    # `copycord doctor --fix`, so the automatic repairs happen on their own. A
+    # first install has nothing to repair.
+    $upgrade = [bool](Get-Command copycord -ErrorAction SilentlyContinue) -or
+        (Test-Path (Join-Path $env:USERPROFILE '.local\bin\copycord.exe')) -or
+        (Test-Path (Join-Path $homeDir '.env')) -or (Test-Path (Join-Path $homeDir 'data.db'))
+
     # --- plan ---------------------------------------------------------------
 
     Out ''
@@ -249,12 +256,14 @@ Test a branch, no release needed:
         else { PlanLine 'node' "$(& node -v) at $((Get-Command node).Source)" }
     }
     if ($uv) { PlanLine 'uv' $uv.Source } else { PlanLine 'uv' "not found, will install it from $UvInstaller" }
+    if ($upgrade) { PlanLine 'repair' 'copycord doctor --fix (an upgrade or reinstall)' }
     if ($verify) { PlanLine 'verify' 'copycord --version and copycord doctor' }
     if ($dryRun) { PlanLine 'dry run' 'nothing will be changed' }
 
     # uv, install, finishing up; release: find the release; git: fetch, build.
     $script:stepTotal = if ($method -eq 'git') { 5 } else { 4 }
     if ($needNode) { $script:stepTotal++ }
+    if ($upgrade) { $script:stepTotal++ }
     if ($verify) { $script:stepTotal++ }
 
     try {
@@ -510,6 +519,24 @@ Test a branch, no release needed:
         if ($channelArgs) {
             if ($dryRun) { Dry "copycord update $($channelArgs -join ' ') --no-install" }
             else { Run "Saving the update channel ($($channelArgs -join ' '))" $exe (@('update') + $channelArgs + '--no-install') }
+        }
+
+        # --- repair ---------------------------------------------------------
+
+        # After an upgrade or a reinstall: the doctor's automatic fixes (piped, it never
+        # prompts). Its exit status does not fail the install; what is left is in its output.
+        if ($upgrade) {
+            Step 'Repairing (copycord doctor --fix)'
+            if ($dryRun) { Dry 'copycord doctor --fix' }
+            else {
+                # Windows PowerShell turns stderr lines (uv's progress) into
+                # errors under 'Stop'; here they are only output.
+                $prevPreference = $ErrorActionPreference
+                $ErrorActionPreference = 'Continue'
+                try { & $exe doctor --fix 2>&1 | ForEach-Object { Out "    $_" } }
+                finally { $ErrorActionPreference = $prevPreference }
+                $global:LASTEXITCODE = 0
+            }
         }
 
         # --- verify ---------------------------------------------------------

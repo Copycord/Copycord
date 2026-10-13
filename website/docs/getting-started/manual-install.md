@@ -41,6 +41,7 @@ It prints a plan, then runs numbered steps:
 2. **Finding the release:** the newest stable release, or the one you asked for.
 3. **Installing Copycord:** `uv tool install --force` with the release wheel, a per-user install with no sudo.
 4. **Finishing up:** adds uv's tool directory to your `PATH` when needed (`uv tool update-shell`), writes [`.env`](/docs/getting-started/configuration) in the Copycord home if it does not exist yet, and saves the update channel when you chose one.
+5. **Repairing (upgrades and reinstalls only):** when Copycord or its home was already there, runs [`copycord doctor --fix`](/docs/cli#doctor-fix) to apply the automatic repairs, such as starting a stopped service or taking an overdue backup. Anything it cannot fix is listed; it never fails the install. A first install skips this step.
 
 It ends with a box that shows the settings file, the default password `copycord`, the next commands (`copycord run`, `copycord restart`, `copycord update`) and `http://localhost:8080`. It does not start Copycord and does not touch Docker. It refuses to run as root: Copycord installs for your user.
 

@@ -13,6 +13,8 @@ copycord restart              restart the OS service so it re-reads <home>/.env
 copycord --version            print the version and the update channel
 copycord doctor [--verbose]   grouped health checks: install, settings, data,
                               running and updates (exit 1 on a problem)
+copycord doctor --fix         run the checks, apply every automatic fix, ask for
+                              a free port in a terminal, then check again
 copycord config get KEY       read one setting (secrets masked)
 copycord config set KEY VAL   write one setting: env-only keys such as PASSWORD
                               go to <home>/.env, the rest to the DB app_config
@@ -124,6 +126,7 @@ COMMAND_EXAMPLES = {
     "copycord doctor": (
         ("copycord doctor", "check everything"),
         ("copycord doctor --verbose", "also show the paths checked"),
+        ("copycord doctor --fix", "fix what it can, then check again"),
     ),
     "copycord config": (
         ("copycord config set PASSWORD hunter2", "change the dashboard password"),
@@ -404,10 +407,14 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         parents=[data_dir],
         help="check this machine can run Copycord",
         description="Check the install, the settings, the data, whether Copycord "
-        "is running and whether an update is out. Exits 1 when a check fails.",
+        "is running and whether an update is out. Exits 1 when a check fails. "
+        "--fix repairs what it can, then checks again.",
     )
     doctor_p.add_argument("--verbose", "-v", action="store_true",
                           help="show the path behind every check")
+    doctor_p.add_argument("--fix", action="store_true",
+                          help="apply every automatic fix, ask before moving the dashboard "
+                          "to a free port when there is a terminal, then check again")
 
     config = sub.add_parser(
         "config",
@@ -571,6 +578,8 @@ class Check(NamedTuple):
     reason: str = ""
     # The file or folder checked; shown on WARN/FAIL or with --verbose.
     path: str = ""
+    # Key into FIXES when `copycord doctor --fix` can repair it.
+    fix: str = ""
 
 
 # --- Install ---------------------------------------------------------------
@@ -619,7 +628,7 @@ def admin_static_dir() -> Optional[Path]:
 def check_frontend(static_dir: Optional[Path] = None) -> Check:
     static_dir = admin_static_dir() if static_dir is None else static_dir
     if static_dir is None:
-        return Check(FAIL, "web UI missing", "the admin package cannot be found")
+        return Check(FAIL, "web UI missing", "the admin package cannot be found", fix="reinstall")
     main_js = static_dir / "assets" / "main.js"
     if main_js.is_file():
         return Check(PASS, "web UI included", path=str(static_dir))
@@ -629,6 +638,7 @@ def check_frontend(static_dir: Optional[Path] = None) -> Check:
         "the dashboard will not load; reinstall Copycord (a git install needs npm "
         "to build it)",
         str(main_js),
+        "reinstall",
     )
 
 
@@ -658,6 +668,7 @@ def check_dependencies(imports=None) -> Check:
         status,
         f"missing dependencies: {names}",
         "; ".join(c.reason for c in bad) + "; reinstall Copycord to repair them",
+        fix="reinstall",
     )
 
 
@@ -681,21 +692,23 @@ def check_env_file(path: Optional[Path] = None) -> Check:
         WARN,
         ".env not found",
         f"{path} is missing, so every setting is at its default; "
-        "`copycord config set PASSWORD <new>` creates it",
+        "`copycord doctor --fix` writes it with the defaults",
         str(path),
+        "env_file",
     )
 
 
 def check_password(env: Optional[Mapping[str, str]] = None) -> Check:
-    from copycord.envfile import DEFAULT_PASSWORD
+    from copycord.envfile import DEFAULT_PASSWORD, env_path
 
     env = os.environ if env is None else env
     value = env.get("PASSWORD")
     if value == DEFAULT_PASSWORD:
+        # No fix: `doctor --fix` never changes the password.
         return Check(
             WARN,
-            "dashboard password is the default",
-            "change it with `copycord config set PASSWORD <new>`, then `copycord restart`",
+            "the default password is still set",
+            f"change PASSWORD in {env_path()}, then run `copycord restart`",
         )
     if not value:
         return Check(INFO, "no dashboard password", "the dashboard has no login page")
@@ -749,7 +762,8 @@ def check_data_dir(path: Path) -> Check:
     while not parent.exists() and parent != parent.parent:
         parent = parent.parent
     if parent.is_dir() and os.access(parent, os.W_OK | os.X_OK):
-        return Check(PASS, "home will be created on first run", path=str(path))
+        return Check(WARN, "home folder missing", "Copycord creates it on first run",
+                     str(path), "home")
     return Check(
         FAIL, "home cannot be created", f"{parent} is not writable", str(path)
     )
@@ -839,10 +853,10 @@ def check_backups(
             fresh = True
         if fresh:
             return Check(INFO, "no backups yet", path=str(backup_dir))
-        return Check(WARN, "no backups yet", hint, str(backup_dir))
+        return Check(WARN, "no backups yet", hint, str(backup_dir), "backup")
     age = now - max(times)
     if age > BACKUP_MAX_AGE:
-        return Check(WARN, f"last backup {_age(age)} ago", hint, str(backup_dir))
+        return Check(WARN, f"last backup {_age(age)} ago", hint, str(backup_dir), "backup")
     return Check(PASS, f"last backup {_age(age)} ago", path=str(backup_dir))
 
 
@@ -894,6 +908,7 @@ def check_admin_port(
                 WARN,
                 f"port {port} in use",
                 f"{e.strerror or e}; another program has it, so set ADMIN_PORT to a free port",
+                fix="port",
             )
     return Check(PASS, f"admin port {port} free")
 
@@ -917,7 +932,7 @@ def check_service(state) -> Check:
     if state.running:
         return Check(PASS, "service running", path=state.where)
     return Check(WARN, "service installed, not running",
-                 "start it with `copycord service start`", state.where)
+                 "start it with `copycord service start`", state.where, "service")
 
 
 # --- Updates ---------------------------------------------------------------
@@ -969,34 +984,293 @@ def doctor_summary(checks: List[Check]) -> str:
             f"{fails} problem{'' if fails == 1 else 's'}")
 
 
-def doctor(verbose: bool = False) -> int:
+# --- fixes -----------------------------------------------------------------
+
+
+class FixError(Exception):
+    """A fix that cannot be applied; the message says why."""
+
+
+def _env_owned(key: str) -> None:
+    """FixError when KEY comes from the real environment, where a value written
+    to <home>/.env would not apply (the real environment wins)."""
+    from copycord import envfile
+
+    if key in os.environ and envfile.get(key) != os.environ[key]:
+        raise FixError(f"{key} is set in the environment (for example a compose file); "
+                       "change it there")
+
+
+def fix_home(checks: List[Check]) -> str:
+    from copycord.common.paths import data_dir
+
+    path = data_dir()
+    path.mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+def fix_env_file(checks: List[Check]) -> str:
+    """The installer's .env, from the same envfile.template()."""
+    from copycord import envfile
+
+    path = envfile.write_template()
+    envfile.load(path)
+    return str(path)
+
+
+def fix_backup(checks: List[Check]) -> str:
+    """A daily-style backup now, with the scheduler the dashboard uses."""
+    from copycord.common.backup_scheduler import (
+        BackupConfig,
+        DailySQLiteBackupScheduler,
+        record_backup_stats,
+    )
+    from copycord.common.db import backups_dir
+    from copycord.common.paths import db_path
+
+    db = db_path()
+    if not db.is_file():
+        raise FixError(f"there is no database at {db} yet")
+    cfg = BackupConfig(
+        db_path=db,
+        backup_dir=backups_dir(),
+        retain=int(os.getenv("BACKUP_RETAIN") or "14"),
+        timezone=os.getenv("TZ") or "UTC",
+    )
+    scheduler = DailySQLiteBackupScheduler(cfg, logger=logging.getLogger("copycord.backup"))
+    archive = asyncio.run(scheduler.run_now())
+    try:
+        conn = sqlite3.connect(str(db))
+        try:
+            with conn:
+                record_backup_stats(
+                    lambda k, v: conn.execute(
+                        "INSERT INTO app_config(key,value) VALUES(?,?) "
+                        "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                        (k, v),
+                    ),
+                    archive,
+                )
+        finally:
+            conn.close()
+    except sqlite3.Error:
+        # No app_config table yet: the dashboard has no backup stats to show.
+        pass
+    return str(archive)
+
+
+def _can_reinstall(checks: List[Check]) -> None:
+    """FixError when `copycord update` cannot reinstall this Copycord."""
+    from copycord import update
+
+    kind = update.detect_installer()
+    if kind in (update.DOCKER, update.SOURCE):
+        raise FixError(f"Copycord was installed with {kind}; {update.manual_hint(kind)}")
+    if kind not in (update.UV_TOOL, update.PIPX):
+        raise FixError(f"Copycord was installed with {kind}; reinstall it the same way")
+    if os.environ.get("COPYCORD_SKIP_FRONTEND") and all(c.name == "web UI missing" for c in checks):
+        raise FixError("COPYCORD_SKIP_FRONTEND is set, so a reinstall would leave the web UI out too")
+
+
+def fix_reinstall(checks: List[Check]) -> str:
+    """The running version again, from the saved channel and ref."""
+    from copycord import update
+
+    _can_reinstall(checks)
+    rc = update.update(reinstall=True)
+    if rc:
+        raise FixError(f"the reinstall failed (exit {rc}); see the output above")
+    # The re-check imports what the reinstall put back.
+    importlib.invalidate_caches()
+    return f"v{update.current_version()}"
+
+
+def fix_service(checks: List[Check]) -> str:
+    from copycord import service
+
+    svc = service.get_service()
+    try:
+        svc.start()
+    except service.ServiceError as e:
+        raise FixError(str(e)) from None
+    return svc.where
+
+
+def next_free_port(port: int, host: str = ADMIN_BIND_HOST) -> Optional[int]:
+    """The first port above PORT that nothing listens on."""
+    for candidate in range(port + 1, min(port + 101, 65536)):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if sys.platform != "win32":
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                s.bind((host, candidate))
+            except OSError:
+                continue
+        return candidate
+    return None
+
+
+def _port_plan() -> int:
+    _env_owned("ADMIN_PORT")
+    port = admin_port()
+    free = next_free_port(port)
+    if free is None:
+        raise FixError(f"no free port found above {port}; set ADMIN_PORT yourself")
+    return free
+
+
+def fix_port(checks: List[Check]) -> str:
+    from copycord import envfile
+
+    free = _port_plan()
+    path = envfile.set_value("ADMIN_PORT", str(free))
+    os.environ["ADMIN_PORT"] = str(free)
+    return f"ADMIN_PORT={free} in {path}"
+
+
+class Fix(NamedTuple):
+    # (checks) -> what it did; raises FixError when it cannot be done.
+    apply: object
+    # Printed with the apply() result once it worked.
+    done: str
+    # Guided fixes only (they need input): (checks) -> the y/N question,
+    # asked in a terminal; may raise FixError when it cannot be done.
+    question: object = None
+    # Without a terminal: "run `copycord doctor --fix` in a terminal to <skipped>".
+    skipped: str = ""
+
+    @property
+    def guided(self) -> bool:
+        return self.question is not None
+
+
+def _port_question(checks):
+    return (f"Port {admin_port()} is taken by another program. "
+            f"Set ADMIN_PORT to {_port_plan()}?")
+
+
+# In the order they run: the home before the files in it, a reinstall and
+# the settings before the service starts.
+FIXES = {
+    "home": Fix(fix_home, "created the Copycord home"),
+    "env_file": Fix(fix_env_file, "recreated .env with the default settings"),
+    "backup": Fix(fix_backup, "backed up the database"),
+    "reinstall": Fix(fix_reinstall, "reinstalled Copycord"),
+    "port": Fix(fix_port, "moved the dashboard to a free port", question=_port_question,
+                skipped="move the dashboard to a free port"),
+    "service": Fix(fix_service, "started the copycord service"),
+}
+
+
+def apply_fixes(checks: List[Check]) -> int:
+    """Apply FIXES for the flagged checks: the automatic ones directly, the
+    guided ones after a y/N in a terminal; the number applied."""
     from copycord import ui
 
-    sections = run_doctor()
-    if ui.use_color():
-        ui.heading("Copycord doctor")
+    interactive = ui.is_interactive()
+    flagged = [c for c in checks if c.status in (WARN, FAIL)]
+    wanted = {}
+    for c in flagged:
+        if c.fix in FIXES:
+            wanted.setdefault(c.fix, []).append(c)
+    applied = 0
+    for key, fix in FIXES.items():
+        if key not in wanted:
+            continue
+        found = wanted[key]
+        name = found[0].name
+        if fix.guided and not interactive:
+            ui.info(name, f"run `copycord doctor --fix` in a terminal to {fix.skipped}")
+            continue
+        try:
+            if fix.guided and not ui.confirm(fix.question(found), default=False):
+                ui.info(name, "skipped")
+                continue
+            result = fix.apply(found)
+        except (KeyboardInterrupt, EOFError):
+            raise
+        except Exception as e:
+            ui.fail(f"could not fix: {name}", str(e) or type(e).__name__, stream=sys.stdout)
+            continue
+        ui.ok(fix.done, result)
+        applied += 1
+    for c in flagged:
+        if c.fix not in FIXES:
+            ui.info(c.name, f"{c.reason} (no automatic fix)" if c.reason else "no automatic fix")
+    return applied
+
+
+def _print_checks(rows: List[Check], verbose: bool) -> None:
+    from copycord import ui
+
     status = {PASS: "ok", WARN: "warn", FAIL: "fail", INFO: "info"}
-    checks: List[Check] = []
-    for title, rows in sections:
-        ui.heading(title)
-        for c in rows:
-            checks.append(c)
-            parts = [c.reason]
-            if c.path and (verbose or c.status in (WARN, FAIL)):
-                parts.append(c.path)
-            ui.line(status[c.status], c.name, "; ".join(p for p in parts if p), stream=sys.stdout)
-    failed = any(c.status == FAIL for c in checks)
+    for c in rows:
+        parts = [c.reason]
+        if c.path and (verbose or c.status in (WARN, FAIL)):
+            parts.append(c.path)
+        ui.line(status[c.status], c.name, "; ".join(p for p in parts if p), stream=sys.stdout)
+
+
+def _print_summary(checks: List[Check], fixable: int = 0) -> None:
+    """The summary line, then a pointer to `copycord doctor --fix` when FIXABLE."""
+    from copycord import ui
+
     summary = doctor_summary(checks)
     print()
     if not ui.use_color():
         print(summary)
-    elif failed:
+    elif any(c.status == FAIL for c in checks):
         ui.fail(summary, stream=sys.stdout)
     elif summary != "All good":
         ui.warn(summary, stream=sys.stdout)
     else:
         ui.ok(summary, f"start it with {ui.cmd('copycord run')}")
-    return 1 if failed else 0
+    if fixable:
+        print(ui.dim(f"Run `copycord doctor --fix` to fix {fixable} of them."))
+
+
+def doctor(verbose: bool = False, fix: bool = False) -> int:
+    from copycord import ui
+
+    if fix:
+        # The fixes also write to stderr and run uv; keep the order when piped.
+        try:
+            sys.stdout.reconfigure(line_buffering=True)
+        except (AttributeError, ValueError):
+            pass
+    sections = run_doctor()
+    if ui.use_color():
+        ui.heading("Copycord doctor")
+    checks: List[Check] = []
+    for title, rows in sections:
+        ui.heading(title)
+        _print_checks(rows, verbose)
+        checks += rows
+    flagged = [c for c in checks if c.status in (WARN, FAIL)]
+    if not fix:
+        _print_summary(checks, sum(c.fix in FIXES for c in flagged))
+        return 1 if any(c.status == FAIL for c in checks) else 0
+
+    _print_summary(checks)
+    ui.heading("Fixes")
+    if not flagged:
+        ui.ok("nothing to fix")
+        return 0
+    try:
+        apply_fixes(checks)
+    except (KeyboardInterrupt, EOFError):
+        print()
+        ui.warn("fixes stopped", "the ones above were applied", stream=sys.stdout)
+        return 130
+
+    ui.heading("Re-check")
+    checks = [c for _, rows in run_doctor() for c in rows]
+    flagged = [c for c in checks if c.status in (WARN, FAIL)]
+    _print_checks(flagged, verbose)
+    # Only the guided fixes skipped for want of a terminal are worth another run.
+    guided = 0 if ui.is_interactive() else sum(c.fix in FIXES and FIXES[c.fix].guided for c in flagged)
+    _print_summary(checks, guided)
+    return 1 if any(c.status == FAIL for c in checks) else 0
 
 
 # --------------------------------------------------------------------------
@@ -1460,7 +1734,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     envfile.load()
 
     if args.command == "doctor":
-        return doctor(verbose=args.verbose)
+        return doctor(verbose=args.verbose, fix=args.fix)
 
     if args.command == "restart":
         return restart_command()

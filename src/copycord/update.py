@@ -211,13 +211,17 @@ def _quote(arg: str) -> str:
     return f'"{arg}"' if " " in arg else arg
 
 
-def install_command(kind: str, spec: str) -> Tuple[Optional[list], str]:
+def install_command(kind: str, spec: str, reinstall: bool = False) -> Tuple[Optional[list], str]:
     """(command to run, or None) and a human hint for installing spec with kind.
 
     spec is a release wheel URL (stable, beta, --tag) or git_spec() (dev).
+    reinstall: uv reinstalls every package and rebuilds a git spec instead of
+    keeping what is installed or cached (pipx --force already recreates the venv).
     """
     if kind == UV_TOOL:
         cmd = ["uv", "tool", "install", "--force", "--python", PYTHON_VERSION, spec]
+        if reinstall:
+            cmd.insert(3, "--reinstall")
         return cmd, " ".join(_quote(a) for a in cmd)
     if kind == PIPX:
         cmd = ["pipx", "install", "--force", spec]
@@ -586,8 +590,16 @@ def update(
     repo: Optional[str] = None,
     no_backup: bool = False,
     yes: bool = False,
+    reinstall: bool = False,
 ) -> int:
+    """reinstall: install the running version again from the saved channel
+    (a dev ref from git, else the release of this exact version); used by
+    `copycord doctor --fix`."""
     saved = load_channel()
+    if reinstall:
+        channel = branch = repo = None
+        tag = None if saved.channel == DEV else current_version()
+        yes = True
     if tag and (channel or branch or repo):
         _err("--tag installs one exact version; it cannot be combined with "
              "--channel, --repo or --ref")
@@ -631,7 +643,10 @@ def update(
         print(f"Copycord was installed with {kind}; update it with:\n  {manual_hint(kind)}")
         return 1
 
-    ui.heading(f"Updating Copycord ({target.describe() if not tag else 'tag ' + tag})")
+    if reinstall:
+        ui.heading(f"Reinstalling Copycord ({target.describe() if not tag else 'v' + tag})")
+    else:
+        ui.heading(f"Updating Copycord ({target.describe() if not tag else 'tag ' + tag})")
     release = None
     if target.channel == DEV and not tag:
         spec = git_spec(target.ref, target.repo)
@@ -651,7 +666,7 @@ def update(
             return 1
         ui.ok(f"release {release.tag}")
 
-    cmd, hint = install_command(kind, spec)
+    cmd, hint = install_command(kind, spec, reinstall)
     if cmd is None:
         print(f"Copycord was installed with {kind}; update it with:\n  {hint}")
         return 1
