@@ -138,6 +138,59 @@ def test_auto_update_skips_terminal_and_applies_in_service(tmp_path, monkeypatch
     assert uc.auto_update_once() and applied == [1]
 
 
+def _auto_on(tmp_path, monkeypatch, channel):
+    set_config(tmp_path, uc.KEY_AUTO_UPDATE, "true")
+    monkeypatch.setattr(update, "load_channel", lambda: channel)
+    monkeypatch.setattr(update, "fetch_latest_release", lambda **kw: fake_release("4.0.1"))
+    monkeypatch.setattr(update, "fetch_branch_head", lambda *a, **kw: update.Commit("b" * 40, "", ""))
+    monkeypatch.setattr(update, "detect_installer", lambda *a, **kw: update.UV_TOOL)
+    monkeypatch.setattr(uc.ui, "is_interactive", lambda: False)
+    applied = []
+    monkeypatch.setattr(update, "update", lambda **kw: applied.append(kw) or 0)
+    return applied
+
+
+def test_auto_update_passes_auto(tmp_path, monkeypatch):
+    applied = _auto_on(tmp_path, monkeypatch, update.Channel(update.STABLE))
+    assert uc.auto_update_once()
+    assert applied == [{"yes": True, "auto": True}]
+
+
+@pytest.mark.parametrize("channel", [update.Channel(update.DEV, "main"), update.Channel(update.BETA)])
+def test_dev_and_beta_need_the_opt_in(tmp_path, monkeypatch, channel):
+    applied = _auto_on(tmp_path, monkeypatch, channel)
+    assert not uc.auto_update_once() and not applied
+    set_config(tmp_path, uc.KEY_AUTO_UPDATE_ANY, "true")
+    assert uc.auto_update_once() and len(applied) == 1
+
+
+def test_auto_update_stays_off_after_a_rollback(tmp_path, monkeypatch):
+    applied = _auto_on(tmp_path, monkeypatch, update.Channel(update.STABLE))
+    update.stop_auto_update("the dashboard did not answer", "4.0.0", "4.0.1")
+    assert not uc.auto_update_once() and not applied
+    update.clear_auto_update_stop()
+    assert uc.auto_update_once() and len(applied) == 1
+
+
+def test_loop_checks_a_pending_update_first(monkeypatch):
+    import asyncio
+
+    class Stop(BaseException):
+        pass
+
+    seen = []
+    monkeypatch.setattr(update, "finish_pending", lambda: seen.append("health"))
+
+    def once():
+        seen.append("cycle")
+        raise Stop
+
+    monkeypatch.setattr(uc, "auto_update_once", once)
+    with pytest.raises(Stop):
+        asyncio.run(uc.auto_update_loop(interval=0))
+    assert seen == ["health", "cycle"]
+
+
 def test_auto_update_does_nothing_when_disabled(monkeypatch):
     monkeypatch.setattr(update, "update", lambda **kw: pytest.fail("must not update"))
     assert not uc.auto_update_once()
