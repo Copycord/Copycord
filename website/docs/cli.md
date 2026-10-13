@@ -252,7 +252,7 @@ copycord doctor --data-dir ~/copycord/data
 | Running | `ADMIN_PORT` (default 8080) is free, or in use by Copycord itself; whether the OS service is installed and running |
 | Updates | The update check, cached for 24 hours. A network error is only reported, never a failure |
 
-Without colors it looks like this on a new install:
+Piped or redirected to a file it prints plain sections, like this on a new install:
 
 ```
 Install
@@ -282,6 +282,33 @@ Needs your attention
 
 ! 1 warning, 0 problems
 ```
+
+In a terminal the same report hangs off a line down the left, one box per group, with the version at the top and the summary on the last line:
+
+```
+Copycord v4.0.0 (1a2b3c4) · Ultimate Discord server mirroring and utility toolkit
+
+┌  Copycord doctor
+│
+◇  Install ───────────────────────────────────────╮
+│                                                 │
+│  ✓ Copycord v4.0.0 (1a2b3c4) · stable channel   │
+│  ✓ Python 3.12.3                                │
+│  ✓ web UI included                              │
+│  ✓ dependencies OK                              │
+│                                                 │
+├─────────────────────────────────────────────────╯
+│
+◇  Updates ──────────────╮
+│                        │
+│  ✓ up to date          │
+│                        │
+├────────────────────────╯
+│
+└  ! 1 warning, 0 problems
+```
+
+Long lines wrap to the width of the terminal. `copycord doctor --brief` and `--json` keep their plain output.
 
 Each line starts with `✓`, `!`, `✗` or `•`; in a terminal they are green, yellow, red and blue. The report ends with a **Needs your attention** section that lists each warning and problem once with what to do, then a last line: `✓ All good`, or the number of warnings and problems. A warning that `--fix` can repair says so there, for example `! .env not found  run copycord doctor --fix to create it with the default settings`, while its line in the group shows the path. The command exits with status 1 when any check fails and 0 otherwise (warnings included), so it can be used in scripts. When `copycord doctor --fix` can repair some of the warnings and problems, a last line says how many.
 
