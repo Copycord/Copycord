@@ -317,5 +317,5 @@ _POOL = ProxyPool()
 
 
 def get_pool() -> ProxyPool:
-    """The single process-wide proxy pool."""
+    """The shared, process-wide proxy pool."""
     return _POOL

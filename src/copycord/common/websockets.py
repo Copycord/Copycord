@@ -92,7 +92,7 @@ class WebsocketManager:
         """
         Spins up a websockets.server using `handler` for each incoming JSON message.
         Runs until cancelled by the event loop.
-        In single-process mode the handler is registered in-process instead.
+        Under the supervisor the handler is registered in-process instead.
         """
         reg = inprocess.active()
         if reg is not None:
@@ -672,7 +672,7 @@ class AdminBus:
     async def subscribe(self, admin_ws_url: str, handler: MessageHandler):
         """
         Connect to admin /ws/out and invoke `handler(event_dict)` per JSON event.
-        In single-process mode the admin's hub feeds this loop directly.
+        Under the supervisor the admin's hub feeds this loop directly.
         """
         reg = inprocess.active()
         if reg is not None:

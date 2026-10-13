@@ -8,7 +8,7 @@
 # =============================================================================
 
 """
-Process-wide logging for the single-process run.
+Process-wide logging for `copycord run`.
 
 One console handler on the root logger prints every record once, tagged
 [admin], [server] or [client] by the thread it was emitted on. Server and

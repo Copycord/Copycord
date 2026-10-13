@@ -8,7 +8,7 @@
 # =============================================================================
 
 """
-copycord run                  admin, server and client in one process
+copycord run                  start the dashboard, server bot and client
 copycord restart              restart the OS service so it re-reads <home>/.env
 copycord --version            print the version and the update channel
 copycord doctor               preflight checks (no network)
@@ -201,7 +201,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "run",
         parents=[data_dir],
         help="run Copycord",
-        description="Run the dashboard, the server bot and the client in one process. "
+        description="Run the dashboard, the server bot and the client. "
         "Finish the setup in the dashboard.",
     )
     sub.add_parser(

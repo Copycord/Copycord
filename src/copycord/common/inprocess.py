@@ -8,7 +8,7 @@
 # =============================================================================
 
 """
-In-process transport for the single-process supervisor.
+In-process transport used by the supervisor.
 
 When admin, server and client run in one interpreter, WebsocketManager and
 AdminBus hand messages over through this registry instead of loopback

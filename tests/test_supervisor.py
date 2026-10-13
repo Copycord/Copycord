@@ -1,5 +1,5 @@
 """
-Tests for the single-process supervisor (src/copycord/supervisor.py).
+Tests for the supervisor (src/copycord/supervisor.py).
 
 Fake roles only: no Discord, no uvicorn, network limited to loopback
 control websockets on ephemeral ports.

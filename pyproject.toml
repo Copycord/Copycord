@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "copycord"
 dynamic = ["version"]
-description = "Mirror Discord servers: admin UI, server bot and client in one process"
+description = "Mirror Discord servers in real time, managed from a web dashboard"
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"

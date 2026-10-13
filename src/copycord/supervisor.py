@@ -8,7 +8,7 @@
 # =============================================================================
 
 """
-Single-process supervisor: admin, server and client as asyncio tasks.
+Supervisor: runs admin, server and client as asyncio tasks.
 
 Each role is a RoleSupervisor that owns one task, restarts it on crash with
 capped exponential backoff and can be started/stopped on demand. Server and
@@ -223,7 +223,7 @@ class ControlEndpoint:
 
 @dataclass
 class Supervisor:
-    """All roles of one process, their control endpoints and shutdown order."""
+    """All roles, their control endpoints and shutdown order."""
 
     roles: Dict[str, RoleSupervisor]
     controls: List[ControlEndpoint] = field(default_factory=list)

@@ -1486,7 +1486,7 @@ async def _ws_cmd(url: str, payload: dict, timeout: float = 0.7) -> dict:
     with _Timer(f"_ws_cmd {url}") as t:
         try:
             async with asyncio.timeout(timeout):
-                # Single-process mode: role agents answer in-process.
+                # Role agents answer in-process.
                 res = await inprocess.admin_request(url, payload, timeout)
                 if res is not None:
                     return res
@@ -2144,7 +2144,7 @@ async def _inprocess_bus_event(ev: dict) -> None:
 
 @_on_startup
 async def _register_inprocess_bus():
-    # Single-process mode: AdminBus publish/subscribe reach the hub directly.
+    # AdminBus publish/subscribe reach the hub directly.
     reg = inprocess.active()
     if reg is not None:
         reg.register(inprocess.BUS_PATH, _inprocess_bus_event)
