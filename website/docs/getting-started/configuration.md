@@ -50,7 +50,7 @@ The installer writes the file on the first install, with every key set to its de
 # dashboard login password; change it from the default (empty: no login page)
 PASSWORD=copycord
 
-# SECRET_KEY is left out: Copycord keeps its own key in <home>/secret.key
+# SECRET_KEY is left out: Copycord keeps its own key in <home>/data/secret.key
 
 # dashboard port
 ADMIN_PORT=8080
@@ -68,7 +68,7 @@ LOG_LEVEL=INFO
 LOG_FORMAT=HUMAN
 
 # where the daily database backups go
-BACKUP_DIR=/home/alice/.copycord/backups
+BACKUP_DIR=/home/alice/.copycord/data/backups
 
 # time of the daily backup, HH:MM
 BACKUP_AT=03:17
@@ -143,7 +143,7 @@ Variables set in the real environment win over the file, for example `ADMIN_PORT
 | `UI_TZ` | `America/New_York` | Time zone shown in exports. |
 | `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG`; the dashboard's value wins once it is saved. |
 | `LOG_FORMAT` | `HUMAN` | `HUMAN` or `JSON` log lines. |
-| `BACKUP_DIR` | `<home>/backups` | Where the daily database backups go. |
+| `BACKUP_DIR` | `<data dir>/backups` | Where the daily database backups go. |
 | `BACKUP_AT` | `03:17` | Time of the daily backup, HH:MM. |
 | `BACKUP_RETAIN` | `14` | How many daily backups to keep. |
 | `COPYCORD_NO_UPDATE_CHECK` | `0` | `1` turns off the update hint on start. |

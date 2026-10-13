@@ -114,15 +114,17 @@ FAIL  database schema 5 is newer than this Copycord supports (4): ...
 
 ## The data directory {#data-dir}
 
-Copycord keeps its database (`data.db`), logs, backups and the saved update channel in one data directory (the Copycord home):
+Copycord keeps its database (`data.db`), `secret.key`, backups, exports and the saved update state in the data directory:
 
 | Where | Data directory |
 |-------|----------------|
-| Linux, macOS | `~/.copycord` |
-| Windows | `%USERPROFILE%\.copycord` |
+| Linux, macOS | `~/.copycord/data` |
+| Windows | `%USERPROFILE%\.copycord\data` |
 | Docker | `/data` (your `./data` volume) |
 
-This folder is the Copycord home. A git install keeps its checkout in `src/` and its per-user Node in `node/` inside it. Set `COPYCORD_HOME` to use another folder; `--data-dir` and `DATA_DIR` still win over it. If `~/.copycord` does not exist but an older install left a `data.db` in `~/.local/share/copycord` (Linux), `~/Library/Application Support/Copycord` (macOS) or `%LOCALAPPDATA%\Copycord` (Windows), Copycord keeps using that folder and prints a notice. It never moves data by itself; to move, stop Copycord and move the folder to `~/.copycord`.
+`~/.copycord` is the Copycord home. It holds `.env`, the `data` folder and a `logs` folder with all logs (`server.out`, `client.out`, `scraper.out`, `update.log`). A git install keeps its checkout in `src/` and its per-user Node in `node/` inside it; on Windows, `copycord update` leaves `.copycord-old` there. Set `COPYCORD_HOME` to use another home; `--data-dir` and `DATA_DIR` still win over the data directory. In Docker, and with any other `DATA_DIR`, everything stays in that one folder as before (`.env`, `*.out` and `logs/update.log` included).
+
+Older installs kept everything loose in the home. When Copycord starts and finds `data.db` or `secret.key` directly in the home and no `data/data.db`, it first backs up the database to `backups/data-pre-update-layout-<timestamp>.db`, then moves the data files into `data` and the `*.out` files into `logs`, and logs one line: `Moved Copycord data into <home>/data and logs into <home>/logs`. It never overwrites a file that is already in the new place and never deletes anything. If a move fails, it puts everything back and keeps using the old layout. `copycord doctor` shows `data files loose in the home` until then, and `copycord doctor --fix` does the same move when Copycord is stopped. Docker data is never moved. If `~/.copycord` does not exist but an older install left a `data.db` in `~/.local/share/copycord` (Linux), `~/Library/Application Support/Copycord` (macOS) or `%LOCALAPPDATA%\Copycord` (Windows), Copycord keeps using that folder and prints a notice. It never moves data by itself; to move, stop Copycord and move the folder to `~/.copycord`.
 
 `--data-dir PATH` uses another folder for that command. It does the same as setting the `DATA_DIR` environment variable. It is accepted by `run`, `doctor`, every `config` command, `service install` and `uninstall`.
 
@@ -176,7 +178,7 @@ copycord doctor --data-dir ~/copycord/data
 |-------|--------|
 | Install | The version, commit and update channel; Python is 3.12 to 3.14; the web UI files are installed; the required packages (`curl_cffi`, `py-cord`, `fastapi`, `uvicorn`) import, as one `dependencies OK` line that names only the missing ones |
 | Settings | `<home>/.env` exists; `PASSWORD` is not still the default `copycord`; a `FAIL` when the removed `ROLE` variable is still set |
-| Data | The Copycord home exists and is writable; `data.db` opens and its schema is one this Copycord supports (a fresh install says it is created on first run); the last backup in the backups folder is under 2 days old |
+| Data | The Copycord home exists and is writable; `data.db` opens and its schema is one this Copycord supports (a fresh install says it is created on first run); the data files are in the `data` folder, not loose in the home; the last backup in the backups folder is under 2 days old |
 | Running | `ADMIN_PORT` (default 8080) is free, or in use by Copycord itself; whether the OS service is installed and running |
 | Updates | The update check, cached for 24 hours. A network error is only reported, never a failure |
 
@@ -327,7 +329,7 @@ The installer makes sure the file exists. It writes it on first install and neve
 # dashboard login password; change it from the default (empty: no login page)
 PASSWORD=copycord
 
-# SECRET_KEY is left out: Copycord keeps its own key in <home>/secret.key
+# SECRET_KEY is left out: Copycord keeps its own key in <home>/data/secret.key
 
 # dashboard port
 ADMIN_PORT=8080
@@ -345,7 +347,7 @@ LOG_LEVEL=INFO
 LOG_FORMAT=HUMAN
 
 # where the daily database backups go
-BACKUP_DIR=/home/alice/.copycord/backups
+BACKUP_DIR=/home/alice/.copycord/data/backups
 
 # time of the daily backup, HH:MM
 BACKUP_AT=03:17
@@ -383,13 +385,13 @@ copycord restart
 | Key | Default | What it does |
 |-----|---------|--------------|
 | `PASSWORD` | `copycord` in the file | Dashboard login password; no login page when empty or unset. |
-| `SECRET_KEY` | a key saved in `<home>/secret.key` | Signs the dashboard login cookie. Not in the file; add it only to use a key of your own. |
+| `SECRET_KEY` | a key saved in `<data dir>/secret.key` | Signs the dashboard login cookie. Not in the file; add it only to use a key of your own. |
 | `ADMIN_PORT` | `8080` | Dashboard port. |
 | `TZ` | `UTC` | Time zone for the daily backup, e.g. `Europe/Berlin`. |
 | `UI_TZ` | `America/New_York` | Time zone shown in exports. |
 | `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG` for the first log lines; an app config key, so the dashboard's value wins once it is saved and `copycord config set LOG_LEVEL` writes the database. |
 | `LOG_FORMAT` | `HUMAN` | `HUMAN` or `JSON` log lines. |
-| `BACKUP_DIR` | `<home>/backups` | Where the daily database backups go. |
+| `BACKUP_DIR` | `<data dir>/backups` | Where the daily database backups go. |
 | `BACKUP_AT` | `03:17` | Time of the daily backup, HH:MM. |
 | `BACKUP_RETAIN` | `14` | How many daily backups to keep. |
 | `COPYCORD_NO_UPDATE_CHECK` | `0` | `1` turns off the update check on start; `0` keeps it on. |
@@ -549,7 +551,7 @@ copycord update --tag 4.0.0            # install exactly this release, once
 
 After a successful update, a running [service](#copycord-service) is restarted so it uses the new version.
 
-`copycord update` shows one progress line while it installs, then `Copycord updated to <version> (<commit>)` and, if the service was running, `restarted the copycord service`. The installer output is saved to `logs/update.log` in the [data directory](#data-dir); if the install fails, the last 20 lines and the log path are printed.
+`copycord update` shows one progress line while it installs, then `Copycord updated to <version> (<commit>)` and, if the service was running, `restarted the copycord service`. The installer output is saved to `logs/update.log` in the [Copycord home](#data-dir); if the install fails, the last 20 lines and the log path are printed.
 
 When the install is already the newest on the saved channel (the same release version on `stable` or `beta`, the same commit as the branch head on `dev`), `copycord update` prints `Copycord is up to date (<version>)`, with the commit on `dev` (`Copycord is up to date (3.28.0, dd7c8b2)`), and exits with status 0 without a backup or an install. If GitHub cannot be reached for that check, it warns and installs as before. A channel switch, `--tag`, `--force` and `copycord doctor --fix` always install.
 
