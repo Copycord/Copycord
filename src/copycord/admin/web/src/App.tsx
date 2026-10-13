@@ -1,5 +1,6 @@
 import { Route, Routes } from "react-router";
 import { Layout } from "./components/Layout";
+import { Kit } from "./pages/Kit";
 import { Placeholder } from "./pages/Placeholder";
 
 // Paths are relative to the router basename /app.
@@ -24,6 +25,7 @@ export function App() {
             <Route key={p.path} path={p.path} element={<Placeholder title={p.title} legacyHref={p.legacy} />} />
           ),
         )}
+        <Route path="/_kit" element={<Kit />} />
         <Route path="*" element={<Placeholder title="Not found" legacyHref="/" />} />
       </Route>
     </Routes>
