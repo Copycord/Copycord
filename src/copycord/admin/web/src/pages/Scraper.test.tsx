@@ -57,6 +57,15 @@ function renderPage() {
   );
 }
 
+/** The token row once the list has loaded. */
+function findRow(id: string): Promise<HTMLElement> {
+  return waitFor(() => {
+    const row = document.querySelector<HTMLElement>(`.sc-token-item[data-id="${id}"]`);
+    if (!row) throw new Error(`no row ${id}`);
+    return row;
+  });
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -139,7 +148,7 @@ describe("Scraper tokens card", () => {
       "POST /api/scraper/tokens/t2/validate": () => jsonResponse({ ok: true, is_valid: false }),
     });
     renderPage();
-    const row = await waitFor(() => document.querySelector<HTMLElement>('[data-id="t2"].sc-token-item')!);
+    const row = await findRow("t2");
     await user.click(within(row).getByRole("button", { name: "Re-validate" }));
     await waitFor(() => expect(callsTo(fetchMock, "POST", "/api/scraper/tokens/t2/validate")).toHaveLength(1));
     const init = callsTo(fetchMock, "POST", "/api/scraper/tokens/t2/validate")[0]!;
@@ -154,7 +163,7 @@ describe("Scraper tokens card", () => {
       "DELETE /api/scraper/tokens/t1": () => jsonResponse({ ok: true }),
     });
     renderPage();
-    const row = await waitFor(() => document.querySelector<HTMLElement>('[data-id="t1"].sc-token-item')!);
+    const row = await findRow("t1");
 
     await user.click(within(row).getByRole("button", { name: "Delete" }));
     let dialog = await screen.findByRole("dialog", { name: "Delete token?" });
