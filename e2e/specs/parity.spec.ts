@@ -175,7 +175,7 @@ test.describe("guilds", () => {
 
     test("37 guild grid lists, search filters, sort direction flips", async ({ page }) => {
       await open(page, "guilds");
-      const cards = page.locator("#guilds-root [data-gid]");
+      const cards = page.locator("#guilds-root article[data-gid]");
       await expect(cards).toHaveCount(GUILDS.length);
       await expect(guildCard(page, FIRST.id)).toContainText(FIRST.name);
       await page.locator("#g-search").fill("BETA");

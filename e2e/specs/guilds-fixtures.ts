@@ -36,7 +36,7 @@ export async function stubGuilds(page: Page): Promise<void> {
 }
 
 export function guildCard(page: Page, id: string): Locator {
-  return page.locator(`#guilds-root [data-gid="${id}"]`);
+  return page.locator(`#guilds-root article[data-gid="${id}"]`);
 }
 
 /** Click a card at a fixed spot (the menu opens where the click was) and pick a menu item. */
