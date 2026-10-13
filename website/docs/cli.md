@@ -547,19 +547,36 @@ The service does not see variables you set in your terminal. The simplest way to
 Removes the Copycord program and its background service. It asks one question, about your data in the [Copycord home](#data-dir):
 
 ```
-Uninstall Copycord
-Removes the Copycord program and its background service.
-
-? Your data is in /home/you/.copycord
-❯ Keep my data
-  Delete everything (database, logs, backups, settings)
-  Cancel
-  ↑/↓ to move, Enter to select
+┌  Uninstall Copycord
+│  Removes the Copycord program and its background service.
+│
+◆  Your data is in /home/you/.copycord
+│  ❯ Keep my data
+│    Delete everything (database, logs, backups, settings)
+│    Cancel
+│    ↑/↓ to move, Enter to select
 ```
 
-Move with the arrow keys (or `j` and `k`) and press Enter; Enter right away keeps your data, and Esc or Ctrl-C cancels. After you pick, the question folds into one line, for example `✓ Your data is in /home/you/.copycord Keep my data`. Yes or no questions work the same way on one line, `? Update Copycord now?  ❯ Yes / No`: Left/Right switch, `y` or `n` answer at once, Enter takes the highlighted one.
+Move with the arrow keys (or `j` and `k`) and press Enter; Enter right away keeps your data, and Esc or Ctrl-C cancels. After you pick, the question is marked `◇` with your answer under it, and the steps follow on the same line down the left:
+
+```
+┌  Uninstall Copycord
+│  Removes the Copycord program and its background service.
+│
+◇  Your data is in /home/you/.copycord
+│  Keep my data
+│
+✓  removed the copycord program  uv tool uninstall copycord
+│
+✓  Copycord uninstalled
+└  Your data is still in /home/you/.copycord/data
+```
+
+Yes or no questions work the same way, for example `◆  Update Copycord now?` with `❯ Yes / No` under it: Left/Right switch, `y` or `n` answer at once, Enter takes the highlighted one. A question asked on its own, such as the port question of `copycord doctor --fix`, takes one line, `? <question>  ❯ Yes / No`, and folds into `✓ <question> Yes` once answered.
 
 Where single keys cannot be read (input piped in, `TERM=dumb`, Git Bash without a real console, or `COPYCORD_PLAIN_PROMPTS=1`), the prompts are typed instead: a numbered list with `Enter 1, 2 or 3 [1]`, and `(y/N)` for yes or no.
+
+Where the terminal cannot show the line characters, they are replaced with `+`, `|`, `*` and `o`. In a script or a pipe, the same lines are printed without the line down the left.
 
 Press Enter to keep your data. It ends with `Copycord uninstalled`, and when the data is kept, the folder it is still in.
 
@@ -628,10 +645,16 @@ On Windows, a running program's files cannot be deleted, but they can be renamed
 When there is something to install, `copycord update` shows what will change before it backs up or installs anything, for example:
 
 ```
-Update available
-3.28.0 (00f0f8d) -> v4-dev (abc1234) client: fix reconnect
-? Update Copycord now? (Y/n)
+┌  Updating Copycord · dev channel · v4-dev
+│
+◇  Update available
+│  3.28.0 (00f0f8d) -> v4-dev (abc1234) client: fix reconnect
+│
+◆  Update Copycord now?
+│  ❯ Yes / No
 ```
+
+Where single keys cannot be read, the question is typed: `Update Copycord now? (Y/n)`. The backup, the install and the restart then follow on the same line down the left, which ends with `└` when the update is done or stops.
 
 For a release it shows the installed and the new version (`3.28.0 -> 4.0.0`). A channel switch (`--channel`, `--ref`, `--repo`) shows the same line and asks too. Enter or `y` updates; `n` prints `Update cancelled, nothing was changed` and exits with status 0. Reinstalling the installed version (`--force`, or `--tag` with the installed version) asks `Reinstall Copycord <version>? (Y/n)` instead. A downgrade asks only its own question (see below).
 
