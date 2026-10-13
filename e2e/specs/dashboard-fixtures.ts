@@ -2,7 +2,7 @@
 // shared by parity.spec.ts and baseline.spec.ts. Both UIs read the same endpoints.
 import type { Page } from "@playwright/test";
 
-export const LOG_LINES = ["e2e alpha ready", "e2e beta warning", "e2e gamma done"];
+export const LOG_LINES = ["e2e alpha ready", "e2e beta warning", "e2e gamma done"] as const;
 
 const RUNNING = {
   server: { running: true, uptime_sec: 65, status: "active" },
