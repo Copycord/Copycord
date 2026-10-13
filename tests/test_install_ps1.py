@@ -15,7 +15,7 @@ def _final_box(text):
 
 
 def test_ps1_has_no_em_dashes():
-    assert "—" not in _text()
+    assert chr(0x2014) not in _text()
 
 
 def test_final_box_reads_the_password_back_once():
