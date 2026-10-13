@@ -66,3 +66,64 @@ export interface Orphans {
   categories: OrphanCategory[];
   channels: OrphanChannel[];
 }
+
+/** POST /api/channels/customize; a null name clears the customization. */
+export interface CustomizeChannelBody {
+  original_channel_id: string;
+  cloned_guild_id: string;
+  clone_channel_name: string | null;
+}
+
+/** POST /api/categories/customize; a null name clears the customization. */
+export interface CustomizeCategoryBody {
+  original_category_id: string;
+  cloned_guild_id: string;
+  custom_category_name: string | null;
+}
+
+/** Reply of both customize routes. */
+export interface CustomizeResponse {
+  ok?: boolean;
+  error?: string;
+}
+
+/** POST /api/filters/blacklist. */
+export interface BlacklistBody {
+  scope: "channel" | "category";
+  obj_id: string;
+  mapping_id: string;
+  original_guild_id: string;
+  cloned_guild_id: string;
+}
+
+/** Ids of a category resolved from the channel rows. */
+export interface CategoryIds {
+  originalCatId: string | null;
+  clonedCatId: string | null;
+  originalGuildId: string | null;
+  clonedGuildId: string | null;
+}
+
+/** Message sent on /ws/in to delete orphans (envelope kind "verify"). */
+export type OrphanDeletePayload =
+  | { action: "delete_one"; kind: "channel" | "category"; id: string }
+  | { action: "delete_all"; ids: string[] }
+  | { action: "list" };
+
+/** One entry of the "deleted" verify event on /ws/out. */
+export interface DeletedResult {
+  id?: string | number;
+  channel_id?: string | number;
+  category_id?: string | number;
+  target_id?: string | number;
+  orphan_id?: string | number;
+  original_id?: string | number;
+  name?: string;
+  channel_name?: string;
+  category_name?: string;
+  status?: string;
+  reason?: string;
+  deleted?: boolean;
+  ok?: boolean;
+  success?: boolean;
+}

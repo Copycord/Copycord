@@ -5,11 +5,12 @@
 // Like the old page it waits until both Server and Client are connected.
 
 import { useDeferredValue, useMemo, useState } from "react";
-import { Card, Input, Select, Spinner } from "../components/ui";
+import { Button, Card, Input, Select, Spinner } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
 import { useApi } from "../hooks/useApi";
 import { useStatusGate } from "../hooks/useStatusGate";
-import type { ChannelListResponse, GuildMappingListResponse, Orphans } from "../types/channels";
+import type { ChannelListResponse, ChannelRow, GuildMappingListResponse, Orphans } from "../types/channels";
+import { useRowActions } from "./channels/actions/useRowActions";
 import { ChannelTree } from "./channels/ChannelTree";
 import {
   buildCategoryPins,
@@ -22,6 +23,8 @@ import {
   SORT_OPTIONS,
 } from "./channels/model";
 import type { FilterMode, SortDir, SortMode } from "./channels/model";
+
+const NO_ROWS: ChannelRow[] = [];
 
 export function Channels() {
   // The tree loads once the gate first opens, as afterGateReady did.
@@ -50,6 +53,15 @@ export function Channels() {
     () => buildTree(rows ?? [], orphans, pins, { query: deferredQuery, filter, sort: sort.sort, dir: sort.dir }),
     [rows, orphans, pins, deferredQuery, filter, sort],
   );
+
+  const actions = useRowActions({
+    mappingId,
+    rows: rows ?? NO_ROWS,
+    pins,
+    orphans,
+    setOrphans: (next) => setOrphans(next),
+    reload: channels.reload,
+  });
 
   const onMapping = (id: string) => {
     setOrphans(NO_ORPHANS);
@@ -109,10 +121,20 @@ export function Channels() {
               options={[...SORT_OPTIONS]}
               className="w-auto!"
             />
+            <Button
+              id="orph-delall"
+              type="button"
+              variant="danger"
+              disabled={actions.deleteAll.disabled}
+              onClick={actions.deleteAll.onClick}
+            >
+              Delete all orphans
+            </Button>
           </div>
         </header>
 
-        <ChannelTree tree={tree} />
+        <ChannelTree tree={tree} channelActions={actions.channelActions} categoryActions={actions.categoryActions} />
+        {actions.dialogs}
 
         {channels.loading && !loaded ? (
           <div className="flex justify-center py-6">

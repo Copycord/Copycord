@@ -2,7 +2,18 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelRow, GuildMapping } from "../types/channels";
+import { ConfirmProvider } from "../components/ui";
+import { ToastProvider } from "../components/Toast";
 import { Channels } from "./Channels";
+
+const renderPage = () =>
+  render(
+    <ToastProvider>
+      <ConfirmProvider>
+        <Channels />
+      </ConfirmProvider>
+    </ToastProvider>,
+  );
 
 const MAPPINGS: GuildMapping[] = [
   { mapping_id: "m1", mapping_name: "Main", original_guild_id: "1", original_guild_name: "Src", cloned_guild_id: "2", cloned_guild_name: "Dst" },
@@ -65,7 +76,7 @@ beforeEach(() => {
 describe("Channels page", () => {
   it("preselects the first mapping and loads its tree", async () => {
     const f = serve();
-    render(<Channels />);
+    renderPage();
     expect(screen.getByRole("heading", { level: 1, name: "Channels" })).toBeInTheDocument();
     await waitFor(() => expect(document.querySelectorAll("#channels-root article")).toHaveLength(3));
 
@@ -81,7 +92,7 @@ describe("Channels page", () => {
 
   it("renders names as text, with type, clone chip and ids", async () => {
     serve();
-    render(<Channels />);
+    renderPage();
     const card = await waitFor(() => {
       const a = document.querySelector('article[data-cid="11"]');
       expect(a).not.toBeNull();
@@ -98,7 +109,7 @@ describe("Channels page", () => {
   it("refetches the tree when the mapping changes", async () => {
     const f = serve();
     const user = userEvent.setup();
-    render(<Channels />);
+    renderPage();
     await waitFor(() => expect(sections()).toHaveLength(2));
     await user.selectOptions(el("mapping-select"), "m2");
     await waitFor(() => expect(sections()).toEqual([["Elsewhere", ["20"]]]));
@@ -108,7 +119,7 @@ describe("Channels page", () => {
   it("searches, filters and sorts", async () => {
     serve();
     const user = userEvent.setup();
-    render(<Channels />);
+    renderPage();
     await waitFor(() => expect(sections()).toHaveLength(2));
 
     await user.type(el("ch-search"), "#ZET");
@@ -149,7 +160,7 @@ describe("Channels page", () => {
 
   it("waits for Server and Client before loading the tree", async () => {
     const f = serve(MAPPINGS, false);
-    render(<Channels />);
+    renderPage();
     await waitFor(() => expect(screen.getByTestId("status-gate")).toBeInTheDocument());
     await waitFor(() => expect(f.mock.calls.some(([u]) => String(u) === "/api/guild-mappings")).toBe(true));
     expect(channelUrls(f)).toEqual([]);
@@ -158,7 +169,7 @@ describe("Channels page", () => {
 
   it("lists every channel when no mapping is configured", async () => {
     const f = serve([]);
-    render(<Channels />);
+    renderPage();
     await waitFor(() => expect(document.querySelectorAll("#channels-root article")).toHaveLength(4));
     const sel = el<HTMLSelectElement>("mapping-select");
     expect(sel).toBeDisabled();
