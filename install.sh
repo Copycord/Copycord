@@ -26,6 +26,8 @@
 set -eu
 
 DEFAULT_REPO="Copycord/Copycord"
+# Python the installer asks uv for: the recommended, tested version.
+PYTHON_VERSION="3.12"
 UV_INSTALLER="https://astral.sh/uv/install.sh"
 NODE_DIST="https://nodejs.org/dist"
 NODE_MIN_MAJOR=20
@@ -400,7 +402,7 @@ install_release() {
         LABEL="${VERSION:+v$VERSION}"
         LABEL="${LABEL:-$CHANNEL release}"
         step "Installing Copycord"
-        dry "uv tool install --force <copycord wheel of $LABEL>"
+        dry "uv tool install --force --python $PYTHON_VERSION <copycord wheel of $LABEL>"
         return 0
     fi
     if [ -n "$VERSION" ]; then
@@ -426,7 +428,7 @@ install_release() {
     info "$WHEEL_URL"
 
     step "Installing Copycord"
-    run "uv tool install copycord $TAG" uv tool install --force "$WHEEL_URL"
+    run "uv tool install copycord $TAG" uv tool install --force --python "$PYTHON_VERSION" "$WHEEL_URL"
     LABEL="$TAG"
 }
 
@@ -544,13 +546,13 @@ install_git() {
 
     step "Installing Copycord"
     if [ "$DRY_RUN" = "1" ]; then
-        dry "uv tool install --force --reinstall-package copycord $GIT_DIR_PATH"
+        dry "uv tool install --force --python $PYTHON_VERSION --reinstall-package copycord $GIT_DIR_PATH"
         LABEL="$REF"
     else
         # --reinstall-package: uv would otherwise reuse a cached build of the
         # same directory from an older ref.
         run "uv tool install copycord from $GIT_DIR_PATH" \
-            uv tool install --force --reinstall-package copycord "$GIT_DIR_PATH"
+            uv tool install --force --python "$PYTHON_VERSION" --reinstall-package copycord "$GIT_DIR_PATH"
         LABEL="$REF ($SHA)"
     fi
 }

@@ -124,6 +124,7 @@ def test_check_python_floor():
     assert cli.check_python((3, 11, 9)).status == cli.FAIL
     assert cli.check_python((3, 12, 0)).status == cli.PASS
     assert cli.check_python((3, 14, 1)).status == cli.PASS
+    assert cli.check_python((3, 15, 0)).status == cli.FAIL
 
 
 def test_check_data_dir(tmp_path):

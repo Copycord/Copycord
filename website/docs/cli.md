@@ -97,7 +97,7 @@ copycord doctor --data-dir ~/copycord/data
 
 | Check | Passes when |
 |-------|-------------|
-| `python` | Python is 3.12 or newer |
+| `python` | Python is 3.12 to 3.14 |
 | `ROLE` | The `ROLE` variable is not set |
 | `data dir` | The data directory is writable, or can be created |
 | `database` | `data.db` opens, or does not exist yet |

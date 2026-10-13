@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "Mirror Discord servers in real time, managed from a web dashboard"
 readme = "README.md"
 license = { file = "LICENSE" }
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.15"
 # Single source of dependencies for the admin, server and client.
 dependencies = [
     "fastapi==0.116.1",

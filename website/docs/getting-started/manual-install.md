@@ -37,7 +37,7 @@ The installer is not used with Docker. See [Docker Install](/docs/getting-starte
 
 It prints a plan, then runs numbered steps:
 
-1. **Preparing uv:** installs [uv](https://docs.astral.sh/uv/) when it is not on your `PATH`. uv provides Python 3.12 or newer and Copycord's dependencies.
+1. **Preparing uv:** installs [uv](https://docs.astral.sh/uv/) when it is not on your `PATH`. uv provides Python 3.12 and Copycord's dependencies.
 2. **Finding the release:** the newest stable release, or the one you asked for.
 3. **Installing Copycord:** `uv tool install --force` with the release wheel, a per-user install with no sudo.
 4. **Finishing up:** adds uv's tool directory to your `PATH` when needed (`uv tool update-shell`), writes [`.env`](/docs/getting-started/configuration) in the Copycord home if it does not exist yet, and saves the update channel when you chose one.

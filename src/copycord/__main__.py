@@ -58,6 +58,8 @@ ROLE_REMOVED_MESSAGE = (
 )
 
 MIN_PYTHON = (3, 12)
+# First Python release Copycord is not tested on (pyproject requires-python).
+MAX_PYTHON = (3, 15)
 DEFAULT_ADMIN_PORT = 8080
 # The admin listens on all interfaces (supervisor.build_supervisor).
 ADMIN_BIND_HOST = "0.0.0.0"
@@ -375,10 +377,11 @@ class Check(NamedTuple):
 def check_python(version_info=None) -> Check:
     v = sys.version_info if version_info is None else version_info
     found = ".".join(str(p) for p in tuple(v)[:3])
-    if tuple(v)[:2] >= MIN_PYTHON:
+    if MIN_PYTHON <= tuple(v)[:2] < MAX_PYTHON:
         return Check(PASS, "python", f"Python {found}")
-    need = ".".join(str(p) for p in MIN_PYTHON)
-    return Check(FAIL, "python", f"Python {found}, Copycord needs {need} or newer")
+    low = ".".join(str(p) for p in MIN_PYTHON)
+    high = f"{MAX_PYTHON[0]}.{MAX_PYTHON[1] - 1}"
+    return Check(FAIL, "python", f"Python {found}, Copycord needs {low} to {high}")
 
 
 def check_data_dir(path: Path) -> Check:

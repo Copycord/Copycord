@@ -55,6 +55,8 @@ RELEASES_URL = "https://api.github.com/repos/Copycord/Copycord/releases"
 RELEASE_TAG_URL = RELEASES_URL + "/tags/{tag}"
 GITHUB_COMMITS_URL = "https://api.github.com/repos/{repo}/commits/{branch}"
 GITHUB_TIMEOUT = 5.0
+# Python `copycord update` asks uv for: the recommended, tested version.
+PYTHON_VERSION = "3.12"
 
 STABLE, BETA, DEV = "stable", "beta", "dev"
 CHANNELS = (STABLE, BETA, DEV)
@@ -203,7 +205,7 @@ def install_command(kind: str, spec: str) -> Tuple[Optional[list], str]:
     spec is a release wheel URL (stable, beta, --tag) or git_spec() (dev).
     """
     if kind == UV_TOOL:
-        cmd = ["uv", "tool", "install", "--force", spec]
+        cmd = ["uv", "tool", "install", "--force", "--python", PYTHON_VERSION, spec]
         return cmd, " ".join(_quote(a) for a in cmd)
     if kind == PIPX:
         cmd = ["pipx", "install", "--force", spec]

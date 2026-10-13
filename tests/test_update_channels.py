@@ -142,9 +142,9 @@ WHEEL = wheel_url("v4.0.0")
 @pytest.mark.parametrize(
     "kind,spec,expected",
     [
-        (update.UV_TOOL, WHEEL, ["uv", "tool", "install", "--force", WHEEL]),
+        (update.UV_TOOL, WHEEL, ["uv", "tool", "install", "--force", "--python", "3.12", WHEEL]),
         (update.UV_TOOL, GIT_SPEC.format("v4-dev"),
-         ["uv", "tool", "install", "--force", GIT_SPEC.format("v4-dev")]),
+         ["uv", "tool", "install", "--force", "--python", "3.12", GIT_SPEC.format("v4-dev")]),
         (update.PIPX, WHEEL, ["pipx", "install", "--force", WHEEL]),
         (update.PIPX, GIT_SPEC.format("main"),
          ["pipx", "install", "--force", GIT_SPEC.format("main")]),

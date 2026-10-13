@@ -48,6 +48,7 @@ function Install-Copycord {
     $ErrorActionPreference = 'Stop'
 
     $DefaultRepo = 'Copycord/Copycord'
+    $PythonVersion = '3.12'  # Python the installer asks uv for: the recommended, tested version
     $UvInstaller = 'https://astral.sh/uv/install.ps1'
     $NodeDist = 'https://nodejs.org/dist'
     $NodeMinMajor = 20
@@ -280,7 +281,7 @@ Test a branch, no release needed:
                 else { Dry "look up the newest $channel release on $repoUrl/releases" }
                 $label = if ($version) { "v$version" } else { "$channel release" }
                 Step 'Installing Copycord'
-                Dry "uv tool install --force <copycord wheel of $label>"
+                Dry "uv tool install --force --python $PythonVersion <copycord wheel of $label>"
             } else {
                 try {
                     if ($version) {
@@ -304,7 +305,7 @@ Test a branch, no release needed:
                 Info $wheel.browser_download_url
 
                 Step 'Installing Copycord'
-                Run "uv tool install copycord $tag" 'uv' @('tool', 'install', '--force', $wheel.browser_download_url)
+                Run "uv tool install copycord $tag" 'uv' @('tool', 'install', '--force', '--python', $PythonVersion, $wheel.browser_download_url)
                 $label = $tag
             }
         } else {
@@ -390,12 +391,12 @@ Test a branch, no release needed:
 
             Step 'Installing Copycord'
             if ($dryRun) {
-                Dry "uv tool install --force --reinstall-package copycord $gitDir"
+                Dry "uv tool install --force --python $PythonVersion --reinstall-package copycord $gitDir"
                 $label = $ref
             } else {
                 # --reinstall-package: uv would otherwise reuse a cached build of
                 # the same directory from an older ref.
-                Run "uv tool install copycord from $gitDir" 'uv' @('tool', 'install', '--force', '--reinstall-package', 'copycord', $gitDir)
+                Run "uv tool install copycord from $gitDir" 'uv' @('tool', 'install', '--force', '--python', $PythonVersion, '--reinstall-package', 'copycord', $gitDir)
                 $label = "$ref ($sha)"
             }
         }

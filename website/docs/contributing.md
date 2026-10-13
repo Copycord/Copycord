@@ -25,7 +25,7 @@ We welcome contributions to Copycord! Whether it's bug fixes, new features, or d
 ### Prerequisites
 
 - Docker & Docker Compose (to run Copycord from your checkout)
-- Python 3.12 or newer (to run the tests)
+- Python 3.12 to 3.14 (to run the tests)
 - Node.js 20 + npm (only if you build the dashboard frontend outside Docker)
 
 ### Running locally with Docker
