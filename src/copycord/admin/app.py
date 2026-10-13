@@ -68,7 +68,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from copycord.common.config import CURRENT_VERSION
 from copycord.common.db import DBManager
-from copycord.common.paths import data_dir
+from copycord.common.paths import data_dir, out_candidates, out_dir
 from copycord.common import inprocess
 from copycord.common.backup_scheduler import (
     BackupConfig,
@@ -165,6 +165,11 @@ DB_PATH = os.getenv("DB_PATH", str(DATA_DIR / "data.db"))
 db = DBManager(DB_PATH, init_schema=True)
 
 BACKUP_DIR = Path(os.getenv("BACKUP_DIR") or str(DATA_DIR / "backups"))
+
+
+def _log_files(name: str) -> list:
+    """Where a role log may be: <home>/logs first, then the old data dir location."""
+    return list(dict.fromkeys([*out_candidates(name), DATA_DIR / name]))
 BACKUP_RETAIN = int(os.getenv("BACKUP_RETAIN") or "14")
 BACKUP_AT = os.getenv("BACKUP_AT") or "03:17"
 BACKUP_TZ = os.getenv("TZ") or "UTC"
@@ -1873,14 +1878,14 @@ async def on_shutdown():
 async def clear_logs():
     cleared = []
     for name in ("server.log", "client.log", "server.out", "client.out"):
-        p = DATA_DIR / name
-        try:
-            if p.exists():
-                with open(p, "w", encoding="utf-8"):
-                    pass
-                cleared.append(name)
-        except Exception:
-            pass
+        for p in _log_files(name):
+            try:
+                if p.exists():
+                    with open(p, "w", encoding="utf-8"):
+                        pass
+                    cleared.append(str(p))
+            except Exception:
+                pass
     LOGGER.info("POST /logs/clear done | cleared=%s", cleared)
     return RedirectResponse("/", status_code=303)
 
@@ -1895,14 +1900,14 @@ async def clear_logs_which(which: str):
         return PlainTextResponse("invalid", status_code=400)
     cleared = []
     for name in names:
-        p = DATA_DIR / name
-        try:
-            if p.exists():
-                with open(p, "w", encoding="utf-8"):
-                    pass
-                cleared.append(name)
-        except Exception:
-            pass
+        for p in _log_files(name):
+            try:
+                if p.exists():
+                    with open(p, "w", encoding="utf-8"):
+                        pass
+                    cleared.append(str(p))
+            except Exception:
+                pass
     LOGGER.info("POST /logs/clear/%s done | cleared=%s", which, cleared)
     return PlainTextResponse("ok")
 
@@ -1916,8 +1921,7 @@ async def logs(which: str, tail: int = 20000):
     else:
         return PlainTextResponse("invalid", status_code=400)
 
-    for name in candidates:
-        p = DATA_DIR / name
+    for p in [q for n in candidates for q in _log_files(n)]:
         try:
             if p.exists() and p.stat().st_size > 0:
                 text = p.read_text(encoding="utf-8", errors="ignore")
@@ -2132,8 +2136,8 @@ async def _log_prune_loop():
             if max_bytes <= 0:
                 continue
 
-            for name in LOG_FILES:
-                p = DATA_DIR / name
+            for p in [q for n in LOG_FILES for q in _log_files(n)]:
+                name = str(p)
                 try:
                     if not p.exists():
                         continue
@@ -2612,9 +2616,9 @@ async def logs_stream(which: str, request: Request, tail_bytes: int = 50000):
     async def gen():
         def pick_path():
             for n in candidates:
-                p = DATA_DIR / n
-                if p.exists():
-                    return p
+                for p in _log_files(n):
+                    if p.exists():
+                        return p
             return None
 
         HEARTBEAT_EVERY = 15.0
@@ -5044,7 +5048,11 @@ async def _run_single_scrape(queue_item: dict):
             )
         )
 
-    _scraper_log_path = DATA_DIR / "scraper.out"
+    _scraper_log_path = out_dir() / "scraper.out"
+    try:
+        _scraper_log_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        pass
 
     def log_callback(message: str, level: str):
         """Write log line to scraper.out AND broadcast to websocket clients."""
@@ -5447,8 +5455,9 @@ async def api_scraper_scrape_delete(filepath: str):
 @app.post("/api/scraper/logs/clear", response_class=JSONResponse)
 async def api_scraper_logs_clear():
     """Clear the scraper.out log file on disk."""
-    log_path = DATA_DIR / "scraper.out"
+    log_path = out_dir() / "scraper.out"
     try:
+        log_path.parent.mkdir(parents=True, exist_ok=True)
         log_path.write_text("", encoding="utf-8")
         return JSONResponse({"ok": True})
     except Exception as e:

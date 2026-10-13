@@ -83,9 +83,14 @@ def is_env_key(key: str) -> bool:
 
 
 def env_path() -> Path:
-    from copycord.common.paths import data_dir
+    """<home>/.env; a .env left in a custom data dir is still read for now."""
+    from copycord.common.paths import data_dir, home_dir
 
-    return data_dir() / FILENAME
+    path = home_dir() / FILENAME
+    old = data_dir() / FILENAME
+    if not path.exists() and old.is_file():
+        return old
+    return path
 
 
 def load(path: Optional[Path] = None) -> bool:
