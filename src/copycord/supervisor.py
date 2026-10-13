@@ -621,6 +621,10 @@ async def run() -> None:
     finally:
         auto_update.cancel()
         _close_admin_db()
+        # The rest (commands cog, module-level configs) so SQLite drops data.db-wal/-shm.
+        from copycord.common.db import close_all
+
+        close_all()
 
 
 def _close_admin_db() -> None:

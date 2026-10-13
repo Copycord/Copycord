@@ -19,6 +19,7 @@ import time
 from typing import Dict, List, Optional
 import uuid
 import secrets
+import weakref
 
 logger = logging.getLogger("common.db")
 
@@ -196,6 +197,19 @@ def _in_tx(method):
     return wrapper
 
 
+_OPEN: "weakref.WeakSet[DBManager]" = weakref.WeakSet()
+
+
+def close_all() -> None:
+    """Close every DBManager still open (cogs, module-level configs); SQLite removes
+    data.db-wal and data.db-shm when the last connection closes. Call once every role is down."""
+    for mgr in list(_OPEN):
+        try:
+            mgr.close()
+        except Exception:
+            logger.debug("DB close failed for %s", mgr.path, exc_info=True)
+
+
 class DBManager:
     def __init__(self, db_path: str, init_schema: bool = False):
         self.path = db_path
@@ -214,6 +228,7 @@ class DBManager:
         self.conn.execute("PRAGMA synchronous = NORMAL;")
         self.lock = threading.RLock()
         self._tx_depth = 0
+        _OPEN.add(self)
         if init_schema:
             self._init_schema()
             self._set_schema_version()
@@ -247,6 +262,7 @@ class DBManager:
             if getattr(self, "_closed", False):
                 return
             self._closed = True
+            _OPEN.discard(self)
             try:
                 self.conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
             except sqlite3.Error:
