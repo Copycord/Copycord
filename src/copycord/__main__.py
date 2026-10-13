@@ -1207,7 +1207,7 @@ def doctor(verbose: bool = False, fix: bool = False) -> int:
     from copycord import ui
 
     if fix:
-        # Fixes write to stderr and run uv; flush so piped output stays in order.
+        # Fixes write to stderr and run uv; line-buffer so piped output stays in order.
         try:
             sys.stdout.reconfigure(line_buffering=True)
         except (AttributeError, ValueError):

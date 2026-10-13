@@ -13,20 +13,14 @@
 #   curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/Copycord/Copycord/main/install.sh | sh -s -- --help
 #
-# Two install methods:
-#   release (default)  the wheel asset of a GitHub release
-#   git                a clone of any repo and ref (branch, tag or commit),
-#                      frontend built with npm, no release needed
-#
-# Installs uv (https://docs.astral.sh/uv/) if it is missing, then installs
-# Copycord with `uv tool install`. The git method also needs git and Node 20+;
-# Node is installed per user when it is missing. It does not touch Docker.
-# Run with --help for the flags and their environment variables.
+# Installs uv if it is missing, then Copycord with `uv tool install`, either
+# from a release wheel (default) or from a git ref built locally, which needs
+# git and Node 20+. Run with --help for the options.
 
 set -eu
 
 DEFAULT_REPO="Copycord/Copycord"
-# Python the installer asks uv for: the recommended, tested version.
+# The Python version uv is asked for.
 PYTHON_VERSION="3.12"
 UV_INSTALLER="https://astral.sh/uv/install.sh"
 NODE_DIST="https://nodejs.org/dist"
@@ -99,7 +93,7 @@ EOF
 }
 
 need_value() {
-    # need_value FLAG VALUE: VALUE must be a non-empty, non-flag argument.
+    # need_value FLAG VALUE
     case "${2:-}" in
         "" | -*) printf 'copycord install: %s needs a value (see --help)\n' "$1" >&2; exit 2 ;;
     esac
@@ -213,8 +207,7 @@ trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM
 
 run() {
-    # run LABEL CMD...: run CMD with a spinner (TTY) and its output in $LOG;
-    # --verbose streams it. On failure, show the tail of the output and stop.
+    # run LABEL CMD...: output goes to $LOG; on failure print its tail and exit.
     label="$1"
     shift
     if [ "$VERBOSE" = "1" ]; then
@@ -249,7 +242,7 @@ run() {
 }
 
 fetch() {
-    # fetch URL: print the body, fail on HTTP errors.
+    # fetch URL
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL -H "Accept: application/vnd.github+json" "$1"
     elif command -v wget >/dev/null 2>&1; then
@@ -269,15 +262,14 @@ download() {
 }
 
 json_field() {
-    # json_field KEY: first string value of KEY in the JSON on stdin.
+    # json_field KEY: first string value of KEY in the JSON on stdin
     tr ',' '\n' | sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p" | head -n 1
 }
 
 # --- checks -------------------------------------------------------------------
 
-# --version alone picks the method: a release version (optional v, then
-# digits.digits.digits and an optional pre-release suffix) is a release,
-# anything else is a git ref. An explicit method wins.
+# Without an explicit method, a --version that looks like a release version
+# means release, anything else a git ref.
 INFERRED=""
 if [ -z "$METHOD_SET" ] && [ -n "$VERSION" ]; then
     if printf '%s' "$VERSION" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-.]?(a|b|c|rc|alpha|beta|pre|preview|dev)[.-]?[0-9A-Za-z.]*)?$'; then
@@ -334,9 +326,7 @@ fi
 need_uv=0
 command -v uv >/dev/null 2>&1 || need_uv=1
 
-# An upgrade or a reinstall (Copycord or its home is already there) ends with
-# `copycord doctor --fix`, so the automatic repairs happen on their own. A
-# first install has nothing to repair.
+# An upgrade or reinstall ends with `copycord doctor --fix`.
 UPGRADE=0
 if command -v copycord >/dev/null 2>&1 || [ -x "$HOME/.local/bin/copycord" ] \
     || [ -e "$COPYCORD_HOME/.env" ] || [ -e "$COPYCORD_HOME/data.db" ]; then
@@ -377,7 +367,6 @@ fi
 [ "$VERIFY" = "1" ] && plan_line "verify" "copycord --version and copycord doctor"
 [ "$DRY_RUN" = "1" ] && plan_line "dry run" "nothing will be changed"
 
-# uv, install, finishing up; release: find the release; git: fetch, build.
 if [ "$METHOD" = "git" ]; then STEP_TOTAL=5; else STEP_TOTAL=4; fi
 [ "$need_node" = "1" ] && STEP_TOTAL=$((STEP_TOTAL + 1))
 [ "$UPGRADE" = "1" ] && STEP_TOTAL=$((STEP_TOTAL + 1))
@@ -424,7 +413,6 @@ install_release() {
         LIST_JSON="$(fetch "$API?per_page=1")" || die "could not list releases from $API"
         TAG="$(printf '%s' "$LIST_JSON" | json_field tag_name)"
     else
-        # GitHub's latest release: newest that is not a draft or a pre-release.
         LATEST_JSON="$(fetch "$API/latest")" || die "could not get the latest release from $API/latest"
         TAG="$(printf '%s' "$LATEST_JSON" | json_field tag_name)"
     fi
@@ -472,8 +460,7 @@ sha256_of() {
 }
 
 install_node() {
-    # The official tarball, checked against SHASUMS256.txt, unpacked into
-    # $NODE_HOME/<name>; no sudo, nothing outside the user's data directory.
+    # The official tarball, checked against SHASUMS256.txt, unpacked into $NODE_HOME.
     name="$1"
     download "$NODE_DIST/v$NODE_VERSION/SHASUMS256.txt" "$TMP_DIR/SHASUMS256.txt" || return 1
     expected="$(grep "  $name.tar.gz\$" "$TMP_DIR/SHASUMS256.txt" | cut -d ' ' -f 1 | head -n 1)"
@@ -487,9 +474,8 @@ install_node() {
 }
 
 checkout_ref() {
-    # Clone or update $GIT_DIR_PATH and check out $REF detached: a branch
-    # (origin/REF), a tag, or a commit sha fetched from origin. Every command
-    # checks its status: errexit does not apply inside `run`.
+    # Check out $REF detached in $GIT_DIR_PATH. errexit does not apply inside
+    # `run`, so every command checks its status.
     if [ -d "$GIT_DIR_PATH/.git" ]; then
         git -C "$GIT_DIR_PATH" remote set-url origin "$REPO_URL.git" || return 1
     else
@@ -512,7 +498,6 @@ checkout_ref() {
 }
 
 build_frontend() {
-    # A fresh dist for this ref; hatch_build.py then ships it in the wheel.
     rm -rf "$GIT_DIR_PATH/src/copycord/admin/frontend/dist" || return 1
     (cd "$GIT_DIR_PATH/src/copycord/admin/frontend" && npm ci --no-audit --no-fund && npm run build)
 }
@@ -529,7 +514,6 @@ install_git() {
         step "Installing Node $NODE_VERSION"
         node_name="$(node_platform)" || exit 1
         if [ -x "$NODE_HOME/$node_name/bin/npm" ]; then
-            # Already there, from an earlier install or `copycord update --channel dev`.
             PATH="$NODE_HOME/$node_name/bin:$PATH"
             export PATH
             done_line "reusing $NODE_HOME/$node_name"
@@ -566,8 +550,7 @@ install_git() {
         dry "uv tool install --force --python $PYTHON_VERSION --reinstall-package copycord $GIT_DIR_PATH"
         LABEL="$REF"
     else
-        # --reinstall-package: uv would otherwise reuse a cached build of the
-        # same directory from an older ref.
+        # Otherwise uv reuses a cached build of this directory from an older ref.
         run "uv tool install copycord from $GIT_DIR_PATH" \
             uv tool install --force --python "$PYTHON_VERSION" --reinstall-package copycord "$GIT_DIR_PATH"
         LABEL="$REF ($SHA)"
@@ -598,8 +581,7 @@ else
     esac
 fi
 
-# Save a custom home where the CLI and the service find it without the
-# environment variable (common/paths.py reads ~/.copycord-home).
+# Save a custom home in ~/.copycord-home so the CLI and service find it.
 if [ "$COPYCORD_HOME" != "$HOME/.copycord" ]; then
     if [ "$DRY_RUN" = "1" ]; then
         dry "save $COPYCORD_HOME in $HOME_POINTER"
@@ -612,10 +594,8 @@ elif [ -f "$HOME_POINTER" ] && [ "$DRY_RUN" != "1" ]; then
     rm -f "$HOME_POINTER"
 fi
 
-# Settings that are read from the environment only live in <home>/.env, which
-# `copycord` loads at every start. Make sure it exists: write it once with
-# every key set to its default; never overwrite it. Keep it in step with
-# envfile.template() in src/copycord/envfile.py.
+# Write <home>/.env once, never overwriting it.
+# Keep in step with envfile.template() in src/copycord/envfile.py.
 ENV_FILE="$COPYCORD_HOME/.env"
 if [ -e "$ENV_FILE" ]; then
     :
@@ -665,8 +645,7 @@ else
     warn "could not write $ENV_FILE; \`copycord config set\` creates it later"
 fi
 
-# The channel file (update.json) is written by `copycord update --no-install`,
-# so its format stays with the CLI.
+# The CLI writes update.json, so its format lives in one place.
 CHANNEL_ARGS=""
 if [ "$METHOD" = "release" ]; then
     if [ -z "$VERSION" ] && [ "$CHANNEL_SET" = "1" ]; then
@@ -692,8 +671,7 @@ fi
 
 # --- repair -----------------------------------------------------------------------
 
-# After an upgrade or a reinstall: the doctor's automatic fixes (piped, it never
-# prompts). Its exit status does not fail the install; what is left is in its output.
+# Piped, the doctor never prompts. Its exit status does not fail the install.
 if [ "$UPGRADE" = "1" ]; then
     step "Repairing (copycord doctor --fix)"
     if [ "$DRY_RUN" = "1" ]; then
