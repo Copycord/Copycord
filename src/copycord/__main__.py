@@ -117,7 +117,7 @@ COMMAND_EXAMPLES = {
     ),
     "copycord service": (
         ("copycord service install", "install, enable and start the service"),
-        ("copycord service install --user", "Linux: a per-user unit, no sudo"),
+        ("copycord service install --system", "Linux: a system-wide service (as root)"),
         ("copycord service status", "is it installed and running?"),
         ("copycord service stop", "stop it"),
     ),
@@ -521,10 +521,16 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     imp.add_argument("file")
 
     user = argparse.ArgumentParser(add_help=False)
-    user.add_argument(
+    scope = user.add_mutually_exclusive_group()
+    scope.add_argument(
         "--user",
         action="store_true",
-        help="Linux: per-user systemd unit (systemctl --user) instead of a system one",
+        help="Linux: the service for your own account (the default unless run as root)",
+    )
+    scope.add_argument(
+        "--system",
+        action="store_true",
+        help="Linux: the system-wide service in /etc/systemd/system (needs root)",
     )
     service = sub.add_parser(
         "service",
@@ -1044,7 +1050,18 @@ def service_console() -> Optional[str]:
         return None
 
 
-def check_service(state, console: Optional[str] = None) -> Check:
+def service_linger() -> Optional[bool]:
+    """Linux user service: whether it starts at boot (linger); None otherwise."""
+    try:
+        from copycord import service
+
+        return service.user_linger()
+    except Exception:
+        return None
+
+
+def check_service(state, console: Optional[str] = None,
+                  linger: Optional[bool] = None) -> Check:
     if state is None:
         return Check(INFO, "service state unknown")
     if not state.installed:
@@ -1054,10 +1071,15 @@ def check_service(state, console: Optional[str] = None) -> Check:
         return Check(WARN, "service runs in a console window",
                      "the window stays open while Copycord runs, and closing it stops "
                      "Copycord", state.where, "service_window")
-    if state.running:
-        return Check(PASS, "service running", path=state.where)
-    return Check(WARN, "service installed, not running",
-                 f"start it with {_cmd('copycord service start')}", state.where, "service")
+    if not state.running:
+        return Check(WARN, "service installed, not running",
+                     f"start it with {_cmd('copycord service start')}", state.where, "service")
+    if linger is False:
+        from copycord import service
+
+        return Check(WARN, "service starts only when you log in",
+                     service.linger_hint(), state.where, "linger")
+    return Check(PASS, "service running", path=state.where)
 
 
 # --- Updates ---------------------------------------------------------------
@@ -1095,7 +1117,8 @@ def run_doctor() -> List[tuple]:
                   check_backups()]),
         ("Running", [
             check_admin_port(service_running=bool(state and state.running)),
-            check_service(state, service_console() if state and state.installed else None),
+            check_service(state, service_console() if state and state.installed else None,
+                          service_linger() if state and state.installed else None),
         ]),
         ("Updates", [check_updates()]),
     ]
@@ -1249,6 +1272,15 @@ def fix_service(checks: List[Check]) -> str:
     return svc.where
 
 
+def fix_linger(checks: List[Check]) -> str:
+    """Linux user service: turn linger on so it starts at boot."""
+    from copycord import service
+
+    if not service.enable_linger():
+        raise FixError(service.linger_hint())
+    return f"linger on for {service.login_name()}"
+
+
 def fix_service_window(checks: List[Check]) -> str:
     """Windows: write the service task again so it runs without a window."""
     from copycord import service
@@ -1324,6 +1356,7 @@ FIXES = {
     "port": Fix(fix_port, "dashboard moved to a free port", "move the dashboard to a free port",
                 question=_port_question),
     "service": Fix(fix_service, "copycord service started", "start it"),
+    "linger": Fix(fix_linger, "service starts at boot", "start it at boot"),
     "service_window": Fix(fix_service_window, "service runs without a window",
                           "run it without a window"),
 }

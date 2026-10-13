@@ -144,6 +144,38 @@ def systemd_unit(
     return "\n".join(lines)
 
 
+def login_name() -> str:
+    return os.environ.get("USER") or os.environ.get("LOGNAME") or "$USER"
+
+
+def linger_enabled(name: Optional[str] = None) -> Optional[bool]:
+    """Whether systemd starts this user's services at boot; None without loginctl."""
+    result = run_cmd(["loginctl", "show-user", name or login_name(), "-p", "Linger"])
+    if result.returncode == 127:
+        return None
+    if result.returncode != 0:
+        # loginctl fails for a user with no session and linger off.
+        return False
+    return (result.stdout or "").strip().lower() == "linger=yes"
+
+
+def enable_linger(name: Optional[str] = None) -> bool:
+    """Turn linger on without sudo; polkit allows it for your own account on most systems."""
+    return run_cmd(["loginctl", "enable-linger", name or login_name()]).returncode == 0
+
+
+def ensure_linger(name: Optional[str] = None) -> bool:
+    """Linger on (already, or turned on now): a user service starts at boot."""
+    return bool(linger_enabled(name)) or enable_linger(name)
+
+
+def linger_hint(name: Optional[str] = None) -> str:
+    return (
+        "to start Copycord at boot and keep it running after you log out, run: "
+        f"sudo loginctl enable-linger {name or login_name()}"
+    )
+
+
 class SystemdService:
     def __init__(self, user: bool, home: Optional[Path] = None):
         self.user = user
@@ -163,11 +195,15 @@ class SystemdService:
     def _systemctl(self, *args: str) -> List[str]:
         return ["systemctl", "--user", *args] if self.user else ["systemctl", *args]
 
+    @property
+    def scope(self) -> str:
+        return "user" if self.user else "system"
+
     def _need_root(self) -> None:
         if not self.user and not is_root():
             raise ServiceError(
-                f"the system service ({self.unit_path}) needs root: rerun with sudo, "
-                "or use copycord service install --user for a per-user service"
+                f"the system service ({self.unit_path}) needs root. Leave out --system "
+                "to use a service for your own account, which needs no sudo"
             )
 
     def install(self, command: Sequence[str], data_dir: Path) -> List[str]:
@@ -183,13 +219,15 @@ class SystemdService:
         )
         _check(run_cmd(self._systemctl("daemon-reload")), "daemon-reload")
         _check(run_cmd(self._systemctl("enable", "--now", UNIT_NAME)), "enable")
-        notes = [f"wrote {self.unit_path}", "enabled and started copycord.service"]
-        if self.user:
-            name = os.environ.get("USER") or os.environ.get("LOGNAME") or "$USER"
-            notes.append(
-                "to keep it running after you log out (and start it at boot), run: "
-                f"sudo loginctl enable-linger {name}"
-            )
+        at_boot = not self.user or ensure_linger()
+        when = "starts at boot" if at_boot else "starts when you log in"
+        notes = [
+            f"created {self.scope} service {UNIT_NAME} ({when})",
+            f"unit file: {self.unit_path}",
+            f"enabled and started {UNIT_NAME}",
+        ]
+        if not at_boot:
+            notes.append(f"needs your attention: {linger_hint()}")
         return notes
 
     def start(self) -> None:
@@ -633,21 +671,49 @@ class ScheduledTaskService:
 
 
 def get_service(
-    user: bool = False, platform: Optional[str] = None, home: Optional[Path] = None
+    user: bool = False,
+    platform: Optional[str] = None,
+    home: Optional[Path] = None,
+    system: bool = False,
 ):
-    """The service manager for this OS; on Linux falls back to an existing user unit."""
+    """The service manager for this OS.
+
+    Linux: --user or --system picks the unit; otherwise the one that is
+    installed, and with none or both, the user unit unless running as root.
+    """
     platform = sys.platform if platform is None else platform
     if platform == "win32":
         return ScheduledTaskService()
     if platform == "darwin":
         return LaunchdService(home=home)
-    if not user:
-        user_svc = SystemdService(True, home)
-        system_svc = SystemdService(False, home)
-        if user_svc.unit_path.exists() and not system_svc.unit_path.exists():
-            return user_svc
-        return system_svc
-    return SystemdService(True, home)
+    if user or system:
+        return SystemdService(not system, home)
+    user_svc = SystemdService(True, home)
+    system_svc = SystemdService(False, home)
+    has_user, has_system = user_svc.unit_path.exists(), system_svc.unit_path.exists()
+    if has_user != has_system:
+        return user_svc if has_user else system_svc
+    return system_svc if is_root() else user_svc
+
+
+def both_installed(home: Optional[Path] = None, platform: Optional[str] = None) -> bool:
+    """Linux: a user unit and a system unit both exist."""
+    platform = sys.platform if platform is None else platform
+    if platform in ("win32", "darwin"):
+        return False
+    return (
+        SystemdService(True, home).unit_path.exists()
+        and SystemdService(False, home).unit_path.exists()
+    )
+
+
+def user_linger(platform: Optional[str] = None) -> Optional[bool]:
+    """Linux user unit: whether linger is on; None for any other service."""
+    platform = sys.platform if platform is None else platform
+    svc = get_service(platform=platform)
+    if not isinstance(svc, SystemdService) or not svc.user or not svc.unit_path.exists():
+        return None
+    return linger_enabled()
 
 
 def service_state() -> State:
@@ -682,15 +748,19 @@ def install_data_dir(user: bool, env=None, platform: Optional[str] = None) -> Pa
 def service_command(args) -> int:
     action = args.service_command
     user = bool(getattr(args, "user", False))
-    if action == "install":
-        target = install_data_dir(user)
-        svc = (
-            get_service(user)
-            if sys.platform in ("win32", "darwin")
-            else SystemdService(user)
-        )
+    system = bool(getattr(args, "system", False))
+    if action == "install" and sys.platform not in ("win32", "darwin"):
+        svc = SystemdService(user or not (system or is_root()))
     else:
-        svc = get_service(user)
+        svc = get_service(user, system=system)
+    if action == "install":
+        target = install_data_dir(getattr(svc, "user", user))
+    elif not (user or system) and both_installed():
+        print(
+            f"a user service and a system service are both installed; using the "
+            f"{svc.scope} service ({svc.unit_path}). Add --user or --system to choose.",
+            file=sys.stderr,
+        )
     try:
         if action == "install":
             for note in svc.install(copycord_command(), target):
