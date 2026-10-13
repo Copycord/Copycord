@@ -64,7 +64,7 @@ DOCS_URL = "https://copycord.github.io/Copycord/docs/cli"
 COMMAND_GROUPS = (
     ("Get started", (
         ("run", "Run Copycord"),
-        ("restart", "Restart the Copycord service to apply changed settings"),
+        ("restart", "Restart Copycord"),
         ("doctor", "Check this machine can run Copycord"),
     )),
     ("Settings", (

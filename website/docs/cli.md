@@ -38,7 +38,7 @@ Usage: copycord <command> [options]
 
 Get started:
   run        Run Copycord
-  restart    Restart the Copycord service to apply changed settings
+  restart    Restart Copycord
   doctor     Check this machine can run Copycord
 
 Settings:
