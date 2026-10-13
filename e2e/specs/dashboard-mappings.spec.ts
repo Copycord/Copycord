@@ -33,13 +33,14 @@ async function stubMappings(page: Page): Promise<Request[]> {
     if (req.method() === "GET") return route.fulfill({ json: { ok: true, mappings: rows } });
     sent.push(req);
     const i = rows.findIndex((r) => r.mapping_id === id);
+    const row = rows[i];
     if (req.method() === "DELETE") {
       if (i >= 0) rows.splice(i, 1);
       return route.fulfill({ json: { ok: true } });
     }
-    if (url.pathname.endsWith("/toggle-status") && i >= 0) {
-      rows[i].status = rows[i].status === "paused" ? "active" : "paused";
-      return route.fulfill({ json: { ok: true, status: rows[i].status } });
+    if (url.pathname.endsWith("/toggle-status") && row) {
+      row.status = row.status === "paused" ? "active" : "paused";
+      return route.fulfill({ json: { ok: true, status: row.status } });
     }
     return route.continue();
   });
@@ -86,7 +87,7 @@ test.describe("18 mapping cards", () => {
       "POST /api/guild-mappings/e2e-a/toggle-status",
       "POST /api/guild-mappings/e2e-a/toggle-status",
     ]);
-    expect(await sent[0].headerValue("x-copycord-csrf")).toBeTruthy();
+    expect(await sent[0]?.headerValue("x-copycord-csrf")).toBeTruthy();
   });
 
   test("delete asks first, cancel sends nothing, confirm sends DELETE and removes the card", async ({ page }) => {

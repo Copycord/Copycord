@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "../../../components/Toast";
@@ -97,7 +97,7 @@ describe("MappingsSection", () => {
     await screen.findByText("Alpha");
     await userEvent.click(screen.getByRole("button", { name: "Pause cloning for this mapping" }));
     await waitFor(() => expect(document.querySelector('[data-id="m1"]')?.getAttribute("data-status")).toBe("paused"));
-    const [[, init]] = callsTo(mock, "POST", "/api/guild-mappings/m1/toggle-status");
+    const init = callsTo(mock, "POST", "/api/guild-mappings/m1/toggle-status")[0]?.[1];
     expect(new Headers(init?.headers).get(CSRF_HEADER)).toBeTruthy();
   });
 
@@ -107,10 +107,10 @@ describe("MappingsSection", () => {
     await screen.findByText("Alpha");
     const del = () => document.querySelector('[data-id="m1"] .delete-mapping-btn') as HTMLElement;
     await userEvent.click(del());
-    await userEvent.click(await screen.findByRole("button", { name: "Cancel" }));
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Cancel" }));
     expect(callsTo(mock, "DELETE", "/api/guild-mappings/m1")).toHaveLength(0);
     await userEvent.click(del());
-    await userEvent.click(await screen.findByRole("button", { name: "Delete mapping" }));
+    await userEvent.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Delete mapping" }));
     await waitFor(() => expect(callsTo(mock, "DELETE", "/api/guild-mappings/m1")).toHaveLength(1));
     await waitFor(() => expect(callsTo(mock, "GET", "/api/guild-mappings")).toHaveLength(2));
   });
