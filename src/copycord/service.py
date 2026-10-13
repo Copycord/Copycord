@@ -867,14 +867,20 @@ def show_status(svc, as_json: bool = False) -> int:
     if logs:
         is_cmd = logs.startswith("journalctl")
         rows.append(("Logs", ui.cmd(logs) if is_cmd else ui.path_link(logs)))
-    ui.heading("Copycord service")
-    ui.kv(rows, width=len("Started"))
-    print()
-    if st.running:
-        print(f"Stop it with {ui.cmd('copycord service stop')}, "
-              f"or open the dashboard at {ui.link(dashboard_url())}")
-    else:
-        print(f"Start it with {ui.cmd('copycord service start')}")
+    tty = sys.stdout.isatty()
+    with ui.Rail("Copycord service status", brand=ui.brand() if tty else "",
+                 heading=False) as rail:
+        with ui.section("Copycord service"):
+            ui.kv(rows, width=len("Started"))
+        if rail.active:
+            ui.gap()
+        else:
+            print()
+        if st.running:
+            rail.close(f"Stop it with {ui.cmd('copycord service stop')}, "
+                       f"or open the dashboard at {ui.link(dashboard_url())}")
+        else:
+            rail.close(f"Start it with {ui.cmd('copycord service start')}")
     return 0 if st.running else 3
 
 

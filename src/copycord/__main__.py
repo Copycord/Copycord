@@ -177,13 +177,7 @@ def brand() -> str:
     """The header line of a rail command, see ui.brand_line()."""
     from copycord import ui
 
-    try:
-        from copycord.update import installed_commit
-
-        commit = installed_commit() or ""
-    except Exception:
-        commit = ""
-    return ui.brand_line(_version(), commit)
+    return ui.brand()
 
 
 def format_help() -> str:

@@ -496,6 +496,21 @@ def brand_line(version: str, commit: str = "", stream: Optional[TextIO] = None) 
     return f"{accent('Copycord', stream)} {version}{sha}{dim(dot(stream) + TAGLINE, stream)}"
 
 
+def brand(stream: Optional[TextIO] = None) -> str:
+    """brand_line() for the installed version and commit."""
+    try:
+        from copycord.common.config import CURRENT_VERSION as version
+    except Exception:
+        version = "unknown"
+    try:
+        from copycord.update import installed_commit
+
+        commit = installed_commit() or ""
+    except Exception:
+        commit = ""
+    return brand_line(version, commit, stream)
+
+
 # A section box is at least this wide inside and at most this wide overall.
 SECTION_MIN = 20
 SECTION_MAX = 100
