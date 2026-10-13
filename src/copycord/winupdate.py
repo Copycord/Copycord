@@ -18,6 +18,8 @@ deletes the old folder.
 
 from __future__ import annotations
 
+import gc
+import importlib
 import json
 import ntpath
 import os
@@ -128,6 +130,9 @@ def clean_old(home: Path, launchers: List[str]) -> None:
 def move_aside(prefix: str, launchers: List[str], home: Path,
                failed: Optional[List[str]] = None) -> List[Tuple[Path, Path]]:
     """Rename the executable files of the environment and the launchers out of the way."""
+    # importlib.metadata keeps the launcher (a zip on sys.path) open; that blocks the rename.
+    importlib.invalidate_caches()
+    gc.collect()
     files = [p for p in Path(prefix).rglob("*") if p.suffix.lower() in _LOCKED and p.is_file()]
     files += [Path(p) for p in launchers if Path(p).is_file()]
     moved = []
