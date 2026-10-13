@@ -312,7 +312,120 @@ test.describe("forwarding", () => {
 });
 
 test.describe("scraper", () => {
+  // Made up values; adding a token is stubbed so no Discord call is made.
+  const FAKE_TOKEN = "FAKE.e2e-parity-token.abcdefghijklmnop.WXYZ";
+  const FAKE_MASKED = "FAKE.e…WXYZ";
+
+  test("43 tokens add with label, list masked, validate and delete", async ({ page }) => {
+    let tokens: unknown[] = [];
+    const added: { value: string | null; label: string | null }[] = [];
+    let validated = 0;
+    let deleted = 0;
+    await page.route("**/api/scraper/tokens", (r) => r.fulfill({ json: { ok: true, tokens } }));
+    await page.route("**/api/scraper/tokens/add", async (r) => {
+      const body = r.request().postData() ?? "";
+      added.push({
+        value: /name="token_value"\r\n\r\n([^\r]*)/.exec(body)?.[1] ?? null,
+        label: /name="label"\r\n\r\n([^\r]*)/.exec(body)?.[1] ?? null,
+      });
+      tokens = [{ token_id: "e2e1", label: "Parity", masked: FAKE_MASKED, is_valid: false, username: null }];
+      await r.fulfill({ json: { ok: true, token_id: "e2e1", is_valid: false } });
+    });
+    await page.route("**/api/scraper/tokens/e2e1/validate", async (r) => {
+      validated++;
+      await r.fulfill({ json: { ok: true, is_valid: false } });
+    });
+    await page.route("**/api/scraper/tokens/e2e1", async (r) => {
+      if (r.request().method() !== "DELETE") return r.fallback();
+      deleted++;
+      tokens = [];
+      await r.fulfill({ json: { ok: true } });
+    });
+    await open(page, "scraper");
+    await expect(page.locator("#sc-token-count")).toHaveText("0 tokens");
+    await page.locator("#sc-token-value").fill(FAKE_TOKEN);
+    await page.locator("#sc-token-label").fill("Parity");
+    await page.locator("#sc-add-submit").click();
+    await expect(page.locator("#sc-token-count")).toHaveText("1 token");
+    expect(added).toEqual([{ value: FAKE_TOKEN, label: "Parity" }]);
+    const row = page.locator('.sc-token-item[data-id="e2e1"]');
+    await expect(row).toContainText("Parity");
+    await expect(row).toContainText(FAKE_MASKED);
+    await expect(page.locator("#sc-token-value")).toHaveValue("");
+    expect(await page.content()).not.toContain(FAKE_TOKEN);
+
+    await row.locator(".sc-token-revalidate").click();
+    await expect.poll(() => validated).toBe(1);
+
+    // The old page asks with window.confirm, the SPA with its dialog.
+    if (!BASE_PATH) page.once("dialog", (d) => void d.accept());
+    await row.locator(".sc-token-delete").click();
+    if (BASE_PATH) await page.getByRole("dialog").getByRole("button", { name: "Delete", exact: true }).click();
+    await expect.poll(() => deleted).toBe(1);
+    await expect(page.locator("#sc-token-empty")).toBeVisible();
+  });
+
+  test("44 configuration fields and validate setup", async ({ page }) => {
+    await open(page, "scraper");
+    for (const id of ["sc-guild-id", "sc-validate-btn", "sc-queue-btn", "sc-start-btn"]) {
+      await expect(page.locator(`#${id}`), id).toBeVisible();
+    }
+    await expect(page.locator("#sc-opt-username")).toBeChecked();
+    await expect(page.locator("#sc-opt-avatar")).toBeChecked();
+    await expect(page.locator("#sc-opt-roles")).not.toBeChecked();
+    await expect(page.locator("#sc-opt-bio")).not.toBeChecked();
+    await page.locator("#sc-opt-roles").check();
+    await expect(page.locator("#sc-opt-roles")).toBeChecked();
+
+    // No tokens in the e2e home, so the server answers without calling Discord.
+    await page.locator("#sc-guild-id").fill("123456789012345678");
+    const reply = page.waitForResponse((r) => r.url().endsWith("/api/scraper/validate-setup"));
+    await page.locator("#sc-validate-btn").click();
+    const r = await reply;
+    expect(r.request().postData()).toContain("123456789012345678");
+    await expect(page.locator("#sc-validation-result")).toContainText("No valid tokens configured");
+
+    // Start without tokens is refused in the page, before any request.
+    let started = 0;
+    await page.route("**/api/scraper/start", async (route) => {
+      started++;
+      await route.fulfill({ json: { ok: false } });
+    });
+    await page.locator("#sc-start-btn").click();
+    await page.waitForTimeout(300);
+    expect(started).toBe(0);
+  });
+
+  test("45 proxies list reads and saves", async ({ page }) => {
+    await open(page, "scraper");
+    await expect(page.locator("#sc-proxy-card")).toContainText("Proxies");
+    const put = (proxies: string[]) => page.request.put("/api/scraper/proxies", { headers: CSRF_HEADERS, data: { proxies } });
+    try {
+      expect((await put(["127.0.0.1:9"])).ok()).toBeTruthy();
+      const got = (await (await page.request.get("/api/scraper/proxies")).json()) as { proxies: string[] };
+      expect(got.proxies).toEqual(["127.0.0.1:9"]);
+      if (BASE_PATH) {
+        // The SPA edits the list in place; the old page links to Configuration.
+        await page.reload();
+        await settle(page);
+        await page.locator("#sc-proxy-toggle").click();
+        await expect(page.locator("#sc-proxy-panel")).toContainText("127.0.0.1:9");
+        await page.locator("#sc-proxy-input").fill("127.0.0.1:10");
+        await page.locator("#sc-proxy-input").press("Enter");
+        const saved = page.waitForResponse((res) => res.url().endsWith("/api/scraper/proxies") && res.request().method() === "PUT");
+        await page.locator("#sc-proxy-save").click();
+        expect((await saved).ok()).toBeTruthy();
+        const after = (await (await page.request.get("/api/scraper/proxies")).json()) as { proxies: string[] };
+        expect(after.proxies).toEqual(["127.0.0.1:9", "127.0.0.1:10"]);
+      }
+    } finally {
+      await put([]);
+    }
+  });
+
   test("48 49 log and past scrapes cards", async ({ page }) => {
+    // Lane 12 ports these cards to the SPA; until then /app/scraper has only the top half.
+    test.skip(Boolean(BASE_PATH), "queue, progress, logs and past scrapes cards are not in the SPA yet");
     await open(page, "scraper");
     for (const id of ["sc-config-card", "sc-log-card", "sc-log-search", "sc-log-autoclear", "sc-scrapes-card", "sc-scrapes-refresh"]) {
       await expect(page.locator(`#${id}`), id).toBeAttached();

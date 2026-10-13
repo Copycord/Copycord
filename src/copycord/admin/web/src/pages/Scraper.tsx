@@ -27,6 +27,7 @@ export function Scraper() {
 
   return (
     <div id="scraper-root" className="mx-auto max-w-[1120px] px-3 pt-3.5 md:px-0 md:pt-[18px] xl:max-w-[1240px]">
+      <h1 className="sr-only">Scraper</h1>
       <div className="mb-5 flex items-start justify-between gap-3">
         <div>
           <h2 className="m-0 flex items-center gap-2 text-2xl font-bold text-accent">
