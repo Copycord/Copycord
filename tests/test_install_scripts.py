@@ -54,7 +54,8 @@ def test_installs_the_wheel_with_uv_tool(path):
     assert "uv tool install --force" in text
     assert ".whl" in text
     assert "uv tool update-shell" in text
-    assert "astral.sh/uv/install." in text
+    # install.sh fetches the latest uv installer; install.ps1 pins a version.
+    assert "astral.sh/uv/install." in text or "astral.sh/uv/$UvVersion/install.ps1" in text
 
 
 @pytest.mark.parametrize("path", [SH, PS1])
