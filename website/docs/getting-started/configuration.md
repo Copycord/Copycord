@@ -55,11 +55,8 @@ PASSWORD=copycord
 # dashboard port
 ADMIN_PORT=8080
 
-# time zone for the daily backup, e.g. Europe/Berlin
+# time zone for scheduled backups and export timestamps, e.g. America/New_York
 TZ=UTC
-
-# time zone shown in exports
-UI_TZ=America/New_York
 
 # DEBUG or INFO; the dashboard's log level wins once it is saved
 LOG_LEVEL=INFO
@@ -139,8 +136,7 @@ Variables set in the real environment win over the file, for example `ADMIN_PORT
 |-----|---------|--------------|
 | `PASSWORD` | `copycord` | Dashboard login password; no login page when empty or unset. |
 | `ADMIN_PORT` | `8080` | Dashboard port. |
-| `TZ` | `UTC` | Time zone for the daily backup. |
-| `UI_TZ` | `America/New_York` | Time zone shown in exports. |
+| `TZ` | `UTC` | Time zone for scheduled backups and export timestamps. |
 | `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG`; the dashboard's value wins once it is saved. |
 | `LOG_FORMAT` | `HUMAN` | `HUMAN` or `JSON` log lines. |
 | `BACKUP_DIR` | `<data dir>/backups` | Where the daily database backups go. |

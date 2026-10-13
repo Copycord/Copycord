@@ -440,11 +440,8 @@ PASSWORD=copycord
 # dashboard port
 ADMIN_PORT=8080
 
-# time zone for the daily backup, e.g. Europe/Berlin
+# time zone for scheduled backups and export timestamps, e.g. America/New_York
 TZ=UTC
-
-# time zone shown in exports
-UI_TZ=America/New_York
 
 # DEBUG or INFO; the dashboard's log level wins once it is saved
 LOG_LEVEL=INFO
@@ -493,8 +490,7 @@ copycord restart
 | `PASSWORD` | `copycord` in the file | Dashboard login password; no login page when empty or unset. |
 | `SECRET_KEY` | a key saved in `<data dir>/secret.key` | Signs the dashboard login cookie. Not in the file; add it only to use a key of your own. |
 | `ADMIN_PORT` | `8080` | Dashboard port. |
-| `TZ` | `UTC` | Time zone for the daily backup, e.g. `Europe/Berlin`. |
-| `UI_TZ` | `America/New_York` | Time zone shown in exports. |
+| `TZ` | `UTC` | Time zone for scheduled backups and export timestamps, e.g. `America/New_York`. |
 | `LOG_LEVEL` | `INFO` | `INFO` or `DEBUG` for the first log lines; an app config key, so the dashboard's value wins once it is saved and `copycord config set LOG_LEVEL` writes the database. |
 | `LOG_FORMAT` | `HUMAN` | `HUMAN` or `JSON` log lines. |
 | `BACKUP_DIR` | `<data dir>/backups` | Where the daily database backups go. |

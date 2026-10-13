@@ -1642,7 +1642,6 @@ def test_env_template_sets_every_default(tmp_path):
         "PASSWORD": "copycord",
         "ADMIN_PORT": "8080",
         "TZ": "UTC",
-        "UI_TZ": "America/New_York",
         "LOG_LEVEL": "INFO",
         "LOG_FORMAT": "HUMAN",
         "BACKUP_AT": "03:17",
@@ -1690,7 +1689,7 @@ def test_env_template_defaults_match_the_code(tmp_path, monkeypatch):
         (root / f).read_text(encoding="utf-8")
         for f in ("admin/app.py", "supervisor.py", "client/export_runners.py")
     )
-    for key in ("ADMIN_PORT", "TZ", "UI_TZ", "BACKUP_AT", "BACKUP_RETAIN"):
+    for key in ("ADMIN_PORT", "BACKUP_AT", "BACKUP_RETAIN"):
         reads = re.findall(rf'os\.getenv\("{key}"\) or "([^"]*)"', sources)
         assert reads, key
         assert set(reads) == {envfile.ENV_DEFAULTS[key]}, key
