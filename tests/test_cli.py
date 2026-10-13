@@ -1471,7 +1471,7 @@ def test_config_import_skips_masked_values(data_dir, tmp_path, capsys):
     src.write_text(json.dumps({"SERVER_TOKEN": cli.MASK, "SYNC_INTERVAL_SECONDS": 60}))
 
     assert cli.main(["config", "import", str(src), *dd]) == 0
-    assert "skipped SERVER_TOKEN" in capsys.readouterr().err
+    assert "! Skipped SERVER_TOKEN  masked value from a stdout export" in capsys.readouterr().err
     assert cli.main(["config", "get", "SERVER_TOKEN", *dd]) == 1
     capsys.readouterr()
     assert cli.main(["config", "get", "SYNC_INTERVAL_SECONDS", *dd]) == 0

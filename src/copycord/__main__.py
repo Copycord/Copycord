@@ -1759,14 +1759,14 @@ def _print_value(key: str, value: Optional[str], show_secrets: bool,
 
 def env_config_command(args: argparse.Namespace) -> int:
     """config get/set/unset for the env-only keys in <home>/.env."""
-    from copycord import envfile
+    from copycord import envfile, ui
 
     cmd, key = args.config_command, args.key
     if cmd == "get":
         value = envfile.get(key)
         if value is None:
             error = f"{key} is not set in {envfile.env_path()}"
-            print(error, file=sys.stderr)
+            ui.fail(f"{key} is not set", str(envfile.env_path()))
             if args.json:
                 _print_value(key, None, False, True, "env", error)
             return 1
@@ -1774,19 +1774,20 @@ def env_config_command(args: argparse.Namespace) -> int:
         return 0
     if cmd == "set":
         path = envfile.set_value(key, args.value)
-        print(f"{key} saved in {path}; {restart_hint()}", file=sys.stderr)
+        ui.ok(f"{key} saved", f"{path}; {restart_hint()}", stream=sys.stderr)
         return 0
     if cmd == "unset":
         path = envfile.env_path()
         if not envfile.unset(key):
-            print(f"{key} is not set in {path}", file=sys.stderr)
+            ui.fail(f"{key} is not set", str(path))
             return 1
-        print(f"{key} removed from {path}; {restart_hint()}", file=sys.stderr)
+        ui.ok(f"{key} removed", f"{path}; {restart_hint()}", stream=sys.stderr)
         return 0
     return 2
 
 
 def config_command(args: argparse.Namespace) -> int:
+    from copycord import ui
     from copycord.envfile import is_env_key
 
     cmd = args.config_command
@@ -1808,7 +1809,7 @@ def config_command(args: argparse.Namespace) -> int:
         if cmd == "get":
             value = db.get_config(args.key, None)
             if value is None:
-                print(f"{args.key} is not set", file=sys.stderr)
+                ui.fail(f"{args.key} is not set")
                 if as_json:
                     _print_value(args.key, None, False, True, "database", f"{args.key} is not set")
                 return 1
@@ -1817,15 +1818,15 @@ def config_command(args: argparse.Namespace) -> int:
 
         if cmd == "set":
             db.set_config(args.key, args.value)
-            print(f"{args.key} saved; {restart_hint()}", file=sys.stderr)
+            ui.ok(f"{args.key} saved", restart_hint(), stream=sys.stderr)
             return 0
 
         if cmd == "unset":
             if db.get_config(args.key, None) is None:
-                print(f"{args.key} is not set", file=sys.stderr)
+                ui.fail(f"{args.key} is not set")
                 return 1
             db.delete_config(args.key)
-            print(f"{args.key} removed; {restart_hint()}", file=sys.stderr)
+            ui.ok(f"{args.key} removed", restart_hint(), stream=sys.stderr)
             return 0
 
         if cmd == "export":
@@ -1837,7 +1838,7 @@ def config_command(args: argparse.Namespace) -> int:
                     os.chmod(out, 0o600)
                 except OSError:
                     pass
-                print(f"exported {len(values)} keys to {out}", file=sys.stderr)
+                ui.ok(f"Exported {len(values)} keys", str(out), stream=sys.stderr)
                 if as_json:
                     from copycord import jsonout
 
@@ -1852,17 +1853,16 @@ def config_command(args: argparse.Namespace) -> int:
                 raw = json.loads(Path(args.file).expanduser().read_text(encoding="utf-8"))
                 values = _import_values(raw)
             except (OSError, ValueError) as e:
-                print(f"cannot import {args.file}: {e}", file=sys.stderr)
+                ui.fail(f"Could not import {args.file}", str(e))
                 return 1
             imported = 0
             for key, value in values.items():
                 if value == MASK:
-                    print(f"skipped {key}: masked value from a stdout export",
-                          file=sys.stderr)
+                    ui.warn(f"Skipped {key}", "masked value from a stdout export")
                     continue
                 db.set_config(key, value)
                 imported += 1
-            print(f"imported {imported} keys; {restart_hint()}", file=sys.stderr)
+            ui.ok(f"Imported {imported} keys", restart_hint(), stream=sys.stderr)
             return 0
     finally:
         db.conn.close()
