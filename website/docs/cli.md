@@ -487,14 +487,20 @@ The service does not see variables you set in your terminal. The simplest way to
 
 ## copycord uninstall {#copycord-uninstall}
 
-Removes Copycord from this machine. After you confirm the uninstall it asks whether to delete your data too:
+Removes the Copycord program and its background service. It asks one question, about your data in the [Copycord home](#data-dir):
 
 ```
-? Uninstall Copycord? (y/N) y
-? Also delete your Copycord data (database, logs, backups, settings) in /home/you/.copycord? This cannot be undone. (y/N)
+Uninstall Copycord
+Removes the Copycord program and its background service.
+
+? Your data is in /home/you/.copycord
+  1) Keep my data (default)
+  2) Delete everything (database, logs, backups, settings)
+  3) Cancel
+? Enter 1, 2 or 3 [1]
 ```
 
-The answer defaults to No: the [Copycord home](#data-dir) is kept and the summary prints where it is. Yes asks you to type `DELETE` before anything is removed.
+Press Enter to keep your data. It ends with `Copycord uninstalled`, and when the data is kept, the folder it is still in.
 
 ```bash
 copycord uninstall --dry-run          # show what would be removed, change nothing
@@ -507,15 +513,15 @@ copycord uninstall --yes --keep-service
 It runs these steps in order:
 
 1. Stops and removes the [service](#copycord-service), the same as `copycord service uninstall`. On Linux it checks both the user and the system service; removing the system service needs root. A service that is not installed is skipped.
-2. If you answered yes to deleting your data, or gave `--purge`, deletes the [Copycord home](#data-dir) (database, logs, backups, settings, `src/`, `node/`) and the saved `~/.copycord-home`. It refuses when that path is `/`, your home directory or empty.
+2. If you chose to delete everything, or gave `--purge`, deletes the [Copycord home](#data-dir) (database, logs, backups, settings, `src/`, `node/`) and the saved `~/.copycord-home`. It refuses when that path is `/`, your home directory or empty.
 3. Removes the program with `uv tool uninstall copycord`, or `pipx uninstall copycord` when `uv` is not on your `PATH`, and deletes the saved `update.json`. When neither tool is found it prints the command to run yourself.
-4. Prints a summary of what was removed and kept, and how to reinstall.
+4. Prints `Copycord uninstalled`, or `Uninstall incomplete` when a step failed.
 
 | Option | What it does |
 |--------|--------------|
-| `--purge` | Deletes the Copycord home without asking whether to. Without `--yes` you must still type `DELETE` to confirm. |
-| `--keep-data` | Keeps the Copycord home without asking |
-| `--yes`, `-y` | Skips the confirmation prompts |
+| `--purge` | Deletes the Copycord home. Without `--yes` the question only offers delete or cancel. |
+| `--keep-data` | Keeps the Copycord home. Without `--yes` the question only offers keep or cancel. |
+| `--yes`, `-y` | Skips the question |
 | `--keep-service` | Leaves the OS service installed |
 | `--dry-run` | Prints the steps and changes nothing |
 | `--data-dir PATH` | The data directory to keep or delete |
