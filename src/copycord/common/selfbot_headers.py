@@ -39,10 +39,7 @@ logger = logging.getLogger("common.selfbot_headers")
 
 
 def _token_log_id(token: str) -> str:
-    """A short, stable, non-reversible identifier for a token, safe to put
-    in logs — never the token itself or a prefix of it (Discord tokens are
-    partially structured/guessable, so even a truncated raw prefix is a
-    partial credential leak)."""
+    """Short non-reversible id for a token, safe to log (even a raw prefix would leak part of the credential)."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()[:10]
 
 
@@ -101,8 +98,7 @@ def get_build_info() -> dict:
 
 
 def set_build_info(build: dict) -> None:
-    """Replace the shared build fingerprint and invalidate cached per-token
-    fingerprints so they rebuild against the new build."""
+    """Replace the shared build fingerprint and invalidate cached per-token fingerprints."""
     global _BUILD
     merged = dict(DEFAULT_BUILD)
     merged.update({k: v for k, v in (build or {}).items() if v is not None})
@@ -418,9 +414,7 @@ def _mask_proxy_for_log(proxy: str) -> str:
 
 
 async def _prime_tls_session(sess, token: str, proxy: str | None = None) -> None:
-    """Warm the session's cookie jar, through ``proxy`` if this token has
-    one leased, so cookies are tied to the same source IP real requests will
-    use."""
+    """Warm the session's cookie jar through the token's leased proxy, so cookies match the source IP."""
     try:
         await sess.get("https://discord.com", timeout=12, proxy=proxy)
     except Exception as e:
@@ -428,9 +422,7 @@ async def _prime_tls_session(sess, token: str, proxy: str | None = None) -> None
 
 
 async def close_tls_session(token: str, reason: str = "unspecified") -> None:
-    """Drop a token's cached curl_cffi session (e.g. on token removal/revoke)
-    and release its proxy lease, if any, back to the pool.
-    """
+    """Drop a token's cached session and release its proxy lease."""
     async with _tls_session_lock(token):
         sess = _TLS_SESSIONS.pop(token, None)
         _TLS_PRIMED.discard(token)
@@ -463,9 +455,7 @@ async def close_all_tls_sessions() -> None:
 
 
 async def reap_idle_tls_sessions(idle_ttl: float = TLS_SESSION_IDLE_TTL) -> int:
-    """Close every cached session that hasn't been used in ``idle_ttl``
-    seconds.
-    """
+    """Close cached sessions unused for ``idle_ttl`` seconds."""
     now = time.monotonic()
     stale = [
         token
