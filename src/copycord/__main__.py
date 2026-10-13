@@ -27,9 +27,9 @@ copycord update [--channel stable|beta|dev [--repo OWNER/NAME] [--ref REF]]
                               update (uv tool / pipx) from the saved or given
                               channel and restart a running service
 copycord update status        installed version, channel and latest on it
-copycord uninstall [--purge] [--yes] [--keep-service] [--dry-run]
-                              remove the service and the program (and the
-                              data directory with --purge)
+copycord uninstall [--purge|--keep-data] [--yes] [--keep-service] [--dry-run]
+                              remove the service and the program; asks
+                              whether to delete the data directory too
 """
 
 from __future__ import annotations
@@ -98,7 +98,7 @@ COMMAND_GROUPS = (
         ("update", "Update Copycord; switch channel with --channel stable|beta|dev"),
     )),
     ("Remove", (
-        ("uninstall", "Remove the service and the program; --purge deletes the data"),
+        ("uninstall", "Remove Copycord; asks whether to delete your data"),
     )),
 )
 
@@ -147,8 +147,9 @@ COMMAND_EXAMPLES = {
     ),
     "copycord uninstall": (
         ("copycord uninstall --dry-run", "show what would be removed"),
-        ("copycord uninstall", "remove the service and the program"),
-        ("copycord uninstall --purge", "also delete the data"),
+        ("copycord uninstall", "remove Copycord; asks whether to delete your data"),
+        ("copycord uninstall --yes", "no prompts, keep the data"),
+        ("copycord uninstall --yes --purge", "no prompts, delete the data too"),
         ("copycord uninstall --yes --keep-service", "no prompts, keep the service"),
     ),
 }
@@ -517,11 +518,17 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         parents=[data_dir],
         help="remove Copycord from this machine",
         description="Stop and remove the OS service, remove the copycord program "
-        "(uv tool or pipx) and the saved update channel. The Copycord home "
-        "(~/.copycord or COPYCORD_HOME: data, src, node) stays unless --purge is given.",
+        "(uv tool or pipx) and the saved update channel. It then asks whether to "
+        "delete your data too: the Copycord home (~/.copycord or COPYCORD_HOME: "
+        "database, logs, backups, settings, src, node). Without a terminal the data "
+        "is kept unless --purge is given.",
     )
-    uninst.add_argument("--purge", action="store_true",
-                        help="also delete the Copycord home (database, logs, backups, src, node)")
+    data_choice = uninst.add_mutually_exclusive_group()
+    data_choice.add_argument("--purge", action="store_true",
+                             help="also delete the Copycord home without asking "
+                             "(database, logs, backups, settings, src, node)")
+    data_choice.add_argument("--keep-data", action="store_true",
+                             help="keep the Copycord home without asking")
     uninst.add_argument("--yes", "-y", action="store_true",
                         help="skip the confirmation prompts (needed without a terminal)")
     uninst.add_argument("--keep-service", action="store_true",
@@ -1170,7 +1177,7 @@ INSTALL_SCRIPT = (
 
 
 def purge_refusal(path: Path) -> Optional[str]:
-    """Why --purge must not delete path; None when it may."""
+    """Why the Copycord home must not be deleted; None when it may."""
     if not str(path).strip() or str(path) == ".":
         return "the Copycord home path is empty"
     resolved = path.expanduser().resolve()
@@ -1293,7 +1300,11 @@ def uninstall_command(args: argparse.Namespace) -> int:
     from copycord.common.paths import data_dir
     from copycord import ui
 
-    purge, dry_run, yes = args.purge, args.dry_run, args.yes
+    dry_run, yes = args.dry_run, args.yes
+    # True deletes the data, False keeps it, None asks after the confirmation.
+    purge: Optional[bool] = True if args.purge else False if args.keep_data else None
+    if purge is None and (yes or dry_run):
+        purge = False
     target = data_dir()
     if purge:
         why = purge_refusal(target)
@@ -1303,7 +1314,7 @@ def uninstall_command(args: argparse.Namespace) -> int:
     if not yes and not dry_run and not ui.is_interactive():
         ui.fail(
             "copycord uninstall needs a confirmation",
-            "no terminal to ask in; rerun with --yes to uninstall without prompts",
+            "no terminal to ask in; rerun with --yes (keeps your data unless you add --purge)",
         )
         return 1
 
@@ -1315,6 +1326,8 @@ def uninstall_command(args: argparse.Namespace) -> int:
     if purge:
         ui.line("step", "delete the Copycord home, including src and node", str(target))
     ui.line("step", "remove the copycord program and its update channel")
+    if purge is None:
+        ui.line("step", "ask whether to delete your data too", str(target))
     print()
 
     if not yes and not dry_run:
@@ -1322,6 +1335,19 @@ def uninstall_command(args: argparse.Namespace) -> int:
             if not ui.confirm("Uninstall Copycord?", default=False):
                 ui.warn("uninstall cancelled", "nothing was changed")
                 return 1
+            if purge is None:
+                purge = ui.confirm(
+                    "Also delete your Copycord data (database, logs, backups, settings) "
+                    f"in {target}? This cannot be undone.",
+                    default=False,
+                )
+                if purge:
+                    why = purge_refusal(target)
+                    if why:
+                        ui.fail("refusing to delete the Copycord home", why)
+                        return 1
+                else:
+                    ui.info("keeping your data", str(target))
             if purge:
                 typed = ui.ask(f"Type DELETE to remove {target} and everything in it")
                 if typed != "DELETE":
@@ -1341,7 +1367,7 @@ def uninstall_command(args: argparse.Namespace) -> int:
         ok = _uninstall_service(dry_run, removed, kept) and ok
 
     if not purge:
-        kept.append(f"Copycord home: {target} (add --purge to delete it)")
+        kept.append(f"Copycord home: {target} (database, logs, backups, settings)")
     elif not target.exists():
         ui.info("Copycord home does not exist", str(target))
     elif dry_run:
