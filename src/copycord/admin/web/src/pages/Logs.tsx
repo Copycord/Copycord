@@ -263,10 +263,17 @@ export function Logs() {
   const firstLoad = list.loading && !list.data;
   const empty = !firstLoad && !list.error && logs.length === 0;
 
+  // On phones the extra side padding gives the 28px inset of the old .container, and the
+  // table height leaves room for the header and toolbar so the page fits the screen.
   return (
-    <section id="logs-root" ref={rootRef} aria-label="Event logs" className="mx-auto w-full max-w-[1200px] scroll-mt-4">
+    <section
+      id="logs-root"
+      ref={rootRef}
+      aria-label="Event logs"
+      className="mx-auto w-full max-w-[1200px] scroll-mt-4 max-md:px-3"
+    >
       <h1 className="sr-only">Logs</h1>
-      <div className="my-3 flex items-center gap-3">
+      <div className="mt-3 mb-3 flex items-center gap-3 max-md:mt-1">
         <h2 className="m-0 text-[22px] font-bold text-text">Event Logs</h2>
       </div>
 
@@ -380,7 +387,7 @@ export function Logs() {
       <div
         className={cx(
           "h-[calc(100vh-280px)] min-h-[400px] overflow-auto rounded-xl border border-border",
-          "bg-linear-to-b from-[rgba(27,16,48,0.5)] to-[rgba(15,8,30,0.6)] max-md:h-[calc(100vh-320px)] max-md:min-h-[300px]",
+          "bg-linear-to-b from-[rgba(27,16,48,0.5)] to-[rgba(15,8,30,0.6)] max-md:h-[calc(100vh-340px)] max-md:min-h-[300px]",
         )}
       >
         <table id="logs-table" className="w-full table-fixed border-collapse max-md:min-w-[560px]" aria-busy={list.loading || undefined}>
