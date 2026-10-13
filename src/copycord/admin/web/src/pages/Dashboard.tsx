@@ -8,6 +8,7 @@ import type { UseWsOptions } from "../hooks/useWsMessages";
 import type { SseOptions } from "../lib/sse";
 import type { LogStream } from "../types/api";
 import { BotsPanel } from "./dashboard/BotsPanel";
+import { PromoCards } from "./dashboard/config/PromoCards";
 import { GlobalConfigSection } from "./dashboard/GlobalConfigSection";
 import { LogModal } from "./dashboard/LogModal";
 import { MappingsSection } from "./dashboard/MappingsSection";
@@ -30,6 +31,7 @@ export function Dashboard({ WebSocketImpl, EventSourceImpl }: DashboardProps = {
       {/* The old page has no visible title; this one is for screen readers and the shell test. */}
       <h1 className="sr-only">Configuration</h1>
       <UpdateNotice />
+      <PromoCards />
       <BotsPanel onViewLogs={setLogs} WebSocketImpl={WebSocketImpl} />
       <GlobalConfigSection />
       <MappingsSection />
