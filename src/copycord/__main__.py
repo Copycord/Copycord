@@ -178,7 +178,7 @@ def format_help() -> str:
         w(f"Copycord {_version()}")
     from copycord.common.paths import copycord_home
 
-    w(f"  {ui.dim('Home:')} {copycord_home()}")
+    w(f"  {ui.dim('Home:')} {ui.path_link(copycord_home(), out)}")
     w()
     w(f"{ui.bold('Usage:')} copycord <command> [options]")
     width = max(len(c) for _, cmds in COMMAND_GROUPS for c, _ in cmds)
@@ -1294,6 +1294,15 @@ def _hint(c: Check, verbose: bool = False, note: str = "") -> str:
     return "; ".join(p for p in parts if p)
 
 
+def _link_home(text: str) -> str:
+    """text with the paths in the Copycord home and the data dir clickable."""
+    from copycord import ui
+    from copycord.common.paths import copycord_home, data_dir
+
+    home = copycord_home()
+    return ui.link_paths(text, (home, home.resolve(), data_dir()), sys.stdout)
+
+
 def _print_checks(rows: List[Check], verbose: bool, done: Optional[dict] = None,
                   notes: Optional[dict] = None, failed: Optional[set] = None) -> None:
     """One line per check; done maps a row index to (text, result) for a fixed check."""
@@ -1304,11 +1313,12 @@ def _print_checks(rows: List[Check], verbose: bool, done: Optional[dict] = None,
     for i, c in enumerate(rows):
         if i in done:
             text, result = done[i]
-            ui.ok(text, " ".join(p for p in (result, "(fixed)") if p), stream=sys.stdout)
+            ui.ok(text, _link_home(" ".join(p for p in (result, "(fixed)") if p)),
+                  stream=sys.stdout)
         elif c.name in failed:
-            ui.fail(c.name, notes[c.name], stream=sys.stdout)
+            ui.fail(c.name, _link_home(notes[c.name]), stream=sys.stdout)
         else:
-            ui.line(status[c.status], c.name, _hint(c, verbose), stream=sys.stdout)
+            ui.line(status[c.status], c.name, _link_home(_hint(c, verbose)), stream=sys.stdout)
 
 
 def _attention_hint(c: Check, note: str, fix: bool) -> str:
@@ -1328,7 +1338,7 @@ def _print_attention(checks: List[Check], notes: Optional[dict] = None, fix: boo
     notes = notes or {}
     ui.attention(
         (("fail" if c.status == FAIL else "warn", c.name,
-          _attention_hint(c, notes.get(c.name, ""), fix))
+          _link_home(_attention_hint(c, notes.get(c.name, ""), fix)))
          for c in checks if c.status in (WARN, FAIL)),
         stream=sys.stdout,
     )
@@ -1379,10 +1389,10 @@ def _print_brief(checks: List[Check], notes: dict, fixed: dict) -> None:
     from copycord import ui
 
     for key, result in fixed.items():
-        ui.ok(FIXES[key].done, result, stream=sys.stdout)
+        ui.ok(FIXES[key].done, _link_home(result), stream=sys.stdout)
     for c in checks:
         if c.status == FAIL:
-            ui.fail(c.name, _hint(c, note=notes.get(c.name, "")), stream=sys.stdout)
+            ui.fail(c.name, _link_home(_hint(c, note=notes.get(c.name, ""))), stream=sys.stdout)
     summary = doctor_summary(checks)
     if summary == "All good":
         ui.ok("All checks passed")
@@ -1930,7 +1940,8 @@ def _uninstall_steps(args: argparse.Namespace, target: Path, purge: Optional[boo
             picked = options + ["Cancel"]
             # Enter never deletes data: with --purge the default is Cancel.
             default = len(picked) - 1 if purge else 0
-            choice = picked[ui.choose(f"Your data is in {target}", picked, default=default)]
+            question = f"Your data is in {ui.path_link(target)}"
+            choice = picked[ui.choose(question, picked, default=default)]
         except (KeyboardInterrupt, EOFError):
             choice = "Cancel"
             ui.gap()
@@ -1994,7 +2005,7 @@ def _uninstall_steps(args: argparse.Namespace, target: Path, purge: Optional[boo
     if not purge and target.exists():
         from copycord.common.paths import data_dir
 
-        rail.close(f"  Your data is still in {data_dir()}")
+        rail.close(f"  Your data is still in {ui.path_link(data_dir(), rail.stream)}")
     return 0 if ok else 1
 
 
