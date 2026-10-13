@@ -202,7 +202,7 @@ export function System() {
               setOpen((v) => !v);
             }}
           >
-            <span aria-hidden="true" className="text-xs leading-none">
+            <span aria-hidden="true" className="text-sm leading-none">
               {open ? "▾" : "▸"}
             </span>
           </button>
