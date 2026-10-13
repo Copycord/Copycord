@@ -10,12 +10,9 @@
 """
 Process-wide logging for `copycord run`.
 
-One console handler on the root logger prints every record once, tagged
-[admin], [server] or [client] by the thread it was emitted on. Server and
-client records are shown on the console only at WARNING and above; all their
-records (routed by the ThreadedRole thread) are written to <DATA_DIR>/<role>.out,
-the files the admin's log tabs read. Admin/supervisor records go to the console
-only.
+The console shows every record tagged by role, with server and client records
+only at WARNING and above. Server and client records also go to
+<DATA_DIR>/<role>.out, which the admin log tabs read.
 """
 
 from __future__ import annotations
@@ -31,15 +28,11 @@ FORMAT = "%(asctime)s | %(levelname)-5s | %(message)s"
 CONSOLE_FORMAT = "%(asctime)s | %(levelname)-5s | %(role_tag)s %(message)s"
 DATEFMT = "%Y-%m-%d %H:%M:%S"
 
-# Set on every handler that prints to the console, so server.py/client.py
-# (which add their own at import time) can tell one is already installed.
+# Marks console handlers so server.py and client.py do not add a second one.
 CONSOLE_MARK = "_copycord_console"
 
 FILE_ROLES = ("server", "client")
-# Server and client INFO stays in their log files; the console only shows
-# their records at this level and above.
 ROLE_CONSOLE_LEVEL = logging.WARNING
-# The v3 log files were unbounded; keep the last ~10 MB (+ one backup).
 MAX_BYTES = 10 * 1024 * 1024
 BACKUP_COUNT = 1
 
@@ -59,14 +52,13 @@ def _level() -> int:
 
 
 def logs_dir() -> Path:
-    """Where the admin reads <role>.out: the data dir (copycord.common.paths)."""
     from copycord.common.paths import data_dir
 
     return data_dir()
 
 
 class ThreadRoleFilter(logging.Filter):
-    """Passes only records emitted on the given role's thread (copycord-<role>)."""
+    """Passes only records emitted on the role's copycord-<role> thread."""
 
     def __init__(self, role: str):
         super().__init__()
@@ -85,11 +77,7 @@ def thread_role(thread_name: str) -> str:
 
 
 class ConsoleRoleFilter(logging.Filter):
-    """
-    Console routing: records from the server/client role threads pass only at
-    ROLE_CONSOLE_LEVEL and above, everything else passes (the handler level
-    still applies).
-    """
+    """Holds server and client records below ROLE_CONSOLE_LEVEL off the console."""
 
     def filter(self, record: logging.LogRecord) -> bool:
         if thread_role(record.threadName) in FILE_ROLES:
@@ -106,11 +94,7 @@ class ConsoleFormatter(logging.Formatter):
 
 
 class TruncateSafeRotatingFileHandler(RotatingFileHandler):
-    """
-    RotatingFileHandler that survives the admin emptying the file in place
-    (open(path, "w")): the stream is append-mode, so writes land at the new
-    end, and the size check uses the real on-disk size, not the stale offset.
-    """
+    """Rotates on the real file size, since the admin may truncate the file in place."""
 
     def shouldRollover(self, record: logging.LogRecord) -> bool:
         if self.maxBytes <= 0:
@@ -131,10 +115,7 @@ def setup_logging(
     max_bytes: int = MAX_BYTES,
     backup_count: int = BACKUP_COUNT,
 ) -> Dict[str, logging.Handler]:
-    """
-    Idempotent. Installs the console handler (unless one is marked already) and
-    one file handler per role. Returns the file handlers keyed by role.
-    """
+    """Install the console handler and one file handler per role; safe to call twice."""
     root = logging.getLogger()
     level = _level()
     formatter = logging.Formatter(FORMAT, datefmt=DATEFMT)

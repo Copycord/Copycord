@@ -8,12 +8,9 @@
 # =============================================================================
 
 """
-Wire protocol for the server/client control ports (9101/9102).
-
-The admin sends JSON like {"cmd": "status" | "start" | "stop"} and gets one
-JSON reply per message. Shared by control/control.py (split mode, role runs as
-a subprocess) and copycord/supervisor.py (role runs as an in-process task) so
-both answer the admin with the same shapes.
+Wire protocol for the server/client control ports (9101/9102), shared by
+control/control.py and supervisor.py. The admin sends {"cmd": ...} and gets
+one JSON reply per message.
 """
 
 from __future__ import annotations
@@ -71,10 +68,7 @@ def status_payload(
 
 
 async def serve_json(ws, handle: Callable[[dict], Awaitable[Any]]) -> None:
-    """
-    Read JSON messages from a control websocket and answer each with
-    the JSON-encoded result of handle(msg).
-    """
+    """Answer each JSON message on a control websocket with handle(msg)."""
     try:
         async for raw in ws:
             try:

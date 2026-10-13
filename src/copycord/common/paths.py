@@ -10,16 +10,8 @@
 """
 Where Copycord keeps its data (DB, logs, backups, exports).
 
-One visible home directory holds everything Copycord owns: ~/.copycord, or
-COPYCORD_HOME when set. The data dir is the home root itself; a git install
-keeps its checkout in src/ and its per-user Node in node/.
-
-Precedence: DATA_DIR (Docker sets it to /data, `copycord run --data-dir` sets
-it), then /data inside Docker, then COPYCORD_HOME, then ~/.copycord. The
-installer saves a custom --home in ~/.copycord-home so the service and the CLI
-agree without an environment variable; COPYCORD_HOME wins over that file.
-Everything that needs the data dir resolves it here so the supervisor,
-logging and config agree.
+The data dir is DATA_DIR, else /data inside Docker, else COPYCORD_HOME, else
+the home saved by the installer in ~/.copycord-home, else ~/.copycord.
 """
 
 from __future__ import annotations
@@ -82,11 +74,7 @@ def platform_data_dir(
     env: Optional[Mapping[str, str]] = None,
     home: Optional[Path] = None,
 ) -> Path:
-    """The data directory for a native (non-Docker) install.
-
-    The Copycord home, unless it does not exist yet while the old platform
-    directory holds a data.db: that one keeps being used (nothing is moved).
-    """
+    """The Copycord home, or the pre-4.0 directory if only that one has a data.db."""
     target = copycord_home(env, home)
     if not target.exists():
         old = legacy_data_dir(platform, env, home)

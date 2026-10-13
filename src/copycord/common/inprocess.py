@@ -8,21 +8,12 @@
 # =============================================================================
 
 """
-In-process transport used by the supervisor.
+In-process transport used when admin, server and client share one process.
 
-When admin, server and client run in one interpreter, WebsocketManager and
-AdminBus hand messages over through this registry instead of loopback
-sockets. Each endpoint remembers the event loop it was registered on, and
-every delivery is scheduled onto that loop with run_coroutine_threadsafe /
-call_soon_threadsafe, because server and client run on their own
-ThreadedRole loops.
-
-Messages are JSON round-tripped on the way in and out, so the receiver sees
-exactly what it would have parsed off a socket and no mutable object is
-shared between threads.
-
-The registry is off unless enable() is called (build_supervisor does that
-for all-roles mode). Split mode never enables it and keeps real sockets.
+WebsocketManager and AdminBus deliver through this registry instead of
+loopback sockets. Each delivery runs on the loop the endpoint registered on,
+and messages are JSON round-tripped so no object is shared between threads.
+Off unless enable() is called.
 """
 
 from __future__ import annotations
@@ -45,7 +36,7 @@ OUT_PATH = "/ws/out"
 
 
 class EndpointUnavailable(OSError):
-    """Nothing registered for the URL, or its loop is gone. Retried like a refused connect."""
+    """No live endpoint for the URL; callers treat it like a refused connect."""
 
 
 def _dumps(obj: Any) -> str:
@@ -56,11 +47,7 @@ def _dumps(obj: Any) -> str:
 
 
 def key_for_url(url: Optional[str]) -> Optional[Key]:
-    """
-    Admin bus URLs resolve by path (one admin per process); role servers by
-    port, since the sender's host (127.0.0.1) and listener's host (0.0.0.0
-    or a compose name) need not match.
-    """
+    """Admin bus URLs key by path, role servers by port (sender and listener hosts differ)."""
     if not url:
         return None
     try:
@@ -84,7 +71,6 @@ class _Endpoint:
 
 @dataclass
 class _Feed:
-    """Admin /ws/out: attach/detach a socket-like sink on the admin loop."""
 
     attach: Callable[[Any], Awaitable[None]]
     detach: Callable[[Any], Awaitable[None]]
@@ -92,7 +78,7 @@ class _Feed:
 
 
 async def serve_one(handler: Handler, raw: str, logger=None) -> str:
-    """Server side of one message, the same as WebsocketManager._serve_loop."""
+    """Handle one message the way WebsocketManager._serve_loop does."""
     try:
         req = json.loads(raw)
     except Exception:
@@ -117,11 +103,7 @@ async def serve_one(handler: Handler, raw: str, logger=None) -> str:
 
 
 class LoopSink:
-    """
-    Socket stand-in that BusHub.add_ui can hold in hub.ui_sockets. send_text
-    runs on the admin loop and only queues the text onto the subscriber's
-    loop, so the hub never blocks on another thread.
-    """
+    """Socket stand-in for BusHub.ui_sockets that queues text onto the subscriber's loop."""
 
     def __init__(self, loop: asyncio.AbstractEventLoop, queue: asyncio.Queue):
         self._loop = loop
@@ -131,8 +113,7 @@ class LoopSink:
     async def send_text(self, text: str) -> None:
         if self.closed:
             raise RuntimeError("in-process subscriber closed")
-        # RuntimeError if the subscriber's loop is closed: the hub then
-        # drops this sink like a dead socket.
+        # Raises RuntimeError once the subscriber's loop is closed, so the hub drops this sink.
         self._loop.call_soon_threadsafe(self._queue.put_nowait, text)
 
     async def close(self, code: int = 1000, reason: str = "") -> None:
@@ -144,8 +125,6 @@ class Registry:
         self._lock = threading.Lock()
         self._endpoints: Dict[Key, _Endpoint] = {}
         self._feed: Optional[_Feed] = None
-
-    # -- registration -------------------------------------------------------
 
     def register(self, key: Key, handler: Handler) -> _Endpoint:
         ep = _Endpoint(handler, asyncio.get_running_loop())
@@ -171,8 +150,6 @@ class Registry:
             if self._feed is not None and (feed is None or self._feed is feed):
                 self._feed = None
 
-    # -- lookup -------------------------------------------------------------
-
     def _live(self, key: Optional[Key]) -> Optional[_Endpoint]:
         if key is None:
             return None
@@ -194,13 +171,8 @@ class Registry:
                 feed = None
         return feed
 
-    # -- delivery -----------------------------------------------------------
-
     def dispatch(self, url: Optional[str], payload: dict, logger=None) -> ConcurrentFuture:
-        """
-        Schedule one message on the endpoint's loop and return a
-        concurrent.futures.Future of the JSON reply text. Thread-safe.
-        """
+        """Schedule a message on the endpoint's loop; a Future of the reply text."""
         key = key_for_url(url)
         ep = self._live(key)
         if ep is None:
@@ -219,8 +191,7 @@ class Registry:
         """Await the reply on the caller's loop, whatever loop the handler runs on."""
         fut = asyncio.wrap_future(self.dispatch(url, payload, logger))
         if timeout is not None:
-            # On timeout the handler keeps running, as it would after a
-            # socket peer hung up; only the waiter is cancelled.
+            # Shielded: a timeout cancels only the waiter, not the handler.
             raw = await asyncio.wait_for(asyncio.shield(fut), timeout)
         else:
             raw = await fut
@@ -251,10 +222,7 @@ def active() -> Optional[Registry]:
 
 
 async def admin_request(url: str, payload: dict, timeout: float) -> Optional[dict]:
-    """
-    For the admin's own _ws_cmd: the reply if a role endpoint for `url` is
-    registered in-process, else None so the caller falls back to a socket.
-    """
+    """The in-process reply for url, or None so the caller falls back to a socket."""
     reg = _registry
     if reg is None or not reg.has(url):
         return None
