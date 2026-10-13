@@ -1,8 +1,8 @@
 """
 Unit tests for the sticky-author token selection / rotation logic.
 
-These cover ``TokenIdentityManager._select_token`` — a pure function of the
-persisted assignment state — plus ``prepare`` idempotency using lightweight
+These cover ``TokenIdentityManager._select_token``, a pure function of the
+persisted assignment state, plus ``prepare`` idempotency using lightweight
 fakes (no real bot or database).
 """
 
@@ -42,7 +42,7 @@ class TestSelectToken:
         assert sorted(picks) == ["a", "b", "c"]
 
     def test_author_keeps_assigned_token(self):
-        # Assignment is permanent — the token stays while it's still enabled.
+        # Assignment is permanent, the token stays while it's still enabled.
         identities = [_ident("X", "b", 900)]
         chosen, reset = select(identities, "X", ["a", "b", "c"])
         assert chosen == "b"
@@ -260,7 +260,7 @@ class TestPrepareIdempotency:
         await mgr.prepare(**kw)
         await mgr.prepare(**kw)
         # The intent was recorded on the first (failed) attempt, so the doomed
-        # edit is tried once — not on every message.
+        # edit is tried once, not on every message.
         assert len(member.edits) == 1
 
     @pytest.mark.asyncio
@@ -364,7 +364,7 @@ class TestPrepareSwapAndExhaust:
     @pytest.mark.asyncio
     async def test_failure_does_not_bench_token_for_future_messages(self):
         # Regression: a token that fails once (excluded for one message) must
-        # still be available for the next message — no persistent benching.
+        # still be available for the next message, no persistent benching.
         m_a = _Member(500)
         db = _DB()
         db.token_users = {"a": "500"}

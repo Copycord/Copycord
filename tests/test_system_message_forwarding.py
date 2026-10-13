@@ -1,8 +1,8 @@
 """
 Forwarding Discord's own system messages (joins, boosts, pins, thread creation).
 
-These messages carry no content of their own -- Discord renders the visible
-text on the client from the message type -- so the forwarder saw them as empty
+These messages carry no content of their own, Discord renders the visible
+text on the client from the message type, so the forwarder saw them as empty
 and sent them on as a bare "New message" placeholder, with no way to turn them
 off. They now have a filter of their own and carry their rendered text.
 
@@ -40,13 +40,10 @@ class _Author:
 
 
 class _Message:
-    """Enough of selfclient's Message for the attribute builder.
+    """Enough of the library Message for the attribute builder.
 
-    is_system() is selfclient's own implementation, bound to this object, so
-    the type classification under test is the library's and not a guess about
-    it -- it deliberately treats replies and slash-command responses as normal
-    messages, which a naive "type != default" check would get wrong. It reads
-    the wire type out of ``_data``, so that is set alongside ``type``.
+    is_system() is the library's own implementation, bound to this object. It
+    reads the wire type from ``_data``, so that is set alongside ``type``.
     """
 
     def __init__(self, *, msg_type, content="", system_content="", bot=False):

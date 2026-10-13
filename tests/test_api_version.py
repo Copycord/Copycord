@@ -1,13 +1,6 @@
 """
-Every Discord call goes to API v9.
-
-v9 is what the web client uses, and the whole point of the Chrome fingerprint
-is that our traffic looks like that client's. A request identifying as Chrome
-and carrying web super-properties, sent to v10, contradicts itself -- and the
-codebase had drifted into using both, four call sites on v10 and two on v9.
-
-discord.py-self is already on v9 (INTERNAL_API_VERSION), so this pins our own
-code to the same version the library and the browser both use.
+Every Discord call goes to API v9, the version the web client uses. A request
+that claims to be Chrome but goes to v10 contradicts itself.
 """
 import pathlib
 import re
@@ -52,9 +45,7 @@ class TestEveryCallUsesV9:
 
 
 def test_the_library_agrees():
-    # If discord.py-self ever moves to v10, the client would identify on a
-    # different version than the token senders use, which is the split this
-    # pin exists to prevent.
+    # The client library must stay on the same version as the token senders.
     import pytest
 
     http = pytest.importorskip("discord.http")

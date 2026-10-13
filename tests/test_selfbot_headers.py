@@ -104,11 +104,8 @@ class TestFingerprintShape:
         assert "priority" not in sh.SUPPRESSED_PROFILE_HEADERS
 
     def test_the_tls_target_and_the_claimed_chrome_agree(self):
-        # These are one decision, not two. A chrome150 handshake under
-        # Chrome/152 headers is a contradiction, and it is exactly what
-        # discord.py-self ships: its TLS target comes from curl_cffi while its
-        # browser version comes from Google's version-history API, and Google
-        # always runs ahead of what curl_cffi can actually impersonate.
+        # A chrome150 handshake under Chrome/152 headers is a contradiction,
+        # so the TLS target and the claimed version must be one decision.
         major = sh.TLS_IMPERSONATE.replace("chrome", "").split("_")[0]
         h = sh.build_headers("token-abc")
         assert h["User-Agent"].split("Chrome/")[1].split(".")[0] == major

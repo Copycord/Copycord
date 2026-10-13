@@ -2,8 +2,8 @@
 Favorite proxies for the client's gateway connection.
 
 A starred proxy is preferred whenever it is usable. When none is, the client
-falls back to an ordinary proxy rather than waiting -- staying connected
-matters more than staying on the preferred route -- and an optional task
+falls back to an ordinary proxy rather than waiting, staying connected
+matters more than staying on the preferred route, and an optional task
 re-tests the favorites and moves back as soon as one answers.
 
 These call the real rotator and the real client methods.
@@ -139,7 +139,7 @@ def _listener(rotator, *, enabled=True, interval=1):
     self.proxy_rotator = rotator
     self._favorite_recheck_enabled = enabled
     self._favorite_recheck_interval = interval
-    # A real selfclient Client whose gateway holds a fake live socket.
+    # A real Client whose gateway holds a fake live socket.
     self.bot = Client(proxy=None, refresh_build=False)
     self.bot.gateway = types.SimpleNamespace(_ws=_FakeWS(), proxy=None)
     return self

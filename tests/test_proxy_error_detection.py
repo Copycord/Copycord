@@ -28,10 +28,9 @@ def _chained(inner: BaseException, outer: BaseException) -> BaseException:
 
 class TestTheReportedCrash:
     def test_an_attributeerror_over_a_curl_failure_is_a_proxy_error(self):
-        # What actually reached us. curl_cffi fails the CONNECT tunnel;
-        # discord.py's retry path then reads self.ws.sequence, but on the
-        # first failed dial self.ws is still None, so the AttributeError is
-        # what propagates and the real cause survives only as __context__.
+        # curl_cffi fails the CONNECT tunnel; the retry path then reads
+        # self.ws.sequence while self.ws is still None, so the AttributeError
+        # propagates and the real cause survives only as __context__.
         from curl_cffi.curl import CurlError
 
         exc = _chained(
@@ -44,7 +43,7 @@ class TestTheReportedCrash:
 
     def test_a_bare_curl_error_is_a_proxy_error(self):
         # CurlError inherits from Exception, not OSError, so an isinstance
-        # test against the socket error types never matched it -- even though
+        # test against the socket error types never matched it, even though
         # curl_cffi raises it for every gateway dial through a dead proxy.
         from curl_cffi.curl import CurlError
 

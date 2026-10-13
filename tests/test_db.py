@@ -1,9 +1,4 @@
-"""
-Unit tests for copycord.common.db.DBManager.
-
-Tests schema creation, CRUD operations for core mapping tables,
-config management, event logs, and edge cases.
-"""
+"""Unit tests for copycord.common.db.DBManager."""
 import sqlite3
 import pytest
 

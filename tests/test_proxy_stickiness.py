@@ -1,14 +1,8 @@
 """
 A token keeps the same proxy across sessions.
 
-The lease was already sticky for the life of a TLS session, but release()
-dropped it, so a token reconnecting after its session was reaped got a fresh
-random proxy — the same account appearing from a different country every hour.
-The proxy it last used is now remembered and preferred.
-
-It is a preference, not a reservation: a remembered proxy that someone else
-holds is not waited for, which is what lets a small pool serve far more tokens
-than it has entries.
+The last proxy used is remembered and preferred on reconnect. It is a
+preference, not a reservation: a proxy someone else holds is not waited for.
 """
 import time
 
