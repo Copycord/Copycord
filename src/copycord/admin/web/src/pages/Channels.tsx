@@ -1,17 +1,21 @@
 // Channels page, ported from templates/channels.html and frontend/src/js/channels.js:
 // the mapping select, the tree of categories and channels (GET /api/channels)
 // with search, filter and sort. Row actions (lane 23) and the verify and
-// backfill modals (lane 24) plug into the ChannelTree slots.
+// backfill modals plug into the ChannelTree slots.
 // Like the old page it waits until both Server and Client are connected.
 
-import { useDeferredValue, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Button, Card, Input, Select, Spinner } from "../components/ui";
 import { StatusGate } from "../components/ui/StatusGate";
 import { useApi } from "../hooks/useApi";
 import { useStatusGate } from "../hooks/useStatusGate";
-import type { ChannelListResponse, ChannelRow, GuildMappingListResponse, Orphans } from "../types/channels";
+import type { ChannelListResponse, ChannelRow, GuildMappingListResponse } from "../types/channels";
 import { useRowActions } from "./channels/actions/useRowActions";
+import { useBackfill } from "./channels/backfill/useBackfill";
 import { ChannelTree } from "./channels/ChannelTree";
+import { orphanStore, useOrphans } from "./channels/verify/orphanStore";
+import { useVerify } from "./channels/verify/useVerify";
+import { VerifyModal } from "./channels/verify/VerifyModal";
 import {
   buildCategoryPins,
   buildTree,
@@ -42,8 +46,11 @@ export function Channels() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterMode>("all");
   const [sort, setSort] = useState<{ sort: SortMode; dir: SortDir }>({ sort: "name", dir: "asc" });
-  // Filled by the verify scan in lane 24; a mapping switch clears it.
-  const [orphans, setOrphans] = useState<Orphans>(NO_ORPHANS);
+  // Filled by the verify scan (verify/orphanStore); a mapping switch clears it.
+  const orphans = useOrphans();
+  const setOrphans = orphanStore.set;
+  const verify = useVerify(mappingId);
+  const [verifyOpen, setVerifyOpen] = useState(false);
 
   // Typing stays responsive on large guilds: the tree rebuilds from the deferred query.
   const deferredQuery = useDeferredValue(query);
@@ -54,6 +61,18 @@ export function Channels() {
     [rows, orphans, pins, deferredQuery, filter, sort],
   );
 
+  useEffect(() => () => orphanStore.set(NO_ORPHANS), []);
+
+  const nameOf = useCallback(
+    (cid: string) => {
+      const r = rows?.find((x) => x.original_channel_id === cid);
+      return r ? r.clone_channel_name || r.original_channel_name : "";
+    },
+    [rows],
+  );
+  // The clone action and live clone progress sit on the channel menu and the card status slot.
+  const backfill = useBackfill({ mappingId, nameOf });
+
   const actions = useRowActions({
     mappingId,
     rows: rows ?? NO_ROWS,
@@ -61,6 +80,7 @@ export function Channels() {
     orphans,
     setOrphans: (next) => setOrphans(next),
     reload: channels.reload,
+    extraItems: backfill.items,
   });
 
   const onMapping = (id: string) => {
@@ -121,6 +141,9 @@ export function Channels() {
               options={[...SORT_OPTIONS]}
               className="w-auto!"
             />
+            <Button id="verify-btn" type="button" variant="ghost" onClick={() => setVerifyOpen(true)}>
+              Verify
+            </Button>
             <Button
               id="orph-delall"
               type="button"
@@ -133,8 +156,24 @@ export function Channels() {
           </div>
         </header>
 
-        <ChannelTree tree={tree} channelActions={actions.channelActions} categoryActions={actions.categoryActions} />
+        <ChannelTree
+          tree={tree}
+          channelActions={actions.channelActions}
+          categoryActions={actions.categoryActions}
+          channelStatus={backfill.channelStatus}
+        />
         {actions.dialogs}
+        {backfill.dialogs}
+        <VerifyModal
+          open={verifyOpen}
+          onClose={() => setVerifyOpen(false)}
+          orphans={orphans}
+          scanning={verify.scanning}
+          scanned={verify.scanned}
+          onFetch={verify.fetch}
+          onDeleteAll={actions.deleteAll.onClick}
+          deleteBusy={actions.deleteAll.busy}
+        />
 
         {channels.loading && !loaded ? (
           <div className="flex justify-center py-6">

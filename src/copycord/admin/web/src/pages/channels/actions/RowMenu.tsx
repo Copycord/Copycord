@@ -8,6 +8,8 @@ import { cx } from "../../../components/ui";
 export interface MenuItem {
   /** The old data-act value. */
   act: string;
+  /** Optional element id, e.g. the old #ctx-backfill. */
+  id?: string;
   label: string;
   onSelect: () => void;
   danger?: boolean;
@@ -101,6 +103,7 @@ export function RowMenu({ kind, items }: RowMenuProps) {
               {items.map((it) => (
                 <button
                   key={it.act}
+                  id={it.id}
                   type="button"
                   role="menuitem"
                   data-act={it.act}
