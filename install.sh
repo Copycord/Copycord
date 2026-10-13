@@ -228,6 +228,10 @@ LOG="$(mktemp "${TMPDIR:-/tmp}/copycord-install.XXXXXX")"
 TMP_DIR=""
 cleanup() {
     progress_off
+    # A failed install starts the service it stopped again.
+    if [ "${SERVICE_STOPPED:-0}" = "1" ]; then
+        "$SERVICE_EXE" service start </dev/null >/dev/null 2>&1 || true
+    fi
     rm -f "$LOG"
     [ -n "$TMP_DIR" ] && rm -rf "$TMP_DIR"
     return 0
@@ -558,6 +562,7 @@ install_release() {
     info "$WHEEL_URL"
 
     step "Installing Copycord"
+    stop_service
     run "uv tool install copycord $TAG" uv tool install --force --python "$PYTHON_VERSION" "$WHEEL_URL"
     LABEL="$TAG"
 }
@@ -699,10 +704,37 @@ install_git() {
         dry "uv tool install --force --python $PYTHON_VERSION --reinstall-package copycord $GIT_DIR_PATH"
         LABEL="$REF"
     else
+        stop_service
         # Otherwise uv reuses a cached build of this directory from an older ref.
         run "uv tool install copycord from $GIT_DIR_PATH" \
             uv tool install --force --python "$PYTHON_VERSION" --reinstall-package copycord "$GIT_DIR_PATH"
         LABEL="$REF ($SHA)"
+    fi
+}
+
+# A running service is stopped while its files are replaced and started again
+# after (see restart_service). `service status --json` exits 0 only when it runs.
+SERVICE_STOPPED=0
+stop_service() {
+    [ "$UPGRADE" = "1" ] && [ "$DRY_RUN" != "1" ] || return 0
+    exe="$(installed_copycord)" || return 0
+    "$exe" service status --json </dev/null >/dev/null 2>&1 || return 0
+    if "$exe" service stop </dev/null >"$LOG" 2>&1; then
+        SERVICE_STOPPED=1
+        SERVICE_EXE="$exe"
+        done_line "Stopped the Copycord service for the install"
+    else
+        warn "could not stop the Copycord service; installing anyway"
+    fi
+}
+
+restart_service() {
+    [ "$SERVICE_STOPPED" = "1" ] || return 0
+    SERVICE_STOPPED=0
+    if "$BIN_DIR/copycord" service start </dev/null >"$LOG" 2>&1; then
+        done_line "Started the Copycord service again"
+    else
+        warn "could not start the Copycord service; run $(cmd "copycord service start")"
     fi
 }
 
@@ -811,6 +843,7 @@ if [ "$UPGRADE" = "1" ]; then
         done || true
     fi
 fi
+restart_service
 
 # --- verify -----------------------------------------------------------------------
 
