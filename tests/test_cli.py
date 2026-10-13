@@ -656,7 +656,9 @@ def test_doctor_links_the_paths_in_the_home(doctor_env, monkeypatch):
     assert link(doctor_env.resolve()) in out
     plain = ui._ANSI.sub("", out)
     assert f"! the default password is still set  change PASSWORD in {env}, " in plain
-    assert f"\u2713 home writable  {doctor_env.resolve()}\n" in plain
+    # The line ends at the edge of its section box.
+    rows = [x.strip("\u2502 ") for x in plain.splitlines()]
+    assert f"\u2713 home writable  {doctor_env.resolve()}" in rows
 
 
 def test_doctor_json_has_no_links(doctor_env, monkeypatch):
