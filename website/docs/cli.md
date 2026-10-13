@@ -10,18 +10,18 @@ The [installer](/docs/getting-started/quick-start) installs the `copycord` comma
 ```
 copycord run [--data-dir PATH]
 copycord restart
-copycord doctor [--verbose] [--fix] [--data-dir PATH]
-copycord config get KEY [--show-secrets] [--data-dir PATH]
+copycord doctor [--verbose] [--fix] [--json] [--data-dir PATH]
+copycord config get KEY [--show-secrets] [--json] [--data-dir PATH]
 copycord config set KEY VALUE [--data-dir PATH]
 copycord config unset KEY [--data-dir PATH]
-copycord config export [FILE] [--show-secrets] [--data-dir PATH]
+copycord config export [FILE] [--show-secrets] [--json] [--data-dir PATH]
 copycord config import FILE [--data-dir PATH]
 copycord service install [--user] [--data-dir PATH]
 copycord service start|stop|status|uninstall [--user]
 copycord update [--channel stable|beta|dev] [--repo OWNER/NAME] [--ref REF] [--tag VERSION] [--no-install] [--force]
-copycord update status
+copycord update status [--json]
 copycord uninstall [--purge|--keep-data] [--yes] [--keep-service] [--dry-run] [--data-dir PATH]
-copycord --version | -V
+copycord --version | -V [--json]
 copycord --no-color <command>
 ```
 
@@ -61,6 +61,8 @@ Options:
   -h, --help     Show this help
   -V, --version  Print the version
   --no-color     Turn off color, same as NO_COLOR=1
+  --json         Print the result as JSON (with --version, doctor,
+                 update status, config get and config export)
 
 Run copycord <command> --help for the options of one command.
 Docs: https://copycord.github.io/Copycord/docs/cli
@@ -121,6 +123,37 @@ Colors are turned off when the output is not a terminal (a pipe, a file, a servi
 ```
 
 Where the terminal cannot print these symbols (for example a Windows console on code page 437 or 1252), they fall back to `+ ! x -`.
+
+### JSON output {#json}
+
+`--json` makes a reporting command print exactly one JSON document on stdout, for scripts and monitoring. It works with `copycord --version`, `copycord doctor` (also with `--fix`), `copycord update status`, `copycord config get` and `copycord config export`, and can go before or after the command. With `--json` there is no banner, no color, no spinner and no question; any other message goes to stderr. The exit status is the same as without it.
+
+```bash
+$ copycord doctor --json
+{
+  "ok": true,
+  "checks": [
+    {
+      "section": "Install",
+      "status": "ok",
+      "text": "Python 3.12.3",
+      "hint": "",
+      "path": null,
+      "fixable": false,
+      "fixed": false
+    },
+    ...
+  ],
+  "summary": {"ok": 11, "warn": 0, "fail": 0, "info": 2, "fixed": 0, "text": "All good"},
+  "fixes": []
+}
+```
+
+- `doctor`: one entry per check with its section, `status` (`ok`, `warn`, `fail` or `info`), text, hint and path, plus the counts. With `--fix`, a check a fix cleared has `"fixed": true` and `fixes` lists what was done; a fix that needs a question (moving the dashboard port) is left for a terminal.
+- `update status`: the installed version and commit, the channel, how Copycord was installed, the latest version on the channel and `update_available`. When GitHub cannot be reached, `error` says why.
+- `config get`: `key`, `value` (masked for a secret unless `--show-secrets`), `set`, `masked` and `source` (`env` for `.env`, else `database`). A key that is not set prints `"set": false` with an `error` and exits 1.
+- `config export`: the same object as without `--json`; with a file, `{"file": ..., "keys": N}`.
+- `--version`: `version`, `commit`, `channel`, and `ref` and `repo` on the dev channel.
 
 ## The data directory {#data-dir}
 

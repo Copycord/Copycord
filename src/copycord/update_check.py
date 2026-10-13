@@ -213,12 +213,19 @@ def start(stream=None, wait: float = 0.0) -> Optional[threading.Thread]:
     return t
 
 
-def last_check_line() -> str:
-    """When the last check ran."""
+def last_check_time() -> Optional[float]:
+    """When the last check ran, as a Unix time; None when it never did."""
     try:
         raw = json.loads(cache_path().read_text(encoding="utf-8"))
-        ts = float(raw["checked_at"])
+        return float(raw["checked_at"])
     except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def last_check_line() -> str:
+    """When the last check ran."""
+    ts = last_check_time()
+    if ts is None:
         return "never"
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
 

@@ -198,6 +198,8 @@ def format_help() -> str:
     w(f"  {ui.cmd('-h, --help'.ljust(opt_width))}  Show this help")
     w(f"  {ui.cmd('-V, --version'.ljust(opt_width))}  Print the version")
     w(f"  {ui.cmd('--no-color'.ljust(opt_width))}  Turn off color, same as NO_COLOR=1")
+    w(f"  {ui.cmd('--json'.ljust(opt_width))}  Print the result as JSON (with --version, doctor,")
+    w(f"  {' ' * opt_width}  update status, config get and config export)")
     w()
     w(ui.dim("Run ") + ui.cmd("copycord <command> --help") + ui.dim(" for the options of one command."))
     w(ui.dim(f"Docs: {DOCS_URL}"))
@@ -297,10 +299,30 @@ def format_command_help(parser: argparse.ArgumentParser) -> str:
     return buf.getvalue()
 
 
-def print_version() -> None:
+def version_report() -> dict:
+    """What `copycord --version --json` prints."""
+    from copycord.update import DEV, installed_commit, load_channel
+
+    channel = load_channel()
+    dev = channel.channel == DEV
+    return {
+        "version": _version(),
+        "commit": installed_commit(),
+        "channel": channel.channel,
+        "ref": channel.ref if dev else None,
+        "repo": channel.repo_name if dev else None,
+    }
+
+
+def print_version(as_json: bool = False) -> None:
     from copycord import ui
     from copycord.update import installed_commit, load_channel
 
+    if as_json:
+        from copycord import jsonout
+
+        jsonout.emit(version_report())
+        return
     version = _version()
     commit = installed_commit()
     if commit:
@@ -315,7 +337,7 @@ def print_version() -> None:
 
 class _VersionAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
-        print_version()
+        print_version(as_json=getattr(parser, "json_output", False))
         parser.exit()
 
 
@@ -387,10 +409,18 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         sys.stdout.write(format_help())
         raise SystemExit(0)
     parser = _Parser(prog="copycord")
+    end = argv.index("--") if "--" in argv else len(argv)
+    # --version prints as soon as it is parsed, so it cannot wait for a later --json.
+    parser.json_output = "--json" in argv[:end]
     parser.add_argument("-V", "--version", action=_VersionAction, nargs=0,
                         help="print the version")
     parser.add_argument("--no-color", action="store_true",
                         help="turn off color, same as NO_COLOR=1")
+    parser.add_argument("--json", dest="top_json", action="store_true",
+                        help="print the result as JSON")
+    json_flag = argparse.ArgumentParser(add_help=False)
+    json_flag.add_argument("--json", action="store_true",
+                           help="print one JSON document on stdout and nothing else")
     sub = parser.add_subparsers(dest="command", required=True, parser_class=_SubParser)
 
     data_dir = argparse.ArgumentParser(add_help=False)
@@ -413,7 +443,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     )
     doctor_p = sub.add_parser(
         "doctor",
-        parents=[data_dir],
+        parents=[data_dir, json_flag],
         help="check this machine can run Copycord",
         description="Check the install, the settings, the data, whether Copycord "
         "is running and whether an update is out. Exits 1 when a check fails. "
@@ -436,7 +466,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
         "app config in the database.",
     )
     csub = config.add_subparsers(dest="config_command", required=True)
-    get = csub.add_parser("get", parents=[data_dir], help="print one value")
+    get = csub.add_parser("get", parents=[data_dir, json_flag], help="print one value")
     get.add_argument("key")
     get.add_argument("--show-secrets", action="store_true",
                      help="print token/password/secret values unmasked")
@@ -446,7 +476,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     unset = csub.add_parser("unset", parents=[data_dir], help="remove one value")
     unset.add_argument("key")
     export = csub.add_parser(
-        "export", parents=[data_dir], help="write all values as JSON"
+        "export", parents=[data_dir, json_flag], help="write all values as JSON"
     )
     export.add_argument(
         "file", nargs="?", help="write to FILE (unmasked) instead of stdout"
@@ -487,7 +517,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 
     update = sub.add_parser(
         "update",
-        parents=[data_dir],
+        parents=[data_dir, json_flag],
         help="update Copycord to the latest version",
         description="Update Copycord to the latest version and restart a running "
         "service. The database is backed up first.",
@@ -566,7 +596,23 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                         help="leave the OS service installed")
     uninst.add_argument("--dry-run", action="store_true",
                         help="print the steps and change nothing")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    args.json = bool(getattr(args, "json", False) or args.top_json)
+    if args.json and not json_supported(args):
+        parser.error("--json works with --version, doctor, update status, config get "
+                     "and config export")
+    return args
+
+
+def json_supported(args: argparse.Namespace) -> bool:
+    """True for the reporting commands that can print JSON."""
+    if args.command == "doctor":
+        return True
+    if args.command == "config":
+        return args.config_command in ("get", "export")
+    if args.command == "update":
+        return args.action == "status"
+    return False
 
 
 def check_removed_options() -> bool:
@@ -1186,15 +1232,18 @@ FIXES = {
 }
 
 
-def apply_fixes(checks: List[Check], notes: dict, fixed: dict, failed: set) -> int:
+def apply_fixes(checks: List[Check], notes: dict, fixed: dict, failed: set,
+                interactive: Optional[bool] = None) -> int:
     """Apply the fixes for flagged checks; returns how many worked.
 
     Fills fixed with {fix key: what it did}, notes with {check name: why it was
-    not fixed} and failed with the names whose fix raised.
+    not fixed} and failed with the names whose fix raised. Guided fixes need
+    interactive (default: whether there is a terminal).
     """
     from copycord import ui
 
-    interactive = ui.is_interactive()
+    if interactive is None:
+        interactive = ui.is_interactive()
     wanted = {}
     for c in checks:
         if c.status in (WARN, FAIL) and c.fix in FIXES:
@@ -1339,15 +1388,24 @@ def _fixed_rows(before: List[tuple], after: List[tuple], fixed: dict) -> dict:
     return {k: (FIXES[key].done, result) for k, (key, result) in rows.items()}
 
 
-def doctor(verbose: bool = False, fix: bool = False, brief: bool = False) -> int:
-    from copycord import ui
+class DoctorRun(NamedTuple):
+    # [(section, [Check])], after the fixes when any worked.
+    sections: List[tuple]
+    notes: dict
+    fixed: dict
+    failed: set
+    # {(section, row index): (text, result)} for each check a fix cleared.
+    done: dict
+    # Ctrl+C while the fixes ran.
+    stopped: bool = False
 
-    if fix:
-        # Fixes write to stderr and run uv; line-buffer so piped output stays in order.
-        try:
-            sys.stdout.reconfigure(line_buffering=True)
-        except (AttributeError, ValueError):
-            pass
+    @property
+    def checks(self) -> List[Check]:
+        return [c for _, rows in self.sections for c in rows]
+
+
+def run_doctor_fixes(fix: bool, interactive: Optional[bool] = None) -> DoctorRun:
+    """The checks and, with fix, the fixes followed by the checks again."""
     sections = run_doctor()
     checks: List[Check] = [c for _, rows in sections for c in rows]
     notes: dict = {}
@@ -1357,17 +1415,86 @@ def doctor(verbose: bool = False, fix: bool = False, brief: bool = False) -> int
     # --fix runs first (the port fix asks), then one report shows the state after it.
     if fix and any(c.status in (WARN, FAIL) for c in checks):
         try:
-            applied = apply_fixes(checks, notes, fixed, failed)
+            applied = apply_fixes(checks, notes, fixed, failed, interactive)
         except (KeyboardInterrupt, EOFError):
-            print()
-            ui.warn("fixes stopped",
-                    f"{_plural(len(fixed), 'fix')} applied before that" if fixed else "",
-                    stream=sys.stdout)
-            return 130
+            return DoctorRun(sections, notes, fixed, failed, done, stopped=True)
         if applied:
             before, sections = sections, run_doctor()
-            checks = [c for _, rows in sections for c in rows]
             done = _fixed_rows(before, sections, fixed)
+    return DoctorRun(sections, notes, fixed, failed, done)
+
+
+CHECK_STATUS = {PASS: "ok", WARN: "warn", FAIL: "fail", INFO: "info"}
+
+
+def doctor_report(run: DoctorRun, fix: bool = False) -> dict:
+    """What `copycord doctor --json` prints."""
+    checks = run.checks
+    items = []
+    for title, rows in run.sections:
+        for i, c in enumerate(rows):
+            note = run.notes.get(c.name, "")
+            hint = note or c.reason
+            if not note and not fix and c.status in (WARN, FAIL) and c.fix in FIXES:
+                hint = "; ".join(p for p in (hint, f"run copycord doctor --fix to {FIXES[c.fix].todo}") if p)
+            item = {
+                "section": title,
+                "status": CHECK_STATUS[c.status],
+                "text": c.name,
+                "hint": hint,
+                "path": c.path or None,
+                "fixable": c.status in (WARN, FAIL) and c.fix in FIXES,
+                "fixed": (title, i) in run.done,
+            }
+            if item["fixed"]:
+                item["text"], item["hint"] = run.done[(title, i)]
+            items.append(item)
+    counts = {name: sum(c.status == status for c in checks) for status, name in CHECK_STATUS.items()}
+    report = {
+        "ok": not any(c.status == FAIL for c in checks),
+        "checks": items,
+        "summary": {**counts, "fixed": len(run.fixed), "text": doctor_summary(checks)},
+        "fixes": [{"fix": key, "text": FIXES[key].done, "result": result}
+                  for key, result in run.fixed.items()],
+    }
+    if run.stopped:
+        report["stopped"] = True
+    return report
+
+
+def doctor_json(fix: bool = False) -> int:
+    """doctor --json: one JSON document on stdout; the fixes never ask."""
+    from copycord import jsonout
+
+    with jsonout.human_to_stderr():
+        run = run_doctor_fixes(fix, interactive=False)
+    jsonout.emit(doctor_report(run, fix))
+    if run.stopped:
+        return 130
+    return 1 if any(c.status == FAIL for c in run.checks) else 0
+
+
+def doctor(verbose: bool = False, fix: bool = False, brief: bool = False,
+           as_json: bool = False) -> int:
+    from copycord import ui
+
+    if as_json:
+        return doctor_json(fix)
+    if fix:
+        # Fixes write to stderr and run uv; line-buffer so piped output stays in order.
+        try:
+            sys.stdout.reconfigure(line_buffering=True)
+        except (AttributeError, ValueError):
+            pass
+    run = run_doctor_fixes(fix)
+    sections, checks = run.sections, run.checks
+    notes, fixed, failed, done = run.notes, run.fixed, run.failed, run.done
+    if run.stopped:
+        print()
+        ui.warn("fixes stopped",
+                f"{_plural(len(fixed), 'fix')} applied before that" if fixed else "",
+                stream=sys.stdout)
+        return 130
     if brief:
         _print_brief(checks, notes, fixed)
         return 1 if any(c.status == FAIL for c in checks) else 0
@@ -1399,6 +1526,10 @@ def masked(values: Mapping[str, str]) -> dict:
     return {k: (MASK if is_secret(k) and v else v) for k, v in values.items()}
 
 
+def _no_db_text(path: Path) -> str:
+    return f"no database at {path} (run Copycord once, or check --data-dir)"
+
+
 def _open_db(create: bool):
     """DBManager on the configured DB; None when it is missing."""
     from copycord.common.db import DBManager
@@ -1407,8 +1538,7 @@ def _open_db(create: bool):
     path = db_path()
     if not path.exists():
         if not create:
-            print(f"no database at {path} (run Copycord once, or check --data-dir)",
-                  file=sys.stderr)
+            print(_no_db_text(path), file=sys.stderr)
             return None
         path.parent.mkdir(parents=True, exist_ok=True)
     return DBManager(str(path), init_schema=True)
@@ -1461,8 +1591,21 @@ def restart_command() -> int:
     return 0
 
 
-def _print_value(key: str, value: str, show_secrets: bool) -> None:
-    print(MASK if is_secret(key) and value and not show_secrets else value)
+def _print_value(key: str, value: Optional[str], show_secrets: bool,
+                 as_json: bool = False, source: str = "", error: str = "") -> None:
+    """The value, masked for a secret; with as_json a document that also says
+    where it is stored and, when it is not set, why."""
+    shown = MASK if is_secret(key) and value and not show_secrets else value
+    if not as_json:
+        print(shown)
+        return
+    from copycord import jsonout
+
+    doc = {"key": key, "value": shown, "set": value is not None,
+           "masked": shown != value, "source": source}
+    if error:
+        doc["error"] = error
+    jsonout.emit(doc)
 
 
 def env_config_command(args: argparse.Namespace) -> int:
@@ -1473,9 +1616,12 @@ def env_config_command(args: argparse.Namespace) -> int:
     if cmd == "get":
         value = envfile.get(key)
         if value is None:
-            print(f"{key} is not set in {envfile.env_path()}", file=sys.stderr)
+            error = f"{key} is not set in {envfile.env_path()}"
+            print(error, file=sys.stderr)
+            if args.json:
+                _print_value(key, None, False, True, "env", error)
             return 1
-        _print_value(key, value, args.show_secrets)
+        _print_value(key, value, args.show_secrets, args.json, "env")
         return 0
     if cmd == "set":
         path = envfile.set_value(key, args.value)
@@ -1497,16 +1643,27 @@ def config_command(args: argparse.Namespace) -> int:
     cmd = args.config_command
     if cmd in ("get", "set", "unset") and is_env_key(args.key):
         return env_config_command(args)
+    as_json = args.json
     db = _open_db(create=cmd in ("set", "import"))
     if db is None:
+        if as_json:
+            from copycord import jsonout
+            from copycord.common.paths import db_path
+
+            if cmd == "get":
+                _print_value(args.key, None, False, True, "database", _no_db_text(db_path()))
+            else:
+                jsonout.emit({"error": _no_db_text(db_path())})
         return 1
     try:
         if cmd == "get":
             value = db.get_config(args.key, None)
             if value is None:
                 print(f"{args.key} is not set", file=sys.stderr)
+                if as_json:
+                    _print_value(args.key, None, False, True, "database", f"{args.key} is not set")
                 return 1
-            _print_value(args.key, value, args.show_secrets)
+            _print_value(args.key, value, args.show_secrets, as_json, "database")
             return 0
 
         if cmd == "set":
@@ -1532,6 +1689,10 @@ def config_command(args: argparse.Namespace) -> int:
                 except OSError:
                     pass
                 print(f"exported {len(values)} keys to {out}", file=sys.stderr)
+                if as_json:
+                    from copycord import jsonout
+
+                    jsonout.emit({"file": str(out), "keys": len(values)})
                 return 0
             shown = values if args.show_secrets else masked(values)
             print(json.dumps(shown, indent=2))
@@ -1862,7 +2023,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     envfile.load()
 
     if args.command == "doctor":
-        return doctor(verbose=args.verbose, fix=args.fix, brief=args.brief)
+        return doctor(verbose=args.verbose, fix=args.fix, brief=args.brief, as_json=args.json)
 
     if args.command == "restart":
         return restart_command()
@@ -1891,6 +2052,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             no_backup=args.no_backup,
             yes=args.yes,
             force=args.force,
+            as_json=args.json,
         )
 
     if args.command == "run":

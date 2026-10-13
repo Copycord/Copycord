@@ -513,6 +513,45 @@ def check(channel: Optional[Channel] = None) -> int:
     return 0
 
 
+def status_report(channel: Optional[Channel] = None) -> dict:
+    """What `copycord update status --json` prints; asks GitHub without a spinner."""
+    import time
+
+    from copycord import update_check
+
+    channel = load_channel() if channel is None else channel
+    current = current_version()
+    dev = channel.channel == DEV
+    checked = update_check.last_check_time()
+    data = {
+        "current": current,
+        "commit": installed_commit(),
+        "channel": channel.channel,
+        "ref": channel.ref if dev else None,
+        "repo": channel.repo_name if dev else None,
+        "method": detect_installer(),
+        "last_checked": None if checked is None else time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(checked)),
+        "auto_update": update_check.auto_update_enabled(),
+        "latest": None,
+        "latest_tag": None,
+        "update_available": None,
+        "error": None,
+    }
+    try:
+        if dev:
+            head = fetch_branch_head(channel.ref, repo=channel.repo_name)
+            data["latest"] = head.sha
+            if data["commit"] is not None:
+                data["update_available"] = data["commit"] != head.sha
+        else:
+            release = fetch_latest_release(prerelease=channel.channel == BETA)
+            data["latest"], data["latest_tag"] = release.version, release.tag
+            data["update_available"] = is_newer(release.version, current)
+    except Exception as e:
+        data["error"] = str(e) or type(e).__name__
+    return data
+
+
 # --------------------------------------------------------------------------
 # update
 # --------------------------------------------------------------------------
@@ -659,10 +698,12 @@ def update(
     yes: bool = False,
     reinstall: bool = False,
     force: bool = False,
+    as_json: bool = False,
 ) -> int:
     """Run an update; reinstall=True reinstalls the running version, for doctor --fix.
 
     With nothing new on the saved channel it changes nothing, unless force.
+    as_json only applies with check_only.
     """
     saved = load_channel()
     source = git_source() if reinstall else None
@@ -706,6 +747,11 @@ def update(
         return 0
 
     if check_only:
+        if as_json:
+            from copycord import jsonout
+
+            jsonout.emit(status_report(target))
+            return 0
         return check(target)
 
     kind = detect_installer()
