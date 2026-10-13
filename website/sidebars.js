@@ -37,6 +37,7 @@ const sidebars = {
       type: 'category',
       label: 'Configuration',
       items: [
+        'configuration/security',
         'configuration/cloning-options',
         'configuration/advanced',
       ],
