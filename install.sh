@@ -555,16 +555,34 @@ install_release() {
 
     RELEASE_JSON="$(fetch "$API/tags/$TAG")" \
         || die "no release $TAG on $REPO_URL/releases. If $VERSION is a branch, tag or commit, use --version with that name, e.g. --version v4-dev"
-    WHEEL_URL="$(printf '%s' "$RELEASE_JSON" | tr ',' '\n' \
-        | sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\/copycord-[^"]*\.whl\)".*/\1/p' \
-        | head -n 1)"
+    # Each asset lists its "digest" (sha256:...) before its browser_download_url.
+    WHEEL="$(printf '%s' "$RELEASE_JSON" | tr ',' '\n' | awk '
+        /"digest"[[:space:]]*:/ { d = $0; sub(/.*"sha256:/, "", d); sub(/".*/, "", d); if ($0 !~ /sha256:/) d = "" }
+        /"browser_download_url"[[:space:]]*:.*\/copycord-[^"\/]*\.whl"/ {
+            u = $0; sub(/.*"browser_download_url"[[:space:]]*:[[:space:]]*"/, "", u); sub(/".*/, "", u)
+            print u " " d; exit
+        }
+        /"name"[[:space:]]*:/ { d = "" }')"
+    WHEEL_URL="${WHEEL%% *}"
+    WHEEL_SHA="${WHEEL#* }"
     [ -n "$WHEEL_URL" ] || die "release $TAG has no wheel asset (copycord-*.whl); see $REPO_URL/releases/tag/$TAG"
     done_line "Release $TAG"
     info "$WHEEL_URL"
 
     step "Installing Copycord"
+    TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/copycord-wheel.XXXXXX")"
+    WHEEL_FILE="$TMP_DIR/${WHEEL_URL##*/}"
+    run "Downloading the wheel" download "$WHEEL_URL" "$WHEEL_FILE"
+    if [ -n "$WHEEL_SHA" ]; then
+        actual="$(sha256_of "$WHEEL_FILE")"
+        [ "$actual" = "$WHEEL_SHA" ] \
+            || die "the downloaded wheel does not match the checksum of release $TAG (expected $WHEEL_SHA, got $actual); nothing was installed"
+        done_line "Checksum matches the release"
+    else
+        warn "release $TAG lists no checksum for the wheel; it was not checked"
+    fi
     stop_service
-    run "uv tool install copycord $TAG" uv tool install --force --python "$PYTHON_VERSION" "$WHEEL_URL"
+    run "uv tool install copycord $TAG" uv tool install --force --python "$PYTHON_VERSION" "$WHEEL_FILE"
     LABEL="$TAG"
 }
 
@@ -591,7 +609,7 @@ sha256_of() {
     elif command -v shasum >/dev/null 2>&1; then
         shasum -a 256 "$1" | cut -d ' ' -f 1
     else
-        die "need sha256sum or shasum to check the Node download"
+        die "need sha256sum or shasum to check a download"
     fi
 }
 
