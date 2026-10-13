@@ -172,7 +172,7 @@ test.describe("dashboard proxy", () => {
     const stub = await stubProxies(page);
     await openCard(page);
     await page.locator("#srv-proxy-settings-btn").click();
-    const settings = page.locator("#proxy-settings-modal");
+    const settings = page.locator("#proxy-settings-modal.show");
     await expect(settings).toHaveClass(/(^|\s)show(\s|$)/);
     await expect(page.locator("#ps-suspend-duration")).toHaveValue("120");
     await expect(page.locator("#ps-test-batch")).toHaveValue("20");
@@ -190,7 +190,7 @@ test.describe("dashboard proxy", () => {
     await expect(settings).not.toHaveClass(/(^|\s)show(\s|$)/);
 
     await page.locator("#srv-proxy-fav-help-btn").click();
-    const help = page.locator("#proxy-fav-help-modal");
+    const help = page.locator("#proxy-fav-help-modal.show");
     await expect(help).toHaveClass(/(^|\s)show(\s|$)/);
     await expect(page.locator("#srv-proxy-card")).toHaveJSProperty("open", true);
     await page.locator("#proxy-fav-help-close").click();
