@@ -114,7 +114,7 @@ describe("Global Configuration card", () => {
     await waitFor(() => expect(screen.getByLabelText("Server Token")).toHaveValue("srv-tok"));
     expect(screen.getByLabelText("Client Token")).toHaveValue("cli-tok");
     expect(screen.getByLabelText("Client Token")).toHaveAttribute("type", "password");
-    expect(screen.getByRole("button", { name: "111" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove 111" })).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Auto Start" })).toBeChecked();
     expect(screen.getByLabelText("Log Level")).toHaveValue("DEBUG");
     expect(screen.getByLabelText("Max Log Size")).toHaveValue(25);
