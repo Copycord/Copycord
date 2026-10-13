@@ -15,8 +15,10 @@ Windows.
 
 from __future__ import annotations
 
+import ntpath
 import os
 import plistlib
+import re
 import shutil
 import socket
 import subprocess
@@ -24,8 +26,8 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import List, Mapping, NamedTuple, Optional, Sequence
-from xml.sax.saxutils import escape
+from typing import List, Mapping, NamedTuple, Optional, Sequence, Tuple
+from xml.sax.saxutils import escape, unescape
 
 SERVICE_NAME = "copycord"
 UNIT_NAME = "copycord.service"
@@ -33,6 +35,10 @@ LAUNCHD_LABEL = "com.copycord"
 TASK_NAME = "Copycord"
 
 SYSTEMD_SYSTEM_DIR = Path("/etc/systemd/system")
+
+# Windows: a captured command needs no console window of its own; without it a
+# windowless Copycord (the service) flashes one for every command.
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def run_cmd(
@@ -43,6 +49,7 @@ def run_cmd(
         return subprocess.run(
             list(cmd), capture_output=capture, text=True, check=False,
             env=None if env is None else dict(env),
+            creationflags=NO_WINDOW if capture else 0,
         )
     except OSError as e:
         return subprocess.CompletedProcess(list(cmd), 127, "", str(e))
@@ -328,6 +335,41 @@ def _windows_quote(arg: str) -> str:
     return f'"{arg}"' if (" " in arg or "\t" in arg or not arg) else arg
 
 
+# Programs that open a console window when the service starts them.
+_CONSOLE_PROGRAMS = {"copycord.exe", "python.exe"}
+
+
+def windowless_command(command: Sequence[str]) -> List[str]:
+    """The same command without a console window: copycordw.exe next to the
+    copycord.exe launcher, else pythonw.exe of this Python environment."""
+    command = list(command)
+    exe = Path(command[0])
+    name = exe.name.lower()
+    if name == "python.exe":
+        gui = exe.with_name("pythonw.exe")
+        return [str(gui), *command[1:]] if gui.is_file() else command
+    if name != "copycord.exe":
+        return command
+    gui = exe.with_name("copycordw.exe")
+    if gui.is_file():
+        return [str(gui), *command[1:]]
+    pythonw = Path(sys.executable).with_name("pythonw.exe")
+    if pythonw.is_file():
+        return [str(pythonw), "-m", "copycord", *command[1:]]
+    return command
+
+
+def opens_window(command: str) -> bool:
+    """Whether the task's program is a console program, which shows a window."""
+    return ntpath.basename(command.strip().strip('"')).lower() in _CONSOLE_PROGRAMS
+
+
+def task_data_dir(arguments: str) -> Optional[Path]:
+    """The --data-dir in the task's arguments."""
+    m = re.search(r'--data-dir\s+(?:"([^"]*)"|(\S+))', arguments or "")
+    return Path(m.group(1) or m.group(2)) if m else None
+
+
 def windows_user(env=None) -> str:
     env = os.environ if env is None else env
     user = env.get("USERNAME") or "%USERNAME%"
@@ -448,9 +490,41 @@ class ScheduledTaskService:
     def _query(self) -> subprocess.CompletedProcess:
         return run_cmd(["schtasks", "/Query", "/TN", self.name, "/FO", "CSV", "/NH"])
 
+    def task_action(self) -> Optional[Tuple[str, str]]:
+        """(Command, Arguments) of the installed task, or None."""
+        res = run_cmd(["schtasks", "/Query", "/TN", self.name, "/XML"])
+        if res.returncode != 0:
+            return None
+        text = res.stdout or ""
+        command = re.search(r"<Command>(.*?)</Command>", text, re.S)
+        arguments = re.search(r"<Arguments>(.*?)</Arguments>", text, re.S)
+        if command is None:
+            return None
+        return (unescape(command.group(1)).strip(),
+                unescape(arguments.group(1)).strip() if arguments else "")
+
+    def console_command(self) -> Optional[str]:
+        """The task's program when it opens a console window, else None."""
+        action = self.task_action()
+        return action[0] if action and opens_window(action[0]) else None
+
+    def use_windowless(self) -> List[str]:
+        """Write the task again so it starts Copycord without a window,
+        keeping its data dir, and start it."""
+        command = windowless_command(copycord_command())
+        if opens_window(command[0]):
+            raise ServiceError(
+                "this Copycord has no copycordw.exe or pythonw.exe to run without a "
+                "window; update Copycord, then run copycord service install"
+            )
+        action = self.task_action()
+        data = task_data_dir(action[1]) if action else None
+        return self.install(command, data or install_data_dir(False))
+
     def install(self, command: Sequence[str], data_dir: Path) -> List[str]:
+        command = windowless_command(command)
         xml = task_xml(command, data_dir, windows_user(self.env))
-        # A running copy keeps its old command until it ends.
+        # A running copy keeps its old command (and its window) until it ends.
         if self.state().running:
             run_cmd(["schtasks", "/End", "/TN", self.name])
             self._end(ports=True)
@@ -575,6 +649,13 @@ def get_service(
 
 def service_state() -> State:
     return get_service().state()
+
+
+def console_task() -> Optional[str]:
+    """Windows: the service task's program when it opens a console window."""
+    if sys.platform != "win32":
+        return None
+    return ScheduledTaskService().console_command()
 
 
 def restart_service() -> None:

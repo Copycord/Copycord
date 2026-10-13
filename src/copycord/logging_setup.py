@@ -33,6 +33,10 @@ DATEFMT = "%Y-%m-%d %H:%M:%S"
 CONSOLE_MARK = "_copycord_console"
 
 FILE_ROLES = ("server", "client")
+# Set when Copycord runs without a console (copycordw.exe, the Windows
+# service): what the console would show goes to <logs>/copycord.out instead.
+WINDOWLESS = False
+CONSOLE_FILE = "copycord.out"
 ROLE_CONSOLE_LEVEL = logging.WARNING
 MAX_BYTES = 10 * 1024 * 1024
 BACKUP_COUNT = 1
@@ -109,6 +113,20 @@ class TruncateSafeRotatingFileHandler(RotatingFileHandler):
         return size + len(self.format(record)) + 1 >= self.maxBytes
 
 
+def _console_handler(directory: Optional[Path], max_bytes: int,
+                     backup_count: int) -> logging.Handler:
+    if WINDOWLESS:
+        path = (Path(directory) if directory is not None else logs_dir()) / CONSOLE_FILE
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return TruncateSafeRotatingFileHandler(
+                str(path), maxBytes=max_bytes, backupCount=backup_count, encoding="utf-8"
+            )
+        except OSError:
+            pass
+    return logging.StreamHandler()
+
+
 def setup_logging(
     directory: Optional[Path] = None,
     *,
@@ -124,7 +142,7 @@ def setup_logging(
         root.setLevel(level)
 
     if not has_console_handler(root):
-        ch = mark_console(logging.StreamHandler())
+        ch = mark_console(_console_handler(directory, max_bytes, backup_count))
         ch.setFormatter(ConsoleFormatter(CONSOLE_FORMAT, datefmt=DATEFMT))
         ch.setLevel(level)
         ch.addFilter(ConsoleRoleFilter())

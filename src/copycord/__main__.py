@@ -987,12 +987,26 @@ def service_state():
         return None
 
 
-def check_service(state) -> Check:
+def service_console() -> Optional[str]:
+    """Windows: the service's program when it opens a console window."""
+    try:
+        from copycord import service
+
+        return service.console_task()
+    except Exception:
+        return None
+
+
+def check_service(state, console: Optional[str] = None) -> Check:
     if state is None:
         return Check(INFO, "service state unknown")
     if not state.installed:
         return Check(INFO, "service not installed",
                      f"{_cmd('copycord service install')} runs Copycord in the background")
+    if console:
+        return Check(WARN, "service runs in a console window",
+                     "the window stays open while Copycord runs, and closing it stops "
+                     "Copycord", state.where, "service_window")
     if state.running:
         return Check(PASS, "service running", path=state.where)
     return Check(WARN, "service installed, not running",
@@ -1034,7 +1048,7 @@ def run_doctor() -> List[tuple]:
                   check_backups()]),
         ("Running", [
             check_admin_port(service_running=bool(state and state.running)),
-            check_service(state),
+            check_service(state, service_console() if state and state.installed else None),
         ]),
         ("Updates", [check_updates()]),
     ]
@@ -1183,6 +1197,18 @@ def fix_service(checks: List[Check]) -> str:
     return svc.where
 
 
+def fix_service_window(checks: List[Check]) -> str:
+    """Windows: write the service task again so it runs without a window."""
+    from copycord import service
+
+    svc = service.get_service()
+    try:
+        svc.use_windowless()
+    except service.ServiceError as e:
+        raise FixError(str(e)) from None
+    return svc.where
+
+
 def next_free_port(port: int, host: str = ADMIN_BIND_HOST) -> Optional[int]:
     """The first port above PORT that nothing listens on."""
     for candidate in range(port + 1, min(port + 101, 65536)):
@@ -1246,6 +1272,8 @@ FIXES = {
     "port": Fix(fix_port, "dashboard moved to a free port", "move the dashboard to a free port",
                 question=_port_question),
     "service": Fix(fix_service, "copycord service started", "start it"),
+    "service_window": Fix(fix_service_window, "service runs without a window",
+                          "run it without a window"),
 }
 
 
@@ -2046,12 +2074,17 @@ def schema_guard() -> bool:
 
 def port_busy_message(port: int) -> None:
     """What `copycord run` prints when a port it needs stays in use."""
-    from copycord import ui
+    from copycord import logging_setup, ui
 
     text = f"Port {port} is in use, so Copycord cannot start"
     hint = (f"another Copycord may still be running: stop it with "
             f"{ui.cmd('copycord service stop', stream=sys.stderr)}, or run "
             f"{ui.cmd('copycord doctor', stream=sys.stderr)} to check the port")
+    if logging_setup.WINDOWLESS:
+        # No console to print to: the log file is all there is.
+        logging.getLogger("copycord.supervisor").error(
+            "%s. Another Copycord may still be running: stop it with copycord service "
+            "stop, or run copycord doctor to check the port", text)
     ui.fail(text, hint, stream=sys.stderr)
 
 
@@ -2067,8 +2100,22 @@ def migrate_on_start() -> None:
                     "layout: %s", e)
 
 
+def windowless_streams() -> None:
+    """Without a console (copycordw.exe, pythonw.exe) sys.stdin, sys.stdout and
+    sys.stderr are None; point them at the null device so printing works."""
+    if sys.stdout is not None and sys.stderr is not None:
+        return
+    from copycord import logging_setup
+
+    logging_setup.WINDOWLESS = True
+    for name, mode in (("stdin", "r"), ("stdout", "w"), ("stderr", "w")):
+        if getattr(sys, name) is None:
+            setattr(sys, name, open(os.devnull, mode, encoding="utf-8"))
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     """Run one command; an unexpected error prints a short report instead of a traceback."""
+    windowless_streams()
     argv = list(sys.argv[1:] if argv is None else argv)
     try:
         return run_command(argv)

@@ -34,6 +34,10 @@ Homepage = "https://github.com/Copycord/Copycord"
 [project.scripts]
 copycord = "copycord.__main__:main"
 
+# Windows: copycordw.exe runs Copycord without a console window (the service uses it).
+[project.gui-scripts]
+copycordw = "copycord.__main__:main"
+
 # Single source: CURRENT_VERSION in src/copycord/common/config.py ("v3.28.0" -> 3.28.0).
 [tool.hatch.version]
 path = "src/copycord/common/config.py"

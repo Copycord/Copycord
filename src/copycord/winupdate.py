@@ -45,6 +45,7 @@ def _processes() -> Optional[list]:
         res = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", _PS_QUERY],
             capture_output=True, text=True, timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         rows = json.loads(res.stdout or "null")
     except (OSError, ValueError, subprocess.SubprocessError):
