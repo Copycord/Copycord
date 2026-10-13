@@ -5,7 +5,7 @@
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
-import type { ProxySettingKey, ProxySettings, ProxyTestResult } from "../../../types/dashboard-proxy";
+import type { ProxySettingKey, ProxyTestResult } from "../../../types/dashboard-proxy";
 import { GhostButton } from "../../system/buttons";
 import { maskProxy, PS_DEFAULTS } from "./model";
 
