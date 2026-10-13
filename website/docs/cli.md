@@ -16,8 +16,8 @@ copycord config set KEY VALUE [--data-dir PATH]
 copycord config unset KEY [--data-dir PATH]
 copycord config export [FILE] [--show-secrets] [--json] [--data-dir PATH]
 copycord config import FILE [--data-dir PATH]
-copycord service install [--user] [--data-dir PATH]
-copycord service start|stop|status|uninstall [--user]
+copycord service install [--user | --system] [--data-dir PATH]
+copycord service start|stop|status|uninstall [--user | --system]
 copycord backup [--json] [--data-dir PATH]
 copycord restore [ARCHIVE] [--yes] [--data-dir PATH]
 copycord update [--channel stable|beta|dev] [--repo OWNER/NAME] [--ref REF] [--tag VERSION] [--no-install] [--force]
@@ -481,7 +481,7 @@ copycord restart
 | In a terminal (`copycord run`) | Prints that Copycord is not running as a service and exits with 1. Stop it with **Ctrl+C** and run `copycord run` again. |
 | Not at all, service installed | Prints the service state and exits with 1; start it with `copycord service start`. |
 
-Restarting the Linux system service needs root: `sudo "$(command -v copycord)" restart`.
+Restarting the Linux system service (`--system`) needs root: `sudo "$(command -v copycord)" restart`. The default service for your own account needs no sudo.
 
 On Windows, `copycord restart` and `copycord service stop` end every process the service started, then wait up to 20 seconds until it has stopped and, for a restart, until its ports are free, before starting it again. If that does not happen in time, the service stays stopped and the command says why, for example `Copycord did not stop within 20 seconds: port 9101 is still in use`, and exits with 1.
 
@@ -499,7 +499,7 @@ copycord service uninstall    # stop and remove
 
 | Command | What it does |
 |---------|--------------|
-| `install [--user] [--data-dir PATH]` | Registers `copycord run --data-dir <data dir>` with the service manager, enables it and starts it |
+| `install [--user \| --system] [--data-dir PATH]` | Registers `copycord run --data-dir <data dir>` with the service manager, enables it and starts it |
 | `start` | Starts the service |
 | `stop` | Stops the service |
 | `status` | Prints whether the service is installed and running. Exits with 0 when running, 3 when not. |
@@ -511,27 +511,34 @@ The data directory is fixed when you install the service: the one given with `--
 
 | OS | Service | Starts | Restarts |
 |----|---------|--------|----------|
-| Linux (default) | systemd system unit `/etc/systemd/system/copycord.service` | At boot | 10 seconds after a crash |
-| Linux (`--user`) | systemd user unit `~/.config/systemd/user/copycord.service` | When you log in (at boot with lingering) | 10 seconds after a crash |
+| Linux (default) | systemd user unit `~/.config/systemd/user/copycord.service` | At boot (with lingering, see below) | 10 seconds after a crash |
+| Linux (`--system`, or run as root) | systemd system unit `/etc/systemd/system/copycord.service` | At boot | 10 seconds after a crash |
 | macOS | launchd agent `~/Library/LaunchAgents/com.copycord.plist` | When you log in | After a crash |
 | Windows | Scheduled Task `Copycord` | When you log in | Every minute after a failure |
 
-**Linux system service.** Installing, starting, stopping and removing it needs root. Because the install script puts `copycord` in your user's tool directory, call it by its full path:
+**Linux service for your account (default).** `copycord service install` needs no sudo. It installs a systemd user unit that runs as you, with your Copycord home. A user unit normally runs only while you are logged in, so the install also turns on lingering for your account, which starts Copycord at boot and keeps it running after you log out. Most systems allow this without sudo, and the install prints:
 
-```bash
-sudo "$(command -v copycord)" service install
+```text
+created user service copycord.service (starts at boot)
 ```
 
-When installed with `sudo`, the service runs as your user (not root) and uses your user's data directory.
-
-**Linux user service.** `copycord service install --user` needs no root. It only runs while you are logged in unless you enable lingering, which also starts it at boot:
+If your system does not allow it, the install prints `starts when you log in` and one line under `needs your attention` with the command to run once:
 
 ```bash
-copycord service install --user
 sudo loginctl enable-linger "$USER"
 ```
 
-Use `--user` with the other `service` commands as well. Without `--user`, `start`, `stop` and `status` use the user service when there is no system service.
+`copycord doctor` shows `service starts only when you log in` while lingering is off, and `copycord doctor --fix` tries to turn it on.
+
+**Linux system service.** `copycord service install --system` installs `/etc/systemd/system/copycord.service` instead. It needs root, and so do `start`, `stop`, `restart` and `uninstall` for it. Because the install script puts `copycord` in your user's tool directory, call it by its full path:
+
+```bash
+sudo "$(command -v copycord)" service install --system
+```
+
+When installed with `sudo`, the system service runs as your user (not root) and uses your user's data directory. Run as root, `copycord service install` installs the system service without `--system`.
+
+`start`, `stop`, `status` and `uninstall` use whichever service is installed. If both a user service and a system service are installed, they use the one for your account (the system service when run as root) and say which; add `--user` or `--system` to choose. On a system without systemd (for example WSL without systemd, or a container), `copycord service install` stops with the error from `systemctl`; run `copycord run` instead.
 
 **macOS.** The agent's output goes to `copycord.out.log` and `copycord.err.log` in the data directory. `--user` has no effect.
 

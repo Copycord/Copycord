@@ -143,7 +143,7 @@ copycord run --data-dir ~/copycord/data
 Use the same flag when you install the service, so it uses that folder too:
 
 ```bash
-copycord service install --user --data-dir ~/copycord/data
+copycord service install --data-dir ~/copycord/data
 ```
 
 **Option B: copy the data into the v4 data directory.** With Copycord stopped:

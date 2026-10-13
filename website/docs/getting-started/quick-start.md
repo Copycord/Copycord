@@ -126,9 +126,8 @@ Install Copycord as a service so it runs without an open terminal and starts aga
 <TabItem value="unix" label="Linux / macOS" default>
 
 ```bash title="Terminal"
-# Linux: a systemd service for your user
-copycord service install --user
-sudo loginctl enable-linger "$USER"   # keep it running after you log out
+# Linux: a systemd service for your account, started at boot (no sudo)
+copycord service install
 
 # macOS: a launchd agent
 copycord service install
