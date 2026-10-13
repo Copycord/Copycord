@@ -1460,7 +1460,11 @@ def test_doctor_fix_never_touches_role_or_a_newer_schema(doctor_env, monkeypatch
     db = DBManager(str(doctor_env / "data.db"), init_schema=True)
     db.set_config(SCHEMA_VERSION_KEY, str(SCHEMA_VERSION + 1))
     db.conn.close()
-    before = sorted(os.listdir(doctor_env))
+    # a read-only open of a WAL database leaves SQLite's own -wal/-shm files
+    def listing():
+        return sorted(n for n in os.listdir(doctor_env) if not n.endswith(("-wal", "-shm")))
+
+    before = listing()
 
     assert _fix(doctor_env) == 1
 
@@ -1471,7 +1475,7 @@ def test_doctor_fix_never_touches_role_or_a_newer_schema(doctor_env, monkeypatch
     schema = next(x for x in left if "database schema" in x)
     assert "copycord update" in schema and "restore a backup" in schema
     assert "Fixed" not in out.splitlines() and "no automatic fix" not in out
-    assert sorted(os.listdir(doctor_env)) == before
+    assert listing() == before
 
 
 def test_doctor_fix_rechecks_after_the_fixes(doctor_env, monkeypatch, capsys):

@@ -793,7 +793,7 @@ class DBManager:
         );
         """
         )
-        self.conn.commit()
+        self.conn.commit()  # schema setup runs outside _tx()
 
         self._ensure_table(
             name="guild_asset_state",
@@ -1666,7 +1666,6 @@ class DBManager:
                     (clone_id, orig_id, cgid),
                 )
 
-            self.conn.commit()
 
     def delete_category_mapping(self, orig_id: int):
         with self._tx():
@@ -1790,7 +1789,6 @@ class DBManager:
                 int(cloned_guild_id) if cloned_guild_id is not None else None,
             ),
         )
-        self.conn.commit()
 
     @_in_tx
     def delete_forum_thread_mapping(self, orig_thread_id: int):
@@ -1799,7 +1797,6 @@ class DBManager:
             "DELETE FROM threads WHERE original_thread_id = ?",
             (orig_thread_id,),
         )
-        self.conn.commit()
 
     @_in_tx
     def upsert_channel_mapping(
@@ -1876,7 +1873,6 @@ class DBManager:
                 int(cloned_guild_id) if cloned_guild_id is not None else None,
             ),
         )
-        self.conn.commit()
 
     def delete_channel_mapping(self, orig_id: int):
         with self._tx():
@@ -2012,7 +2008,6 @@ class DBManager:
                 int(cloned_guild_id) if cloned_guild_id is not None else None,
             ),
         )
-        self.conn.commit()
 
     def get_emoji_mapping(self, original_id: int) -> sqlite3.Row | None:
         """Return the row for this original emoji id, or None if never cloned."""
@@ -2026,7 +2021,6 @@ class DBManager:
             "INSERT OR IGNORE INTO announcement_subscriptions(guild_id, keyword, user_id) VALUES (?, ?, ?)",
             (guild_id, keyword, user_id),
         )
-        self.conn.commit()
         return cur.rowcount > 0
 
     @_in_tx
@@ -2037,7 +2031,6 @@ class DBManager:
             "DELETE FROM announcement_subscriptions WHERE guild_id = ? AND keyword = ? AND user_id = ?",
             (guild_id, keyword, user_id),
         )
-        self.conn.commit()
         return cur.rowcount > 0
 
     def get_announcement_users(self, guild_id: int, keyword: str) -> list[int]:
@@ -2059,7 +2052,6 @@ class DBManager:
             "VALUES (?, ?, ?, ?)",
             (guild_id, keyword, filter_user_id, channel_id),
         )
-        self.conn.commit()
         return cur.rowcount > 0
 
     def get_announcement_keywords(self, guild_id: int) -> list[str]:
@@ -2078,7 +2070,6 @@ class DBManager:
             "WHERE guild_id = ? AND keyword = ? AND filter_user_id = ? AND channel_id = ?",
             (guild_id, keyword, filter_user_id, channel_id),
         )
-        self.conn.commit()
         return cur.rowcount > 0
 
     def get_announcement_triggers(
@@ -2141,7 +2132,6 @@ class DBManager:
             "INSERT OR IGNORE INTO join_dm_subscriptions(guild_id, user_id) VALUES (?, ?)",
             (guild_id, user_id),
         )
-        self.conn.commit()
         return cur.rowcount > 0
 
     @_in_tx
@@ -2150,7 +2140,6 @@ class DBManager:
             "DELETE FROM join_dm_subscriptions WHERE guild_id = ? AND user_id = ?",
             (guild_id, user_id),
         )
-        self.conn.commit()
         return cur.rowcount > 0
 
     def has_onjoin_subscription(self, guild_id: int, user_id: int) -> bool:
@@ -2221,14 +2210,12 @@ class DBManager:
                 int(cloned_guild_id) if cloned_guild_id is not None else None,
             ),
         )
-        self.conn.commit()
 
     @_in_tx
     def delete_sticker_mapping(self, orig_id: int):
         self.conn.execute(
             "DELETE FROM sticker_mappings WHERE original_sticker_id = ?", (orig_id,)
         )
-        self.conn.commit()
 
     def get_all_role_mappings(self) -> List[sqlite3.Row]:
         return self.conn.execute("SELECT * FROM role_mappings").fetchall()
@@ -2271,14 +2258,12 @@ class DBManager:
                 int(cloned_guild_id) if cloned_guild_id is not None else None,
             ),
         )
-        self.conn.commit()
 
     @_in_tx
     def delete_role_mapping(self, orig_id: int):
         self.conn.execute(
             "DELETE FROM role_mappings WHERE original_role_id = ?", (orig_id,)
         )
-        self.conn.commit()
 
     def get_role_mapping(self, orig_id: int):
         return self.conn.execute(
@@ -2384,7 +2369,6 @@ class DBManager:
         ins("exclude", "category", exclude_categories)
         ins("exclude", "channel", exclude_channels)
 
-        self.conn.commit()
 
     def add_filter(
         self,
@@ -2797,7 +2781,6 @@ class DBManager:
                 "DELETE FROM messages WHERE original_message_id = ?",
                 (int(original_message_id),),
             )
-            self.conn.commit()
             return cur.rowcount or 0
         except Exception:
             return 0
@@ -2887,7 +2870,6 @@ class DBManager:
                     now,
                 ),
             )
-            self.conn.commit()
         return run_id
 
     @_in_tx
@@ -2897,7 +2879,6 @@ class DBManager:
             "UPDATE backfill_runs SET clone_channel_id=?, updated_at=? WHERE run_id=?",
             (int(clone_channel_id) if clone_channel_id else None, now, run_id),
         )
-        self.conn.commit()
 
     @_in_tx
     def backfill_update_checkpoint(
@@ -2926,7 +2907,6 @@ class DBManager:
             f"UPDATE backfill_runs SET {', '.join(c+'=?' for c in cols)} WHERE run_id=?"
         )
         self.conn.execute(sql, (*vals, run_id))
-        self.conn.commit()
 
     @_in_tx
     def backfill_mark_done(self, run_id: str):
@@ -2935,7 +2915,6 @@ class DBManager:
             "UPDATE backfill_runs SET status='completed', updated_at=? WHERE run_id=?",
             (now, run_id),
         )
-        self.conn.commit()
 
     @_in_tx
     def backfill_mark_failed(self, run_id: str, error: str | None):
@@ -2944,7 +2923,6 @@ class DBManager:
             "UPDATE backfill_runs SET status='failed', error=?, updated_at=? WHERE run_id=?",
             (error, now, run_id),
         )
-        self.conn.commit()
 
     @_in_tx
     def backfill_abandon_running_on_boot(self):
@@ -2953,7 +2931,6 @@ class DBManager:
             "UPDATE backfill_runs SET status='aborted', updated_at=? WHERE status='running'",
             (now,),
         )
-        self.conn.commit()
 
     def backfill_get_incomplete_for_channel(self, original_channel_id: int):
         cur = self.conn.execute(
@@ -2994,7 +2971,6 @@ class DBManager:
             "UPDATE backfill_runs SET status='cancelled', error=COALESCE(?, error), updated_at=? WHERE run_id=?",
             (reason, now, run_id),
         )
-        self.conn.commit()
 
     @_in_tx
     def backfill_abort_running_for_channel(
@@ -3006,7 +2982,6 @@ class DBManager:
             "WHERE original_channel_id=? AND status='running'",
             (reason, now, int(original_channel_id)),
         )
-        self.conn.commit()
         return cur.rowcount
 
     def get_clone_guild_ids(self, original_guild_id: int) -> List[int]:
@@ -3568,7 +3543,6 @@ class DBManager:
                 "DELETE FROM app_config WHERE key = ?",
                 (key,),
             )
-            self.conn.commit()
 
     def get_mapping_by_id(self, mapping_id: str) -> dict | None:
         """A guild_mappings row (plus parsed settings) for a mapping_id, with the keys of list_guild_mappings()."""
@@ -3686,7 +3660,6 @@ class DBManager:
             """,
             (reason, now, int(original_channel_id), int(cloned_guild_id)),
         )
-        self.conn.commit()
         return cur.rowcount
 
     def get_mapping_by_cloned_guild_id(self, cloned_guild_id: int):
@@ -4089,7 +4062,6 @@ class DBManager:
                 """,
                 (int(original_thread_id), int(cloned_guild_id)),
             )
-            self.conn.commit()
 
     def delete_message_mapping_pair(
         self, original_message_id: int, cloned_guild_id: int
@@ -4136,7 +4108,6 @@ class DBManager:
             "DELETE FROM emoji_mappings WHERE original_emoji_id = ? AND cloned_guild_id = ?",
             (int(original_id), int(cloned_guild_id)),
         )
-        self.conn.commit()
 
     @_in_tx
     def delete_emoji_mapping(self, original_id: int) -> None:
@@ -4144,7 +4115,6 @@ class DBManager:
             "DELETE FROM emoji_mappings WHERE original_emoji_id = ?",
             (int(original_id),),
         )
-        self.conn.commit()
 
     def get_sticker_mapping_for_clone(self, original_id: int, cloned_guild_id: int):
         return self.conn.execute(
@@ -4166,7 +4136,6 @@ class DBManager:
             "DELETE FROM sticker_mappings WHERE original_sticker_id = ? AND cloned_guild_id = ?",
             (int(original_id), int(cloned_guild_id)),
         )
-        self.conn.commit()
 
     def get_role_mapping_for_clone(self, original_id: int, cloned_guild_id: int):
         return self.conn.execute(
@@ -4194,7 +4163,6 @@ class DBManager:
             "DELETE FROM role_mappings WHERE original_role_id = ? AND cloned_guild_id = ?",
             (int(original_id), int(cloned_guild_id)),
         )
-        self.conn.commit()
 
     def get_category_mapping_by_original_and_clone(
         self, original_category_id: int, cloned_guild_id: int
@@ -4968,7 +4936,6 @@ class DBManager:
                     replacement_text,
                 ),
             )
-            self.conn.commit()
 
         return existed
 
@@ -4990,7 +4957,6 @@ class DBManager:
                 """,
                 (int(rewrite_id), int(original_guild_id), int(cloned_guild_id)),
             )
-            self.conn.commit()
             return cur.rowcount > 0
 
     def list_mapping_rewrites_for_mapping(
@@ -5288,7 +5254,6 @@ class DBManager:
                 """,
                 (token_id, token_value, label),
             )
-            self.conn.commit()
         return token_id
 
     def list_scraper_tokens(self) -> list[dict]:
@@ -5358,7 +5323,6 @@ class DBManager:
                 f"UPDATE scraper_tokens SET {', '.join(updates)} WHERE token_id = ?",
                 params,
             )
-            self.conn.commit()
         return True
 
     @_in_tx
@@ -5368,7 +5332,6 @@ class DBManager:
             cur = self.conn.execute(
                 "DELETE FROM scraper_tokens WHERE token_id = ?", (token_id,)
             )
-            self.conn.commit()
             return cur.rowcount > 0
 
     @_in_tx
@@ -5384,7 +5347,6 @@ class DBManager:
                 """,
                 (int(time.time()), token_id),
             )
-            self.conn.commit()
 
     # mapping_user_tokens CRUD
 
@@ -5409,7 +5371,6 @@ class DBManager:
                 """,
                 (token_id, mapping_id, token_value, label, username, user_id),
             )
-            self.conn.commit()
         return token_id
 
     def list_mapping_tokens(self, mapping_id: str) -> list[dict]:
@@ -5464,7 +5425,6 @@ class DBManager:
                 "UPDATE mapping_user_tokens SET enabled = ? WHERE token_id = ?",
                 (1 if enabled else 0, token_id),
             )
-            self.conn.commit()
             return cur.rowcount > 0
 
     @_in_tx
@@ -5474,7 +5434,6 @@ class DBManager:
             cur = self.conn.execute(
                 "DELETE FROM mapping_user_tokens WHERE token_id = ?", (token_id,)
             )
-            self.conn.commit()
             return cur.rowcount > 0
 
     @_in_tx
@@ -5484,7 +5443,6 @@ class DBManager:
             cur = self.conn.execute(
                 "DELETE FROM mapping_user_tokens WHERE mapping_id = ?", (mapping_id,)
             )
-            self.conn.commit()
             return cur.rowcount
 
     @_in_tx
@@ -5500,7 +5458,6 @@ class DBManager:
                 """,
                 (int(time.time()), token_id),
             )
-            self.conn.commit()
 
     # mapping_token_identities CRUD
 
@@ -5551,7 +5508,6 @@ class DBManager:
                     int(assigned_at),
                 ),
             )
-            self.conn.commit()
 
     @staticmethod
     def _row_to_identity(row) -> dict:
@@ -5590,7 +5546,6 @@ class DBManager:
                 "DELETE FROM mapping_token_identities WHERE mapping_id = ? AND author_id = ?",
                 (str(mapping_id), str(author_id)),
             )
-            self.conn.commit()
             return cur.rowcount > 0
 
     @_in_tx
@@ -5601,7 +5556,6 @@ class DBManager:
                 "DELETE FROM mapping_token_identities WHERE mapping_id = ?",
                 (str(mapping_id),),
             )
-            self.conn.commit()
             return cur.rowcount
 
     # event_logs CRUD
@@ -5643,7 +5597,6 @@ class DBManager:
                     extra_json,
                 ),
             )
-            self.conn.commit()
         return log_id
 
     def get_event_logs(
@@ -5724,7 +5677,6 @@ class DBManager:
             cur = self.conn.execute(
                 "DELETE FROM event_logs WHERE log_id = ?", (log_id,)
             )
-            self.conn.commit()
             return cur.rowcount > 0
 
     @_in_tx
@@ -5738,7 +5690,6 @@ class DBManager:
                 f"DELETE FROM event_logs WHERE log_id IN ({placeholders})",
                 log_ids,
             )
-            self.conn.commit()
             return cur.rowcount
 
     @_in_tx
@@ -5746,7 +5697,6 @@ class DBManager:
         """Delete all event log entries. Returns count deleted."""
         with self.lock:
             cur = self.conn.execute("DELETE FROM event_logs")
-            self.conn.commit()
             return cur.rowcount
 
     def get_valid_scraper_tokens(self) -> list[dict]:
