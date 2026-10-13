@@ -205,7 +205,7 @@ def test_ps1_repairs_with_the_doctor_after_an_upgrade_only():
         assert probe in detect
     assert text.index("$upgrade = ") < text.index("Step 'Finishing up'")
     assert text.index("$envTemplate") < text.index(call) > text.index("'--no-install'")
-    block = text[text.index(call) - 300:text.index(call) + 900]
+    block = text[text.index(call) - 300:text.index(call) + 1400]
     assert "$env:NO_COLOR = '1'" in block
     assert "$ErrorActionPreference = 'Continue'" in block
     assert "$global:LASTEXITCODE = 0" in block

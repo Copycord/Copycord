@@ -817,7 +817,7 @@ def test_doctor_fix_applies_the_automatic_fixes_without_asking(doctor_env, monke
     assert asked == []
     out = capsys.readouterr().out
     fixes = [x for x in out.splitlines() if x.endswith("(fixed)")]
-    assert [x.split(":")[0] for x in fixes] == [
+    assert [x.split("  ")[0] for x in fixes] == [
         "✔ .env created with the default settings",
         "✔ database backed up",
     ]
@@ -1003,7 +1003,7 @@ def test_doctor_fix_service_start_failure(stopped_service, doctor_env, capsys):
     stopped_service["error"] = "the system service needs root: rerun with sudo"
     assert _fix(doctor_env) == 0
     out = capsys.readouterr().out
-    assert "service installed, not running: could not fix it: the system service needs root" in out
+    assert "service installed, not running  could not fix it: the system service needs root" in out
 
 
 @pytest.fixture()
