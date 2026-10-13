@@ -27,6 +27,9 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 FRONTEND = Path("src") / "copycord" / "admin" / "frontend"
 DIST = FRONTEND / "dist"
+# The new SPA, served at /app; ships as copycord/admin/web_static.
+WEB = Path("src") / "copycord" / "admin" / "web"
+WEB_DIST = WEB / "dist"
 SKIP_ENV = "COPYCORD_SKIP_FRONTEND"
 
 
@@ -43,17 +46,19 @@ class FrontendBuildHook(BuildHookInterface):
             return
         if self.target_name == "wheel":
             self.stamp_commit(build_data)
-        dist = Path(self.root) / DIST
-        if not _has_files(dist):
-            self.build_frontend()
-        if not _has_files(dist):
-            self.app.display_warning(
-                f"{DIST} not found: building without the admin frontend "
-                "(run `npm run build` in src/copycord/admin/frontend; `copycord doctor` will warn)"
-            )
-            return
-        target = "copycord/admin/static" if self.target_name == "wheel" else DIST.as_posix()
-        build_data["force_include"][str(dist)] = target
+        builds = ((FRONTEND, DIST, "copycord/admin/static"), (WEB, WEB_DIST, "copycord/admin/web_static"))
+        for src, out, wheel_target in builds:
+            dist = Path(self.root) / out
+            if not _has_files(dist):
+                self.build_frontend(src)
+            if not _has_files(dist):
+                self.app.display_warning(
+                    f"{out} not found: building without it "
+                    f"(run `npm run build` in {src.as_posix()}; `copycord doctor` will warn)"
+                )
+                continue
+            target = wheel_target if self.target_name == "wheel" else out.as_posix()
+            build_data["force_include"][str(dist)] = target
 
     def stamp_commit(self, build_data: dict) -> None:
         """Ship copycord/_build.json with the commit this wheel is built from."""
@@ -73,28 +78,28 @@ class FrontendBuildHook(BuildHookInterface):
         out.write_text(json.dumps({"commit": commit}), encoding="utf-8")
         build_data["force_include"][str(out)] = "copycord/_build.json"
 
-    def build_frontend(self) -> None:
-        """Run npm ci and npm run build; fails unless COPYCORD_SKIP_FRONTEND=1."""
-        frontend = Path(self.root) / FRONTEND
+    def build_frontend(self, src: Path = FRONTEND) -> None:
+        """Run npm ci and npm run build in src; fails unless COPYCORD_SKIP_FRONTEND=1."""
+        frontend = Path(self.root) / src
         if not (frontend / "package.json").is_file():
             return
         skip = os.environ.get(SKIP_ENV) == "1"
         npm = shutil.which("npm")
         if npm is None:
             self.fail(
-                f"npm not found on PATH, so the admin frontend in {FRONTEND} cannot be "
+                f"npm not found on PATH, so the admin frontend in {src.as_posix()} cannot be "
                 "built. Install Node.js 20 or newer (it includes npm) and build again, "
                 f"or set {SKIP_ENV}=1 to build without the admin UI.",
                 skip,
             )
             return
-        self.app.display_info(f"building the admin frontend in {FRONTEND} (npm ci && npm run build)")
+        self.app.display_info(f"building the admin frontend in {src.as_posix()} (npm ci && npm run build)")
         for args in (["ci"], ["run", "build"]):
             try:
                 subprocess.run([npm, *args], cwd=frontend, check=True)
             except (OSError, subprocess.CalledProcessError) as e:
                 self.fail(
-                    f"npm {' '.join(args)} failed in {FRONTEND}: {e}. Fix the error above, "
+                    f"npm {' '.join(args)} failed in {src.as_posix()}: {e}. Fix the error above, "
                     f"or set {SKIP_ENV}=1 to build without the admin UI.",
                     skip,
                 )

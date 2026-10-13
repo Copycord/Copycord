@@ -685,7 +685,7 @@ checkout_ref() {
         target="FETCH_HEAD"
     fi
     git -C "$GIT_DIR_PATH" checkout --force --detach "$target" || return 1
-    git -C "$GIT_DIR_PATH" clean -fdx -e src/copycord/admin/frontend/node_modules
+    git -C "$GIT_DIR_PATH" clean -fdx -e src/copycord/admin/frontend/node_modules -e src/copycord/admin/web/node_modules
 }
 
 GIT_MARKER="copycord-installer"
@@ -701,8 +701,11 @@ owned_checkout() {
 }
 
 build_frontend() {
-    rm -rf "$GIT_DIR_PATH/src/copycord/admin/frontend/dist" || return 1
-    (cd "$GIT_DIR_PATH/src/copycord/admin/frontend" && npm ci --no-audit --no-fund && npm run build)
+    local ui
+    for ui in frontend web; do
+        rm -rf "$GIT_DIR_PATH/src/copycord/admin/$ui/dist" || return 1
+        (cd "$GIT_DIR_PATH/src/copycord/admin/$ui" && npm ci --no-audit --no-fund && npm run build) || return 1
+    done
 }
 
 install_git() {
@@ -749,6 +752,7 @@ install_git() {
     step "Building the admin frontend"
     if [ "$DRY_RUN" = "1" ]; then
         dry "cd $GIT_DIR_PATH/src/copycord/admin/frontend && npm ci && npm run build"
+        dry "cd $GIT_DIR_PATH/src/copycord/admin/web && npm ci && npm run build"
     else
         run "npm ci && npm run build" build_frontend
     fi

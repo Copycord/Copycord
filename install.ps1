@@ -595,21 +595,23 @@ Test a branch, no release needed:
                     }
                 }
                 Run "Checking out $ref" 'git' @('-C', $gitDir, 'checkout', '--force', '--detach', $target)
-                Run 'Cleaning the checkout' 'git' @('-C', $gitDir, 'clean', '-fdx', '-e', 'src/copycord/admin/frontend/node_modules')
+                Run 'Cleaning the checkout' 'git' @('-C', $gitDir, 'clean', '-fdx', '-e', 'src/copycord/admin/frontend/node_modules', '-e', 'src/copycord/admin/web/node_modules')
                 $sha = (& git -C $gitDir rev-parse --short HEAD).Trim()
                 Done "$ref at $sha"
             }
 
             Step 'Building the admin frontend'
-            $frontend = Join-Path $gitDir 'src\copycord\admin\frontend'
-            if ($dryRun) {
-                Dry "cd $frontend; npm ci; npm run build"
-            } else {
-                Remove-Item -Recurse -Force (Join-Path $frontend 'dist') -ErrorAction SilentlyContinue
-                # npm.cmd, not npm.ps1: Start-Process cannot launch a .ps1 directly.
-                $npm = (Get-Command npm.cmd).Source
-                Run 'npm ci' $npm @('ci', '--no-audit', '--no-fund') $frontend
-                Run 'npm run build' $npm @('run', 'build') $frontend
+            foreach ($ui in @('frontend', 'web')) {
+                $frontend = Join-Path $gitDir "src\copycord\admin\$ui"
+                if ($dryRun) {
+                    Dry "cd $frontend; npm ci; npm run build"
+                } else {
+                    Remove-Item -Recurse -Force (Join-Path $frontend 'dist') -ErrorAction SilentlyContinue
+                    # npm.cmd, not npm.ps1: Start-Process cannot launch a .ps1 directly.
+                    $npm = (Get-Command npm.cmd).Source
+                    Run 'npm ci' $npm @('ci', '--no-audit', '--no-fund') $frontend
+                    Run 'npm run build' $npm @('run', 'build') $frontend
+                }
             }
 
             Step 'Installing Copycord'
