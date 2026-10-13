@@ -343,14 +343,17 @@ def note(text: str = "", stream: Optional[TextIO] = None) -> None:
     print(f"{bar}  {text}" if text else bar, file=stream)
 
 
-def gap(stream: Optional[TextIO] = None) -> None:
-    """A blank line between steps; on the rail just the rail."""
+def gap(stream: Optional[TextIO] = None, blank: bool = True) -> None:
+    """A blank line between steps, on the rail just the rail; blank=False
+    prints nothing off the rail."""
     global _open_prompt
     stream = sys.stdout if stream is None else stream
-    if on_rail(stream) and _open_prompt:
+    rail = on_rail(stream)
+    if rail and _open_prompt:
         print(file=stream)
     _open_prompt = False
-    note("", stream)
+    if rail or blank:
+        note("", stream)
 
 
 class Rail:

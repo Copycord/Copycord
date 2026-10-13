@@ -1909,9 +1909,19 @@ def uninstall_command(args: argparse.Namespace) -> int:
                     f"(process {other}); stop it first, then run this again")
             return 1
 
-    ui.heading("Uninstall Copycord" + (" (dry run, nothing changes)" if dry_run else ""))
-    print("Removes the Copycord program and its background service.")
-    print()
+    title = "Uninstall Copycord" + (" (dry run, nothing changes)" if dry_run else "")
+    with ui.Rail(title) as rail:
+        return _uninstall_steps(args, target, purge, launchers, rail)
+
+
+def _uninstall_steps(args: argparse.Namespace, target: Path, purge: Optional[bool],
+                     launchers: list, rail) -> int:
+    """uninstall_command from its title on: the question, then the removal."""
+    from copycord import ui
+
+    dry_run, yes = args.dry_run, args.yes
+    ui.note("Removes the Copycord program and its background service.")
+    ui.gap()
 
     if not yes and not dry_run:
         keep, delete = "Keep my data", "Delete everything (database, logs, backups, settings)"
@@ -1923,7 +1933,10 @@ def uninstall_command(args: argparse.Namespace) -> int:
             choice = picked[ui.choose(f"Your data is in {target}", picked, default=default)]
         except (KeyboardInterrupt, EOFError):
             choice = "Cancel"
-            print()
+            ui.gap()
+        else:
+            if choice == "Cancel":
+                ui.gap(blank=False)
         if choice == "Cancel":
             ui.warn("uninstall cancelled", "nothing was changed")
             return 1
@@ -1933,7 +1946,7 @@ def uninstall_command(args: argparse.Namespace) -> int:
             if why:
                 ui.fail("refusing to delete the Copycord home", why)
                 return 1
-        print()
+        ui.gap()
 
     removed: list = []
     kept: list = []
@@ -1971,7 +1984,7 @@ def uninstall_command(args: argparse.Namespace) -> int:
 
     ok = _uninstall_program(dry_run, purge, removed, kept, launchers) and ok
 
-    print()
+    ui.gap()
     if dry_run:
         ui.info("Dry run: nothing changed")
     elif ok:
@@ -1981,7 +1994,7 @@ def uninstall_command(args: argparse.Namespace) -> int:
     if not purge and target.exists():
         from copycord.common.paths import data_dir
 
-        print(f"  Your data is still in {data_dir()}")
+        rail.close(f"  Your data is still in {data_dir()}")
     return 0 if ok else 1
 
 

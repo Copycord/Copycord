@@ -599,6 +599,7 @@ def confirm_downgrade(current: str, target: str, yes: bool = False) -> int:
         _err(f"copycord update would downgrade from v{current} to v{target}",
              "no terminal to ask in; rerun with --yes to downgrade without a prompt")
         return 1
+    ui.gap(blank=False)
     try:
         ok = ui.confirm(
             f"Downgrade from v{current} to v{target}? Your data is backed up first; "
@@ -607,9 +608,10 @@ def confirm_downgrade(current: str, target: str, yes: bool = False) -> int:
             default=False,
         )
     except (KeyboardInterrupt, EOFError):
-        print()
+        ui.gap()
         ui.warn("update cancelled", "nothing was changed")
         return 130
+    ui.gap(blank=False)
     if not ok:
         ui.warn("update cancelled", "nothing was changed")
         return 1
@@ -619,15 +621,18 @@ def confirm_downgrade(current: str, target: str, yes: bool = False) -> int:
 def confirm_update(lines: list, question: str, title: str = "Update available") -> int:
     """Show what will change and ask; 0 to go ahead, else the exit code."""
     if lines:
+        ui.gap(blank=False)
         ui.box(lines, title=title, status="info")
+    ui.gap(blank=False)
     try:
         ok = ui.confirm(question, default=True)
     except (KeyboardInterrupt, EOFError):
-        print()
+        ui.gap()
         ui.warn("update cancelled", "nothing was changed")
         return 130
+    ui.gap(blank=False)
     if not ok:
-        print("Update cancelled, nothing was changed")
+        ui.note("Update cancelled, nothing was changed")
         return CANCELLED
     return 0
 
@@ -776,121 +781,124 @@ def update(
 
     if reinstall:
         label = "v" + tag if tag else target.describe(ui.dot()) if target.channel == DEV else "git"
-        ui.heading(f"Reinstalling Copycord{ui.dot()}{label}")
+        title = f"Reinstalling Copycord{ui.dot()}{label}"
     else:
-        ui.heading(f"Updating Copycord{ui.dot()}{target.describe(ui.dot()) if not tag else 'tag ' + tag}")
-    git = source is not None or (target.channel == DEV and not tag)
-    if source is not None:
-        spec = source.spec()
-    elif target.channel == DEV and not tag:
-        spec = git_spec(target.ref, target.repo)
-    else:
-        try:
-            with ui.Spinner("Checking GitHub releases"):
-                if release is None and tag:
-                    release = fetch_release(tag)
-                elif release is None:
-                    release = fetch_latest_release(prerelease=target.channel == BETA)
-                spec = release.wheel()
-        except ReleaseError as e:
-            _err(f"cannot update: {e}")
-            return 1
-        except Exception as e:
-            _err(f"cannot update: could not get the release from GitHub: {e}")
-            return 1
-        ui.ok(f"release {release.tag}")
-
-    cmd, hint = install_command(kind, spec, reinstall)
-    if cmd is None:
-        print(f"Copycord was installed with {kind}; update it with:\n  {hint}")
-        return 1
-    if shutil.which(cmd[0]) is None:
-        _err(f"{cmd[0]} is not on PATH", f"update Copycord with: {hint}")
-        return 1
-    # Dev refs have no comparable version, so only releases can be a downgrade.
-    if release is not None and is_older(release.version, current_version()):
-        rc = confirm_downgrade(current_version(), release.version, yes)
-        if rc:
-            return rc
-    elif not yes and ui.is_interactive():
-        current = current_version()
-        same = release.version == current if release is not None else force
-        if same and target == saved:
-            rc = confirm_update([], f"Reinstall Copycord {current}?")
+        title = f"Updating Copycord{ui.dot()}{target.describe(ui.dot()) if not tag else 'tag ' + tag}"
+    with ui.Rail(title):
+        ui.gap(blank=False)
+        git = source is not None or (target.channel == DEV and not tag)
+        if source is not None:
+            spec = source.spec()
+        elif target.channel == DEV and not tag:
+            spec = git_spec(target.ref, target.repo)
         else:
-            new = release.version if release is not None else _target_label(target)
-            title = (f"Switch to the {target.channel} channel"
-                     if target.channel != saved.channel else "Update available")
-            rc = confirm_update([f"{_installed_label()} -> {new}"], "Update Copycord now?", title)
-        if rc == CANCELLED:
-            return 0
-        if rc:
-            return rc
-    if not backup_database(no_backup):
-        return 1
-    # Only a git build needs npm, for the admin UI.
-    cmd_env = None
-    if git:
-        try:
-            npm_dir = node_runtime.ensure_npm()
-        except node_runtime.NodeError as e:
-            ui.box(
-                [
-                    "The dev channel builds the admin UI from source and needs",
-                    "Node.js/npm, which could not be set up:",
-                    str(e),
-                    f"Or stay on a release: {ui.cmd('copycord update --channel stable')}",
-                ],
-                title="Node.js not available", status="fail", stream=sys.stderr,
-            )
+            try:
+                with ui.Spinner("Checking GitHub releases"):
+                    if release is None and tag:
+                        release = fetch_release(tag)
+                    elif release is None:
+                        release = fetch_latest_release(prerelease=target.channel == BETA)
+                    spec = release.wheel()
+            except ReleaseError as e:
+                _err(f"cannot update: {e}")
+                return 1
+            except Exception as e:
+                _err(f"cannot update: could not get the release from GitHub: {e}")
+                return 1
+            ui.ok(f"release {release.tag}")
+
+        cmd, hint = install_command(kind, spec, reinstall)
+        if cmd is None:
+            ui.note(f"Copycord was installed with {kind}; update it with:")
+            ui.note(f"  {hint}")
             return 1
-        cmd_env = node_runtime.with_path(npm_dir)
+        if shutil.which(cmd[0]) is None:
+            _err(f"{cmd[0]} is not on PATH", f"update Copycord with: {hint}")
+            return 1
+        # Dev refs have no comparable version, so only releases can be a downgrade.
+        if release is not None and is_older(release.version, current_version()):
+            rc = confirm_downgrade(current_version(), release.version, yes)
+            if rc:
+                return rc
+        elif not yes and ui.is_interactive():
+            current = current_version()
+            same = release.version == current if release is not None else force
+            if same and target == saved:
+                rc = confirm_update([], f"Reinstall Copycord {current}?")
+            else:
+                new = release.version if release is not None else _target_label(target)
+                title = (f"Switch to the {target.channel} channel"
+                         if target.channel != saved.channel else "Update available")
+                rc = confirm_update([f"{_installed_label()} -> {new}"], "Update Copycord now?", title)
+            if rc == CANCELLED:
+                return 0
+            if rc:
+                return rc
+        if not backup_database(no_backup):
+            return 1
+        # Only a git build needs npm, for the admin UI.
+        cmd_env = None
+        if git:
+            try:
+                npm_dir = node_runtime.ensure_npm()
+            except node_runtime.NodeError as e:
+                ui.box(
+                    [
+                        "The dev channel builds the admin UI from source and needs",
+                        "Node.js/npm, which could not be set up:",
+                        str(e),
+                        f"Or stay on a release: {ui.cmd('copycord update --channel stable')}",
+                    ],
+                    title="Node.js not available", status="fail", stream=sys.stderr,
+                )
+                return 1
+            cmd_env = node_runtime.with_path(npm_dir)
 
-    # Read before the install replaces the files.
-    try:
-        state = service.service_state()
-    except Exception as e:
-        ui.warn("could not read the service state", str(e))
-        state = None
-
-    restart = bool(state is not None and state.installed and state.running)
-    if release is not None:
-        what = release.tag
-    elif source is not None:
-        what = source.ref or (source.commit or "")[:12] or "git"
-    else:
-        what = target.ref
-    text = f"Installing Copycord {what}" + (" and building the admin UI" if git else "")
-    result, log = _install(cmd, hint, cmd_env, windows, launchers, restart, text + "...")
-    if result.returncode != 0:
-        sys.stdout.flush()
-        _err(f"update failed (exit {result.returncode})", f"reinstall with: {hint}")
-        tail = (log.read_text(encoding="utf-8", errors="replace").splitlines()
-                if log.is_file() else [])[-20:]
-        tail = [t for t in tail if not t.startswith(("launchers: ", "moved aside: ", "could not move"))]
-        for line in tail:
-            print(f"  {line}", file=sys.stderr)
-        ui.info("full log", str(log), stream=sys.stderr)
-        if windows and restart:
-            _restart_service()
-        return result.returncode
-    version, commit = installed_version()
-    if version:
-        ui.ok(f"Copycord updated to {version}" + (f" ({commit[:7]})" if commit else ""))
-    else:
-        ui.ok("Copycord updated", spec)
-
-    # --tag is a one-off; a channel switch is saved once the install worked.
-    if not tag and switching:
+        # Read before the install replaces the files.
         try:
-            path = save_channel(target)
-            ui.ok(f"update channel set to {target.describe(ui.dot())}", str(path))
-        except OSError as e:
-            ui.warn("could not save the update channel", str(e))
+            state = service.service_state()
+        except Exception as e:
+            ui.warn("could not read the service state", str(e))
+            state = None
 
-    if restart and not _restart_service():
-        return 1
-    return 0
+        restart = bool(state is not None and state.installed and state.running)
+        if release is not None:
+            what = release.tag
+        elif source is not None:
+            what = source.ref or (source.commit or "")[:12] or "git"
+        else:
+            what = target.ref
+        text = f"Installing Copycord {what}" + (" and building the admin UI" if git else "")
+        result, log = _install(cmd, hint, cmd_env, windows, launchers, restart, text + "...")
+        if result.returncode != 0:
+            sys.stdout.flush()
+            _err(f"update failed (exit {result.returncode})", f"reinstall with: {hint}")
+            tail = (log.read_text(encoding="utf-8", errors="replace").splitlines()
+                    if log.is_file() else [])[-20:]
+            tail = [t for t in tail if not t.startswith(("launchers: ", "moved aside: ", "could not move"))]
+            for line in tail:
+                ui.note(f"  {line}", sys.stderr)
+            ui.info("full log", str(log), stream=sys.stderr)
+            if windows and restart:
+                _restart_service()
+            return result.returncode
+        version, commit = installed_version()
+        if version:
+            ui.ok(f"Copycord updated to {version}" + (f" ({commit[:7]})" if commit else ""))
+        else:
+            ui.ok("Copycord updated", spec)
+
+        # --tag is a one-off; a channel switch is saved once the install worked.
+        if not tag and switching:
+            try:
+                path = save_channel(target)
+                ui.ok(f"update channel set to {target.describe(ui.dot())}", str(path))
+            except OSError as e:
+                ui.warn("could not save the update channel", str(e))
+
+        if restart and not _restart_service():
+            return 1
+        return 0
 
 
 def _restart_service() -> bool:
