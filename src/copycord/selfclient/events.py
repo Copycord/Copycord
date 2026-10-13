@@ -7,31 +7,11 @@
 #  https://www.gnu.org/licenses/agpl-3.0.en.html
 # =============================================================================
 
-"""Gateway dispatch table: raw event name -> model wrappers -> ``on_*`` calls.
+"""Gateway dispatch table: raw event name to ``on_*`` handler calls.
 
-``parse(event, data, state)`` turns one raw dispatch into the ``Dispatch``
-records the client role's handlers expect, by name and by argument shape, so
-``on_message(message)``, ``on_message_edit(before, after)``,
-``on_raw_message_edit(payload)``, ``on_guild_channel_update(before, after)``
-and the rest keep their signatures when src/copycord/client moves off discord.py-self.
-
-The handler set is the one src/copycord/client/client.py registers today: ready,
-resumed, message, message_edit, raw_message_edit, message_delete,
-raw_message_delete, guild_channel_create/delete/update, thread_delete,
-thread_update, member_join, guild_role_create/delete/update, guild_join,
-guild_remove, guild_update, guild_emojis_update, guild_stickers_update. A few
-neighbours ride along (thread_create, private channels, member_remove, bulk
-delete, GUILD_MEMBERS_CHUNK for the scraper) because the payloads are already
-here and the Client needs them for its caches.
-
-``state`` is whatever owns the caches (the Client, next branch). It is duck
-typed and optional, read only through ``get_guild``, ``get_channel`` and
-``_get_message``, the same lookups the models already make. Without it every
-event still parses; events whose discord.py form needs a cached "before"
-(message_edit, message_delete, the ``*_update`` pairs) emit only what can be
-built from the payload, exactly as discord.py skips them on a cache miss.
-Nothing here mutates the state: each record carries the new object as
-``payload`` for the Client to cache.
+Handler names and argument shapes match discord.py's. ``state`` is optional
+and only read; events that need a cached "before" are skipped on a cache miss,
+as in discord.py.
 """
 
 from __future__ import annotations
@@ -130,11 +110,7 @@ class RawThreadDeleteEvent:
 
 
 class ReadyEvent:
-    """READY, parsed: the account, its guilds and its private channels.
-
-    ``on_ready`` takes no arguments; this rides on ``Dispatch.payload`` so the
-    Client can seed its caches.
-    """
+    """READY, parsed. Carried on ``Dispatch.payload`` since ``on_ready`` takes no arguments."""
 
     __slots__ = ("user", "guilds", "private_channels", "session_id", "resume_gateway_url", "data")
 
@@ -243,7 +219,7 @@ def parse_guild_create(data: Dict[str, Any], state: Any = None) -> List[Dispatch
     guild = Guild(data, state)
     if data.get("unavailable"):
         return [Dispatch("guild_unavailable", (guild,), guild)]
-    # Known already means it came back from an outage; unknown means joined.
+    # A guild already cached is back from an outage, not newly joined.
     known = _guild(state, guild.id) is not None
     return [Dispatch("guild_available" if known else "guild_join", (guild,), guild)]
 
@@ -301,8 +277,6 @@ def _thread(data: Dict[str, Any], guild: Optional[Guild], state: Any) -> GuildCh
 def parse_thread_create(data: Dict[str, Any], state: Any = None) -> List[Dispatch]:
     guild = _guild_or_stub(state, data.get("guild_id"))
     thread = _thread(data, guild, state)
-    # discord.py's split: thread_create for a thread that was just made,
-    # thread_join for an existing one the account was added to.
     event = "thread_create" if data.get("newly_created") else "thread_join"
     return [Dispatch(event, (thread,), thread)]
 
@@ -312,9 +286,7 @@ def parse_thread_update(data: Dict[str, Any], state: Any = None) -> List[Dispatc
     after = _thread(data, guild, state)
     before = _cached_channel(state, guild, data.get("id"))
     if before is None:
-        # A thread the cache never saw (archived, or joined mid-session).
-        # discord.py would fire thread_join here; the mirror cares about the
-        # update, so it is surfaced as one with no "before".
+        # discord.py fires thread_join here; we report it as an update instead.
         return [Dispatch("thread_update_uncached", (), after)]
     return [Dispatch("thread_update", (before, after), after)]
 
@@ -323,8 +295,7 @@ def parse_thread_delete(data: Dict[str, Any], state: Any = None) -> List[Dispatc
     guild = _guild_or_stub(state, data.get("guild_id"))
     cached = _cached_channel(state, guild, data.get("id"))
     out = [Dispatch("raw_thread_delete", (RawThreadDeleteEvent(data, cached),), None)]
-    # THREAD_DELETE carries id, guild_id, parent_id and type, which is all
-    # on_thread_delete reads; a cache miss still gets a thread built from it.
+    # The payload has every field on_thread_delete reads, so a cache miss still works.
     thread = cached if cached is not None else _thread(data, guild, state)
     out.append(Dispatch("thread_delete", (thread,), thread))
     return out
@@ -398,8 +369,7 @@ def parse_guild_role_delete(data: Dict[str, Any], state: Any = None) -> List[Dis
     role_id = _int(data.get("role_id"))
     role = guild.get_role(role_id) if guild is not None else None
     if role is None:
-        # Only the id survives a delete; an id-only role keeps the handler
-        # signature for a guild the cache never fully loaded.
+        # The delete carries only the id.
         role = Role({"id": str(role_id or 0)}, guild, state)
     return [Dispatch("guild_role_delete", (role,), role)]
 
@@ -439,7 +409,6 @@ def parse_guild_members_chunk(data: Dict[str, Any], state: Any = None) -> List[D
 
 Parser = Callable[[Dict[str, Any], Any], List[Dispatch]]
 
-#: Raw gateway event name -> parser. Anything absent is passed over.
 EVENT_PARSERS: Dict[str, Parser] = {
     "READY": parse_ready,
     "RESUMED": parse_resumed,
@@ -467,8 +436,7 @@ EVENT_PARSERS: Dict[str, Parser] = {
     "GUILD_MEMBERS_CHUNK": parse_guild_members_chunk,
 }
 
-#: The ``on_*`` handlers src/copycord/client registers, for the Client to check its
-#: dispatch against (client.py's ``self.bot.event(...)`` block).
+# The ``on_*`` handlers the client role registers.
 CLIENT_HANDLERS = frozenset(
     {
         "ready",
