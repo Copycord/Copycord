@@ -2165,6 +2165,20 @@ def test_migration_backs_up_then_moves(flat_home, monkeypatch):
     assert paths.migrate_layout() is None
 
 
+def test_migration_keeps_backups_in_the_configured_backup_dir(flat_home, monkeypatch):
+    from copycord.common.db import backups_dir
+
+    configured = flat_home / "backups"
+    configured.mkdir()
+    (configured / "old.tar.gz").write_text("a")
+    monkeypatch.setenv("BACKUP_DIR", str(configured))
+    assert paths.migrate_layout() is not None
+    assert (configured / "old.tar.gz").read_text() == "a"
+    assert list(configured.glob("data-pre-update-layout-*.db"))
+    assert not (flat_home / "data" / "backups").exists()
+    assert backups_dir() == configured.resolve()
+
+
 def test_migration_skips_when_data_db_exists(flat_home):
     (flat_home / "data").mkdir()
     _make_db(flat_home / "data" / "data.db")

@@ -221,7 +221,9 @@ def migrate_layout(
             str(db), "layout",
             backup_dir=Path(raw).expanduser() if raw else home / "backups",
         )
-    plan = [(home / n, data / n) for n in DATA_ENTRIES]
+    # A configured BACKUP_DIR stays where it is: moving it would split it from what .env names.
+    entries = [n for n in DATA_ENTRIES if not (n == "backups" and env.get("BACKUP_DIR"))]
+    plan = [(home / n, data / n) for n in entries]
     plan += [(home / n, logs / n) for n in OUT_ENTRIES]
     moved = []
     kept = []
