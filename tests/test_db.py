@@ -817,3 +817,48 @@ class TestWal:
             assert conn.execute("SELECT COUNT(*) FROM emoji_mappings").fetchone()[0] == 1
         finally:
             conn.close()
+
+    @pytest.mark.parametrize("shared", [True, False], ids=["one-connection", "two-connections"])
+    def test_two_thread_write_hammer(self, db, shared):
+        import threading
+        from copycord.common.db import DBManager
+
+        managers = [db, db] if shared else [db, DBManager(db.path)]
+        errors = []
+
+        def hammer(mgr, base):
+            try:
+                for i in range(500):
+                    mgr.upsert_emoji_mapping(base + i, f"e{i}", base + i + 100000, f"c{i}",
+                                             original_guild_id=1, cloned_guild_id=2)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=hammer, args=(m, n * 1000)) for n, m in enumerate(managers)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(60)
+
+        assert errors == []
+        assert db.conn.execute("SELECT COUNT(*) FROM emoji_mappings").fetchone()[0] == 1000
+
+    def test_tx_rolls_back_on_error(self, db):
+        with pytest.raises(RuntimeError):
+            with db._tx():
+                db.upsert_emoji_mapping(1, "e1", 11, "c1", original_guild_id=1, cloned_guild_id=2)
+                db.set_config("half_done", "1")
+                raise RuntimeError("boom")
+        assert db.get_emoji_mapping(1) is None
+        assert db.get_config("half_done", "") == ""
+        # the connection is usable afterwards
+        db.set_config("after", "1")
+        assert db.get_config("after", "") == "1"
+
+    def test_write_method_that_raises_rolls_back(self, db):
+        db.upsert_emoji_mapping(1, "e1", 11, "c1", original_guild_id=1, cloned_guild_id=2)
+        with pytest.raises(sqlite3.Error):
+            with db._tx() as conn:
+                conn.execute("DELETE FROM emoji_mappings")
+                conn.execute("INSERT INTO no_such_table VALUES (1)")
+        assert db.get_emoji_mapping(1) is not None
