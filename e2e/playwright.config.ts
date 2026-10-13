@@ -16,7 +16,7 @@ export default defineConfig({
     storageState: STATE_FILE,
     browserName: "chromium",
     viewport: { width: 1440, height: 900 },
-    reducedMotion: "reduce",
+    contextOptions: { reducedMotion: "reduce" },
     timezoneId: "UTC",
     locale: "en-US",
     trace: "retain-on-failure",

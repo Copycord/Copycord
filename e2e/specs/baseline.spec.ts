@@ -76,6 +76,7 @@ for (const vp of VIEWPORTS) {
       test(`modal ${m.name}`, async ({ page }) => {
         await page.goto(pageUrl(m.page));
         await settle(page);
+        test.setTimeout(20_000);
         await m.open(page);
         await expectOpen(modal(page, m.id));
         await page.waitForTimeout(400);

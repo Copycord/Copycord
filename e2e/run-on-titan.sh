@@ -4,7 +4,7 @@
 # Env passed through: E2E_BASE_PATH (e.g. /app), E2E_SHOTS_DIR (e.g. baseline/new), E2E_ADMIN_PORT.
 set -u
 B=${B:?branch}
-D=${D:-/tmp/cc-e2e-src}
+D=${D:-/root/cc-e2e-src}
 SPECS=${SPECS:-}
 REPO_URL=${REPO_URL:-https://github.com/Copycord/Copycord.git}
 
