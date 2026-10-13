@@ -1851,7 +1851,8 @@ def config_command(args: argparse.Namespace) -> int:
 
     tty = sys.stdout.isatty()
     title = CONFIG_TITLES.get(args.config_command, "Copycord settings")
-    with ui.Rail(title, brand=brand() if tty and not args.json else "", heading=False):
+    as_json = getattr(args, "json", False)
+    with ui.Rail(title, brand=brand() if tty and not as_json else "", heading=False):
         ui.gap(blank=False)
         return _config_steps(args)
 
