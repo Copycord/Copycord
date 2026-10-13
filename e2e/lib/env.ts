@@ -32,7 +32,8 @@ export function pageUrl(name: PageName): string {
   if (!BASE_PATH) return p;
   // The SPA serves the logs page at /logs; the old UI calls it /event-logs.
   if (name === "event-logs") return `${BASE_PATH}/logs`;
-  return `${BASE_PATH}${p === "/" ? "/" : p}`;
+  // The router renders the home link without a trailing slash.
+  return p === "/" ? BASE_PATH : `${BASE_PATH}${p}`;
 }
 
 // The login and 404 pages stay server routes until the SPA login lane replaces them.
