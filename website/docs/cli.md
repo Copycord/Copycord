@@ -503,11 +503,15 @@ Uninstall Copycord
 Removes the Copycord program and its background service.
 
 ? Your data is in /home/you/.copycord
-  1) Keep my data (default)
-  2) Delete everything (database, logs, backups, settings)
-  3) Cancel
-? Enter 1, 2 or 3 [1]
+❯ Keep my data
+  Delete everything (database, logs, backups, settings)
+  Cancel
+  ↑/↓ to move, Enter to select
 ```
+
+Move with the arrow keys (or `j` and `k`) and press Enter; Enter right away keeps your data, and Esc or Ctrl-C cancels. After you pick, the question folds into one line, for example `✔ Your data is in /home/you/.copycord Keep my data`. Yes or no questions work the same way on one line, `? Update Copycord now?  ❯ Yes / No`: Left/Right switch, `y` or `n` answer at once, Enter takes the highlighted one.
+
+Where single keys cannot be read (input piped in, `TERM=dumb`, Git Bash without a real console, or `COPYCORD_PLAIN_PROMPTS=1`), the prompts are typed instead: a numbered list with `Enter 1, 2 or 3 [1]`, and `(y/N)` for yes or no.
 
 Press Enter to keep your data. It ends with `Copycord uninstalled`, and when the data is kept, the folder it is still in.
 
