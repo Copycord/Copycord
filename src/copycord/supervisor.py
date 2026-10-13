@@ -17,13 +17,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import logging
 import os
 import signal
+import socket
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable, Dict, List, Optional
+from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 from copycord.common.config import CURRENT_VERSION
 from copycord.common.control_protocol import ALLOWED_ENV, serve_json, status_payload
@@ -41,6 +44,51 @@ SHUTDOWN_ORDER = ("client", "server", "admin")
 
 DEFAULT_SERVER_CONTROL_PORT = 9101
 DEFAULT_CLIENT_CONTROL_PORT = 9102
+
+# How long a busy port is retried at startup: a Copycord that just stopped can
+# hold its ports for a few seconds.
+PORT_WAIT = 15.0
+PORT_RETRY = 0.5
+
+
+class PortBusyError(Exception):
+    """A port Copycord needs stayed in use for PORT_WAIT seconds."""
+
+    def __init__(self, port: int):
+        super().__init__(f"port {port} is in use")
+        self.port = port
+
+
+def port_in_use(e: OSError) -> bool:
+    return e.errno in (errno.EADDRINUSE, 10048) or getattr(e, "winerror", None) == 10048
+
+
+def port_free(host: str, port: int) -> bool:
+    """Whether host:port can be bound now, the way uvicorn binds it."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        # On Windows SO_REUSEADDR would share a live port.
+        if sys.platform != "win32":
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, port))
+        except OSError as e:
+            if port_in_use(e):
+                return False
+            raise
+    return True
+
+
+async def wait_for_port(host: str, port: int, timeout: float = PORT_WAIT) -> None:
+    """Return once host:port is free; PortBusyError after timeout seconds."""
+    deadline = time.monotonic() + timeout
+    warned = False
+    while not port_free(host, port):
+        if time.monotonic() >= deadline:
+            raise PortBusyError(port)
+        if not warned:
+            logger.warning("Port %d is in use, waiting up to %.0f seconds for it", port, timeout)
+            warned = True
+        await asyncio.sleep(PORT_RETRY)
 
 @dataclass
 class Backoff:
@@ -182,10 +230,12 @@ class RoleSupervisor:
 class ControlEndpoint:
     """Control websocket for one role, speaking common.control_protocol."""
 
-    def __init__(self, role: RoleSupervisor, host: str, port: int):
+    def __init__(self, role: RoleSupervisor, host: str, port: int,
+                 port_wait: float = PORT_WAIT):
         self.role = role
         self.host = host
         self.port = int(port)
+        self.port_wait = port_wait
         self._server = None
 
     async def _ws_handler(self, ws):
@@ -194,9 +244,24 @@ class ControlEndpoint:
     async def start(self) -> None:
         import websockets
 
-        self._server = await websockets.serve(
-            self._ws_handler, self.host, self.port, ping_interval=20, ping_timeout=20
-        )
+        deadline = time.monotonic() + self.port_wait
+        warned = False
+        while True:
+            try:
+                self._server = await websockets.serve(
+                    self._ws_handler, self.host, self.port, ping_interval=20, ping_timeout=20
+                )
+                break
+            except OSError as e:
+                if not port_in_use(e):
+                    raise
+                if time.monotonic() >= deadline:
+                    raise PortBusyError(self.port) from None
+                if not warned:
+                    logger.warning("Port %d is in use, waiting up to %.0f seconds for it",
+                                   self.port, self.port_wait)
+                    warned = True
+                await asyncio.sleep(PORT_RETRY)
         if self.port == 0:
             self.port = self._server.sockets[0].getsockname()[1]
         logger.info(
@@ -218,11 +283,16 @@ class Supervisor:
     roles: Dict[str, RoleSupervisor]
     controls: List[ControlEndpoint] = field(default_factory=list)
     autostart: List[str] = field(default_factory=list)
+    # (host, port) the auto-started roles bind, waited for before they start.
+    ports: List[Tuple[str, int]] = field(default_factory=list)
+    port_wait: float = PORT_WAIT
 
     async def start(self) -> None:
         # Control ports first: the admin's own auto-start asks them for status.
         for ctl in self.controls:
             await ctl.start()
+        for host, port in self.ports:
+            await wait_for_port(host, port, self.port_wait)
         for name in self.autostart:
             self.roles[name].start()
 
@@ -455,6 +525,7 @@ def build_supervisor(
 ) -> Supervisor:
     """All three roles in this process, using the in-process transport by default."""
     real = factories is None
+    ports = []
     if inprocess_transport is None:
         inprocess_transport = real
     if inprocess_transport:
@@ -462,10 +533,11 @@ def build_supervisor(
 
         inprocess.enable()
     if real:
+        ports.append(("0.0.0.0", int(os.getenv("ADMIN_PORT") or "8080")))
         factories = {
             "admin": admin_factory(
-                host="0.0.0.0",
-                port=int(os.getenv("ADMIN_PORT") or "8080"),
+                host=ports[0][0],
+                port=ports[0][1],
                 log_level=(os.getenv("LOG_LEVEL") or "info").lower(),
             ),
             "server": server_factory(),
@@ -492,7 +564,8 @@ def build_supervisor(
             port = _control_port(name)
         controls.append(ControlEndpoint(roles[name], host, port))
 
-    return Supervisor(roles=roles, controls=controls, autostart=["admin"])
+    return Supervisor(roles=roles, controls=controls, autostart=["admin"],
+                      ports=ports)
 
 
 async def _auto_update() -> None:

@@ -2044,6 +2044,17 @@ def schema_guard() -> bool:
     return True
 
 
+def port_busy_message(port: int) -> None:
+    """What `copycord run` prints when a port it needs stays in use."""
+    from copycord import ui
+
+    text = f"Port {port} is in use, so Copycord cannot start"
+    hint = (f"another Copycord may still be running: stop it with "
+            f"{ui.cmd('copycord service stop', stream=sys.stderr)}, or run "
+            f"{ui.cmd('copycord doctor', stream=sys.stderr)} to check the port")
+    ui.fail(text, hint, stream=sys.stderr)
+
+
 def migrate_on_start() -> None:
     """Move an old flat native home into data and logs folders; on failure keep it."""
     from copycord.common.paths import migrate_layout
@@ -2129,6 +2140,9 @@ def run_command(argv: Optional[List[str]] = None) -> int:
             pass
         except SchemaTooNewError as e:
             schema_too_new_message(e)
+            return 1
+        except supervisor.PortBusyError as e:
+            port_busy_message(e.port)
             return 1
         return 0
     return 2
