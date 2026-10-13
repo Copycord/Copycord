@@ -276,8 +276,7 @@ def ask(question: str, default: str = "", secret: bool = False) -> str:
     return value.strip() or default
 
 
-def choose(question: str, options: List[str], default: int = 0) -> int:
-    """A numbered choice; returns the picked index. Enter picks the default."""
+def _choose_typed(question: str, options: List[str], default: int) -> int:
     print(f"{paint('?', 'accent', 'bold')} {bold(question)}")
     for i, option in enumerate(options, 1):
         tail = f" {dim('(default)')}" if i - 1 == default else ""
@@ -289,7 +288,7 @@ def choose(question: str, options: List[str], default: int = 0) -> int:
             return int(raw) - 1
 
 
-def confirm(question: str, default: bool = True) -> bool:
+def _confirm_typed(question: str, default: bool) -> bool:
     yn = "Y/n" if default else "y/N"
     while True:
         raw = ask(f"{question} ({yn})").lower()
@@ -299,3 +298,241 @@ def confirm(question: str, default: bool = True) -> bool:
             return True
         if raw in ("n", "no"):
             return False
+
+
+# --------------------------------------------------------------------------
+# arrow-key selector
+# --------------------------------------------------------------------------
+
+_HIDE, _SHOW = "\033[?25l", "\033[?25h"
+
+
+class _NoRawKeys(Exception):
+    """Raw key input is not available; use the typed prompt."""
+
+
+def raw_keys_available() -> bool:
+    """True when the arrow-key selector can read single keys from a console."""
+    if os.environ.get("COPYCORD_PLAIN_PROMPTS") not in (None, "", "0"):
+        return False
+    if os.environ.get("TERM") == "dumb":
+        return False
+    try:
+        if not (sys.stdin.isatty() and sys.stdout.isatty()):
+            return False
+    except (AttributeError, ValueError):
+        return False
+    if os.name == "nt":
+        try:
+            import msvcrt
+
+            msvcrt.kbhit()
+        except Exception:
+            return False
+    return True
+
+
+class _RawMode:
+    """Single keys without echo; the terminal mode is restored on exit."""
+
+    def __init__(self):
+        self._restore = None
+
+    def __enter__(self) -> "_RawMode":
+        try:
+            if os.name == "nt":
+                self._enter_windows()
+            else:
+                self._enter_posix()
+        except Exception as e:
+            raise _NoRawKeys(str(e)) from e
+        return self
+
+    def _enter_posix(self) -> None:
+        import termios
+
+        fd = sys.stdin.fileno()
+        old = termios.tcgetattr(fd)
+        new = termios.tcgetattr(fd)
+        new[3] &= ~(termios.ICANON | termios.ECHO | termios.ISIG)
+        new[6][termios.VMIN] = 1
+        new[6][termios.VTIME] = 0
+        termios.tcsetattr(fd, termios.TCSADRAIN, new)
+        self._restore = lambda: termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+    def _enter_windows(self) -> None:
+        import ctypes
+        import msvcrt
+
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.GetStdHandle(-11)  # stdout
+        mode = ctypes.c_ulong()
+        if not kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            raise OSError("stdout is not a Windows console")
+        # VT processing so the redraw codes work in the classic console.
+        if not kernel32.SetConsoleMode(handle, mode.value | 0x0004):
+            raise OSError("no VT processing")
+        msvcrt.kbhit()
+        self._restore = lambda: kernel32.SetConsoleMode(handle, mode.value)
+
+    def __exit__(self, *exc) -> None:
+        if self._restore is not None:
+            self._restore()
+            self._restore = None
+
+
+_WIN_ARROWS = {"H": "up", "P": "down", "K": "left", "M": "right"}
+_ANSI_ARROWS = {"A": "up", "B": "down", "D": "left", "C": "right"}
+
+
+def _read_key() -> str:
+    """One key: up, down, left, right, enter, esc or the character typed."""
+    if os.name == "nt":
+        import msvcrt
+
+        ch = msvcrt.getwch()
+        if ch in ("\x00", "\xe0"):
+            return _WIN_ARROWS.get(msvcrt.getwch(), "")
+    else:
+        import select
+
+        fd = sys.stdin.fileno()
+
+        def get(timeout=None):
+            if timeout is not None and not select.select([fd], [], [], timeout)[0]:
+                return ""
+            data = os.read(fd, 1)
+            if not data:
+                raise EOFError
+            return data.decode("latin-1")
+
+        ch = get()
+        if ch == "\x1b":
+            nxt = get(0.05)
+            if nxt in ("[", "O"):
+                return _ANSI_ARROWS.get(get(0.05), "")
+            return "esc"
+    if ch == "\x03":
+        raise KeyboardInterrupt
+    if ch in ("\r", "\n"):
+        return "enter"
+    if ch == "\x1b":
+        return "esc"
+    return ch.lower()
+
+
+def _pointer() -> str:
+    return "❯" if _encodable("❯", sys.stdout) else ">"
+
+
+def _select(render, keys, question: str, answer) -> int:
+    """Drive a selector: render(index) gives the lines, keys(key, index) the
+    next index, or (index, True) when picked. Returns the picked index."""
+    out = sys.stdout
+    state = {"lines": 0}
+
+    def clear() -> None:
+        # Back to the first row drawn and wipe everything below it.
+        up = state["lines"] - 1
+        out.write(f"\r\033[{up}A\033[J" if up > 0 else "\r\033[J")
+
+    def draw(index: int) -> None:
+        if state["lines"]:
+            clear()
+        rows = render(index)
+        out.write("\n".join(rows))
+        out.flush()
+        state["lines"] = len(rows)
+
+    def collapse(status: str, text: str) -> None:
+        tail = accent(text) if status == "ok" else dim(text)
+        clear()
+        out.write(f"{mark(status)} {bold(question)} {tail}\n")
+        out.flush()
+        state["lines"] = 0
+
+    index, picked = keys(None, None)
+    with _RawMode():
+        out.write(_HIDE)
+        try:
+            draw(index)
+            while not picked:
+                key = _read_key()
+                if key in ("esc", "q"):
+                    raise KeyboardInterrupt
+                index, picked = keys(key, index)
+                draw(index)
+        except KeyboardInterrupt:
+            collapse("fail", "cancelled")
+            raise
+        except Exception as e:
+            if state["lines"]:
+                out.write("\n")
+            raise _NoRawKeys("key input failed") from e
+        finally:
+            out.write(_SHOW)
+            out.flush()
+    collapse("ok", answer(index))
+    return index
+
+
+def choose(question: str, options: List[str], default: int = 0) -> int:
+    """Pick one option; returns its index. Arrow keys and Enter on a console,
+    a numbered prompt otherwise. Enter picks the default."""
+    if raw_keys_available():
+        def render(index):
+            rows = [f"{paint('?', 'accent', 'bold')} {bold(question)}"]
+            for i, option in enumerate(options):
+                if i == index:
+                    rows.append(f"{accent(_pointer() + ' ' + option)}")
+                else:
+                    rows.append(f"  {dim(option)}")
+            arrows = "↑/↓" if _encodable("↑↓", sys.stdout) else "Up/Down"
+            rows.append(f"  {dim(arrows + ' to move, Enter to select')}")
+            return rows
+
+        def keys(key, index):
+            if key is None:
+                return default, False
+            if key in ("up", "k", "left"):
+                return (index - 1) % len(options), False
+            if key in ("down", "j", "right"):
+                return (index + 1) % len(options), False
+            if key.isdigit() and 1 <= int(key) <= len(options):
+                return int(key) - 1, True
+            return index, key == "enter"
+
+        try:
+            return _select(render, keys, question, lambda i: options[i])
+        except _NoRawKeys:
+            pass
+    return _choose_typed(question, options, default)
+
+
+def confirm(question: str, default: bool = True) -> bool:
+    """Yes or no; Left/Right or Up/Down switch, y/n pick, Enter accepts the
+    highlighted answer (the default first). Typed y/N without a console."""
+    if raw_keys_available():
+        labels = ("Yes", "No")
+
+        def render(index):
+            parts = [accent(f"{_pointer()} {label}") if i == index else dim(label)
+                     for i, label in enumerate(labels)]
+            return [f"{paint('?', 'accent', 'bold')} {bold(question)}  {parts[0]}{dim(' / ')}{parts[1]}"]
+
+        def keys(key, index):
+            if key is None:
+                return (0 if default else 1), False
+            if key in ("left", "right", "up", "down", "h", "l", "k", "j", "\t"):
+                return 1 - index, False
+            if key == "y":
+                return 0, True
+            if key == "n":
+                return 1, True
+            return index, key == "enter"
+
+        try:
+            return _select(render, keys, question, lambda i: labels[i]) == 0
+        except _NoRawKeys:
+            pass
+    return _confirm_typed(question, default)
