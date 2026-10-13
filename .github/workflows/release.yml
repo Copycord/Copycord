@@ -40,7 +40,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: src/copycord/admin/frontend/package-lock.json
 
@@ -52,7 +52,7 @@ jobs:
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
 
       - name: Build sdist and wheel
         run: pipx run build --sdist --wheel --outdir dist/

@@ -1,6 +1,9 @@
 {
     "name": "unicorn-admin-frontend",
     "private": true,
+    "engines": {
+      "node": ">=22"
+    },
     "type": "module",
     "scripts": {
       "dev": "vite",

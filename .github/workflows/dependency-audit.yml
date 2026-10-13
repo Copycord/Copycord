@@ -18,7 +18,7 @@ jobs:
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.14"
+          python-version-file: .python-version
 
       - name: Install pip-audit
         run: pip install pip-audit
@@ -65,7 +65,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version-file: .nvmrc
 
       - name: Install & audit
         id: npm-audit

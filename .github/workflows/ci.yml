@@ -31,7 +31,7 @@ jobs:
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version-file: .python-version
 
       - name: Install ruff
         run: pip install ruff
@@ -152,7 +152,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: src/copycord/admin/frontend/package-lock.json
 
@@ -183,7 +183,7 @@ jobs:
 
       - uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: src/copycord/admin/frontend/package-lock.json
 
@@ -195,7 +195,7 @@ jobs:
 
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.14"
+          python-version-file: .python-version
 
       - name: Build wheel
         run: pipx run --python python3.14 build --wheel --outdir dist/

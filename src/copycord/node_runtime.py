@@ -38,7 +38,7 @@ _ARCH = {
 }
 
 INSTALL_HINT = (
-    "install Node.js 20 or newer (it includes npm) from https://nodejs.org "
+    "install Node.js 22 or newer (it includes npm) from https://nodejs.org "
     "and run the update again"
 )
 
