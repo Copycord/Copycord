@@ -215,7 +215,7 @@ def internal_token(monkeypatch):
 
 
 def _session_cookie():
-    return f"{auth.ADMIN_COOKIE_NAME}={auth._get_signer().dumps({'ok': True})}"
+    return f"{auth.ADMIN_COOKIE_NAME}={auth.make_session_token()}"
 
 
 def _rejected(tc, path, headers):

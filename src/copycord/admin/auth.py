@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import hmac
 import math
 import os
@@ -35,6 +36,7 @@ ADMIN_PASSWORD: str = ""
 # Socket peers whose CF-Connecting-IP / X-Real-IP / X-Forwarded-For are believed.
 TRUSTED_PROXIES: frozenset[str] = frozenset()
 _session_signer: URLSafeTimedSerializer | None = None
+_session_secret: str | None = None
 
 
 def _parse_trusted_proxies(raw: str) -> frozenset[str]:
@@ -215,14 +217,36 @@ def _get_signer() -> URLSafeTimedSerializer:
     return _session_signer
 
 
+def _password_fingerprint() -> str:
+    """Short keyed hash of the current PASSWORD; a new password ends old sessions."""
+    if _session_secret is None:
+        raise RuntimeError("admin auth not initialized: call init_admin_auth() first")
+    return hmac.new(
+        _session_secret.encode("utf-8"),
+        ADMIN_PASSWORD.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:16]
+
+
+def make_session_token() -> str:
+    """Signed session cookie value for the current password."""
+    return _get_signer().dumps({"ok": True, "pw": _password_fingerprint()})
+
+
 def decode_admin_session(token: str | None) -> Optional[Dict]:
-    """Return the session payload if the token is valid and unexpired, else None."""
+    """Return the session payload if the token is valid, unexpired and was
+    issued for the current password, else None."""
     if not token:
         return None
     try:
-        return _get_signer().loads(token, max_age=SESSION_MAX_AGE)
+        sess = _get_signer().loads(token, max_age=SESSION_MAX_AGE)
     except (BadSignature, SignatureExpired):
         return None
+    if not isinstance(sess, dict):
+        return None
+    if not hmac.compare_digest(str(sess.get("pw", "")), _password_fingerprint()):
+        return None
+    return sess
 
 
 class PasswordGuardMiddleware(BaseHTTPMiddleware):
@@ -238,6 +262,7 @@ class PasswordGuardMiddleware(BaseHTTPMiddleware):
 
         if (
             path.startswith("/login")
+            or path == "/logout"
             or path.startswith("/health")
             or path.startswith("/static")
         ):
@@ -258,13 +283,14 @@ class PasswordGuardMiddleware(BaseHTTPMiddleware):
 
 def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) -> None:
     """Set up admin login: read PASSWORD and SECRET_KEY, add PasswordGuardMiddleware, CSRFMiddleware and the /login routes."""
-    global ADMIN_PASSWORD, TRUSTED_PROXIES, _session_signer
+    global ADMIN_PASSWORD, TRUSTED_PROXIES, _session_signer, _session_secret
 
     ADMIN_PASSWORD = os.getenv("PASSWORD", "").strip()
     TRUSTED_PROXIES = _parse_trusted_proxies(os.getenv("TRUSTED_PROXIES", ""))
     secret_env = os.getenv("SECRET_KEY", "").strip()
 
     secret_key = _load_or_create_secret_key(data_dir, secret_env)
+    _session_secret = secret_key
     _session_signer = URLSafeTimedSerializer(secret_key, salt="copycord-admin")
 
     app.add_middleware(PasswordGuardMiddleware)
@@ -333,7 +359,7 @@ def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) ->
                 _client_ip(request),
             )
 
-            token = _get_signer().dumps({"ok": True})
+            token = make_session_token()
 
             resp = RedirectResponse("/", status_code=status.HTTP_302_FOUND)
             secure = request.url.scheme == "https"
@@ -365,3 +391,16 @@ def init_admin_auth(app: FastAPI, templates: Jinja2Templates, data_dir: Path) ->
             },
             status_code=status.HTTP_401_UNAUTHORIZED,
         )
+
+    @app.post("/logout")
+    async def logout(request: Request):
+        # CSRFMiddleware already required same-origin and the CSRF header.
+        LOGGER.info("Admin logout from %s", _client_ip(request))
+        resp = RedirectResponse("/login", status_code=status.HTTP_303_SEE_OTHER)
+        resp.delete_cookie(
+            ADMIN_COOKIE_NAME,
+            httponly=True,
+            samesite="lax",
+            secure=request.url.scheme == "https",
+        )
+        return resp
