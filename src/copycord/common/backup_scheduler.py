@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import io
 import json
+import os
 import sqlite3
 import tarfile
 import tempfile
@@ -82,6 +84,66 @@ def last_check_failure(backup_dir: Path) -> Optional[dict]:
             "mtime": mtime}
 
 
+DB_FILE = "data.db"
+KEY_FILE = "secret.key"
+MANIFEST = "manifest.json"
+# manifest.json "format"; an archive without a manifest holds only data.db.
+ARCHIVE_FORMAT = 1
+
+
+def _copycord_version() -> str:
+    try:
+        from copycord.common.config import CURRENT_VERSION
+
+        return CURRENT_VERSION.lstrip("v")
+    except Exception:
+        return "unknown"
+
+
+def _add_bytes(tar: tarfile.TarFile, name: str, data: bytes) -> None:
+    info = tarfile.TarInfo(name)
+    info.size = len(data)
+    info.mtime = int(time.time())
+    info.mode = 0o600
+    tar.addfile(info, io.BytesIO(data))
+
+
+def write_archive(db_copy: Path, dest: Path, key_path: Optional[Path] = None) -> list:
+    """Write dest as a tar.gz of db_copy (as data.db), key_path (as secret.key)
+    when it exists and manifest.json; owner-only on POSIX since it holds the key.
+    Returns the names of the files in it."""
+    from copycord.common.db import stored_schema_version
+
+    files = [DB_FILE]
+    key = None
+    if key_path is not None:
+        try:
+            key = Path(key_path).read_bytes()
+            files.append(KEY_FILE)
+        except FileNotFoundError:
+            pass
+    try:
+        schema = stored_schema_version(str(db_copy))
+    except sqlite3.Error:
+        schema = None
+    manifest = {
+        "format": ARCHIVE_FORMAT,
+        "copycord_version": _copycord_version(),
+        "schema_version": schema,
+        "created_at": datetime.now(timezone.utc).replace(tzinfo=None).isoformat() + "Z",
+        "files": files,
+    }
+    fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_BINARY", 0), 0o600)
+    if os.name != "nt":
+        os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "wb") as fh, tarfile.open(fileobj=fh, mode="w:gz") as tar:
+        tar.add(str(db_copy), arcname=DB_FILE)
+        if key is not None:
+            _add_bytes(tar, KEY_FILE, key)
+        _add_bytes(tar, MANIFEST, (json.dumps(manifest, indent=2) + "\n").encode("utf-8"))
+    return files
+
+
 def record_backup_stats(set_config: Callable[[str, str], None], archive_path: Path) -> None:
     """Store the DB_LAST_BACKUP_* app config values the dashboard shows."""
     size = archive_path.stat().st_size if archive_path.exists() else 0
@@ -101,6 +163,8 @@ class BackupConfig:
     run_at: str = "03:17"
     timezone: str = "UTC"
     interval_minutes: Optional[int] = None
+    # secret.key, archived with the database; None means next to db_path.
+    key_path: Optional[Path] = None
 
 
 class DailySQLiteBackupScheduler:
@@ -335,8 +399,9 @@ class DailySQLiteBackupScheduler:
 
             def _write_archive_once() -> None:
                 self._dbg("opening tar for write: %s", tmp_tgz)
-                with tarfile.open(tmp_tgz, "w:gz") as tar:
-                    tar.add(str(tmp_db_path), arcname="data.db")
+                key_path = self.cfg.key_path or Path(self.cfg.db_path).parent / KEY_FILE
+                files = write_archive(tmp_db_path, tmp_tgz, key_path)
+                self._dbg("archived: %s", ", ".join(files))
                 size_tmp = tmp_tgz.stat().st_size if tmp_tgz.exists() else 0
                 self._dbg("tar written (tmp): %s bytes", f"{size_tmp:,}")
                 tmp_tgz.replace(final_tgz)

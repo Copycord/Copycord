@@ -180,6 +180,7 @@ _backup_cfg = BackupConfig(
     retain=BACKUP_RETAIN,
     run_at=BACKUP_AT,
     timezone=BACKUP_TZ,
+    key_path=DATA_DIR / "secret.key",
 )
 
 

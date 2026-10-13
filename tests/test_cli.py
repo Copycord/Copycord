@@ -995,7 +995,7 @@ def test_doctor_fix_backs_up_a_stale_database(doctor_env, capsys):
     archives = sorted(p for p in backups.glob("*.tar.gz") if not p.name.startswith("2026-01-01"))
     assert len(archives) == 1
     with tarfile.open(archives[0]) as tar:
-        assert tar.getnames() == ["data.db"]
+        assert tar.getnames() == ["data.db", "manifest.json"]
     assert f"✓ database backed up  {archives[0].resolve()} (fixed)" in _after(out, "Data")
     # The dashboard's last-backup values, as after a scheduled backup.
     db = DBManager(str(doctor_env / "data.db"))

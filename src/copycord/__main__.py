@@ -1126,7 +1126,7 @@ def fix_backup(checks: List[Check]) -> str:
         record_backup_stats,
     )
     from copycord.common.db import backups_dir
-    from copycord.common.paths import db_path
+    from copycord.common.paths import data_dir, db_path
 
     db = db_path()
     if not db.is_file():
@@ -1136,6 +1136,7 @@ def fix_backup(checks: List[Check]) -> str:
         backup_dir=backups_dir(),
         retain=int(os.getenv("BACKUP_RETAIN") or "14"),
         timezone=os.getenv("TZ") or "UTC",
+        key_path=data_dir() / "secret.key",
     )
     scheduler = DailySQLiteBackupScheduler(cfg, logger=logging.getLogger("copycord.backup"))
     archive = asyncio.run(scheduler.run_now())
