@@ -222,10 +222,17 @@ When the dashboard port or one of the internal ports (`9101` and `9102`) is in u
 
 ## copycord --version {#copycord-version}
 
-`copycord --version` (or `-V`) prints two plain lines: the installed version and the saved [update channel](#update-channels).
+`copycord --version` (or `-V`) prints the installed version and the saved [update channel](#update-channels). In a terminal that is one line, in the style of the line at the top of the other commands:
 
 ```bash
 $ copycord --version
+Copycord v4.0.0 · stable channel
+```
+
+In a pipe or a script it prints two plain lines:
+
+```bash
+$ copycord --version | cat
 4.0.0
 stable channel
 ```
@@ -299,16 +306,16 @@ Copycord v4.0.0 (1a2b3c4) · Ultimate Discord server mirroring and utility toolk
 │                                                 │
 ├─────────────────────────────────────────────────╯
 │
-◇  Updates ──────────────╮
-│                        │
-│  ✓ up to date          │
-│                        │
-├────────────────────────╯
+◇  Updates ───────────────────────────────────────╮
+│                                                 │
+│  ✓ up to date                                   │
+│                                                 │
+├─────────────────────────────────────────────────╯
 │
 └  ! 1 warning, 0 problems
 ```
 
-Long lines wrap to the width of the terminal. `copycord doctor --brief` and `--json` keep their plain output.
+Every box of one command is as wide as the terminal, up to 100 columns, and long lines wrap inside it. `copycord doctor --brief` and `--json` keep their plain output.
 
 Each line starts with `✓`, `!`, `✗` or `•`; in a terminal they are green, yellow, red and blue. The report ends with a **Needs your attention** section that lists each warning and problem once with what to do, then a last line: `✓ All good`, or the number of warnings and problems. A warning that `--fix` can repair says so there, for example `! .env not found  run copycord doctor --fix to create it with the default settings`, while its line in the group shows the path. The command exits with status 1 when any check fails and 0 otherwise (warnings included), so it can be used in scripts. When `copycord doctor --fix` can repair some of the warnings and problems, a last line says how many.
 
