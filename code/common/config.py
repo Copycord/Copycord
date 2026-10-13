@@ -52,7 +52,7 @@ class Config:
                     return 0
 
         self.RELEASE_CHECK_INTERVAL_SECONDS = 1810
-        self.DEFAULT_WEBHOOK_AVATAR_URL = "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/logo/logo.png"
+        self.DEFAULT_WEBHOOK_AVATAR_URL = "https://raw.githubusercontent.com/Copycord/Copycord/refs/heads/main/assets/logo.png"
 
         self.SERVER_TOKEN = _str("SERVER_TOKEN")
         self.CLIENT_TOKEN = _str("CLIENT_TOKEN")
