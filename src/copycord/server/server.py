@@ -111,12 +111,11 @@ if not any(getattr(h, "_copycord_console", False) for h in root.handlers):
 
 
 
-# every frame at DEBUG ("< Sec-WebSocket-Accept", "> TEXT ...", "= connection
-# is OPEN"), which buries our own output on a debug run.
+# websockets logs every frame at DEBUG, which buries our own output on a debug run.
 logging.getLogger("websockets").setLevel(logging.WARNING)
 
 
-# parts worth seeing (asyncio's slow-callback warnings, real errors).
+# Keep asyncio's slow-callback warnings and real errors only.
 for lib in ("asyncio", "tzlocal"):
     logging.getLogger(lib).setLevel(logging.WARNING)
 for lib in (
@@ -133,10 +132,9 @@ logger = logging.getLogger("server")
 
 
 def _channel_name_blacklisted(name: str, patterns: list[str]) -> bool:
-    """Check if a channel name matches any blacklist pattern (case-insensitive).
+    """True if a channel name matches any blacklist pattern (case-insensitive).
 
-    Supports fnmatch-style wildcards (* and ?).
-    Plain strings without wildcards use substring matching.
+    Supports fnmatch wildcards (* and ?); plain strings match as substrings.
     """
     if not patterns or not name:
         return False
@@ -336,7 +334,7 @@ class ServerReceiver:
         return self.guild_resolver.resolve_target_clone(host_guild_id=host_guild_id)
 
     def _rowdict(self, row):
-        """sqlite3.Row → dict; dict stays dict; None stays None."""
+        """sqlite3.Row -> dict; dict stays dict; None stays None."""
         if row is None:
             return None
         return row if isinstance(row, dict) else dict(row)
@@ -399,10 +397,7 @@ class ServerReceiver:
         jitter: float = 0.25,
         log_prefix: str = "map-wait",
     ) -> list[dict]:
-        """
-        Poll the DB for *all* message->clone mappings for a given original message id.
-        Returns a list of plain dict rows (possibly empty).
-        """
+        """All message->clone mapping rows for an original message id, polling the DB. Possibly empty."""
         try:
             mid = int(original_message_id)
         except Exception:
@@ -455,10 +450,7 @@ class ServerReceiver:
 
     @contextlib.contextmanager
     def _clone_log_label(self, clone_gid: int):
-        """
-        Temporarily set the log prefix to the clone mapping's label (e.g. 'Server B').
-        Always resets after the wrapped block.
-        """
+        """Temporarily set the log prefix to the clone mapping's label, resetting afterwards."""
         try:
             label = self._label_for_clone_gid(int(clone_gid))
         except Exception:
@@ -470,10 +462,7 @@ class ServerReceiver:
             logctx.guild_name.reset(token)
 
     def _label_for_clone_gid(self, clone_gid: int) -> str:
-        """
-        Prefer mapping_name for the clone; fall back to the clone guild's Discord name;
-        last resort: 'guild:<id>'.
-        """
+        """mapping_name for the clone, else the clone guild's Discord name, else 'guild:<id>'."""
         try:
             row = self.db.get_mapping_by_clone(int(clone_gid))
             if row:
@@ -493,10 +482,7 @@ class ServerReceiver:
         return f"guild:{clone_gid}"
 
     def _resolve_guild_label(self, typ: str, data: dict) -> str | None:
-        """
-        Best-effort human-readable label for logging.
-        Prefer per-mapping 'mapping_name' (clone-aware), then Discord name, then "guild:<id>".
-        """
+        """Human-readable label for logging: mapping_name, then Discord name, then 'guild:<id>'."""
         gid = 0
         label = ""
 
@@ -590,10 +576,7 @@ class ServerReceiver:
     def _clone_gid_for_ctx(
         self, *, host_guild_id: int | None = None, mapping_row: dict | None = None
     ) -> int | None:
-        """
-        Prefer the mapping row's cloned_guild_id; otherwise resolve from the origin guild.
-        Falls back to config.CLONE_GUILD_ID for legacy single-guild installs.
-        """
+        """The mapping row's cloned_guild_id, else resolved from the origin guild, else config.CLONE_GUILD_ID (legacy single-guild installs)."""
         try:
             if mapping_row and mapping_row.get("cloned_guild_id"):
                 return int(mapping_row["cloned_guild_id"])
@@ -608,12 +591,7 @@ class ServerReceiver:
                 pass
 
     def _prep_sitemap_task_meta(self, sitemap: dict) -> tuple[int, str, str]:
-        """
-        Extracts:
-        - host/original guild id (int)
-        - host/original guild name (str fallback "host:<id>")
-        - human-friendly 5-char task code like 'az4dc'
-        """
+        """Extract (host guild id, host guild name, 5-char task code like 'az4dc') from a sitemap."""
         ginfo = sitemap.get("guild") or {}
         raw_id = ginfo.get("id") or 0
         try:
@@ -643,13 +621,10 @@ class ServerReceiver:
         return q
 
     async def _process_sitemap_queue_for_guild(self, host_gid: int, q: asyncio.Queue):
-        """
-        Worker loop for ONE origin/host guild.
+        """Worker loop for one origin/host guild.
 
-        - Coalesces per-clone for a short "idle gap" so near-simultaneous sitemaps batch together.
-        - Never waits longer than MAX_COALESCE_TOTAL to avoid head-of-line blocking.
-        - Keeps only the newest sitemap PER clone (older same-clone items are dropped).
-        - Launches one sync per clone IMMEDIATELY (fire-and-forget) and logs full tracebacks.
+        Coalesces per clone over a short idle gap, but never longer than MAX_COALESCE_TOTAL.
+        Keeps only the newest sitemap per clone and starts one sync per clone right away.
         """
         IDLE_GAP = 0.25
         MAX_COALESCE_TOTAL = 2.0
@@ -845,10 +820,8 @@ class ServerReceiver:
     async def _status_heartbeat_loop(self):
         """Periodically re-publish status so the admin watchdog keeps us online.
 
-        The admin marks a component offline after ~90s of bus silence. Incidental
-        log/event traffic normally refreshes that, but an otherwise-idle bot would
-        be shown offline while running fine. Gated on readiness so a genuine
-        disconnect or shutdown isn't masked by a stale "running" heartbeat.
+        The admin marks a component offline after ~90s of bus silence, which an idle bot
+        would hit. Gated on readiness so a real disconnect is not masked.
         """
         while not self._shutting_down:
             try:
@@ -868,9 +841,7 @@ class ServerReceiver:
                 logger.debug("[status] heartbeat publish failed", exc_info=True)
 
     async def on_ready(self):
-        """
-        Event handler that is called when the bot is ready.
-        """
+        """Called when the bot is ready."""
         if not hasattr(self, "verify"):
             self.verify = VerifyController(
                 bus=self.bus,
@@ -975,10 +946,7 @@ class ServerReceiver:
     async def _primary_name_changed_from_db(
         self, any_channel_id: int
     ) -> tuple[bool, str | None, int | None, int | None]:
-        """
-        Returns (changed, current_name, original_id, clone_id)
-        changed=True iff primary webhook *name* != canonical; None-safe on failures.
-        """
+        """Returns (changed, current_name, original_id, clone_id); changed is True iff the primary webhook name differs from canonical."""
         try:
 
             orig_id, clone_id, _ = self.db.resolve_original_from_any_id(
@@ -1057,11 +1025,7 @@ class ServerReceiver:
         )
 
     async def on_guild_channel_delete(self, channel):
-        """
-        When a cloned channel/category is deleted in one clone guild,
-        request a sitemap refresh ONLY for that mapping's host/original guild.
-        Works with multiple clones per host by using per-clone caches and DB fallback.
-        """
+        """When a cloned channel/category is deleted, request a sitemap refresh for that mapping's host guild only."""
         try:
 
             if not self.db.is_clone_guild_id(channel.guild.id):
@@ -1220,9 +1184,7 @@ class ServerReceiver:
         )
 
     async def _verify_listen_loop(self):
-        """
-        Subscribes to /ws/out and handles UI 'verify' requests.
-        """
+        """Subscribe to /ws/out and handle UI 'verify' requests."""
         base = self._admin_base()
 
         async def _handler(ev: dict):
@@ -1234,10 +1196,7 @@ class ServerReceiver:
         await self.bus.subscribe(base, _handler)
 
     def _bf_channel_key_for_event(self, typ: str, data: dict) -> int | None:
-        """
-        Return the 'origin channel id' we use to track backfills for this event.
-        For thread events, we key by the parent channel; otherwise by channel_id.
-        """
+        """Origin channel id used to track backfills for an event: the parent channel for threads, else channel_id."""
         try:
             if typ.startswith("thread_"):
                 return int(data.get("thread_parent_id") or 0) or None
@@ -1278,9 +1237,7 @@ class ServerReceiver:
         return False
 
     async def _on_ws(self, msg: dict):
-        """
-        Handles incoming WebSocket messages and dispatches them based on their type.
-        """
+        """Dispatch incoming WebSocket messages by type."""
         if self._shutting_down:
             return
 
@@ -1704,11 +1661,7 @@ class ServerReceiver:
             logger.exception("Unexpected error in handle_announce: %s", e)
 
     def _load_mappings(self) -> None:
-        """
-        Refresh in-memory caches from DB. Safe to call anytime.
-        Builds both flat (legacy) and per-clone caches; runtime logic should
-        prefer the per-clone maps.
-        """
+        """Refresh in-memory caches from DB. Builds flat (legacy) and per-clone caches; prefer the per-clone maps."""
 
         self.chan_map = {}
         self.chan_map_by_clone = {}
@@ -1811,9 +1764,7 @@ class ServerReceiver:
         return removed
 
     async def sync_structure(self, task_id: int, sitemap: Dict) -> str:
-        """
-        Synchronizes the structure of a clone based on the provided sitemap.
-        """
+        """Synchronize a clone's structure from the provided sitemap."""
 
         logger.debug(f"Sync Task #{task_id}: Processing sitemap {sitemap}")
 
@@ -2029,15 +1980,10 @@ class ServerReceiver:
         sitemap: Dict,
         settings: Dict[str, object],
     ) -> List[str]:
-        """
-        Sync guild-level metadata for THIS clone.
+        """Sync guild-level metadata for this clone.
 
-        Currently supported (per-mapping toggles):
-        - CLONE_GUILD_ICON
-        - CLONE_GUILD_BANNER
-        - CLONE_GUILD_SPLASH
-        - CLONE_GUILD_DISCOVERY_SPLASH
-        - SYNC_GUILD_DESCRIPTION
+        Controlled by CLONE_GUILD_ICON, CLONE_GUILD_BANNER, CLONE_GUILD_SPLASH,
+        CLONE_GUILD_DISCOVERY_SPLASH and SYNC_GUILD_DESCRIPTION.
         """
         parts: List[str] = []
 
@@ -2060,10 +2006,7 @@ class ServerReceiver:
             return parts
 
         def _normalized_hash_from_url(u: str | None) -> str | None:
-            """
-            Normalize an icon/banner/splash URL (or key) to a stable hash string:
-            strips guild id, query params, and file extension.
-            """
+            """Normalize an icon/banner/splash URL or key to a stable hash: guild id, query params and extension are stripped."""
             if not u:
                 return None
             try:
@@ -2078,10 +2021,7 @@ class ServerReceiver:
                 return None
 
         def _asset_hash(asset) -> str | None:
-            """
-            Get a normalized hash for an Asset (or asset-like) object
-            by converting it to a URL string and normalizing it.
-            """
+            """Normalized hash for an Asset or asset-like object, via its URL."""
             if not asset:
                 return None
             try:
@@ -2105,11 +2045,7 @@ class ServerReceiver:
         }
 
         def _can_clone_premium_asset(kind: str, *, animated: bool = False) -> bool:
-            """
-            Skip banner/splash/discovery_splash if the clone guild lacks the
-            Discord feature required to set that asset (e.g. BANNER unlocks at
-            Boost Level 2). We still allow clearing if host has None.
-            """
+            """Skip banner/splash/discovery_splash when the clone lacks the required feature (e.g. BANNER needs Boost Level 2). Clearing is still allowed if the host has None."""
             required = (
                 "ANIMATED_BANNER"
                 if (kind == "banner" and animated)
@@ -2128,11 +2064,7 @@ class ServerReceiver:
             return True
 
         def _already_applied(kind: str, host_hash: str | None) -> bool:
-            """
-            Discord re-hashes uploaded images, so the clone's asset hash never
-            matches the host's. Remember which host hash we last applied and
-            skip the re-upload while it hasn't changed.
-            """
+            """Discord re-hashes uploaded images, so the clone's hash never matches the host's. Remember the host hash last applied and skip the re-upload while it is unchanged."""
             if not host_hash:
                 return False
             try:
@@ -2425,11 +2357,7 @@ class ServerReceiver:
         return parts
 
     async def _sync_community(self, guild: discord.Guild, sitemap: Dict) -> List[str]:
-        """
-        Enable/disable Community mode and set rules/public updates channels
-        for THIS clone guild only. Preflight-checks current IDs via HTTP and
-        only patches when there's a real delta. Avoids 'X→X' spam.
-        """
+        """Enable/disable Community mode and set the rules/public updates channels for this clone. Checks current IDs over HTTP and patches only on a real change."""
         parts: List[str] = []
 
         community = sitemap.get("community") or {}
@@ -2499,9 +2427,7 @@ class ServerReceiver:
         async def _fetch_comm_ids_via_http(
             gid: int,
         ) -> tuple[int | None, int | None, bool]:
-            """
-            Returns (rules_id, updates_id, community_enabled) from HTTP payload.
-            """
+            """Returns (rules_id, updates_id, community_enabled) from the HTTP payload."""
             try:
                 data = await self.bot.http.get_guild(int(gid), with_counts=False)
                 rid = data.get("rules_channel_id")
@@ -2642,17 +2568,10 @@ class ServerReceiver:
     async def _repair_deleted_categories(
         self, guild: discord.Guild, sitemap: dict
     ) -> tuple[int, int, set[int]]:
-        """
-        For THIS clone guild only:
+        """Repair mapped categories/channels for this clone guild only.
 
-        - Only repair categories/channels when there is already a mapping in the DB.
-        - If a mapped category is missing in the clone, recreate (or adopt by name) and
-        update the mapping.
-        - If REPOSITION_CHANNELS is enabled, ensure mapped channels are parented to the
-        correct mapped category.
-
-        This MUST NOT act as a first-time category creator; it should only "repair"
-        broken state where the DB mappings exist but the clone-side objects do not.
+        Recreates (or adopts by name) a mapped category missing in the clone and, with
+        REPOSITION_CHANNELS, re-parents mapped channels. Never creates categories for the first time.
         """
         created = 0
         reparented = 0
@@ -2835,16 +2754,10 @@ class ServerReceiver:
         return created, reparented, repaired_ids
 
     async def _sync_channel_metadata(self, guild: Guild, sitemap: Dict) -> List[str]:
-        """
-        Synchronize all channel metadata in a single pass, after structural sync.
+        """Synchronize all channel metadata in one pass after structural sync.
 
-        Uses per-mapping settings for:
-        - SYNC_CHANNEL_TOPIC
-        - SYNC_CHANNEL_NSFW
-        - SYNC_CHANNEL_SLOWMODE
-        - CLONE_VOICE / CLONE_VOICE_PROPERTIES
-        - CLONE_STAGE / CLONE_STAGE_PROPERTIES
-        - SYNC_FORUM_PROPERTIES (post guidelines, message limit, layout, sort, archive, require_tag, default reaction)
+        Per-mapping settings: SYNC_CHANNEL_TOPIC, SYNC_CHANNEL_NSFW, SYNC_CHANNEL_SLOWMODE,
+        CLONE_VOICE(_PROPERTIES), CLONE_STAGE(_PROPERTIES) and SYNC_FORUM_PROPERTIES.
         """
 
         parts: List[str] = []
@@ -2927,10 +2840,7 @@ class ServerReceiver:
                 ctx_mapping_row = mrow
 
         def _sanitize_topic(text: str | None, limit: int) -> str | None:
-            """
-            Rewrite host channel mentions and message links inside a topic
-            using the existing inline sanitizer, then clip to Discord's limits.
-            """
+            """Rewrite host channel mentions and message links in a topic with the inline sanitizer, then clip to Discord's limits."""
             if not text:
                 return text
             if not ctx_host_gid or not ctx_mapping_row:
@@ -3104,10 +3014,7 @@ class ServerReceiver:
                 return "auto"
 
         def _enum_int(val, default: Optional[int]) -> Optional[int]:
-            """
-            Helper: unwrap Enum/None/int into a plain int, or default.
-            Used for Forum layout/sort enums which are not JSON-serializable directly.
-            """
+            """Unwrap Enum/None/int into a plain int, or default. Forum layout/sort enums are not JSON-serializable."""
             if val is None:
                 return default
             try:
@@ -3120,12 +3027,7 @@ class ServerReceiver:
                 return default
 
         def _norm_forum_emoji(val: Any) -> tuple[int | None, str | None, bool]:
-            """
-            Normalize forum default reaction emoji into (id, name, animated).
-            - custom emoji → (id, name, animated)
-            - unicode emoji / plain string → (None, string, False)
-            - missing/None → (None, None, False)
-            """
+            """Normalize a forum default reaction emoji into (id, name, animated); unicode or plain strings give (None, string, False), missing gives (None, None, False)."""
             if val is None:
                 return (None, None, False)
 
@@ -3154,12 +3056,7 @@ class ServerReceiver:
             return (None, s, False)
 
         def _build_forum_emoji(norm: tuple[int | None, str | None, bool]):
-            """
-            Build a value suitable for default_reaction_emoji param:
-            - custom emoji → discord.PartialEmoji
-            - unicode → string
-            - missing → None
-            """
+            """Value for default_reaction_emoji: a PartialEmoji for custom, a string for unicode, None if missing."""
             eid, name, animated = norm
             if eid:
                 return discord.PartialEmoji(
@@ -3187,13 +3084,10 @@ class ServerReceiver:
         def _canon_host_tags(
             tags_meta, desired_req: Optional[bool]
         ) -> list[tuple[str, bool, str]]:
-            """
-            Canonical form of host tags for idempotence comparison.
-            We ignore IDs and only care about (name, moderated, emoji_str).
+            """Canonical form of host tags for idempotence comparison, ignoring IDs: (name, moderated, emoji_str).
 
-            If require_tag=True but host has no unmoderated tags, we
-            include the implicit 'General' fallback in the canonical list
-            so that once we create it on the clone, future runs are stable.
+            If require_tag is set but the host has no unmoderated tags, the implicit 'General'
+            fallback is included so runs stay stable once it exists on the clone.
             """
             out: list[tuple[str, bool, str]] = []
             has_unmod = False
@@ -3216,9 +3110,7 @@ class ServerReceiver:
             return out
 
         def _canon_clone_tags(tags) -> list[tuple[str, bool, str]]:
-            """
-            Canonical form of clone ForumTags for idempotence comparison.
-            """
+            """Canonical form of clone ForumTags for idempotence comparison."""
             out: list[tuple[str, bool, str]] = []
             for t in tags or []:
                 name = (getattr(t, "name", "") or "").strip().lower()
@@ -3250,10 +3142,7 @@ class ServerReceiver:
             return http_client, Route
 
         async def _fetch_forum_layout(channel_id: int) -> Optional[int]:
-            """
-            Fetch the live default_forum_layout from Discord so we can
-            compare against the host and avoid unnecessary PATCHes.
-            """
+            """Fetch the live default_forum_layout so we only PATCH when it differs from the host."""
             http_client, Route = _get_http_client_and_route()
             if http_client is None or Route is None:
                 logger.debug(
@@ -3287,11 +3176,7 @@ class ServerReceiver:
             return current
 
         async def _raw_patch_forum_layout(channel_id: int, layout_val: int) -> bool:
-            """
-            Raw PATCH for forum default layout for older py-cord versions.
-
-            Discord API expects: default_forum_layout (int)
-            """
+            """Raw PATCH for the forum default layout (default_forum_layout, int) on older py-cord versions."""
             http_client, Route = _get_http_client_and_route()
             if http_client is None or Route is None:
                 logger.warning(
@@ -3912,9 +3797,7 @@ class ServerReceiver:
         return parts
 
     async def _sync_categories(self, guild: Guild, sitemap: Dict) -> List[str]:
-        """
-        Synchronize the categories of a guild with the provided sitemap.
-        """
+        """Synchronize a guild's categories with the provided sitemap."""
         parts: List[str] = []
         host_guild_id = (sitemap.get("guild") or {}).get("id")
 
@@ -3937,12 +3820,7 @@ class ServerReceiver:
         return parts
 
     async def _sync_forums(self, guild: Guild, sitemap: Dict) -> List[str]:
-        """
-        Ensure forum channels exist and are mapped for THIS clone guild only.
-        - Creates forum channels as needed.
-        - Ensures a webhook exists and is STORED in channel_mappings.
-        - Keeps per-clone and global caches in sync.
-        """
+        """Ensure forum channels exist and are mapped for this clone guild, with a stored webhook and synced caches."""
         parts: List[str] = []
         host_guild_id = int((sitemap.get("guild") or {}).get("id") or 0)
 
@@ -4204,9 +4082,7 @@ class ServerReceiver:
         video_quality: str | int | None = None,
         clone_messages: bool = True,
     ) -> Tuple[int, int, str]:
-        """
-        Ensure a voice channel exists with webhook for its text chat.
-        """
+        """Ensure a voice channel exists with a webhook for its text chat."""
         if self._shutting_down:
             return
 
@@ -4392,10 +4268,7 @@ class ServerReceiver:
         video_quality: str | int | None = None,
         clone_messages: bool = True,
     ) -> Tuple[int, int, str]:
-        """
-        Ensure a stage channel exists with webhook for its text chat.
-        Similar to voice channels but for stage channels.
-        """
+        """Ensure a stage channel exists with a webhook for its text chat."""
         if self._shutting_down:
             return
 
@@ -4596,9 +4469,7 @@ class ServerReceiver:
         stage_only: bool = False,
         skip_removed: bool = False,
     ) -> List[str]:
-        """
-        Synchronizes the channels of a guild with the provided sitemap.
-        """
+        """Synchronize a guild's channels with the provided sitemap."""
         parts: List[str] = []
         incoming = self._parse_sitemap(sitemap)
         host_guild_id = (sitemap.get("guild") or {}).get("id")
@@ -4889,11 +4760,11 @@ class ServerReceiver:
         return parts
 
     async def _sync_threads(self, guild: Guild, sitemap: Dict) -> List[str]:
-        """
-        Reconcile thread mappings:
-        • If the CLONE thread is missing but the ORIGINAL still exists upstream -> clear DB mapping only.
-        • If the ORIGINAL thread is gone upstream -> clear mapping and optionally delete the clone.
-        • Rename surviving cloned threads whose names changed upstream.
+        """Reconcile thread mappings.
+
+        If the clone thread is missing but the original exists, only the DB mapping is cleared.
+        If the original is gone, the mapping is cleared and the clone optionally deleted.
+        Surviving clone threads are renamed to match upstream.
         """
         parts: List[str] = []
 
@@ -5144,11 +5015,7 @@ class ServerReceiver:
         chan_ids: set[int] | None = None,
         thread_parent_ids: set[int] | None = None,
     ) -> None:
-        """
-        - No args  -> request a full flush.
-        - With args -> request a targeted flush (coalesces with other requests).
-        If a task is already running, we just enqueue flags/targets and let it pick them up.
-        """
+        """No args requests a full flush; with args, a targeted one that coalesces with other requests. If a flush is already running the flags/targets are queued for it."""
         if getattr(self, "_shutting_down", False):
             return
 
@@ -5249,9 +5116,7 @@ class ServerReceiver:
         return items
 
     def _can_create_category(self, guild: discord.Guild) -> bool:
-        """
-        Determines whether a new category can be created in the cloned guild.
-        """
+        """Whether a new category can be created in the clone guild."""
         return (
             len(guild.categories) < self.MAX_CATEGORIES
             and len(guild.channels) < self.MAX_GUILD_CHANNELS
@@ -5260,11 +5125,7 @@ class ServerReceiver:
     def _can_create_in_category(
         self, guild: discord.Guild, category: Optional[discord.CategoryChannel]
     ) -> bool:
-        """
-        Determines whether a new channel can be created in the specified category
-        within the clone guild, based on the maximum allowed channels per category and
-        the maximum allowed channels in the guild.
-        """
+        """Whether a channel can be created in the category, within the per-category and per-guild limits."""
         if category is None:
             return len(guild.channels) < self.MAX_GUILD_CHANNELS
         return (
@@ -5281,11 +5142,7 @@ class ServerReceiver:
         topic: str | None = None,
         original_channel_id: int | None = None,
     ) -> Union[TextChannel, ForumChannel, discord.VoiceChannel, discord.StageChannel]:
-        """
-        Create a channel of `kind` ('text'|'news'|'forum'|'voice'|'stage') named `name` under
-        `category`.  If the category or guild is at capacity, it falls back to
-        standalone (category=None).  Returns the created channel object.
-        """
+        """Create a channel of kind (text, news, forum, voice, stage) under category, falling back to no category when full. Returns the channel."""
         if self._shutting_down:
             return
         if not self._can_create_in_category(guild, category):
@@ -5381,10 +5238,7 @@ class ServerReceiver:
         upstream_name: str,
         orig_source_id: int,
     ) -> tuple[bool, str]:
-        """
-        Enforce per-clone pinned name (channel_mappings.clone_channel_name);
-        otherwise match upstream IF RENAME_CHANNELS is enabled.
-        """
+        """Enforce the per-clone pinned name (channel_mappings.clone_channel_name), else match upstream if RENAME_CHANNELS is on."""
         try:
             per_clone = (self.chan_map_by_clone or {}).get(int(ch.guild.id), {}) or {}
             mapping = per_clone.get(int(orig_source_id))
@@ -5502,16 +5356,10 @@ class ServerReceiver:
     async def _handle_removed_categories(
         self, guild: discord.Guild, sitemap: Dict
     ) -> int:
-        """
-        For THIS clone guild only:
-        - Remove categories that no longer exist in the *filtered* sitemap
-        (i.e. they were removed on the host or filtered out client-side).
-        - If DELETE_CHANNELS is true for this clone, delete all cloned child channels and then
-        the cloned category itself.
-        - If DELETE_CHANNELS is false, keep the existing channels/category in the clone, but
-        delete only the DB mappings so Copycord no longer tracks them.
-        - ALWAYS delete channel mappings (and the category mapping) for this clone when a
-        category is out-of-scope for this clone.
+        """Handle categories removed from the filtered sitemap, for this clone guild only.
+
+        With DELETE_CHANNELS the cloned children and the category are deleted; without it only
+        the DB mappings are removed. Mappings are always deleted for out-of-scope categories.
         """
 
         self._load_mappings()
@@ -5733,14 +5581,10 @@ class ServerReceiver:
     async def _handle_removed_channels(
         self, guild: discord.Guild, incoming: List[Dict]
     ) -> int:
-        """
-        Delete cloned channels not present on the host, for THIS clone guild only.
-        Always removes the (origin, clone) mapping row for this guild when host no longer has it.
+        """Delete cloned channels not on the host, for this clone guild only.
 
-        Summary:
-        - If DELETE_CHANNELS is true and the channel is not protected, delete the channel + mapping.
-        - Otherwise, keep the channel (or it's already gone / protected / API-blocked) and
-        delete only the DB mapping.
+        The (origin, clone) mapping row is always removed. The channel itself is deleted only
+        with DELETE_CHANNELS and when not protected.
         """
 
         self._load_mappings()
@@ -5989,10 +5833,7 @@ class ServerReceiver:
         name: str,
         host_guild_id: Optional[int] = None,
     ) -> Tuple[discord.CategoryChannel, bool]:
-        """
-        Ensure a mapping exists for (original_category_id, THIS clone guild).
-        Returns (category_obj, did_create).
-        """
+        """Ensure a mapping exists for (original_category_id, this clone guild). Returns (category_obj, did_create)."""
 
         if not hasattr(self, "cat_map_by_clone") or self.cat_map_by_clone is None:
             self.cat_map_by_clone = {}
@@ -6100,11 +5941,7 @@ class ServerReceiver:
             return webhook
 
     async def _create_pending_webhooks(self, pending: list[dict]):
-        """
-        Background task: create webhooks for channels that were synced without one.
-        Runs after structure sync completes so channel/category creation isn't blocked.
-        discord.py handles rate limits natively via Retry-After headers.
-        """
+        """Background task creating webhooks for channels synced without one, so structure sync is not blocked."""
         if not pending:
             return
 
@@ -6333,10 +6170,7 @@ class ServerReceiver:
         *,
         skip_channel_ids: set[int] | None = None,
     ) -> int:
-        """
-        Re-parent cloned channels for THIS clone guild only, when upstream parent differs.
-        Updates DB mapping for THIS clone so future syncs keep the new parent.
-        """
+        """Re-parent cloned channels for this clone guild when the upstream parent differs, and update the mapping."""
         moved = 0
         skip_channel_ids = skip_channel_ids or set()
         host_guild_id = int(host_guild_id or 0)
@@ -6591,12 +6425,7 @@ class ServerReceiver:
     async def _recreate_webhook(
         self, original_id: int, host_guild_id: Optional[int]
     ) -> Optional[str]:
-        """
-        Recreates a webhook for a given channel if it is missing or invalid.
-        This method attempts to retrieve the webhook URL for a channel from the internal
-        channel mapping. If the webhook is missing or invalid, it creates a new webhook
-        for the corresponding cloned channel and updates the database and internal mapping.
-        """
+        """Recreate a channel's webhook if missing or invalid, updating the DB and channel mapping."""
         if self._shutting_down:
             return
 
@@ -6681,10 +6510,7 @@ class ServerReceiver:
                 return None
 
     async def handle_thread_delete(self, data: dict):
-        """
-        Delete the cloned thread(s) that correspond to the original one.
-        Works across multi-clone setups; respects per-mapping ENABLE_CLONING / DELETE_THREADS.
-        """
+        """Delete the cloned thread(s) for the original, respecting per-mapping ENABLE_CLONING and DELETE_THREADS."""
         try:
             orig_tid = int(data.get("thread_id") or data.get("channel_id") or 0)
         except Exception:
@@ -6695,13 +6521,10 @@ class ServerReceiver:
         async def _resolve_thread_obj(
             guild, thread_id: int, forum_parent_id: int | None
         ):
-            """
-            Find a discord.Thread in the clone guild, trying multiple strategies:
-            1) guild.get_thread(id)
-            2) guild.get_channel(id)
-            3) fetch_channel(id)
-            4) search parent forum (active + archived)
-            Returns discord.Thread or None
+            """Find a discord.Thread in the clone guild.
+
+            Tries guild.get_thread, guild.get_channel, fetch_channel, then the parent forum's
+            active and archived threads. Returns None if not found.
             """
             import discord
 
@@ -6859,10 +6682,7 @@ class ServerReceiver:
         logger.debug("[🗑️] Deleted thread mappings for original thread %s", orig_tid)
 
     async def handle_thread_rename(self, data: dict):
-        """
-        Rename all cloned threads that correspond to the original thread.
-        Works across multi-clone setups; respects per-mapping ENABLE_CLONING.
-        """
+        """Rename all cloned threads for the original thread, respecting per-mapping ENABLE_CLONING."""
         if self._shutting_down:
             return
 
@@ -6977,10 +6797,7 @@ class ServerReceiver:
                 logger.exception("[db] upsert_forum_thread_mapping failed on rename")
 
     async def handle_thread_tags_update(self, data: dict):
-        """
-        Sync applied forum tags from the host thread to all cloned threads.
-        Tags are matched by name between host and clone forums.
-        """
+        """Sync applied forum tags from the host thread to the cloned threads, matched by name."""
         if self._shutting_down:
             return
 
@@ -7071,10 +6888,7 @@ class ServerReceiver:
                 )
 
     async def _enforce_thread_limit(self, guild: discord.Guild):
-        """
-        Enforces the thread limit for the clone guild by archiving the oldest active threads
-        if the number of active threads exceeds the configured maximum.
-        """
+        """Archive the oldest active threads when the clone guild exceeds the configured thread limit."""
 
         valid_clone_ids = {r["cloned_thread_id"] for r in self.db.get_all_threads()}
 
@@ -7206,14 +7020,10 @@ class ServerReceiver:
         ctx_guild_id: int | None = None,
         ctx_mapping_row: dict | None = None,
     ) -> str | None:
-        """
-        Normalize inline content (message content, embed text, etc.).
+        """Normalize inline content (message content, embed text, etc.).
 
-        ctx_guild_id      = original/host guild id (where the message came from)
-        ctx_mapping_row   = the specific mapping row for the clone we are targeting
-
-        With both of these, per-clone mappings (channels/roles/emojis/message links)
-        can be resolved correctly when there are multiple clones for a single host.
+        ctx_guild_id is the host guild; ctx_mapping_row is the mapping for the target clone,
+        so per-clone channels, roles, emojis and message links resolve with multiple clones.
         """
         if not s:
             return s
@@ -7248,12 +7058,7 @@ class ServerReceiver:
         *,
         cloned_guild_id: int | None = None,
     ) -> str:
-        """
-        Replace custom emoji IDs with the clone's emoji IDs.
-
-        If cloned_guild_id is provided, we prefer the mapping in that clone.
-        Otherwise we fall back to the legacy "any mapping" behaviour.
-        """
+        """Replace custom emoji IDs with the clone's. Prefers the mapping for cloned_guild_id, else any mapping."""
         _emoji_re = re.compile(r"<:(\w+):(\d+)?\>")
 
         def repl(m: re.Match) -> str:
@@ -7301,12 +7106,7 @@ class ServerReceiver:
         *,
         cloned_guild_id: int | None = None,
     ) -> str:
-        """
-        Rewrite <
-
-        If cloned_guild_id is provided, use the mapping for THAT clone; otherwise
-        fall back to the old global chan_map behaviour.
-        """
+        """Rewrite <#id> channel mentions. Uses the mapping for cloned_guild_id if given, else the global chan_map."""
         _m_ch = re.compile(r"<#(\d+)>")
 
         def repl(m: re.Match) -> str:
@@ -7399,14 +7199,10 @@ class ServerReceiver:
         cloned_id_to_name: dict[int, str] | None,
         valid_ids: set[int] | None,
     ) -> str:
-        """
-        Given precomputed role maps and valid clone role IDs, replace any
-        <@&id> mentions that don't resolve in the clone guild with a
-        plain-text '@RoleName'.
+        """Replace <@&id> mentions that do not resolve in the clone guild with plain '@RoleName'.
 
-        - orig_id_to_name: original role id -> name (from client payload)
-        - cloned_id_to_name: cloned role id -> name (via DB mappings)
-        - valid_ids: set of role IDs that actually exist in the clone guild
+        orig_id_to_name comes from the client payload, cloned_id_to_name from DB mappings,
+        and valid_ids are the role IDs that exist in the clone guild.
         """
         if not content or not orig_id_to_name:
             return content
@@ -7440,10 +7236,7 @@ class ServerReceiver:
         ctx_guild_id: int | None = None,
         ctx_mapping_row: dict | None = None,
     ) -> str:
-        """
-        Rewrites https://discord.com/channels/<gid>/<cid>/<mid> links in `content`
-        to point at the mapped *clone* guild/channel/message where we can.
-        """
+        """Rewrite discord.com/channels/<gid>/<cid>/<mid> links to the mapped clone guild/channel/message where possible."""
         _link = re.compile(
             r"(https?://(?:ptb\.|canary\.)?discord(?:app)?\.com/channels/)"
             r"(?P<gid>\d+|@me)/(?P<cid>\d+)/(?P<mid>\d+)"
@@ -7561,18 +7354,7 @@ class ServerReceiver:
         original_guild_id: int,
         cloned_guild_id: int,
     ) -> list[int]:
-        """
-        Get role IDs that should be mentioned for messages in this cloned channel.
-        Returns list of cloned role IDs.
-
-        Args:
-            cloned_channel_id: The channel ID in the clone guild where the message will be sent
-            original_guild_id: The source/host guild ID
-            cloned_guild_id: The clone guild ID
-
-        Returns:
-            List of role IDs (in the clone guild) that should be mentioned
-        """
+        """Cloned role IDs to mention for messages in this cloned channel."""
         try:
             role_ids = self.db.get_role_mentions(
                 original_guild_id=int(original_guild_id),
@@ -7590,11 +7372,7 @@ class ServerReceiver:
             return []
 
     def _ensure_aiohttp_session(self) -> aiohttp.ClientSession:
-        """Return a live shared aiohttp session, recreating it if closed.
-
-        Used by the webhook send path and the user-token sender so both share
-        one connection pool.
-        """
+        """Return the shared aiohttp session, recreating it if closed. Used by the webhook and user-token send paths."""
         if self.session is None or self.session.closed:
             self.session = aiohttp.ClientSession()
         return self.session
@@ -7617,9 +7395,8 @@ class ServerReceiver:
     def _resolve_reply_target(self, msg: dict, cloned_guild_id) -> dict | None:
         """Map a message's reply reference onto the cloned message it answers.
 
-        Returns ``{"guild_id", "channel_id", "message_id", "link"}``, or None if
-        the message is not a reply or the message it replies to was never
-        cloned (older than the backfill window, filtered out, deleted).
+        Returns {guild_id, channel_id, message_id, link}, or None if the message is not a reply
+        or its target was never cloned.
         """
         try:
             ref = msg.get("reference") or {}
@@ -7686,8 +7463,7 @@ class ServerReceiver:
     def _strip_reply_header(cls, content: str | None, link: str) -> str | None:
         """Drop the webhook reply header from content sent as a native reply.
 
-        Matches on the whole line rather than a prefix: role mentions are
-        prepended after the header is built, so it is not always first.
+        Matches the whole line: role mentions are prepended after the header is built.
         """
         if not content:
             return content
@@ -7700,10 +7476,8 @@ class ServerReceiver:
     def _strip_reply_header_from_embeds(cls, embeds, link: str):
         """Same strip, for text that was moved into an embed.
 
-        A message over 2000 characters is rehoused wholesale into an embed by
-        the payload builder, taking the header line with it. Embeds are copied
-        before editing because the webhook fallback reuses these same objects
-        and still needs the link.
+        A message over 2000 characters is moved wholesale into an embed, header included.
+        Embeds are copied first because the webhook fallback reuses them and needs the link.
         """
         if not embeds:
             return embeds
@@ -7728,14 +7502,10 @@ class ServerReceiver:
         cloned_message_id,
         sent_token_id=None,
     ) -> None:
-        """Record what a token send produced, the way the webhook path does.
+        """Record what a token send produced, as the webhook path does.
 
-        Without this the ``messages`` table only ever learns about webhook
-        sends, so nothing posted by a token can be replied to, edited or
-        deleted. ``webhook_url`` stays NULL and ``sent_token_id`` names the
-        account that posted, which is how the edit and delete paths tell the
-        two kinds of row apart — and Discord only lets an author edit its own
-        message, so the specific account matters.
+        Without it nothing posted by a token could be replied to, edited or deleted.
+        webhook_url stays NULL and sent_token_id names the account, which only that account can edit.
         """
         try:
             orig_mid = int(msg.get("message_id") or 0)
@@ -7789,18 +7559,12 @@ class ServerReceiver:
     async def _prepare_token_identity(
         self, *, mapping_id, cloned_guild_id, settings: dict, msg: dict, exclude=None
     ) -> tuple[str | None, str | None]:
-        """Run sticky-author identity prep. Returns ``(forced_token_id, action)``.
+        """Run sticky-author identity prep. Returns (forced_token_id, action).
 
-        - ``(token_id, None)`` → post from this exact account (identity applied).
-        - ``(None, "webhook")`` / ``(None, "skip")`` → identity is active but out
-          of free tokens; the caller sends via webhook or drops the message per
-          ``USER_TOKEN_FALLBACK_WEBHOOK``.
-        - ``(None, None)`` → identity mirroring off; caller uses the normal
-          strategy ordering.
-
-        ``exclude`` is the set of token ids already tried and failed for THIS
-        message, so a re-prepare swaps to a different account. Never raises — the
-        message must still send.
+        (token_id, None) posts from that account. (None, 'webhook') or (None, 'skip') means
+        identity is active but out of free tokens, per USER_TOKEN_FALLBACK_WEBHOOK.
+        (None, None) means identity mirroring is off. exclude holds token ids already tried
+        for this message. Never raises; the message must still send.
         """
         if not self._identity_active(settings):
 
@@ -7820,9 +7584,8 @@ class ServerReceiver:
 
             return None, self._identity_exhausted_action(settings)
 
-        # An edit payload carries no identity fields. Absent is not "this
-        # author has no roles" — applying it that way clears the nickname and
-        # strips every mirrored role from the account.
+        # An edit payload carries no identity fields; treating that as "no roles"
+        # would clear the nickname and strip every mirrored role.
         identity_known = (
             msg.get("author_display_name") is not None
             or msg.get("author_role_ids") is not None
@@ -7849,9 +7612,7 @@ class ServerReceiver:
             return None, None
 
     def _disposition_for(self, status: str, settings: dict) -> str:
-        """Map a raw ``SEND_*`` status to a disposition for the non-identity
-        (round-robin) path: ``"ok"``, ``"drop"`` (rate-limited/transient — never
-        webhook), or webhook/skip when no token could deliver."""
+        """Map a SEND_* status to a disposition for the round-robin path: 'ok', 'drop' (rate-limited/transient, never webhook), or webhook/skip when no token could deliver."""
         if status == SEND_OK:
             return "ok"
         if status in (SEND_RATE_LIMITED, SEND_TRANSIENT):
@@ -7863,17 +7624,12 @@ class ServerReceiver:
     ) -> str:
         """Drive the sticky-identity swap loop for one message.
 
-        ``attempt(token_id)`` forces that account (sticky-exclusive) and returns
-        a ``SEND_*`` status. The author swaps to another account ONLY when the
-        current one is dead (Discord revoked it → bench it), retrying until one
-        delivers or there is no free token left. A permission / can't-post-here
-        error (403/404) does NOT swap — another account likely can't post there
-        either and swapping would post as the wrong account — so it webhooks or
-        skips. A rate-limit or transient error is not the account's fault either,
-        so it drops the message (the sender already slept/retried) without a
-        swap or webhook.
+        attempt(token_id) forces that account and returns a SEND_* status. The author swaps
+        accounts only when the current one is dead (revoked, so it is benched). A 403/404 does
+        not swap, since another account likely cannot post there either: it webhooks or skips.
+        A rate limit or transient error drops the message without a swap.
 
-        Returns a disposition: ``"ok"``, ``"webhook"``, ``"skip"``, or ``"drop"``.
+        Returns 'ok', 'webhook', 'skip' or 'drop'.
         """
         try:
             n_tokens = len(self.db.get_enabled_mapping_tokens(str(mapping_id)) or [])
@@ -8107,12 +7863,9 @@ class ServerReceiver:
     ) -> int | None:
         """Create a forum thread's starter post as a user token when enabled.
 
-        A forum thread and its first (starter) message are created atomically,
-        so the normal into-thread token path can't reach the starter — this
-        creates the whole thread as the assigned account. Returns the new clone
-        thread id on success, or None so the caller creates the thread via the
-        webhook (feature off, bot/embed-authored, no tokens, or every token
-        failed). Never raises — the thread must still get created.
+        The thread and its first message are created atomically, so the thread has to be
+        created as the assigned account. Returns the clone thread id, or None to fall back to
+        the webhook. Never raises.
         """
         try:
             settings = resolve_mapping_settings(
@@ -8184,14 +7937,8 @@ class ServerReceiver:
     ) -> int | None:
         """Create a text-channel thread as a user token when enabled.
 
-        The bot normally creates text threads; when token forwarding is on we
-        create the thread as the assigned account so the "started a thread"
-        system message and thread ownership reflect the real author instead of
-        the bot. The thread's first message is still forwarded separately.
-
-        Returns the new clone thread id on success, or None so the caller
-        creates the thread via the bot (feature off, bot/embed-authored, no
-        tokens, or every token failed). Never raises.
+        This makes the 'started a thread' message and thread ownership reflect the real author.
+        Returns the clone thread id, or None to fall back to the bot. Never raises.
         """
         try:
             settings = resolve_mapping_settings(
@@ -8252,14 +7999,9 @@ class ServerReceiver:
     async def _try_user_token_stickers(self, *, ch, stickers, mapping, msg) -> bool:
         """Send a sticker message via a user token when enabled for the mapping.
 
-        Custom guild stickers are sent by their *cloned* id (the token account is
-        a clone-guild member); standard Discord-library stickers are sent by their
-        original global id, which only works if the account has Nitro. Anything
-        the account can't use fails the send and falls back to the bot.
-
-        Returns True when a token delivered the message (caller should stop), or
-        False to let the bot/webhook handle it (feature off, bot-authored, or
-        every token failed with fallback on).
+        Custom stickers go by their cloned id; standard stickers by original id, which needs
+        Nitro. Anything the account cannot use falls back to the bot.
+        Returns True when a token delivered the message, False to let the bot/webhook handle it.
         """
         if not stickers or host_message_needs_webhook(msg):
             return False
@@ -8414,9 +8156,7 @@ class ServerReceiver:
         prepend_roles: list[int] | None = None,
         target_cloned_channel_id: int | None = None,
     ) -> dict:
-        """
-        Constructs a webhook payload from a given message dictionary.
-        """
+        """Build a webhook payload from a message dict."""
 
         cloned_guild_id_for_mentions: int | None = None
         if target_cloned_channel_id is not None:
@@ -8820,10 +8560,7 @@ class ServerReceiver:
         return payload
 
     def _log_tag(self, data: dict) -> str:
-        """
-        Return ' [backfill]' and/or ' [buffered]' when applicable.
-        Live messages get no tag.
-        """
+        """Return ' [backfill]' and/or ' [buffered]' when applicable; live messages get no tag."""
         parts = []
         if data.get("__backfill__"):
             parts.append("backfill")
@@ -8851,15 +8588,10 @@ class ServerReceiver:
         self._bf_throttle.pop(int(clone_id), None)
 
     async def forward_thread_message(self, data: dict):
-        """
-        Public entry point for forwarding a thread message.
+        """Public entry point for forwarding a thread message.
 
-        For backfill messages:
-        - serialize by thread_parent_id so that we never create a thread
-          before the parent message's webhook send + DB upsert finishes.
-
-        For live messages:
-        - keep existing parallel behaviour.
+        Backfill messages are serialized by thread_parent_id so a thread is never created
+        before the parent message's webhook send and DB upsert finish. Live messages run in parallel.
         """
         if self._shutting_down:
             return
@@ -8880,16 +8612,10 @@ class ServerReceiver:
             return await self.handle_thread_message(data)
 
     async def forward_message(self, msg: Dict):
-        """
-        Public entry point for forwarding a message.
+        """Public entry point for forwarding a message.
 
-        For backfill messages:
-        - serialize by original channel_id so that we never
-        send message N+1 until message N has completed
-        its webhook send + DB upsert.
-
-        For live messages:
-        - keep existing parallel behaviour.
+        Backfill messages are serialized by channel_id so message N+1 waits for N's webhook
+        send and DB upsert. Live messages run in parallel.
         """
         if self._shutting_down:
             return
@@ -8909,9 +8635,7 @@ class ServerReceiver:
             return await self._forward_message_inner(msg)
 
     async def _forward_message_inner(self, msg: Dict):
-        """
-        Forwards a message to the appropriate channel webhook(s) based on the channel mapping.
-        """
+        """Forward a message to the webhook(s) of the mapped channel."""
         if self._shutting_down:
             return
 
@@ -8947,12 +8671,10 @@ class ServerReceiver:
             return rows
 
         def _bf_targets_for_source(source_channel_id: int) -> set[int]:
-            """
-            Determine which *clone channel IDs* should receive backfill messages for this source.
-            Priority:
-            1) Explicit hints carried on the message (e.g. __bf_target_clone_cids__/__bf_target_clone_cid__)
-            2) BackfillManager (if it exposes an API/attribute with active targets)
-            3) Fallback: empty set (means 'no restriction' — send to all)
+            """Clone channel IDs that should receive backfill messages for this source.
+
+            Order: hints on the message (__bf_target_clone_cids__/__bf_target_clone_cid__), the
+            BackfillManager's active targets, then an empty set meaning no restriction.
             """
             targets: set[int] = set()
 
@@ -8987,9 +8709,7 @@ class ServerReceiver:
             return targets
 
         def _cached_primary_for_mapping(mapping_row: dict):
-            """
-            Primary webhook identity derived from backfill primary_identity and this mapping's URL.
-            """
+            """Primary webhook identity from the backfill primary_identity and this mapping's URL."""
             st = self.backfill._progress.get(int(source_id)) or {}
             ident = st.get("primary_identity") or {}
             purl = mapping_row.get("channel_webhook_url") or mapping_row.get(
@@ -9127,9 +8847,7 @@ class ServerReceiver:
             payload: dict,
             override_identity: dict | None = None,
         ):
-            """
-            Core send path. Uses mapping_row for clone-aware upserts and 404 recreate.
-            """
+            """Core send path. Uses mapping_row for clone-aware upserts and 404 recreate."""
             if self._shutting_down:
                 return
             from aiohttp import ClientError
@@ -10007,9 +9725,7 @@ class ServerReceiver:
         jitter: float = 0.25,
         log_prefix: str = "get-msg-maps",
     ) -> list[dict]:
-        """
-        Retry helper to fetch ALL message-mapping rows for a given original message id.
-        """
+        """Fetch all message-mapping rows for an original message id, with retries."""
         delay = base_delay
         for i in range(attempts):
             try:
@@ -10198,10 +9914,7 @@ class ServerReceiver:
     async def _fallback_resend_edit(
         self, data: dict, orig_mid: int | None = None
     ) -> None:
-        """
-        When native webhook edit fails, resend as a new message — but ONLY to clones
-        whose mapping has EDIT_MESSAGES=True (per-clone).
-        """
+        """When a native webhook edit fails, resend as a new message, only to clones whose mapping has EDIT_MESSAGES."""
         try:
             source_id = int(data.get("channel_id") or 0)
             host_gid = int(data.get("guild_id") or 0)
@@ -10270,10 +9983,7 @@ class ServerReceiver:
         await self.forward_message(resend)
 
     async def handle_message_edit(self, data: dict):
-        """
-        Edit the cloned message(s) corresponding to the original one.
-        Works across multi-clone setups and respects per-mapping EDIT_MESSAGES.
-        """
+        """Edit the cloned message(s) for the original, respecting per-mapping EDIT_MESSAGES."""
         try:
             orig_mid = int(data.get("message_id") or 0)
             orig_gid = int(data.get("guild_id") or 0)
@@ -10405,10 +10115,7 @@ class ServerReceiver:
                 logger.warning(f"Webhook send failed: {resp.status}")
 
     async def handle_thread_message(self, data: dict):
-        """
-        Handles forwarding of thread messages from the original guild to ALL cloned guilds
-        that map the thread's parent channel (forum or text).
-        """
+        """Forward thread messages to every cloned guild that maps the thread's parent channel (forum or text)."""
         if self._shutting_down:
             return
 
@@ -11201,13 +10908,9 @@ class ServerReceiver:
                                 return None
 
                             async def _create_text_thread():
-                                """
-                                Create a text-thread in the cloned channel, trying the best we can to attach it
-                                to the cloned starter message so Discord treats it as a proper
-                                message-based thread.
-
-                                Fallback: if we cannot resolve the starter message mapping, we fall back
-                                to channel.create_thread(...) which creates an unlinked thread.
+                                """Create a text thread in the cloned channel, attached to the cloned starter message when
+                                its mapping resolves so Discord treats it as message-based; otherwise an unlinked
+                                channel.create_thread.
                                 """
                                 candidates: list[int] = []
 
@@ -12311,15 +12014,10 @@ class ServerReceiver:
                         logger.exception("Error enforcing thread limit.")
 
     def _bf_pick_mapping_for_target(self, original_channel_id: int) -> dict | None:
-        """
-        Resolve the precise mapping row for a backfill run, preferring this run's
-        mapping_id / cloned_guild_id over a generic 'first row for this origin'.
+        """Resolve the mapping row for a backfill run, preferring this run's mapping_id / cloned_guild_id.
 
-        Priority:
-        1) mapping_id (from guild_mappings)
-        2) (original_channel_id, cloned_guild_id)
-        3) cloned_channel_id
-        4) first row for original_channel_id
+        Order: mapping_id, (original_channel_id, cloned_guild_id), cloned_channel_id,
+        then the first row for original_channel_id.
         """
         oid = int(original_channel_id)
         st = self.backfill._progress.get(oid) or {}
@@ -12565,15 +12263,10 @@ class ServerReceiver:
     def _prune_old_messages_loop(
         self, retention_seconds: int | None = None
     ) -> asyncio.Task:
-        """
-        Start hourly task that deletes old rows from the `messages` table.
+        """Start an hourly task that deletes old rows from the messages table.
 
-        Retention priority:
-
-        1) app_config.MESSAGE_RETENTION_DAYS      (days → seconds)
-        2) app_config.MESSAGE_RETENTION_SECONDS   (legacy seconds)
-        3) Legacy env vars MESSAGE_RETENTION_DAYS / MESSAGE_RETENTION_SECONDS
-        4) Fallback default (7 days)
+        Retention order: app_config MESSAGE_RETENTION_DAYS, app_config MESSAGE_RETENTION_SECONDS,
+        the same two env vars, then a 7 day default.
         """
 
         if getattr(self, "_prune_task", None) and not self._prune_task.done():
@@ -12583,9 +12276,7 @@ class ServerReceiver:
             retention_seconds = 7 * 24 * 3600
 
         def _resolve_retention_seconds() -> int:
-            """
-            Compute the effective retention window, preferring app_config days.
-            """
+            """Effective retention window, preferring app_config days."""
             cfg_sec = cfg_days = ""
             try:
                 cfg_sec = (
@@ -12722,15 +12413,10 @@ class ServerReceiver:
         return self._prune_task
 
     def _reap_idle_tls_sessions_loop(self) -> asyncio.Task:
-        """Periodically close user-token curl_cffi sessions — and their
-        associated lock/cooldown/rotation bookkeeping in the token sender —
-        that have sat idle longer than ``TLS_SESSION_IDLE_TTL``.
+        """Periodically close idle user-token curl_cffi sessions and their token sender bookkeeping.
 
-        Pure resource hygiene for deployments running large token pools — an
-        idle session's cookies/fingerprint identity aren't lost, the session
-        just transparently rebuilds (and re-primes) the next time that token
-        is actually used, and reaped token/channel/author bookkeeping just
-        starts fresh on next use too.
+        Applies to sessions idle longer than TLS_SESSION_IDLE_TTL. A reaped session rebuilds
+        the next time its token is used.
         """
         if getattr(self, "_tls_reap_task", None) and not self._tls_reap_task.done():
             return self._tls_reap_task
@@ -12760,14 +12446,11 @@ class ServerReceiver:
     async def _delete_token_message(
         self, row, orig_mid: int, channel_name: str | None, cloned_mid: int
     ) -> bool:
-        """Delete a token-posted clone, with the bot.
+        """Delete a token-posted clone with the bot.
 
-        Deleting is not an author-only operation the way editing is — the bot
-        already holds Manage Messages in the clone guild, so it can remove
-        anyone's message there. Using it keeps the delete working after the
-        sending account is disabled, revoked or removed from the mapping, and
-        spends no selfbot API calls. The account is only asked as a fallback,
-        for a channel where the bot somehow cannot.
+        The bot already holds Manage Messages, so unlike editing this works after the sending
+        account is disabled or removed and costs no selfbot API calls. The account is only
+        asked as a fallback.
         """
         try:
             cloned_cid = int(row["cloned_channel_id"])
@@ -12955,10 +12638,7 @@ class ServerReceiver:
         return True
 
     async def handle_message_delete(self, data: dict):
-        """
-        Delete the cloned message(s) that correspond to the original one.
-        Works across multi-clone setups and respects per-mapping DELETE_MESSAGES.
-        """
+        """Delete the cloned message(s) for the original, respecting per-mapping DELETE_MESSAGES."""
         try:
             orig_mid = int(data.get("message_id") or 0)
             orig_gid = int(data.get("guild_id") or 0)
@@ -13084,13 +12764,9 @@ class ServerReceiver:
         )
 
     def _pick_verify_guild_id(self) -> int | None:
-        """
-        Prefer a mapped clone guild the bot is actually in.
-        Fallbacks:
-        - any mapped clone guild id from DB
-        - legacy config.CLONE_GUILD_ID
-        - any guild the bot is in
-        - None
+        """Prefer a mapped clone guild the bot is in.
+
+        Falls back to any mapped clone guild id, config.CLONE_GUILD_ID, any guild the bot is in, then None.
         """
         try:
             mapped = {int(x) for x in (self.db.get_all_clone_guild_ids() or [])}
@@ -13110,12 +12786,7 @@ class ServerReceiver:
         return None
 
     def _maybe_enrich_mapping_identity_from_sitemap(self, sitemap: dict) -> None:
-        """
-        Backfill identity fields in guild_mappings (names/icon URLs) using data
-        we already have at sync time, scoped to THIS sitemap's mapping.
-
-        ⚠️ DOES NOT overwrite existing settings - only enriches identity metadata.
-        """
+        """Backfill identity fields in guild_mappings (names, icon URLs) from the sitemap for its mapping. Does not overwrite existing settings."""
         guild_info = sitemap.get("guild") or {}
         target = sitemap.get("target") or {}
 
@@ -13217,11 +12888,7 @@ class ServerReceiver:
             )
 
     async def _load_blocked_keywords_cache(self) -> None:
-        """
-        Load all blocked keywords from DB and compile regex patterns.
-        Builds cache for all (original_guild_id, cloned_guild_id) pairs.
-        Called at startup and after keyword updates.
-        """
+        """Load all blocked keywords from DB and compile patterns for each (original_guild_id, cloned_guild_id) pair. Called at startup and after keyword updates."""
         async with self._blocked_keywords_lock:
             self._blocked_keywords_cache.clear()
 
@@ -13301,14 +12968,9 @@ class ServerReceiver:
         original_guild_id: int,
         cloned_guild_id: int,
     ) -> list[tuple[re.Pattern, str]]:
-        """
-        Get compiled regex patterns for blocked keywords for a specific mapping.
-        Returns list of (pattern, keyword) tuples from the pre-loaded cache.
+        """Compiled (pattern, keyword) tuples for a mapping from the pre-loaded cache.
 
-        Checks three scopes in order:
-        1. Mapping-specific (original_guild_id, cloned_guild_id)
-        2. Host-level (original_guild_id, 0)
-        3. Global (0, 0)
+        Scopes checked in order: mapping-specific, host-level (original_guild_id, 0), global (0, 0).
         """
         patterns = []
 
@@ -13373,11 +13035,9 @@ class ServerReceiver:
         return patterns
 
     async def _load_word_rewrites_cache(self) -> None:
-        """
-        Load all mapping word/phrase rewrites from DB and compile regex patterns.
+        """Load all mapping word/phrase rewrites from DB and compile patterns.
 
-        Cache structure:
-            {(original_guild_id, cloned_guild_id): [(pattern, replacement), ...]}
+        Cache: {(original_guild_id, cloned_guild_id): [(pattern, replacement), ...]}
         """
         async with self._word_rewrites_lock:
             self._word_rewrites_cache.clear()
@@ -13455,13 +13115,9 @@ class ServerReceiver:
         original_guild_id: int,
         cloned_guild_id: int,
     ) -> list[tuple[re.Pattern, str]]:
-        """
-        Get compiled rewrite patterns for a specific mapping.
+        """Compiled rewrite patterns for a mapping.
 
-        Checks three scopes in order:
-        1. Mapping-specific (original_guild_id, cloned_guild_id)
-        2. Host-level (original_guild_id, 0)
-        3. Global (0, 0)
+        Scopes checked in order: mapping-specific, host-level (original_guild_id, 0), global (0, 0).
         """
         patterns: list[tuple[re.Pattern, str]] = []
 
@@ -13477,17 +13133,11 @@ class ServerReceiver:
         return patterns
 
     async def _clear_word_rewrites_cache_async(self) -> None:
-        """
-        Reload mapping rewrite cache from DB.
-        Called after rewrite updates via slash commands.
-        """
+        """Reload the rewrite cache from DB after slash-command updates."""
         await self._load_word_rewrites_cache()
 
     async def _clear_blocked_keywords_cache_async(self):
-        """
-        Reload blocked keywords cache from DB.
-        Called after keyword updates via slash commands.
-        """
+        """Reload the blocked keywords cache from DB after slash-command updates."""
         await self._load_blocked_keywords_cache()
 
     def _should_block_for_mapping(
@@ -13496,12 +13146,7 @@ class ServerReceiver:
         original_guild_id: int,
         cloned_guild_id: int,
     ) -> tuple[bool, str | None]:
-        """
-        Check if message content should be blocked for a specific mapping.
-
-        Returns:
-            (should_block, matched_keyword)
-        """
+        """Whether message content should be blocked for a mapping. Returns (should_block, matched_keyword)."""
         if not content:
             return False, None
 
@@ -13519,9 +13164,9 @@ class ServerReceiver:
         return False, None
 
     async def _load_user_filters_cache(self) -> None:
-        """
-        Load all user filters from DB and build cache.
-        Cache structure: {(original_gid, cloned_gid): {'blacklist': {uid, ...}, 'whitelist': {uid, ...}}}
+        """Load all user filters from DB.
+
+        Cache: {(original_gid, cloned_gid): {'blacklist': {uid, ...}, 'whitelist': {uid, ...}}}
         """
         async with self._user_filters_lock:
             self._user_filters_cache.clear()
@@ -13579,14 +13224,9 @@ class ServerReceiver:
         original_guild_id: int,
         cloned_guild_id: int,
     ) -> dict[str, set[int]]:
-        """
-        Get user filters for a specific mapping.
-        Returns dict with 'blacklist' and 'whitelist' sets of user IDs.
+        """User filters for a mapping as a dict of 'blacklist' and 'whitelist' user ID sets.
 
-        Checks three scopes in order (merging):
-        1. Mapping-specific (original_guild_id, cloned_guild_id)
-        2. Host-level (original_guild_id, 0)
-        3. Global (0, 0)
+        Scopes are merged in order: mapping-specific, host-level (original_guild_id, 0), global (0, 0).
         """
         result = {"blacklist": set(), "whitelist": set()}
 
@@ -13640,9 +13280,7 @@ class ServerReceiver:
         return False, None
 
     async def _shutdown(self):
-        """
-        Gracefully shut down the server:
-        """
+        """Gracefully shut down the server."""
         if getattr(self, "_shutting_down", False):
             return
         self._shutting_down = True
@@ -13740,9 +13378,7 @@ class ServerReceiver:
         logger.info("Shutdown complete.")
 
     def run(self):
-        """
-        Starts the Copycord server and manages the event loop.
-        """
+        """Start the server and manage the event loop."""
         logger.info("[✨] Starting Copycord Server %s", CURRENT_VERSION)
         loop = asyncio.get_event_loop()
 

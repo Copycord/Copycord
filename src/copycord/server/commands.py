@@ -1652,7 +1652,7 @@ class CloneCommands(commands.Cog):
     )
     async def role_block_clear(self, ctx: discord.ApplicationContext):
         """
-        Clears all entries in the role block list **for this cloned guild**.
+        Clears all entries in the role block list for this cloned guild.
 
         This does NOT recreate any roles automatically; it only removes the block entries.
         Future role syncs for this clone may recreate those roles if they exist on the source.
