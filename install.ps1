@@ -281,18 +281,41 @@ Test a branch, no release needed:
         return $null
     }
 
+    function InstalledExe {
+        # The installed copycord.exe, or $null.
+        $exe = Get-Command copycord -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($exe) { return $exe.Source }
+        foreach ($dir in @($env:UV_TOOL_BIN_DIR, $env:XDG_BIN_HOME, (Join-Path $env:USERPROFILE '.local\bin'))) {
+            if ($dir -and (Test-Path (Join-Path $dir 'copycord.exe'))) { return Join-Path $dir 'copycord.exe' }
+        }
+        return $null
+    }
+
+    $script:wasRunning = $false
+    function StopRunning {
+        # A running Copycord holds its files open, so the reinstall stops it first
+        # (copycord service stop waits until its processes are gone) and starts it after.
+        if ($dryRun) { Dry 'copycord service stop, when Copycord runs as a service (started again after)'; return }
+        $old = InstalledExe
+        if (-not $old) { return }
+        $prevPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $running = $false
+        try {
+            $doc = (& $old service status --json 2>$null) -join "`n"
+            if ($doc) { $running = [bool](($doc | ConvertFrom-Json).running) }
+        } catch { $running = $false } finally { $ErrorActionPreference = $prevPreference }
+        if (-not $running) { return }
+        Run 'Stopping Copycord (copycord service stop)' $old @('service', 'stop')
+        $script:wasRunning = $true
+    }
+
     function AlreadyInstalled {
         # The installed label when it is what this run would install, else $null.
         # Any doubt (no network, unknown output) means install.
         # Continue: stderr from a native command must not stop the check.
         $ErrorActionPreference = 'Continue'
-        $exe = Get-Command copycord -ErrorAction SilentlyContinue | Select-Object -First 1
-        $exePath = if ($exe) { $exe.Source } else { $null }
-        if (-not $exePath) {
-            foreach ($dir in @($env:UV_TOOL_BIN_DIR, $env:XDG_BIN_HOME, (Join-Path $env:USERPROFILE '.local\bin'))) {
-                if ($dir -and (Test-Path (Join-Path $dir 'copycord.exe'))) { $exePath = Join-Path $dir 'copycord.exe'; break }
-            }
-        }
+        $exePath = InstalledExe
         if (-not $exePath) { return $null }
         $oldNoColor = $env:NO_COLOR
         $env:NO_COLOR = '1'
@@ -402,6 +425,7 @@ Test a branch, no release needed:
                 else { Dry "look up the newest $channel release on $repoUrl/releases" }
                 $label = if ($version) { "v$version" } else { "$channel release" }
                 Step 'Installing Copycord'
+                if ($upgrade) { StopRunning }
                 Dry "uv tool install --force --python $PythonVersion <copycord wheel of $label>"
             } else {
                 try {
@@ -425,6 +449,7 @@ Test a branch, no release needed:
                 Info $wheel.browser_download_url
 
                 Step 'Installing Copycord'
+                StopRunning
                 Run "uv tool install copycord $tag" 'uv' @('tool', 'install', '--force', '--python', $PythonVersion, $wheel.browser_download_url)
                 $label = $tag
             }
@@ -533,6 +558,7 @@ Test a branch, no release needed:
             }
 
             Step 'Installing Copycord'
+            if ($upgrade) { StopRunning }
             if ($dryRun) {
                 Dry "uv tool install --force --python $PythonVersion --reinstall-package copycord $gitDir"
                 $label = $ref
@@ -648,6 +674,12 @@ Test a branch, no release needed:
             }
         }
 
+        # Start again what the reinstall stopped.
+        if ($script:wasRunning) {
+            $script:wasRunning = $false
+            Run 'Starting Copycord again (copycord service start)' $exe @('service', 'start')
+        }
+
         # --- verify ---------------------------------------------------------
 
         if ($verify) {
@@ -662,6 +694,13 @@ Test a branch, no release needed:
         }
     } finally {
         Remove-Item $log -ErrorAction SilentlyContinue
+        # A failed install still starts the Copycord it stopped.
+        if ($script:wasRunning) {
+            $again = InstalledExe
+            $global:LASTEXITCODE = 1
+            if ($again) { try { & $again service start *> $null } catch { $global:LASTEXITCODE = 1 } }
+            if (-not $again -or $LASTEXITCODE -ne 0) { Warn 'Copycord was stopped for the install; start it with: copycord service start' }
+        }
     }
 
     # --- done ---------------------------------------------------------------
