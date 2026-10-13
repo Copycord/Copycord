@@ -42,8 +42,11 @@ ROLE_REMOVED_MESSAGE = (
 MIN_PYTHON = (3, 12)
 # First Python release Copycord is not tested on.
 MAX_PYTHON = (3, 15)
-DEFAULT_ADMIN_PORT = 8080
-ADMIN_BIND_HOST = "0.0.0.0"
+from copycord.common.ports import DEFAULT_ADMIN_PORT, DEFAULT_DASHBOARD_HOST
+from copycord.common.ports import dashboard_host, insecure_dashboard
+
+# The default listen address; DASHBOARD_HOST changes it.
+ADMIN_BIND_HOST = DEFAULT_DASHBOARD_HOST
 # Module name -> distribution that must provide it.
 REQUIRED_IMPORTS = (
     ("curl_cffi", "curl_cffi"),
@@ -845,6 +848,9 @@ def check_password(env: Optional[Mapping[str, str]] = None) -> Check:
 
     env = os.environ if env is None else env
     value = env.get("PASSWORD")
+    exposed = insecure_dashboard(env)
+    if exposed:
+        return Check(FAIL, "the dashboard is open to the network without a real password", exposed)
     if value == DEFAULT_PASSWORD:
         # doctor --fix never changes the password.
         return Check(
@@ -1022,11 +1028,12 @@ def copycord_on_port(port: int, timeout: float = 1.0) -> bool:
 
 def check_admin_port(
     env: Optional[Mapping[str, str]] = None,
-    host: str = ADMIN_BIND_HOST,
+    host: Optional[str] = None,
     service_running: bool = False,
     probe=None,
 ) -> Check:
     env = os.environ if env is None else env
+    host = dashboard_host(env) if host is None else host
     raw = env.get("ADMIN_PORT") or str(DEFAULT_ADMIN_PORT)
     try:
         port = int(raw)
@@ -1317,8 +1324,9 @@ def fix_service_window(checks: List[Check]) -> str:
     return svc.where
 
 
-def next_free_port(port: int, host: str = ADMIN_BIND_HOST) -> Optional[int]:
+def next_free_port(port: int, host: Optional[str] = None) -> Optional[int]:
     """The first port above PORT that nothing listens on."""
+    host = dashboard_host() if host is None else host
     for candidate in range(port + 1, min(port + 101, 65536)):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             if sys.platform != "win32":
@@ -2615,6 +2623,13 @@ def run_command(argv: Optional[List[str]] = None) -> int:
         # Console only here; supervisor.run adds the per-role files once DATA_DIR is set.
         setup_logging(roles=())
         if not check_removed_options():
+            return 1
+        exposed = insecure_dashboard()
+        if exposed:
+            # COPYCORD_ALLOW_INSECURE_DASHBOARD=1 skips this on purpose.
+            from copycord import ui
+
+            ui.fail("Copycord did not start", exposed)
             return 1
         migrate_on_start()
         if not schema_guard():

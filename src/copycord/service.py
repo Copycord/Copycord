@@ -526,10 +526,12 @@ def list_processes() -> Optional[list]:
 def busy_ports(env=None) -> List[int]:
     """The ports `copycord run` binds that something still holds."""
     env = os.environ if env is None else env
+    from copycord.common import ports
+
     wanted = [
-        ("127.0.0.1", env.get("CONTROL_PORT_SERVER") or "9101"),
-        ("127.0.0.1", env.get("CONTROL_PORT_CLIENT") or "9102"),
-        ("0.0.0.0", env.get("ADMIN_PORT") or "8080"),
+        ("127.0.0.1", env.get("CONTROL_PORT_SERVER") or str(ports.DEFAULT_SERVER_CONTROL_PORT)),
+        ("127.0.0.1", env.get("CONTROL_PORT_CLIENT") or str(ports.DEFAULT_CLIENT_CONTROL_PORT)),
+        (ports.dashboard_host(env), env.get("ADMIN_PORT") or str(ports.DEFAULT_ADMIN_PORT)),
     ]
     busy = []
     for host, raw in wanted:
@@ -805,8 +807,9 @@ def _logs_dir() -> Path:
 
 def dashboard_url() -> str:
     from copycord.__main__ import admin_port
+    from copycord.common.ports import browser_host, dashboard_host
 
-    return f"http://localhost:{admin_port()}"
+    return f"http://{browser_host(dashboard_host())}:{admin_port()}"
 
 
 ACTIONS = "status | stop | start | restart | uninstall"

@@ -20,10 +20,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     DATA_DIR=/data \
     LOG_LEVEL=info \
     ADMIN_PORT=8080 \
-    SERVER_PORT=8765 \
-    CLIENT_PORT=8766 \
-    SERVER_CTRL_URL=ws://server:9101 \
-    CLIENT_CTRL_URL=ws://client:9102
+    DASHBOARD_HOST=0.0.0.0
 
 
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked,id=apt-${TARGETPLATFORM} \

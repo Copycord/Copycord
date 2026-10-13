@@ -32,6 +32,15 @@ from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 from copycord.common.config import CURRENT_VERSION
 from copycord.common.control_protocol import ALLOWED_ENV, serve_json, status_payload
 from copycord.common.paths import data_dir
+from copycord.common.ports import (
+    DEFAULT_ADMIN_PORT,
+    DEFAULT_CLIENT_CONTROL_PORT,
+    DEFAULT_CLIENT_WS_PORT,
+    DEFAULT_SERVER_CONTROL_PORT,
+    DEFAULT_SERVER_WS_PORT,
+    agent_host,
+    dashboard_host,
+)
 from copycord.common.websockets import INTERNAL_TOKEN_ENV
 from copycord import ui
 from copycord.logging_setup import setup_logging
@@ -43,9 +52,6 @@ RoleFactory = Callable[[], Awaitable[None]]
 ROLES = ("admin", "server", "client")
 # Client stops first so it stops forwarding before the server; admin last.
 SHUTDOWN_ORDER = ("client", "server", "admin")
-
-DEFAULT_SERVER_CONTROL_PORT = 9101
-DEFAULT_CLIENT_CONTROL_PORT = 9102
 
 # How long a busy port is retried at startup: a Copycord that just stopped can
 # hold its ports for a few seconds.
@@ -500,13 +506,14 @@ def _set_runtime_env() -> None:
     sport = os.getenv("CONTROL_PORT_SERVER", str(DEFAULT_SERVER_CONTROL_PORT))
     cport = os.getenv("CONTROL_PORT_CLIENT", str(DEFAULT_CLIENT_CONTROL_PORT))
     for key, value in (
-        ("ADMIN_HOST", "127.0.0.1"),
+        # ADMIN_HOST is where the roles connect to the dashboard, not where it listens.
+        ("ADMIN_HOST", agent_host(dashboard_host())),
         ("SERVER_WS_HOST", "127.0.0.1"),
         ("CLIENT_WS_HOST", "127.0.0.1"),
         ("WS_SERVER_CTRL_URL", f"ws://127.0.0.1:{sport}"),
         ("WS_CLIENT_CTRL_URL", f"ws://127.0.0.1:{cport}"),
-        ("WS_SERVER_URL", f"ws://127.0.0.1:{os.getenv('SERVER_WS_PORT', '8765')}"),
-        ("WS_CLIENT_URL", f"ws://127.0.0.1:{os.getenv('CLIENT_WS_PORT', '8766')}"),
+        ("WS_SERVER_URL", f"ws://127.0.0.1:{os.getenv('SERVER_WS_PORT', str(DEFAULT_SERVER_WS_PORT))}"),
+        ("WS_CLIENT_URL", f"ws://127.0.0.1:{os.getenv('CLIENT_WS_PORT', str(DEFAULT_CLIENT_WS_PORT))}"),
     ):
         os.environ.setdefault(key, value)
     # Shared by the roles for the admin's internal sockets (/bus, /ws/out).
@@ -537,7 +544,7 @@ def build_supervisor(
 
         inprocess.enable()
     if real:
-        ports.append(("0.0.0.0", int(os.getenv("ADMIN_PORT") or "8080")))
+        ports.append((dashboard_host(), int(os.getenv("ADMIN_PORT") or DEFAULT_ADMIN_PORT)))
         factories = {
             "admin": admin_factory(
                 host=ports[0][0],

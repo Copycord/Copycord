@@ -26,6 +26,7 @@ ENV_KEYS: Dict[str, str] = {
     "PASSWORD": "dashboard login password; change it from the default (empty: no login page)",
     "SECRET_KEY": "signs the dashboard login cookie (default: a key saved in <home>/data/secret.key)",
     "ADMIN_PORT": "dashboard port",
+    "DASHBOARD_HOST": "where the dashboard listens; 127.0.0.1 is this computer only",
     "TZ": "time zone for scheduled backups and export timestamps, e.g. America/New_York",
     "LOG_FORMAT": "HUMAN or JSON log lines",
     "BACKUP_DIR": "where the daily database backups go",
@@ -56,12 +57,18 @@ SECRET_KEY_TEXT = (
     "SECRET_KEY is left out: Copycord keeps its own key in <home>/data/secret.key"
 )
 
-BACKUP_DIR_TEXT = "where the daily database backups go; remove the # to use another folder"
+DASHBOARD_HOST_TEXT = (
+    "the dashboard is on this computer only (127.0.0.1); remove the # and use 0.0.0.0\n"
+    "# to open it to your network, after setting your own PASSWORD"
+)
+
+BACKUP_DIR_TEXT ="where the daily database backups go; remove the # to use another folder"
 
 TEMPLATE_KEYS = (
     "PASSWORD",
     "SECRET_KEY",
     "ADMIN_PORT",
+    "DASHBOARD_HOST",
     "TZ",
     "LOG_LEVEL",
     "LOG_FORMAT",
@@ -186,6 +193,8 @@ def template(home: Optional[Path] = None) -> str:
     for key in TEMPLATE_KEYS:
         if key == "SECRET_KEY":
             lines += [f"# {SECRET_KEY_TEXT}", ""]
+        elif key == "DASHBOARD_HOST":
+            lines += [f"# {DASHBOARD_HOST_TEXT}", "#DASHBOARD_HOST=127.0.0.1", ""]
         elif key == "BACKUP_DIR":
             lines += [f"# {BACKUP_DIR_TEXT}", f"#BACKUP_DIR={default_backup_dir(home)}", ""]
         else:
