@@ -1179,8 +1179,9 @@ def apply_fixes(checks: List[Check], notes: dict, brief: bool = False) -> int:
     return applied
 
 
-def _hint(c: Check, verbose: bool = False) -> str:
-    parts = [c.reason]
+def _hint(c: Check, verbose: bool = False, note: str = "") -> str:
+    """The reason (or why --fix left it) and, on WARN/FAIL, the path."""
+    parts = [note or c.reason]
     if c.path and (verbose or c.status in (WARN, FAIL)):
         parts.append(c.path)
     return "; ".join(p for p in parts if p)
@@ -1200,8 +1201,7 @@ def _print_attention(checks: List[Check], notes: Optional[dict] = None) -> None:
 
     notes = notes or {}
     ui.attention(
-        (("fail" if c.status == FAIL else "warn", c.name,
-          "; ".join(p for p in (notes.get(c.name, ""), _hint(c)) if p))
+        (("fail" if c.status == FAIL else "warn", c.name, _hint(c, note=notes.get(c.name, "")))
          for c in checks if c.status in (WARN, FAIL)),
         stream=sys.stdout,
     )
@@ -1231,8 +1231,7 @@ def _print_brief(checks: List[Check], notes: dict) -> None:
 
     for c in checks:
         if c.status == FAIL:
-            hint = "; ".join(p for p in (notes.get(c.name, ""), _hint(c)) if p)
-            ui.fail(c.name, hint, stream=sys.stdout)
+            ui.fail(c.name, _hint(c, note=notes.get(c.name, "")), stream=sys.stdout)
     summary = doctor_summary(checks)
     if summary == "All good":
         ui.ok("All checks passed")
