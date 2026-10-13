@@ -5,6 +5,7 @@
 import type { DashboardMapping, MappingModalOptions } from "../../../types/dashboard-mappings";
 import { modeOf } from "./modal/model";
 import type { MappingMode } from "./modal/model";
+import { mountFilters } from "../filters/open";
 
 export interface MappingModalRequest {
   mapping: DashboardMapping | null;
@@ -44,6 +45,6 @@ export function closeMappingModal(): void {
 }
 
 /** Filters button on a card. */
-export function openFilters(_mapping: DashboardMapping | null): void {
-  // Filled in by the filters modal lane.
+export function openFilters(mapping: DashboardMapping | null): void {
+  mountFilters(mapping);
 }
