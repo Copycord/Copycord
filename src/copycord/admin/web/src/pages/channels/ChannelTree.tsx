@@ -10,8 +10,8 @@ import type { ChannelTreeSlots } from "./slots";
 
 const CHIP = "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-semibold";
 const CHIP_GOOD = "border-[#2e7d5b] bg-[#0f2a1f] text-[#7ee2b8]";
-const CHIP_CUSTOM = "border-[#7c5cff] bg-[#21154a] text-[#c9b8ff]";
-const CHIP_ORPHAN = "border-[#a33a4a] bg-[#2a0f17] text-[#ff9aa9]";
+const CHIP_CUSTOM = "border-[rgba(250,204,21,0.45)] bg-[rgba(250,204,21,0.12)] text-[#facc15]";
+const CHIP_ORPHAN = "border-[rgba(239,68,68,0.35)] bg-[#3a1c20] text-[#ffc5cf]";
 const CHIP_MUTED = "border-border bg-white/4 text-muted";
 
 export interface ChannelTreeProps extends ChannelTreeSlots {
@@ -20,7 +20,7 @@ export interface ChannelTreeProps extends ChannelTreeSlots {
 
 export function ChannelTree({ tree, channelActions, categoryActions, channelStatus }: ChannelTreeProps) {
   return (
-    <div id="channels-root" aria-live="polite" className="mt-3 flex flex-col gap-5">
+    <div id="channels-root" aria-live="polite" className="mt-3 flex flex-col gap-6 xl:gap-7">
       {tree.sections.map((s) => (
         <section key={s.key} className="ch-section flex flex-col gap-2.5">
           <div className="flex items-center">
@@ -36,7 +36,7 @@ export function ChannelTree({ tree, channelActions, categoryActions, channelStat
               </span>
             </h3>
           </div>
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-3 max-sm:grid-cols-[repeat(auto-fill,minmax(200px,1fr))] xl:gap-4">
             {s.channels.map((c) => (
               <ChannelCard
                 key={c.id}
@@ -72,7 +72,7 @@ const ChannelCard = memo(function ChannelCard({ channel: c, actions, status }: C
         <div className="min-w-0 flex-1">
           <span
             title={c.title}
-            className={cx("block truncate font-semibold", c.customized ? "text-[#c9b8ff]" : "text-text")}
+            className={cx("block truncate font-semibold", c.customized ? "text-[#facc15]" : "text-text")}
           >
             # {c.displayName}
           </span>
@@ -98,7 +98,7 @@ const ChannelCard = memo(function ChannelCard({ channel: c, actions, status }: C
           </>
         ) : null}
       </div>
-      <div className="flex flex-wrap gap-x-2 font-mono text-xs text-muted">
+      <div className="flex gap-1.5 text-xs text-muted max-sm:flex-wrap">
         <span title="Original channel ID">{c.id}</span>
         {c.clonedId ? (
           <span title="Cloned channel ID" className="opacity-80">

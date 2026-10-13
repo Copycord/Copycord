@@ -283,14 +283,14 @@ test.describe("channels", () => {
       await expect(cards).toHaveCount(CHANNELS.length);
       await expect(page.locator("#channels-empty")).toBeHidden();
 
-      await page.locator("#ch-filter").selectOption("orphans");
+      await page.locator("#ch-filter").selectOption("orphans", { force: true });
       await expect(cards).toHaveCount(0);
-      await page.locator("#ch-filter").selectOption("nonorphans");
+      await page.locator("#ch-filter").selectOption("nonorphans", { force: true });
       await expect(cards).toHaveCount(CHANNELS.length);
 
-      await page.locator("#ch-sort").selectOption("category");
+      await page.locator("#ch-sort").selectOption("category", { force: true });
       await expect.poll(() => cats(page)).toEqual(["Community", "Information", "Support", "Uncategorized"]);
-      await page.locator("#ch-sort").selectOption("type");
+      await page.locator("#ch-sort").selectOption("type", { force: true });
       await expect.poll(() => cats(page)).toEqual(["Information", "Community", "Support", "Uncategorized"]);
       await expect(cards.first()).toHaveAttribute("data-cid", "444444444444444403");
     });

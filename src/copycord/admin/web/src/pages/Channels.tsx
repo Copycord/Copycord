@@ -24,7 +24,9 @@ import {
 import type { FilterMode, SortDir, SortMode } from "./channels/model";
 
 export function Channels() {
-  const gate = useStatusGate({ require: "both" });
+  // The tree loads once the gate first opens, as afterGateReady did.
+  const [booted, setBooted] = useState(false);
+  const gate = useStatusGate({ require: "both", onUp: () => setBooted(true) });
   const mappings = useApi<GuildMappingListResponse>("/api/guild-mappings");
   const list = mappings.data?.mappings ?? [];
 
@@ -32,7 +34,7 @@ export function Channels() {
   const [picked, setPicked] = useState<string | null>(null);
   const mappingId = picked ?? list[0]?.mapping_id ?? "";
   const mappingsSettled = mappings.data !== undefined || mappings.error !== undefined;
-  const channels = useApi<ChannelListResponse>(mappingsSettled ? channelsUrl(mappingId) : null);
+  const channels = useApi<ChannelListResponse>(booted && mappingsSettled ? channelsUrl(mappingId) : null);
 
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<FilterMode>("all");
@@ -59,16 +61,16 @@ export function Channels() {
   return (
     <StatusGate gate={gate}>
       <Card className="shadow-card">
-        <header className="mb-1.5 flex flex-wrap items-center gap-3">
+        <header className="mb-1.5 flex flex-col items-start gap-3">
           <h1 className="text-xl font-bold tracking-wide">Channels</h1>
-          <div className="ml-auto flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
             <Select
               id="mapping-select"
               aria-label="Guild mapping"
               value={mappingId}
               disabled={!list.length}
               onChange={(e) => onMapping(e.target.value)}
-              className="max-w-64"
+              className="w-auto! max-w-64"
             >
               {list.length ? (
                 list.map((m) => (
@@ -97,7 +99,7 @@ export function Channels() {
               value={filter}
               onChange={(e) => setFilter(e.target.value as FilterMode)}
               options={[...FILTER_OPTIONS]}
-              className="w-auto"
+              className="w-auto!"
             />
             <Select
               id="ch-sort"
@@ -105,7 +107,7 @@ export function Channels() {
               value={sort.sort}
               onChange={(e) => setSort((cur) => nextSort(cur, e.target.value))}
               options={[...SORT_OPTIONS]}
-              className="w-auto"
+              className="w-auto!"
             />
           </div>
         </header>

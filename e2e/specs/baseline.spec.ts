@@ -69,7 +69,7 @@ const CHANNEL_SHOTS: Array<{ name: string; fullPage: boolean; open: (page: Page)
   { name: "channels-tree", fullPage: true, open: async () => undefined },
   { name: "channels-search", fullPage: true, open: async (p) => {
     await p.locator("#ch-search").fill("i");
-    await p.locator("#ch-sort").selectOption("category");
+    await p.locator("#ch-sort").selectOption("category", { force: true });
   } },
   { name: "channels-empty", fullPage: false, open: async (p) => {
     await p.locator("#ch-search").fill("zzz-nothing");

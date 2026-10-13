@@ -32,10 +32,10 @@ const CHANNELS: Record<string, ChannelRow[]> = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
-function serve(mappings: GuildMapping[] = MAPPINGS) {
+function serve(mappings: GuildMapping[] = MAPPINGS, up = true) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url === "/api/status") return json({ server: { ready: true }, client: { ready: true } });
+    if (url === "/api/status") return json({ server: { ready: up }, client: { ready: up } });
     if (url === "/api/guild-mappings") return json({ ok: true, mappings });
     if (url.startsWith("/api/channels")) {
       const mid = new URL(url, "http://x").searchParams.get("mapping_id") ?? "";
@@ -145,6 +145,15 @@ describe("Channels page", () => {
       "Category",
       "Type",
     ]);
+  });
+
+  it("waits for Server and Client before loading the tree", async () => {
+    const f = serve(MAPPINGS, false);
+    render(<Channels />);
+    await waitFor(() => expect(screen.getByTestId("status-gate")).toBeInTheDocument());
+    await waitFor(() => expect(f.mock.calls.some(([u]) => String(u) === "/api/guild-mappings")).toBe(true));
+    expect(channelUrls(f)).toEqual([]);
+    expect(screen.queryByText("No channels found.")).toBeNull();
   });
 
   it("lists every channel when no mapping is configured", async () => {
