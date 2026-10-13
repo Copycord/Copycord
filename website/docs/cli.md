@@ -739,6 +739,26 @@ docker compose run --rm --entrypoint /opt/venvs/copycord/bin/copycord copycord r
 docker compose up -d
 ```
 
+## copycord help advanced {#copycord-help}
+
+```
+copycord help
+copycord help advanced
+```
+
+`copycord help` shows the same overview as `copycord --help`. `copycord help advanced` prints one page with every advanced option, grouped by command, and the environment variables that change how Copycord behaves. `copycord --help` ends with a line that points to it. The page is plain text, also with `--json`, and has no colors on a pipe.
+
+It lists:
+
+- **Update:** `--channel`, `--ref`, `--repo`, `--no-install` and `--force`, the same options `copycord update --help` shows under **Advanced**. See [channels and git installs](#update-advanced).
+- **Service:** `--system` and `--user` (Linux).
+- **Doctor:** `--fix` and `--brief`.
+- **Config:** `--show-secrets` on `config get` and `config export`.
+- **Run:** `--data-dir`, which most commands accept.
+- **Backup and restore:** `backup --json` and `restore --yes`.
+- **Uninstall:** `--purge`, `--keep-data`, `--keep-service` and `--dry-run`.
+- **Environment:** `COPYCORD_HOME`, `COPYCORD_ALLOW_ROOT`, `COPYCORD_TASK_NAME`, `COPYCORD_SKIP_FRONTEND`, `COPYCORD_ALLOW_INSECURE_DASHBOARD`, `COPYCORD_NO_UPDATE_CHECK`, `COPYCORD_NODE_VERSION`, `COPYCORD_PLAIN_PROMPTS`, `DASHBOARD_HOST`, `TRUSTED_PROXIES` and `AUTO_UPDATE_ALL_CHANNELS`.
+
 ## copycord uninstall {#copycord-uninstall}
 
 Removes the Copycord program and its background service. It asks one question, about your data in the [Copycord home](#data-dir):

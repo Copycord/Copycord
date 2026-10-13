@@ -2279,3 +2279,60 @@ def test_backup_dir_defaults_to_the_data_folder(native, monkeypatch):
     assert f"BACKUP_DIR={envfile._quote(str(backups_dir()))}" in envfile.template(home).splitlines()
     monkeypatch.setenv("BACKUP_DIR", str(native / "elsewhere"))
     assert backups_dir() == (native / "elsewhere").resolve()
+
+
+def test_help_advanced_lists_every_command_group(data_dir, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["help", "advanced"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert out.startswith("copycord help advanced\n") and "\033[" not in out
+    for section in cli.COMMAND_ADVANCED.values():
+        assert f"{section.title}:\n" in out
+        for invocation, _, _ in section.rows:
+            assert f"  {invocation}" in out
+    assert "Environment:" in out
+    for name, _ in cli.ADVANCED_ENV:
+        assert name in out
+    for name in ("COPYCORD_HOME", "COPYCORD_ALLOW_ROOT", "COPYCORD_TASK_NAME", "COPYCORD_SKIP_FRONTEND",
+                 "COPYCORD_ALLOW_INSECURE_DASHBOARD", "DASHBOARD_HOST", "TRUSTED_PROXIES",
+                 "AUTO_UPDATE_ALL_CHANNELS"):
+        assert name in out
+
+
+def test_help_without_a_topic_shows_the_normal_help(data_dir, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["help"])
+    assert exc.value.code == 0
+    assert capsys.readouterr().out == cli.format_help()
+
+
+def test_help_unknown_topic_fails(data_dir, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["help", "nope"])
+    assert exc.value.code == 2
+    assert "no help topic 'nope'" in capsys.readouterr().err
+
+
+def test_every_advanced_flag_is_accepted_by_its_parser(data_dir):
+    for section in cli.COMMAND_ADVANCED.values():
+        for invocation, _, probe in section.rows:
+            assert all(t in probe for t in invocation.split() if t.startswith("--")), invocation
+            args = cli.parse_args(list(probe))
+            assert args.command == probe[0]
+
+
+def test_top_help_ends_with_the_advanced_pointer(data_dir, capsys):
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    out = capsys.readouterr().out
+    assert "More: copycord help advanced\n" in out
+    assert out.index("More: copycord help advanced") < out.index("Docs:")
+
+
+def test_help_advanced_is_plain_on_a_pipe_even_with_json(data_dir, capsys):
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--json", "help", "advanced"])
+    assert exc.value.code == 0
+    out = capsys.readouterr().out
+    assert out.startswith("copycord help advanced\n") and not out.lstrip().startswith("{")

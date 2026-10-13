@@ -583,8 +583,9 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     if not argv:
         sys.stdout.write(format_help())
         raise SystemExit(0)
-    if argv[0] == "help":
-        topic = argv[1] if len(argv) > 1 else ""
+    help_argv = [a for a in argv if a != "--json"]
+    if help_argv[:1] == ["help"]:
+        topic = help_argv[1] if len(help_argv) > 1 else ""
         if topic in ("", "--help", "-h"):
             sys.stdout.write(format_help())
         elif topic == "advanced":
