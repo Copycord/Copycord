@@ -250,12 +250,8 @@ def format_command_help(parser: argparse.ArgumentParser) -> str:
             lines = textwrap.wrap(text, max(30, 78 - width - 4)) or [""]
             if len(name) > width:
                 w(f"  {style(name)}")
-                first = []
             else:
-                first = [f"  {style(name.ljust(width))}  {lines[0]}"]
-                lines = lines[1:]
-            for x in first:
-                w(x)
+                w(f"  {style(name.ljust(width))}  {lines.pop(0)}".rstrip())
             for x in lines:
                 w(f"  {' ' * width}  {x}")
 
